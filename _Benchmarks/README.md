@@ -89,7 +89,23 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
     --replication-suite --replication-profile=all --clients=400 \
     --ticks=120 --warmup=30 --dirty-percent=2 \
     --output=_Benchmarks/results/network-v3-spread-dense-local.json
+
+# Opt-in causal attribution; diagnostic probes deliberately perturb normal timing.
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+    --replication-suite --replication-profile=dense_mix \
+    --replication-traffic=causal --phase-attribution=true --clients=400 \
+    --ticks=120 --warmup=30 --dirty-percent=2 \
+    --output=_Benchmarks/results/network-v3-dense-event-causal-local.json
 ```
+
+The replication causal control runs `full`, `worldstate-only`, and `event-only`
+with identical topology, maintained relations, dirty updates, capacities,
+cadence, and transport. Its phase report separates authority/update, Event
+publish/schedule, WorldState scheduling, server/client application work,
+combined protocol pumping, and opt-in server/client protocol-role estimates.
+Cold freshness scans remain outside the timed tick. Probe-enabled figures are
+compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 
 Each executable's `--help`/argument parser is the source of truth for filters,
 scales, process order, output, worker count, and longer profiles. Accepted runs

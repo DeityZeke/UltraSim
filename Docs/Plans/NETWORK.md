@@ -7,8 +7,11 @@ ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, N0.6
 bounded authoritative input/owner-state replication, and N0.7 maintained AOI,
 pending state, application knowledge, and shared semantic fanout are accepted.
 N0.8 atomic baseline/recovery, reconnect, and generation replacement and the
-correctness-hardened N0.9 integrated topology acceptance are accepted. N0.10 scale and measured
-specialization is next.
+correctness-hardened N0.9 integrated topology acceptance are accepted. N0.10
+scale and measured specialization is active; its owner-path corrections,
+cadence/stall matrix, dense/spread entrance, and participant-local Event-ledger
+specialization are accepted evidence, while the 400-client fixed-60 target
+remains open.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -1579,9 +1582,9 @@ catalog until both adapters perform equivalent observer WorldState/Event semanti
 They are now implemented separately as **V3-only integrated acceptance profiles**
 over maintained interest, secure shared-listener UDP, client projection,
 application acknowledgements, and retained Events. This preserves useful V3
-evidence without silently producing a dishonest V2 ratio. Event-ledger examined/skipped,
-minimum-cursor scan entries, and retained high water are now always-available
-N0.10 counters for deciding whether participant-local Event indexing is earned.
+evidence without silently producing a dishonest V2 ratio. Event-ledger
+examined/skipped, consumer lookup, participant-index, minimum-cursor fast/rescan,
+and retained-high-water diagnostics are now always-available N0.10 counters.
 Those profiles must add WorldState age by Immediate/Near/Far tier, application
 Event publish-to-apply latency, worst-recipient freshness, and canonical-change
 to semantic-construction/recipient-copy/bundle/datagram amplification. Likewise,
@@ -1890,7 +1893,7 @@ owner benchmark uses its own phased tick harness and steady-performance window.
 The cadence rows compare only against one another until both instruments share
 the same emission and observation contract.
 
-#### V3 spread/dense integrated acceptance
+#### V3 spread/dense integrated acceptance and Event specialization
 
 The first real observer-heavy artifact is
 [`network-v3-spread-dense-acceptance-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-spread-dense-acceptance-2026-08-16.json).
@@ -1902,8 +1905,8 @@ owns 1,000 entities in one 126 m hotspot and 400,000 real relations;
 Client capacity is derived from the largest admitted fixed recipient scope
 (1,000 dense, 1,156 spread), not the whole world population.
 
-Both profiles converge exactly after three/four settlement steps, deliver all
-2,400 Events, and record zero nonviable recipients, capacity drops, retained-byte
+Both entry profiles converge exactly after three/four settlement steps, deliver
+all 2,400 Events, and record zero nonviable recipients, capacity drops, retained-byte
 failures, or arena compactions. They also answer the 400-client question honestly:
 the current single-owner integrated path is **bounded but not yet boring**.
 
@@ -1917,7 +1920,7 @@ of 42. Maximum observed state age remains bounded at 130.4/141.7 ms and the
 profiles converge rather than accumulate permanent debt, but that is not an
 acceptance of their CPU budget. The protected 400-client goal remains open.
 
-The evidence locates the work above the earlier owner-only transport problem.
+The entry evidence locates the work above the earlier owner-only transport problem.
 Dense constructs 2,400 canonical semantic versions and copies 960,000 recipient
 records (exactly 400 copies/construction); spread constructs 12,000 and copies
 841,634 (~70.1 copies/construction). They emit 53,200/41,533 application bundles
@@ -1946,15 +1949,69 @@ arrays remain the next memory specialization question even after scope-derived
 client capacity. Physical process figures remain distinct from known reserved
 payload and configured kernel buffers.
 
-The Event counters identify a much stronger representation target. Each profile
-publishes 2,400 participant-specific facts, yet the global filtered ledger causes
-960,000 Event records to be examined, 957,600 to be skipped, and 384,000,000
-minimum-cursor entries to be scanned. This is direct admitted evidence for
-participant-local Event indexing plus incremental minimum-cursor maintenance;
-it is no longer a speculative optimization. The next experiment must preserve
-the existing global sequence/floor, reliable delivery, idempotence, baseline,
-and bounded-retention semantics while eliminating work proportional to unrelated
-participants and repeated all-consumer minimum scans.
+The Event counters identified a much stronger representation target. Each entry
+profile published 2,400 participant-specific facts, yet the global filtered
+ledger caused 960,000 Event records to be examined, 957,600 to be skipped,
+384,000,000 minimum-cursor entries to be scanned, and 192,480,000 linear
+consumer comparisons. That evidence earned one isolated specialization.
+
+The global Event ring, sequence/floor, reliable delivery, idempotence, baseline,
+and bounded-retention semantics remain unchanged. Retained slots now form a
+participant-local linked index over the global ring; consumer lookup uses a
+fixed-capacity participant map; no-relevant consumers advance directly to the
+global tail; and minimum retention tracks `{ minimum cursor, consumers at
+minimum }`, rescanning only after the last tied minimum advances. No per-
+participant durable sequence or second Event authority was introduced.
+
+The causal artifacts preserve the exact before/after experiment:
+
+- [`network-v3-dense-event-causal-pre-specialization-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-event-causal-pre-specialization-2026-08-16.json)
+  records probe-enabled Full, WorldState-only, and Event-only controls before the
+  representation change;
+- [`network-v3-dense-event-causal-participant-index-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-event-causal-participant-index-2026-08-16.json)
+  repeats those controls after it;
+- [`network-v3-spread-dense-event-index-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-spread-dense-event-index-hardened-2026-08-16.json)
+  is the probes-off Full dense/spread observation.
+
+Under identical probe-enabled dense controls, Full tick p95 changed 25.166→
+22.898 ms while WorldState-only stayed 21.625→22.198 ms across separate runs.
+Event scheduling p95 changed 2.910→0.081 ms; Event-only server-role p95 changed
+5.191→2.171 ms. Records examined changed 960,000→2,400, unrelated skips
+957,600→0, full-minimum scan entries 384,000,000→960,000, and consumer lookup
+work 192,480,000 linear comparisons→50,299 fixed-map attempts. The post-change
+run also records 47,899 minimum fast paths, 2,400 participant-index hits, and
+45,619 no-relevant fast-forwards. These probe-enabled numbers are causal
+diagnostics, not ordinary acceptance timings.
+
+The same attribution separates production-server work from the intentionally
+same-process population of 400 client peers. Post-change Full server-role p95 is
+10.108 ms, versus 9.662 ms for WorldState-only; client-role p95 is 11.823 ms and
+the combined protocol pump is 16.801 ms. Server-role includes authority/update,
+WorldState and Event scheduling, server application processing, server peer
+processing, and shared-listener socket timing. It therefore passes the frozen
+16.667 ms feasibility gate, but remains well above the ≤6 ms usable and 4–5 ms
+preferred targets. The combined 22.898 ms diagnostic row is not mislabeled as a
+dedicated-server cost.
+
+The probes-off hardened Full profiles retain exact convergence, all 2,400 Events,
+and zero nonviable/capacity/byte failures or compactions:
+
+| Profile | Tick p95 | Immediate p95 | Near p95 | Far p95 | Event p95 | Worst-client freshness p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `dense_mix` | 21.216 ms | 22.375 ms | 68.625 ms | 92.125 ms | 13.375 ms | 91.125 ms |
+| `spread_mix` | 19.541 ms | 20.625 ms | 63.625 ms | 85.375 ms | 11.875 ms | 86.375 ms |
+
+This is a real reduction from the 24.985/22.960 ms entry p95s, but not a
+400-client **usable** acceptance. The combined same-process dense harness misses
+118 deadlines in one continuous streak;
+spread misses 76 with a longest streak of 34. Tick-relative freshness remains
+correct—Immediate 0, Near 2, Far 3 authoritative steps—and millisecond age
+improves because each overloaded step is shorter. N0.10 freezes feasibility at
+server-role p95 below 16.667 ms, a usable target at or below 6 ms, and a preferred
+4–5 ms target without semantic degradation. The server-role result is feasible
+but not usable, so the next measured question is WorldState/AOI/server-role cost
+and closing 10.108→≤6 ms—not Event, queue capacity, cadence retuning,
+socket/crypto work, workers, or sharding.
 
 Protected profiles:
 

@@ -1,0 +1,721 @@
+{
+  "schema": "ultrasim-network-v3-spread-dense-acceptance-v2",
+  "timestamp_utc": "2026-08-16T21:30:35.0531478+00:00",
+  "runtime": "8.0.29",
+  "logical_processors": 16,
+  "methodology": "V3-only integrated acceptance. Real shared-listener UDP, secure protocol, maintained AOI, independent unreliable WorldState, reliable application Events, application ACKs, and retained client projection. No V2 ratio is claimed because V2 does not own equivalent semantics. Traffic controls preserve topology, relations, dirty updates, capacities, cadence, and transport; phase attribution is opt-in and excluded from ordinary accepted timing.",
+  "results": [
+    {
+      "profile": {
+        "id": "dense_mix",
+        "clients": 400,
+        "entities": 1000,
+        "ticks": 120,
+        "warmup_ticks": 30,
+        "dirty_percent": 2,
+        "spacing_millimeters": 4000,
+        "spatial_shape": "One 126 m hotspot; all recipients distributed through the hotspot; every entity lies inside the 192 m Far envelope.",
+        "traffic": "Full"
+      },
+      "relations": 400000,
+      "maximum_recipient_scope": 1000,
+      "converged": true,
+      "settle_ticks": 3,
+      "tick_milliseconds": {
+        "mean": 20.506602500000007,
+        "p50": 20.526899999999998,
+        "p95": 21.215505,
+        "p99": 21.715288,
+        "max": 21.8726
+      },
+      "diagnostic_probe_milliseconds": {
+        "mean": 2.1129008333333337,
+        "p50": 2.0927,
+        "p95": 2.227505,
+        "p99": 2.342035,
+        "max": 3.078
+      },
+      "immediate_freshness_milliseconds": {
+        "mean": 21.12830676949443,
+        "p50": 21.125,
+        "p95": 22.375,
+        "p99": 23.125,
+        "max": 23.4487
+      },
+      "near_freshness_milliseconds": {
+        "mean": 53.95709948955788,
+        "p50": 45.625,
+        "p95": 68.625,
+        "p99": 69.625,
+        "max": 71.4482
+      },
+      "far_freshness_milliseconds": {
+        "mean": 65.41019938275943,
+        "p50": 66.375,
+        "p95": 92.125,
+        "p99": 93.375,
+        "max": 94.7535
+      },
+      "all_world_state_freshness_milliseconds": {
+        "mean": 54.47396591864871,
+        "p50": 45.875,
+        "p95": 69.125,
+        "p99": 89.375,
+        "max": 94.7535
+      },
+      "immediate_freshness_ticks": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "near_freshness_ticks": {
+        "mean": 1.42040978024277,
+        "p50": 1,
+        "p95": 2,
+        "p99": 2,
+        "max": 2
+      },
+      "far_freshness_ticks": {
+        "mean": 1.8669582392776525,
+        "p50": 2,
+        "p95": 3,
+        "p99": 3,
+        "max": 3
+      },
+      "event_application_milliseconds": {
+        "mean": 12.86396341666666,
+        "p50": 12.875,
+        "p95": 13.375,
+        "p99": 13.625,
+        "max": 13.6595
+      },
+      "event_application_ticks": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "per_client_freshness_p95_milliseconds": {
+        "mean": 70.20875,
+        "p50": 68.875,
+        "p95": 88.125,
+        "p99": 90.6275,
+        "max": 91.125
+      },
+      "worst_client_freshness_p95_milliseconds": 91.125,
+      "worst_client_freshness_maximum_milliseconds": 94.7535,
+      "pending_relations": {
+        "mean": 12898.975,
+        "p50": 12904,
+        "p95": 13552,
+        "p99": 13729.63,
+        "max": 14035
+      },
+      "retained_payload_bytes": {
+        "mean": 11443.75,
+        "p50": 11475,
+        "p95": 12026.25,
+        "p99": 12306,
+        "max": 12575
+      },
+      "aggregate_reliable_queued": {
+        "mean": 457.75,
+        "p50": 459,
+        "p95": 481.05,
+        "p99": 492.24,
+        "max": 503
+      },
+      "aggregate_independent_queued": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "aggregate_received_queued": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "aggregate_in_flight_packets": {
+        "mean": 398.4166666666667,
+        "p50": 400,
+        "p95": 400,
+        "p99": 400,
+        "max": 400
+      },
+      "retained_payload_capacity_ratio": {
+        "mean": 8.160490781096683E-05,
+        "p50": 8.182775026812405E-05,
+        "p95": 8.575869121237706E-05,
+        "p99": 8.775357688884832E-05,
+        "max": 8.96718047600575E-05
+      },
+      "nonviable_recipients": 0,
+      "tick_deadline_misses": 118,
+      "longest_deadline_miss_streak": 118,
+      "application_events_published": 2400,
+      "application_events_applied": 2400,
+      "semantic_constructions": 2400,
+      "semantic_record_copies": 960000,
+      "semantic_record_bytes": 40320000,
+      "bundles_built": 53200,
+      "application_event_records_examined": 2400,
+      "application_event_records_skipped": 0,
+      "application_event_retained_high_water": 39,
+      "application_event_minimum_cursor_scan_entries": 960000,
+      "application_event_minimum_cursor_full_rescans": 2400,
+      "application_event_minimum_cursor_fast_path_updates": 47899,
+      "application_event_consumer_lookup_comparisons": 0,
+      "application_event_consumer_lookup_attempts": 50299,
+      "application_event_participant_index_hits": 2400,
+      "application_event_no_relevant_fast_forwards": 45619,
+      "wire_datagrams": 169247,
+      "wire_bytes": 54092468,
+      "data_packets": 111200,
+      "acknowledgement_packets": 58000,
+      "retransmissions": 0,
+      "retransmitted_wire_bytes": 0,
+      "capacity_drops": 0,
+      "retained_byte_capacity_failures": 0,
+      "retained_payload_compactions": 0,
+      "retained_payload_compaction_bytes_moved": 0,
+      "known_reserved_bytes": 453542143,
+      "peak_managed_heap_bytes": 519469640,
+      "peak_working_set_bytes": 592310272,
+      "peak_private_bytes": 661393408,
+      "allocated_bytes": 322184,
+      "gen0_collections": 0,
+      "gen1_collections": 0,
+      "gen2_collections": 0,
+      "process_cpu_milliseconds": 2790,
+      "process_cpu_core_utilization": 0.9936490157443508,
+      "listener_before": {
+        "sent": 65252,
+        "received": 34836,
+        "sent_bytes": 31860172,
+        "received_bytes": 3195072,
+        "unknown_path_datagrams": 0,
+        "capacity_drops": 0,
+        "rejected_datagrams": 0,
+        "send_calls": 3279,
+        "receive_poll_calls": 37856,
+        "receive_calls": 34836,
+        "would_block_events": 0,
+        "uses_native_send_batching": true,
+        "native_send_calls": 2079,
+        "native_sent_datagrams": 64052,
+        "partial_native_send_calls": 0,
+        "native_send_would_block_events": 0,
+        "native_send_batch_p50": 32,
+        "native_send_batch_p95": 32,
+        "maximum_native_send_batch": 32,
+        "maximum_outbound_queued_datagrams": 1200,
+        "send_system_call_ticks": 0,
+        "receive_poll_ticks": 0,
+        "receive_system_call_ticks": 0,
+        "maximum_sent_datagram_bytes": 1100,
+        "maximum_received_datagram_bytes": 152,
+        "registered_paths": 400,
+        "maximum_queued_datagrams": 2,
+        "is_open": true,
+        "last_socket_error": "Success",
+        "reserved_bytes": 19063624
+      },
+      "listener_after": {
+        "sent": 176452,
+        "received": 92882,
+        "sent_bytes": 80691372,
+        "received_bytes": 8456296,
+        "unknown_path_datagrams": 0,
+        "capacity_drops": 0,
+        "rejected_datagrams": 0,
+        "send_calls": 7019,
+        "receive_poll_calls": 96394,
+        "receive_calls": 92882,
+        "would_block_events": 0,
+        "uses_native_send_batching": true,
+        "native_send_calls": 5819,
+        "native_sent_datagrams": 175252,
+        "partial_native_send_calls": 0,
+        "native_send_would_block_events": 0,
+        "native_send_batch_p50": 32,
+        "native_send_batch_p95": 32,
+        "maximum_native_send_batch": 32,
+        "maximum_outbound_queued_datagrams": 1200,
+        "send_system_call_ticks": 0,
+        "receive_poll_ticks": 0,
+        "receive_system_call_ticks": 0,
+        "maximum_sent_datagram_bytes": 1100,
+        "maximum_received_datagram_bytes": 152,
+        "registered_paths": 400,
+        "maximum_queued_datagrams": 2,
+        "is_open": true,
+        "last_socket_error": "Success",
+        "reserved_bytes": 19063624
+      },
+      "batch_opportunity": {
+        "inspections": 393600,
+        "nonempty_inspections": 55295,
+        "inspections_with_two_or_more_frames": 4734,
+        "inspections_with_three_or_more_frames": 0,
+        "ready_frames": 60029,
+        "plaintext_bytes": 49454982,
+        "mean_ready_frames_when_nonempty": 1.085613527443711,
+        "mean_plaintext_bytes_when_nonempty": 894.3843385477892,
+        "theoretical_greedy_datagrams": 55325,
+        "maximum_ready_frames": 2
+      },
+      "phase_attribution": {
+        "enabled": false,
+        "authority_update_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "event_publish_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "world_state_schedule_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "event_schedule_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "server_application_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "client_application_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "combined_protocol_pump_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "server_protocol_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "client_protocol_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "server_role_total_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "client_role_total_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        }
+      },
+      "amplification": {
+        "recipient_copies_per_semantic_construction": 400,
+        "bundles_per_recipient_copy": 0.05541666666666667,
+        "data_packets_per_bundle": 2.0902255639097747,
+        "wire_bytes_per_recipient_copy": 56.34632083333333,
+        "wire_bytes_per_world_semantic_byte": 1.3415790674603174,
+        "mean_wire_bytes_per_datagram": 319.6066577251,
+        "retransmitted_wire_fraction": 0
+      }
+    },
+    {
+      "profile": {
+        "id": "spread_mix",
+        "clients": 400,
+        "entities": 5000,
+        "ticks": 120,
+        "warmup_ticks": 30,
+        "dirty_percent": 2,
+        "spacing_millimeters": 12000,
+        "spatial_shape": "One 768 m distributed grid; recipients are distributed through the world; maintained relations follow local 192 m envelopes.",
+        "traffic": "Full"
+      },
+      "relations": 352596,
+      "maximum_recipient_scope": 1156,
+      "converged": true,
+      "settle_ticks": 4,
+      "tick_milliseconds": {
+        "mean": 17.231293333333333,
+        "p50": 18.5452,
+        "p95": 19.540755,
+        "p99": 19.977999,
+        "max": 20.0455
+      },
+      "diagnostic_probe_milliseconds": {
+        "mean": 2.010374166666667,
+        "p50": 2.02635,
+        "p95": 2.244615,
+        "p99": 2.323434,
+        "max": 2.366
+      },
+      "immediate_freshness_milliseconds": {
+        "mean": 17.85827020833334,
+        "p50": 18.875,
+        "p95": 20.625,
+        "p99": 20.875,
+        "max": 21.4036
+      },
+      "near_freshness_milliseconds": {
+        "mean": 46.603047992781164,
+        "p50": 42.125,
+        "p95": 63.625,
+        "p99": 64.625,
+        "max": 71.297
+      },
+      "far_freshness_milliseconds": {
+        "mean": 60.703564948166644,
+        "p50": 62.375,
+        "p95": 85.375,
+        "p99": 86.875,
+        "max": 109.0383
+      },
+      "all_world_state_freshness_milliseconds": {
+        "mean": 56.273490509769786,
+        "p50": 59.125,
+        "p95": 84.875,
+        "p99": 86.625,
+        "max": 109.0383
+      },
+      "immediate_freshness_ticks": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "near_freshness_ticks": {
+        "mean": 1.4288544048702516,
+        "p50": 1,
+        "p95": 2,
+        "p99": 2,
+        "max": 3
+      },
+      "far_freshness_ticks": {
+        "mean": 2.0993425051107795,
+        "p50": 2,
+        "p95": 3,
+        "p99": 3,
+        "max": 4
+      },
+      "event_application_milliseconds": {
+        "mean": 10.12600899999999,
+        "p50": 10.625,
+        "p95": 11.875,
+        "p99": 11.875,
+        "max": 12.0915
+      },
+      "event_application_ticks": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "per_client_freshness_p95_milliseconds": {
+        "mean": 84.110625,
+        "p50": 84.625,
+        "p95": 85.875,
+        "p99": 86.125,
+        "max": 86.375
+      },
+      "worst_client_freshness_p95_milliseconds": 86.375,
+      "worst_client_freshness_maximum_milliseconds": 109.0383,
+      "pending_relations": {
+        "mean": 18554.916666666668,
+        "p50": 19686,
+        "p95": 22623.55,
+        "p99": 23136.14,
+        "max": 23265
+      },
+      "retained_payload_bytes": {
+        "mean": 10874.166666666666,
+        "p50": 11187.5,
+        "p95": 13910,
+        "p99": 14265.5,
+        "max": 14325
+      },
+      "aggregate_reliable_queued": {
+        "mean": 434.96666666666664,
+        "p50": 447.5,
+        "p95": 556.4,
+        "p99": 570.62,
+        "max": 573
+      },
+      "aggregate_independent_queued": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "aggregate_received_queued": {
+        "mean": 0,
+        "p50": 0,
+        "p95": 0,
+        "p99": 0,
+        "max": 0
+      },
+      "aggregate_in_flight_packets": {
+        "mean": 199.79166666666666,
+        "p50": 212.5,
+        "p95": 237,
+        "p99": 238,
+        "max": 238
+      },
+      "retained_payload_capacity_ratio": {
+        "mean": 7.754323262518155E-05,
+        "p50": 7.977759966227779E-05,
+        "p95": 9.919163452981311E-05,
+        "p99": 0.00010172669032243343,
+        "max": 0.00010215098236086074
+      },
+      "nonviable_recipients": 0,
+      "tick_deadline_misses": 76,
+      "longest_deadline_miss_streak": 34,
+      "application_events_published": 2400,
+      "application_events_applied": 2400,
+      "semantic_constructions": 12000,
+      "semantic_record_copies": 841634,
+      "semantic_record_bytes": 35348628,
+      "bundles_built": 41533,
+      "application_event_records_examined": 2400,
+      "application_event_records_skipped": 0,
+      "application_event_retained_high_water": 59,
+      "application_event_minimum_cursor_scan_entries": 921600,
+      "application_event_minimum_cursor_full_rescans": 2304,
+      "application_event_minimum_cursor_fast_path_updates": 47893,
+      "application_event_consumer_lookup_comparisons": 0,
+      "application_event_consumer_lookup_attempts": 50197,
+      "application_event_participant_index_hits": 2400,
+      "application_event_no_relevant_fast_forwards": 45517,
+      "wire_datagrams": 134227,
+      "wire_bytes": 46274408,
+      "data_packets": 87880,
+      "acknowledgement_packets": 46347,
+      "retransmissions": 14,
+      "retransmitted_wire_bytes": 1288,
+      "capacity_drops": 0,
+      "retained_byte_capacity_failures": 0,
+      "retained_payload_compactions": 0,
+      "retained_payload_compaction_bytes_moved": 0,
+      "known_reserved_bytes": 754229223,
+      "peak_managed_heap_bytes": 1448747904,
+      "peak_working_set_bytes": 1159127040,
+      "peak_private_bytes": 1585147904,
+      "allocated_bytes": 299456,
+      "gen0_collections": 0,
+      "gen1_collections": 0,
+      "gen2_collections": 0,
+      "process_cpu_milliseconds": 2320,
+      "process_cpu_core_utilization": 0.9689327176879629,
+      "listener_before": {
+        "sent": 55650,
+        "received": 29939,
+        "sent_bytes": 28142132,
+        "received_bytes": 2743908,
+        "unknown_path_datagrams": 0,
+        "capacity_drops": 0,
+        "rejected_datagrams": 0,
+        "send_calls": 2986,
+        "receive_poll_calls": 32979,
+        "receive_calls": 29939,
+        "would_block_events": 0,
+        "uses_native_send_batching": true,
+        "native_send_calls": 1786,
+        "native_sent_datagrams": 54450,
+        "partial_native_send_calls": 0,
+        "native_send_would_block_events": 0,
+        "native_send_batch_p50": 32,
+        "native_send_batch_p95": 32,
+        "maximum_native_send_batch": 32,
+        "maximum_outbound_queued_datagrams": 1200,
+        "send_system_call_ticks": 0,
+        "receive_poll_ticks": 0,
+        "receive_system_call_ticks": 0,
+        "maximum_sent_datagram_bytes": 1100,
+        "maximum_received_datagram_bytes": 152,
+        "registered_paths": 400,
+        "maximum_queued_datagrams": 2,
+        "is_open": true,
+        "last_socket_error": "Success",
+        "reserved_bytes": 19063624
+      },
+      "listener_after": {
+        "sent": 143530,
+        "received": 76286,
+        "sent_bytes": 70229416,
+        "received_bytes": 6931032,
+        "unknown_path_datagrams": 0,
+        "capacity_drops": 0,
+        "rejected_datagrams": 0,
+        "send_calls": 5948,
+        "receive_poll_calls": 79822,
+        "receive_calls": 76286,
+        "would_block_events": 0,
+        "uses_native_send_batching": true,
+        "native_send_calls": 4748,
+        "native_sent_datagrams": 142330,
+        "partial_native_send_calls": 0,
+        "native_send_would_block_events": 0,
+        "native_send_batch_p50": 32,
+        "native_send_batch_p95": 32,
+        "maximum_native_send_batch": 32,
+        "maximum_outbound_queued_datagrams": 1200,
+        "send_system_call_ticks": 0,
+        "receive_poll_ticks": 0,
+        "receive_system_call_ticks": 0,
+        "maximum_sent_datagram_bytes": 1100,
+        "maximum_received_datagram_bytes": 152,
+        "registered_paths": 400,
+        "maximum_queued_datagrams": 2,
+        "is_open": true,
+        "last_socket_error": "Success",
+        "reserved_bytes": 19063624
+      },
+      "batch_opportunity": {
+        "inspections": 396800,
+        "nonempty_inspections": 40571,
+        "inspections_with_two_or_more_frames": 19441,
+        "inspections_with_three_or_more_frames": 0,
+        "ready_frames": 60012,
+        "plaintext_bytes": 56586396,
+        "mean_ready_frames_when_nonempty": 1.4791846392743586,
+        "mean_plaintext_bytes_when_nonempty": 1394.7498459490769,
+        "theoretical_greedy_datagrams": 57213,
+        "maximum_ready_frames": 2
+      },
+      "phase_attribution": {
+        "enabled": false,
+        "authority_update_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "event_publish_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "world_state_schedule_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "event_schedule_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "server_application_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "client_application_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "combined_protocol_pump_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "server_protocol_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "client_protocol_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "server_role_total_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "client_role_total_milliseconds": {
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        }
+      },
+      "amplification": {
+        "recipient_copies_per_semantic_construction": 70.13616666666667,
+        "bundles_per_recipient_copy": 0.0493480539046664,
+        "data_packets_per_bundle": 2.1159078323261022,
+        "wire_bytes_per_recipient_copy": 54.98162859390186,
+        "wire_bytes_per_world_semantic_byte": 1.3090863950929015,
+        "mean_wire_bytes_per_datagram": 344.7473906144069,
+        "retransmitted_wire_fraction": 2.7833959539795733E-05
+      }
+    }
+  ]
+}

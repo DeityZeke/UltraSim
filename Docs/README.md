@@ -36,7 +36,7 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Network kernel foundation](../Kernels/Network/README.md) — N0.0 contracts,
   N0.2 bounded bytes, and N0.3 secure reliable ProtocolLoopback.
 - [Network V3 active plan](Plans/NETWORK.md) — accepted correctness-hardened N0.9
-  integrated vertical and the N0.10 V2/V3 scale-comparison entrance.
+  integrated vertical and active evidence-driven N0.10 scale specialization.
 
 ## Evidence and tools
 
@@ -47,8 +47,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  N0.0 through N0.9 are accepted; N0.10 now measures scale before admitting
-  connection/assembly shards or transport specializations.
+  N0.0 through N0.9 are accepted; N0.10 now measures and specializes proven
+  scale costs while refusing unearned shards, workers, or semantic degradation.
 
 ## Source-of-truth hierarchy
 

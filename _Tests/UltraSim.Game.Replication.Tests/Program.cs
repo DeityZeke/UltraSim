@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("GenerationReplacementRebuildsEpochAndInvalidatesAccountlessAuthority", GenerationReplacementRebuildsEpoch),
     ("GenerationReplacementRebindsDurableAdmissionAuthority", GenerationReplacementRebindsDurableAdmission),
     ("ApplicationEventsAreIndependentBoundedFacts", ApplicationEventsAreIndependentBoundedFacts),
+    ("ApplicationEventParticipantIndexSurvivesWrapChurnAndAllocatesZero", ApplicationEventParticipantIndexSurvivesWrapChurnAndAllocatesZero),
     ("FutureHistoryCursorsRejectWithoutThrowing", FutureHistoryCursorsRejectWithoutThrowing),
     ("CaptureSequenceDomainsPreflightBeforeCommit", CaptureSequenceDomainsPreflightBeforeCommit),
     ("WorkingSetStampRolloverIsExplicitInCheckedBuild", WorkingSetStampRolloverIsExplicitInCheckedBuild),
@@ -786,6 +787,98 @@ static void ApplicationEventsAreIndependentBoundedFacts()
     Check.Equal(OfflineProjectionApplyStatus.Success, offline.ApplyApplicationEvents(events));
     projection.DiscardApplicationEventsThrough(read.NextSequence);
     Check.True(projection.TryPublishApplicationEvent(participant, 3, 30, 300, out _));
+}
+
+static void ApplicationEventParticipantIndexSurvivesWrapChurnAndAllocatesZero()
+{
+    using var fixture = new Fixture(GameRuntimeProfile.Networked, 0x970A, 64);
+    ParticipantId[] participants = [new(51), new(52), new(53), new(54)];
+    for (int index = 0; index < participants.Length; index++)
+        Check.True(fixture.Admission.JoinAccountless(participants[index]).IsEntered);
+    using var projection = new GameProjectionService(
+        fixture.Runtime.Game,
+        fixture.Admission,
+        new GameReplicationLimits(64, 8, 64, 128, 8, 64, 8));
+    for (int index = 0; index < participants.Length; index++)
+        Check.True(projection.SynchronizeParticipant(participants[index]));
+    ulong floor = projection.RebuildBaseline().Frame.ApplicationEventNextSequence;
+    ulong[] cursors = new ulong[participants.Length];
+    Array.Fill(cursors, floor);
+    for (int index = 0; index < participants.Length; index++)
+        Check.True(projection.TryRegisterApplicationEventConsumer(participants[index], floor));
+
+    Span<GameApplicationEvent> scratch = stackalloc GameApplicationEvent[1];
+    Check.True(projection.TryPublishApplicationEvent(
+        participants[1], 1, 1, 1, out GameApplicationEvent onlyForSecond));
+    GameProjectionHistoryReadResult absent = projection.ReadApplicationEvents(
+        participants[0], cursors[0], scratch);
+    Check.Equal(GameProjectionHistoryReadStatus.NoData, absent.Status);
+    Check.Equal(onlyForSecond.Sequence + 1, absent.NextPublishedSequence);
+    cursors[0] = absent.NextPublishedSequence;
+    Check.True(projection.TryAdvanceApplicationEventConsumer(participants[0], cursors[0]));
+    Check.Equal(1UL, projection.GetSnapshot().ApplicationEventNoRelevantFastForwards);
+
+    GameProjectionHistoryReadResult relevant = projection.ReadApplicationEvents(
+        participants[1], cursors[1], scratch);
+    Check.Equal(GameProjectionHistoryReadStatus.Success, relevant.Status);
+    Check.Equal(onlyForSecond, scratch[0]);
+    cursors[1] = relevant.NextSequence;
+    Check.True(projection.TryAdvanceApplicationEventConsumer(participants[1], cursors[1]));
+    for (int index = 2; index < participants.Length; index++)
+    {
+        GameProjectionHistoryReadResult skipped = projection.ReadApplicationEvents(
+            participants[index], cursors[index], scratch);
+        Check.Equal(GameProjectionHistoryReadStatus.NoData, skipped.Status);
+        cursors[index] = skipped.NextPublishedSequence;
+        Check.True(projection.TryAdvanceApplicationEventConsumer(participants[index], cursors[index]));
+    }
+    Check.Equal(0, projection.GetSnapshot().RetainedApplicationEvents);
+
+    Check.True(projection.UnregisterApplicationEventConsumer(participants[3]));
+    Check.True(projection.TryRegisterApplicationEventConsumer(participants[3], cursors[3]));
+
+    for (int round = 0; round < 80; round++)
+    {
+        GameApplicationEvent lastPublished = default;
+        for (int index = 0; index < participants.Length; index++)
+            Check.True(projection.TryPublishApplicationEvent(
+                participants[index], checked((ushort)(index + 1)), checked((ulong)round + 10),
+                checked((ulong)index + 100), out lastPublished));
+        ulong published = checked(lastPublished.Sequence + 1);
+        for (int index = 0; index < participants.Length; index++)
+        {
+            GameProjectionHistoryReadResult read = projection.ReadApplicationEvents(
+                participants[index], cursors[index], scratch);
+            Check.Equal(GameProjectionHistoryReadStatus.Success, read.Status);
+            Check.Equal(participants[index], scratch[0].Participant);
+            cursors[index] = read.NextSequence;
+            Check.True(projection.TryAdvanceApplicationEventConsumer(participants[index], cursors[index]));
+            GameProjectionHistoryReadResult tail = projection.ReadApplicationEvents(
+                participants[index], cursors[index], scratch);
+            Check.Equal(GameProjectionHistoryReadStatus.NoData, tail.Status);
+            Check.Equal(published, tail.NextPublishedSequence);
+            cursors[index] = published;
+            Check.True(projection.TryAdvanceApplicationEventConsumer(participants[index], published));
+        }
+    }
+    GameProjectionSnapshot afterWrap = projection.GetSnapshot();
+    Check.Equal(0, afterWrap.RetainedApplicationEvents);
+    Check.True(afterWrap.ApplicationEventParticipantIndexHits >= 321);
+    Check.Equal(0UL, afterWrap.ApplicationEventConsumerLookupComparisons);
+    Check.True(afterWrap.ApplicationEventConsumerLookupAttempts > 0);
+    Check.True(afterWrap.ApplicationEventMinimumCursorFastPathUpdates >
+        afterWrap.ApplicationEventMinimumCursorFullRescans);
+
+    _ = projection.ReadApplicationEvents(participants[0], cursors[0], scratch);
+    long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+    for (int iteration = 0; iteration < 10_000; iteration++)
+    {
+        GameProjectionHistoryReadResult read = projection.ReadApplicationEvents(
+            participants[0], cursors[0], scratch);
+        Check.Equal(GameProjectionHistoryReadStatus.NoData, read.Status);
+        Check.True(projection.TryAdvanceApplicationEventConsumer(participants[0], cursors[0]));
+    }
+    Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
 }
 
 static void FutureHistoryCursorsRejectWithoutThrowing()

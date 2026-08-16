@@ -19,13 +19,15 @@ internal static class DenseReplicationSuite
         int ticks = ReadInt(args, "--ticks", 120);
         int warmup = ReadInt(args, "--warmup", 30);
         int dirtyPercent = ReadInt(args, "--dirty-percent", 2);
+        string requestedTraffic = ReadText(args, "--replication-traffic") ?? "full";
+        bool phaseAttribution = ReadBool(args, "--phase-attribution", false);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-v3-spread-dense-acceptance.json";
         if (clients <= 0 || clients > 1_024 || ticks < 30 || warmup < 1 ||
             dirtyPercent is <= 0 or > 100)
             throw new ArgumentOutOfRangeException(nameof(args));
 
-        ReplicationWorkload[] profiles = requested.ToLowerInvariant() switch
+        ReplicationWorkload[] baseProfiles = requested.ToLowerInvariant() switch
         {
             "spread_mix" => [ReplicationWorkload.Spread(clients, ticks, warmup, dirtyPercent)],
             "dense_mix" => [ReplicationWorkload.Dense(clients, ticks, warmup, dirtyPercent)],
@@ -37,12 +39,24 @@ internal static class DenseReplicationSuite
             _ => throw new ArgumentException($"Unknown replication profile '{requested}'."),
         };
 
+        ReplicationTraffic[] traffic = requestedTraffic.ToLowerInvariant() switch
+        {
+            "full" => [ReplicationTraffic.Full],
+            "worldstate-only" => [ReplicationTraffic.WorldStateOnly],
+            "event-only" => [ReplicationTraffic.EventOnly],
+            "causal" => [ReplicationTraffic.Full, ReplicationTraffic.WorldStateOnly, ReplicationTraffic.EventOnly],
+            _ => throw new ArgumentException($"Unknown replication traffic mode '{requestedTraffic}'."),
+        };
+        ReplicationWorkload[] profiles = baseProfiles
+            .SelectMany(profile => traffic.Select(profile.WithTraffic))
+            .ToArray();
+
         var results = new List<ReplicationWorkloadResult>(profiles.Length);
         foreach (ReplicationWorkload profile in profiles)
         {
             Console.WriteLine($"REPLICATION {profile.Id}: constructing {profile.Clients} clients, " +
                 $"{profile.Entities} entities...");
-            using var harness = new ReplicationWorkloadHarness(profile);
+            using var harness = new ReplicationWorkloadHarness(profile, phaseAttribution);
             ReplicationWorkloadResult result = harness.Run();
             Validate(result);
             results.Add(result);
@@ -54,13 +68,15 @@ internal static class DenseReplicationSuite
         }
 
         var report = new ReplicationSuiteReport(
-            "ultrasim-network-v3-spread-dense-acceptance-v1",
+            "ultrasim-network-v3-spread-dense-acceptance-v2",
             DateTimeOffset.UtcNow,
             Environment.Version.ToString(),
             Environment.ProcessorCount,
             "V3-only integrated acceptance. Real shared-listener UDP, secure protocol, maintained AOI, " +
             "independent unreliable WorldState, reliable application Events, application ACKs, and retained client projection. " +
-            "No V2 ratio is claimed because V2 does not own equivalent semantics.",
+            "No V2 ratio is claimed because V2 does not own equivalent semantics. " +
+            "Traffic controls preserve topology, relations, dirty updates, capacities, cadence, and transport; " +
+            "phase attribution is opt-in and excluded from ordinary accepted timing.",
             results);
         NetworkBotComparisonIo.Write(output, report);
         Console.WriteLine(Path.GetFullPath(output));
@@ -86,6 +102,12 @@ internal static class DenseReplicationSuite
     {
         string? value = ReadText(args, name);
         return value is null ? fallback : int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static bool ReadBool(string[] args, string name, bool fallback)
+    {
+        string? value = ReadText(args, name);
+        return value is null ? fallback : bool.Parse(value);
     }
 
     private static string? ReadText(string[] args, string name)
@@ -115,6 +137,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         KeepAliveIntervalMilliseconds: 5_000);
 
     private readonly ReplicationWorkload _profile;
+    private readonly bool _phaseAttribution;
     private readonly UltraSimGameComposition _composition;
     private readonly ServerRuntime _runtime;
     private readonly AdmissionService _admission;
@@ -152,17 +175,32 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private readonly List<double> _receivedQueued;
     private readonly List<double> _inFlightPackets;
     private readonly List<double> _retainedPayloadRatio;
+    private readonly List<double> _authorityUpdateMilliseconds;
+    private readonly List<double> _eventPublishMilliseconds;
+    private readonly List<double> _worldScheduleMilliseconds;
+    private readonly List<double> _eventScheduleMilliseconds;
+    private readonly List<double> _serverApplicationMilliseconds;
+    private readonly List<double> _clientApplicationMilliseconds;
+    private readonly List<double> _combinedProtocolPumpMilliseconds;
+    private readonly List<double> _serverProtocolMilliseconds;
+    private readonly List<double> _clientProtocolMilliseconds;
+    private readonly List<double> _serverRoleMilliseconds;
+    private readonly List<double> _clientRoleMilliseconds;
     private readonly ReplicationBatchCensus _batchCensus = new();
     private int _dirtyCursor;
     private int _currentAuthorityTick;
     private readonly int _maximumRecipientScope;
     private ulong _eventsPublished;
     private ulong _eventsApplied;
+    private long _tickServerApplicationTicks;
+    private long _tickClientApplicationTicks;
+    private long _tickProtocolPumpTicks;
     private bool _disposed;
 
-    internal ReplicationWorkloadHarness(ReplicationWorkload profile)
+    internal ReplicationWorkloadHarness(ReplicationWorkload profile, bool phaseAttribution)
     {
         _profile = profile;
+        _phaseAttribution = phaseAttribution;
         _tickMilliseconds = new List<double>(profile.Ticks);
         _diagnosticMilliseconds = new List<double>(profile.Ticks);
         _pendingRelations = new List<double>(profile.Ticks);
@@ -172,6 +210,17 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         _receivedQueued = new List<double>(profile.Ticks);
         _inFlightPackets = new List<double>(profile.Ticks);
         _retainedPayloadRatio = new List<double>(profile.Ticks);
+        _authorityUpdateMilliseconds = new List<double>(profile.Ticks);
+        _eventPublishMilliseconds = new List<double>(profile.Ticks);
+        _worldScheduleMilliseconds = new List<double>(profile.Ticks);
+        _eventScheduleMilliseconds = new List<double>(profile.Ticks);
+        _serverApplicationMilliseconds = new List<double>(profile.Ticks);
+        _clientApplicationMilliseconds = new List<double>(profile.Ticks);
+        _combinedProtocolPumpMilliseconds = new List<double>(profile.Ticks);
+        _serverProtocolMilliseconds = new List<double>(profile.Ticks);
+        _clientProtocolMilliseconds = new List<double>(profile.Ticks);
+        _serverRoleMilliseconds = new List<double>(profile.Ticks);
+        _clientRoleMilliseconds = new List<double>(profile.Ticks);
         _clientFreshness = Enumerable.Range(0, profile.Clients)
             .Select(_ => new LatencyHistogram(0.25, 8_192)).ToArray();
 
@@ -309,6 +358,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         nextDeadline = Stopwatch.GetTimestamp();
 
         ResetMeasurement();
+        if (_phaseAttribution) ResetProtocolStageTiming(enabled: true);
         GameInterestSnapshot interestBefore = _interest.GetSnapshot();
         GameProjectionSnapshot projectionBefore = _projection.GetSnapshot();
         EventTotals eventBefore = CaptureEventTotals();
@@ -384,7 +434,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         double cpuMs = (cpuAfter - cpuBefore).TotalMilliseconds;
         NetworkMetricSummary retained = NetworkMetricSummary.From(_retainedBytes);
 
-        return new ReplicationWorkloadResult(
+        var result = new ReplicationWorkloadResult(
             _profile,
             interestAfter.RelationCount,
             _maximumRecipientScope,
@@ -425,6 +475,18 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             projectionAfter.RetainedApplicationEventHighWater,
             projectionAfter.ApplicationEventMinimumCursorScanEntries -
                 projectionBefore.ApplicationEventMinimumCursorScanEntries,
+            projectionAfter.ApplicationEventMinimumCursorFullRescans -
+                projectionBefore.ApplicationEventMinimumCursorFullRescans,
+            projectionAfter.ApplicationEventMinimumCursorFastPathUpdates -
+                projectionBefore.ApplicationEventMinimumCursorFastPathUpdates,
+            projectionAfter.ApplicationEventConsumerLookupComparisons -
+                projectionBefore.ApplicationEventConsumerLookupComparisons,
+            projectionAfter.ApplicationEventConsumerLookupAttempts -
+                projectionBefore.ApplicationEventConsumerLookupAttempts,
+            projectionAfter.ApplicationEventParticipantIndexHits -
+                projectionBefore.ApplicationEventParticipantIndexHits,
+            projectionAfter.ApplicationEventNoRelevantFastForwards -
+                projectionBefore.ApplicationEventNoRelevantFastForwards,
             wireDatagrams,
             wireBytes,
             dataPackets,
@@ -448,6 +510,19 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             listenerBefore,
             hostAfter.Listener,
             _batchCensus.CreateReport(),
+            new ReplicationPhaseAttribution(
+                _phaseAttribution,
+                NetworkMetricSummary.From(_authorityUpdateMilliseconds),
+                NetworkMetricSummary.From(_eventPublishMilliseconds),
+                NetworkMetricSummary.From(_worldScheduleMilliseconds),
+                NetworkMetricSummary.From(_eventScheduleMilliseconds),
+                NetworkMetricSummary.From(_serverApplicationMilliseconds),
+                NetworkMetricSummary.From(_clientApplicationMilliseconds),
+                NetworkMetricSummary.From(_combinedProtocolPumpMilliseconds),
+                NetworkMetricSummary.From(_serverProtocolMilliseconds),
+                NetworkMetricSummary.From(_clientProtocolMilliseconds),
+                NetworkMetricSummary.From(_serverRoleMilliseconds),
+                NetworkMetricSummary.From(_clientRoleMilliseconds)),
             new ReplicationAmplification(
                 constructions == 0 ? 0 : relationsCopied / (double)constructions,
                 relationsCopied == 0 ? 0 : bundles / (double)relationsCopied,
@@ -456,12 +531,21 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 semanticBytes == 0 ? 0 : wireBytes / (double)semanticBytes,
                 wireDatagrams == 0 ? 0 : wireBytes / (double)wireDatagrams,
                 wireBytes == 0 ? 0 : retransmittedBytes / (double)wireBytes));
+        if (_phaseAttribution) ResetProtocolStageTiming(enabled: false);
+        return result;
     }
 
     private void RunActiveTick(int tick, bool measure)
     {
         _currentAuthorityTick = tick;
         long started = Stopwatch.GetTimestamp();
+        ReplicationProtocolTiming protocolBefore = measure && _phaseAttribution
+            ? CaptureProtocolStageTiming()
+            : default;
+        _tickServerApplicationTicks = 0;
+        _tickClientApplicationTicks = 0;
+        _tickProtocolPumpTicks = 0;
+        long phaseStarted = Stopwatch.GetTimestamp();
         int dirty = Math.Max(1, _profile.Entities * _profile.DirtyPercent / 100);
         for (int offset = 0; offset < dirty; offset++)
         {
@@ -479,10 +563,46 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 GameInterestUpdateStatus.Success, "Canonical WorldState update failed.");
         }
         _dirtyCursor = (_dirtyCursor + dirty) % _profile.Entities;
-        PublishEvents(tick);
-        ScheduleApplication(SemanticMilliseconds(tick));
+        RecordPhase(_authorityUpdateMilliseconds, phaseStarted, measure && _phaseAttribution);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) PublishEvents(tick);
+        RecordPhase(_eventPublishMilliseconds, phaseStarted, measure && _phaseAttribution);
+
+        long now = SemanticMilliseconds(tick);
+        phaseStarted = Stopwatch.GetTimestamp();
+        if (_profile.Traffic != ReplicationTraffic.EventOnly) ScheduleWorldState(now);
+        RecordPhase(_worldScheduleMilliseconds, phaseStarted, measure && _phaseAttribution);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) ScheduleEvents();
+        RecordPhase(_eventScheduleMilliseconds, phaseStarted, measure && _phaseAttribution);
         for (int pass = 0; pass < 4; pass++) PumpAndDispatch(measure);
-        if (measure) _tickMilliseconds.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+        if (measure)
+        {
+            _tickMilliseconds.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            if (_phaseAttribution)
+            {
+                ReplicationProtocolTiming protocolAfter = CaptureProtocolStageTiming();
+                ReplicationProtocolTiming protocol = protocolAfter.Subtract(protocolBefore);
+                double authority = _authorityUpdateMilliseconds[^1];
+                double eventPublish = _eventPublishMilliseconds[^1];
+                double worldSchedule = _worldScheduleMilliseconds[^1];
+                double eventSchedule = _eventScheduleMilliseconds[^1];
+                double serverApplication = ToMilliseconds(_tickServerApplicationTicks);
+                double clientApplication = ToMilliseconds(_tickClientApplicationTicks);
+                double serverProtocol = ToMilliseconds(protocol.ServerTicks);
+                double clientProtocol = ToMilliseconds(protocol.ClientTicks);
+                _serverApplicationMilliseconds.Add(serverApplication);
+                _clientApplicationMilliseconds.Add(clientApplication);
+                _combinedProtocolPumpMilliseconds.Add(ToMilliseconds(_tickProtocolPumpTicks));
+                _serverProtocolMilliseconds.Add(serverProtocol);
+                _clientProtocolMilliseconds.Add(clientProtocol);
+                _serverRoleMilliseconds.Add(authority + eventPublish + worldSchedule + eventSchedule +
+                    serverApplication + serverProtocol);
+                _clientRoleMilliseconds.Add(clientApplication + clientProtocol);
+            }
+        }
 
         long diagnosticStarted = Stopwatch.GetTimestamp();
         ScanFreshness(tick, measure);
@@ -522,7 +642,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         }
     }
 
-    private void ScheduleApplication(long nowMilliseconds)
+    private void ScheduleWorldState(long nowMilliseconds)
     {
         for (int index = 0; index < _bots.Length; index++)
         {
@@ -533,8 +653,19 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                     nowMilliseconds, WorldStateByteBudget);
                 if (status != GameWorldStateBuildStatus.Success) break;
             }
-            _ = bot.EventServer.TrySchedule();
         }
+    }
+
+    private void ScheduleEvents()
+    {
+        for (int index = 0; index < _bots.Length; index++)
+            _ = _bots[index].EventServer.TrySchedule();
+    }
+
+    private void ScheduleApplication(long nowMilliseconds)
+    {
+        if (_profile.Traffic != ReplicationTraffic.EventOnly) ScheduleWorldState(nowMilliseconds);
+        if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) ScheduleEvents();
     }
 
     private void PumpAndDispatch(bool captureBatch)
@@ -545,10 +676,15 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 _batchCensus.Add(_bots[index].Session.Client.InspectUnreliableBatchOpportunity());
                 _batchCensus.Add(_bots[index].Session.Server.InspectUnreliableBatchOpportunity());
             }
+        long protocolStarted = _phaseAttribution ? Stopwatch.GetTimestamp() : 0;
         _host.Pump();
+        if (_phaseAttribution)
+            _tickProtocolPumpTicks = checked(_tickProtocolPumpTicks +
+                Stopwatch.GetTimestamp() - protocolStarted);
         for (int index = 0; index < _bots.Length; index++)
         {
             ReplicationBot bot = _bots[index];
+            long applicationStarted = _phaseAttribution ? Stopwatch.GetTimestamp() : 0;
             while (bot.Session.Server.TryPeekReceived(
                        out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
@@ -556,6 +692,11 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                     bot.EventServer.TryProcess(in message, payload);
                 _ = bot.Session.Server.TryConsumeReceived();
             }
+            if (_phaseAttribution)
+                _tickServerApplicationTicks = checked(_tickServerApplicationTicks +
+                    Stopwatch.GetTimestamp() - applicationStarted);
+
+            applicationStarted = _phaseAttribution ? Stopwatch.GetTimestamp() : 0;
             while (bot.Session.Client.TryPeekReceived(
                        out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
@@ -575,6 +716,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                     _currentAuthorityTick - _eventPublishedTick[sequence]));
                 _eventsApplied++;
             }
+            if (_phaseAttribution)
+                _tickClientApplicationTicks = checked(_tickClientApplicationTicks +
+                    Stopwatch.GetTimestamp() - applicationStarted);
         }
     }
 
@@ -582,7 +726,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     {
         for (int round = 0; round < 2_048; round++)
         {
-            ScheduleApplication(checked(100L + round * 17L));
+            // Every causal control begins from the same fully materialized client scope.
+            ScheduleWorldState(checked(100L + round * 17L));
+            if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) ScheduleEvents();
             for (int pass = 0; pass < 4; pass++) PumpAndDispatch(captureBatch: false);
             GameInterestSnapshot snapshot = _interest.GetSnapshot();
             if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0)
@@ -604,8 +750,11 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             for (int pass = 0; pass < 4; pass++) PumpAndDispatch(captureBatch: measure);
             ScanFreshness(authorityTick, measure);
             GameInterestSnapshot snapshot = _interest.GetSnapshot();
-            if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0 &&
-                _bots.All(bot => !bot.EventServer.GetSnapshot().AwaitingApplication))
+            bool worldComplete = _profile.Traffic == ReplicationTraffic.EventOnly ||
+                (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0);
+            bool eventsComplete = _profile.Traffic == ReplicationTraffic.WorldStateOnly ||
+                _bots.All(bot => !bot.EventServer.GetSnapshot().AwaitingApplication);
+            if (worldComplete && eventsComplete)
                 return settle;
             WaitForRealtimeTick(ref nextDeadline);
         }
@@ -652,6 +801,8 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
 
     private bool ValidateConvergence()
     {
+        if (_profile.Traffic == ReplicationTraffic.EventOnly)
+            return _eventsPublished == _eventsApplied;
         int relationCount = _interest.CopyRelations(_relationScratch);
         int relationIndex = 0;
         for (int client = 0; client < _bots.Length; client++)
@@ -732,7 +883,56 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         _inFlightPackets.Clear();
         _retainedPayloadRatio.Clear();
         _batchCensus.Clear();
+        _authorityUpdateMilliseconds.Clear();
+        _eventPublishMilliseconds.Clear();
+        _worldScheduleMilliseconds.Clear();
+        _eventScheduleMilliseconds.Clear();
+        _serverApplicationMilliseconds.Clear();
+        _clientApplicationMilliseconds.Clear();
+        _combinedProtocolPumpMilliseconds.Clear();
+        _serverProtocolMilliseconds.Clear();
+        _clientProtocolMilliseconds.Clear();
+        _serverRoleMilliseconds.Clear();
+        _clientRoleMilliseconds.Clear();
     }
+
+    private void ResetProtocolStageTiming(bool enabled)
+    {
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            _bots[index].Session.Client.ResetStageTiming(enabled);
+            _bots[index].Session.Server.ResetStageTiming(enabled);
+        }
+        _host.ResetListenerStageTiming(enabled);
+    }
+
+    private ReplicationProtocolTiming CaptureProtocolStageTiming()
+    {
+        ulong client = 0;
+        ulong server = 0;
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            NetworkProtocolStageTiming clientTiming = _bots[index].Session.Client.GetStageTiming();
+            NetworkProtocolStageTiming serverTiming = _bots[index].Session.Server.GetStageTiming();
+            client = SaturatingAdd(client, SaturatingAdd(clientTiming.EmitTicks, clientTiming.InboundTicks));
+            server = SaturatingAdd(server, SaturatingAdd(serverTiming.EmitTicks, serverTiming.InboundTicks));
+        }
+        SharedUdpListenerSnapshot listener = _host.GetSnapshot().Listener;
+        server = SaturatingAdd(server, SaturatingAdd(listener.SendSystemCallTicks,
+            SaturatingAdd(listener.ReceivePollTicks, listener.ReceiveSystemCallTicks)));
+        return new(client, server);
+    }
+
+    private static void RecordPhase(List<double> destination, long started, bool measure)
+    {
+        if (measure) destination.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+
+    private static double ToMilliseconds(long ticks) => ticks * 1_000d / Stopwatch.Frequency;
+    private static double ToMilliseconds(ulong ticks) => ticks * 1_000d / Stopwatch.Frequency;
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 
     private TransportTotals CaptureTransportTotals()
     {
@@ -1047,6 +1247,12 @@ internal sealed record ReplicationWorkloadResult(
     ulong ApplicationEventRecordsSkipped,
     int ApplicationEventRetainedHighWater,
     ulong ApplicationEventMinimumCursorScanEntries,
+    ulong ApplicationEventMinimumCursorFullRescans,
+    ulong ApplicationEventMinimumCursorFastPathUpdates,
+    ulong ApplicationEventConsumerLookupComparisons,
+    ulong ApplicationEventConsumerLookupAttempts,
+    ulong ApplicationEventParticipantIndexHits,
+    ulong ApplicationEventNoRelevantFastForwards,
     ulong WireDatagrams,
     ulong WireBytes,
     ulong DataPackets,
@@ -1070,7 +1276,29 @@ internal sealed record ReplicationWorkloadResult(
     SharedUdpListenerSnapshot ListenerBefore,
     SharedUdpListenerSnapshot ListenerAfter,
     ReplicationBatchOpportunityReport BatchOpportunity,
+    ReplicationPhaseAttribution PhaseAttribution,
     ReplicationAmplification Amplification);
+
+internal readonly record struct ReplicationPhaseAttribution(
+    bool Enabled,
+    NetworkMetricSummary AuthorityUpdateMilliseconds,
+    NetworkMetricSummary EventPublishMilliseconds,
+    NetworkMetricSummary WorldStateScheduleMilliseconds,
+    NetworkMetricSummary EventScheduleMilliseconds,
+    NetworkMetricSummary ServerApplicationMilliseconds,
+    NetworkMetricSummary ClientApplicationMilliseconds,
+    NetworkMetricSummary CombinedProtocolPumpMilliseconds,
+    NetworkMetricSummary ServerProtocolMilliseconds,
+    NetworkMetricSummary ClientProtocolMilliseconds,
+    NetworkMetricSummary ServerRoleTotalMilliseconds,
+    NetworkMetricSummary ClientRoleTotalMilliseconds);
+
+internal readonly record struct ReplicationProtocolTiming(ulong ClientTicks, ulong ServerTicks)
+{
+    internal ReplicationProtocolTiming Subtract(ReplicationProtocolTiming baseline) => new(
+        ClientTicks >= baseline.ClientTicks ? ClientTicks - baseline.ClientTicks : 0,
+        ServerTicks >= baseline.ServerTicks ? ServerTicks - baseline.ServerTicks : 0);
+}
 
 internal readonly record struct ReplicationBatchOpportunityReport(
     ulong Inspections,
@@ -1093,6 +1321,13 @@ internal readonly record struct ReplicationAmplification(
     double MeanWireBytesPerDatagram,
     double RetransmittedWireFraction);
 
+internal enum ReplicationTraffic : byte
+{
+    Full = 0,
+    WorldStateOnly = 1,
+    EventOnly = 2,
+}
+
 internal sealed record ReplicationWorkload(
     string Id,
     int Clients,
@@ -1101,7 +1336,8 @@ internal sealed record ReplicationWorkload(
     int WarmupTicks,
     int DirtyPercent,
     int SpacingMillimeters,
-    string SpatialShape)
+    string SpatialShape,
+    ReplicationTraffic Traffic = ReplicationTraffic.Full)
 {
     internal static ReplicationWorkload Dense(int clients, int ticks, int warmup, int dirty) =>
         new("dense_mix", clients, 1_000, ticks, warmup, dirty, 4_000,
@@ -1110,6 +1346,14 @@ internal sealed record ReplicationWorkload(
     internal static ReplicationWorkload Spread(int clients, int ticks, int warmup, int dirty) =>
         new("spread_mix", clients, 5_000, ticks, warmup, dirty, 12_000,
             "One 768 m distributed grid; recipients are distributed through the world; maintained relations follow local 192 m envelopes.");
+
+    internal ReplicationWorkload WithTraffic(ReplicationTraffic traffic) => this with
+    {
+        Id = traffic == ReplicationTraffic.Full
+            ? Id
+            : $"{Id}/{traffic.ToString().ToLowerInvariant()}",
+        Traffic = traffic,
+    };
 
     internal ReplicationSpatialPoint EntityPoint(int entity)
     {

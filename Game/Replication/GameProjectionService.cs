@@ -41,13 +41,17 @@ public sealed class GameProjectionService : IDisposable
     private readonly GameProjectionDelta[] _lastDeltas;
     private readonly GameProjectionLifecycleFact[] _lifecycleHistory;
     private readonly GameApplicationEvent[] _applicationEvents;
+    private readonly ulong[] _applicationEventNextParticipantSequence;
     private readonly ParticipantId[] _applicationEventConsumers;
     private readonly ulong[] _applicationEventConsumerCursors;
+    private readonly ulong[] _applicationEventConsumerNextRelevantSequences;
+    private readonly Dictionary<ParticipantId, int> _applicationEventConsumerMap;
     private readonly GameAuthoritativeInput[] _inputs;
     private readonly GameSimulationCommand[] _commandScratch;
     private readonly ParticipantId[] _participantScratch;
     private readonly Dictionary<ParticipantId, ParticipantState> _participants;
     private readonly int _participantMapCapacity;
+    private readonly int _applicationEventConsumerMapCapacity;
     private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _captureOperation;
     private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _rebuildOperation;
     private readonly ServerGenerationStateOperation<GameGenerationState, IngressCommit> _ingressPublisher;
@@ -75,6 +79,13 @@ public sealed class GameProjectionService : IDisposable
     private ulong _applicationNextSequence;
     private int _applicationEventConsumerCount;
     private ulong _applicationMinimumCursorScanEntries;
+    private ulong _applicationMinimumCursorFullRescans;
+    private ulong _applicationMinimumCursorFastPathUpdates;
+    private ulong _applicationEventConsumerLookupAttempts;
+    private ulong _applicationEventParticipantIndexHits;
+    private ulong _applicationEventNoRelevantFastForwards;
+    private ulong _applicationMinimumCursor;
+    private int _applicationConsumersAtMinimum;
     private int _inputCount;
     private bool _rebuildRequired;
     private Exception? _fault;
@@ -134,8 +145,14 @@ public sealed class GameProjectionService : IDisposable
         _lastDeltas = new GameProjectionDelta[limits.MaximumDeltasPerCapture];
         _lifecycleHistory = new GameProjectionLifecycleFact[limits.LifecycleHistoryCapacity];
         _applicationEvents = new GameApplicationEvent[limits.ApplicationEventCapacity];
+        _applicationEventNextParticipantSequence = new ulong[limits.ApplicationEventCapacity];
+        Array.Fill(_applicationEventNextParticipantSequence, ulong.MaxValue);
         _applicationEventConsumers = new ParticipantId[limits.MaximumParticipants];
         _applicationEventConsumerCursors = new ulong[limits.MaximumParticipants];
+        _applicationEventConsumerNextRelevantSequences = new ulong[limits.MaximumParticipants];
+        Array.Fill(_applicationEventConsumerNextRelevantSequences, ulong.MaxValue);
+        _applicationEventConsumerMap = new Dictionary<ParticipantId, int>(limits.MaximumParticipants);
+        _applicationEventConsumerMapCapacity = _applicationEventConsumerMap.EnsureCapacity(limits.MaximumParticipants);
         _inputs = new GameAuthoritativeInput[limits.AuthoritativeInputCapacity];
         _commandScratch = new GameSimulationCommand[limits.AuthoritativeInputCapacity];
         _participantScratch = new ParticipantId[limits.MaximumParticipants];
@@ -298,7 +315,8 @@ public sealed class GameProjectionService : IDisposable
         out GameApplicationEvent applicationEvent)
     {
         EnsureOperational();
-        if (!_stateEpoch.IsValid || !participant.IsValid || !_participants.ContainsKey(participant) || kind == 0 ||
+        if (!_stateEpoch.IsValid || !participant.IsValid ||
+            !_participants.TryGetValue(participant, out ParticipantState participantState) || kind == 0 ||
             _applicationCount == _applicationEvents.Length ||
             _applicationNextSequence == ulong.MaxValue)
         {
@@ -306,9 +324,29 @@ public sealed class GameProjectionService : IDisposable
             return false;
         }
         int index = (_applicationHead + _applicationCount) % _applicationEvents.Length;
+        int priorParticipantTailIndex = participantState.ApplicationEventTailSequence == ulong.MaxValue
+            ? -1
+            : ApplicationEventRingIndex(participantState.ApplicationEventTailSequence);
         applicationEvent = new GameApplicationEvent(
             _applicationNextSequence++, _stateEpoch, participant, kind, subject, payloadHash);
         _applicationEvents[index] = applicationEvent;
+        _applicationEventNextParticipantSequence[index] = ulong.MaxValue;
+        if (priorParticipantTailIndex >= 0)
+        {
+            _applicationEventNextParticipantSequence[priorParticipantTailIndex] = applicationEvent.Sequence;
+        }
+        else
+        {
+            participantState.ApplicationEventHeadSequence = applicationEvent.Sequence;
+        }
+        participantState.ApplicationEventTailSequence = applicationEvent.Sequence;
+        _participants[participant] = participantState;
+        if (_applicationEventConsumerMap.TryGetValue(participant, out int consumer) &&
+            _applicationEventConsumerNextRelevantSequences[consumer] == ulong.MaxValue &&
+            applicationEvent.Sequence >= _applicationEventConsumerCursors[consumer])
+        {
+            _applicationEventConsumerNextRelevantSequences[consumer] = applicationEvent.Sequence;
+        }
         _applicationCount++;
         _applicationHighWater = Math.Max(_applicationHighWater, _applicationCount);
         return true;
@@ -335,6 +373,52 @@ public sealed class GameProjectionService : IDisposable
     }
 
     /// <summary>
+    /// Reads the next retained Event relevant to one registered participant.
+    /// Global Event sequence remains the durable ordering identity; the
+    /// participant index only removes unrelated-record traversal.
+    /// </summary>
+    internal GameProjectionHistoryReadResult ReadApplicationEvents(
+        ParticipantId participant,
+        ulong nextSequence,
+        Span<GameApplicationEvent> destination)
+    {
+        EnsureOperational();
+        ulong oldest = unchecked(_applicationNextSequence - (ulong)_applicationCount);
+        if (nextSequence < oldest)
+            return new(GameProjectionHistoryReadStatus.HistoryLost, 0, nextSequence, oldest, _applicationNextSequence);
+        if (nextSequence > _applicationNextSequence)
+            return new(GameProjectionHistoryReadStatus.FutureSequence, 0, nextSequence, oldest,
+                _applicationNextSequence);
+        if (!_applicationEventConsumerMap.TryGetValue(participant, out int consumer))
+            return new(GameProjectionHistoryReadStatus.HistoryLost, 0, nextSequence, oldest,
+                _applicationNextSequence);
+        if (nextSequence != _applicationEventConsumerCursors[consumer])
+            return new(nextSequence < _applicationEventConsumerCursors[consumer]
+                    ? GameProjectionHistoryReadStatus.HistoryLost
+                    : GameProjectionHistoryReadStatus.FutureSequence,
+                0, nextSequence, oldest, _applicationNextSequence);
+
+        ulong relevant = _applicationEventConsumerNextRelevantSequences[consumer];
+        while (relevant != ulong.MaxValue && relevant < nextSequence)
+            relevant = _applicationEventNextParticipantSequence[ApplicationEventRingIndex(relevant)];
+        _applicationEventConsumerNextRelevantSequences[consumer] = relevant;
+        if (relevant == ulong.MaxValue)
+        {
+            if (nextSequence != _applicationNextSequence)
+                _applicationEventNoRelevantFastForwards = SaturatingAdd(
+                    _applicationEventNoRelevantFastForwards, 1);
+            return new(GameProjectionHistoryReadStatus.NoData, 0, _applicationNextSequence, oldest,
+                _applicationNextSequence);
+        }
+        if (destination.IsEmpty)
+            return new(GameProjectionHistoryReadStatus.NoData, 0, relevant, oldest, _applicationNextSequence);
+        destination[0] = _applicationEvents[ApplicationEventRingIndex(relevant)];
+        _applicationEventParticipantIndexHits = SaturatingAdd(_applicationEventParticipantIndexHits, 1);
+        return new(GameProjectionHistoryReadStatus.Success, 1, unchecked(relevant + 1), oldest,
+            _applicationNextSequence);
+    }
+
+    /// <summary>
     /// Registers one admitted participant as an independent application-event
     /// consumer. The floor must still be retained; duplicate active consumers
     /// for one participant are rejected.
@@ -342,17 +426,23 @@ public sealed class GameProjectionService : IDisposable
     internal bool TryRegisterApplicationEventConsumer(ParticipantId participant, ulong nextSequence)
     {
         EnsureOperational();
-        if (!participant.IsValid || !_participants.ContainsKey(participant) ||
-            _applicationEventConsumerCount == _applicationEventConsumers.Length)
+        if (!participant.IsValid || !_participants.TryGetValue(participant, out ParticipantState state) ||
+            _applicationEventConsumerCount == _applicationEventConsumers.Length ||
+            _applicationEventConsumerMap.ContainsKey(participant))
             return false;
         ulong oldest = unchecked(_applicationNextSequence - (ulong)_applicationCount);
         if (nextSequence < oldest || nextSequence > _applicationNextSequence)
             return false;
-        for (int index = 0; index < _applicationEventConsumerCount; index++)
-            if (_applicationEventConsumers[index] == participant) return false;
-        _applicationEventConsumers[_applicationEventConsumerCount] = participant;
-        _applicationEventConsumerCursors[_applicationEventConsumerCount] = nextSequence;
+        int consumer = _applicationEventConsumerCount;
+        ulong relevant = state.ApplicationEventHeadSequence;
+        while (relevant != ulong.MaxValue && relevant < nextSequence)
+            relevant = _applicationEventNextParticipantSequence[ApplicationEventRingIndex(relevant)];
+        _applicationEventConsumers[consumer] = participant;
+        _applicationEventConsumerCursors[consumer] = nextSequence;
+        _applicationEventConsumerNextRelevantSequences[consumer] = relevant;
+        _applicationEventConsumerMap.Add(participant, consumer);
         _applicationEventConsumerCount++;
+        AddApplicationCursorToMinimum(nextSequence);
         return true;
     }
 
@@ -367,8 +457,14 @@ public sealed class GameProjectionService : IDisposable
         if (consumer < 0 || nextSequence < _applicationEventConsumerCursors[consumer] ||
             nextSequence > _applicationNextSequence)
             return false;
+        ulong prior = _applicationEventConsumerCursors[consumer];
+        if (prior == nextSequence) return true;
         _applicationEventConsumerCursors[consumer] = nextSequence;
-        DiscardApplicationEventsThroughConsumerMinimum();
+        ulong relevant = _applicationEventConsumerNextRelevantSequences[consumer];
+        while (relevant != ulong.MaxValue && relevant < nextSequence)
+            relevant = _applicationEventNextParticipantSequence[ApplicationEventRingIndex(relevant)];
+        _applicationEventConsumerNextRelevantSequences[consumer] = relevant;
+        AdvanceApplicationCursorMinimum(prior);
         return true;
     }
 
@@ -384,8 +480,14 @@ public sealed class GameProjectionService : IDisposable
         if (consumer < 0 || !priorEpoch.IsValid || _stateEpoch.Value <= priorEpoch.Value ||
             nextSequence < oldest || nextSequence > _applicationNextSequence)
             return false;
+        ulong prior = _applicationEventConsumerCursors[consumer];
         _applicationEventConsumerCursors[consumer] = nextSequence;
-        DiscardApplicationEventsThroughConsumerMinimum();
+        _applicationEventConsumerNextRelevantSequences[consumer] =
+            FindFirstParticipantEventAtOrAfter(participant, nextSequence);
+        RebuildApplicationCursorMinimum();
+        if (prior == nextSequence)
+            _applicationMinimumCursorFastPathUpdates = SaturatingAdd(
+                _applicationMinimumCursorFastPathUpdates, 1);
         return true;
     }
 
@@ -395,13 +497,27 @@ public sealed class GameProjectionService : IDisposable
         EnsureOperational();
         int consumer = FindApplicationEventConsumer(participant);
         if (consumer < 0) return false;
+        ulong removedCursor = _applicationEventConsumerCursors[consumer];
         int last = --_applicationEventConsumerCount;
         _applicationEventConsumers[consumer] = _applicationEventConsumers[last];
         _applicationEventConsumerCursors[consumer] = _applicationEventConsumerCursors[last];
+        _applicationEventConsumerNextRelevantSequences[consumer] =
+            _applicationEventConsumerNextRelevantSequences[last];
+        _applicationEventConsumerMap.Remove(participant);
+        if (consumer != last)
+            _applicationEventConsumerMap[_applicationEventConsumers[consumer]] = consumer;
         _applicationEventConsumers[last] = default;
         _applicationEventConsumerCursors[last] = 0;
-        if (_applicationEventConsumerCount != 0)
-            DiscardApplicationEventsThroughConsumerMinimum();
+        _applicationEventConsumerNextRelevantSequences[last] = ulong.MaxValue;
+        if (_applicationEventConsumerCount == 0)
+        {
+            _applicationMinimumCursor = 0;
+            _applicationConsumersAtMinimum = 0;
+        }
+        else if (removedCursor == _applicationMinimumCursor && --_applicationConsumersAtMinimum == 0)
+        {
+            RebuildApplicationCursorMinimum();
+        }
         return true;
     }
 
@@ -422,29 +538,134 @@ public sealed class GameProjectionService : IDisposable
             throw new ArgumentOutOfRangeException(nameof(exclusiveSequence));
         int remove = checked((int)unchecked(exclusiveSequence - oldest));
         if (remove == 0) return;
-        _applicationEvents.AsSpan(_applicationHead, Math.Min(remove, _applicationEvents.Length - _applicationHead)).Clear();
-        int wrapped = remove - Math.Min(remove, _applicationEvents.Length - _applicationHead);
-        if (wrapped != 0) _applicationEvents.AsSpan(0, wrapped).Clear();
+        for (int offset = 0; offset < remove; offset++)
+        {
+            int index = (_applicationHead + offset) % _applicationEvents.Length;
+            GameApplicationEvent value = _applicationEvents[index];
+            ulong nextRelevant = _applicationEventNextParticipantSequence[index];
+            if (_participants.TryGetValue(value.Participant, out ParticipantState participantState) &&
+                participantState.ApplicationEventHeadSequence == value.Sequence)
+            {
+                participantState.ApplicationEventHeadSequence = nextRelevant;
+                if (nextRelevant == ulong.MaxValue)
+                    participantState.ApplicationEventTailSequence = ulong.MaxValue;
+                _participants[value.Participant] = participantState;
+            }
+            if (_applicationEventConsumerMap.TryGetValue(value.Participant, out int consumer) &&
+                _applicationEventConsumerNextRelevantSequences[consumer] == value.Sequence)
+            {
+                _applicationEventConsumerNextRelevantSequences[consumer] = nextRelevant;
+            }
+            _applicationEvents[index] = default;
+            _applicationEventNextParticipantSequence[index] = ulong.MaxValue;
+        }
         _applicationHead = (_applicationHead + remove) % _applicationEvents.Length;
         _applicationCount -= remove;
     }
 
     private int FindApplicationEventConsumer(ParticipantId participant)
     {
-        for (int index = 0; index < _applicationEventConsumerCount; index++)
-            if (_applicationEventConsumers[index] == participant) return index;
-        return -1;
+        _applicationEventConsumerLookupAttempts = SaturatingAdd(
+            _applicationEventConsumerLookupAttempts, 1);
+        return _applicationEventConsumerMap.TryGetValue(participant, out int consumer) ? consumer : -1;
     }
 
-    private void DiscardApplicationEventsThroughConsumerMinimum()
+    private void AddApplicationCursorToMinimum(ulong cursor)
     {
+        if (_applicationEventConsumerCount == 1 || cursor < _applicationMinimumCursor)
+        {
+            _applicationMinimumCursor = cursor;
+            _applicationConsumersAtMinimum = 1;
+        }
+        else if (cursor == _applicationMinimumCursor)
+        {
+            _applicationConsumersAtMinimum++;
+        }
+    }
+
+    private void AdvanceApplicationCursorMinimum(ulong prior)
+    {
+        if (prior != _applicationMinimumCursor)
+        {
+            _applicationMinimumCursorFastPathUpdates = SaturatingAdd(
+                _applicationMinimumCursorFastPathUpdates, 1);
+            return;
+        }
+        _applicationConsumersAtMinimum--;
+        if (_applicationConsumersAtMinimum != 0)
+        {
+            _applicationMinimumCursorFastPathUpdates = SaturatingAdd(
+                _applicationMinimumCursorFastPathUpdates, 1);
+            return;
+        }
+        RebuildApplicationCursorMinimum();
+    }
+
+    private void RebuildApplicationCursorMinimum()
+    {
+        if (_applicationEventConsumerCount == 0)
+        {
+            _applicationMinimumCursor = 0;
+            _applicationConsumersAtMinimum = 0;
+            return;
+        }
+        _applicationMinimumCursorFullRescans = SaturatingAdd(
+            _applicationMinimumCursorFullRescans, 1);
         _applicationMinimumCursorScanEntries = SaturatingAdd(
             _applicationMinimumCursorScanEntries,
             checked((ulong)_applicationEventConsumerCount));
         ulong minimum = _applicationEventConsumerCursors[0];
+        int ties = 1;
         for (int index = 1; index < _applicationEventConsumerCount; index++)
-            minimum = Math.Min(minimum, _applicationEventConsumerCursors[index]);
+        {
+            ulong cursor = _applicationEventConsumerCursors[index];
+            if (cursor < minimum)
+            {
+                minimum = cursor;
+                ties = 1;
+            }
+            else if (cursor == minimum)
+            {
+                ties++;
+            }
+        }
+        _applicationMinimumCursor = minimum;
+        _applicationConsumersAtMinimum = ties;
         DiscardApplicationEventsThroughCore(minimum);
+    }
+
+    private ulong FindFirstParticipantEventAtOrAfter(ParticipantId participant, ulong sequence)
+    {
+        if (!_participants.TryGetValue(participant, out ParticipantState state)) return ulong.MaxValue;
+        ulong relevant = state.ApplicationEventHeadSequence;
+        while (relevant != ulong.MaxValue && relevant < sequence)
+            relevant = _applicationEventNextParticipantSequence[ApplicationEventRingIndex(relevant)];
+        return relevant;
+    }
+
+    private void FindParticipantEventBounds(
+        ParticipantId participant,
+        out ulong head,
+        out ulong tail)
+    {
+        head = ulong.MaxValue;
+        tail = ulong.MaxValue;
+        for (int offset = 0; offset < _applicationCount; offset++)
+        {
+            int index = (_applicationHead + offset) % _applicationEvents.Length;
+            GameApplicationEvent value = _applicationEvents[index];
+            if (value.Participant != participant) continue;
+            if (head == ulong.MaxValue) head = value.Sequence;
+            tail = value.Sequence;
+        }
+    }
+
+    private int ApplicationEventRingIndex(ulong sequence)
+    {
+        ulong oldest = unchecked(_applicationNextSequence - (ulong)_applicationCount);
+        if (sequence < oldest || sequence >= _applicationNextSequence)
+            throw new InvalidOperationException("The participant Event index referenced unretained history.");
+        return (_applicationHead + checked((int)unchecked(sequence - oldest))) % _applicationEvents.Length;
     }
 
     public bool TryEnqueueAuthoritativeInput(in GameAuthoritativeInput input)
@@ -548,6 +769,12 @@ public sealed class GameProjectionService : IDisposable
             _applicationEventConsumerCount,
             _applicationHighWater,
             _applicationMinimumCursorScanEntries,
+            _applicationMinimumCursorFullRescans,
+            _applicationMinimumCursorFastPathUpdates,
+            0,
+            _applicationEventConsumerLookupAttempts,
+            _applicationEventParticipantIndexHits,
+            _applicationEventNoRelevantFastForwards,
             _inputCount,
             CalculateReservedBytes());
     }
@@ -561,6 +788,7 @@ public sealed class GameProjectionService : IDisposable
         _admission.Rejected -= HandleAdmissionRejected;
         _runtime.GenerationPublished -= HandleGenerationPublished;
         _participants.Clear();
+        _applicationEventConsumerMap.Clear();
         _fault = null;
         FaultInjector = null;
     }
@@ -1064,10 +1292,16 @@ public sealed class GameProjectionService : IDisposable
             _ = UnregisterApplicationEventConsumer(result.Participant);
             return;
         }
-        if (!_participants.TryGetValue(result.Participant, out ParticipantState state) &&
-            _participants.Count == _limits.MaximumParticipants)
+        bool exists = _participants.TryGetValue(result.Participant, out ParticipantState state);
+        if (!exists && _participants.Count == _limits.MaximumParticipants)
         {
             return;
+        }
+        if (!exists)
+        {
+            FindParticipantEventBounds(result.Participant,
+                out state.ApplicationEventHeadSequence,
+                out state.ApplicationEventTailSequence);
         }
         state.Session = result;
         _participants[result.Participant] = state;
@@ -1111,10 +1345,25 @@ public sealed class GameProjectionService : IDisposable
     private void ClearApplicationEvents()
     {
         Array.Clear(_applicationEvents);
+        Array.Fill(_applicationEventNextParticipantSequence, ulong.MaxValue);
         _applicationHead = 0;
         _applicationCount = 0;
         _applicationNextSequence = 0;
         Array.Clear(_applicationEventConsumerCursors, 0, _applicationEventConsumerCount);
+        Array.Fill(_applicationEventConsumerNextRelevantSequences, ulong.MaxValue);
+        _applicationMinimumCursor = 0;
+        _applicationConsumersAtMinimum = _applicationEventConsumerCount;
+        int participantCount = 0;
+        foreach (ParticipantId participant in _participants.Keys)
+            _participantScratch[participantCount++] = participant;
+        for (int index = 0; index < participantCount; index++)
+        {
+            ParticipantId participant = _participantScratch[index];
+            ParticipantState state = _participants[participant];
+            state.ApplicationEventHeadSequence = ulong.MaxValue;
+            state.ApplicationEventTailSequence = ulong.MaxValue;
+            _participants[participant] = state;
+        }
     }
 
     private long CalculateReservedBytes() => checked(
@@ -1138,12 +1387,16 @@ public sealed class GameProjectionService : IDisposable
         (long)_lastDeltas.Length * Unsafe.SizeOf<GameProjectionDelta>() +
         (long)_lifecycleHistory.Length * Unsafe.SizeOf<GameProjectionLifecycleFact>() +
         (long)_applicationEvents.Length * Unsafe.SizeOf<GameApplicationEvent>() +
+        (long)_applicationEventNextParticipantSequence.Length * sizeof(ulong) +
         (long)_applicationEventConsumers.Length * Unsafe.SizeOf<ParticipantId>() +
         (long)_applicationEventConsumerCursors.Length * sizeof(ulong) +
+        (long)_applicationEventConsumerNextRelevantSequences.Length * sizeof(ulong) +
         (long)_inputs.Length * Unsafe.SizeOf<GameAuthoritativeInput>() +
         (long)_commandScratch.Length * Unsafe.SizeOf<GameSimulationCommand>() +
         (long)_participantScratch.Length * Unsafe.SizeOf<ParticipantId>() +
-        (long)_participantMapCapacity * (sizeof(int) + Unsafe.SizeOf<ParticipantMapEntryEstimate>()));
+        (long)_participantMapCapacity * (sizeof(int) + Unsafe.SizeOf<ParticipantMapEntryEstimate>()) +
+        (long)_applicationEventConsumerMapCapacity *
+        (sizeof(int) + Unsafe.SizeOf<ApplicationEventConsumerMapEntryEstimate>()));
 
     private static void CopyRing<T>(
         T[] source,
@@ -1183,6 +1436,8 @@ public sealed class GameProjectionService : IDisposable
         internal AdmissionResult Session;
         internal GameProjectionParticipant Binding;
         internal ulong LastAcceptedInputSequence;
+        internal ulong ApplicationEventHeadSequence;
+        internal ulong ApplicationEventTailSequence;
     }
 
     // Mirrors the current Dictionary<TKey,TValue> entry payload for reserved-byte
@@ -1193,6 +1448,12 @@ public sealed class GameProjectionService : IDisposable
         int Next,
         ParticipantId Key,
         ParticipantState Value);
+
+    private readonly record struct ApplicationEventConsumerMapEntryEstimate(
+        uint HashCode,
+        int Next,
+        ParticipantId Key,
+        int Value);
 
     private struct BaselineVisitor : IReadChunkJob<GameSimulationState>
     {

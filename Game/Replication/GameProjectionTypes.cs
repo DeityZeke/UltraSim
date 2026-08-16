@@ -150,6 +150,12 @@ public readonly record struct GameProjectionSnapshot(
     int ApplicationEventConsumers,
     int RetainedApplicationEventHighWater,
     ulong ApplicationEventMinimumCursorScanEntries,
+    ulong ApplicationEventMinimumCursorFullRescans,
+    ulong ApplicationEventMinimumCursorFastPathUpdates,
+    ulong ApplicationEventConsumerLookupComparisons,
+    ulong ApplicationEventConsumerLookupAttempts,
+    ulong ApplicationEventParticipantIndexHits,
+    ulong ApplicationEventNoRelevantFastForwards,
     int PendingAuthoritativeInputs,
     long ReservedBytes);
 

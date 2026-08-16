@@ -20,8 +20,12 @@ N0.10 now includes the isolated V2/V3 owner-movement comparison, shared-listener
 and reliable-only-ACK CPU corrections, bounded retained-payload arenas,
 cadence/stall acceptance, and V3-only integrated `spread_mix`/`dense_mix`
 evidence. Four hundred observer-heavy clients remain bounded and converge with
-zero capacity loss, but currently exceed the fixed-60 CPU budget; that measured
-higher-layer fanout/freshness workload now shapes the next specialization.
+zero capacity loss. Participant-local Event indexing removed the first proven
+cross-participant ledger scan and reduced the probes-off dense/spread p95s to
+about 21.2/19.5 ms in the combined same-process harness. Opt-in role attribution
+puts dense server work at about 10.1 ms p95—inside feasibility but above the ≤6 ms
+usable target—so measured WorldState/AOI/server-role work now shapes the next
+specialization.
 
 ## Design
 

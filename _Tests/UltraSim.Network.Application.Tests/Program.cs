@@ -1342,12 +1342,16 @@ static void ApplicationEventConsumersRetainAndFilterIndependently()
     Equal(0, snapshot.RetainedApplicationEvents);
     Equal(2, snapshot.ApplicationEventConsumers);
     Equal(2, snapshot.RetainedApplicationEventHighWater);
-    True(snapshot.ApplicationEventMinimumCursorScanEntries >= 6,
-        "The Event consumer-ledger scan cost was not exposed diagnostically.");
-    Equal(2UL, firstServer.GetSnapshot().EventRecordsExamined);
-    Equal(1UL, firstServer.GetSnapshot().EventRecordsSkipped);
-    Equal(2UL, secondServer.GetSnapshot().EventRecordsExamined);
-    Equal(1UL, secondServer.GetSnapshot().EventRecordsSkipped);
+    Equal(4UL, snapshot.ApplicationEventMinimumCursorScanEntries);
+    Equal(2UL, snapshot.ApplicationEventMinimumCursorFullRescans);
+    True(snapshot.ApplicationEventMinimumCursorFastPathUpdates >= 2,
+        "Tied consumers did not use the incremental minimum fast path.");
+    True(snapshot.ApplicationEventParticipantIndexHits >= 2,
+        "Participant-local Event lookup was not exercised.");
+    Equal(1UL, firstServer.GetSnapshot().EventRecordsExamined);
+    Equal(0UL, firstServer.GetSnapshot().EventRecordsSkipped);
+    Equal(1UL, secondServer.GetSnapshot().EventRecordsExamined);
+    Equal(0UL, secondServer.GetSnapshot().EventRecordsSkipped);
 
     void Acknowledge(RemoteApplicationEventServer server, ulong next)
     {
@@ -1463,8 +1467,8 @@ static void ParticipantFilteredEventSequencesPermitTrustedGlobalGaps()
     Equal(alice0.Sequence, delivered[0].Sequence);
     Equal(alice2.Sequence, delivered[1].Sequence);
     Equal(alice2.Sequence + 1, client.GetSnapshot().NextSequence);
-    Equal(3UL, server.GetSnapshot().EventRecordsExamined);
-    Equal(1UL, server.GetSnapshot().EventRecordsSkipped);
+    Equal(2UL, server.GetSnapshot().EventRecordsExamined);
+    Equal(0UL, server.GetSnapshot().EventRecordsSkipped);
     False(delivered[0].ParticipantId == bob.Value || delivered[1].ParticipantId == bob.Value,
         "Participant filtering exposed another participant's Event payload.");
 }

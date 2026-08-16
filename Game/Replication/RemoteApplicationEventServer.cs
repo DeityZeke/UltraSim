@@ -56,7 +56,6 @@ public sealed class RemoteApplicationEventServer : IRemoteGameProtocolHandler, I
     private ulong _malformed;
     private ulong _timeouts;
     private ulong _recordsExamined;
-    private ulong _recordsSkipped;
     private uint _consecutiveTimeouts;
     private long _awaitingSinceMilliseconds;
     private bool _disposed;
@@ -119,19 +118,28 @@ public sealed class RemoteApplicationEventServer : IRemoteGameProtocolHandler, I
                 return RemoteApplicationEventScheduleStatus.RecipientNonviable;
             }
         }
-        GameApplicationEvent value;
-        while (true)
+        GameProjectionHistoryReadResult read = _projection.ReadApplicationEvents(
+            _participant, _nextSequence, _scratch);
+        if (read.Status == GameProjectionHistoryReadStatus.NoData)
         {
-            GameProjectionHistoryReadResult read = _projection.ReadApplicationEvents(_nextSequence, _scratch);
-            if (read.Status == GameProjectionHistoryReadStatus.NoData)
-                return RemoteApplicationEventScheduleStatus.NoData;
-            if (read.Status != GameProjectionHistoryReadStatus.Success || read.Count != 1)
-                return RemoteApplicationEventScheduleStatus.BaselineRequired;
-            value = _scratch[0];
-            SaturatingIncrement(ref _recordsExamined);
-            if (value.Participant == _participant) break;
-            SaturatingIncrement(ref _recordsSkipped);
-            _nextSequence = read.NextSequence;
+            if (read.NextPublishedSequence != _nextSequence)
+            {
+                _nextSequence = read.NextPublishedSequence;
+                if (!_projection.TryAdvanceApplicationEventConsumer(_participant, _nextSequence))
+                {
+                    _nonviable = true;
+                    return RemoteApplicationEventScheduleStatus.RecipientNonviable;
+                }
+            }
+            return RemoteApplicationEventScheduleStatus.NoData;
+        }
+        if (read.Status != GameProjectionHistoryReadStatus.Success || read.Count != 1)
+            return RemoteApplicationEventScheduleStatus.BaselineRequired;
+        GameApplicationEvent value = _scratch[0];
+        SaturatingIncrement(ref _recordsExamined);
+        if (value.Sequence != _nextSequence)
+        {
+            _nextSequence = value.Sequence;
             if (!_projection.TryAdvanceApplicationEventConsumer(_participant, _nextSequence))
             {
                 _nonviable = true;
@@ -242,7 +250,7 @@ public sealed class RemoteApplicationEventServer : IRemoteGameProtocolHandler, I
         return new(_stateEpoch, _nextSequence, _awaitingApplication
                 ? _outstanding.Sequence : _nextSequence,
             _awaitingApplication, _nonviable, _queued, _applied, _rejected, _malformed,
-            _timeouts, _consecutiveTimeouts, _recordsExamined, _recordsSkipped);
+            _timeouts, _consecutiveTimeouts, _recordsExamined, 0);
     }
 
     public void Dispose()

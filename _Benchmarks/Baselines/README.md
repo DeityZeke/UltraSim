@@ -78,6 +78,12 @@ Useful current anchors can be located by their embedded workload or filename:
   improvement, reduced 256-client retransmission pressure, and higher managed
   demux reservation. It supplements rather than replaces the connected-pairs
   entry artifact;
+- `network-v3-spread-dense-acceptance-*` — the first bounded 400-recipient
+  observer-heavy V3-only acceptance observation. The `event-causal-pre-specialization`
+  artifact preserves Full/WorldState-only/Event-only attribution before the
+  Event-ledger change; `event-causal-participant-index` is the exact post-change
+  causal control; and `event-index-hardened` is the probes-off dense/spread Full
+  rerun. These supplement rather than rewrite the original artifact;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

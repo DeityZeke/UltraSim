@@ -89,6 +89,16 @@ recover it. Explicit application events use a non-overwriting fixed ring because
 their intermediate occurrence may matter. Full application-event retention
 rejects without mutation until a consumer-safe prefix is discarded.
 
+Application Event ordering remains one projection-global sequence and one bounded
+global ring. Delivery lookup is participant-local: each retained slot links only
+to the next Event for the same participant, while a fixed participant→consumer
+map resolves the connection-owned cursor in O(1) expected time. A consumer with
+no relevant Event advances directly to the current global publication floor;
+it does not reread or count unrelated payloads. Retention minimum tracking keeps
+the current minimum and its tie count incrementally, rescanning all consumers
+only when the last consumer at that minimum advances. This is an acceleration of
+the existing global Event contract, not a per-participant ordering identity.
+
 ## OfflineDirect
 
 `OfflineDirectGameProjection` is the packet-free semantic oracle. Baselines and
@@ -280,11 +290,14 @@ Same-epoch relation and event floors are
 monotonic, and generation replacement requires a strictly increasing
 `StateEpoch`.
 
-N0.10 diagnostics expose the cost of the deliberately simple global Event
-ledger: each connection adapter reports records examined/skipped, while the
-projection reports consumer count, retained-event high water, and cumulative
-minimum-cursor scan entries. These counters decide whether participant-local
-indexing is earned; they do not pre-approve a new representation.
+N0.10 first exposed the cost of the deliberately simple filtered global ledger,
+then earned and installed the participant-local acceleration above. Diagnostics
+retain examined/skipped records, O(1) consumer lookup attempts, participant-index
+hits, no-relevant fast-forwards, minimum fast-path updates, full rescans, scan
+entries, consumer count, and retained-event high water. Permanent gates cover
+interleaving, a lagging consumer pinning retention, tied minima, no-relevant
+fast-forward, unregister/reregister, physical ring-slot reuse, generation
+replacement, capacity rejection, duplicate retry, and warmed zero allocation.
 
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces
