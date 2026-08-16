@@ -136,6 +136,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly int _activeBots;
     private readonly long _realtimeTickIntervalStopwatchTicks;
     private readonly List<double> _handshakeMilliseconds;
+    private BatchOpportunityCensus _batchCensus;
     private long _handshakeAttempts;
     private long _handshakeSuccesses;
     private long _handshakeAllocatedBytes;
@@ -240,6 +241,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
 
     internal NetworkBotStageResult Run()
     {
+        _batchCensus = default;
+        if (_profile.DeepTiming) ResetProtocolStageTiming(enabled: true);
         DiagnosticCounterBaseline diagnosticBaseline = _profile.DeepTiming
             ? CaptureDiagnosticCounterBaseline()
             : default;
@@ -390,6 +393,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
             PumpAll(1);
         }
+
+        ProtocolStageTimingTotal protocolStageTiming = _profile.DeepTiming
+            ? CaptureProtocolStageTiming()
+            : default;
+        if (_profile.DeepTiming) ResetProtocolStageTiming(enabled: false);
 
         ulong datagrams = 0;
         ulong bytes = 0;
@@ -698,6 +706,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             AddPhaseDiagnostics(diagnostics, "forward_protocol_pump", forwardPumpMs!);
             AddPhaseDiagnostics(diagnostics, "client_application_apply", clientApplyMs!);
             AddPhaseDiagnostics(diagnostics, "return_protocol_pump", returnPumpMs!);
+            AddBatchOpportunityDiagnostics(diagnostics, dataPacketsSent, reliableFragmentsSent);
+            AddProtocolStageTimingDiagnostics(diagnostics, protocolStageTiming, dataPacketsSent);
         }
         return result;
     }
@@ -723,10 +733,111 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     {
         for (int pass = 0; pass < count; pass++)
         {
+            if (_profile.DeepTiming) CaptureBatchOpportunities();
             if (_sharedHost is not null) _sharedHost.Pump();
             else
                 for (int index = 0; index < _bots.Length; index++) _bots[index].PairSession!.Pump();
         }
+    }
+
+    private void CaptureBatchOpportunities()
+    {
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            _batchCensus.Add(_bots[index].Client.InspectUnreliableBatchOpportunity());
+            _batchCensus.Add(_bots[index].Server.InspectUnreliableBatchOpportunity());
+        }
+    }
+
+    private void ResetProtocolStageTiming(bool enabled)
+    {
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            _bots[index].Client.ResetStageTiming(enabled);
+            _bots[index].Server.ResetStageTiming(enabled);
+        }
+    }
+
+    private ProtocolStageTimingTotal CaptureProtocolStageTiming()
+    {
+        ProtocolStageTimingTotal total = default;
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            total.Add(_bots[index].Client.GetStageTiming());
+            total.Add(_bots[index].Server.GetStageTiming());
+        }
+        return total;
+    }
+
+    private static void AddProtocolStageTimingDiagnostics(
+        Dictionary<string, double> diagnostics,
+        ProtocolStageTimingTotal timing,
+        ulong dataPackets)
+    {
+        double ToMilliseconds(ulong ticks) => ticks * 1000d / Stopwatch.Frequency;
+        double ToMicrosecondsPerDataPacket(ulong ticks) => dataPackets == 0
+            ? 0
+            : ticks * 1_000_000d / Stopwatch.Frequency / dataPackets;
+        ulong attributedEmit = SaturatingAdd(
+            SaturatingAdd(timing.SelectionTicks, timing.FrameEncodeTicks),
+            SaturatingAdd(timing.SecureSendTicks, timing.EndpointSendTicks));
+        ulong attributedInbound = SaturatingAdd(
+            timing.EndpointReceiveTicks,
+            SaturatingAdd(timing.SecureReceiveTicks, timing.FrameAdmissionTicks));
+        ulong emitResidual = timing.EmitTicks >= attributedEmit
+            ? timing.EmitTicks - attributedEmit
+            : 0;
+        ulong inboundResidual = timing.InboundTicks >= attributedInbound
+            ? timing.InboundTicks - attributedInbound
+            : 0;
+
+        Add("emit_total", timing.EmitTicks);
+        Add("select_schedule", timing.SelectionTicks);
+        Add("frame_encode", timing.FrameEncodeTicks);
+        Add("secure_frame_encrypt", timing.SecureSendTicks);
+        Add("endpoint_send", timing.EndpointSendTicks);
+        Add("emit_residual", emitResidual);
+        Add("inbound_total", timing.InboundTicks);
+        Add("endpoint_receive", timing.EndpointReceiveTicks);
+        Add("secure_parse_decrypt", timing.SecureReceiveTicks);
+        Add("frame_decode_admission", timing.FrameAdmissionTicks);
+        Add("inbound_residual", inboundResidual);
+
+        void Add(string key, ulong ticks)
+        {
+            diagnostics["protocol_stage_" + key + "_total_ms"] = ToMilliseconds(ticks);
+            diagnostics["protocol_stage_" + key + "_us_per_data_packet"] =
+                ToMicrosecondsPerDataPacket(ticks);
+        }
+    }
+
+    private void AddBatchOpportunityDiagnostics(
+        Dictionary<string, double> diagnostics,
+        ulong dataPacketsSent,
+        ulong reliableFragmentsSent)
+    {
+        ulong unreliablePackets = dataPacketsSent >= reliableFragmentsSent
+            ? dataPacketsSent - reliableFragmentsSent
+            : 0;
+        diagnostics["batch_peer_emit_opportunities_inspected"] = _batchCensus.Inspections;
+        diagnostics["batch_opportunities_with_unreliable"] = _batchCensus.WithReadyFrames;
+        diagnostics["batch_unreliable_frames_ready_observed"] = _batchCensus.ReadyFrames;
+        diagnostics["batch_unreliable_plaintext_bytes_observed"] = _batchCensus.PlaintextBytes;
+        diagnostics["batch_co_batchable_frames_observed"] = _batchCensus.CoBatchableFrames;
+        diagnostics["batch_co_batchable_plaintext_bytes_observed"] =
+            _batchCensus.CoBatchablePlaintextBytes;
+        diagnostics["batch_opportunities_2_plus"] = _batchCensus.TwoPlus;
+        diagnostics["batch_opportunities_3_plus"] = _batchCensus.ThreePlus;
+        diagnostics["batch_opportunities_4_plus"] = _batchCensus.FourPlus;
+        diagnostics["batch_maximum_ready_frames"] = _batchCensus.MaximumReadyFrames;
+        diagnostics["batch_greedy_datagrams_observed"] = _batchCensus.GreedyDatagrams;
+        diagnostics["actual_unreliable_data_packets"] = unreliablePackets;
+        diagnostics["batch_mean_frames_when_nonempty"] = _batchCensus.WithReadyFrames == 0
+            ? 0
+            : _batchCensus.ReadyFrames / (double)_batchCensus.WithReadyFrames;
+        diagnostics["batch_multi_frame_opportunity_percent"] = _batchCensus.WithReadyFrames == 0
+            ? 0
+            : _batchCensus.TwoPlus * 100d / _batchCensus.WithReadyFrames;
     }
 
     private DiagnosticCounterBaseline CaptureDiagnosticCounterBaseline()
@@ -1125,6 +1236,68 @@ internal readonly record struct OccupancyTick(
     int Received,
     int InFlight,
     double MaximumRatio);
+
+internal struct BatchOpportunityCensus
+{
+    internal ulong Inspections;
+    internal ulong WithReadyFrames;
+    internal ulong ReadyFrames;
+    internal ulong PlaintextBytes;
+    internal ulong CoBatchableFrames;
+    internal ulong CoBatchablePlaintextBytes;
+    internal ulong TwoPlus;
+    internal ulong ThreePlus;
+    internal ulong FourPlus;
+    internal ulong GreedyDatagrams;
+    internal int MaximumReadyFrames;
+
+    internal void Add(NetworkUnreliableBatchOpportunity opportunity)
+    {
+        Inspections = checked(Inspections + 1);
+        if (opportunity.ReadyFrames == 0) return;
+        WithReadyFrames = checked(WithReadyFrames + 1);
+        ReadyFrames = checked(ReadyFrames + (ulong)opportunity.ReadyFrames);
+        PlaintextBytes = checked(PlaintextBytes + (ulong)opportunity.PlaintextBytes);
+        GreedyDatagrams = checked(GreedyDatagrams + (ulong)opportunity.GreedyDatagrams);
+        MaximumReadyFrames = Math.Max(MaximumReadyFrames, opportunity.ReadyFrames);
+        if (opportunity.ReadyFrames < 2) return;
+        TwoPlus = checked(TwoPlus + 1);
+        if (opportunity.ReadyFrames >= 3) ThreePlus = checked(ThreePlus + 1);
+        if (opportunity.ReadyFrames >= 4) FourPlus = checked(FourPlus + 1);
+        CoBatchableFrames = checked(CoBatchableFrames + (ulong)opportunity.ReadyFrames);
+        CoBatchablePlaintextBytes = checked(
+            CoBatchablePlaintextBytes + (ulong)opportunity.PlaintextBytes);
+    }
+}
+
+internal struct ProtocolStageTimingTotal
+{
+    internal ulong EmitTicks;
+    internal ulong SelectionTicks;
+    internal ulong FrameEncodeTicks;
+    internal ulong SecureSendTicks;
+    internal ulong EndpointSendTicks;
+    internal ulong InboundTicks;
+    internal ulong EndpointReceiveTicks;
+    internal ulong SecureReceiveTicks;
+    internal ulong FrameAdmissionTicks;
+
+    internal void Add(NetworkProtocolStageTiming value)
+    {
+        EmitTicks = Add(EmitTicks, value.EmitTicks);
+        SelectionTicks = Add(SelectionTicks, value.SelectionTicks);
+        FrameEncodeTicks = Add(FrameEncodeTicks, value.FrameEncodeTicks);
+        SecureSendTicks = Add(SecureSendTicks, value.SecureSendTicks);
+        EndpointSendTicks = Add(EndpointSendTicks, value.EndpointSendTicks);
+        InboundTicks = Add(InboundTicks, value.InboundTicks);
+        EndpointReceiveTicks = Add(EndpointReceiveTicks, value.EndpointReceiveTicks);
+        SecureReceiveTicks = Add(SecureReceiveTicks, value.SecureReceiveTicks);
+        FrameAdmissionTicks = Add(FrameAdmissionTicks, value.FrameAdmissionTicks);
+    }
+
+    private static ulong Add(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
 
 internal readonly record struct DiagnosticCounterBaseline(
     ulong Datagrams,

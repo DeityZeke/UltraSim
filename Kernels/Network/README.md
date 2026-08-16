@@ -295,6 +295,14 @@ still required independently for memory viability. See the
 [bot comparison guide](../../_Benchmarks/NETWORK_V2_V3_BOT_COMPARISON.md) for
 the complete before/after counters and immutable artifacts.
 
+N0.10's batch-opportunity census and protocol-stage timing are deliberately
+internal, opt-in benchmark instrumentation. The census capacity-scans pending
+unreliable state and therefore never runs in normal protocol operation. Stage
+timing adds timestamp probes only after explicit reset/enable and is cleared when
+disabled. It shows no 2+ same-peer unreliable opportunities in `owner_movement`;
+endpoint send/receive, not selection or codec work, owns most remaining active
+peer time. No multi-frame wire form was added without evidence.
+
 ## N0.6 application-owned input and owner state
 
 The kernel did not acquire game state in N0.6. `Game/Protocol` adds bounded Input,

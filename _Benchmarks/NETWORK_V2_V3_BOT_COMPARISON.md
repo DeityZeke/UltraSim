@@ -356,3 +356,100 @@ fill rises only to about 6.2%, with one send call per datagram, so small-packet
 assembly/batching is now a measured candidate for the remaining CPU/wire gap.
 Reservation specialization remains independently required for memory viability.
 Neither observation earns workers, sharding, compression, or capacity increases.
+
+### N0.10.3 batch-opportunity census
+
+Low datagram fill does not itself prove same-connection packet assembly can help.
+The deep diagnostic therefore performs a cold capacity scan immediately before
+each peer-direction pump and reports already-ready unreliable frames, exact
+frame plaintext, 2+/3+/4+ opportunities, maximum ready frames, and immediate
+order-preserving greedy datagrams. It neither mutates queues nor waits for work;
+its scan cost means census timings are diagnostic rather than a replacement
+performance baseline.
+
+The accepted census is
+[`network-v3-peer-cost-batch-opportunity-census-2026-08-15.json`](Baselines/network-v3-peer-cost-batch-opportunity-census-2026-08-15.json).
+Each case inspected 230,400 peer-direction emit opportunities. Results:
+
+| Case | Nonempty opportunities | Ready frames observed | Maximum ready | 2+ / 3+ / 4+ | Greedy datagrams |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| idle | 0 | 0 | 0 | 0 / 0 / 0 | 0 |
+| full, 10% active | 4,940 | 4,940 | 1 | 0 / 0 / 0 | 4,940 |
+| full, 35% active | 17,100 | 17,100 | 1 | 0 / 0 / 0 | 17,100 |
+| Control | 0 | 0 | 0 | 0 / 0 / 0 | 0 |
+| Input | 10,240 | 10,240 | 1 | 0 / 0 / 0 | 10,240 |
+| Input + owner | 48,640 | 48,640 | 1 | 0 / 0 / 0 | 48,640 |
+| Full | 52,805-56,286 | 52,805-56,286 | 1 | 0 / 0 / 0 | same as ready |
+
+Full has more ready observations than unique unreliable sends because reliable
+pacing can leave one unreliable frame pending across more than one inspected
+pump. That does not create a multi-frame opportunity. Every nonempty observation
+still contains exactly one frame.
+
+The current owner workload therefore does **not** earn an unreliable multi-frame
+wire format. Its small datagrams arise from one ready frame per connection and
+direction, so the next CPU evidence should distinguish selection, frame
+encode/bookkeeping, authenticated secure framing, endpoint send, socket/demux,
+secure receive, and frame admission. Cross-connection syscall batching may later
+be relevant, while a future `spread_mix`/`dense_mix` WorldState workload may
+independently earn same-connection frame assembly. Neither should be inferred
+from mean MTU fill alone.
+
+### N0.10.4 protocol-stage attribution
+
+The next opt-in run times only coarse peer stages. Timestamp overhead is visible
+(especially across 512 idle peer directions), so it is diagnostic attribution,
+not a replacement p95 baseline. The accepted artifact is
+[`network-v3-peer-stage-attribution-2026-08-15.json`](Baselines/network-v3-peer-stage-attribution-2026-08-15.json).
+
+Subtracting the paired established-idle scan/poll floor gives this Input+Owner
+breakdown across 48,640 Data packets:
+
+| Stage | Total | Approx. per Data packet |
+| --- | ---: | ---: |
+| select/schedule | 2.842 ms | 0.058 us |
+| frame encode | 2.637 ms | 0.054 us |
+| secure frame + AES-GCM send | 32.718 ms | 0.673 us |
+| endpoint send | 139.875 ms | 2.876 us |
+| endpoint receive above idle | 48.589 ms | 0.999 us |
+| secure parse + AES-GCM receive | 32.666 ms | 0.672 us |
+| frame decode/admission | 4.153 ms | 0.085 us |
+
+Endpoint send/receive accounts for about 69% of the active attributed peer time;
+secure framing/AES accounts for about 24%. Selection plus frame codec/admission is
+about 3.6%, with the remainder in bounded bookkeeping/residual work. Input-only
+and Full show the same ordering. This rejects ready-head restructuring as the
+next large owner-workload recovery.
+
+The measured CPU candidate is now **cross-connection socket I/O batching at the
+shared listener**, especially the server-to-client OwnerState direction. That is
+not the rejected same-connection multi-frame format: packet identities, AEAD,
+replay, and semantics remain independent while one owner may submit/receive
+several already-built datagrams in fewer OS calls. It must first define a bounded,
+portable ownership/fallback contract and preserve latency, backpressure, and
+failure attribution. Linux-only evidence cannot silently become the portable
+Network contract. Reservation specialization remains independently required.
+
+### Cadence-decoupling acceptance
+
+N0.10 must prove that transport cadence and authoritative publication cadence are
+independent without becoming independent application-work producers:
+
+> Additional Network pumps without additional authoritative publication may
+> advance transport state but may not create duplicate application-semantic debt.
+
+Conversely, multiple authoritative steps between Network publications may
+coalesce intermediate latest-state facts, but must retain required Event/Control
+facts and the newest complete Owner/WorldState truth. Metrics must be reported per
+wall-clock second, per authoritative step, and per Network pump, including
+`network_pumps_per_authoritative_step`, captures per step, publications per
+capture, queue/debt high water, and state/input/Event age in both simulation ticks
+and milliseconds.
+
+The focused matrix is `60/60`, `60/120`, `60/240`, `30/60`, `30/120`, `20/120`,
+and `120/60` Hz plus opt-in `60->30->60` and `60->20->60` cadence transitions at
+120 Hz Network pumping. Separate 250 ms authority-stall and Network-stall cases
+must report peak occupancy/debt, retransmission and wire bursts, recovery time,
+and maximum client state age. Normal performance development remains fixed 60 Hz,
+1x playback, cadence adaptation off; this matrix tests correctness and liveness,
+not an escape hatch for missing the 60 Hz budget.

@@ -110,6 +110,31 @@ internal static class NetworkDeliveredMessageMetadata
 }
 
 /// <summary>
+/// Cold, capacity-scanning evidence of unreliable frames already pending for one
+/// peer at one emit opportunity. This is benchmark instrumentation, not a hot
+/// scheduling API.
+/// </summary>
+internal readonly record struct NetworkUnreliableBatchOpportunity(
+    int ReadyFrames,
+    int PlaintextBytes,
+    int GreedyDatagrams);
+
+/// <summary>
+/// Opt-in protocol-stage timing. Values are raw <see cref="System.Diagnostics.Stopwatch"/>
+/// ticks and deliberately remain outside normal snapshot/hot-path accounting.
+/// </summary>
+internal readonly record struct NetworkProtocolStageTiming(
+    ulong EmitTicks,
+    ulong SelectionTicks,
+    ulong FrameEncodeTicks,
+    ulong SecureSendTicks,
+    ulong EndpointSendTicks,
+    ulong InboundTicks,
+    ulong EndpointReceiveTicks,
+    ulong SecureReceiveTicks,
+    ulong FrameAdmissionTicks);
+
+/// <summary>
 /// Cold protocol diagnostics. <see cref="ReservedBytes"/> is the exact payload
 /// of peer-owned managed arrays and directional master-secret copies; it excludes
 /// CLR object/array headers and opaque cryptography-provider state.

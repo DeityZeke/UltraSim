@@ -1703,10 +1703,82 @@ to approximately 368 bots. Immutable evidence:
 
 This closes unreliable ACK suppression as a demonstrated large recovery. The
 remaining full workload still averages only about 6.2% datagram fill and one
-send syscall per datagram, so bounded multi-message secure datagram assembly is
-the next earned CPU/wire experiment. Per-connection reservation specialization
-remains a separate memory-viability requirement. Batching must be measured before
+send syscall per datagram, making bounded multi-message secure datagram assembly
+the next candidate to test with an opportunity census. Per-connection reservation
+specialization remains a separate memory-viability requirement. Batching must be measured before
 workers, sharding, compression, or protocol-format micro-tuning are admitted.
+
+A batch-opportunity census now resolves that question for `owner_movement`.
+Across 230,400 peer-direction pump inspections per case, every nonempty
+Input/Input+Owner/Full opportunity contained exactly one unreliable frame;
+maximum ready frames was one and every 2+/3+/4+ count was zero. Immediate greedy
+packing therefore equals one datagram per observed frame. The accepted artifact
+is
+[`network-v3-peer-cost-batch-opportunity-census-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-peer-cost-batch-opportunity-census-2026-08-15.json).
+
+This evidence does **not** admit a new multi-frame wire format for the current
+workload. Low fill currently means one small frame is ready for each connection
+and direction, not that the peer sends before sibling unreliable frames can be
+packed. A future observer/WorldState workload must run the same census and may
+earn assembly independently. Current CPU attribution proceeds to bounded
+selection/encode/security/endpoint and receive-stage timing; cross-connection
+syscall batching remains a separate later candidate.
+
+That stage attribution is now captured as
+[`network-v3-peer-stage-attribution-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-peer-stage-attribution-2026-08-15.json).
+After subtracting established-idle scan/poll cost, the 48,640-packet Input+Owner
+case attributes approximately 69% of peer time to endpoint send/receive, 24% to
+secure framing/AES-GCM, and only about 3.6% to selection plus frame
+encode/admission. Approximate per-Data costs are 2.876 us endpoint send,
+0.999 us endpoint receive, 0.673/0.672 us secure send/receive, and less than
+0.2 us combined selection/codec/admission.
+
+This rejects pending-head restructuring as the next major owner-workload target.
+The next CPU experiment is bounded cross-connection socket submission/receive
+batching at the shared listener while keeping independent secure datagrams and
+application semantics. It requires an explicit portable fallback and ownership/
+backpressure contract; a Linux-only fast path is evidence, not the universal
+Network API. Same-connection multi-frame assembly remains deferred until a
+WorldState workload demonstrates 2+ ready frames for one peer direction.
+
+N0.10 also freezes cadence decoupling as a first-class acceptance dimension:
+
+> Additional Network pumps without additional authoritative publication may
+> advance transport state but may not create duplicate application-semantic debt.
+
+Simulation cadence governs production of committed authoritative semantic state.
+Network cadence governs receive, authentication, ACK/retransmission, retained
+flush, and socket progress. A faster Network clock must not reconstruct unchanged
+WorldState, advance semantic sequences, consume new queue slots, or regenerate
+owner/Event work. A slower Network clock may coalesce intermediate latest state,
+but must preserve bounded ordered Event/Control facts and newest complete state.
+
+Every cadence result reports rates per wall-clock second, authoritative step, and
+Network pump. Required ratios include Network pumps per authoritative step,
+captures per step, and publications per capture. Freshness is always expressed in
+both ticks and milliseconds. The focused correctness/liveness matrix is:
+
+| ECS Hz | Network pump Hz | Purpose |
+| ---: | ---: | --- |
+| 60 | 60 | fixed control |
+| 60 | 120 | Network outruns authority |
+| 60 | 240 | aggressive outrun |
+| 30 | 60 | common cadence reduction |
+| 30 | 120 | strong mismatch |
+| 20 | 120 | extreme mismatch |
+| 120 | 60 | authority outruns Network |
+| 60->30->60 | 120 | live transition |
+| 60->20->60 | 120 | severe live transition |
+
+Permanent stall cases pause authority for 250 ms while Network pumps and pause
+Network for 250 ms while authority steps. They report peak queue occupancy,
+oldest work/debt age, relation debt, retransmission/wire burst, recovery time, and
+maximum client state age. A one-publication/10,000-pump invariant test must leave
+owner frame, WorldState semantic sequence, Event cursor, relation debt, and
+application queues unchanged absent legitimate timers. The inverse test advances
+authority repeatedly without Network and proves latest-state coalescing plus
+lossless bounded Event/Control retention. Fixed 60 Hz remains the normal
+performance gate; adaptive cadence cannot conceal a regression.
 
 Protected profiles:
 

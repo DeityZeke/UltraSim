@@ -18,6 +18,8 @@ internal static class N03ProtocolTests
         Run("UnreliableLanesApplySequencingAndCoalescing", UnreliableLanesApplySequencingAndCoalescing);
         Run("UnreliableDataDoesNotElicitTransportAcknowledgements", UnreliableDataDoesNotElicitTransportAcknowledgements);
         Run("MixedTrafficAcknowledgesReliableDataOnly", MixedTrafficAcknowledgesReliableDataOnly);
+        Run("UnreliableBatchCensusIsExactAndNonMutating", UnreliableBatchCensusIsExactAndNonMutating);
+        Run("ProtocolStageTimingIsOptInAndResettable", ProtocolStageTimingIsOptInAndResettable);
         Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
         Run("UnreliableMessageFamiliesOwnIndependentStreams", UnreliableMessageFamiliesOwnIndependentStreams);
         Run("SequencedCapacityDropAdvancesStaleFloor", SequencedCapacityDropAdvancesStaleFloor);
@@ -251,6 +253,58 @@ internal static class N03ProtocolTests
         True(receiver.AcknowledgementPacketsSent > 0);
         True(receiver.AcknowledgementPacketsSent < sender.DataPacketsSent);
         True(sender.SmoothedRoundTripSteps > 0);
+    }
+
+    private static void UnreliableBatchCensusIsExactAndNonMutating()
+    {
+        using ProtocolLoopback loopback = Create();
+        byte[] payload = new byte[200];
+        Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Input), payload));
+        Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.OwnerState), payload));
+        Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.WorldState), payload));
+
+        NetworkUnreliableBatchOpportunity opportunity =
+            loopback.Client.InspectUnreliableBatchOpportunity();
+        Equal(3, opportunity.ReadyFrames);
+        Equal(3 * (NetworkProtocolDataHeader.EncodedBytes + payload.Length),
+            opportunity.PlaintextBytes);
+        Equal(2, opportunity.GreedyDatagrams);
+        Equal(1, loopback.Client.IndependentUnreliableQueued);
+
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 3, 100);
+        Equal(0, loopback.Client.InspectUnreliableBatchOpportunity().ReadyFrames);
+    }
+
+    private static void ProtocolStageTimingIsOptInAndResettable()
+    {
+        using ProtocolLoopback loopback = Create();
+        Equal(default, loopback.Client.GetStageTiming());
+        Equal(default, loopback.Server.GetStageTiming());
+        loopback.Client.ResetStageTiming(enabled: true);
+        loopback.Server.ResetStageTiming(enabled: true);
+
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 4, 2 }));
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 1, 100);
+        AssertReceive(loopback.Server, NetworkLane.Control, stackalloc byte[] { 4, 2 });
+        Drive(loopback, () => loopback.Client.ReliableQueued == 0, 100);
+
+        NetworkProtocolStageTiming sender = loopback.Client.GetStageTiming();
+        NetworkProtocolStageTiming receiver = loopback.Server.GetStageTiming();
+        True(sender.EmitTicks > 0);
+        True(sender.SelectionTicks > 0);
+        True(sender.FrameEncodeTicks > 0);
+        True(sender.SecureSendTicks > 0);
+        True(sender.EndpointSendTicks > 0);
+        True(receiver.InboundTicks > 0);
+        True(receiver.EndpointReceiveTicks > 0);
+        True(receiver.SecureReceiveTicks > 0);
+        True(receiver.FrameAdmissionTicks > 0);
+
+        loopback.Client.ResetStageTiming(enabled: false);
+        loopback.Server.ResetStageTiming(enabled: false);
+        Equal(default, loopback.Client.GetStageTiming());
+        Equal(default, loopback.Server.GetStageTiming());
     }
 
     private static void IndependentWorldStateContainersDoNotCoalesce()

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 
@@ -249,6 +250,16 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _nextLossDeadlineCount;
     private readonly bool _usesMonotonicPacing;
     private ulong _nextPacedDataStep;
+    private bool _stageTimingEnabled;
+    private ulong _emitTicks;
+    private ulong _selectionTicks;
+    private ulong _frameEncodeTicks;
+    private ulong _secureSendTicks;
+    private ulong _endpointSendTicks;
+    private ulong _inboundTicks;
+    private ulong _endpointReceiveTicks;
+    private ulong _secureReceiveTicks;
+    private ulong _frameAdmissionTicks;
     private bool _acceptsNewSends = true;
     private bool _disposed;
 
@@ -426,6 +437,78 @@ public sealed class NetworkProtocolPeer : IDisposable
     internal ulong ReceivedPacketCount => _receivedPacketsCount;
 
     /// <summary>
+    /// Scans currently pending unreliable frames and reports how many secure Data
+    /// datagrams an immediate, order-preserving greedy pack would require. It never
+    /// waits for more work and does not inspect or mutate reliable flight state.
+    /// </summary>
+    internal NetworkUnreliableBatchOpportunity InspectUnreliableBatchOpportunity()
+    {
+        EnsureOperational();
+        int maximumPlaintext = NetworkSecureDatagramFraming.MaximumPlaintextBytes(
+            _datagramLimits.MaximumDatagramBytes);
+        int ready = 0;
+        int bytes = 0;
+        int greedyDatagrams = 0;
+        int currentDatagramBytes = 0;
+
+        for (int index = 0; index < _independent.Length; index++)
+            if (_independent[index].Active) Add(_independent[index]);
+        for (int index = 0; index < _unreliableStreams.Length; index++)
+            if (_unreliableStreams[index].Pending) Add(_unreliableStreams[index].Message);
+
+        return new(ready, bytes, greedyDatagrams);
+
+        void Add(in OutgoingMessage message)
+        {
+            int frameBytes = checked(NetworkProtocolDataHeader.EncodedBytes + message.Length);
+            if (frameBytes > maximumPlaintext)
+                throw new InvalidOperationException("An admitted unreliable frame exceeds one secure datagram.");
+            ready++;
+            bytes = checked(bytes + frameBytes);
+            if (currentDatagramBytes == 0 ||
+                checked(currentDatagramBytes + frameBytes) > maximumPlaintext)
+            {
+                greedyDatagrams++;
+                currentDatagramBytes = frameBytes;
+            }
+            else
+            {
+                currentDatagramBytes += frameBytes;
+            }
+        }
+    }
+
+    internal void ResetStageTiming(bool enabled)
+    {
+        EnsureOperational();
+        _emitTicks = 0;
+        _selectionTicks = 0;
+        _frameEncodeTicks = 0;
+        _secureSendTicks = 0;
+        _endpointSendTicks = 0;
+        _inboundTicks = 0;
+        _endpointReceiveTicks = 0;
+        _secureReceiveTicks = 0;
+        _frameAdmissionTicks = 0;
+        _stageTimingEnabled = enabled;
+    }
+
+    internal NetworkProtocolStageTiming GetStageTiming()
+    {
+        EnsureOperational();
+        return new(
+            _emitTicks,
+            _selectionTicks,
+            _frameEncodeTicks,
+            _secureSendTicks,
+            _endpointSendTicks,
+            _inboundTicks,
+            _endpointReceiveTicks,
+            _secureReceiveTicks,
+            _frameAdmissionTicks);
+    }
+
+    /// <summary>
     /// Closes new application admission while retaining ACK/retransmission work
     /// already owned by this protocol peer.
     /// </summary>
@@ -449,29 +532,43 @@ public sealed class NetworkProtocolPeer : IDisposable
     internal int ProcessInbound(ulong step)
     {
         EnsureOperational();
+        long inboundStarted = StartStageTiming();
         int budget = _limits.MaximumInboundPacketsPerPump;
         int processed = 0;
-        while (budget-- > 0 && _endpoint.TryReceive(_wireScratch, out int length))
+        while (budget-- > 0)
         {
+            long receiveStarted = StartStageTiming();
+            bool received = _endpoint.TryReceive(_wireScratch, out int length);
+            RecordStageTiming(ref _endpointReceiveTicks, receiveStarted);
+            if (!received) break;
             ProcessDatagram(_wireScratch.AsSpan(0, length), step);
             processed++;
         }
+        RecordStageTiming(ref _inboundTicks, inboundStarted);
         return processed;
     }
 
     internal void Emit(ulong step)
     {
         EnsureOperational();
+        long emitStarted = StartStageTiming();
         if (_inFlight != 0) ProcessExpiredFlights(step);
         int budget = _limits.MaximumPacketsPerPump;
         if (_ackPending && budget != 0 && TryEmitAcknowledgement()) budget--;
 
-        if (_usesMonotonicPacing && step < _nextPacedDataStep) return;
+        if (_usesMonotonicPacing && step < _nextPacedDataStep)
+        {
+            RecordStageTiming(ref _emitTicks, emitStarted);
+            return;
+        }
 
         while (budget > 0 && _inFlight < _congestionWindow)
         {
-            if (!TrySelectNext(out int reliableSlot, out ushort fragment,
-                    out int independentSlot, out int unreliableSlot)) break;
+            long selectionStarted = StartStageTiming();
+            bool selected = TrySelectNext(out int reliableSlot, out ushort fragment,
+                out int independentSlot, out int unreliableSlot);
+            RecordStageTiming(ref _selectionTicks, selectionStarted);
+            if (!selected) break;
             bool reliable = reliableSlot >= 0;
             if (!TryEmitData(reliableSlot, fragment, independentSlot,
                     unreliableSlot, step, reliable)) break;
@@ -487,6 +584,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 }
             }
         }
+        RecordStageTiming(ref _emitTicks, emitStarted);
     }
 
     public NetworkProtocolSnapshot GetSnapshot()
@@ -638,6 +736,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         int fragmentPayload = FragmentPayloadBytes;
         int offset = reliable ? fragmentIndex * fragmentPayload : 0;
         int length = reliable ? Math.Min(fragmentPayload, message.Length - offset) : message.Length;
+        long frameStarted = StartStageTiming();
         var frame = new NetworkDataFrameHeader(
             message.Lane, message.MessageId, message.MessageVersion, message.Sequence,
             fragmentIndex, message.FragmentCount, message.Length, checked((ushort)length));
@@ -645,6 +744,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (!NetworkDataFrameCodec.TryWrite(ref writer, frame) ||
             !writer.TryWriteBytes(payload.Slice(offset, length)))
             throw new InvalidOperationException("A validated protocol frame exceeded its fixed plaintext buffer.");
+        RecordStageTiming(ref _frameEncodeTicks, frameStarted);
 
         int reservedSentRecord = reliable ? FindFreeSentRecord() : -1;
         if (reliable && reservedSentRecord < 0) return false;
@@ -731,6 +831,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             return false;
         }
         packet = new PacketNumber(_nextPacketNumber);
+        long secureStarted = StartStageTiming();
         var header = new NetworkSecureDatagramHeader(
             _manifest.Version, _connection, _sendCryptography.Epoch, packet, kind,
             checked((ushort)plaintext.Length));
@@ -742,8 +843,11 @@ public sealed class NetworkProtocolPeer : IDisposable
             NetworkSecureDatagramFraming.TagBytes);
         _sendCryptography.Encrypt(packet, plaintext, ciphertext, tag,
             _wireScratch.AsSpan(0, NetworkSecureDatagramFraming.HeaderBytes));
+        RecordStageTiming(ref _secureSendTicks, secureStarted);
+        long endpointStarted = StartStageTiming();
         status = _endpoint.TrySend(_wireScratch.AsSpan(0,
             NetworkSecureDatagramFraming.HeaderBytes + plaintext.Length + NetworkSecureDatagramFraming.TagBytes));
+        RecordStageTiming(ref _endpointSendTicks, endpointStarted);
         if (status is DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment)
         {
             _nextPacketNumber++;
@@ -769,10 +873,12 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void ProcessDatagram(ReadOnlySpan<byte> datagram, ulong step)
     {
+        long secureStarted = StartStageTiming();
         if (!NetworkSecureDatagramFraming.TryReadExact(datagram, out NetworkSecureDatagramHeader header,
                 out ReadOnlySpan<byte> associated, out ReadOnlySpan<byte> ciphertext, out ReadOnlySpan<byte> tag) ||
             header.ProtocolVersion != _manifest.Version || header.Connection != _connection)
         {
+            RecordStageTiming(ref _secureReceiveTicks, secureStarted);
             _authenticationFailures++;
             return;
         }
@@ -783,6 +889,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (!candidateAuthentication.TryPrepare(header.PacketNumber,
                 out NetworkPacketWindowTransition authenticationTransition))
         {
+            RecordStageTiming(ref _secureReceiveTicks, secureStarted);
             _replayRejections++;
             return;
         }
@@ -790,6 +897,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (!_receiveCryptography.TryDecryptAtEpoch(header.SecurityEpoch, header.PacketNumber,
                 ciphertext, tag, plaintext, associated, out bool advanced))
         {
+            RecordStageTiming(ref _secureReceiveTicks, secureStarted);
             _authenticationFailures++;
             return;
         }
@@ -808,6 +916,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             _ackPending = false;
         }
         _authenticatedPackets.Commit(authenticationTransition);
+        RecordStageTiming(ref _secureReceiveTicks, secureStarted);
 
         if (header.Kind == NetworkSecureDatagramKind.Acknowledgement)
         {
@@ -822,7 +931,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             return;
         }
 
+        long admissionStarted = StartStageTiming();
         NetworkDeliveryAdmission admission = ProcessData(plaintext, out bool acknowledgementEliciting);
+        RecordStageTiming(ref _frameAdmissionTicks, admissionStarted);
         if (admission != NetworkDeliveryAdmission.Admitted) return;
         if (!_transportDeliveries.TryPrepare(header.PacketNumber,
                 out NetworkPacketWindowTransition deliveryTransition))
@@ -1141,6 +1252,18 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private static ulong SaturatingIncrement(ulong value) =>
         value == ulong.MaxValue ? value : value + 1;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long StartStageTiming() => _stageTimingEnabled ? Stopwatch.GetTimestamp() : 0;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordStageTiming(ref ulong accumulator, long started)
+    {
+        if (!_stageTimingEnabled) return;
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        if (elapsed > 0)
+            accumulator = SaturatingAdd(accumulator, checked((ulong)elapsed));
+    }
 
     private void EnsureOperational()
     {
