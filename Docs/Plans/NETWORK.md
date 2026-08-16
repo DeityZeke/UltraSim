@@ -1574,10 +1574,12 @@ semantic latency, and handshake timing are normal benchmark measurements. Deep
 crypto/codec/assembly, per-lane CPU, GC-pause, and future worker/shard timing are
 opt-in investigations so measurement does not become the workload.
 
-`spread_mix` and `dense_mix` are catalog names only until both adapters perform
-equivalent observer WorldState/Event semantics and their canonical oracles are
-implemented. The comparison executable rejects them today rather than silently
-running owner-only work under a broader label. Event-ledger examined/skipped,
+`spread_mix` and `dense_mix` remain rejected by the cross-generation comparison
+catalog until both adapters perform equivalent observer WorldState/Event semantics.
+They are now implemented separately as **V3-only integrated acceptance profiles**
+over maintained interest, secure shared-listener UDP, client projection,
+application acknowledgements, and retained Events. This preserves useful V3
+evidence without silently producing a dishonest V2 ratio. Event-ledger examined/skipped,
 minimum-cursor scan entries, and retained high water are now always-available
 N0.10 counters for deciding whether participant-local Event indexing is earned.
 Those profiles must add WorldState age by Immediate/Near/Far tier, application
@@ -1878,6 +1880,81 @@ they may leave a correctly deferred final datagram pending forever in benchmark
 time. The measured cadence window remains unchanged; only its post-window
 semantic drain uses the configured wall cadence and repeats the newest complete
 Input state, matching the superseding Input contract.
+
+The cadence artifact's fixed `60/60` input-ack p95 (about 50.7 ms) is not a
+regression comparison against the ordinary fixed-performance owner run (recently
+about 19 ms). The cadence suite samples at an independent 20 Hz wall-time source,
+uses fixed-point authority/Network accumulators, exercises cadence-shaped drains,
+and reports the acknowledgement of those sampled complete states. The ordinary
+owner benchmark uses its own phased tick harness and steady-performance window.
+The cadence rows compare only against one another until both instruments share
+the same emission and observation contract.
+
+#### V3 spread/dense integrated acceptance
+
+The first real observer-heavy artifact is
+[`network-v3-spread-dense-acceptance-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-spread-dense-acceptance-2026-08-16.json).
+It runs fixed 60 Hz, 2% canonical dirtiness, 120 measured steps, 400 secure
+shared-listener recipients, one reliable participant Event every 20 steps, and
+two bounded WorldState scheduling opportunities per recipient/step. `dense_mix`
+owns 1,000 entities in one 126 m hotspot and 400,000 real relations;
+`spread_mix` owns 5,000 entities over a 768 m grid and 352,596 real relations.
+Client capacity is derived from the largest admitted fixed recipient scope
+(1,000 dense, 1,156 spread), not the whole world population.
+
+Both profiles converge exactly after three/four settlement steps, deliver all
+2,400 Events, and record zero nonviable recipients, capacity drops, retained-byte
+failures, or arena compactions. They also answer the 400-client question honestly:
+the current single-owner integrated path is **bounded but not yet boring**.
+
+| Profile | Tick p95 | Immediate p95 | Near p95 | Far p95 | Event p95 | Worst-client freshness p95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `dense_mix` | 24.985 ms | 25.875 ms | 79.375 ms | 105.125 ms | 16.625 ms | 104.125 ms |
+| `spread_mix` | 22.960 ms | 25.625 ms | 74.625 ms | 99.625 ms | 14.625 ms | 109.375 ms |
+
+Dense misses all 120 fixed-60 deadlines; spread misses 106 with a longest streak
+of 42. Maximum observed state age remains bounded at 130.4/141.7 ms and the
+profiles converge rather than accumulate permanent debt, but that is not an
+acceptance of their CPU budget. The protected 400-client goal remains open.
+
+The evidence locates the work above the earlier owner-only transport problem.
+Dense constructs 2,400 canonical semantic versions and copies 960,000 recipient
+records (exactly 400 copies/construction); spread constructs 12,000 and copies
+841,634 (~70.1 copies/construction). They emit 53,200/41,533 application bundles
+and about 54.10/46.28 MB of wire traffic. Queue/arena pressure remains tiny:
+maximum retained-payload use is below 0.033% of admitted capacity, receive queues
+are empty at observation points, no payload arena compacts, and no capacity
+failure occurs. Increasing capacities would therefore hide no current bottleneck.
+
+Dense still rarely exposes same-peer assembly opportunity: only 4,740 of 55,597
+nonempty inspections have two ready unreliable frames and none have three.
+Spread materially changes that result: 19,906 of 41,527 nonempty inspections
+have 2+ frames, 223 have 3+, and the maximum is four. Greedy packing could avoid
+only about 4,710 dense and 2,828 spread unreliable datagrams, because many
+spread pairs do not fit one MTU. This records a real future experiment but does
+not make a new wire format the dominant next target, retroactively justify
+batching `owner_movement`, or permit delaying ready work.
+Native listener submission is already fully utilized in both profiles (p50/p95
+batch 32, no partial or WouldBlock submissions), so another server-send syscall
+experiment is not the next general answer.
+
+Known managed reservations are about 432.5 MiB dense and 719.3 MiB spread;
+process managed-heap peaks are about 495.3/888.3 MiB. This is truthful bounded
+evidence, not a production target. The spread result shows that per-client
+projection candidates and the deliberately worst-case interest relation/edge
+arrays remain the next memory specialization question even after scope-derived
+client capacity. Physical process figures remain distinct from known reserved
+payload and configured kernel buffers.
+
+The Event counters identify a much stronger representation target. Each profile
+publishes 2,400 participant-specific facts, yet the global filtered ledger causes
+960,000 Event records to be examined, 957,600 to be skipped, and 384,000,000
+minimum-cursor entries to be scanned. This is direct admitted evidence for
+participant-local Event indexing plus incremental minimum-cursor maintenance;
+it is no longer a speculative optimization. The next experiment must preserve
+the existing global sequence/floor, reliable delivery, idempotence, baseline,
+and bounded-retention semantics while eliminating work proportional to unrelated
+participants and repeated all-consumer minimum scans.
 
 Protected profiles:
 

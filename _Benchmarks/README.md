@@ -35,7 +35,7 @@ when those systems exist.
 | `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
 | `UltraSim.Network.Comparison` | N0.10 isolated V2/V3 bot matrix coordinator; both process orders and selectable connected-pairs/shared-listener V3 topology. |
 | `UltraSim.Network.V2ComparisonAdapter` | Frozen V2 bot-harness child-process adapter and normalized owner-state evidence. |
-| `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected-UDP bot adapter with bounded pressure, memory, wire, and semantic-latency telemetry. |
+| `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected/shared-UDP bot adapter with bounded pressure, memory, wire, semantic-latency telemetry, cadence/stall acceptance, and V3-only integrated `spread_mix`/`dense_mix`. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
@@ -84,6 +84,11 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
     --clients=32,64,128,256 --stage-ticks=120 --settle-ticks=30 \
     --output-dir=_Benchmarks/results/network-v2-v3-bot-local
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+    --replication-suite --replication-profile=all --clients=400 \
+    --ticks=120 --warmup=30 --dirty-percent=2 \
+    --output=_Benchmarks/results/network-v3-spread-dense-local.json
 ```
 
 Each executable's `--help`/argument parser is the source of truth for filters,
@@ -101,8 +106,10 @@ The provisional N0.10 network instrument is documented in
 Its v2 evidence schema distinguishes unavailable metric families from measured
 zero, preserves all numeric frozen-V2 stage diagnostics, and reports V3
 occupancy, freshness/fairness, handshake, wire/security, syscall, CPU, and
-marginal-scale context. Observer/AoI/Event/recovery metrics remain tied to their
-future semantic workloads rather than being fabricated by the owner-only run.
+marginal-scale context. Observer/AoI/Event metrics now come from the separate
+V3-only integrated replication suite; they are still not fabricated in the
+owner-only cross-generation run. Recovery metrics remain tied to their owning
+recovery workloads.
 
 ## Comparability
 

@@ -249,16 +249,28 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     public int CopyActiveEntities(Span<RemoteWorldEntitySnapshot> destination)
     {
         EnsureOwnerThread();
-        if (destination.Length < _activeCount)
-            throw new ArgumentException("Destination cannot contain every active client entity.", nameof(destination));
-        int count = 0;
-        for (int index = 0; index < _activeHigh; index++)
-            if (_active[index].Slot.IsValid) destination[count++] = _active[index];
+        int count = CopyActiveEntitiesUnordered(destination);
         destination[..count].Sort(static (left, right) =>
         {
             int index = left.Entity.Index.CompareTo(right.Entity.Index);
             return index != 0 ? index : left.Entity.Generation.CompareTo(right.Entity.Generation);
         });
+        return count;
+    }
+
+    /// <summary>
+    /// Copies active projection rows in private dense-slot order for cold diagnostics
+    /// that do not require canonical ordering. This avoids making metric collection
+    /// sort every recipient projection; callers must not treat the order as identity.
+    /// </summary>
+    public int CopyActiveEntitiesUnordered(Span<RemoteWorldEntitySnapshot> destination)
+    {
+        EnsureOwnerThread();
+        if (destination.Length < _activeCount)
+            throw new ArgumentException("Destination cannot contain every active client entity.", nameof(destination));
+        int count = 0;
+        for (int index = 0; index < _activeHigh; index++)
+            if (_active[index].Slot.IsValid) destination[count++] = _active[index];
         return count;
     }
 

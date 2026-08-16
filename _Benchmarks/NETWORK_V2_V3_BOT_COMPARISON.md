@@ -54,9 +54,11 @@ V2 integrates an input when it arrives; the current V3 workload integrates the
 latest complete control state every authoritative step. Treating those positions
 as identical would manufacture a semantic equivalence neither engine promises.
 
-`spread_mix` and `dense_mix` are not implemented yet. Both adapters reject those
-names so an owner-only run cannot be mislabeled as observer WorldState/Event
-evidence.
+`spread_mix` and `dense_mix` remain unavailable as V2/V3 comparison rows. Both
+adapters reject those names so an owner-only run cannot be mislabeled as observer
+WorldState/Event evidence. A separate V3-only integrated suite now implements
+those workloads over the real AOI, WorldState, Event, secure UDP, application-ACK,
+and retained client-projection path; it deliberately produces no V2 ratio.
 
 ## Metrics
 
@@ -134,9 +136,9 @@ application-Event publish-to-apply latency, interest amplification, baseline
 recovery, slow-recipient debt, or traversal edge/relation work. Those are frozen
 as required metrics for the workloads that own the semantics:
 
-| Future profile | Required additional evidence |
+| Profile | Required additional evidence |
 | --- | --- |
-| `spread_mix` / `dense_mix` | WorldState age by tier; canonical changes → semantic constructions → recipient copies → bundles → datagrams/bytes; worst-recipient freshness. |
+| `spread_mix` / `dense_mix` | Implemented in the V3-only suite: WorldState age by tier; canonical changes → semantic constructions → recipient copies → bundles → datagrams/bytes; worst-recipient freshness. Cross-generation equivalence remains future work. |
 | `traversal` | region edges added/removed, relations examined/changed, retier work, interest CPU. |
 | `generation_resync` | baseline capture, records/segments/bytes/retries, first new-epoch owner/input latency, all-clients-current duration. |
 | `slow_client` | debt age, retained bytes, retries, occupancy, nonviable/escalation counts, pathological-recipient CPU spillover. |
@@ -166,6 +168,9 @@ rejoins already-created adapter artifacts at their expected scale/order paths.
 `--v3-topology=connected-pairs` retains the N0.10 entry control.
 The V3 adapter-only `--shared-socket-io=platform-batch` enables the opt-in
 shared-listener native-send experiment; scalar remains the comparison default.
+The V3-only integrated observer suite is invoked with `--replication-suite
+--replication-profile=all`; it is an acceptance/diagnostic artifact, not a joined
+comparison input.
 An immutable accepted baseline requires the full matrix, semantic tests, both
 orders, stable machine conditions, and review under the repository benchmark
 policy.

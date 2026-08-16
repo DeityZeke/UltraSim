@@ -16,11 +16,12 @@ baseline/recovery/generation-replacement vertical are implemented. N0.9 now
 accepts the hardened integrated OfflineDirect/secure-loopback/UDP/listen-host
 vertical, including multi-consumer retained application Events, reliable
 baseline cancellation, exact WorldState parity, and durable generation replacement.
-N0.10 has begun with an isolated V2/V3 owner-movement bot comparison and bounded
-pressure/memory telemetry. Its first measured specialization replaces per-session
-server sockets with one bounded shared UDP listener; it modestly improves the V3
-CPU slope while proving that per-peer work, not socket count alone, remains the
-dominant optimization target.
+N0.10 now includes the isolated V2/V3 owner-movement comparison, shared-listener
+and reliable-only-ACK CPU corrections, bounded retained-payload arenas,
+cadence/stall acceptance, and V3-only integrated `spread_mix`/`dense_mix`
+evidence. Four hundred observer-heavy clients remain bounded and converge with
+zero capacity loss, but currently exceed the fixed-60 CPU budget; that measured
+higher-layer fanout/freshness workload now shapes the next specialization.
 
 ## Design
 

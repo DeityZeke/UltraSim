@@ -1,0 +1,1130 @@
+using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using UltraSim.Client.Network;
+using UltraSim.ECS;
+using UltraSim.Game.Admission;
+using UltraSim.Game.Composition;
+using UltraSim.Game.Replication;
+using UltraSim.Network;
+using UltraSim.Network.Comparison;
+using UltraSim.Server.Runtime;
+
+internal static class DenseReplicationSuite
+{
+    internal static void Run(string[] args)
+    {
+        string requested = ReadText(args, "--replication-profile") ?? "all";
+        int clients = ReadInt(args, "--clients", 400);
+        int ticks = ReadInt(args, "--ticks", 120);
+        int warmup = ReadInt(args, "--warmup", 30);
+        int dirtyPercent = ReadInt(args, "--dirty-percent", 2);
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/Baselines/network-v3-spread-dense-acceptance.json";
+        if (clients <= 0 || clients > 1_024 || ticks < 30 || warmup < 1 ||
+            dirtyPercent is <= 0 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        ReplicationWorkload[] profiles = requested.ToLowerInvariant() switch
+        {
+            "spread_mix" => [ReplicationWorkload.Spread(clients, ticks, warmup, dirtyPercent)],
+            "dense_mix" => [ReplicationWorkload.Dense(clients, ticks, warmup, dirtyPercent)],
+            "all" =>
+            [
+                ReplicationWorkload.Dense(clients, ticks, warmup, dirtyPercent),
+                ReplicationWorkload.Spread(clients, ticks, warmup, dirtyPercent),
+            ],
+            _ => throw new ArgumentException($"Unknown replication profile '{requested}'."),
+        };
+
+        var results = new List<ReplicationWorkloadResult>(profiles.Length);
+        foreach (ReplicationWorkload profile in profiles)
+        {
+            Console.WriteLine($"REPLICATION {profile.Id}: constructing {profile.Clients} clients, " +
+                $"{profile.Entities} entities...");
+            using var harness = new ReplicationWorkloadHarness(profile);
+            ReplicationWorkloadResult result = harness.Run();
+            Validate(result);
+            results.Add(result);
+            Console.WriteLine($"REPLICATION {profile.Id}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
+                $"relations {result.Relations:N0}, freshness p95/max " +
+                $"{result.AllWorldStateFreshnessMilliseconds.P95:F2}/{result.AllWorldStateFreshnessMilliseconds.Max:F2} ms, " +
+                $"event p95 {result.EventApplicationMilliseconds.P95:F2} ms, " +
+                $"pending max {result.PendingRelations.Max:F0}, wire {result.WireBytes / 1048576d:F2} MiB");
+        }
+
+        var report = new ReplicationSuiteReport(
+            "ultrasim-network-v3-spread-dense-acceptance-v1",
+            DateTimeOffset.UtcNow,
+            Environment.Version.ToString(),
+            Environment.ProcessorCount,
+            "V3-only integrated acceptance. Real shared-listener UDP, secure protocol, maintained AOI, " +
+            "independent unreliable WorldState, reliable application Events, application ACKs, and retained client projection. " +
+            "No V2 ratio is claimed because V2 does not own equivalent semantics.",
+            results);
+        NetworkBotComparisonIo.Write(output, report);
+        Console.WriteLine(Path.GetFullPath(output));
+    }
+
+    private static void Validate(ReplicationWorkloadResult result)
+    {
+        if (!result.Converged)
+            throw new InvalidOperationException($"{result.Profile.Id} did not converge to exact latest recipient state.");
+        if (result.NonviableRecipients != 0 || result.CapacityDrops != 0 ||
+            result.RetainedByteCapacityFailures != 0)
+            throw new InvalidOperationException(
+                $"{result.Profile.Id} exceeded an admitted bound or marked a recipient nonviable.");
+        if (result.ApplicationEventsPublished != result.ApplicationEventsApplied)
+            throw new InvalidOperationException(
+                $"{result.Profile.Id} lost application Event continuity: " +
+                $"{result.ApplicationEventsPublished} published, {result.ApplicationEventsApplied} applied.");
+        if (result.PendingRelations.Max > result.Relations)
+            throw new InvalidOperationException($"{result.Profile.Id} reported impossible relation debt.");
+    }
+
+    private static int ReadInt(string[] args, string name, int fallback)
+    {
+        string? value = ReadText(args, name);
+        return value is null ? fallback : int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string? ReadText(string[] args, string name)
+    {
+        string prefix = name + "=";
+        string? match = args.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
+        return match is null ? null : match[prefix.Length..];
+    }
+}
+
+internal sealed class ReplicationWorkloadHarness : IDisposable
+{
+    private const int TickHz = 60;
+    private const int RecordsPerBundle = 24;
+    private const int BundlesPerRecipientTick = 2;
+    private const int WorldStateByteBudget = 1_200;
+    private const ulong ApplicationEpoch = 1;
+
+    private static readonly UdpProtocolLimits s_udpLimits = new(
+        MaximumDatagramBytes: 1_472,
+        SocketSendBufferBytes: 65_536,
+        SocketReceiveBufferBytes: 65_536,
+        MaximumHandshakePumps: 16_384,
+        CookieBucketMilliseconds: 30_000,
+        IdleTimeoutMilliseconds: 30_000,
+        DrainTimeoutMilliseconds: 5_000,
+        KeepAliveIntervalMilliseconds: 5_000);
+
+    private readonly ReplicationWorkload _profile;
+    private readonly UltraSimGameComposition _composition;
+    private readonly ServerRuntime _runtime;
+    private readonly AdmissionService _admission;
+    private readonly GameProjectionService _projection;
+    private readonly GameInterestService _interest;
+    private readonly NetworkProtocolLimits _protocolLimits;
+    private readonly SharedUdpProtocolHost _host;
+    private readonly ReplicationBot[] _bots;
+    private readonly ReplicationSpatialPoint[] _positions;
+    private readonly ulong[] _versions;
+    private readonly long[] _versionCreatedAt;
+    private readonly int[] _versionCreatedTick;
+    private readonly ulong[] _lastSeenVersions;
+    private readonly byte[] _relationTiers;
+    private readonly RemoteWorldEntitySnapshot[] _clientScratch;
+    private readonly GameRecipientEntityRelationSnapshot[] _relationScratch;
+    private readonly long[] _eventPublishedAt;
+    private readonly int[] _eventPublishedTick;
+    private readonly LatencyHistogram _immediateMs = new(0.25, 8_192);
+    private readonly LatencyHistogram _nearMs = new(0.25, 8_192);
+    private readonly LatencyHistogram _farMs = new(0.25, 8_192);
+    private readonly LatencyHistogram _allMs = new(0.25, 8_192);
+    private readonly LatencyHistogram _immediateTicks = new(1, 2_048, percentileBucketOffset: 0);
+    private readonly LatencyHistogram _nearTicks = new(1, 2_048, percentileBucketOffset: 0);
+    private readonly LatencyHistogram _farTicks = new(1, 2_048, percentileBucketOffset: 0);
+    private readonly LatencyHistogram _eventMs = new(0.25, 8_192);
+    private readonly LatencyHistogram _eventTicks = new(1, 2_048, percentileBucketOffset: 0);
+    private readonly LatencyHistogram[] _clientFreshness;
+    private readonly List<double> _tickMilliseconds;
+    private readonly List<double> _diagnosticMilliseconds;
+    private readonly List<double> _pendingRelations;
+    private readonly List<double> _retainedBytes;
+    private readonly List<double> _reliableQueued;
+    private readonly List<double> _independentQueued;
+    private readonly List<double> _receivedQueued;
+    private readonly List<double> _inFlightPackets;
+    private readonly List<double> _retainedPayloadRatio;
+    private readonly ReplicationBatchCensus _batchCensus = new();
+    private int _dirtyCursor;
+    private int _currentAuthorityTick;
+    private readonly int _maximumRecipientScope;
+    private ulong _eventsPublished;
+    private ulong _eventsApplied;
+    private bool _disposed;
+
+    internal ReplicationWorkloadHarness(ReplicationWorkload profile)
+    {
+        _profile = profile;
+        _tickMilliseconds = new List<double>(profile.Ticks);
+        _diagnosticMilliseconds = new List<double>(profile.Ticks);
+        _pendingRelations = new List<double>(profile.Ticks);
+        _retainedBytes = new List<double>(profile.Ticks);
+        _reliableQueued = new List<double>(profile.Ticks);
+        _independentQueued = new List<double>(profile.Ticks);
+        _receivedQueued = new List<double>(profile.Ticks);
+        _inFlightPackets = new List<double>(profile.Ticks);
+        _retainedPayloadRatio = new List<double>(profile.Ticks);
+        _clientFreshness = Enumerable.Range(0, profile.Clients)
+            .Select(_ => new LatencyHistogram(0.25, 8_192)).ToArray();
+
+        _composition = new UltraSimGameComposition(
+            maximumChunksPerContentArchetype: Math.Max(16, (profile.Clients + 255) / 256),
+            runtimeProfile: GameRuntimeProfile.Networked);
+        _runtime = new ServerRuntime(_composition, new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(
+                profile.Clients + 64,
+                new PersistenceIdentityOptions(new PersistentWorldId(0xD3_0001)),
+                GameRuntimeProfile.Networked),
+            WorldClockOptions.Default));
+        _runtime.Initialize();
+        _runtime.Start();
+        _admission = new AdmissionService(_runtime.Game, _composition);
+        for (int index = 0; index < profile.Clients; index++)
+        {
+            AdmissionResult entered = _admission.JoinAccountless(Participant(index));
+            Check(entered.IsEntered, $"Participant {index} did not enter authority.");
+        }
+
+        var projectionLimits = new GameReplicationLimits(
+            MaximumEntities: profile.Clients + 64,
+            MaximumParticipants: profile.Clients,
+            MaximumLifecycleFactsPerCapture: Math.Max(4_096, profile.Clients * 2),
+            MaximumDeltasPerCapture: Math.Max(8_192, profile.Clients * 4),
+            LifecycleHistoryCapacity: Math.Max(8_192, profile.Clients * 4),
+            ApplicationEventCapacity: Math.Max(1_024, profile.Clients * 4),
+            AuthoritativeInputCapacity: Math.Max(64, profile.Clients));
+        _projection = new GameProjectionService(_runtime.Game, _admission, projectionLimits);
+        for (int index = 0; index < profile.Clients; index++)
+            Check(_projection.SynchronizeParticipant(Participant(index)),
+                $"Participant {index} was not visible to projection.");
+        GameProjectionCaptureResult baseline = _projection.RebuildBaseline();
+        Check(baseline.Status == GameProjectionCaptureStatus.BaselineRebuilt,
+            "Application Event projection baseline failed.");
+
+        GameInterestProfile interestProfile = GameInterestProfile.Reference;
+        int farCells = checked((int)(((long)interestProfile.FarRadiusMillimeters +
+            interestProfile.RegionEdgeMillimeters - 1) / interestProfile.RegionEdgeMillimeters));
+        int edgeWidth = checked(farCells * 2 + 1);
+        int maximumEdges = checked(edgeWidth * edgeWidth * profile.Clients + edgeWidth);
+        var interestLimits = new GameInterestLimits(
+            MaximumEntities: profile.Entities,
+            MaximumRecipients: profile.Clients,
+            MaximumRegions: checked(maximumEdges + profile.Entities),
+            MaximumRegionInterestEdges: maximumEdges,
+            MaximumRecipientEntityRelations: checked(profile.Entities * profile.Clients),
+            MaximumOutstandingBundles: checked(profile.Clients * 8),
+            MaximumRecordsPerBundle: RecordsPerBundle);
+        _interest = new GameInterestService(_projection.StateEpoch, interestLimits, interestProfile);
+
+        _positions = new ReplicationSpatialPoint[profile.Entities];
+        _versions = new ulong[profile.Entities];
+        _versionCreatedAt = new long[profile.Entities];
+        _versionCreatedTick = new int[profile.Entities];
+        _lastSeenVersions = new ulong[checked(profile.Clients * profile.Entities)];
+        _relationTiers = new byte[checked(profile.Clients * profile.Entities)];
+        _clientScratch = new RemoteWorldEntitySnapshot[profile.Entities];
+        _relationScratch = new GameRecipientEntityRelationSnapshot[checked(profile.Clients * profile.Entities)];
+        int maximumEvents = checked(profile.Clients * (profile.WarmupTicks + profile.Ticks + 256) / 10 + 1_024);
+        _eventPublishedAt = new long[maximumEvents];
+        _eventPublishedTick = new int[maximumEvents];
+
+        for (int index = 0; index < profile.Clients; index++)
+            Check(_interest.SetRecipientAnchor(Participant(index), profile.Anchor(index), 0) ==
+                GameInterestUpdateStatus.Success, "Recipient interest setup exceeded its bound.");
+        for (int index = 0; index < profile.Entities; index++)
+        {
+            _positions[index] = profile.EntityPoint(index);
+            _versions[index] = 1;
+            _versionCreatedTick[index] = -1;
+            Check(_interest.UpsertEntity(Projected(index, 1), 1, _positions[index],
+                    GameReplicationHorizon.Far, 0) == GameInterestUpdateStatus.Success,
+                "Entity interest setup exceeded its bound.");
+        }
+        _maximumRecipientScope = MeasureMaximumRecipientScope();
+
+        _protocolLimits = new NetworkProtocolLimits(
+            MaximumReliableMessages: 32,
+            MaximumReceivedMessages: 32,
+            MaximumMessageBytes: UltraSim.Game.Protocol.UltraSimGameProtocol.MaximumMessageBytes,
+            MaximumFragmentsPerMessage: 64,
+            SentPacketCapacity: 256,
+            MaximumInboundPacketsPerPump: 64,
+            MaximumPacketsPerPump: 64,
+            MinimumRetransmissionSteps: 2,
+            MaximumRetransmissionSteps: 128,
+            InitialCongestionWindowPackets: 8,
+            MaximumCongestionWindowPackets: 128,
+            MaximumIndependentUnreliableMessages: 8,
+            ReliablePayloadByteCapacity: 65_536,
+            ReceivedPayloadByteCapacity: 65_536);
+        var sharedLimits = new SharedUdpProtocolLimits(
+            MaximumSessions: profile.Clients,
+            MaximumQueuedDatagramsPerSession: 16,
+            MaximumInboundDatagramsPerPump: Math.Max(4_096, profile.Clients * 32),
+            SocketIoMode: SharedUdpSocketIoMode.PlatformBatch,
+            MaximumNativeSendBatchDatagrams: 32);
+        _host = new SharedUdpProtocolHost(
+            _protocolLimits, s_udpLimits, sharedLimits,
+            UltraSim.Game.Protocol.UltraSimGameProtocol.Manifest);
+        _bots = new ReplicationBot[profile.Clients];
+        ulong eventFloor = baseline.Frame.ApplicationEventNextSequence;
+        for (int index = 0; index < profile.Clients; index++)
+        {
+            Check(_host.TryAddLoopbackSession(out SharedUdpProtocolSession? session, out _),
+                $"Secure UDP session {index} could not be established.");
+            ParticipantId participant = Participant(index);
+            _bots[index] = new ReplicationBot(
+                session!,
+                new RemoteWorldStateServer(session!.Server, _interest, participant,
+                    ApplicationEpoch, RecordsPerBundle, _maximumRecipientScope),
+                new RemoteWorldStateClient(session.Client, ApplicationEpoch, _projection.StateEpoch,
+                    _maximumRecipientScope, _maximumRecipientScope, RecordsPerBundle, 64),
+                new RemoteApplicationEventServer(session.Server, _projection, participant,
+                    ApplicationEpoch, eventFloor),
+                new RemoteApplicationEventClient(session.Client, ApplicationEpoch,
+                    participant.Value, _projection.StateEpoch, eventFloor, 16));
+        }
+    }
+
+    internal ReplicationWorkloadResult Run()
+    {
+        DrainInitialState();
+        ScanFreshness(authorityTick: 0, measure: false);
+        long nextDeadline = Stopwatch.GetTimestamp();
+        for (int tick = 1; tick <= _profile.WarmupTicks; tick++)
+        {
+            RunActiveTick(tick, measure: false);
+            WaitForRealtimeTick(ref nextDeadline);
+        }
+        _ = DrainState(_profile.WarmupTicks, ref nextDeadline, measure: false);
+        ScanFreshness(_profile.WarmupTicks, measure: false);
+        nextDeadline = Stopwatch.GetTimestamp();
+
+        ResetMeasurement();
+        GameInterestSnapshot interestBefore = _interest.GetSnapshot();
+        GameProjectionSnapshot projectionBefore = _projection.GetSnapshot();
+        EventTotals eventBefore = CaptureEventTotals();
+        TransportTotals networkBefore = CaptureTransportTotals();
+        SharedUdpListenerSnapshot listenerBefore = _host.GetSnapshot().Listener;
+        long allocatedBefore = GC.GetTotalAllocatedBytes(true);
+        int gen0Before = GC.CollectionCount(0);
+        int gen1Before = GC.CollectionCount(1);
+        int gen2Before = GC.CollectionCount(2);
+        using Process process = Process.GetCurrentProcess();
+        TimeSpan cpuBefore = process.TotalProcessorTime;
+        long wallStarted = Stopwatch.GetTimestamp();
+        long peakHeap = GC.GetTotalMemory(false);
+        long peakWorking = process.WorkingSet64;
+        long peakPrivate = process.PrivateMemorySize64;
+
+        for (int tick = 1; tick <= _profile.Ticks; tick++)
+        {
+            RunActiveTick(tick, measure: true);
+            peakHeap = Math.Max(peakHeap, GC.GetTotalMemory(false));
+            if ((tick & 7) == 0)
+            {
+                process.Refresh();
+                peakWorking = Math.Max(peakWorking, process.WorkingSet64);
+                peakPrivate = Math.Max(peakPrivate, process.PrivateMemorySize64);
+            }
+            WaitForRealtimeTick(ref nextDeadline);
+        }
+
+        int settleTicks = DrainState(_profile.Ticks, ref nextDeadline, measure: true);
+        long wallEnded = Stopwatch.GetTimestamp();
+        process.Refresh();
+        peakWorking = Math.Max(peakWorking, process.WorkingSet64);
+        peakPrivate = Math.Max(peakPrivate, process.PrivateMemorySize64);
+        peakHeap = Math.Max(peakHeap, GC.GetTotalMemory(false));
+        TimeSpan cpuAfter = process.TotalProcessorTime;
+        long allocatedAfter = GC.GetTotalAllocatedBytes(true);
+        GameInterestSnapshot interestAfter = _interest.GetSnapshot();
+        GameProjectionSnapshot projectionAfter = _projection.GetSnapshot();
+        EventTotals eventAfter = CaptureEventTotals();
+        TransportTotals networkAfter = CaptureTransportTotals();
+        SharedUdpProtocolHostSnapshot hostAfter = _host.GetSnapshot();
+
+        bool converged = ValidateConvergence();
+        NetworkMetricSummary[] clientP95 = _clientFreshness
+            .Select(value => value.Summary()).ToArray();
+        double deadline = 1000d / TickHz;
+        int misses = _tickMilliseconds.Count(value => value > deadline);
+        int longestMiss = LongestMissStreak(_tickMilliseconds, deadline);
+        long applicationAdapterBytes = 0;
+        for (int index = 0; index < _bots.Length; index++)
+            applicationAdapterBytes = checked(applicationAdapterBytes +
+                _bots[index].WorldServer.GetSnapshot().ReservedBytes +
+                _bots[index].WorldClient.GetSnapshot().ReservedBytes);
+        long knownReserved = checked(hostAfter.KnownReservedBytes + interestAfter.ReservedBytes +
+            _projection.GetSnapshot().ReservedBytes + applicationAdapterBytes);
+
+        ulong relationsCopied = interestAfter.SemanticRecordCopies - interestBefore.SemanticRecordCopies;
+        ulong semanticBytes = interestAfter.SemanticBytesCopied - interestBefore.SemanticBytesCopied;
+        ulong constructions = interestAfter.UniqueSemanticConstructions -
+            interestBefore.UniqueSemanticConstructions;
+        ulong bundles = interestAfter.BundlesBuilt - interestBefore.BundlesBuilt;
+        ulong dataPackets = networkAfter.DataPackets - networkBefore.DataPackets;
+        ulong wireBytes = networkAfter.WireBytes - networkBefore.WireBytes;
+        ulong wireDatagrams = networkAfter.WireDatagrams - networkBefore.WireDatagrams;
+        ulong retransmittedBytes = networkAfter.RetransmittedWireBytes - networkBefore.RetransmittedWireBytes;
+        ulong capacityDrops = networkAfter.CapacityDrops - networkBefore.CapacityDrops;
+        ulong byteFailures = networkAfter.ByteCapacityFailures - networkBefore.ByteCapacityFailures;
+        ulong compactionBytes = networkAfter.CompactionBytesMoved - networkBefore.CompactionBytesMoved;
+        ulong publishedDuringMeasure = _eventsPublished;
+        ulong appliedDuringMeasure = _eventsApplied;
+        double wallMs = Stopwatch.GetElapsedTime(wallStarted, wallEnded).TotalMilliseconds;
+        double cpuMs = (cpuAfter - cpuBefore).TotalMilliseconds;
+        NetworkMetricSummary retained = NetworkMetricSummary.From(_retainedBytes);
+
+        return new ReplicationWorkloadResult(
+            _profile,
+            interestAfter.RelationCount,
+            _maximumRecipientScope,
+            converged,
+            settleTicks,
+            NetworkMetricSummary.From(_tickMilliseconds),
+            NetworkMetricSummary.From(_diagnosticMilliseconds),
+            _immediateMs.Summary(),
+            _nearMs.Summary(),
+            _farMs.Summary(),
+            _allMs.Summary(),
+            _immediateTicks.Summary(),
+            _nearTicks.Summary(),
+            _farTicks.Summary(),
+            _eventMs.Summary(),
+            _eventTicks.Summary(),
+            NetworkMetricSummary.From(clientP95.Select(value => value.P95).ToArray()),
+            clientP95.Max(value => value.P95),
+            clientP95.Max(value => value.Max),
+            NetworkMetricSummary.From(_pendingRelations),
+            retained,
+            NetworkMetricSummary.From(_reliableQueued),
+            NetworkMetricSummary.From(_independentQueued),
+            NetworkMetricSummary.From(_receivedQueued),
+            NetworkMetricSummary.From(_inFlightPackets),
+            NetworkMetricSummary.From(_retainedPayloadRatio),
+            interestAfter.NonviableRecipientCount,
+            misses,
+            longestMiss,
+            publishedDuringMeasure,
+            appliedDuringMeasure,
+            constructions,
+            relationsCopied,
+            semanticBytes,
+            bundles,
+            eventAfter.RecordsExamined - eventBefore.RecordsExamined,
+            eventAfter.RecordsSkipped - eventBefore.RecordsSkipped,
+            projectionAfter.RetainedApplicationEventHighWater,
+            projectionAfter.ApplicationEventMinimumCursorScanEntries -
+                projectionBefore.ApplicationEventMinimumCursorScanEntries,
+            wireDatagrams,
+            wireBytes,
+            dataPackets,
+            networkAfter.AcknowledgementPackets - networkBefore.AcknowledgementPackets,
+            networkAfter.Retransmissions - networkBefore.Retransmissions,
+            retransmittedBytes,
+            capacityDrops,
+            byteFailures,
+            networkAfter.Compactions - networkBefore.Compactions,
+            compactionBytes,
+            knownReserved,
+            peakHeap,
+            peakWorking,
+            peakPrivate,
+            allocatedAfter - allocatedBefore,
+            GC.CollectionCount(0) - gen0Before,
+            GC.CollectionCount(1) - gen1Before,
+            GC.CollectionCount(2) - gen2Before,
+            cpuMs,
+            wallMs == 0 ? 0 : cpuMs / wallMs,
+            listenerBefore,
+            hostAfter.Listener,
+            _batchCensus.CreateReport(),
+            new ReplicationAmplification(
+                constructions == 0 ? 0 : relationsCopied / (double)constructions,
+                relationsCopied == 0 ? 0 : bundles / (double)relationsCopied,
+                bundles == 0 ? 0 : dataPackets / (double)bundles,
+                relationsCopied == 0 ? 0 : wireBytes / (double)relationsCopied,
+                semanticBytes == 0 ? 0 : wireBytes / (double)semanticBytes,
+                wireDatagrams == 0 ? 0 : wireBytes / (double)wireDatagrams,
+                wireBytes == 0 ? 0 : retransmittedBytes / (double)wireBytes));
+    }
+
+    private void RunActiveTick(int tick, bool measure)
+    {
+        _currentAuthorityTick = tick;
+        long started = Stopwatch.GetTimestamp();
+        int dirty = Math.Max(1, _profile.Entities * _profile.DirtyPercent / 100);
+        for (int offset = 0; offset < dirty; offset++)
+        {
+            int entity = (_dirtyCursor + offset) % _profile.Entities;
+            ulong version = checked(++_versions[entity]);
+            ReplicationSpatialPoint position = _positions[entity];
+            position = new ReplicationSpatialPoint(
+                checked(position.XMillimeters + ((version & 1) == 0 ? 1 : -1)),
+                position.ZMillimeters);
+            _positions[entity] = position;
+            _versionCreatedAt[entity] = Stopwatch.GetTimestamp();
+            _versionCreatedTick[entity] = tick;
+            Check(_interest.UpsertEntity(Projected(entity, tick), version, position,
+                    GameReplicationHorizon.Far, SemanticMilliseconds(tick)) ==
+                GameInterestUpdateStatus.Success, "Canonical WorldState update failed.");
+        }
+        _dirtyCursor = (_dirtyCursor + dirty) % _profile.Entities;
+        PublishEvents(tick);
+        ScheduleApplication(SemanticMilliseconds(tick));
+        for (int pass = 0; pass < 4; pass++) PumpAndDispatch(measure);
+        if (measure) _tickMilliseconds.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+
+        long diagnosticStarted = Stopwatch.GetTimestamp();
+        ScanFreshness(tick, measure);
+        if (measure)
+        {
+            _diagnosticMilliseconds.Add(Stopwatch.GetElapsedTime(diagnosticStarted).TotalMilliseconds);
+            GameInterestSnapshot interest = _interest.GetSnapshot();
+            _pendingRelations.Add(interest.PendingRelationCount);
+            TransportTotals totals = CaptureTransportTotals();
+            _retainedBytes.Add(totals.RetainedBytes);
+            _reliableQueued.Add(totals.ReliableQueued);
+            _independentQueued.Add(totals.IndependentQueued);
+            _receivedQueued.Add(totals.ReceivedQueued);
+            _inFlightPackets.Add(totals.InFlightPackets);
+            _retainedPayloadRatio.Add(totals.RetainedCapacityBytes == 0
+                ? 0
+                : totals.RetainedBytes / (double)totals.RetainedCapacityBytes);
+        }
+    }
+
+    private void PublishEvents(int tick)
+    {
+        int count = Math.Max(1, _profile.Clients / 20);
+        int start = checked((tick - 1) * count % _profile.Clients);
+        for (int offset = 0; offset < count; offset++)
+        {
+            int client = (start + offset) % _profile.Clients;
+            Check(_projection.TryPublishApplicationEvent(
+                    Participant(client), kind: 1, subject: checked((ulong)tick),
+                    payloadHash: checked((ulong)client + 1), out GameApplicationEvent value),
+                "Application Event retention exceeded its admitted bound.");
+            int sequence = checked((int)value.Sequence);
+            Check(sequence < _eventPublishedAt.Length, "Event timing storage exhausted.");
+            _eventPublishedAt[sequence] = Stopwatch.GetTimestamp();
+            _eventPublishedTick[sequence] = tick;
+            _eventsPublished++;
+        }
+    }
+
+    private void ScheduleApplication(long nowMilliseconds)
+    {
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            ReplicationBot bot = _bots[index];
+            for (int bundle = 0; bundle < BundlesPerRecipientTick; bundle++)
+            {
+                GameWorldStateBuildStatus status = bot.WorldServer.TrySchedule(
+                    nowMilliseconds, WorldStateByteBudget);
+                if (status != GameWorldStateBuildStatus.Success) break;
+            }
+            _ = bot.EventServer.TrySchedule();
+        }
+    }
+
+    private void PumpAndDispatch(bool captureBatch)
+    {
+        if (captureBatch)
+            for (int index = 0; index < _bots.Length; index++)
+            {
+                _batchCensus.Add(_bots[index].Session.Client.InspectUnreliableBatchOpportunity());
+                _batchCensus.Add(_bots[index].Session.Server.InspectUnreliableBatchOpportunity());
+            }
+        _host.Pump();
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            ReplicationBot bot = _bots[index];
+            while (bot.Session.Server.TryPeekReceived(
+                       out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+            {
+                _ = bot.WorldServer.TryProcess(in message, payload) ||
+                    bot.EventServer.TryProcess(in message, payload);
+                _ = bot.Session.Server.TryConsumeReceived();
+            }
+            while (bot.Session.Client.TryPeekReceived(
+                       out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+            {
+                _ = bot.WorldClient.TryProcess(in message, payload) ||
+                    bot.EventClient.TryProcess(in message, payload);
+                _ = bot.Session.Client.TryConsumeReceived();
+            }
+            _ = bot.WorldClient.TryFlushAcknowledgements();
+            _ = bot.EventClient.TryFlushAcknowledgement();
+            while (bot.EventClient.TryConsumeNext(out RemoteApplicationEventSnapshot value))
+            {
+                int sequence = checked((int)value.Sequence);
+                Check(sequence < _eventPublishedAt.Length && _eventPublishedAt[sequence] != 0,
+                    "Applied Event did not have a publication timestamp.");
+                _eventMs.Observe(Stopwatch.GetElapsedTime(_eventPublishedAt[sequence]).TotalMilliseconds);
+                _eventTicks.Observe(Math.Max(0,
+                    _currentAuthorityTick - _eventPublishedTick[sequence]));
+                _eventsApplied++;
+            }
+        }
+    }
+
+    private void DrainInitialState()
+    {
+        for (int round = 0; round < 2_048; round++)
+        {
+            ScheduleApplication(checked(100L + round * 17L));
+            for (int pass = 0; pass < 4; pass++) PumpAndDispatch(captureBatch: false);
+            GameInterestSnapshot snapshot = _interest.GetSnapshot();
+            if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0)
+            {
+                CaptureRelationTiers();
+                return;
+            }
+            Thread.Sleep(1);
+        }
+        throw new InvalidOperationException("Initial recipient state did not converge.");
+    }
+
+    private int DrainState(int authorityTick, ref long nextDeadline, bool measure)
+    {
+        _currentAuthorityTick = authorityTick;
+        for (int settle = 1; settle <= 240; settle++)
+        {
+            ScheduleApplication(SemanticMilliseconds(authorityTick + settle));
+            for (int pass = 0; pass < 4; pass++) PumpAndDispatch(captureBatch: measure);
+            ScanFreshness(authorityTick, measure);
+            GameInterestSnapshot snapshot = _interest.GetSnapshot();
+            if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0 &&
+                _bots.All(bot => !bot.EventServer.GetSnapshot().AwaitingApplication))
+                return settle;
+            WaitForRealtimeTick(ref nextDeadline);
+        }
+        return 240;
+    }
+
+    private void ScanFreshness(int authorityTick, bool measure)
+    {
+        for (int client = 0; client < _bots.Length; client++)
+        {
+            int count = _bots[client].WorldClient.CopyActiveEntitiesUnordered(_clientScratch);
+            int baseIndex = checked(client * _profile.Entities);
+            for (int index = 0; index < count; index++)
+            {
+                ref readonly RemoteWorldEntitySnapshot state = ref _clientScratch[index];
+                int entity = checked((int)state.Entity.Index);
+                ulong prior = _lastSeenVersions[baseIndex + entity];
+                if (state.CanonicalVersion == prior) continue;
+                _lastSeenVersions[baseIndex + entity] = state.CanonicalVersion;
+                if (!measure || _versionCreatedTick[entity] < 0 ||
+                    state.CanonicalVersion != _versions[entity]) continue;
+                double milliseconds = Stopwatch.GetElapsedTime(_versionCreatedAt[entity]).TotalMilliseconds;
+                double ticks = Math.Max(0, authorityTick - _versionCreatedTick[entity]);
+                _allMs.Observe(milliseconds);
+                _clientFreshness[client].Observe(milliseconds);
+                switch ((GameInterestTier)_relationTiers[baseIndex + entity])
+                {
+                    case GameInterestTier.Immediate:
+                        _immediateMs.Observe(milliseconds);
+                        _immediateTicks.Observe(ticks);
+                        break;
+                    case GameInterestTier.Near:
+                        _nearMs.Observe(milliseconds);
+                        _nearTicks.Observe(ticks);
+                        break;
+                    case GameInterestTier.Far:
+                        _farMs.Observe(milliseconds);
+                        _farTicks.Observe(ticks);
+                        break;
+                }
+            }
+        }
+    }
+
+    private bool ValidateConvergence()
+    {
+        int relationCount = _interest.CopyRelations(_relationScratch);
+        int relationIndex = 0;
+        for (int client = 0; client < _bots.Length; client++)
+        {
+            int count = _bots[client].WorldClient.CopyActiveEntities(_clientScratch);
+            int expected = 0;
+            while (relationIndex < relationCount &&
+                   _relationScratch[relationIndex].Participant == Participant(client))
+            {
+                ref readonly GameRecipientEntityRelationSnapshot relation = ref _relationScratch[relationIndex++];
+                if (!relation.DesiredPresent) continue;
+                expected++;
+                int entity = checked((int)relation.Entity.Index);
+                if (_lastSeenVersions[checked(client * _profile.Entities + entity)] != _versions[entity])
+                    return false;
+            }
+            if (count != expected) return false;
+        }
+        return relationIndex == relationCount;
+    }
+
+    private void CaptureRelationTiers()
+    {
+        Array.Clear(_relationTiers);
+        int count = _interest.CopyRelations(_relationScratch);
+        for (int index = 0; index < count; index++)
+        {
+            ref readonly GameRecipientEntityRelationSnapshot relation = ref _relationScratch[index];
+            int client = checked((int)relation.Participant.Value - 1);
+            int entity = checked((int)relation.Entity.Index);
+            _relationTiers[checked(client * _profile.Entities + entity)] = (byte)relation.Tier;
+        }
+    }
+
+    private int MeasureMaximumRecipientScope()
+    {
+        int count = _interest.CopyRelations(_relationScratch);
+        int maximum = 0;
+        int current = 0;
+        ParticipantId participant = default;
+        for (int index = 0; index < count; index++)
+        {
+            ref readonly GameRecipientEntityRelationSnapshot relation = ref _relationScratch[index];
+            if (relation.Participant != participant)
+            {
+                maximum = Math.Max(maximum, current);
+                participant = relation.Participant;
+                current = 0;
+            }
+            if (relation.DesiredPresent) current++;
+        }
+        maximum = Math.Max(maximum, current);
+        Check(maximum > 0, "No recipient owns an admitted interest scope.");
+        return maximum;
+    }
+
+    private void ResetMeasurement()
+    {
+        _eventsPublished = 0;
+        _eventsApplied = 0;
+        _immediateMs.Clear();
+        _nearMs.Clear();
+        _farMs.Clear();
+        _allMs.Clear();
+        _immediateTicks.Clear();
+        _nearTicks.Clear();
+        _farTicks.Clear();
+        _eventMs.Clear();
+        _eventTicks.Clear();
+        foreach (LatencyHistogram value in _clientFreshness) value.Clear();
+        _tickMilliseconds.Clear();
+        _diagnosticMilliseconds.Clear();
+        _pendingRelations.Clear();
+        _retainedBytes.Clear();
+        _reliableQueued.Clear();
+        _independentQueued.Clear();
+        _receivedQueued.Clear();
+        _inFlightPackets.Clear();
+        _retainedPayloadRatio.Clear();
+        _batchCensus.Clear();
+    }
+
+    private TransportTotals CaptureTransportTotals()
+    {
+        TransportTotals total = default;
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            SharedUdpProtocolSessionSnapshot session = _bots[index].Session.GetSnapshot();
+            total.Add(session.Client, session.ClientDatagrams);
+            total.Add(session.Server, default);
+        }
+        SharedUdpListenerSnapshot listener = _host.GetSnapshot().Listener;
+        total.WireDatagrams = checked(total.WireDatagrams + listener.Sent);
+        total.WireBytes = checked(total.WireBytes + listener.SentBytes);
+        total.CapacityDrops = checked(total.CapacityDrops + listener.CapacityDrops);
+        total.SendCalls = checked(total.SendCalls + listener.SendCalls);
+        return total;
+    }
+
+    private EventTotals CaptureEventTotals()
+    {
+        EventTotals total = default;
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            RemoteApplicationEventServerSnapshot snapshot = _bots[index].EventServer.GetSnapshot();
+            total.RecordsExamined = checked(total.RecordsExamined + snapshot.EventRecordsExamined);
+            total.RecordsSkipped = checked(total.RecordsSkipped + snapshot.EventRecordsSkipped);
+        }
+        return total;
+    }
+
+    private static ParticipantId Participant(int index) => new(checked((ulong)index + 1));
+
+    private static GameProjectedEntity Projected(int index, int marker) => new(
+        new ReplicationEntityId(checked((uint)index), 1),
+        true,
+        new GameSimulationState { TickMarker = marker, InputVelocity = marker });
+
+    private static long SemanticMilliseconds(int tick) => checked(tick * 1_000L / TickHz);
+
+    private static void WaitForRealtimeTick(ref long nextDeadline)
+    {
+        nextDeadline = checked(nextDeadline + Stopwatch.Frequency / TickHz);
+        while (true)
+        {
+            long remaining = nextDeadline - Stopwatch.GetTimestamp();
+            if (remaining <= 0) return;
+            if (remaining > Stopwatch.Frequency / 200)
+            {
+                int sleep = checked((int)Math.Max(1,
+                    remaining * 1_000 / Stopwatch.Frequency - 1));
+                Thread.Sleep(sleep);
+            }
+            else
+                Thread.SpinWait(64);
+        }
+    }
+
+    private static int LongestMissStreak(IReadOnlyList<double> values, double budget)
+    {
+        int current = 0;
+        int longest = 0;
+        for (int index = 0; index < values.Count; index++)
+        {
+            current = values[index] > budget ? current + 1 : 0;
+            longest = Math.Max(longest, current);
+        }
+        return longest;
+    }
+
+    private static void Check(bool condition, string message)
+    {
+        if (!condition) throw new InvalidOperationException(message);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        if (_bots is not null)
+            for (int index = 0; index < _bots.Length; index++) _bots[index]?.Dispose();
+        _host?.Dispose();
+        _projection?.Dispose();
+        _admission?.Dispose();
+        _runtime?.Dispose();
+    }
+
+    private sealed class ReplicationBot : IDisposable
+    {
+        internal ReplicationBot(
+            SharedUdpProtocolSession session,
+            RemoteWorldStateServer worldServer,
+            RemoteWorldStateClient worldClient,
+            RemoteApplicationEventServer eventServer,
+            RemoteApplicationEventClient eventClient)
+        {
+            Session = session;
+            WorldServer = worldServer;
+            WorldClient = worldClient;
+            EventServer = eventServer;
+            EventClient = eventClient;
+        }
+
+        internal SharedUdpProtocolSession Session { get; }
+        internal RemoteWorldStateServer WorldServer { get; }
+        internal RemoteWorldStateClient WorldClient { get; }
+        internal RemoteApplicationEventServer EventServer { get; }
+        internal RemoteApplicationEventClient EventClient { get; }
+
+        public void Dispose()
+        {
+            EventServer.Dispose();
+            Session.Dispose();
+        }
+    }
+
+    private struct TransportTotals
+    {
+        internal ulong WireDatagrams;
+        internal ulong WireBytes;
+        internal ulong DataPackets;
+        internal ulong AcknowledgementPackets;
+        internal ulong Retransmissions;
+        internal ulong RetransmittedWireBytes;
+        internal ulong CapacityDrops;
+        internal ulong ByteCapacityFailures;
+        internal ulong Compactions;
+        internal ulong CompactionBytesMoved;
+        internal ulong SendCalls;
+        internal long RetainedBytes;
+        internal long RetainedCapacityBytes;
+        internal int ReliableQueued;
+        internal int IndependentQueued;
+        internal int ReceivedQueued;
+        internal int InFlightPackets;
+
+        internal void Add(NetworkProtocolSnapshot protocol, UdpDatagramEndpointSnapshot datagrams)
+        {
+            DataPackets = checked(DataPackets + protocol.DataPacketsSent);
+            AcknowledgementPackets = checked(AcknowledgementPackets + protocol.AcknowledgementPacketsSent);
+            Retransmissions = checked(Retransmissions + protocol.ReliableRetransmissions);
+            RetransmittedWireBytes = checked(RetransmittedWireBytes + protocol.ReliableRetransmittedWireBytes);
+            CapacityDrops = checked(CapacityDrops + protocol.CapacityDrops + datagrams.CapacityDrops);
+            WireDatagrams = checked(WireDatagrams + datagrams.Sent);
+            WireBytes = checked(WireBytes + datagrams.SentBytes);
+            SendCalls = checked(SendCalls + datagrams.SendCalls);
+            NetworkRetainedPayloadSnapshot payload = protocol.RetainedPayloads;
+            RetainedBytes = checked(RetainedBytes + payload.TotalBytes);
+            RetainedCapacityBytes = checked(RetainedCapacityBytes + payload.TotalCapacityBytes);
+            ReliableQueued = checked(ReliableQueued + protocol.ReliableQueued);
+            IndependentQueued = checked(IndependentQueued + protocol.IndependentUnreliableQueued);
+            ReceivedQueued = checked(ReceivedQueued + protocol.ReceivedQueued);
+            InFlightPackets = checked(InFlightPackets + protocol.InFlightPackets);
+            ByteCapacityFailures = checked(ByteCapacityFailures + payload.ByteCapacityFailures);
+            Compactions = checked(Compactions + payload.ReliableCompactions + payload.ReceivedCompactions);
+            CompactionBytesMoved = checked(CompactionBytesMoved + payload.ReliableCompactionBytesMoved +
+                payload.ReceivedCompactionBytesMoved);
+        }
+    }
+
+    private struct EventTotals
+    {
+        internal ulong RecordsExamined;
+        internal ulong RecordsSkipped;
+    }
+}
+
+internal sealed class LatencyHistogram
+{
+    private readonly double _width;
+    private readonly double _percentileBucketOffset;
+    private readonly long[] _buckets;
+    private long _count;
+    private double _sum;
+    private double _max;
+
+    internal LatencyHistogram(double width, int buckets, double percentileBucketOffset = 0.5)
+    {
+        _width = width;
+        _percentileBucketOffset = percentileBucketOffset;
+        _buckets = new long[buckets];
+    }
+
+    internal void Observe(double value)
+    {
+        if (!double.IsFinite(value) || value < 0) return;
+        int bucket = Math.Min(_buckets.Length - 1, checked((int)(value / _width)));
+        _buckets[bucket]++;
+        _count++;
+        _sum += value;
+        _max = Math.Max(_max, value);
+    }
+
+    internal NetworkMetricSummary Summary() => _count == 0
+        ? default
+        : new(_sum / _count, Percentile(0.50), Percentile(0.95), Percentile(0.99), _max);
+
+    internal void Clear()
+    {
+        Array.Clear(_buckets);
+        _count = 0;
+        _sum = 0;
+        _max = 0;
+    }
+
+    private double Percentile(double percentile)
+    {
+        long target = Math.Max(1, checked((long)Math.Ceiling(_count * percentile)));
+        long seen = 0;
+        for (int index = 0; index < _buckets.Length; index++)
+        {
+            seen += _buckets[index];
+            if (seen >= target) return (index + _percentileBucketOffset) * _width;
+        }
+        return _max;
+    }
+}
+
+internal sealed class ReplicationBatchCensus
+{
+    private ulong _inspections;
+    private ulong _nonempty;
+    private ulong _twoOrMore;
+    private ulong _threeOrMore;
+    private ulong _readyFrames;
+    private ulong _plaintextBytes;
+    private ulong _greedyDatagrams;
+    private int _maxFrames;
+
+    internal void Add(NetworkUnreliableBatchOpportunity value)
+    {
+        _inspections++;
+        if (value.ReadyFrames == 0) return;
+        _nonempty++;
+        if (value.ReadyFrames >= 2) _twoOrMore++;
+        if (value.ReadyFrames >= 3) _threeOrMore++;
+        _readyFrames = checked(_readyFrames + (ulong)value.ReadyFrames);
+        _plaintextBytes = checked(_plaintextBytes + (ulong)value.PlaintextBytes);
+        _greedyDatagrams = checked(_greedyDatagrams + (ulong)value.GreedyDatagrams);
+        _maxFrames = Math.Max(_maxFrames, value.ReadyFrames);
+    }
+
+    internal void Clear()
+    {
+        _inspections = 0;
+        _nonempty = 0;
+        _twoOrMore = 0;
+        _threeOrMore = 0;
+        _readyFrames = 0;
+        _plaintextBytes = 0;
+        _greedyDatagrams = 0;
+        _maxFrames = 0;
+    }
+
+    internal ReplicationBatchOpportunityReport CreateReport() => new(
+        _inspections,
+        _nonempty,
+        _twoOrMore,
+        _threeOrMore,
+        _readyFrames,
+        _plaintextBytes,
+        _nonempty == 0 ? 0 : _readyFrames / (double)_nonempty,
+        _nonempty == 0 ? 0 : _plaintextBytes / (double)_nonempty,
+        _greedyDatagrams,
+        _maxFrames);
+}
+
+internal sealed record ReplicationSuiteReport(
+    string Schema,
+    DateTimeOffset TimestampUtc,
+    string Runtime,
+    int LogicalProcessors,
+    string Methodology,
+    IReadOnlyList<ReplicationWorkloadResult> Results);
+
+internal sealed record ReplicationWorkloadResult(
+    ReplicationWorkload Profile,
+    int Relations,
+    int MaximumRecipientScope,
+    bool Converged,
+    int SettleTicks,
+    NetworkMetricSummary TickMilliseconds,
+    NetworkMetricSummary DiagnosticProbeMilliseconds,
+    NetworkMetricSummary ImmediateFreshnessMilliseconds,
+    NetworkMetricSummary NearFreshnessMilliseconds,
+    NetworkMetricSummary FarFreshnessMilliseconds,
+    NetworkMetricSummary AllWorldStateFreshnessMilliseconds,
+    NetworkMetricSummary ImmediateFreshnessTicks,
+    NetworkMetricSummary NearFreshnessTicks,
+    NetworkMetricSummary FarFreshnessTicks,
+    NetworkMetricSummary EventApplicationMilliseconds,
+    NetworkMetricSummary EventApplicationTicks,
+    NetworkMetricSummary PerClientFreshnessP95Milliseconds,
+    double WorstClientFreshnessP95Milliseconds,
+    double WorstClientFreshnessMaximumMilliseconds,
+    NetworkMetricSummary PendingRelations,
+    NetworkMetricSummary RetainedPayloadBytes,
+    NetworkMetricSummary AggregateReliableQueued,
+    NetworkMetricSummary AggregateIndependentQueued,
+    NetworkMetricSummary AggregateReceivedQueued,
+    NetworkMetricSummary AggregateInFlightPackets,
+    NetworkMetricSummary RetainedPayloadCapacityRatio,
+    int NonviableRecipients,
+    int TickDeadlineMisses,
+    int LongestDeadlineMissStreak,
+    ulong ApplicationEventsPublished,
+    ulong ApplicationEventsApplied,
+    ulong SemanticConstructions,
+    ulong SemanticRecordCopies,
+    ulong SemanticRecordBytes,
+    ulong BundlesBuilt,
+    ulong ApplicationEventRecordsExamined,
+    ulong ApplicationEventRecordsSkipped,
+    int ApplicationEventRetainedHighWater,
+    ulong ApplicationEventMinimumCursorScanEntries,
+    ulong WireDatagrams,
+    ulong WireBytes,
+    ulong DataPackets,
+    ulong AcknowledgementPackets,
+    ulong Retransmissions,
+    ulong RetransmittedWireBytes,
+    ulong CapacityDrops,
+    ulong RetainedByteCapacityFailures,
+    ulong RetainedPayloadCompactions,
+    ulong RetainedPayloadCompactionBytesMoved,
+    long KnownReservedBytes,
+    long PeakManagedHeapBytes,
+    long PeakWorkingSetBytes,
+    long PeakPrivateBytes,
+    long AllocatedBytes,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections,
+    double ProcessCpuMilliseconds,
+    double ProcessCpuCoreUtilization,
+    SharedUdpListenerSnapshot ListenerBefore,
+    SharedUdpListenerSnapshot ListenerAfter,
+    ReplicationBatchOpportunityReport BatchOpportunity,
+    ReplicationAmplification Amplification);
+
+internal readonly record struct ReplicationBatchOpportunityReport(
+    ulong Inspections,
+    ulong NonemptyInspections,
+    ulong InspectionsWithTwoOrMoreFrames,
+    ulong InspectionsWithThreeOrMoreFrames,
+    ulong ReadyFrames,
+    ulong PlaintextBytes,
+    double MeanReadyFramesWhenNonempty,
+    double MeanPlaintextBytesWhenNonempty,
+    ulong TheoreticalGreedyDatagrams,
+    int MaximumReadyFrames);
+
+internal readonly record struct ReplicationAmplification(
+    double RecipientCopiesPerSemanticConstruction,
+    double BundlesPerRecipientCopy,
+    double DataPacketsPerBundle,
+    double WireBytesPerRecipientCopy,
+    double WireBytesPerWorldSemanticByte,
+    double MeanWireBytesPerDatagram,
+    double RetransmittedWireFraction);
+
+internal sealed record ReplicationWorkload(
+    string Id,
+    int Clients,
+    int Entities,
+    int Ticks,
+    int WarmupTicks,
+    int DirtyPercent,
+    int SpacingMillimeters,
+    string SpatialShape)
+{
+    internal static ReplicationWorkload Dense(int clients, int ticks, int warmup, int dirty) =>
+        new("dense_mix", clients, 1_000, ticks, warmup, dirty, 4_000,
+            "One 126 m hotspot; all recipients distributed through the hotspot; every entity lies inside the 192 m Far envelope.");
+
+    internal static ReplicationWorkload Spread(int clients, int ticks, int warmup, int dirty) =>
+        new("spread_mix", clients, 5_000, ticks, warmup, dirty, 12_000,
+            "One 768 m distributed grid; recipients are distributed through the world; maintained relations follow local 192 m envelopes.");
+
+    internal ReplicationSpatialPoint EntityPoint(int entity)
+    {
+        int width = checked((int)Math.Ceiling(Math.Sqrt(Entities)));
+        return new(
+            checked((entity % width) * SpacingMillimeters),
+            checked((entity / width) * SpacingMillimeters));
+    }
+
+    internal ReplicationSpatialPoint Anchor(int client)
+    {
+        int width = checked((int)Math.Ceiling(Math.Sqrt(Entities)));
+        int entity = Clients == 1 ? 0 : checked(client * (Entities - 1) / (Clients - 1));
+        return new(
+            checked((entity % width) * SpacingMillimeters),
+            checked((entity / width) * SpacingMillimeters));
+    }
+}

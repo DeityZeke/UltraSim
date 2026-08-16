@@ -595,6 +595,12 @@ static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
     Equal(3U, active[0].Entity.Index);
     Equal(31, active[0].TickMarker);
     Equal(2UL, active[0].CanonicalVersion);
+    active.Clear();
+    Equal(2, client.CopyActiveEntitiesUnordered(active));
+    True(active[0].Entity.Index is 3 or 9);
+    True(active[1].Entity.Index is 3 or 9);
+    True(active[0].Entity.Index != active[1].Entity.Index,
+        "Unordered diagnostic copy lost or duplicated an active dense slot.");
 }
 
 static void WorldStateTombstoneKnowledgeIsIndependentFromPresentation()

@@ -4,6 +4,12 @@ using System.Globalization;
 using UltraSim.Network;
 using UltraSim.Network.Comparison;
 
+if (args.Contains("--replication-suite", StringComparer.Ordinal))
+{
+    DenseReplicationSuite.Run(args);
+    return;
+}
+
 AdapterOptions options = AdapterOptions.Parse(args);
 if (options.CadenceSuite)
 {
