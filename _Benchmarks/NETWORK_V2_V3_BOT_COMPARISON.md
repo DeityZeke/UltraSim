@@ -474,11 +474,37 @@ the prior scalar 2.821 ms observation, consistent with the diagnostic result.
 The experiment therefore earns the bounded native-send seam but rejects the
 stronger prediction that syscall-count collapse alone would remove most of the
 remaining CPU gap. `sendmmsg` amortizes the managed/kernel transition while the
-kernel still performs per-datagram UDP work. Native receive batching is not the
-next broad optimization by inspection: server receive syscall time is only about
-8 ms in these stages. Per-connection reservation specialization remains the next
-independent obligation; any further CPU work must remeasure the residual rather
-than infer it from syscall counts.
+kernel still performs per-datagram UDP work. Native receive batching was not the
+next broad optimization from this workload alone: server receive syscall time is
+only about 8 ms in these stages. Observer-heavy profiles must remeasure it.
+
+### N0.10 dense shared-listener native receive experiment
+
+`dense_mix` supplied that missing evidence. The send-only Full census observed
+58,000 inbound datagrams across 458 nonempty listener drains, with as many as
+400 datagrams already available at one pump. A bounded batch of 32 projected
+2,069 native calls; WorldState-only projected 1,728 calls for 53,200 datagrams.
+No wait or new packet format was required.
+
+The isolated Linux `recvmmsg` path owns fixed listener buffers, preserves
+independent route/per-session admission, and falls back to scalar receive off
+Linux. Full used 2,073 native calls for all 58,000 datagrams with batch p50/p95
+32. Under matched deep probes, listener poll time fell 30.34→0.56 ms, receive
+syscall time 42.65→20.71 ms, server-protocol p95 4.002→3.380 ms, and server-role
+p95 10.054→9.051 ms. These absolute role figures include diagnostic overhead.
+
+Probes-off Full improved 11.758→10.850 ms in one order and 11.340→11.053 ms in
+reverse order; WorldState-only improved 10.552→9.964 ms. Updates-only remained
+effectively unchanged, while Event-only's small difference was noise-sized. A
+protocol-only role probe measured mean/p95 5.386/5.643 ms for scalar receive and
+4.99-5.08/5.36-5.54 ms across native observations. Two native p99 observations
+were 5.51/5.63 ms; one scheduler/runtime outlier produced 6.97 ms. The path is
+retained as a useful bounded optimization, but consistent p99 <6 ms is not yet
+claimed.
+
+Per-connection reservation specialization remains an independent obligation;
+any further CPU work must remeasure the residual rather than infer it from
+syscall counts.
 
 ### N0.10.6 manifest-aware payload reservation
 

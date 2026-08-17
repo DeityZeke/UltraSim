@@ -312,6 +312,17 @@ pump and never delays traffic to form a batch. This Linux fast path remains an
 explicit deployment choice with the scalar path as portable fallback; its fixed
 ring is included in reservation accounting.
 
+Dense-400 later earned the matching receive experiment. `PlatformBatch` remains
+the accepted send-only control; `PlatformSendReceiveBatch` additionally owns
+fixed listener receive payload/address/length storage and uses Linux `recvmmsg`
+when available. It performs one zero-time readability check and drains only the
+datagrams already available at that pump—there is no wait to fill a batch.
+Every returned datagram still routes through the existing path table and bounded
+per-session ring independently. Truncation, unknown paths and per-session
+pressure retain the scalar rejection/accounting semantics, while unsupported
+platforms keep the portable scalar receive path. Permanent tests cover
+independent routes, per-session pressure and warmed 0-B delivery.
+
 Protocol payload reservation is manifest- and lane-aware. The global maximum
 message size is an admission ceiling, not an allocation behind every slot.
 Reliable/receive strides use the largest admitted descriptor; nonfragmenting

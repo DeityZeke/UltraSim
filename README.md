@@ -52,6 +52,13 @@ wheel enlarged and churned the hot relation representation enough to regress the
 probes-off Full tick 10.598→11.711 ms. That representation was rejected and is
 not in production; only dormant attribution and immutable negative evidence are
 retained. Comfortable p99 headroom remains open.
+Dense protocol attribution then found 58,000 inbound datagrams available in only
+458 nonempty listener drains. An opt-in Linux `recvmmsg` path preserves each
+datagram's routing/admission semantics while reducing that Full observation to
+2,073 native receive calls. Matched probes-off Full controls improved
+11.758→10.850 ms and 11.340→11.053 ms in reverse order; the server-role mean and
+p95 improved, while p99 remained run-sensitive and is not yet a consistently
+closed target.
 
 ## Design
 

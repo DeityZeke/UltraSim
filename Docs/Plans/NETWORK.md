@@ -2345,6 +2345,79 @@ diagnostic. Any future pending optimization must avoid growing every relation;
 a narrow recipient-local negative-result cache may be measured separately, but
 is not justified by counts alone.
 
+#### Dense-400 server-protocol census and native receive batching
+
+Pending-list work is closed for now: Dense-400 has no same-recipient/same-time
+attempt after a `NoData` result, so a recipient-local negative-result cache has
+no measured hit opportunity. The accepted expiration diagnostic instead shows
+server protocol owning roughly two-thirds of server-role CPU.
+
+Opt-in protocol attribution now separates listener poll/syscall/routing;
+server-peer endpoint receive, AEAD, frame admission and residual bookkeeping;
+selection/encode/send AEAD/listener admission/send syscall; plus empty inbound
+and emit calls. It can run without the prior per-relation pending clocks via
+`--worldstate-attribution=false`.
+
+The send-only Full census
+[`network-v3-dense-receive-batch-census-pre-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-receive-batch-census-pre-2026-08-16.json)
+found:
+
+```text
+received datagrams                         58,000
+host receive pumps / nonempty pumps       492 / 458
+maximum datagrams already available       400
+pumps with at least 8 / 16 / 32           366 / 362 / 241
+scalar receive calls                      58,000
+theoretical calls at batch 4/8/16/32      14,587 / 7,426 / 3,854 / 2,069
+```
+
+That evidence earned a fixed, listener-owned Linux `recvmmsg` experiment. It
+does not wait to fill a batch or alter packets above the endpoint: each datagram
+keeps its packet number, AEAD, route, bounded per-session admission and failure
+accounting. `PlatformBatch` remains the send-only control;
+`PlatformSendReceiveBatch` adds native receive where supported and otherwise
+uses the scalar fallback. Independent-route, pressure and warmed 0-B tests are
+permanent.
+
+The causal artifact
+[`network-v3-dense-native-receive-batch-causal-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-batch-causal-2026-08-16.json)
+records 2,073 native calls for all 58,000 Full datagrams, native batch p50/p95
+32, poll time 30.34→0.56 ms, receive-syscall time 42.65→20.71 ms,
+server-protocol p95 4.002→3.380 ms, and deep-probe server-role p95
+10.054→9.051 ms. The absolute role values include diagnostic clocks.
+
+Matched probes-off
+[`control`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-batch-control-2026-08-16.json)
+and
+[`hardened`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-batch-hardened-2026-08-16.json)
+artifacts improve Full 11.758→10.850 ms and WorldState-only 10.552→9.964 ms.
+A reverse-order
+[`control`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-batch-reverse-control-2026-08-16.json)/
+[`experiment`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-batch-reverse-experiment-2026-08-16.json)
+Full observation improves 11.340→11.053 ms. The improvement is smaller but
+positive in both orders, so the path is retained.
+
+Protocol-only role evidence preserves the remaining tail qualification. Scalar
+mean/p95/p99 was 5.386/5.643/5.789 ms. Three native observations were:
+
+```text
+mean       p95       p99
+5.073 ms   5.539 ms  6.970 ms
+5.080 ms   5.410 ms  5.510 ms
+4.989 ms   5.359 ms  5.629 ms
+```
+
+The immutable role artifacts are
+[`scalar`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-role-control-2026-08-16.json),
+[`native 1`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-role-hardened-1-2026-08-16.json),
+[`native 2`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-role-hardened-2-2026-08-16.json), and
+[`native 3`](../../_Benchmarks/Baselines/network-v3-dense-native-receive-role-hardened-3-2026-08-16.json).
+
+Mean and p95 improve, and two observations meet p99 <6 ms, but the outlier means
+comfortable tail headroom is not yet a consistent acceptance claim. This closes
+the receive-call multiplier; it does not justify waiting, larger batches,
+workers, or changes to peer/security semantics.
+
 Protected profiles:
 
 ```text

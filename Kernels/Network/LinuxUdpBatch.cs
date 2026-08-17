@@ -9,7 +9,9 @@ namespace UltraSim.Network;
 internal static unsafe class LinuxUdpBatch
 {
     private const string Libc = "libc";
-    private static readonly bool s_isSupported = DetectSupport();
+    private const int MessageTruncated = 0x20;
+    private static readonly bool s_isSupported = DetectSupport("sendmmsg");
+    private static readonly bool s_isReceiveSupported = DetectSupport("recvmmsg");
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct IoVector
@@ -38,6 +40,7 @@ internal static unsafe class LinuxUdpBatch
     }
 
     internal static bool IsSupported => s_isSupported;
+    internal static bool IsReceiveSupported => s_isReceiveSupported;
 
     internal static int Send(
         int socketDescriptor,
@@ -79,6 +82,49 @@ internal static unsafe class LinuxUdpBatch
         }
     }
 
+    internal static int Receive(
+        int socketDescriptor,
+        byte[] payloads,
+        int maximumDatagramBytes,
+        byte[] addresses,
+        int addressBytes,
+        int[] lengths,
+        int count,
+        out int error)
+    {
+        if (!IsReceiveSupported)
+            throw new PlatformNotSupportedException("Linux recvmmsg is unavailable.");
+        if (count <= 0 || count > 256) throw new ArgumentOutOfRangeException(nameof(count));
+
+        IoVector* vectors = stackalloc IoVector[count];
+        MultipleMessageHeader* messages = stackalloc MultipleMessageHeader[count];
+        new Span<IoVector>(vectors, count).Clear();
+        new Span<MultipleMessageHeader>(messages, count).Clear();
+
+        fixed (byte* payloadBase = payloads)
+        fixed (byte* addressBase = addresses)
+        {
+            for (int index = 0; index < count; index++)
+            {
+                vectors[index].Base = payloadBase + checked(index * maximumDatagramBytes);
+                vectors[index].Length = checked((nuint)maximumDatagramBytes);
+                messages[index].Header.Name = addressBase + checked(index * addressBytes);
+                messages[index].Header.NameLength = checked((uint)addressBytes);
+                messages[index].Header.Vectors = &vectors[index];
+                messages[index].Header.VectorCount = 1;
+            }
+
+            int received = ReceiveMultiple(
+                socketDescriptor, messages, checked((uint)count), 0, null);
+            error = received < 0 ? Marshal.GetLastPInvokeError() : 0;
+            for (int index = 0; index < received; index++)
+                lengths[index] = (messages[index].Header.Flags & MessageTruncated) != 0
+                    ? -1
+                    : checked((int)messages[index].Length);
+            return received;
+        }
+    }
+
     [DllImport(Libc, EntryPoint = "sendmmsg", SetLastError = true)]
     private static extern int SendMultiple(
         int socket,
@@ -86,7 +132,15 @@ internal static unsafe class LinuxUdpBatch
         uint count,
         int flags);
 
-    private static bool DetectSupport()
+    [DllImport(Libc, EntryPoint = "recvmmsg", SetLastError = true)]
+    private static extern int ReceiveMultiple(
+        int socket,
+        MultipleMessageHeader* messages,
+        uint count,
+        int flags,
+        void* timeout);
+
+    private static bool DetectSupport(string export)
     {
         if (!OperatingSystem.IsLinux() || OperatingSystem.IsAndroid() ||
             IntPtr.Size != 8 || sizeof(IoVector) != 16 ||
@@ -95,7 +149,7 @@ internal static unsafe class LinuxUdpBatch
         if (!NativeLibrary.TryLoad(Libc, out nint library)) return false;
         try
         {
-            return NativeLibrary.TryGetExport(library, "sendmmsg", out _);
+            return NativeLibrary.TryGetExport(library, export, out _);
         }
         finally
         {

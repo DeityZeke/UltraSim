@@ -295,11 +295,15 @@ internal static class N03ProtocolTests
         NetworkProtocolStageTiming sender = loopback.Client.GetStageTiming();
         NetworkProtocolStageTiming receiver = loopback.Server.GetStageTiming();
         True(sender.EmitTicks > 0);
+        True(sender.EmitCalls > 0);
         True(sender.SelectionTicks > 0);
         True(sender.FrameEncodeTicks > 0);
         True(sender.SecureSendTicks > 0);
         True(sender.EndpointSendTicks > 0);
         True(receiver.InboundTicks > 0);
+        True(receiver.InboundCalls > 0);
+        True(receiver.InboundDatagrams > 0);
+        True(receiver.EmptyInboundCalls < receiver.InboundCalls);
         True(receiver.EndpointReceiveTicks > 0);
         True(receiver.SecureReceiveTicks > 0);
         True(receiver.FrameAdmissionTicks > 0);

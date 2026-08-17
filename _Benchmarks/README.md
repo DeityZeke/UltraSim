@@ -129,6 +129,15 @@ already-selected classifications, traversal and tier overhead, record/commit
 work, counts all-deferred `NoData` calls, and preserves logarithmic remaining-
 delay histograms. Per-candidate clocks are intentionally diagnostic overhead;
 their absolute totals are not probes-off production cost.
+Server-protocol attribution further separates shared-listener poll, receive
+syscall and route/admission time; server-peer endpoint receive, AEAD, frame
+admission and residual bookkeeping; send selection/encode/AEAD/listener
+admission/syscall; and empty peer calls. The listener census records complete
+no-wait receive drains and theoretical native call counts at 4/8/16/32. Use
+`--worldstate-attribution=false` with `--phase-attribution=true` when measuring
+protocol/role tails without the much heavier per-relation WorldState clocks.
+`--shared-socket-io=platform-send-receive-batch` selects the bounded Linux
+`recvmmsg` experiment; the default `platform-batch` remains the send-only control.
 Cold freshness scans remain outside the timed tick. Probe-enabled figures are
 compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 

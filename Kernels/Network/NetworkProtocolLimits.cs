@@ -221,11 +221,16 @@ internal readonly record struct NetworkUnreliableBatchOpportunity(
 /// </summary>
 internal readonly record struct NetworkProtocolStageTiming(
     ulong EmitTicks,
+    ulong EmitCalls,
+    ulong IdleEmitCalls,
     ulong SelectionTicks,
     ulong FrameEncodeTicks,
     ulong SecureSendTicks,
     ulong EndpointSendTicks,
     ulong InboundTicks,
+    ulong InboundCalls,
+    ulong EmptyInboundCalls,
+    ulong InboundDatagrams,
     ulong EndpointReceiveTicks,
     ulong SecureReceiveTicks,
     ulong FrameAdmissionTicks,

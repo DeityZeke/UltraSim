@@ -109,6 +109,12 @@ Useful current anchors can be located by their embedded workload or filename:
   attribution-only hardened observation. The rejected files are negative
   evidence, not accepted production baselines; the wheel implementation was
   removed after it reduced scans but worsened normal-path CPU;
+- `network-v3-dense-receive-batch-*` and
+  `network-v3-dense-native-receive-*` — the send-only receive-drain census,
+  Linux `recvmmsg` causal/probes-off controls, and protocol-role tail
+  observations. They preserve both the native-call collapse and the remaining
+  p99 variability rather than promoting one favorable run to a universal tail
+  claim;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

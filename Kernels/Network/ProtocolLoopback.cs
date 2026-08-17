@@ -279,11 +279,16 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _nextPacedDataStep;
     private bool _stageTimingEnabled;
     private ulong _emitTicks;
+    private ulong _emitCalls;
+    private ulong _idleEmitCalls;
     private ulong _selectionTicks;
     private ulong _frameEncodeTicks;
     private ulong _secureSendTicks;
     private ulong _endpointSendTicks;
     private ulong _inboundTicks;
+    private ulong _inboundCalls;
+    private ulong _emptyInboundCalls;
+    private ulong _inboundDatagrams;
     private ulong _endpointReceiveTicks;
     private ulong _secureReceiveTicks;
     private ulong _frameAdmissionTicks;
@@ -540,11 +545,16 @@ public sealed class NetworkProtocolPeer : IDisposable
     {
         EnsureOperational();
         _emitTicks = 0;
+        _emitCalls = 0;
+        _idleEmitCalls = 0;
         _selectionTicks = 0;
         _frameEncodeTicks = 0;
         _secureSendTicks = 0;
         _endpointSendTicks = 0;
         _inboundTicks = 0;
+        _inboundCalls = 0;
+        _emptyInboundCalls = 0;
+        _inboundDatagrams = 0;
         _endpointReceiveTicks = 0;
         _secureReceiveTicks = 0;
         _frameAdmissionTicks = 0;
@@ -558,11 +568,16 @@ public sealed class NetworkProtocolPeer : IDisposable
         EnsureOperational();
         return new(
             _emitTicks,
+            _emitCalls,
+            _idleEmitCalls,
             _selectionTicks,
             _frameEncodeTicks,
             _secureSendTicks,
             _endpointSendTicks,
             _inboundTicks,
+            _inboundCalls,
+            _emptyInboundCalls,
+            _inboundDatagrams,
             _endpointReceiveTicks,
             _secureReceiveTicks,
             _frameAdmissionTicks,
@@ -607,6 +622,12 @@ public sealed class NetworkProtocolPeer : IDisposable
             processed++;
         }
         RecordStageTiming(ref _inboundTicks, inboundStarted);
+        if (_stageTimingEnabled)
+        {
+            _inboundCalls = SaturatingIncrement(_inboundCalls);
+            if (processed == 0) _emptyInboundCalls = SaturatingIncrement(_emptyInboundCalls);
+            _inboundDatagrams = SaturatingAdd(_inboundDatagrams, checked((ulong)processed));
+        }
         return processed;
     }
 
@@ -614,6 +635,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     {
         EnsureOperational();
         long emitStarted = StartStageTiming();
+        ulong sentBefore = _stageTimingEnabled ? _sentPacketsCount : 0;
         if (_inFlight != 0) ProcessExpiredFlights(step);
         int budget = _limits.MaximumPacketsPerPump;
         if (_ackPending && budget != 0 && TryEmitAcknowledgement()) budget--;
@@ -621,6 +643,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (_usesMonotonicPacing && step < _nextPacedDataStep)
         {
             RecordStageTiming(ref _emitTicks, emitStarted);
+            RecordEmitCall(sentBefore);
             return;
         }
 
@@ -647,6 +670,15 @@ public sealed class NetworkProtocolPeer : IDisposable
             }
         }
         RecordStageTiming(ref _emitTicks, emitStarted);
+        RecordEmitCall(sentBefore);
+    }
+
+    private void RecordEmitCall(ulong sentBefore)
+    {
+        if (!_stageTimingEnabled) return;
+        _emitCalls = SaturatingIncrement(_emitCalls);
+        if (_sentPacketsCount == sentBefore)
+            _idleEmitCalls = SaturatingIncrement(_idleEmitCalls);
     }
 
     public NetworkProtocolSnapshot GetSnapshot()

@@ -21,6 +21,10 @@ internal static class DenseReplicationSuite
         int dirtyPercent = ReadInt(args, "--dirty-percent", 2);
         string requestedTraffic = ReadText(args, "--replication-traffic") ?? "full";
         bool phaseAttribution = ReadBool(args, "--phase-attribution", false);
+        bool worldStateAttribution = ReadBool(
+            args, "--worldstate-attribution", phaseAttribution);
+        SharedUdpSocketIoMode socketIoMode = ParseSocketIoMode(
+            ReadText(args, "--shared-socket-io"));
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-v3-spread-dense-acceptance.json";
         if (clients <= 0 || clients > 1_024 || ticks < 30 || warmup < 1 ||
@@ -58,7 +62,8 @@ internal static class DenseReplicationSuite
         {
             Console.WriteLine($"REPLICATION {profile.Id}: constructing {profile.Clients} clients, " +
                 $"{profile.Entities} entities...");
-            using var harness = new ReplicationWorkloadHarness(profile, phaseAttribution);
+            using var harness = new ReplicationWorkloadHarness(
+                profile, phaseAttribution, worldStateAttribution, socketIoMode);
             ReplicationWorkloadResult result = harness.Run();
             Validate(result);
             results.Add(result);
@@ -118,6 +123,17 @@ internal static class DenseReplicationSuite
         string? match = args.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.Ordinal));
         return match is null ? null : match[prefix.Length..];
     }
+
+    private static SharedUdpSocketIoMode ParseSocketIoMode(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            null or "platform-batch" or "native-send-batch" =>
+                SharedUdpSocketIoMode.PlatformBatch,
+            "platform-send-receive-batch" or "native-send-receive-batch" =>
+                SharedUdpSocketIoMode.PlatformSendReceiveBatch,
+            "scalar" => SharedUdpSocketIoMode.Scalar,
+            _ => throw new ArgumentException($"Unsupported shared socket I/O mode '{value}'."),
+        };
 }
 
 internal sealed class ReplicationWorkloadHarness : IDisposable
@@ -140,6 +156,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
 
     private readonly ReplicationWorkload _profile;
     private readonly bool _phaseAttribution;
+    private readonly bool _worldStateAttribution;
     private readonly UltraSimGameComposition _composition;
     private readonly ServerRuntime _runtime;
     private readonly AdmissionService _admission;
@@ -200,10 +217,15 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private long _tickProtocolPumpTicks;
     private bool _disposed;
 
-    internal ReplicationWorkloadHarness(ReplicationWorkload profile, bool phaseAttribution)
+    internal ReplicationWorkloadHarness(
+        ReplicationWorkload profile,
+        bool phaseAttribution,
+        bool worldStateAttribution = false,
+        SharedUdpSocketIoMode socketIoMode = SharedUdpSocketIoMode.PlatformBatch)
     {
         _profile = profile;
         _phaseAttribution = phaseAttribution;
+        _worldStateAttribution = worldStateAttribution;
         _tickMilliseconds = new List<double>(profile.Ticks);
         _diagnosticMilliseconds = new List<double>(profile.Ticks);
         _pendingRelations = new List<double>(profile.Ticks);
@@ -321,8 +343,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             MaximumSessions: profile.Clients,
             MaximumQueuedDatagramsPerSession: 16,
             MaximumInboundDatagramsPerPump: Math.Max(4_096, profile.Clients * 32),
-            SocketIoMode: SharedUdpSocketIoMode.PlatformBatch,
-            MaximumNativeSendBatchDatagrams: 32);
+            SocketIoMode: socketIoMode,
+            MaximumNativeSendBatchDatagrams: 32,
+            MaximumNativeReceiveBatchDatagrams: 32);
         _host = new SharedUdpProtocolHost(
             _protocolLimits, s_udpLimits, sharedLimits,
             UltraSim.Game.Protocol.UltraSimGameProtocol.Manifest);
@@ -364,6 +387,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         if (_phaseAttribution)
         {
             ResetProtocolStageTiming(enabled: true);
+        }
+        if (_worldStateAttribution)
+        {
             _interest.ResetAttribution(enabled: true);
             for (int index = 0; index < _bots.Length; index++)
             {
@@ -536,6 +562,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 NetworkMetricSummary.From(_clientProtocolMilliseconds),
                 NetworkMetricSummary.From(_serverRoleMilliseconds),
                 NetworkMetricSummary.From(_clientRoleMilliseconds)),
+            CaptureServerProtocolAttribution(),
             worldAttribution,
             new ReplicationAmplification(
                 constructions == 0 ? 0 : relationsCopied / (double)constructions,
@@ -548,6 +575,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         if (_phaseAttribution)
         {
             ResetProtocolStageTiming(enabled: false);
+        }
+        if (_worldStateAttribution)
+        {
             _interest.ResetAttribution(enabled: false);
             for (int index = 0; index < _bots.Length; index++)
             {
@@ -935,7 +965,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
 
     private ReplicationWorldStateAttribution CaptureWorldStateAttribution()
     {
-        if (!_phaseAttribution) return default;
+        if (!_worldStateAttribution) return default;
         GameInterestAttributionSnapshot interest = _interest.GetAttributionSnapshot();
         ulong classifiedUpserts = SaturatingAdd(
             interest.StableFarFastPathUpserts, interest.GeneralPathUpserts);
@@ -1038,6 +1068,75 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         server = SaturatingAdd(server, SaturatingAdd(listener.SendSystemCallTicks,
             SaturatingAdd(listener.ReceivePollTicks, listener.ReceiveSystemCallTicks)));
         return new(client, server);
+    }
+
+    private ReplicationServerProtocolAttribution CaptureServerProtocolAttribution()
+    {
+        if (!_phaseAttribution) return default;
+        NetworkProtocolStageTiming server = default;
+        for (int index = 0; index < _bots.Length; index++)
+            server = Add(server, _bots[index].Session.Server.GetStageTiming());
+        SharedUdpListenerSnapshot listener = _host.GetSnapshot().Listener;
+        ulong inboundBookkeeping = Remaining(
+            server.InboundTicks,
+            server.EndpointReceiveTicks,
+            server.SecureReceiveTicks,
+            server.FrameAdmissionTicks);
+        ulong emitBookkeeping = Remaining(
+            server.EmitTicks,
+            server.SelectionTicks,
+            server.FrameEncodeTicks,
+            server.SecureSendTicks,
+            server.EndpointSendTicks);
+        return new(
+            true,
+            ToMilliseconds(listener.ReceivePollTicks),
+            ToMilliseconds(listener.ReceiveSystemCallTicks),
+            ToMilliseconds(listener.ReceiveCensus.RoutingTicks),
+            ToMilliseconds(server.EndpointReceiveTicks),
+            ToMilliseconds(server.SecureReceiveTicks),
+            ToMilliseconds(server.FrameAdmissionTicks),
+            ToMilliseconds(inboundBookkeeping),
+            ToMilliseconds(server.SelectionTicks),
+            ToMilliseconds(server.FrameEncodeTicks),
+            ToMilliseconds(server.SecureSendTicks),
+            ToMilliseconds(server.EndpointSendTicks),
+            ToMilliseconds(emitBookkeeping),
+            ToMilliseconds(listener.SendSystemCallTicks),
+            server.InboundCalls,
+            server.EmptyInboundCalls,
+            server.InboundDatagrams,
+            server.EmitCalls,
+            server.IdleEmitCalls,
+            listener.ReceiveCensus);
+    }
+
+    private static NetworkProtocolStageTiming Add(
+        NetworkProtocolStageTiming left,
+        NetworkProtocolStageTiming right) => new(
+            SaturatingAdd(left.EmitTicks, right.EmitTicks),
+            SaturatingAdd(left.EmitCalls, right.EmitCalls),
+            SaturatingAdd(left.IdleEmitCalls, right.IdleEmitCalls),
+            SaturatingAdd(left.SelectionTicks, right.SelectionTicks),
+            SaturatingAdd(left.FrameEncodeTicks, right.FrameEncodeTicks),
+            SaturatingAdd(left.SecureSendTicks, right.SecureSendTicks),
+            SaturatingAdd(left.EndpointSendTicks, right.EndpointSendTicks),
+            SaturatingAdd(left.InboundTicks, right.InboundTicks),
+            SaturatingAdd(left.InboundCalls, right.InboundCalls),
+            SaturatingAdd(left.EmptyInboundCalls, right.EmptyInboundCalls),
+            SaturatingAdd(left.InboundDatagrams, right.InboundDatagrams),
+            SaturatingAdd(left.EndpointReceiveTicks, right.EndpointReceiveTicks),
+            SaturatingAdd(left.SecureReceiveTicks, right.SecureReceiveTicks),
+            SaturatingAdd(left.FrameAdmissionTicks, right.FrameAdmissionTicks),
+            SaturatingAdd(left.ReliableCompactionTicks, right.ReliableCompactionTicks),
+            SaturatingAdd(left.ReceivedCompactionTicks, right.ReceivedCompactionTicks));
+
+    private static ulong Remaining(ulong total, params ulong[] parts)
+    {
+        ulong sum = 0;
+        for (int index = 0; index < parts.Length; index++)
+            sum = SaturatingAdd(sum, parts[index]);
+        return total >= sum ? total - sum : 0;
     }
 
     private static void RecordPhase(List<double> destination, long started, bool measure)
@@ -1465,6 +1564,7 @@ internal sealed record ReplicationWorkloadResult(
     SharedUdpListenerSnapshot ListenerAfter,
     ReplicationBatchOpportunityReport BatchOpportunity,
     ReplicationPhaseAttribution PhaseAttribution,
+    ReplicationServerProtocolAttribution ServerProtocolAttribution,
     ReplicationWorldStateAttribution WorldStateAttribution,
     ReplicationAmplification Amplification);
 
@@ -1481,6 +1581,28 @@ internal readonly record struct ReplicationPhaseAttribution(
     NetworkMetricSummary ClientProtocolMilliseconds,
     NetworkMetricSummary ServerRoleTotalMilliseconds,
     NetworkMetricSummary ClientRoleTotalMilliseconds);
+
+internal readonly record struct ReplicationServerProtocolAttribution(
+    bool Enabled,
+    double ListenerReceivePollMilliseconds,
+    double ListenerReceiveSystemCallMilliseconds,
+    double ListenerReceiveRoutingMilliseconds,
+    double PeerEndpointReceiveMilliseconds,
+    double PeerSecureReceiveMilliseconds,
+    double PeerFrameAdmissionMilliseconds,
+    double PeerInboundBookkeepingMilliseconds,
+    double PeerSelectionMilliseconds,
+    double PeerFrameEncodeMilliseconds,
+    double PeerSecureSendMilliseconds,
+    double ListenerOutboundAdmissionMilliseconds,
+    double PeerEmitBookkeepingMilliseconds,
+    double ListenerSendSystemCallMilliseconds,
+    ulong PeerInboundCalls,
+    ulong PeerEmptyInboundCalls,
+    ulong PeerInboundDatagrams,
+    ulong PeerEmitCalls,
+    ulong PeerIdleEmitCalls,
+    SharedUdpReceiveCensusSnapshot ReceiveCensus);
 
 internal readonly record struct ReplicationWorldStateAttribution(
     bool Enabled,
