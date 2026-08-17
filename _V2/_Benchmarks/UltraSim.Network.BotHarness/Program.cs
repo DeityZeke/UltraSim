@@ -689,6 +689,12 @@ internal sealed class MovementRampHarness : IRampHarness
             perClientPing.Add(_clients[i].BuildPingJson());
         }
 
+        using Process currentProcess = Process.GetCurrentProcess();
+        currentProcess.Refresh();
+        long workingSetBytes = currentProcess.WorkingSet64;
+        long privateBytes = currentProcess.PrivateMemorySize64;
+        long managedHeapBytes = GC.GetTotalMemory(forceFullCollection: false);
+
         return new StageResult(
             StageIndex: stageIndex,
             TargetClients: targetClients,
@@ -838,6 +844,9 @@ internal sealed class MovementRampHarness : IRampHarness
             PendingMax: pendingMax,
             PendingMaxPerClientAverage: tickSamplesMs.Count == 0 ? 0d : pendingPerClientSum / (double)tickSamplesMs.Count,
             PendingMaxPerClient: pendingMaxPerClient,
+            WorkingSetBytes: workingSetBytes,
+            PrivateBytes: privateBytes,
+            ManagedHeapBytes: managedHeapBytes,
             AllocatedBytes: allocAfter - allocBefore,
             ServerPumpAllocatedBytes: serverPumpAllocatedBytes,
             PublishAllocatedBytes: publishAllocatedBytes,
@@ -2253,6 +2262,9 @@ internal readonly record struct StageResult(
     int PendingMax,
     double PendingMaxPerClientAverage,
     int PendingMaxPerClient,
+    long WorkingSetBytes,
+    long PrivateBytes,
+    long ManagedHeapBytes,
     long AllocatedBytes,
     long ServerPumpAllocatedBytes,
     long PublishAllocatedBytes,
@@ -2447,7 +2459,10 @@ internal readonly record struct StageResult(
             ["pending_max_per_client_avg"] = Math.Round(PendingMaxPerClientAverage, 3),
             ["pending_max_per_client"] = PendingMaxPerClient,
             ["pending_slo_basis"] = "per_client",
-             ["alloc_bytes"] = AllocatedBytes,
+            ["working_set_bytes"] = WorkingSetBytes,
+            ["private_bytes"] = PrivateBytes,
+            ["managed_heap_bytes"] = ManagedHeapBytes,
+            ["alloc_bytes"] = AllocatedBytes,
             ["server_pump_alloc_bytes"] = ServerPumpAllocatedBytes,
             ["publish_alloc_bytes"] = PublishAllocatedBytes,
             ["dispatch_alloc_bytes"] = DispatchAllocatedBytes,

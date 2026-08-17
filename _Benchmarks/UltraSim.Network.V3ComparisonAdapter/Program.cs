@@ -1,6 +1,11 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
+using UltraSim.Client.Network;
+using UltraSim.Game.Admission;
+using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
 using UltraSim.Network;
 using UltraSim.Network.Comparison;
 
@@ -207,6 +212,9 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
 
 internal sealed class V3OwnerMovementHarness : IDisposable
 {
+    private const int SparseWorldRecordsPerBundle = 24;
+    private const int SparseWorldByteBudget = 1_200;
+    private const ulong SparseApplicationEpoch = 1;
     private static readonly NetworkMessageDescriptor InputDescriptor =
         new(new NetworkMessageId(1), "ultrasim.benchmark.owner-input", 1,
             NetworkLane.Input, 10, 0xA001);
@@ -221,6 +229,20 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             NetworkLane.Control, 2, 0xA004);
     private static readonly NetworkProtocolManifest Manifest = NetworkProtocolManifest.Create(
         1, [InputDescriptor, OwnerDescriptor, PingDescriptor, PongDescriptor]);
+    private static readonly NetworkProtocolManifest SparseManifest = NetworkProtocolManifest.Create(
+        10,
+        [
+            InputDescriptor,
+            OwnerDescriptor,
+            PingDescriptor,
+            PongDescriptor,
+            RemoteWorldStateBundleHeaderCodec.Descriptor with
+            {
+                MaximumEncodedBytes = RemoteWorldStateBundleHeaderCodec.EncodedSize +
+                    SparseWorldRecordsPerBundle * RemoteWorldStateRecord.EncodedSize,
+            },
+            RemoteWorldStateAppliedMessageCodec.Descriptor,
+        ]);
     private static readonly NetworkProtocolLimits ProtocolLimits = new(
         MaximumReliableMessages: 8,
         MaximumReceivedMessages: 8,
@@ -234,6 +256,21 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         InitialCongestionWindowPackets: 4,
         MaximumCongestionWindowPackets: 32,
         MaximumIndependentUnreliableMessages: 4);
+    private static readonly NetworkProtocolLimits SparseProtocolLimits = new(
+        MaximumReliableMessages: 16,
+        MaximumReceivedMessages: 32,
+        MaximumMessageBytes: 1_472,
+        MaximumFragmentsPerMessage: 2,
+        SentPacketCapacity: 128,
+        MaximumInboundPacketsPerPump: 64,
+        MaximumPacketsPerPump: 64,
+        MinimumRetransmissionSteps: 2,
+        MaximumRetransmissionSteps: 64,
+        InitialCongestionWindowPackets: 8,
+        MaximumCongestionWindowPackets: 64,
+        MaximumIndependentUnreliableMessages: 8,
+        ReliablePayloadByteCapacity: 16_384,
+        ReceivedPayloadByteCapacity: 32_768);
     private static readonly UdpProtocolLimits UdpLimits = new(
         MaximumDatagramBytes: 1_472,
         SocketSendBufferBytes: 16_384,
@@ -251,6 +288,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly SharedUdpSocketIoMode _sharedSocketIoMode;
     private readonly SharedUdpProtocolHost? _sharedHost;
     private readonly V3HarnessProfile _profile;
+    private readonly NetworkProtocolManifest _manifest;
+    private readonly NetworkProtocolLimits _protocolLimits;
+    private readonly SparseObserverWorkload? _observer;
     private readonly V3CadenceProfile? _cadence;
     private readonly int _activeBots;
     private readonly long _realtimeTickIntervalStopwatchTicks;
@@ -274,6 +314,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         _topology = topology;
         _sharedSocketIoMode = sharedSocketIoMode;
         _profile = profile.Validate();
+        _manifest = scenario.ObserverState ? SparseManifest : Manifest;
+        _protocolLimits = scenario.ObserverState ? SparseProtocolLimits : ProtocolLimits;
         _cadence = cadence?.Validate();
         _activeBots = checked((int)Math.Round(
             scenario.Clients * profile.ActiveRatio, MidpointRounding.AwayFromZero));
@@ -286,15 +328,15 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         ReadOnlyMemory<byte> trusted = _identity.PublicKey.ToArray();
         if (topology == V3UdpTopology.SharedListener)
             _sharedHost = new SharedUdpProtocolHost(
-                ProtocolLimits, UdpLimits,
+                _protocolLimits, UdpLimits,
                 new SharedUdpProtocolLimits(
                     scenario.Clients,
                     MaximumQueuedDatagramsPerSession: 4,
                     MaximumInboundDatagramsPerPump: checked(scenario.Clients * 16),
                     SocketIoMode: sharedSocketIoMode,
                     MaximumNativeSendBatchDatagrams: 64),
-                Manifest, _identity, trusted);
-        const int width = 32; // frozen V2 bot-harness spawn-grid default
+                _manifest, _identity, trusted);
+        int width = scenario.SpawnGridWidth;
         for (int index = 0; index < _bots.Length; index++)
         {
             _handshakeAttempts++;
@@ -305,8 +347,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             if (topology == V3UdpTopology.ConnectedPairs)
             {
                 if (!UdpProtocolSession.TryCreate(
-                        ProtocolLimits, UdpLimits, out pair, out _,
-                        Manifest, _identity, trusted) || pair is null)
+                        _protocolLimits, UdpLimits, out pair, out _,
+                        _manifest, _identity, trusted) || pair is null)
                     throw new InvalidOperationException($"V3 UDP bot {index} did not establish.");
             }
             else if (!_sharedHost!.TryAddLoopbackSession(out shared, out _) || shared is null)
@@ -329,6 +371,13 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _bots[index] = new Bot(index, pair, shared, x, y,
                 Math.Max(8, scenario.StageTicks / (scenario.TickHz / scenario.InputHz) + 8),
                 scenario.StageTicks);
+        }
+        if (scenario.ObserverState)
+        {
+            _observer = new SparseObserverWorkload(
+                scenario, _bots, PumpAll, SparseApplicationEpoch,
+                SparseWorldRecordsPerBundle, SparseWorldByteBudget);
+            _observer.DrainInitialState();
         }
         for (int tick = 0; tick < scenario.SettleTicks; tick++)
         {
@@ -368,6 +417,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     internal NetworkBotStageResult Run()
     {
         _batchCensus = default;
+        _observer?.ResetMeasurement();
         if (_profile.DeepTiming) ResetProtocolStageTiming(enabled: true);
         DiagnosticCounterBaseline diagnosticBaseline = _profile.DeepTiming
             ? CaptureDiagnosticCounterBaseline()
@@ -499,11 +549,19 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 for (int index = 0; index < _bots.Length; index++)
                     _bots[index].AdvanceAuthority(_scenario.TickHz);
                 authoritySteps++;
+                _observer?.UpdateChangedAuthority(checked((int)authoritySteps));
                 RecordPhase(authorityMs, phaseStarted);
                 phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
                 for (int index = 0; index < _activeBots && _profile.SendsOwner; index++)
-                    if (_bots[index].QueueOwnerState(checked((ulong)authoritySteps)))
+                    if ((!_scenario.ObserverState || _bots[index].ShouldQueueSparseOwner(checked((ulong)authoritySteps))) &&
+                        _bots[index].QueueOwnerState(checked((ulong)authoritySteps)))
                         ownerMessagesQueued++;
+                if (_scenario.ObserverState)
+                    for (int index = _activeBots; index < _bots.Length; index++)
+                        if (_bots[index].ShouldQueueSparseOwner(checked((ulong)authoritySteps)) &&
+                            _bots[index].QueueOwnerState(checked((ulong)authoritySteps)))
+                            ownerMessagesQueued++;
+                _observer?.Schedule(checked((int)authoritySteps));
                 RecordPhase(ownerQueueMs, phaseStarted);
                 phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
                 PumpAll(2);
@@ -637,12 +695,26 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 _bots[index].ProcessServer(_scenario.TickHz);
             for (int index = 0; index < _bots.Length; index++)
                 _bots[index].AdvanceAuthority(_scenario.TickHz);
+            _observer?.UpdateChangedAuthority(
+                checked(_scenario.StageTicks + settle + 1));
             for (int index = 0; index < _activeBots && _profile.SendsOwner; index++)
-                _bots[index].QueueOwnerState(
-                    checked((ulong)_scenario.StageTicks + (ulong)settle + 1));
+                if (!_scenario.ObserverState ||
+                    _bots[index].ShouldQueueSparseOwner(
+                        checked((ulong)_scenario.StageTicks + (ulong)settle + 1)))
+                    _bots[index].QueueOwnerState(
+                        checked((ulong)_scenario.StageTicks + (ulong)settle + 1));
+            if (_scenario.ObserverState)
+                for (int index = _activeBots; index < _bots.Length; index++)
+                    if (_bots[index].ShouldQueueSparseOwner(
+                            checked((ulong)_scenario.StageTicks + (ulong)settle + 1)))
+                        _bots[index].QueueOwnerState(
+                            checked((ulong)_scenario.StageTicks + (ulong)settle + 1));
+            _observer?.Schedule(checked(_scenario.StageTicks + settle + 1));
             PumpAll(2);
             for (int index = 0; index < _bots.Length; index++)
                 ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
+            _observer?.ScanFreshness(
+                checked(_scenario.StageTicks + settle + 1), measure: true);
             PumpAll(1);
             if (_cadence is not null) WaitForRealtimeTick(ref nextDeadline);
         }
@@ -654,6 +726,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             for (int index = 0; index < _bots.Length; index++)
                 ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
         }
+        _observer?.DrainRemaining(
+            checked(_scenario.StageTicks + _scenario.SettleTicks + 1));
 
         ProtocolStageTimingSides protocolStageTiming = _profile.DeepTiming
             ? CaptureProtocolStageTiming()
@@ -833,9 +907,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         long benchmarkManifestDefaultReservedPerClient = checked(
             2 * NetworkProtocolLimits.Default.EstimateReservedPayloadBytes(
             new DeterministicDatagramLimits(UdpLimits.MaximumDatagramBytes, UdpLimits.MaximumDatagramBytes),
-            Manifest));
+            _manifest));
+        SparseObserverMetrics observerMetrics = _observer?.CaptureMetrics() ?? default;
         long normalizedLogicalBytes = checked(
-            logicalInputs * 10 + ownerMessagesQueued * 30 + pingMs.Count * 4L);
+            logicalInputs * 10 + ownerMessagesQueued * 30 + pingMs.Count * 4L +
+            observerMetrics.SemanticBytesCopied);
         NetworkMetricSummary inputAckTicks = NetworkMetricSummary.From(
             ackMs.Select(value => value *
                 (_cadence?.NominalAuthorityHz ?? _scenario.TickHz) / 1000d).ToArray());
@@ -862,12 +938,16 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         : $"-{_profile.Layer}-{_activeBots}"),
             Scenario = _scenario,
             EvidenceProfile = new(
-                _profile.IsComparisonDefault && _cadence is null
+                _scenario.ObserverState
+                    ? "network-bot-sparse-observer-movement-v1"
+                    : _profile.IsComparisonDefault && _cadence is null
                     ? "network-bot-owner-movement-v1"
                     : _cadence is not null
                         ? "network-v3-cadence-acceptance-v1"
                         : "network-v3-peer-cost-diagnostic-v1",
-                _profile.IsComparisonDefault && _cadence is null
+                _scenario.ObserverState
+                    ? "Historical sparse workload: deterministic phased owner input, one observer latest-state family, three AOI rings, owner correction, and ping; chat and ordered Events disabled."
+                    : _profile.IsComparisonDefault && _cadence is null
                     ? "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic."
                     : _cadence is not null
                         ? _cadence.Value.DescribeSemantics()
@@ -877,8 +957,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     ? $"fixed {_scenario.TickHz} Hz; {_scenario.InputHz} Hz phased input; realtime"
                     : $"{_cadence.Value.DescribeCadence()}; 20 Hz wall-time input; realtime",
                 _topology == V3UdpTopology.SharedListener
-                    ? _sharedSocketIoMode == SharedUdpSocketIoMode.PlatformBatch
-                        ? "one shared server UDP listener with bounded platform send batching, one client socket and two secure protocol peers per bot"
+                    ? _sharedSocketIoMode is SharedUdpSocketIoMode.PlatformBatch or
+                        SharedUdpSocketIoMode.PlatformSendReceiveBatch
+                        ? $"one shared server UDP listener with bounded platform {(_sharedSocketIoMode == SharedUdpSocketIoMode.PlatformSendReceiveBatch ? "send/receive" : "send")} batching, one client socket and two secure protocol peers per bot"
                         : "one shared server UDP listener, one client socket and two secure protocol peers per bot"
                     : "one connected localhost UDP socket pair and two secure protocol peers per bot",
                 "process-wide allocated bytes and GC collections; physical memory where exposed"),
@@ -892,9 +973,16 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             PerClientInputAckP95Milliseconds = perClientInputAckP95,
             PerClientPingP95Milliseconds = perClientPingP95,
             HandshakeMilliseconds = NetworkMetricSummary.From(_handshakeMilliseconds),
+            ImmediateWorldStateMilliseconds = observerMetrics.ImmediateMilliseconds,
+            NearWorldStateMilliseconds = observerMetrics.NearMilliseconds,
+            FarWorldStateMilliseconds = observerMetrics.FarMilliseconds,
+            ImmediateWorldStateTicks = observerMetrics.ImmediateTicks,
+            NearWorldStateTicks = observerMetrics.NearTicks,
+            FarWorldStateTicks = observerMetrics.FarTicks,
+            PerClientWorldStateP95Milliseconds = observerMetrics.PerClientP95Milliseconds,
             MetricCoverage = new(
                 OwnerInputFreshness: _profile.SendsInput && _profile.SendsOwner,
-                WorldStateFreshnessByTier: false,
+                WorldStateFreshnessByTier: _scenario.ObserverState,
                 ApplicationEventLatency: false,
                 PerClientFairness: _profile.SendsControl ||
                     (_profile.SendsInput && _profile.SendsOwner),
@@ -907,14 +995,14 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ManagedAllocation: true,
                 ProcessCpu: true,
                 Handshake: true,
-                InterestAmplification: false,
+                InterestAmplification: _scenario.ObserverState,
                 BaselineRecovery: false,
                 DeepPhaseTiming: _profile.DeepTiming),
             TickDeadlineMisses = deadlineMisses,
             LongestDeadlineMissStreak = longestDeadlineStreak,
             LogicalInputs = logicalInputs,
             OwnerStatesApplied = ownerApplied,
-            WorldStateRecordsApplied = 0,
+            WorldStateRecordsApplied = observerMetrics.RecordsApplied,
             ApplicationEventsApplied = 0,
             WireDatagramsSent = datagrams,
             WireBytesSent = bytes,
@@ -938,13 +1026,13 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             MaximumReceivedQueued = maxReceived,
             MaximumInFlightPackets = maxInFlight,
             ReliableOccupancy = NetworkOccupancySummary.From(
-                reliableOccupancy, ProtocolLimits.MaximumReliableMessages),
+                reliableOccupancy, _protocolLimits.MaximumReliableMessages),
             IndependentUnreliableOccupancy = NetworkOccupancySummary.From(
-                independentOccupancy, ProtocolLimits.MaximumIndependentUnreliableMessages),
+                independentOccupancy, _protocolLimits.MaximumIndependentUnreliableMessages),
             ReceivedOccupancy = NetworkOccupancySummary.From(
-                receivedOccupancy, ProtocolLimits.MaximumReceivedMessages),
+                receivedOccupancy, _protocolLimits.MaximumReceivedMessages),
             InFlightOccupancy = NetworkOccupancySummary.From(
-                inFlightOccupancy, ProtocolLimits.MaximumCongestionWindowPackets),
+                inFlightOccupancy, _protocolLimits.MaximumCongestionWindowPackets),
             CapacityPressureTicks50 = pressure50,
             CapacityPressureTicks75 = pressure75,
             CapacityPressureTicks90 = pressure90,
@@ -962,7 +1050,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             MaximumSentDatagramBytes = maximumSentDatagramBytes,
             CanonicalOwnerStateHash = NetworkBotCanonicalState.ComputeHash(canonicalStates),
             CanonicalOwnerStates = canonicalStates,
-            CanonicalValidation = _profile.IsComparisonDefault && _cadence is null
+            CanonicalValidation = _scenario.ObserverState
+                ? "Exact client-applied owner identity, acknowledged input sequence, and velocity. Observer convergence and freshness are validated separately; V2 exposes apply counts but no canonical observer digest."
+                : _profile.IsComparisonDefault && _cadence is null
                 ? "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input."
                 : _cadence is not null
                     ? "V3 cadence acceptance: identical wall-time input samples must converge to the same owner identity, acknowledged input sequence, and velocity across cadence/stall schedules; position remains cadence-relative diagnostic state."
@@ -1104,6 +1194,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["diagnostic_active_ratio"] = _profile.ActiveRatio,
             },
         };
+        if (_observer is not null)
+            _observer.AddDiagnostics((Dictionary<string, double>)result.Diagnostics);
         if (_cadence is not null)
         {
             var diagnostics = (Dictionary<string, double>)result.Diagnostics;
@@ -1399,10 +1491,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         maxReceived = Math.Max(maxReceived, received);
         maxInFlight = Math.Max(maxInFlight, inFlight);
         double maximum = Math.Max(
-            Math.Max(reliable / (double)ProtocolLimits.MaximumReliableMessages,
-                independent / (double)ProtocolLimits.MaximumIndependentUnreliableMessages),
-            Math.Max(received / (double)ProtocolLimits.MaximumReceivedMessages,
-                inFlight / (double)ProtocolLimits.MaximumCongestionWindowPackets));
+            Math.Max(reliable / (double)_protocolLimits.MaximumReliableMessages,
+                independent / (double)_protocolLimits.MaximumIndependentUnreliableMessages),
+            Math.Max(received / (double)_protocolLimits.MaximumReceivedMessages,
+                inFlight / (double)_protocolLimits.MaximumCongestionWindowPackets));
         return new(reliable, independent, received, inFlight, maximum,
             reliableBytes, independentBytes, receivedBytes, totalBytes,
             totalByteCapacity == 0 ? 0 : totalBytes / (double)totalByteCapacity,
@@ -1449,6 +1541,387 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         _identity.Dispose();
     }
 
+    private sealed class SparseObserverWorkload
+    {
+        // The historical 39.5 m outer radius is maintained through a coarse
+        // seven-by-seven 16 m region envelope.  Its densest admitted cells can
+        // contain slightly more than 96 identities even though the exact
+        // circular scope is much smaller.
+        private const int MaximumScope = 128;
+        private const int GlobalFreshnessBuckets = 16_384;
+        private const int ClientFreshnessBuckets = 512;
+        private readonly NetworkBotScenario _scenario;
+        private readonly Bot[] _bots;
+        private readonly Action<int> _pump;
+        private readonly int _recordsPerBundle;
+        private readonly int _byteBudget;
+        private readonly GameInterestProfile _profile;
+        private readonly GameInterestService _interest;
+        private readonly ReplicationSpatialPoint[] _positions;
+        private readonly ulong[] _versions;
+        private readonly long[] _createdAtByAuthorityTick;
+        private readonly RemoteWorldEntitySnapshot[] _scratch =
+            new RemoteWorldEntitySnapshot[MaximumScope];
+        private readonly LatencyHistogram _immediateMs = new(1, GlobalFreshnessBuckets);
+        private readonly LatencyHistogram _nearMs = new(1, GlobalFreshnessBuckets);
+        private readonly LatencyHistogram _farMs = new(1, GlobalFreshnessBuckets);
+        private readonly LatencyHistogram _immediateTicks =
+            new(1, 2_048, percentileBucketOffset: 0);
+        private readonly LatencyHistogram _nearTicks =
+            new(1, 2_048, percentileBucketOffset: 0);
+        private readonly LatencyHistogram _farTicks =
+            new(1, 2_048, percentileBucketOffset: 0);
+        private readonly LatencyHistogram[] _clientFreshness;
+        private long _freshnessSamples;
+        private int _maximumPending;
+        private int _maximumOutstanding;
+
+        internal SparseObserverWorkload(
+            NetworkBotScenario scenario,
+            Bot[] bots,
+            Action<int> pump,
+            ulong applicationEpoch,
+            int recordsPerBundle,
+            int byteBudget)
+        {
+            _scenario = scenario;
+            _bots = bots;
+            _pump = pump;
+            _recordsPerBundle = recordsPerBundle;
+            _byteBudget = byteBudget;
+            _profile = new GameInterestProfile(
+                RegionEdgeMillimeters: 16_000,
+                ImmediateEnterRadiusMillimeters: 7_500,
+                ImmediateLeaveRadiusMillimeters: 7_500,
+                NearRadiusMillimeters: 23_500,
+                FarRadiusMillimeters: 39_500,
+                NearIntervalMilliseconds: 32,
+                FarIntervalMilliseconds: 48,
+                ApplicationAckRetryMilliseconds: 100,
+                ApplicationAckTimeoutMilliseconds: 2_000);
+            int farCells = checked((_profile.FarRadiusMillimeters +
+                _profile.RegionEdgeMillimeters - 1) / _profile.RegionEdgeMillimeters);
+            int edgeWidth = checked(farCells * 2 + 1);
+            int maximumEdges = checked(scenario.Clients * edgeWidth * edgeWidth);
+            _interest = new GameInterestService(
+                new StateEpoch(1),
+                new GameInterestLimits(
+                    MaximumEntities: scenario.Clients,
+                    MaximumRecipients: scenario.Clients,
+                    MaximumRegions: checked(maximumEdges + scenario.Clients),
+                    MaximumRegionInterestEdges: maximumEdges,
+                    MaximumRecipientEntityRelations: checked(scenario.Clients * MaximumScope),
+                    MaximumOutstandingBundles: checked(scenario.Clients * 8),
+                    MaximumRecordsPerBundle: recordsPerBundle),
+                _profile);
+            _positions = new ReplicationSpatialPoint[scenario.Clients];
+            _versions = new ulong[scenario.Clients];
+            _createdAtByAuthorityTick = new long[
+                checked(scenario.StageTicks + scenario.SettleTicks + 2_049)];
+            _clientFreshness = new LatencyHistogram[scenario.Clients];
+
+            for (int index = 0; index < bots.Length; index++)
+            {
+                _positions[index] = Position(bots[index]);
+                _versions[index] = 1;
+                // Per-client fairness needs a useful tail, not sub-millisecond
+                // resolution.  Keeping this sketch compact prevents benchmark
+                // telemetry from dominating the memory result at 4K clients.
+                _clientFreshness[index] =
+                    new LatencyHistogram(32, ClientFreshnessBuckets);
+                Require(_interest.SetRecipientAnchor(
+                        Participant(index), _positions[index], 0),
+                    $"Sparse recipient {index} setup");
+            }
+            for (int index = 0; index < bots.Length; index++)
+                Require(_interest.UpsertEntity(
+                        Projected(index, 1, marker: 0, velocity: 0),
+                        1,
+                        _positions[index],
+                        GameReplicationHorizon.Far,
+                        0),
+                    $"Sparse entity {index} setup");
+
+            GameInterestSnapshot initial = _interest.GetSnapshot();
+            if (initial.RelationCount > checked(scenario.Clients * MaximumScope))
+                throw new InvalidOperationException("Sparse relation estimate exceeded its admitted bound.");
+            for (int index = 0; index < bots.Length; index++)
+            {
+                Bot bot = bots[index];
+                bot.AttachWorldState(
+                    new RemoteWorldStateServer(
+                        bot.Server, _interest, Participant(index), applicationEpoch,
+                        recordsPerBundle, MaximumScope),
+                    new RemoteWorldStateClient(
+                        bot.Client, applicationEpoch, _interest.StateEpoch,
+                        MaximumScope, MaximumScope, recordsPerBundle, 64));
+            }
+        }
+
+        internal void DrainInitialState()
+        {
+            DrainCore(authorityTick: 0, initializeKnowledge: true);
+            ScanFreshness(authorityTick: 0, measure: false);
+        }
+
+        internal void DrainRemaining(int authorityTick)
+        {
+            DrainCore(authorityTick, initializeKnowledge: false);
+            ScanFreshness(authorityTick, measure: false);
+            GameInterestSnapshot snapshot = _interest.GetSnapshot();
+            if (snapshot.PendingRelationCount != 0 || snapshot.OutstandingBundleCount != 0 ||
+                snapshot.NonviableRecipientCount != 0)
+                throw new InvalidOperationException(
+                    "Sparse observer state did not converge after the bounded drain.");
+        }
+
+        internal void ResetMeasurement()
+        {
+            _immediateMs.Clear();
+            _nearMs.Clear();
+            _farMs.Clear();
+            _immediateTicks.Clear();
+            _nearTicks.Clear();
+            _farTicks.Clear();
+            for (int index = 0; index < _clientFreshness.Length; index++)
+                _clientFreshness[index].Clear();
+            _freshnessSamples = 0;
+            _maximumPending = 0;
+            _maximumOutstanding = 0;
+        }
+
+        internal void UpdateChangedAuthority(int authorityTick)
+        {
+            long now = SemanticMilliseconds(authorityTick);
+            if ((uint)authorityTick >= (uint)_createdAtByAuthorityTick.Length)
+                throw new InvalidOperationException("Sparse authority tick exceeded freshness history.");
+            _createdAtByAuthorityTick[authorityTick] = Stopwatch.GetTimestamp();
+            for (int index = 0; index < _bots.Length; index++)
+            {
+                Bot bot = _bots[index];
+                if (!bot.ConsumeAuthorityChanged()) continue;
+                ReplicationSpatialPoint point = Position(bot);
+                _positions[index] = point;
+                Require(_interest.SetRecipientAnchor(Participant(index), point, now),
+                    $"Sparse recipient {index} movement");
+                ulong version = checked(++_versions[index]);
+                Require(_interest.UpsertEntity(
+                        Projected(index, version, authorityTick,
+                            checked((int)Math.Round(bot.ServerVelocityX * 100))),
+                        version, point, GameReplicationHorizon.Far, now),
+                    $"Sparse entity {index} movement");
+            }
+        }
+
+        internal void Schedule(int authorityTick)
+        {
+            long now = SemanticMilliseconds(authorityTick);
+            for (int index = 0; index < _bots.Length; index++)
+            {
+                for (int bundle = 0; bundle < 2; bundle++)
+                {
+                    GameWorldStateBuildStatus status =
+                        _bots[index].WorldServer!.TrySchedule(now, _byteBudget);
+                    if (status == GameWorldStateBuildStatus.Success) continue;
+                    if (status is GameWorldStateBuildStatus.NoData or
+                        GameWorldStateBuildStatus.TransportNotAccepting or
+                        GameWorldStateBuildStatus.OutstandingCapacityExceeded)
+                        break;
+                    throw new InvalidOperationException(
+                        $"Sparse WorldState scheduling failed for recipient {index}: {status}.");
+                }
+            }
+            GameInterestSnapshot snapshot = _interest.GetSnapshot();
+            _maximumPending = Math.Max(_maximumPending, snapshot.PendingRelationCount);
+            _maximumOutstanding = Math.Max(_maximumOutstanding, snapshot.OutstandingBundleCount);
+        }
+
+        internal void ScanFreshness(int authorityTick, bool measure)
+        {
+            for (int client = 0; client < _bots.Length; client++)
+            {
+                int count = _bots[client].WorldClient!.CopyActiveEntitiesUnordered(_scratch);
+                for (int row = 0; row < count; row++)
+                {
+                    ref readonly RemoteWorldEntitySnapshot state = ref _scratch[row];
+                    if (!measure) continue;
+                    _freshnessSamples++;
+                    int entity = checked((int)state.Entity.Index);
+                    int createdTick = state.TickMarker;
+                    if ((uint)entity >= (uint)_versions.Length || createdTick <= 0 ||
+                        (uint)createdTick >= (uint)_createdAtByAuthorityTick.Length ||
+                        _createdAtByAuthorityTick[createdTick] == 0)
+                        continue;
+                    double milliseconds =
+                        Stopwatch.GetElapsedTime(
+                            _createdAtByAuthorityTick[createdTick]).TotalMilliseconds;
+                    double ticks = Math.Max(0, authorityTick - createdTick);
+                    _clientFreshness[client].Observe(milliseconds);
+                    switch (Tier(_positions[client], new ReplicationSpatialPoint(
+                        state.XMillimeters, state.ZMillimeters)))
+                    {
+                        case GameInterestTier.Immediate:
+                            _immediateMs.Observe(milliseconds);
+                            _immediateTicks.Observe(ticks);
+                            break;
+                        case GameInterestTier.Near:
+                            _nearMs.Observe(milliseconds);
+                            _nearTicks.Observe(ticks);
+                            break;
+                        default:
+                            _farMs.Observe(milliseconds);
+                            _farTicks.Observe(ticks);
+                            break;
+                    }
+                }
+            }
+        }
+
+        internal SparseObserverMetrics CaptureMetrics()
+        {
+            GameInterestSnapshot snapshot = _interest.GetSnapshot();
+            return new(
+                _immediateMs.Summary(),
+                _nearMs.Summary(),
+                _farMs.Summary(),
+                _immediateTicks.Summary(),
+                _nearTicks.Summary(),
+                _farTicks.Summary(),
+                NetworkMetricSummary.From(
+                    _clientFreshness.Where(value => value.Count != 0)
+                        .Select(value => value.Summary().P95).ToArray()),
+                checked((long)snapshot.SemanticRecordCopies),
+                _freshnessSamples,
+                checked((long)snapshot.SemanticBytesCopied));
+        }
+
+        internal void AddDiagnostics(Dictionary<string, double> diagnostics)
+        {
+            GameInterestSnapshot interest = _interest.GetSnapshot();
+            long adapterReserved = interest.ReservedBytes;
+            ulong bundlesQueued = 0;
+            ulong applicationAcks = 0;
+            for (int index = 0; index < _bots.Length; index++)
+            {
+                RemoteWorldStateServerSnapshot server = _bots[index].WorldServer!.GetSnapshot();
+                RemoteWorldStateClientSnapshot client = _bots[index].WorldClient!.GetSnapshot();
+                adapterReserved = checked(adapterReserved + server.ReservedBytes + client.ReservedBytes);
+                bundlesQueued = checked(bundlesQueued + server.BundlesQueued);
+                applicationAcks = checked(applicationAcks + server.ApplicationAcknowledgements);
+            }
+            diagnostics["world_state_relations"] = interest.RelationCount;
+            diagnostics["world_state_pending_relations_final"] = interest.PendingRelationCount;
+            diagnostics["world_state_pending_relations_max"] = _maximumPending;
+            diagnostics["world_state_outstanding_bundles_final"] = interest.OutstandingBundleCount;
+            diagnostics["world_state_outstanding_bundles_max"] = _maximumOutstanding;
+            diagnostics["world_state_nonviable_recipients"] = interest.NonviableRecipientCount;
+            diagnostics["world_state_pending_writes"] = interest.PendingWrites;
+            diagnostics["world_state_unique_semantic_constructions"] =
+                interest.UniqueSemanticConstructions;
+            diagnostics["world_state_semantic_record_copies"] = interest.SemanticRecordCopies;
+            diagnostics["world_state_semantic_bytes_copied"] = interest.SemanticBytesCopied;
+            diagnostics["world_state_bundles_built"] = interest.BundlesBuilt;
+            diagnostics["world_state_bundles_applied"] = interest.BundlesApplied;
+            diagnostics["world_state_adapter_bundles_queued"] = bundlesQueued;
+            diagnostics["world_state_application_acknowledgements"] = applicationAcks;
+            diagnostics["game_replication_reserved_bytes"] = adapterReserved;
+            diagnostics["game_replication_reserved_bytes_per_client"] =
+                adapterReserved / (double)_bots.Length;
+            diagnostics["world_state_records_applied"] = interest.SemanticRecordCopies;
+            diagnostics["world_state_latest_freshness_samples"] = _freshnessSamples;
+            diagnostics["world_state_freshness_sampling_ticks"] = _scenario.SettleTicks;
+            diagnostics["world_state_freshness_histogram_payload_reserved_bytes"] = checked(
+                (3L * GlobalFreshnessBuckets + 3L * 2_048 +
+                 (long)_bots.Length * ClientFreshnessBuckets) * sizeof(long));
+            diagnostics["world_state_recipient_copies_per_semantic_construction"] =
+                interest.UniqueSemanticConstructions == 0 ? 0 :
+                interest.SemanticRecordCopies / (double)interest.UniqueSemanticConstructions;
+            diagnostics["world_state_chat_supported"] = 0;
+            diagnostics["world_state_chat_messages"] = 0;
+        }
+
+        private void DrainCore(int authorityTick, bool initializeKnowledge)
+        {
+            for (int round = 0; round < 2_048; round++)
+            {
+                Schedule(checked(authorityTick + round));
+                _pump(2);
+                for (int index = 0; index < _bots.Length; index++)
+                    _bots[index].ProcessServer(_scenario.TickHz);
+                for (int index = 0; index < _bots.Length; index++)
+                    _ = _bots[index].ProcessClient([], []);
+                _pump(1);
+                GameInterestSnapshot snapshot = _interest.GetSnapshot();
+                if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0)
+                    return;
+                if ((round & 15) == 15) Thread.Sleep(1);
+            }
+            throw new InvalidOperationException(
+                initializeKnowledge
+                    ? "Initial sparse observer state did not converge."
+                    : "Sparse observer state did not converge after measurement.");
+        }
+
+        private GameInterestTier Tier(
+            ReplicationSpatialPoint recipient,
+            ReplicationSpatialPoint entity)
+        {
+            long dx = (long)entity.XMillimeters - recipient.XMillimeters;
+            long dz = (long)entity.ZMillimeters - recipient.ZMillimeters;
+            long distanceSquared = checked(dx * dx + dz * dz);
+            if (distanceSquared <=
+                (long)_profile.ImmediateEnterRadiusMillimeters *
+                _profile.ImmediateEnterRadiusMillimeters)
+                return GameInterestTier.Immediate;
+            if (distanceSquared <=
+                (long)_profile.NearRadiusMillimeters * _profile.NearRadiusMillimeters)
+                return GameInterestTier.Near;
+            return GameInterestTier.Far;
+        }
+
+        private long SemanticMilliseconds(int tick) =>
+            checked(tick * 1_000L / _scenario.TickHz);
+
+        private static ParticipantId Participant(int index) =>
+            new(checked((ulong)index + 1));
+
+        private static ReplicationSpatialPoint Position(Bot bot) => new(
+            checked((int)Math.Round(bot.ServerX * 1_000)),
+            checked((int)Math.Round(bot.ServerY * 1_000)));
+
+        private static GameProjectedEntity Projected(
+            int index,
+            ulong version,
+            int marker,
+            int velocity) => new(
+                new ReplicationEntityId(checked((uint)index), 1),
+                true,
+                new GameSimulationState
+                {
+                    TickMarker = marker,
+                    InputVelocity = velocity,
+                });
+
+        private static void Require(GameInterestUpdateStatus status, string operation)
+        {
+            if (status is not (GameInterestUpdateStatus.Success or
+                GameInterestUpdateStatus.NoChange))
+                throw new InvalidOperationException($"{operation} failed: {status}.");
+        }
+    }
+
+    private readonly record struct SparseObserverMetrics(
+        NetworkMetricSummary ImmediateMilliseconds,
+        NetworkMetricSummary NearMilliseconds,
+        NetworkMetricSummary FarMilliseconds,
+        NetworkMetricSummary ImmediateTicks,
+        NetworkMetricSummary NearTicks,
+        NetworkMetricSummary FarTicks,
+        NetworkMetricSummary PerClientP95Milliseconds,
+        long RecordsApplied,
+        long LatestFreshnessSamples,
+        long SemanticBytesCopied);
+
     private sealed class Bot : IDisposable
     {
         private readonly long[] _inputSentAt = new long[256];
@@ -1469,6 +1942,12 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         private float _serverVelocityX;
         private float _serverVelocityY;
         private bool _hasServerInput;
+        private bool _authorityChanged;
+        private float _lastSparseOwnerX;
+        private float _lastSparseOwnerY;
+        private float _lastSparseOwnerVelocityX;
+        private float _lastSparseOwnerVelocityY;
+        private ulong _lastSparseOwnerTick;
 
         internal Bot(
             int index,
@@ -1498,6 +1977,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         internal SharedUdpProtocolSession? SharedSession { get; }
         internal NetworkProtocolPeer Client { get; }
         internal NetworkProtocolPeer Server { get; }
+        internal RemoteWorldStateServer? WorldServer { get; private set; }
+        internal RemoteWorldStateClient? WorldClient { get; private set; }
         internal ushort LatestQueuedInput { get; private set; }
         internal ushort ServerInput => _serverInput;
         internal ushort LastQueuedOwnerInput { get; private set; }
@@ -1508,6 +1989,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         internal float ClientY { get; private set; }
         internal float ClientVelocityX { get; private set; }
         internal float ClientVelocityY { get; private set; }
+        internal float ServerX => _serverX;
+        internal float ServerY => _serverY;
+        internal float ServerVelocityX => _serverVelocityX;
+        internal float ServerVelocityY => _serverVelocityY;
         internal NetworkMetricSummary InputAcknowledgements => NetworkMetricSummary.From(_inputAcknowledgements);
         internal NetworkMetricSummary PingAcknowledgements => NetworkMetricSummary.From(_pingAcknowledgements);
         internal IReadOnlyList<double> OwnerFreshnessMilliseconds => _ownerFreshnessMilliseconds;
@@ -1562,11 +2047,22 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             return true;
         }
 
+        internal void AttachWorldState(
+            RemoteWorldStateServer server,
+            RemoteWorldStateClient client)
+        {
+            WorldServer = server;
+            WorldClient = client;
+        }
+
         internal void ProcessServer(int tickHz)
         {
             while (Server.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
-                if (message.MessageId == InputDescriptor.Id && payload.Length == 10)
+                if (WorldServer?.TryProcess(in message, payload) == true)
+                {
+                }
+                else if (message.MessageId == InputDescriptor.Id && payload.Length == 10)
                 {
                     ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(payload);
                     if (SequenceNewer(sequence, _serverInput))
@@ -1575,6 +2071,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         _serverVelocityX = BinaryPrimitives.ReadInt16LittleEndian(payload[6..]) / 100f;
                         _serverVelocityY = BinaryPrimitives.ReadInt16LittleEndian(payload[8..]) / 100f;
                         _hasServerInput = true;
+                        _authorityChanged = true;
                     }
                 }
                 else if (message.MessageId == PingDescriptor.Id && payload.Length == 2)
@@ -1588,6 +2085,23 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             if (!_hasServerInput) return;
             _serverX += _serverVelocityX / tickHz;
             _serverY += _serverVelocityY / tickHz;
+            _authorityChanged = true;
+        }
+
+        internal bool ConsumeAuthorityChanged()
+        {
+            bool changed = _authorityChanged;
+            _authorityChanged = false;
+            return changed;
+        }
+
+        internal bool ShouldQueueSparseOwner(ulong serverTick)
+        {
+            if (_lastSparseOwnerTick == 0 || serverTick - _lastSparseOwnerTick >= 8)
+                return true;
+            float dx = _serverX - _lastSparseOwnerX;
+            float dy = _serverY - _lastSparseOwnerY;
+            return dx * dx + dy * dy > 0.01f;
         }
 
         internal bool QueueOwnerState(ulong serverTick)
@@ -1602,6 +2116,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(bytes[26..], BitConverter.SingleToUInt32Bits(_serverVelocityY));
             if (Server.TryQueue(OwnerDescriptor.Id, bytes) != NetworkQueueStatus.Accepted)
                 return false;
+            _lastSparseOwnerTick = serverTick;
+            _lastSparseOwnerX = _serverX;
+            _lastSparseOwnerY = _serverY;
+            _lastSparseOwnerVelocityX = _serverVelocityX;
+            _lastSparseOwnerVelocityY = _serverVelocityY;
             LastQueuedOwnerInput = _serverInput;
             int slot = checked((int)(serverTick & 255));
             _ownerSentTick[slot] = serverTick;
@@ -1614,7 +2133,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             int applied = 0;
             while (Client.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
-                if (message.MessageId == OwnerDescriptor.Id && payload.Length == 30)
+                if (WorldClient?.TryProcess(in message, payload) == true)
+                {
+                }
+                else if (message.MessageId == OwnerDescriptor.Id && payload.Length == 30)
                 {
                     ulong ownerTick = BinaryPrimitives.ReadUInt64LittleEndian(payload[4..]);
                     ushort sequence = BinaryPrimitives.ReadUInt16LittleEndian(payload[12..]);
@@ -1659,6 +2181,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 }
                 _ = Client.TryConsumeReceived();
             }
+            _ = WorldClient?.TryFlushAcknowledgements();
             return applied;
         }
 
@@ -2071,6 +2594,7 @@ internal sealed record AdapterOptions(
     int StageTicks,
     int SettleTicks,
     double SpawnSpacing,
+    int SpawnGridWidth,
     V3UdpTopology Topology,
     SharedUdpSocketIoMode SharedSocketIoMode,
     double ActiveRatio,
@@ -2089,6 +2613,7 @@ internal sealed record AdapterOptions(
         ParseInt(Get(args, "--stage-ticks="), 120),
         ParseInt(Get(args, "--settle-ticks="), 30),
         ParseDouble(Get(args, "--spawn-spacing="), 12),
+        ParseInt(Get(args, "--spawn-grid-width="), 32),
         ParseTopology(Get(args, "--topology=")),
         ParseSharedSocketIoMode(Get(args, "--shared-socket-io=")),
         ParseDouble(Get(args, "--active-ratio="), 1),
@@ -2101,8 +2626,10 @@ internal sealed record AdapterOptions(
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
         SpawnSpacing,
-        ObserverState: false,
-        OrderedEvents: false).Validate();
+        ObserverState: StringComparer.Ordinal.Equals(Scenario, "sparse_observer_movement"),
+        OrderedEvents: false,
+        ActiveRatio,
+        SpawnGridWidth).Validate();
 
     private static string? Get(string[] args, string prefix) =>
         args.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..];
@@ -2123,6 +2650,8 @@ internal sealed record AdapterOptions(
         {
             null or "scalar" => SharedUdpSocketIoMode.Scalar,
             "platform-batch" or "native-send-batch" => SharedUdpSocketIoMode.PlatformBatch,
+            "platform-send-receive-batch" or "native-send-receive-batch" =>
+                SharedUdpSocketIoMode.PlatformSendReceiveBatch,
             _ => throw new ArgumentException($"Unsupported shared socket I/O mode '{value}'."),
         };
     private static V3DiagnosticLayer ParseLayer(string? value) => value?.ToLowerInvariant() switch

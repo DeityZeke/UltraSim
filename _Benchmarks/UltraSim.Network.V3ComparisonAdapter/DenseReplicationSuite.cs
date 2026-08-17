@@ -20,9 +20,10 @@ internal static class DenseReplicationSuite
         int warmup = ReadInt(args, "--warmup", 30);
         int dirtyPercent = ReadInt(args, "--dirty-percent", 2);
         string requestedTraffic = ReadText(args, "--replication-traffic") ?? "full";
-        bool phaseAttribution = ReadBool(args, "--phase-attribution", false);
+        bool tailDiagnostics = ReadBool(args, "--tail-diagnostics", false);
+        bool phaseAttribution = ReadBool(args, "--phase-attribution", false) || tailDiagnostics;
         bool worldStateAttribution = ReadBool(
-            args, "--worldstate-attribution", phaseAttribution);
+            args, "--worldstate-attribution", phaseAttribution && !tailDiagnostics);
         SharedUdpSocketIoMode socketIoMode = ParseSocketIoMode(
             ReadText(args, "--shared-socket-io"));
         string output = ReadText(args, "--output") ??
@@ -63,7 +64,7 @@ internal static class DenseReplicationSuite
             Console.WriteLine($"REPLICATION {profile.Id}: constructing {profile.Clients} clients, " +
                 $"{profile.Entities} entities...");
             using var harness = new ReplicationWorkloadHarness(
-                profile, phaseAttribution, worldStateAttribution, socketIoMode);
+                profile, phaseAttribution, worldStateAttribution, socketIoMode, tailDiagnostics);
             ReplicationWorkloadResult result = harness.Run();
             Validate(result);
             results.Add(result);
@@ -72,6 +73,12 @@ internal static class DenseReplicationSuite
                 $"{result.AllWorldStateFreshnessMilliseconds.P95:F2}/{result.AllWorldStateFreshnessMilliseconds.Max:F2} ms, " +
                 $"event p95 {result.EventApplicationMilliseconds.P95:F2} ms, " +
                 $"pending max {result.PendingRelations.Max:F0}, wire {result.WireBytes / 1048576d:F2} MiB");
+            if (tailDiagnostics)
+                Console.WriteLine($"TAIL {profile.Id}: server-role p99/p99.9/max " +
+                    $"{result.Tail.ServerRoleMilliseconds.P99:F3}/" +
+                    $"{result.Tail.ServerRoleMilliseconds.P999:F3}/" +
+                    $"{result.Tail.ServerRoleMilliseconds.Max:F3} ms, " +
+                    $"worst records {result.Tail.WorstTicks?.Count ?? 0}");
         }
 
         var report = new ReplicationSuiteReport(
@@ -83,7 +90,9 @@ internal static class DenseReplicationSuite
             "independent unreliable WorldState, reliable application Events, application ACKs, and retained client projection. " +
             "No V2 ratio is claimed because V2 does not own equivalent semantics. " +
             "Traffic controls preserve topology, relations, dirty updates, capacities, cadence, and transport; " +
-            "phase attribution is opt-in and excluded from ordinary accepted timing.",
+            "phase attribution is opt-in and excluded from ordinary accepted timing. " +
+            "Tail diagnostics additionally retain p99.9 summaries and the 32 highest server-role ticks " +
+            "with per-tick listener, queue, Event, and process-CPU counter deltas.",
             results);
         NetworkBotComparisonIo.Write(output, report);
         Console.WriteLine(Path.GetFullPath(output));
@@ -157,6 +166,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private readonly ReplicationWorkload _profile;
     private readonly bool _phaseAttribution;
     private readonly bool _worldStateAttribution;
+    private readonly bool _tailDiagnostics;
     private readonly UltraSimGameComposition _composition;
     private readonly ServerRuntime _runtime;
     private readonly AdmissionService _admission;
@@ -205,6 +215,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private readonly List<double> _clientProtocolMilliseconds;
     private readonly List<double> _serverRoleMilliseconds;
     private readonly List<double> _clientRoleMilliseconds;
+    private readonly List<ReplicationWorstTick> _worstTicks = new(32);
     private readonly ReplicationBatchCensus _batchCensus = new();
     private readonly WorldStateAcknowledgementCensus _worldStateAcknowledgementCensus = new();
     private int _dirtyCursor;
@@ -221,11 +232,13 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         ReplicationWorkload profile,
         bool phaseAttribution,
         bool worldStateAttribution = false,
-        SharedUdpSocketIoMode socketIoMode = SharedUdpSocketIoMode.PlatformBatch)
+        SharedUdpSocketIoMode socketIoMode = SharedUdpSocketIoMode.PlatformBatch,
+        bool tailDiagnostics = false)
     {
         _profile = profile;
         _phaseAttribution = phaseAttribution;
         _worldStateAttribution = worldStateAttribution;
+        _tailDiagnostics = tailDiagnostics;
         _tickMilliseconds = new List<double>(profile.Ticks);
         _diagnosticMilliseconds = new List<double>(profile.Ticks);
         _pendingRelations = new List<double>(profile.Ticks);
@@ -415,7 +428,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
 
         for (int tick = 1; tick <= _profile.Ticks; tick++)
         {
-            RunActiveTick(tick, measure: true);
+            RunActiveTick(tick, measure: true, process);
             peakHeap = Math.Max(peakHeap, GC.GetTotalMemory(false));
             if ((tick & 7) == 0)
             {
@@ -440,6 +453,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         TransportTotals networkAfter = CaptureTransportTotals();
         SharedUdpProtocolHostSnapshot hostAfter = _host.GetSnapshot();
         ReplicationWorldStateAttribution worldAttribution = CaptureWorldStateAttribution();
+        ReplicationTailSummary tail = CreateTailSummary();
 
         bool converged = ValidateConvergence();
         NetworkMetricSummary[] clientP95 = _clientFreshness
@@ -562,6 +576,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 NetworkMetricSummary.From(_clientProtocolMilliseconds),
                 NetworkMetricSummary.From(_serverRoleMilliseconds),
                 NetworkMetricSummary.From(_clientRoleMilliseconds)),
+            tail,
             CaptureServerProtocolAttribution(),
             worldAttribution,
             new ReplicationAmplification(
@@ -588,10 +603,21 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         return result;
     }
 
-    private void RunActiveTick(int tick, bool measure)
+    private void RunActiveTick(int tick, bool measure, Process? process = null)
     {
         _currentAuthorityTick = tick;
         long started = Stopwatch.GetTimestamp();
+        long processCpuStarted = _tailDiagnostics && measure && process is not null
+            ? process.TotalProcessorTime.Ticks
+            : 0;
+        SharedUdpListenerSnapshot listenerBefore = _tailDiagnostics && measure
+            ? _host.GetSnapshot().Listener
+            : default;
+        EventTotals eventBefore = _tailDiagnostics && measure
+            ? CaptureEventTotals()
+            : default;
+        ulong eventsPublishedBefore = _tailDiagnostics && measure ? _eventsPublished : 0;
+        ulong eventsAppliedBefore = _tailDiagnostics && measure ? _eventsApplied : 0;
         ReplicationProtocolTiming protocolBefore = measure && _phaseAttribution
             ? CaptureProtocolStageTiming()
             : default;
@@ -654,6 +680,19 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 _serverRoleMilliseconds.Add(authority + eventPublish + worldSchedule + eventSchedule +
                     serverApplication + serverProtocol);
                 _clientRoleMilliseconds.Add(clientApplication + clientProtocol);
+            }
+            if (_tailDiagnostics)
+            {
+                CaptureWorstTick(
+                    tick,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    process is null ? 0 : Math.Max(0,
+                        (process.TotalProcessorTime.Ticks - processCpuStarted) /
+                        (double)TimeSpan.TicksPerMillisecond),
+                    listenerBefore,
+                    eventBefore,
+                    eventsPublishedBefore,
+                    eventsAppliedBefore);
             }
         }
 
@@ -951,6 +990,111 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         _clientProtocolMilliseconds.Clear();
         _serverRoleMilliseconds.Clear();
         _clientRoleMilliseconds.Clear();
+        _worstTicks.Clear();
+    }
+
+    private ReplicationTailSummary CreateTailSummary()
+    {
+        if (!_tailDiagnostics) return default;
+        return new(
+            true,
+            _tickMilliseconds.Count,
+            ReplicationTailMetricSummary.From(_serverRoleMilliseconds),
+            ReplicationTailMetricSummary.From(_serverProtocolMilliseconds),
+            ReplicationTailMetricSummary.From(_worldScheduleMilliseconds),
+            ReplicationTailMetricSummary.From(_eventScheduleMilliseconds),
+            ReplicationTailMetricSummary.From(_authorityUpdateMilliseconds),
+            ReplicationTailMetricSummary.From(_serverApplicationMilliseconds),
+            _worstTicks
+                .OrderByDescending(value => value.ServerRoleMilliseconds)
+                .ThenBy(value => value.Tick)
+                .ToArray());
+    }
+
+    private void CaptureWorstTick(
+        int tick,
+        double tickMilliseconds,
+        double processCpuMilliseconds,
+        SharedUdpListenerSnapshot listenerBefore,
+        EventTotals eventBefore,
+        ulong eventsPublishedBefore,
+        ulong eventsAppliedBefore)
+    {
+        SharedUdpListenerSnapshot listenerAfter = _host.GetSnapshot().Listener;
+        SharedUdpReceiveCensusSnapshot receiveBefore = listenerBefore.ReceiveCensus;
+        SharedUdpReceiveCensusSnapshot receiveAfter = listenerAfter.ReceiveCensus;
+        ulong nativeReceiveCalls = Delta(receiveAfter.NativeReceiveCalls,
+            receiveBefore.NativeReceiveCalls);
+        ulong nativeReceivedDatagrams = Delta(receiveAfter.NativeReceivedDatagrams,
+            receiveBefore.NativeReceivedDatagrams);
+        ulong nativeSendCalls = Delta(listenerAfter.NativeSendCalls,
+            listenerBefore.NativeSendCalls);
+        ulong nativeSentDatagrams = Delta(listenerAfter.NativeSentDatagrams,
+            listenerBefore.NativeSentDatagrams);
+        EventTotals eventAfter = CaptureEventTotals();
+        TransportTotals transport = CaptureTransportTotals();
+        GameInterestSnapshot interest = _interest.GetSnapshot();
+        ReplicationWorstTick candidate = new(
+            tick,
+            tickMilliseconds,
+            _serverRoleMilliseconds[^1],
+            _serverProtocolMilliseconds[^1],
+            _authorityUpdateMilliseconds[^1],
+            _worldScheduleMilliseconds[^1],
+            _eventScheduleMilliseconds[^1],
+            _serverApplicationMilliseconds[^1],
+            Delta(listenerAfter.Received, listenerBefore.Received),
+            Delta(listenerAfter.Sent, listenerBefore.Sent),
+            Delta(listenerAfter.ReceiveCalls, listenerBefore.ReceiveCalls),
+            Delta(listenerAfter.SendCalls, listenerBefore.SendCalls),
+            nativeReceiveCalls,
+            nativeReceivedDatagrams,
+            nativeReceiveCalls == 0 ? 0 : nativeReceivedDatagrams / (double)nativeReceiveCalls,
+            receiveAfter.NativeReceiveBatchP50,
+            receiveAfter.NativeReceiveBatchP95,
+            receiveAfter.MaximumNativeReceiveBatch,
+            nativeSendCalls,
+            nativeSentDatagrams,
+            nativeSendCalls == 0 ? 0 : nativeSentDatagrams / (double)nativeSendCalls,
+            listenerAfter.NativeSendBatchP50,
+            listenerAfter.NativeSendBatchP95,
+            listenerAfter.MaximumNativeSendBatch,
+            transport.ReliableQueued,
+            transport.IndependentQueued,
+            transport.ReceivedQueued,
+            transport.InFlightPackets,
+            interest.PendingRelationCount,
+            Delta(_eventsPublished, eventsPublishedBefore),
+            Delta(_eventsApplied, eventsAppliedBefore),
+            Delta(eventAfter.RecordsExamined, eventBefore.RecordsExamined),
+            Delta(eventAfter.RecordsSkipped, eventBefore.RecordsSkipped),
+            ToMilliseconds(Delta(listenerAfter.SendSystemCallTicks,
+                listenerBefore.SendSystemCallTicks)),
+            ToMilliseconds(Delta(listenerAfter.ReceivePollTicks,
+                listenerBefore.ReceivePollTicks)),
+            ToMilliseconds(Delta(listenerAfter.ReceiveSystemCallTicks,
+                listenerBefore.ReceiveSystemCallTicks)),
+            ToMilliseconds(Delta(receiveAfter.RoutingTicks, receiveBefore.RoutingTicks)),
+            processCpuMilliseconds);
+        AddWorstTick(candidate);
+    }
+
+    private void AddWorstTick(ReplicationWorstTick candidate)
+    {
+        if (_worstTicks.Count < 32)
+        {
+            _worstTicks.Add(candidate);
+            return;
+        }
+        int minimumIndex = 0;
+        for (int index = 1; index < _worstTicks.Count; index++)
+        {
+            if (_worstTicks[index].ServerRoleMilliseconds <
+                _worstTicks[minimumIndex].ServerRoleMilliseconds)
+                minimumIndex = index;
+        }
+        if (candidate.ServerRoleMilliseconds > _worstTicks[minimumIndex].ServerRoleMilliseconds)
+            _worstTicks[minimumIndex] = candidate;
     }
 
     private void ResetProtocolStageTiming(bool enabled)
@@ -1147,6 +1291,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private static double ToMilliseconds(long ticks) => ticks * 1_000d / Stopwatch.Frequency;
     private static double ToMilliseconds(ulong ticks) => ticks * 1_000d / Stopwatch.Frequency;
 
+    private static ulong Delta(ulong after, ulong before) =>
+        after >= before ? after - before : 0;
+
     private static ulong SaturatingAdd(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 
@@ -1323,6 +1470,7 @@ internal sealed class LatencyHistogram
     private long _count;
     private double _sum;
     private double _max;
+    internal long Count => _count;
 
     internal LatencyHistogram(double width, int buckets, double percentileBucketOffset = 0.5)
     {
@@ -1564,6 +1712,7 @@ internal sealed record ReplicationWorkloadResult(
     SharedUdpListenerSnapshot ListenerAfter,
     ReplicationBatchOpportunityReport BatchOpportunity,
     ReplicationPhaseAttribution PhaseAttribution,
+    ReplicationTailSummary Tail,
     ReplicationServerProtocolAttribution ServerProtocolAttribution,
     ReplicationWorldStateAttribution WorldStateAttribution,
     ReplicationAmplification Amplification);
@@ -1581,6 +1730,92 @@ internal readonly record struct ReplicationPhaseAttribution(
     NetworkMetricSummary ClientProtocolMilliseconds,
     NetworkMetricSummary ServerRoleTotalMilliseconds,
     NetworkMetricSummary ClientRoleTotalMilliseconds);
+
+internal readonly record struct ReplicationTailSummary(
+    bool Enabled,
+    int MeasuredTicks,
+    ReplicationTailMetricSummary ServerRoleMilliseconds,
+    ReplicationTailMetricSummary ServerProtocolMilliseconds,
+    ReplicationTailMetricSummary WorldStateScheduleMilliseconds,
+    ReplicationTailMetricSummary EventScheduleMilliseconds,
+    ReplicationTailMetricSummary AuthorityUpdateMilliseconds,
+    ReplicationTailMetricSummary ServerApplicationMilliseconds,
+    IReadOnlyList<ReplicationWorstTick>? WorstTicks);
+
+internal readonly record struct ReplicationTailMetricSummary(
+    int Samples,
+    double Mean,
+    double P50,
+    double P95,
+    double P99,
+    double P999,
+    double Max)
+{
+    internal static ReplicationTailMetricSummary From(IReadOnlyList<double> values)
+    {
+        if (values.Count == 0) return default;
+        double[] sorted = values.ToArray();
+        Array.Sort(sorted);
+        return new(
+            sorted.Length,
+            sorted.Average(),
+            Percentile(sorted, 0.50),
+            Percentile(sorted, 0.95),
+            Percentile(sorted, 0.99),
+            Percentile(sorted, 0.999),
+            sorted[^1]);
+    }
+
+    private static double Percentile(ReadOnlySpan<double> sorted, double percentile)
+    {
+        double position = (sorted.Length - 1) * percentile;
+        int lower = (int)position;
+        int upper = (int)Math.Ceiling(position);
+        return lower == upper
+            ? sorted[lower]
+            : sorted[lower] + ((sorted[upper] - sorted[lower]) * (position - lower));
+    }
+}
+
+internal readonly record struct ReplicationWorstTick(
+    int Tick,
+    double TickMilliseconds,
+    double ServerRoleMilliseconds,
+    double ServerProtocolMilliseconds,
+    double AuthorityUpdateMilliseconds,
+    double WorldStateScheduleMilliseconds,
+    double EventScheduleMilliseconds,
+    double ServerApplicationMilliseconds,
+    ulong InboundDatagrams,
+    ulong OutboundDatagrams,
+    ulong InboundSocketCalls,
+    ulong OutboundSocketCalls,
+    ulong NativeReceiveCalls,
+    ulong NativeReceiveDatagrams,
+    double NativeReceiveDatagramsPerCall,
+    int NativeReceiveBatchP50ToDate,
+    int NativeReceiveBatchP95ToDate,
+    int MaximumNativeReceiveBatchToDate,
+    ulong NativeSendCalls,
+    ulong NativeSentDatagrams,
+    double NativeSentDatagramsPerCall,
+    int NativeSendBatchP50ToDate,
+    int NativeSendBatchP95ToDate,
+    int MaximumNativeSendBatchToDate,
+    int ReliableQueued,
+    int IndependentQueued,
+    int ReceivedQueued,
+    int InFlightPackets,
+    int PendingRelations,
+    ulong EventsPublished,
+    ulong EventsApplied,
+    ulong EventRecordsExamined,
+    ulong EventRecordsSkipped,
+    double ListenerSendSystemCallMilliseconds,
+    double ListenerReceivePollMilliseconds,
+    double ListenerReceiveSystemCallMilliseconds,
+    double ListenerReceiveRoutingMilliseconds,
+    double ProcessCpuMilliseconds);
 
 internal readonly record struct ReplicationServerProtocolAttribution(
     bool Enabled,

@@ -12,9 +12,13 @@ string v3Project = Path.Combine(repository, "_Benchmarks", "UltraSim.Network.V3C
     "UltraSim.Network.V3ComparisonAdapter.csproj");
 var runs = new List<NetworkBotJoinedReport>();
 
-foreach (int clients in options.ClientStages)
+for (int stageIndex = 0; stageIndex < options.ClientStages.Count; stageIndex++)
 {
-    bool[] orders = options.BothOrders ? [false, true] : [options.V3First];
+    int clients = options.ClientStages[stageIndex];
+    bool stageV3First = options.AlternateSingleOrder
+        ? (stageIndex & 1) != 0
+        : options.V3First;
+    bool[] orders = options.BothOrders ? [false, true] : [stageV3First];
     foreach (bool v3First in orders)
     {
         string orderName = v3First ? "v3-first" : "v2-first";
@@ -51,7 +55,8 @@ foreach (int clients in options.ClientStages)
         ValidateCatalog(v2.Result.Scenario, v3.Result.Scenario);
         NetworkBotJoinedReport joined = Join(v2, v3, v3First);
         runs.Add(joined);
-        NetworkBotComparisonIo.Write(Path.Combine(runDirectory, "network-v2-v3-bot-comparison.json"), joined);
+        NetworkBotComparisonIo.Write(Path.Combine(runDirectory, "network-v2-v3-bot-comparison.json"),
+            CompactJoined(joined));
         File.WriteAllText(Path.Combine(runDirectory, "network-v2-v3-bot-comparison.md"),
             BuildRunMarkdown(joined));
         Console.WriteLine($"Canonical owner state ({clients}, {orderName}): " +
@@ -70,7 +75,7 @@ var matrix = new NetworkBotMatrixReport(
     runs.All(run => run.CanonicalStateMatches));
 string json = Path.Combine(options.OutputDirectory, "network-v2-v3-bot-comparison-matrix.json");
 string markdown = Path.Combine(options.OutputDirectory, "network-v2-v3-bot-comparison-matrix.md");
-NetworkBotComparisonIo.Write(json, matrix);
+NetworkBotComparisonIo.Write(json, CompactMatrix(matrix));
 File.WriteAllText(markdown, BuildMatrixMarkdown(matrix));
 Console.WriteLine(Path.GetFullPath(markdown));
 if (!matrix.AllCanonicalStatesMatch) Environment.ExitCode = 2;
@@ -130,7 +135,13 @@ AdapterProcessObservation RunAdapter(string project, string output, bool v2Adapt
     Add($"--stage-ticks={options.StageTicks}");
     Add($"--settle-ticks={options.SettleTicks}");
     Add($"--spawn-spacing={options.SpawnSpacing.ToString("R", CultureInfo.InvariantCulture)}");
-    if (!v2Adapter) Add($"--topology={options.V3Topology}");
+    Add($"--active-ratio={options.ActiveRatio.ToString("R", CultureInfo.InvariantCulture)}");
+    Add($"--spawn-grid-width={options.SpawnGridWidth}");
+    if (!v2Adapter)
+    {
+        Add($"--topology={options.V3Topology}");
+        Add($"--shared-socket-io={options.V3SocketIo}");
+    }
     if (v2Adapter && options.NoBuildV2) Add("--no-build-v2");
 
     Console.WriteLine($"Running {Path.GetFileNameWithoutExtension(project)} ({clients})...");
@@ -183,6 +194,29 @@ static void ValidateCatalog(NetworkBotScenario left, NetworkBotScenario right)
 static double? Ratio(double numerator, double denominator) =>
     numerator > 0 && denominator > 0 ? numerator / denominator : null;
 
+static NetworkBotJoinedReport CompactJoined(NetworkBotJoinedReport report) => report with
+{
+    V2 = report.V2 with
+    {
+        Result = report.V2.Result with
+        {
+            CanonicalOwnerStates = Array.Empty<NetworkCanonicalOwnerState>(),
+        },
+    },
+    V3 = report.V3 with
+    {
+        Result = report.V3.Result with
+        {
+            CanonicalOwnerStates = Array.Empty<NetworkCanonicalOwnerState>(),
+        },
+    },
+};
+
+static NetworkBotMatrixReport CompactMatrix(NetworkBotMatrixReport report) => report with
+{
+    Runs = report.Runs.Select(CompactJoined).ToArray(),
+};
+
 static IReadOnlyList<NetworkBotScaleDelta> CalculateScaleDeltas(
     IReadOnlyList<NetworkBotJoinedReport> runs)
 {
@@ -230,10 +264,23 @@ static string BuildRunMarkdown(NetworkBotJoinedReport report)
     Row("input ACK p95 ticks", v2.InputAcknowledgementTicks.P95, v3.InputAcknowledgementTicks.P95, null);
     Row("worst-client input ACK p95 ms", v2.PerClientInputAckP95Milliseconds.Max,
         v3.PerClientInputAckP95Milliseconds.Max, null);
+    Row("Immediate WorldState p95 ms", v2.ImmediateWorldStateMilliseconds.P95,
+        v3.ImmediateWorldStateMilliseconds.P95, null);
+    Row("Near WorldState p95 ms", v2.NearWorldStateMilliseconds.P95,
+        v3.NearWorldStateMilliseconds.P95, null);
+    Row("Far WorldState p95 ms", v2.FarWorldStateMilliseconds.P95,
+        v3.FarWorldStateMilliseconds.P95, null);
+    Row("worst-client WorldState p95 ms", v2.PerClientWorldStateP95Milliseconds.Max,
+        v3.PerClientWorldStateP95Milliseconds.Max, null);
     Row("deadline misses", v2.TickDeadlineMisses, v3.TickDeadlineMisses, null);
     Row("allocated bytes", v2.AllocatedBytes, v3.AllocatedBytes, report.V3ToV2AllocatedBytesRatio);
     Row("reserved network bytes", v2.ReservedNetworkBytes, v3.ReservedNetworkBytes, report.V3ToV2ReservedBytesRatio);
     Row("configured socket bytes", v2.ConfiguredSocketBufferBytes, v3.ConfiguredSocketBufferBytes, null);
+    Row("working set bytes", v2.WorkingSetBytes, v3.WorkingSetBytes, null);
+    Row("private bytes", v2.PrivateBytes, v3.PrivateBytes, null);
+    Row("managed heap bytes", v2.ManagedHeapBytes, v3.ManagedHeapBytes, null);
+    Row("WorldState records applied", v2.WorldStateRecordsApplied,
+        v3.WorldStateRecordsApplied, null);
     Row("wire datagrams", v2.WireDatagramsSent, v3.WireDatagramsSent, null);
     Row("wire bytes", v2.WireBytesSent, v3.WireBytesSent, report.V3ToV2WireBytesRatio);
     Row("retransmitted wire bytes", v2.RetransmittedWireBytes, v3.RetransmittedWireBytes, null);
@@ -270,20 +317,105 @@ static string BuildMatrixMarkdown(NetworkBotMatrixReport report)
     text.AppendLine($"- Protocol: `{report.ProtocolVersion}`");
     text.AppendLine($"- Scenario: `{report.Scenario}`");
     text.AppendLine($"- Both process orders: {report.BothProcessOrders}");
-    text.AppendLine($"- All canonical results: **{(report.AllCanonicalStatesMatch ? "MATCH" : "MISMATCH")}**").AppendLine();
-    text.AppendLine("| Bots | Order | V2 tick p95 ms | V3 tick p95 ms | V3/V2 | V2 ping p95 ms | V3 ping p95 ms | Canonical |");
-    text.AppendLine("| ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |");
+    text.AppendLine($"- All canonical results: **{(report.AllCanonicalStatesMatch ? "MATCH" : "MISMATCH")}**");
+    NetworkBotScenario scenario = report.Runs[0].V2.Result.Scenario;
+    text.AppendLine($"- Cadence: {scenario.TickHz} Hz authority/network; {scenario.InputHz} Hz phased input");
+    text.AppendLine($"- Window: {scenario.SettleTicks} settle ticks + {scenario.StageTicks} measured ticks per independent population");
+    text.AppendLine($"- Activity/space: {scenario.ActiveRatio:P0} active; {F(scenario.SpawnSpacingMeters)} m spacing; grid width {scenario.SpawnGridWidth}").AppendLine();
+    text.AppendLine("| Bots | Order | V2 tick mean/p95/p99/max ms | V3 tick mean/p95/p99/max ms | V3/V2 p95 | V2/V3 ping p95 ms | V3 input ACK p95 ms | V3 Far age p95/max ms | Deadline misses V2/V3 | Canonical |");
+    text.AppendLine("| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |");
     foreach (NetworkBotJoinedReport run in report.Runs)
     {
         NetworkBotStageResult v2 = run.V2.Result;
         NetworkBotStageResult v3 = run.V3.Result;
         text.Append("| ").Append(v2.Scenario.Clients).Append(" | ").Append(run.CaptureOrder)
-            .Append(" | ").Append(v2.TickMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
-            .Append(" | ").Append(v3.TickMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
+            .Append(" | ").Append(Summary(v2.TickMilliseconds))
+            .Append(" | ").Append(Summary(v3.TickMilliseconds))
             .Append(" | ").Append(run.V3ToV2TickP95Ratio?.ToString("0.###x", CultureInfo.InvariantCulture) ?? "—")
-            .Append(" | ").Append(v2.PingMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
-            .Append(" | ").Append(v3.PingMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
+            .Append(" | ").Append(F(v2.PingMilliseconds.P95)).Append('/').Append(F(v3.PingMilliseconds.P95))
+            .Append(" | ").Append(F(v3.InputAcknowledgementMilliseconds.P95))
+            .Append(" | ").Append(F(v3.FarWorldStateMilliseconds.P95)).Append('/').Append(F(v3.FarWorldStateMilliseconds.Max))
+            .Append(" | ").Append(v2.MetricCoverage.TickDeadlineCompliance
+                ? v2.TickDeadlineMisses.ToString(CultureInfo.InvariantCulture)
+                : "—").Append('/').Append(v3.TickDeadlineMisses)
             .Append(" | ").Append(run.CanonicalStateMatches ? "MATCH" : "MISMATCH").AppendLine(" |");
+    }
+    text.AppendLine().AppendLine("## Work, wire, and bounded pressure").AppendLine();
+    text.AppendLine("| Bots | Inputs V2/V3 | Owner applied V2/V3 | World records V2/V3 | V2 observer items / V3 relations | V2 replication logical/wire datagrams | V3 wire datagrams / MiB | V3 retransmit KiB | V3 data/ACK packets | V3 semantic copies | V3 pending max / nonviable |");
+    text.AppendLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    foreach (NetworkBotJoinedReport run in report.Runs)
+    {
+        NetworkBotStageResult v2 = run.V2.Result;
+        NetworkBotStageResult v3 = run.V3.Result;
+        text.Append("| ").Append(v2.Scenario.Clients)
+            .Append(" | ").Append(v2.LogicalInputs).Append('/').Append(v3.LogicalInputs)
+            .Append(" | ").Append(v2.OwnerStatesApplied).Append('/').Append(v3.OwnerStatesApplied)
+            .Append(" | ").Append(v2.WorldStateRecordsApplied).Append('/').Append(v3.WorldStateRecordsApplied)
+            .Append(" | ").Append(F(D(v2, "v2.observer_state_items"))).Append('/').Append(F(D(v3, "world_state_relations")))
+            .Append(" | ").Append(F(D(v2, "replication_logical_datagrams"))).Append('/').Append(F(D(v2, "replication_wire_datagrams")))
+            .Append(" | ").Append(v3.WireDatagramsSent).Append(" / ").Append(F(v3.WireBytesSent / 1048576d))
+            .Append(" | ").Append(F(v3.RetransmittedWireBytes / 1024d))
+            .Append(" | ").Append(F(D(v3, "data_packets_sent"))).Append('/').Append(F(D(v3, "acknowledgement_packets_sent")))
+            .Append(" | ").Append(F(D(v3, "world_state_semantic_record_copies")))
+            .Append(" | ").Append(F(D(v3, "world_state_pending_relations_max"))).Append('/').Append(F(D(v3, "world_state_nonviable_recipients")))
+            .AppendLine(" |");
+    }
+    text.AppendLine().AppendLine("## Memory, allocation, CPU, and headroom").AppendLine();
+    text.AppendLine("| Bots | Working set MiB V2/V3 | Private MiB V2/V3 | Managed heap MiB V2/V3 | Alloc MiB V2/V3 | GC0/1/2 V2 | GC0/1/2 V3 | V3 Network / replication reserve MiB | Socket config MiB V2/V3 | V3 CPU cores | V3 max rel/recv occupancy | V3 SLO headroom ms |");
+    text.AppendLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    foreach (NetworkBotJoinedReport run in report.Runs)
+    {
+        NetworkBotStageResult v2 = run.V2.Result;
+        NetworkBotStageResult v3 = run.V3.Result;
+        text.Append("| ").Append(v2.Scenario.Clients)
+            .Append(" | ").Append(F(v2.WorkingSetBytes / 1048576d)).Append('/').Append(F(v3.WorkingSetBytes / 1048576d))
+            .Append(" | ").Append(F(v2.PrivateBytes / 1048576d)).Append('/').Append(F(v3.PrivateBytes / 1048576d))
+            .Append(" | ").Append(F(v2.ManagedHeapBytes / 1048576d)).Append('/').Append(F(v3.ManagedHeapBytes / 1048576d))
+            .Append(" | ").Append(F(v2.AllocatedBytes / 1048576d)).Append('/').Append(F(v3.AllocatedBytes / 1048576d))
+            .Append(" | ").Append(v2.Gen0Collections).Append('/').Append(v2.Gen1Collections).Append('/').Append(v2.Gen2Collections)
+            .Append(" | ").Append(v3.Gen0Collections).Append('/').Append(v3.Gen1Collections).Append('/').Append(v3.Gen2Collections)
+            .Append(" | ").Append(F(v3.ReservedNetworkBytes / 1048576d)).Append('/').Append(F(D(v3, "game_replication_reserved_bytes") / 1048576d))
+            .Append(" | ").Append(F(v2.ConfiguredSocketBufferBytes / 1048576d)).Append('/').Append(F(v3.ConfiguredSocketBufferBytes / 1048576d))
+            .Append(" | ").Append(F(v3.ProcessCpuCoreUtilization))
+            .Append(" | ").Append(F(v3.ReliableOccupancy.MaximumRatio * 100)).Append("%/").Append(F(v3.ReceivedOccupancy.MaximumRatio * 100)).Append('%')
+            .Append(" | ").Append(F(D(v3, "tick_slo_headroom_ms")))
+            .AppendLine(" |");
+    }
+    text.AppendLine().AppendLine("## V3 freshness and fairness").AppendLine();
+    text.AppendLine("| Bots | Input ACK p95 ticks/ms | Immediate p95 ticks/ms | Near p95 ticks/ms | Far p95 ticks/ms | Worst-client WorldState p95 ms | Worst-client input ACK p95 ms |");
+    text.AppendLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    foreach (NetworkBotJoinedReport run in report.Runs)
+    {
+        NetworkBotStageResult v3 = run.V3.Result;
+        text.Append("| ").Append(v3.Scenario.Clients)
+            .Append(" | ").Append(F(v3.InputAcknowledgementTicks.P95)).Append('/').Append(F(v3.InputAcknowledgementMilliseconds.P95))
+            .Append(" | ").Append(F(v3.ImmediateWorldStateTicks.P95)).Append('/').Append(F(v3.ImmediateWorldStateMilliseconds.P95))
+            .Append(" | ").Append(F(v3.NearWorldStateTicks.P95)).Append('/').Append(F(v3.NearWorldStateMilliseconds.P95))
+            .Append(" | ").Append(F(v3.FarWorldStateTicks.P95)).Append('/').Append(F(v3.FarWorldStateMilliseconds.P95))
+            .Append(" | ").Append(F(v3.PerClientWorldStateP95Milliseconds.Max))
+            .Append(" | ").Append(F(v3.PerClientInputAckP95Milliseconds.Max))
+            .AppendLine(" |");
+    }
+    text.AppendLine().AppendLine("## V3 protocol, transport, and byte pressure").AppendLine();
+    text.AppendLine("| Bots | Handshake p95/max ms | Wire/logical | Mean/max MTU fill | Send/receive calls | Datagrams/send call | Max rel/unrel/recv/flight | Pressure ticks >=50% | Retained bytes max/capacity | Drops / nonviable |");
+    text.AppendLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    foreach (NetworkBotJoinedReport run in report.Runs)
+    {
+        NetworkBotStageResult v3 = run.V3.Result;
+        text.Append("| ").Append(v3.Scenario.Clients)
+            .Append(" | ").Append(F(v3.HandshakeMilliseconds.P95)).Append('/').Append(F(v3.HandshakeMilliseconds.Max))
+            .Append(" | ").Append(F(D(v3, "wire_bytes_per_normalized_logical_byte")))
+            .Append(" | ").Append(F(D(v3, "mean_datagram_fill_ratio") * 100)).Append("%/").Append(F(D(v3, "maximum_datagram_fill_ratio") * 100)).Append('%')
+            .Append(" | ").Append(v3.SocketSendCalls).Append('/').Append(v3.SocketReceiveCalls)
+            .Append(" | ").Append(F(D(v3, "datagrams_per_send_syscall")))
+            .Append(" | ").Append(F(v3.ReliableOccupancy.MaximumRatio * 100)).Append("%/")
+                .Append(F(v3.IndependentUnreliableOccupancy.MaximumRatio * 100)).Append("%/")
+                .Append(F(v3.ReceivedOccupancy.MaximumRatio * 100)).Append("%/")
+                .Append(F(v3.InFlightOccupancy.MaximumRatio * 100)).Append('%')
+            .Append(" | ").Append(v3.CapacityPressureTicks50)
+            .Append(" | ").Append(F(D(v3, "retained_total_bytes_max"))).Append('/').Append(F(D(v3, "retained_payload_capacity_bytes")))
+            .Append(" | ").Append(v3.CapacityDrops).Append('/').Append(F(D(v3, "world_state_nonviable_recipients")))
+            .AppendLine(" |");
     }
     if (report.MarginalTickCosts.Count != 0)
     {
@@ -300,7 +432,15 @@ static string BuildMatrixMarkdown(NetworkBotMatrixReport report)
         .Select(run => run.V3.Result.EvidenceProfile.ExecutionTopology)
         .Distinct(StringComparer.Ordinal));
     text.AppendLine().AppendLine($"All ratios are **provisional topology evidence**. V2 uses one shared server socket. V3 evidence: {v3Topologies}. The matrix is an N0.10 input, not a direct production-topology verdict.");
+    text.AppendLine().AppendLine("The common input/owner contract and canonical owner outcome match, but observer work is intentionally not normalized away. V2's chunk subscriptions and V3's maintained coarse outer envelopes produce different admitted observer sets; the `V2 observer items / V3 relations` and applied-record columns quantify that representation consequence. V2 does not expose authoritative input-ACK age, tier age, deadline-miss counts, actual wire bytes, bounded occupancy, syscall counts, security work, process CPU, or deterministic reservations; those cells are omitted rather than interpreted as zero.");
+    text.AppendLine().AppendLine("V3 visible-state age/fairness is sampled during the untimed post-stage settle window, not charged to the tick comparison. The adapter reports the sampling window and histogram payload reservation explicitly. Age is the current observation time minus the authoritative creation time of the version still visible at the client, so continuously deferred latest-state debt remains visible rather than being discarded when a newer version supersedes it.");
     return text.ToString();
+
+    static string Summary(NetworkMetricSummary value) =>
+        $"{F(value.Mean)}/{F(value.P95)}/{F(value.P99)}/{F(value.Max)}";
+    static string F(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    static double D(NetworkBotStageResult value, string key) =>
+        value.Diagnostics.TryGetValue(key, out double result) ? result : 0;
 }
 
 static string FindRepositoryRoot()
@@ -326,12 +466,16 @@ internal sealed record RunnerOptions(
     int StageTicks,
     int SettleTicks,
     double SpawnSpacing,
+    double ActiveRatio,
+    int SpawnGridWidth,
     bool BothOrders,
     bool V3First,
+    bool AlternateSingleOrder,
     bool UseExisting,
     bool NoBuild,
     bool NoBuildV2,
-    string V3Topology)
+    string V3Topology,
+    string V3SocketIo)
 {
     internal static RunnerOptions Parse(string[] args)
     {
@@ -346,12 +490,16 @@ internal sealed record RunnerOptions(
             ParseInt(Get(args, "--stage-ticks="), 120),
             ParseInt(Get(args, "--settle-ticks="), 30),
             ParseDouble(Get(args, "--spawn-spacing="), 12),
+            ParseDouble(Get(args, "--active-ratio="), 1),
+            ParseInt(Get(args, "--spawn-grid-width="), 32),
             !Has(args, "--single-order"),
             Has(args, "--v3-first"),
+            Has(args, "--alternate-order"),
             Has(args, "--use-existing"),
             Has(args, "--no-build"),
             Has(args, "--no-build-v2"),
-            ParseV3Topology(Get(args, "--v3-topology=")));
+            ParseV3Topology(Get(args, "--v3-topology=")),
+            ParseV3SocketIo(Get(args, "--v3-socket-io=")));
     }
 
     private static IReadOnlyList<int> ParseStages(string value)
@@ -377,6 +525,14 @@ internal sealed record RunnerOptions(
         null or "connected-pairs" => "connected-pairs",
         "shared-listener" => "shared-listener",
         _ => throw new ArgumentException($"Unsupported V3 UDP topology '{value}'."),
+    };
+    private static string ParseV3SocketIo(string? value) => value?.ToLowerInvariant() switch
+    {
+        null or "platform-batch" or "native-send-batch" => "platform-batch",
+        "platform-send-receive-batch" or "native-send-receive-batch" =>
+            "platform-send-receive-batch",
+        "scalar" => "scalar",
+        _ => throw new ArgumentException($"Unsupported V3 socket I/O mode '{value}'."),
     };
 }
 

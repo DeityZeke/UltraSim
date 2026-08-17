@@ -2418,6 +2418,76 @@ comfortable tail headroom is not yet a consistent acceptance claim. This closes
 the receive-call multiplier; it does not justify waiting, larger batches,
 workers, or changes to peer/security semantics.
 
+### N0.10 sparse 1K–4K diagnostic
+
+The historical V2 sparse result was recovered rather than reconstructed from
+memory. It was a one-server/four-client-worker run at 62 Hz, 20 Hz phased input,
+35% active clients, 12 m spacing, width-64 placement, 7.5/23.5/39.5 m AOI,
+1/2/3-step ring cadence, recipient phasing, 0.10 m owner deadband, eight-step
+maximum silence, 30 measured seconds and 10 settle seconds. It carried one
+observer movement family and ping; chat, Event, visual and Bulk work were off.
+Its server p95 rose 3.048 ms at 1,024 → 8.049 ms at 2,560 → 9.883 ms at 3,072.
+The historical 4 ms investigation budget was crossed around 1.3K even though
+2.5K remained operational under broader latency budgets.
+
+The new cross-generation `sparse_observer_movement` profile preserves that game
+policy while using current same-process V2 and V3 topologies. The diagnostic
+matrix covers 1,024→4,096 in 256-client increments with 10 settle ticks and 310
+measured ticks, alternating process order by population. The preserved compact
+diagnostic artifact is
+[`network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json`](../../_Benchmarks/Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json)
+and the readable matrix is
+[`network-v2-v3-sparse-ccu-1024-4096-2026-08-17.md`](../../_Benchmarks/Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.md).
+
+All 13 rows reached every client, matched canonical owner state, and had zero V3
+capacity drops or nonviable recipients. Tick p95 was:
+
+```text
+CCU     V2        V3        V3/V2
+1024    6.979     17.618    2.524x
+2048   14.063     39.318    2.796x
+2560   19.269     48.524    2.518x
+3072   23.767     65.361    2.750x
+4096   32.298     87.669    2.714x
+```
+
+This is provisional topology/representation evidence, not a normalized
+per-record efficiency ratio. The V3 coarse outer envelope maintains
+76,180→343,396 recipient/entity relationships, while V2 retained
+22,584→70,572 observer items. V3 nevertheless applies only about 35% as many
+observer records because newest-state coalescing works: 0.419M versus 1.201M at
+1,024 and 1.874M versus 5.236M at 4,096. The expensive multiplier is earlier in
+the maintained graph. At 4,096, 460,076 unique semantic constructions and
+1,874,153 recipient copies sit behind 38,103,554 pending-version writes. That
+roughly 20:1 rewrite/copy ratio, plus 4.87x as many maintained relations as V2
+observer items, is the leading sparse-cost hypothesis. First attribute and
+remove avoidable pending-rewrite/requeue work, then run a matched admitted-set
+or region-sensitivity control. Do not add workers or inflate capacities from the
+raw ratio.
+
+Hard bounds did not fail: capacity drops/nonviable recipients stayed zero, all
+final debt converged, and retransmitted bytes were 0.10→0.38% of wire bytes.
+V3 semantic wire/logical amplification was 2.87x at 1,024 and 2.46x at 4,096
+after observer payload is included. The independent-unreliable queue did,
+however, reach 100% transient occupancy during some 2,560- and 4,096-client
+ticks. That is headroom evidence to retain, not a reason to enlarge it before
+the upstream rewrite/scheduling work is corrected. Network plus
+Game/Replication deterministic reservation reached about 919 MiB at 4,096;
+measured V3 working set was 1,202 MiB versus V2's 720 MiB. Timed allocation
+moved the other way: 68 MiB V3 versus 1,425 MiB V2.
+
+The new age-of-information metric found a correctness/liveness issue hidden by
+ordinary delivery counters. Immediate state remained at p95 one authoritative
+step, but continuously dirty Near/Far relations retained visible versions about
+111 steps old at p95. Far p95 grew 1.80→8.07 seconds and input-ACK p95
+63.7→294.4 ms across the matrix. Replacing a pending version currently computes
+a new future phase and can repeatedly push cadence eligibility forward. The
+next correction should preserve the already-earned delivery deadline when a
+newer version supersedes pending state. AoI/fairness is sampled during the
+untimed 10-tick settle window; its compact histogram payload is reported
+separately (16.42 MiB at 4,096) so diagnostics do not contaminate tick timing or
+dominate process memory.
+
 Protected profiles:
 
 ```text

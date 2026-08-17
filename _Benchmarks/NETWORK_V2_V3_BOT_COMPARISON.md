@@ -1,6 +1,6 @@
 # Network V2/V3 bot comparison
 
-Protocol: `ultrasim-network-v2-v3-bot-comparison-v2`.
+Protocol: `ultrasim-network-v2-v3-bot-comparison-v3`.
 
 This is the measurement entrance to N0.10. It reuses the useful experimental
 shape of the frozen V2 bot harness—stages, deterministic phased input, fixed
@@ -54,11 +54,24 @@ V2 integrates an input when it arrives; the current V3 workload integrates the
 latest complete control state every authoritative step. Treating those positions
 as identical would manufacture a semantic equivalence neither engine promises.
 
+`sparse_observer_movement` is the admitted cross-generation observer profile. It
+reconstructs the historical V2 sparse policy: 62 Hz, phased 20 Hz input, 35%
+active clients, 12 m spacing on a width-64 grid, 7.5/23.5/39.5 m rings,
+1/2/3-step tier cadence, recipient phasing, 0.10 m owner deadband, and an
+eight-step maximum silent interval. It carries no chat, ordered Event, visual,
+Bulk, or baseline work.
+
+The common input/owner contract and final canonical owner rows match. Observer
+sets are deliberately not declared identical: V2 subscribes to radius-tested
+chunks while V3 maintains coarse outer region envelopes. Applied observer work,
+retained observer items/relations, and semantic-copy counts remain visible so
+the cost of that representation difference is evidence rather than normalization.
+
 `spread_mix` and `dense_mix` remain unavailable as V2/V3 comparison rows. Both
-adapters reject those names so an owner-only run cannot be mislabeled as observer
-WorldState/Event evidence. A separate V3-only integrated suite now implements
-those workloads over the real AOI, WorldState, Event, secure UDP, application-ACK,
-and retained client-projection path; it deliberately produces no V2 ratio.
+adapters reject those names so the sparse profile cannot be mislabeled as dense
+WorldState/Event evidence. A separate V3-only integrated suite implements those
+workloads over the real AOI, WorldState, Event, secure UDP, application-ACK, and
+retained client-projection path; it deliberately produces no V2 ratio.
 
 ## Metrics
 
@@ -174,6 +187,84 @@ comparison input.
 An immutable accepted baseline requires the full matrix, semantic tests, both
 orders, stable machine conditions, and review under the repository benchmark
 policy.
+
+## Historical sparse V2 reference and current 1K–4K comparison
+
+The historical table the project previously used is
+[`aggregate.json`](../_V2/_Benchmarks/results/sharded_v1_shape_singlefamily_linux_1024_3072/sharded_20260428_032248/aggregate.json).
+It used one server plus four client-worker processes, 30 measured seconds and a
+10-second settle per independent stage. Its exact server arguments also record
+62 Hz, 20 Hz phased input, 35% active, one observer movement family, the sparse
+spatial policy above, async server flush, latest-state recipient phasing,
+one-second ping, 4 MiB send/receive socket requests, and no chat/Event/visual/Bulk
+traffic.
+
+| CCU | Server tick p95 | Worst-worker ping p95 | Pending max/client | Total allocated | Logical/wire replication datagrams |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 3.048 ms | 16.471 ms | 3 | 1,186 MiB | 7,355,098 / 932,426 |
+| 1,280 | 3.956 ms | 23.485 ms | 4 | 1,430 MiB | 9,407,063 / 880,948 |
+| 1,536 | 4.747 ms | 32.797 ms | 5 | 1,841 MiB | 11,389,016 / 1,156,463 |
+| 1,792 | 5.495 ms | 16.978 ms | 5 | 2,155 MiB | 13,402,977 / 1,258,164 |
+| 2,048 | 6.224 ms | 32.382 ms | 6 | 2,454 MiB | 15,352,966 / 1,356,273 |
+| 2,304 | 7.164 ms | 32.813 ms | 6 | 3,049 MiB | 17,476,716 / 1,729,882 |
+| 2,560 | 8.049 ms | 32.616 ms | 6 | 3,231 MiB | 19,439,851 / 1,654,133 |
+| 2,816 | 9.147 ms | 32.582 ms | 8 | 3,537 MiB | 21,458,577 / 1,734,956 |
+| 3,072 | 9.883 ms | 31.412 ms | 8 | 4,222 MiB | 23,371,907 / 2,392,864 |
+
+This confirms the remembered shape: roughly 2.5K was expensive but operational
+under broader latency budgets, while 3K approached 10 ms server p95. It was
+already over the historical 4 ms investigation target above roughly 1.3K.
+Chat counters were zero; this was never a chat-bearing table.
+
+The current preserved diagnostic comparison is
+[`network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json`](Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json)
+with a readable
+[`matrix`](Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.md).
+The requested `1,024 + n × 256` sequence terminates at 4,096; 4,098 is not on
+that sequence. Each population is an isolated current-process run with 10 settle
+ticks and 310 measured ticks, alternating which generation runs first.
+
+| CCU | V2/V3 tick p95 | V3/V2 | V2/V3 working set | V2/V3 timed allocation | V2/V3 applied observer records |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 6.979 / 17.618 ms | 2.524x | 234 / 362 MiB | 218 / 16.6 MiB | 1.201M / 0.419M |
+| 2,048 | 14.063 / 39.318 ms | 2.796x | 357 / 660 MiB | 534 / 33.5 MiB | 2.573M / 0.902M |
+| 2,560 | 19.269 / 48.524 ms | 2.518x | 479 / 790 MiB | 786 / 41.9 MiB | 3.203M / 1.146M |
+| 3,072 | 23.767 / 65.361 ms | 2.750x | 572 / 914 MiB | 1,031 / 50.5 MiB | 3.874M / 1.388M |
+| 4,096 | 32.298 / 87.669 ms | 2.714x | 720 / 1,202 MiB | 1,425 / 68.2 MiB | 5.236M / 1.874M |
+
+All 13 populations reached every client, matched canonical owner state, reported
+zero V3 capacity drops/nonviable recipients, and converged with no final pending
+debt. V3's deterministic Network plus Game/Replication reservation at 4,096 was
+about 919 MiB; V2 has no equivalent deterministic-reservation counter. V2's
+32,776 MiB socket figure at 4,096 is a configured kernel-buffer request, not
+resident memory.
+
+The raw p95 ratio is not a per-unit-work efficiency ratio. V3's newest-state
+coalescing applies only about 35% as many observer records as V2, but it maintains
+76,180→343,396 recipient/entity relations versus V2's 22,584→70,572 observer
+items. At 4,096, 38.10M pending writes produce 460K semantic constructions and
+1.874M recipient copies. The roughly 20 pending rewrites per emitted copy and
+outer-envelope relation count are therefore stronger targets than codec or
+packet capacity. No hard capacity failure occurred, but independent-unreliable
+occupancy did transiently reach 100% at some high-scale ticks; preserve that
+headroom signal while correcting the upstream work.
+
+Retransmitted bytes rose from 0.10% to 0.38% of wire bytes and semantic
+wire/logical amplification fell from 2.87x to 2.46x. At 4,096 deterministic
+Network plus Game/Replication reservation was about 919 MiB, working set was
+1,202 MiB V3 versus 720 MiB V2, and timed allocation was 68 MiB V3 versus
+1,425 MiB V2.
+
+V3 did not remain cadence-fresh outside Immediate. Immediate p95 was one
+authoritative step, but continuously dirty Near/Far visible state was about 111
+steps old at p95; Far p95 grew 1.80→8.07 seconds and input-ACK p95
+63.7→294.4 ms. A newer pending version currently recomputes a future phased
+eligibility deadline, allowing continuous rewrites to postpone Near/Far
+delivery. The next correction should preserve an already-earned deadline when
+coalescing newer pending state, then repeat this same matrix. Visible-state AoI
+and per-client fairness are sampled in the untimed 10-tick settle window. The
+compact telemetry payload is reported separately (16.42 MiB at 4,096), avoiding
+both timed-path distortion and the earlier oversized diagnostic reservation.
 
 The first accepted provisional matrix is
 [`network-v2-v3-bot-n010-entry-2026-08-15.json`](Baselines/network-v2-v3-bot-n010-entry-2026-08-15.json).

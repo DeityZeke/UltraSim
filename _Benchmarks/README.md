@@ -156,10 +156,34 @@ The provisional N0.10 network instrument is documented in
 Its v2 evidence schema distinguishes unavailable metric families from measured
 zero, preserves all numeric frozen-V2 stage diagnostics, and reports V3
 occupancy, freshness/fairness, handshake, wire/security, syscall, CPU, and
-marginal-scale context. Observer/AoI/Event metrics now come from the separate
-V3-only integrated replication suite; they are still not fabricated in the
-owner-only cross-generation run. Recovery metrics remain tied to their owning
-recovery workloads.
+marginal-scale context. The cross-generation `sparse_observer_movement` profile
+now reports observer counts and V3 tier freshness/AoI amplification while
+explicitly preserving the V2/V3 admitted-set difference. Dense/Event metrics
+remain owned by the separate V3-only integrated replication suite and recovery
+metrics remain tied to their recovery workloads.
+
+The 1,024→4,096 sparse diagnostic can be reproduced with:
+
+```bash
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
+  --scenario=sparse_observer_movement \
+  --clients=1024,1280,1536,1792,2048,2304,2560,2816,3072,3328,3584,3840,4096 \
+  --tick-hz=62 --input-hz=20 --stage-ticks=310 --settle-ticks=10 \
+  --spawn-spacing=12 --spawn-grid-width=64 --active-ratio=0.35 \
+  --v3-topology=shared-listener \
+  --v3-socket-io=platform-send-receive-batch \
+  --single-order --alternate-order \
+  --output-dir=_Benchmarks/results/network-v2-v3-sparse-ccu
+```
+
+The coordinator writes compact joined/matrix JSON by omitting redundant
+per-client canonical rows after their exact hash/match has been established;
+raw adapter artifacts retain those rows for an active investigation.
+V3 visible-state AoI/fairness is sampled during the untimed 10-tick post-stage
+settle window. The result records both the sampling duration and compact
+histogram payload reservation, so freshness instrumentation is neither charged
+to tick time nor mistaken for production Network/Game reservation.
 
 ## Comparability
 

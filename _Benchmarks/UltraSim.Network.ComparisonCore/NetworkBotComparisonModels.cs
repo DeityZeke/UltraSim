@@ -13,20 +13,28 @@ public sealed record NetworkBotScenario(
     int SettleTicks,
     double SpawnSpacingMeters,
     bool ObserverState,
-    bool OrderedEvents)
+    bool OrderedEvents,
+    double ActiveRatio = 1,
+    int SpawnGridWidth = 32)
 {
     public NetworkBotScenario Validate()
     {
         if (string.IsNullOrWhiteSpace(Id)) throw new ArgumentException("A scenario ID is required.", nameof(Id));
-        if (!StringComparer.Ordinal.Equals(Id, "owner_movement"))
+        if (!StringComparer.Ordinal.Equals(Id, "owner_movement") &&
+            !StringComparer.Ordinal.Equals(Id, "sparse_observer_movement"))
             throw new NotSupportedException(
                 $"The comparison profile '{Id}' is not implemented. N0.10 admits profiles only after both adapters own equivalent semantics.");
         if (Clients <= 0) throw new ArgumentOutOfRangeException(nameof(Clients));
-        if (TickHz <= 0 || InputHz <= 0 || InputHz > TickHz || TickHz % InputHz != 0)
+        if (TickHz <= 0 || InputHz <= 0 || InputHz > TickHz)
             throw new ArgumentOutOfRangeException(nameof(InputHz));
         if (StageTicks <= 0 || SettleTicks < 0) throw new ArgumentOutOfRangeException(nameof(StageTicks));
         if (!double.IsFinite(SpawnSpacingMeters) || SpawnSpacingMeters < 0)
             throw new ArgumentOutOfRangeException(nameof(SpawnSpacingMeters));
+        if (!double.IsFinite(ActiveRatio) || ActiveRatio is < 0 or > 1)
+            throw new ArgumentOutOfRangeException(nameof(ActiveRatio));
+        if (SpawnGridWidth <= 0) throw new ArgumentOutOfRangeException(nameof(SpawnGridWidth));
+        if (StringComparer.Ordinal.Equals(Id, "sparse_observer_movement") && !ObserverState)
+            throw new ArgumentException("The sparse observer profile requires observer state.", nameof(ObserverState));
         return this;
     }
 }
@@ -190,6 +198,15 @@ public sealed record NetworkBotStageResult
     public required NetworkMetricSummary PerClientInputAckP95Milliseconds { get; init; }
     public required NetworkMetricSummary PerClientPingP95Milliseconds { get; init; }
     public required NetworkMetricSummary HandshakeMilliseconds { get; init; }
+    public NetworkMetricSummary ImmediateWorldStateMilliseconds { get; init; }
+    public NetworkMetricSummary NearWorldStateMilliseconds { get; init; }
+    public NetworkMetricSummary FarWorldStateMilliseconds { get; init; }
+    public NetworkMetricSummary ImmediateWorldStateTicks { get; init; }
+    public NetworkMetricSummary NearWorldStateTicks { get; init; }
+    public NetworkMetricSummary FarWorldStateTicks { get; init; }
+    public NetworkMetricSummary PerClientWorldStateP95Milliseconds { get; init; }
+    public NetworkMetricSummary ApplicationEventMilliseconds { get; init; }
+    public NetworkMetricSummary ApplicationEventTicks { get; init; }
     public required NetworkBotMetricCoverage MetricCoverage { get; init; }
     public required long TickDeadlineMisses { get; init; }
     public required int LongestDeadlineMissStreak { get; init; }
@@ -243,7 +260,7 @@ public sealed record NetworkBotStageResult
 
 public sealed record NetworkBotAdapterReport
 {
-    public const string Protocol = "ultrasim-network-v2-v3-bot-comparison-v2";
+    public const string Protocol = "ultrasim-network-v2-v3-bot-comparison-v3";
     public required string ProtocolVersion { get; init; }
     public required string Generation { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }

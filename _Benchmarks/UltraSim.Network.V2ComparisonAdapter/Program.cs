@@ -35,30 +35,42 @@ try
     Add("--stage-duration", (scenario.StageTicks / (double)scenario.TickHz).ToString("R", CultureInfo.InvariantCulture));
     Add("--settle-seconds", (scenario.SettleTicks / (double)scenario.TickHz).ToString("R", CultureInfo.InvariantCulture));
     Add("--tick-hz", scenario.TickHz.ToString(CultureInfo.InvariantCulture));
-    Add("--active-ratio", "1");
+    Add("--active-ratio", scenario.ActiveRatio.ToString("R", CultureInfo.InvariantCulture));
     Add("--input-hz", scenario.InputHz.ToString(CultureInfo.InvariantCulture));
     start.ArgumentList.Add("--phase-input-sends");
     start.ArgumentList.Add("--phase-ping-probes");
-    start.ArgumentList.Add("--disable-async-server-flush");
+    if (!scenario.ObserverState)
+        start.ArgumentList.Add("--disable-async-server-flush");
     Add("--ping-interval-s", "1");
     Add("--stop-on", "none");
     Add("--spawn-spacing-m", scenario.SpawnSpacingMeters.ToString("R", CultureInfo.InvariantCulture));
-    Add("--spawn-grid-width", "32");
+    Add("--spawn-grid-width", scenario.SpawnGridWidth.ToString(CultureInfo.InvariantCulture));
     Add("--report-dir", temporary);
     if (scenario.ObserverState) start.ArgumentList.Add("--observer-replication");
     if (scenario.OrderedEvents) start.ArgumentList.Add("--observer-events");
+    if (scenario.ObserverState)
+    {
+        Add("--aoi-radii-m", "7.5,23.5,39.5");
+        Add("--ring-cadence-ticks", "1,2,3");
+        start.ArgumentList.Add("--enable-latest-state-recipient-phasing");
+        Add("--latest-state-connection-phasing-cadence-ticks", "2");
+        Add("--owner-deadband", "0.10");
+        Add("--owner-max-silent-ticks", "8");
+    }
 
     using Process process = Process.Start(start)
         ?? throw new InvalidOperationException("Could not start the V2 bot harness.");
     Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
     Task<string> errorTask = process.StandardError.ReadToEndAsync();
     long peakWorkingSet = 0;
+    long peakPrivateBytes = 0;
     while (!process.WaitForExit(10))
     {
         try
         {
             process.Refresh();
             peakWorkingSet = Math.Max(peakWorkingSet, process.WorkingSet64);
+            peakPrivateBytes = Math.Max(peakPrivateBytes, process.PrivateMemorySize64);
         }
         catch (InvalidOperationException) when (process.HasExited)
         {
@@ -100,8 +112,12 @@ try
         Generation = "V2",
         Scenario = scenario,
         EvidenceProfile = new(
-            "network-bot-owner-movement-v1",
-            "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic.",
+            scenario.ObserverState
+                ? "network-bot-sparse-observer-movement-v1"
+                : "network-bot-owner-movement-v1",
+            scenario.ObserverState
+                ? "Historical sparse workload: deterministic phased owner input, one observer latest-state family, three AOI rings, owner correction, and ping; chat and ordered Events disabled."
+                : "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic.",
             "workload bounds fixed; implementation reservations reported separately",
             $"fixed {scenario.TickHz} Hz; {scenario.InputHz} Hz phased input; realtime",
             "one shared server UDP socket with one client socket/session per bot",
@@ -145,9 +161,11 @@ try
         RetransmittedWireBytes = 0,
         ReservedNetworkBytes = 0,
         ConfiguredSocketBufferBytes = checked((long)(scenario.Clients + 1) * 8 * 1024 * 1024),
-        ManagedHeapBytes = 0,
-        WorkingSetBytes = peakWorkingSet,
-        PrivateBytes = 0,
+        ManagedHeapBytes = stage.GetProperty("managed_heap_bytes").GetInt64(),
+        WorkingSetBytes = Math.Max(
+            stage.GetProperty("working_set_bytes").GetInt64(), peakWorkingSet),
+        PrivateBytes = Math.Max(
+            stage.GetProperty("private_bytes").GetInt64(), peakPrivateBytes),
         AllocatedBytes = allocated,
         Gen0Collections = stage.GetProperty("gc_gen0_collections").GetInt32(),
         Gen1Collections = stage.GetProperty("gc_gen1_collections").GetInt32(),
@@ -179,7 +197,9 @@ try
         MaximumSentDatagramBytes = 0,
         CanonicalOwnerStateHash = NetworkBotCanonicalState.ComputeHash(canonicalStates),
         CanonicalOwnerStates = canonicalStates,
-        CanonicalValidation = "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input.",
+        CanonicalValidation = scenario.ObserverState
+            ? "Exact client-applied owner identity, acknowledged input sequence, and velocity. V2 does not expose a canonical observer-state digest or observer age; observer apply counts remain diagnostic."
+            : "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input.",
         Diagnostics = diagnostics,
     };
     NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create("V2", result));
@@ -243,8 +263,10 @@ static IReadOnlyList<NetworkCanonicalOwnerState> ParseCanonicalStates(JsonElemen
 static long CountInputs(NetworkBotScenario scenario)
 {
     int interval = scenario.TickHz / scenario.InputHz;
+    int active = checked((int)Math.Round(
+        scenario.Clients * scenario.ActiveRatio, MidpointRounding.AwayFromZero));
     long count = 0;
-    for (int client = 0; client < scenario.Clients; client++)
+    for (int client = 0; client < active; client++)
         for (int tick = client % interval; tick < scenario.StageTicks; tick += interval) count++;
     return count;
 }
@@ -280,6 +302,8 @@ internal sealed record AdapterOptions(
     int StageTicks,
     int SettleTicks,
     double SpawnSpacing,
+    double ActiveRatio,
+    int SpawnGridWidth,
     bool NoBuild)
 {
     internal static AdapterOptions Parse(string[] args) => new(
@@ -291,13 +315,17 @@ internal sealed record AdapterOptions(
         ParseInt(Get(args, "--stage-ticks="), 120),
         ParseInt(Get(args, "--settle-ticks="), 30),
         ParseDouble(Get(args, "--spawn-spacing="), 12),
+        ParseDouble(Get(args, "--active-ratio="), 1),
+        ParseInt(Get(args, "--spawn-grid-width="), 32),
         args.Contains("--no-build-v2", StringComparer.OrdinalIgnoreCase));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
         SpawnSpacing,
-        ObserverState: false,
-        OrderedEvents: false).Validate();
+        ObserverState: StringComparer.Ordinal.Equals(Scenario, "sparse_observer_movement"),
+        OrderedEvents: false,
+        ActiveRatio,
+        SpawnGridWidth).Validate();
 
     private static string? Get(string[] args, string prefix) =>
         args.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..];
