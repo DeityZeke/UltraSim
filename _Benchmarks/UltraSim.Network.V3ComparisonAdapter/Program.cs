@@ -30,7 +30,8 @@ if (options.DiagnosticSuite)
 using var harness = new V3OwnerMovementHarness(
     scenario, options.Topology,
     new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming),
-    options.SharedSocketIoMode);
+    options.SharedSocketIoMode,
+    sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters);
 NetworkBotStageResult result = harness.Run();
 NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
@@ -163,7 +164,8 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
             using var diagnostic = new V3OwnerMovementHarness(
                 scenario, options.Topology,
                 new V3HarnessProfile(item.Layer, item.ActiveRatio, DeepTiming: true),
-                options.SharedSocketIoMode);
+                options.SharedSocketIoMode,
+                sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters);
             NetworkBotStageResult measured = diagnostic.Run();
             observations.Add(new(pass == 0 ? "forward" : "reverse", order++, item, measured));
             Console.WriteLine($"DIAGNOSTIC {item.Id}/{(pass == 0 ? "forward" : "reverse")}: " +
@@ -293,6 +295,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly SparseObserverWorkload? _observer;
     private readonly V3CadenceProfile? _cadence;
     private readonly int _activeBots;
+    private readonly int _sparseRegionEdgeMillimeters;
     private readonly long _realtimeTickIntervalStopwatchTicks;
     private readonly List<double> _handshakeMilliseconds;
     private BatchOpportunityCensus _batchCensus;
@@ -308,12 +311,16 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         V3UdpTopology topology,
         V3HarnessProfile profile,
         SharedUdpSocketIoMode sharedSocketIoMode = SharedUdpSocketIoMode.Scalar,
-        V3CadenceProfile? cadence = null)
+        V3CadenceProfile? cadence = null,
+        int sparseRegionEdgeMillimeters = 16_000)
     {
         _scenario = scenario.Validate();
         _topology = topology;
         _sharedSocketIoMode = sharedSocketIoMode;
         _profile = profile.Validate();
+        if (sparseRegionEdgeMillimeters <= 0)
+            throw new ArgumentOutOfRangeException(nameof(sparseRegionEdgeMillimeters));
+        _sparseRegionEdgeMillimeters = sparseRegionEdgeMillimeters;
         _manifest = scenario.ObserverState ? SparseManifest : Manifest;
         _protocolLimits = scenario.ObserverState ? SparseProtocolLimits : ProtocolLimits;
         _cadence = cadence?.Validate();
@@ -376,7 +383,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         {
             _observer = new SparseObserverWorkload(
                 scenario, _bots, PumpAll, SparseApplicationEpoch,
-                SparseWorldRecordsPerBundle, SparseWorldByteBudget);
+                SparseWorldRecordsPerBundle, SparseWorldByteBudget,
+                _sparseRegionEdgeMillimeters);
             _observer.DrainInitialState();
         }
         for (int tick = 0; tick < scenario.SettleTicks; tick++)
@@ -440,10 +448,16 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         List<double>? intentQueueMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? serverIngressMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? authorityMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? interestUpdateMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? ownerQueueMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? worldScheduleMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? forwardPumpMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? clientApplyMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? returnPumpMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? serverProtocolMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? clientProtocolMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? serverRoleMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? clientRoleMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         long logicalInputs = 0;
         long ownerApplied = 0;
         long ownerMessagesQueued = 0;
@@ -498,6 +512,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
 
         for (int tick = 0; tick < _scenario.StageTicks; tick++)
         {
+            ProtocolStageTimingSides protocolBefore = _profile.DeepTiming
+                ? CaptureProtocolStageTiming()
+                : default;
             if (_cadence is { HasStall: true } cadenceAtBoundary &&
                 tick == cadenceAtBoundary.StallEndWallTick)
             {
@@ -549,8 +566,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 for (int index = 0; index < _bots.Length; index++)
                     _bots[index].AdvanceAuthority(_scenario.TickHz);
                 authoritySteps++;
-                _observer?.UpdateChangedAuthority(checked((int)authoritySteps));
                 RecordPhase(authorityMs, phaseStarted);
+                phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
+                _observer?.UpdateChangedAuthority(checked((int)authoritySteps));
+                RecordPhase(interestUpdateMs, phaseStarted);
                 phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
                 for (int index = 0; index < _activeBots && _profile.SendsOwner; index++)
                     if ((!_scenario.ObserverState || _bots[index].ShouldQueueSparseOwner(checked((ulong)authoritySteps))) &&
@@ -561,8 +580,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         if (_bots[index].ShouldQueueSparseOwner(checked((ulong)authoritySteps)) &&
                             _bots[index].QueueOwnerState(checked((ulong)authoritySteps)))
                             ownerMessagesQueued++;
-                _observer?.Schedule(checked((int)authoritySteps));
                 RecordPhase(ownerQueueMs, phaseStarted);
+                phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
+                _observer?.Schedule(checked((int)authoritySteps));
+                RecordPhase(worldScheduleMs, phaseStarted);
                 phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
                 PumpAll(2);
                 networkPumps += 2;
@@ -610,6 +631,21 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 }
             }
             long end = Stopwatch.GetTimestamp();
+
+            if (_profile.DeepTiming && _cadence is null)
+            {
+                ProtocolStageTimingSides protocol =
+                    CaptureProtocolStageTiming().Subtract(protocolBefore);
+                double serverProtocol = protocol.Server.TotalMilliseconds +
+                    protocol.Listener.TotalMilliseconds;
+                double clientProtocol = protocol.Client.TotalMilliseconds;
+                serverProtocolMs!.Add(serverProtocol);
+                clientProtocolMs!.Add(clientProtocol);
+                serverRoleMs!.Add(
+                    serverIngressMs![^1] + authorityMs![^1] + interestUpdateMs![^1] +
+                    ownerQueueMs![^1] + worldScheduleMs![^1] + serverProtocol);
+                clientRoleMs!.Add(intentQueueMs![^1] + clientApplyMs![^1] + clientProtocol);
+            }
 
             double elapsed = Stopwatch.GetElapsedTime(tickStart, end).TotalMilliseconds;
             tickMs.Add(elapsed);
@@ -684,6 +720,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         int gen1After = GC.CollectionCount(1);
         int gen2After = GC.CollectionCount(2);
 
+        ProtocolStageTimingSides protocolStageTiming = _profile.DeepTiming
+            ? CaptureProtocolStageTiming()
+            : default;
+        if (_profile.DeepTiming) ResetProtocolStageTiming(enabled: false);
+
         // Match the V2 harness's untimed post-stage settle: no new intent is
         // created, but admitted input and current control state may converge.
         for (int settle = 0; settle < _scenario.SettleTicks; settle++)
@@ -728,11 +769,6 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         }
         _observer?.DrainRemaining(
             checked(_scenario.StageTicks + _scenario.SettleTicks + 1));
-
-        ProtocolStageTimingSides protocolStageTiming = _profile.DeepTiming
-            ? CaptureProtocolStageTiming()
-            : default;
-        if (_profile.DeepTiming) ResetProtocolStageTiming(enabled: false);
 
         ulong datagrams = 0;
         ulong bytes = 0;
@@ -1249,10 +1285,19 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             AddPhaseDiagnostics(diagnostics, "client_intent_queue", intentQueueMs!);
             AddPhaseDiagnostics(diagnostics, "server_application_ingress", serverIngressMs!);
             AddPhaseDiagnostics(diagnostics, "authority_advance", authorityMs!);
+            AddPhaseDiagnostics(diagnostics, "interest_update", interestUpdateMs!);
             AddPhaseDiagnostics(diagnostics, "owner_state_queue", ownerQueueMs!);
+            AddPhaseDiagnostics(diagnostics, "world_state_schedule", worldScheduleMs!);
             AddPhaseDiagnostics(diagnostics, "forward_protocol_pump", forwardPumpMs!);
             AddPhaseDiagnostics(diagnostics, "client_application_apply", clientApplyMs!);
             AddPhaseDiagnostics(diagnostics, "return_protocol_pump", returnPumpMs!);
+            if (_cadence is null)
+            {
+                AddPhaseDiagnostics(diagnostics, "server_protocol_listener", serverProtocolMs!);
+                AddPhaseDiagnostics(diagnostics, "client_protocol", clientProtocolMs!);
+                AddPhaseDiagnostics(diagnostics, "server_role", serverRoleMs!);
+                AddPhaseDiagnostics(diagnostics, "client_role", clientRoleMs!);
+            }
             AddBatchOpportunityDiagnostics(diagnostics, dataPacketsSent, reliableFragmentsSent);
             AddProtocolStageTimingDiagnostics(diagnostics, protocolStageTiming, dataPacketsSent);
         }
@@ -1582,7 +1627,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             Action<int> pump,
             ulong applicationEpoch,
             int recordsPerBundle,
-            int byteBudget)
+            int byteBudget,
+            int regionEdgeMillimeters)
         {
             _scenario = scenario;
             _bots = bots;
@@ -1590,7 +1636,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _recordsPerBundle = recordsPerBundle;
             _byteBudget = byteBudget;
             _profile = new GameInterestProfile(
-                RegionEdgeMillimeters: 16_000,
+                RegionEdgeMillimeters: regionEdgeMillimeters,
                 ImmediateEnterRadiusMillimeters: 7_500,
                 ImmediateLeaveRadiusMillimeters: 7_500,
                 NearRadiusMillimeters: 23_500,
@@ -1602,7 +1648,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             int farCells = checked((_profile.FarRadiusMillimeters +
                 _profile.RegionEdgeMillimeters - 1) / _profile.RegionEdgeMillimeters);
             int edgeWidth = checked(farCells * 2 + 1);
-            int maximumEdges = checked(scenario.Clients * edgeWidth * edgeWidth);
+            // Rebuild adds one recipient's entering row/column before it removes
+            // the exiting row/column. Preserve only that transactional headroom;
+            // the admitted steady-state envelope remains edgeWidth squared.
+            int maximumEdges = checked(
+                scenario.Clients * edgeWidth * edgeWidth + edgeWidth * 2 - 1);
             _interest = new GameInterestService(
                 new StateEpoch(1),
                 new GameInterestLimits(
@@ -1853,6 +1903,111 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 interest.SemanticRecordCopies / (double)interest.UniqueSemanticConstructions;
             diagnostics["world_state_chat_supported"] = 0;
             diagnostics["world_state_chat_messages"] = 0;
+            AddExactScopeCensus(diagnostics, interest);
+        }
+
+        private void AddExactScopeCensus(
+            Dictionary<string, double> diagnostics,
+            GameInterestSnapshot interest)
+        {
+            // This is deliberately cold benchmark instrumentation. It audits the
+            // production graph after convergence without changing its representation
+            // or charging the O(recipients * entities) oracle to measured tick time.
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var relations = new GameRecipientEntityRelationSnapshot[interest.RelationCount];
+            int relationCount = _interest.CopyRelations(relations);
+            var maintainedScope = new int[_bots.Length];
+            var exactScope = new int[_bots.Length];
+            long exactPairCount = 0;
+            for (int recipient = 0; recipient < _bots.Length; recipient++)
+            {
+                ReplicationSpatialPoint anchor = _positions[recipient];
+                for (int entity = 0; entity < _positions.Length; entity++)
+                {
+                    if (ExactTier(anchor, _positions[entity]) == GameInterestTier.None) continue;
+                    exactScope[recipient]++;
+                    exactPairCount++;
+                }
+            }
+
+            long maintainedPresent = 0;
+            long maintainedOutsideExactFar = 0;
+            long tierMismatches = 0;
+            var tierMatrix = new long[3, 4];
+            for (int index = 0; index < relationCount; index++)
+            {
+                ref readonly GameRecipientEntityRelationSnapshot relation = ref relations[index];
+                if (!relation.DesiredPresent) continue;
+                int recipient = checked((int)relation.Participant.Value - 1);
+                int entity = checked((int)relation.Entity.Index);
+                maintainedScope[recipient]++;
+                maintainedPresent++;
+                GameInterestTier exact = ExactTier(_positions[recipient], _positions[entity]);
+                int exactIndex = exact switch
+                {
+                    GameInterestTier.Immediate => 0,
+                    GameInterestTier.Near => 1,
+                    GameInterestTier.Far => 2,
+                    _ => 3,
+                };
+                int coarseIndex = relation.Tier switch
+                {
+                    GameInterestTier.Immediate => 0,
+                    GameInterestTier.Near => 1,
+                    GameInterestTier.Far => 2,
+                    _ => throw new InvalidOperationException(
+                        "A present maintained relation has no delivery tier."),
+                };
+                tierMatrix[coarseIndex, exactIndex]++;
+                if (exact == GameInterestTier.None) maintainedOutsideExactFar++;
+                if (relation.Tier != exact) tierMismatches++;
+            }
+
+            if (maintainedPresent != relationCount)
+                throw new InvalidOperationException(
+                    "The converged sparse graph retained an absent relation.");
+            long maintainedInsideExactFar = maintainedPresent - maintainedOutsideExactFar;
+            if (maintainedInsideExactFar != exactPairCount)
+                throw new InvalidOperationException(
+                    $"The coarse graph did not conservatively contain the exact Far scope: " +
+                    $"graph={maintainedInsideExactFar}, oracle={exactPairCount}.");
+
+            NetworkMetricSummary maintained = NetworkMetricSummary.From(
+                maintainedScope.Select(static value => (double)value).ToArray());
+            NetworkMetricSummary exactSummary = NetworkMetricSummary.From(
+                exactScope.Select(static value => (double)value).ToArray());
+            diagnostics["scope_census_measured"] = 1;
+            diagnostics["scope_census_region_edge_mm"] = _profile.RegionEdgeMillimeters;
+            int farCells = checked((_profile.FarRadiusMillimeters +
+                _profile.RegionEdgeMillimeters - 1) / _profile.RegionEdgeMillimeters);
+            int edgeWidth = checked(farCells * 2 + 1);
+            diagnostics["scope_census_region_envelope_cells_per_recipient"] =
+                checked(edgeWidth * edgeWidth);
+            diagnostics["scope_census_region_edge_transaction_headroom"] =
+                checked(edgeWidth * 2 - 1);
+            diagnostics["scope_census_region_interest_edges"] = interest.RegionInterestEdgeCount;
+            diagnostics["scope_census_maintained_relations"] = maintainedPresent;
+            diagnostics["scope_census_exact_far_relations"] = exactPairCount;
+            diagnostics["scope_census_coarse_only_relations"] = maintainedOutsideExactFar;
+            diagnostics["scope_census_false_positive_ratio"] = maintainedPresent == 0
+                ? 0
+                : maintainedOutsideExactFar / (double)maintainedPresent;
+            diagnostics["scope_census_tier_mismatches"] = tierMismatches;
+            diagnostics["scope_census_exact_scope_p50"] = exactSummary.P50;
+            diagnostics["scope_census_exact_scope_p95"] = exactSummary.P95;
+            diagnostics["scope_census_exact_scope_max"] = exactSummary.Max;
+            diagnostics["scope_census_maintained_scope_p50"] = maintained.P50;
+            diagnostics["scope_census_maintained_scope_p95"] = maintained.P95;
+            diagnostics["scope_census_maintained_scope_max"] = maintained.Max;
+            diagnostics["scope_census_pending_and_emitted_exact_attribution_measured"] = 0;
+            string[] coarseNames = ["immediate", "near", "far"];
+            string[] exactNames = ["immediate", "near", "far", "outside"];
+            for (int coarse = 0; coarse < coarseNames.Length; coarse++)
+                for (int exact = 0; exact < exactNames.Length; exact++)
+                    diagnostics[$"scope_census_coarse_{coarseNames[coarse]}_exact_{exactNames[exact]}"] =
+                        tierMatrix[coarse, exact];
+            diagnostics["scope_census_allocated_bytes"] =
+                GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
         }
 
         private void DrainCore(int authorityTick, bool initializeKnowledge)
@@ -1892,6 +2047,26 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 (long)_profile.NearRadiusMillimeters * _profile.NearRadiusMillimeters)
                 return GameInterestTier.Near;
             return GameInterestTier.Far;
+        }
+
+        private GameInterestTier ExactTier(
+            ReplicationSpatialPoint recipient,
+            ReplicationSpatialPoint entity)
+        {
+            long dx = (long)entity.XMillimeters - recipient.XMillimeters;
+            long dz = (long)entity.ZMillimeters - recipient.ZMillimeters;
+            long distanceSquared = checked(dx * dx + dz * dz);
+            if (distanceSquared <=
+                (long)_profile.ImmediateEnterRadiusMillimeters *
+                _profile.ImmediateEnterRadiusMillimeters)
+                return GameInterestTier.Immediate;
+            if (distanceSquared <=
+                (long)_profile.NearRadiusMillimeters * _profile.NearRadiusMillimeters)
+                return GameInterestTier.Near;
+            if (distanceSquared <=
+                (long)_profile.FarRadiusMillimeters * _profile.FarRadiusMillimeters)
+                return GameInterestTier.Far;
+            return GameInterestTier.None;
         }
 
         private long SemanticMilliseconds(int tick) =>
@@ -2023,6 +2198,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             Array.Clear(_ownerSentAt);
             Array.Clear(_ownerSentTick);
             _ownerFreshnessMilliseconds.Clear();
+            _lastSparseOwnerTick = 0;
         }
 
         internal bool TryQueueInput(int tick)
@@ -2515,6 +2691,24 @@ internal struct ProtocolStageTimingTotal
         ReceivedCompactionTicks = Add(ReceivedCompactionTicks, value.ReceivedCompactionTicks);
     }
 
+    internal readonly ProtocolStageTimingTotal Subtract(ProtocolStageTimingTotal baseline) => new()
+    {
+        EmitTicks = checked(EmitTicks - baseline.EmitTicks),
+        SelectionTicks = checked(SelectionTicks - baseline.SelectionTicks),
+        FrameEncodeTicks = checked(FrameEncodeTicks - baseline.FrameEncodeTicks),
+        SecureSendTicks = checked(SecureSendTicks - baseline.SecureSendTicks),
+        EndpointSendTicks = checked(EndpointSendTicks - baseline.EndpointSendTicks),
+        InboundTicks = checked(InboundTicks - baseline.InboundTicks),
+        EndpointReceiveTicks = checked(EndpointReceiveTicks - baseline.EndpointReceiveTicks),
+        SecureReceiveTicks = checked(SecureReceiveTicks - baseline.SecureReceiveTicks),
+        FrameAdmissionTicks = checked(FrameAdmissionTicks - baseline.FrameAdmissionTicks),
+        ReliableCompactionTicks = checked(ReliableCompactionTicks - baseline.ReliableCompactionTicks),
+        ReceivedCompactionTicks = checked(ReceivedCompactionTicks - baseline.ReceivedCompactionTicks),
+    };
+
+    internal readonly double TotalMilliseconds =>
+        (EmitTicks + InboundTicks) * 1000d / Stopwatch.Frequency;
+
     private static ulong Add(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 }
@@ -2522,12 +2716,28 @@ internal struct ProtocolStageTimingTotal
 internal readonly record struct SharedListenerStageTiming(
     ulong SendSystemCallTicks,
     ulong ReceivePollTicks,
-    ulong ReceiveSystemCallTicks);
+    ulong ReceiveSystemCallTicks)
+{
+    internal SharedListenerStageTiming Subtract(SharedListenerStageTiming baseline) => new(
+        checked(SendSystemCallTicks - baseline.SendSystemCallTicks),
+        checked(ReceivePollTicks - baseline.ReceivePollTicks),
+        checked(ReceiveSystemCallTicks - baseline.ReceiveSystemCallTicks));
+
+    internal double TotalMilliseconds =>
+        (SendSystemCallTicks + ReceivePollTicks + ReceiveSystemCallTicks) *
+        1000d / Stopwatch.Frequency;
+}
 
 internal readonly record struct ProtocolStageTimingSides(
     ProtocolStageTimingTotal Client,
     ProtocolStageTimingTotal Server,
-    SharedListenerStageTiming Listener);
+    SharedListenerStageTiming Listener)
+{
+    internal ProtocolStageTimingSides Subtract(ProtocolStageTimingSides baseline) => new(
+        Client.Subtract(baseline.Client),
+        Server.Subtract(baseline.Server),
+        Listener.Subtract(baseline.Listener));
+}
 
 internal readonly record struct DiagnosticCounterBaseline(
     ulong Datagrams,
@@ -2617,7 +2827,8 @@ internal sealed record AdapterOptions(
     bool DeepTiming,
     bool DiagnosticSuite,
     bool CadenceSuite,
-    string? CadenceCase)
+    string? CadenceCase,
+    int SparseRegionEdgeMillimeters)
 {
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
@@ -2636,7 +2847,8 @@ internal sealed record AdapterOptions(
         Has(args, "--deep-timing"),
         Has(args, "--diagnostic-suite"),
         Has(args, "--cadence-suite"),
-        Get(args, "--cadence-case="));
+        Get(args, "--cadence-case="),
+        ParseInt(Get(args, "--sparse-region-edge-mm="), 16_000));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,

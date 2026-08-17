@@ -2532,6 +2532,41 @@ now emits 3.11x the observer records. The next sparse checkpoint should isolate
 admitted-set/region-policy sensitivity and attribute the honest delivery cost;
 it should not optimize against the superseded starvation artifact.
 
+That checkpoint is now complete. The current accepted shared-listener
+send+receive topology lowers corrected probes-off V3 p95 to 19.404/42.944/
+72.009/100.483 ms at 1,024/2,048/3,072/4,096, versus the prior send-only
+22.433/52.080/86.799/121.154 ms. Canonical owner state, 1/2/3-step tier
+freshness, and zero drop/nonviable results remain unchanged.
+
+The independent cold scope census proves that the 16 m broadphase maintains
+343,396 relations at 4,096 while only 144,840 lie inside the exact 39.5 m Far
+circle: 198,556 relations, or 57.82%, are conservative coarse-only work. The
+same exact-scope p95 is 37 identities while maintained-scope p95 is 100.
+
+The fixed-policy 16/10/8 m sensitivity gives this 4,096-client probe-bearing
+server-role result:
+
+```text
+edge    region edges    relations    coarse-only    server p95    total reserve
+16 m       200,704       343,396        198,556       58.236 ms      918.63 MiB
+10 m       331,776       211,600         66,760       46.879 ms      932.89 MiB
+ 8 m       495,616       190,096         45,256       44.948 ms      949.42 MiB
+```
+
+At 10 m, interest-update mean falls 12.773→8.886 ms, schedule mean
+7.327→4.749 ms, emitted records fall 16.389M→10.843M, and wire falls
+830.5→576.6 MiB. At 8 m, interest-update mean rises to 9.992 ms and server p95
+improves only another 4.1% while adding 163,840 edges. Therefore 10 m is the
+current evidence-backed knee, not yet the production/default policy. Freeze
+16 m until an alternating confirmation and a separate admitted-scope capacity/
+reservation decision; do not infer a need for workers, wider queues, relaxed
+cadence, or exact per-entity discovery from this result.
+
+The full immutable summary is
+[`network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json)
+with its readable
+[`report`](../../_Benchmarks/Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.md).
+
 Protected profiles:
 
 ```text

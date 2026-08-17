@@ -56,6 +56,10 @@ Useful current anchors can be located by their embedded workload or filename:
   region-edge, density, and fanout artifacts form one sensitivity matrix rather
   than competing replacement baselines. The `hardening-reference` artifact adds
   independent WorldState delivery semantics and all-recipient same-cell movement;
+- `network-v3-sparse-current-topology-region-sensitivity-2026-08-17.*` — current
+  send+receive sparse normalization plus cold exact-scope census and fixed-policy
+  16/10/8 m region-edge sensitivity at 1,024 and 4,096 clients. It identifies
+  10 m as the current CPU/memory knee without changing the frozen 16 m default;
 - `network-n0.8-atomic-world-baseline-*` — paired secure ProtocolLoopback/connected
   localhost UDP evidence for one bounded segmented baseline, private atomic client
   publication, application acknowledgement, allocation, and reservation;

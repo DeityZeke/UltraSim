@@ -172,10 +172,28 @@ dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
   --tick-hz=62 --input-hz=20 --stage-ticks=310 --settle-ticks=10 \
   --spawn-spacing=12 --spawn-grid-width=64 --active-ratio=0.35 \
   --v3-topology=shared-listener \
-  --v3-socket-io=platform-batch \
+  --v3-socket-io=platform-send-receive-batch \
+  --v3-sparse-region-edge-mm=16000 \
   --single-order --alternate-order \
   --output-dir=_Benchmarks/results/network-v2-v3-sparse-ccu
 ```
+
+The V3 adapter also accepts `--sparse-region-edge-mm=<positive integer>`. The
+comparison coordinator forwards it as `--v3-sparse-region-edge-mm`. This changes
+only the conservative broadphase cell profile; the exact 7.5/23.5/39.5 m game
+policy, cadence, capacities, and transport semantics remain fixed. Pass
+`--deep-timing` directly to the V3 adapter for diagnostic phase attribution.
+Those probe-enabled rows are not directly comparable with ordinary probes-off
+timing or suitable for a joined V2/V3 canonical run.
+
+Every sparse V3 result performs a cold exact-scope census after measured work.
+It reports maintained/exact/coarse-only relations, coarse-vs-exact tiers,
+recipient-scope p50/p95/max, and its temporary allocation. The census is an
+independent O(recipients × entities) oracle outside tick time and does not alter
+the production interest representation. The comparison coordinator retains its
+externally observed process peak under
+`process_peak_including_cold_scope_census_*`; primary working/private bytes stay
+tied to the harness measurement and therefore exclude the cold oracle buffer.
 
 The coordinator writes compact joined/matrix JSON by omitting redundant
 per-client canonical rows after their exact hash/match has been established;
@@ -193,6 +211,11 @@ It proves 1/2/3-step Immediate/Near/Far p95 freshness across the full matrix,
 zero same-tier deadline deferrals, zero capacity drops, and the larger honest
 delivery cost after starvation is removed. Use that artifact—not the earlier
 timing row—for subsequent sparse performance decisions.
+The current send+receive topology and 16/10/8 m region sensitivity are preserved
+in
+[`network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json`](Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json)
+with a readable
+[`report`](Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.md).
 
 ## Comparability
 

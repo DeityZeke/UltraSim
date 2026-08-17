@@ -90,6 +90,14 @@ The stable joined schema includes:
 - owner input-to-authority-ack age in milliseconds and simulation ticks, plus
   per-client ping/input-ack fairness summaries;
 - stage process CPU/core utilization for the same-process V3 topology;
+- opt-in sparse authority, interest-update, WorldState-schedule, server
+  application/proof, server protocol/listener, client application, client
+  protocol, and aggregate server/client-role phase distributions;
+- cold sparse exact-scope census: maintained/exact/coarse-only relationships,
+  coarse-vs-exact tier matrix, recipient scope p50/p95/max, false-positive ratio,
+  and diagnostic allocation. The external process peak that can include this
+  cold buffer is retained separately rather than replacing timed working/private
+  memory;
 - handshake latency, allocation, datagrams, bytes, attempts, and successes;
 - UDP send/receive/poll calls, WouldBlock observations, mean/max MTU use;
 - secure data/ACK/keepalive packet counts, encrypted/decrypted plaintext, and
@@ -179,8 +187,11 @@ dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
 Development smoke runs may pass `--clients=4 --single-order`. `--use-existing`
 rejoins already-created adapter artifacts at their expected scale/order paths.
 `--v3-topology=connected-pairs` retains the N0.10 entry control.
-The V3 adapter-only `--shared-socket-io=platform-batch` enables the opt-in
-shared-listener native-send experiment; scalar remains the comparison default.
+`--v3-socket-io=platform-send-receive-batch` selects the accepted Linux
+shared-listener send/receive path. `--v3-sparse-region-edge-mm` controls the
+V3-only coarse-cell sensitivity profile. Invoke the V3 adapter directly with
+`--deep-timing` for probe-bearing phase results; joined runs remain probes off.
+Scalar and send-only remain explicit controls.
 The V3-only integrated observer suite is invoked with `--replication-suite
 --replication-profile=all`; it is an acceptance/diagnostic artifact, not a joined
 comparison input.

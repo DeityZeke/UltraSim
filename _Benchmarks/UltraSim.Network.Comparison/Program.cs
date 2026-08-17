@@ -141,6 +141,7 @@ AdapterProcessObservation RunAdapter(string project, string output, bool v2Adapt
     {
         Add($"--topology={options.V3Topology}");
         Add($"--shared-socket-io={options.V3SocketIo}");
+        Add($"--sparse-region-edge-mm={options.V3SparseRegionEdgeMillimeters}");
     }
     if (v2Adapter && options.NoBuildV2) Add("--no-build-v2");
 
@@ -174,14 +175,34 @@ AdapterProcessObservation RunAdapter(string project, string output, bool v2Adapt
 
 static NetworkBotAdapterReport ApplyProcessObservation(
     NetworkBotAdapterReport report,
-    AdapterProcessObservation observation) => report with
+    AdapterProcessObservation observation)
 {
-    Result = report.Result with
+    if (report.Result.Diagnostics.TryGetValue("scope_census_measured", out double measured) &&
+        measured != 0)
     {
-        WorkingSetBytes = Math.Max(report.Result.WorkingSetBytes, observation.PeakWorkingSetBytes),
-        PrivateBytes = Math.Max(report.Result.PrivateBytes, observation.PeakPrivateBytes),
-    },
-};
+        var diagnostics = new Dictionary<string, double>(report.Result.Diagnostics)
+        {
+            ["process_peak_including_cold_scope_census_working_set_bytes"] =
+                observation.PeakWorkingSetBytes,
+            ["process_peak_including_cold_scope_census_private_bytes"] =
+                observation.PeakPrivateBytes,
+        };
+        return report with
+        {
+            Result = report.Result with { Diagnostics = diagnostics },
+        };
+    }
+    return report with
+    {
+        Result = report.Result with
+        {
+            WorkingSetBytes = Math.Max(
+                report.Result.WorkingSetBytes, observation.PeakWorkingSetBytes),
+            PrivateBytes = Math.Max(
+                report.Result.PrivateBytes, observation.PeakPrivateBytes),
+        },
+    };
+}
 
 static void ValidateCatalog(NetworkBotScenario left, NetworkBotScenario right)
 {
@@ -493,7 +514,8 @@ internal sealed record RunnerOptions(
     bool NoBuild,
     bool NoBuildV2,
     string V3Topology,
-    string V3SocketIo)
+    string V3SocketIo,
+    int V3SparseRegionEdgeMillimeters)
 {
     internal static RunnerOptions Parse(string[] args)
     {
@@ -517,7 +539,8 @@ internal sealed record RunnerOptions(
             Has(args, "--no-build"),
             Has(args, "--no-build-v2"),
             ParseV3Topology(Get(args, "--v3-topology=")),
-            ParseV3SocketIo(Get(args, "--v3-socket-io=")));
+            ParseV3SocketIo(Get(args, "--v3-socket-io=")),
+            ParseInt(Get(args, "--v3-sparse-region-edge-mm="), 16_000));
     }
 
     private static IReadOnlyList<int> ParseStages(string value)
