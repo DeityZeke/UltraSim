@@ -61,6 +61,11 @@ active clients, 12 m spacing on a width-64 grid, 7.5/23.5/39.5 m rings,
 eight-step maximum silent interval. It carries no chat, ordered Event, visual,
 Bulk, or baseline work.
 
+Its accepted V3 benchmark specialization uses 10 m conservative outer regions
+and the named `current10` capacity profile. This is not a global interest-policy
+default: other GameInterest profiles and explicit non-10 m sensitivity controls
+remain unchanged.
+
 The common input/owner contract and final canonical owner rows match. Observer
 sets are deliberately not declared identical: V2 subscribes to radius-tested
 chunks while V3 maintains coarse outer region envelopes. Applied observer work,
@@ -189,7 +194,8 @@ rejoins already-created adapter artifacts at their expected scale/order paths.
 `--v3-topology=connected-pairs` retains the N0.10 entry control.
 `--v3-socket-io=platform-send-receive-batch` selects the accepted Linux
 shared-listener send/receive path. `--v3-sparse-region-edge-mm` controls the
-V3-only coarse-cell sensitivity profile. Invoke the V3 adapter directly with
+V3-only coarse-cell sensitivity profile; `--v3-sparse-capacity-profile` selects
+`auto`, `current10`, or the unchanged `legacy128` control. Invoke the V3 adapter directly with
 `--deep-timing` for probe-bearing phase results; joined runs remain probes off.
 Scalar and send-only remain explicit controls.
 The V3-only integrated observer suite is invoked with `--replication-suite

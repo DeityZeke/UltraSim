@@ -59,7 +59,12 @@ Useful current anchors can be located by their embedded workload or filename:
 - `network-v3-sparse-current-topology-region-sensitivity-2026-08-17.*` — current
   send+receive sparse normalization plus cold exact-scope census and fixed-policy
   16/10/8 m region-edge sensitivity at 1,024 and 4,096 clients. It identifies
-  10 m as the current CPU/memory knee without changing the frozen 16 m default;
+  10 m as the candidate CPU/memory knee;
+- `network-v3-sparse-10m-confirmation-capacity-2026-08-17.*` — alternating
+  probes-off/deep 16 m versus 10 m confirmation, exact-tier × maintained-tier
+  accounting, and the separately isolated `legacy128` versus `current10`
+  reservation experiment. This artifact adopts 10 m and its derived bounds only
+  for the admitted sparse comparison profile;
 - `network-n0.8-atomic-world-baseline-*` — paired secure ProtocolLoopback/connected
   localhost UDP evidence for one bounded segmented baseline, private atomic client
   publication, application acknowledgement, allocation, and reservation;

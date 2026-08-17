@@ -1,0 +1,157 @@
+{
+  "schema": "ultrasim-network-v3-sparse-10m-confirmation-capacity-v1",
+  "recorded_utc": "2026-08-17T10:15:03Z",
+  "workload": "sparse_observer_movement",
+  "configuration": {
+    "tick_hz": 62,
+    "input_hz": 20,
+    "stage_ticks": 310,
+    "settle_ticks": 10,
+    "spawn_spacing_meters": 12,
+    "spawn_grid_width": 64,
+    "active_ratio": 0.35,
+    "topology": "shared-listener",
+    "socket_io": "platform-send-receive-batch"
+  },
+  "geometry_confirmation": [
+    {
+      "clients": 1024,
+      "region_edge_mm": 16000,
+      "samples": 4,
+      "tick_p95_ms": [20.0415, 19.527505, 19.703855, 20.0972],
+      "tick_p95_mean_ms": 19.842515,
+      "world_state_records_mean": 3492224,
+      "bundles_mean": 251830.75,
+      "wire_bytes_mean": 201167784,
+      "maintained_relations": 76180,
+      "exact_far_relations": 33672,
+      "coarse_only_relations": 42508,
+      "input_ack_p95_mean_ms": 66.0653775,
+      "allocated_bytes_mean": 17443150,
+      "capacity_drops": 0,
+      "nonviable_recipients": 0
+    },
+    {
+      "clients": 1024,
+      "region_edge_mm": 10000,
+      "samples": 4,
+      "tick_p95_ms": [17.28575, 17.218605, 17.11595, 17.09929],
+      "tick_p95_mean_ms": 17.17989875,
+      "world_state_records_mean": 2441768.25,
+      "bundles_mean": 202489.5,
+      "wire_bytes_mean": 147893807,
+      "maintained_relations": 48760,
+      "exact_far_relations": 33672,
+      "coarse_only_relations": 15088,
+      "input_ack_p95_mean_ms": 62.89466625,
+      "allocated_bytes_mean": 17439822,
+      "capacity_drops": 0,
+      "nonviable_recipients": 0
+    },
+    {
+      "clients": 4096,
+      "region_edge_mm": 16000,
+      "samples": 4,
+      "tick_p95_ms": [105.096415, 105.390685, 104.974715, 105.16789],
+      "tick_p95_mean_ms": 105.15742625,
+      "world_state_records_mean": 16289940.75,
+      "bundles_mean": 915912.25,
+      "wire_bytes_mean": 886787957.5,
+      "maintained_relations": 343396,
+      "exact_far_relations": 144840,
+      "coarse_only_relations": 198556,
+      "input_ack_p95_mean_ms": 344.8063625,
+      "allocated_bytes_mean": 71539456,
+      "capacity_drops": 0,
+      "nonviable_recipients": 0
+    },
+    {
+      "clients": 4096,
+      "region_edge_mm": 10000,
+      "samples": 4,
+      "tick_p95_ms": [84.901705, 84.80651, 85.52229, 83.541875],
+      "tick_p95_mean_ms": 84.693095,
+      "world_state_records_mean": 10776627.5,
+      "bundles_mean": 703758.75,
+      "wire_bytes_mean": 615901033,
+      "maintained_relations": 211600,
+      "exact_far_relations": 144840,
+      "coarse_only_relations": 66760,
+      "input_ack_p95_mean_ms": 278.83669375,
+      "allocated_bytes_mean": 71541474,
+      "capacity_drops": 0,
+      "nonviable_recipients": 0
+    }
+  ],
+  "deep_confirmation": [
+    {"clients": 1024, "region_edge_mm": 16000, "samples": 2, "server_role_p95_mean_ms": 11.66031545, "interest_update_p95_mean_ms": 2.40765, "schedule_p95_mean_ms": 1.1002875, "server_protocol_p95_mean_ms": 8.03705095},
+    {"clients": 1024, "region_edge_mm": 10000, "samples": 2, "server_role_p95_mean_ms": 9.947102625, "interest_update_p95_mean_ms": 1.6603975, "schedule_p95_mean_ms": 0.7745625, "server_protocol_p95_mean_ms": 7.446264675},
+    {"clients": 4096, "region_edge_mm": 16000, "samples": 2, "server_role_p95_mean_ms": 60.286708825, "interest_update_p95_mean_ms": 14.3449, "schedule_p95_mean_ms": 7.786755, "server_protocol_p95_mean_ms": 37.2662386},
+    {"clients": 4096, "region_edge_mm": 10000, "samples": 2, "server_role_p95_mean_ms": 49.552445575, "interest_update_p95_mean_ms": 10.1743575, "schedule_p95_mean_ms": 5.3229725, "server_protocol_p95_mean_ms": 33.41606745}
+  ],
+  "tier_confusion_4096": {
+    "edge_16000": {
+      "coarse_immediate_exact_immediate": 4096,
+      "coarse_near_exact_near": 32392,
+      "coarse_near_exact_far": 96980,
+      "coarse_far_exact_far": 11372,
+      "coarse_near_exact_outside": 31368,
+      "coarse_far_exact_outside": 167188
+    },
+    "edge_10000": {
+      "coarse_immediate_exact_immediate": 4096,
+      "coarse_near_exact_near": 32392,
+      "coarse_near_exact_far": 81084,
+      "coarse_far_exact_far": 27268,
+      "coarse_near_exact_outside": 14924,
+      "coarse_far_exact_outside": 51836
+    }
+  },
+  "capacity_bounds": {
+    "steady_envelope_cells": 81,
+    "diagonal_boundary_union_cells": 98,
+    "safety_slots": 14,
+    "maximum_relations_per_recipient": 112,
+    "maximum_known_identities_per_client": 112,
+    "maximum_active_entities_per_client": 112,
+    "maximum_baseline_records_per_recipient": 95
+  },
+  "capacity_confirmation": [
+    {"clients": 1024, "profile": "legacy128", "samples": 4, "tick_p95_mean_ms": 17.320885, "combined_known_reservation_mib": 233.2938146591, "game_replication_reservation_mib": 121.0145988464, "relation_count_high_water": 49226, "known_identity_high_water": 72, "active_entity_high_water": 64, "capacity_drops": 0, "nonviable_recipients": 0},
+    {"clients": 1024, "profile": "current10", "samples": 4, "tick_p95_mean_ms": 17.2798875, "combined_known_reservation_mib": 224.8121175766, "game_replication_reservation_mib": 112.5329017639, "relation_count_high_water": 49226, "known_identity_high_water": 72, "active_entity_high_water": 64, "capacity_drops": 0, "nonviable_recipients": 0},
+    {"clients": 4096, "profile": "legacy128", "samples": 4, "tick_p95_mean_ms": 86.79283875, "combined_known_reservation_mib": 932.8863286972, "game_replication_reservation_mib": 483.912776947, "relation_count_high_water": 213815, "known_identity_high_water": 72, "active_entity_high_water": 64, "capacity_drops": 0, "nonviable_recipients": 0},
+    {"clients": 4096, "profile": "current10", "samples": 4, "tick_p95_mean_ms": 87.64171875, "combined_known_reservation_mib": 899.1663732529, "game_replication_reservation_mib": 450.1928215027, "relation_count_high_water": 213815, "known_identity_high_water": 72, "active_entity_high_water": 64, "capacity_drops": 0, "nonviable_recipients": 0}
+  ],
+  "accepted_profile_protocol_recensus": {
+    "clients": 4096,
+    "deep_probes": true,
+    "tick_p95_ms": 106.24778,
+    "server_role_p95_ms": 53.50852985,
+    "server_protocol_listener_p95_ms": 36.70315715,
+    "interest_update_p95_ms": 10.660325,
+    "world_state_schedule_p95_ms": 5.06235,
+    "server_application_ingress_p95_ms": 1.94984,
+    "world_state_records": 10843526,
+    "world_state_bundles": 708120,
+    "data_packets": 1715155,
+    "acknowledgement_packets": 24816,
+    "wire_datagrams": 1764547,
+    "wire_bytes": 604932427,
+    "retransmitted_packets": 10404,
+    "mean_datagram_fill_ratio": 0.2328980351,
+    "datagrams_per_send_syscall": 1.9584860845,
+    "listener_datagrams_per_native_send_call": 61.5717892965,
+    "same_peer_unreliable_emit_opportunities": 1761380,
+    "same_peer_multi_frame_opportunities": 570187,
+    "same_peer_multi_frame_opportunity_percent": 32.3716063541,
+    "same_peer_maximum_ready_frames": 7,
+    "same_peer_co_batchable_frames": 1267303,
+    "note": "Probe-bearing diagnostic; compare phase ownership, not its absolute p95, with probes-off acceptance rows. Unlike owner_movement, this WorldState workload has measured same-peer multi-frame opportunity."
+  },
+  "decision": {
+    "sparse_profile_region_edge_mm": 10000,
+    "sparse_profile_capacity": "current10",
+    "scope": "Only the sparse 7.5/23.5/39.5 m, 12 m-spacing comparison profile. No global GameInterestProfile default changed.",
+    "later_work": "Protocol remains the largest server-role phase. Same-peer unreliable multi-frame assembly is now earned as a bounded experiment by 32.37% multi-ready opportunities. Circle-vs-region-AABB admission remains unimplemented and unearned."
+  }
+}

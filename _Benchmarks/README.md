@@ -173,15 +173,20 @@ dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
   --spawn-spacing=12 --spawn-grid-width=64 --active-ratio=0.35 \
   --v3-topology=shared-listener \
   --v3-socket-io=platform-send-receive-batch \
-  --v3-sparse-region-edge-mm=16000 \
+  --v3-sparse-region-edge-mm=10000 \
+  --v3-sparse-capacity-profile=current10 \
   --single-order --alternate-order \
   --output-dir=_Benchmarks/results/network-v2-v3-sparse-ccu
 ```
 
-The V3 adapter also accepts `--sparse-region-edge-mm=<positive integer>`. The
+The V3 adapter also accepts `--sparse-region-edge-mm=<positive integer>` and
+`--sparse-capacity-profile=auto|current10|legacy128`. The
 comparison coordinator forwards it as `--v3-sparse-region-edge-mm`. This changes
 only the conservative broadphase cell profile; the exact 7.5/23.5/39.5 m game
-policy, cadence, capacities, and transport semantics remain fixed. Pass
+policy, cadence, and transport semantics remain fixed. `auto` selects the
+evidence-backed `current10` bounds only at 10 m and retains `legacy128` for other
+region sizes; the coordinator forwards the capacity option as
+`--v3-sparse-capacity-profile`. Pass
 `--deep-timing` directly to the V3 adapter for diagnostic phase attribution.
 Those probe-enabled rows are not directly comparable with ordinary probes-off
 timing or suitable for a joined V2/V3 canonical run.
@@ -216,6 +221,10 @@ in
 [`network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json`](Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json)
 with a readable
 [`report`](Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.md).
+The alternating adoption and separately isolated capacity evidence is
+[`network-v3-sparse-10m-confirmation-capacity-2026-08-17.json`](Baselines/network-v3-sparse-10m-confirmation-capacity-2026-08-17.json)
+with its readable
+[`report`](Baselines/network-v3-sparse-10m-confirmation-capacity-2026-08-17.md).
 
 ## Comparability
 

@@ -31,7 +31,8 @@ using var harness = new V3OwnerMovementHarness(
     scenario, options.Topology,
     new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming),
     options.SharedSocketIoMode,
-    sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters);
+    sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
+    sparseCapacityMode: options.SparseCapacityMode);
 NetworkBotStageResult result = harness.Run();
 NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
@@ -165,7 +166,8 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
                 scenario, options.Topology,
                 new V3HarnessProfile(item.Layer, item.ActiveRatio, DeepTiming: true),
                 options.SharedSocketIoMode,
-                sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters);
+                sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
+                sparseCapacityMode: options.SparseCapacityMode);
             NetworkBotStageResult measured = diagnostic.Run();
             observations.Add(new(pass == 0 ? "forward" : "reverse", order++, item, measured));
             Console.WriteLine($"DIAGNOSTIC {item.Id}/{(pass == 0 ? "forward" : "reverse")}: " +
@@ -312,7 +314,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         V3HarnessProfile profile,
         SharedUdpSocketIoMode sharedSocketIoMode = SharedUdpSocketIoMode.Scalar,
         V3CadenceProfile? cadence = null,
-        int sparseRegionEdgeMillimeters = 16_000)
+        int sparseRegionEdgeMillimeters = 10_000,
+        SparseCapacityMode sparseCapacityMode = SparseCapacityMode.Auto)
     {
         _scenario = scenario.Validate();
         _topology = topology;
@@ -384,7 +387,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _observer = new SparseObserverWorkload(
                 scenario, _bots, PumpAll, SparseApplicationEpoch,
                 SparseWorldRecordsPerBundle, SparseWorldByteBudget,
-                _sparseRegionEdgeMillimeters);
+                _sparseRegionEdgeMillimeters, sparseCapacityMode);
             _observer.DrainInitialState();
         }
         for (int tick = 0; tick < scenario.SettleTicks; tick++)
@@ -1588,11 +1591,6 @@ internal sealed class V3OwnerMovementHarness : IDisposable
 
     private sealed class SparseObserverWorkload
     {
-        // The historical 39.5 m outer radius is maintained through a coarse
-        // seven-by-seven 16 m region envelope.  Its densest admitted cells can
-        // contain slightly more than 96 identities even though the exact
-        // circular scope is much smaller.
-        private const int MaximumScope = 128;
         private const int GlobalFreshnessBuckets = 16_384;
         private const int ClientFreshnessBuckets = 512;
         private readonly NetworkBotScenario _scenario;
@@ -1602,11 +1600,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         private readonly int _byteBudget;
         private readonly GameInterestProfile _profile;
         private readonly GameInterestService _interest;
+        private readonly SparseCapacityBounds _capacity;
         private readonly ReplicationSpatialPoint[] _positions;
         private readonly ulong[] _versions;
         private readonly long[] _createdAtByAuthorityTick;
-        private readonly RemoteWorldEntitySnapshot[] _scratch =
-            new RemoteWorldEntitySnapshot[MaximumScope];
+        private readonly RemoteWorldEntitySnapshot[] _scratch;
         private readonly LatencyHistogram _immediateMs = new(1, GlobalFreshnessBuckets);
         private readonly LatencyHistogram _nearMs = new(1, GlobalFreshnessBuckets);
         private readonly LatencyHistogram _farMs = new(1, GlobalFreshnessBuckets);
@@ -1620,6 +1618,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         private long _freshnessSamples;
         private int _maximumPending;
         private int _maximumOutstanding;
+        private int _maximumRelations;
+        private int _maximumKnownIdentities;
+        private int _maximumActiveEntities;
 
         internal SparseObserverWorkload(
             NetworkBotScenario scenario,
@@ -1628,13 +1629,17 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             ulong applicationEpoch,
             int recordsPerBundle,
             int byteBudget,
-            int regionEdgeMillimeters)
+            int regionEdgeMillimeters,
+            SparseCapacityMode capacityMode)
         {
             _scenario = scenario;
             _bots = bots;
             _pump = pump;
             _recordsPerBundle = recordsPerBundle;
             _byteBudget = byteBudget;
+            _capacity = SparseCapacityBounds.Create(
+                capacityMode, regionEdgeMillimeters, scenario);
+            _scratch = new RemoteWorldEntitySnapshot[_capacity.MaximumActiveEntities];
             _profile = new GameInterestProfile(
                 RegionEdgeMillimeters: regionEdgeMillimeters,
                 ImmediateEnterRadiusMillimeters: 7_500,
@@ -1660,7 +1665,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     MaximumRecipients: scenario.Clients,
                     MaximumRegions: checked(maximumEdges + scenario.Clients),
                     MaximumRegionInterestEdges: maximumEdges,
-                    MaximumRecipientEntityRelations: checked(scenario.Clients * MaximumScope),
+                    MaximumRecipientEntityRelations: checked(
+                        scenario.Clients * _capacity.MaximumRelationsPerRecipient),
                     MaximumOutstandingBundles: checked(scenario.Clients * 8),
                     MaximumRecordsPerBundle: recordsPerBundle),
                 _profile);
@@ -1693,7 +1699,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     $"Sparse entity {index} setup");
 
             GameInterestSnapshot initial = _interest.GetSnapshot();
-            if (initial.RelationCount > checked(scenario.Clients * MaximumScope))
+            _maximumRelations = initial.RelationCount;
+            if (initial.RelationCount > checked(
+                    scenario.Clients * _capacity.MaximumRelationsPerRecipient))
                 throw new InvalidOperationException("Sparse relation estimate exceeded its admitted bound.");
             for (int index = 0; index < bots.Length; index++)
             {
@@ -1701,10 +1709,12 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 bot.AttachWorldState(
                     new RemoteWorldStateServer(
                         bot.Server, _interest, Participant(index), applicationEpoch,
-                        recordsPerBundle, MaximumScope),
+                        recordsPerBundle, _capacity.MaximumBaselineRecords),
                     new RemoteWorldStateClient(
                         bot.Client, applicationEpoch, _interest.StateEpoch,
-                        MaximumScope, MaximumScope, recordsPerBundle, 64));
+                        _capacity.MaximumKnownIdentities,
+                        _capacity.MaximumActiveEntities,
+                        recordsPerBundle, 64));
             }
         }
 
@@ -1738,6 +1748,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _freshnessSamples = 0;
             _maximumPending = 0;
             _maximumOutstanding = 0;
+            _maximumRelations = _interest.GetSnapshot().RelationCount;
+            _maximumKnownIdentities = 0;
+            _maximumActiveEntities = 0;
         }
 
         internal void UpdateChangedAuthority(int authorityTick)
@@ -1761,6 +1774,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         version, point, GameReplicationHorizon.Far, now),
                     $"Sparse entity {index} movement");
             }
+            _maximumRelations = Math.Max(
+                _maximumRelations, _interest.GetSnapshot().RelationCount);
         }
 
         internal void Schedule(int authorityTick)
@@ -1784,13 +1799,20 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             GameInterestSnapshot snapshot = _interest.GetSnapshot();
             _maximumPending = Math.Max(_maximumPending, snapshot.PendingRelationCount);
             _maximumOutstanding = Math.Max(_maximumOutstanding, snapshot.OutstandingBundleCount);
+            _maximumRelations = Math.Max(_maximumRelations, snapshot.RelationCount);
         }
 
         internal void ScanFreshness(int authorityTick, bool measure)
         {
             for (int client = 0; client < _bots.Length; client++)
             {
-                int count = _bots[client].WorldClient!.CopyActiveEntitiesUnordered(_scratch);
+                RemoteWorldStateClient worldClient = _bots[client].WorldClient!;
+                int count = worldClient.CopyActiveEntitiesUnordered(_scratch);
+                RemoteWorldStateClientSnapshot clientSnapshot = worldClient.GetSnapshot();
+                _maximumKnownIdentities = Math.Max(
+                    _maximumKnownIdentities, clientSnapshot.KnownIdentityCount);
+                _maximumActiveEntities = Math.Max(
+                    _maximumActiveEntities, clientSnapshot.ActiveEntityCount);
                 for (int row = 0; row < count; row++)
                 {
                     ref readonly RemoteWorldEntitySnapshot state = ref _scratch[row];
@@ -1860,11 +1882,32 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 applicationAcks = checked(applicationAcks + server.ApplicationAcknowledgements);
             }
             diagnostics["world_state_relations"] = interest.RelationCount;
+            diagnostics["world_state_relations_max"] = _maximumRelations;
             diagnostics["world_state_pending_relations_final"] = interest.PendingRelationCount;
             diagnostics["world_state_pending_relations_max"] = _maximumPending;
             diagnostics["world_state_outstanding_bundles_final"] = interest.OutstandingBundleCount;
             diagnostics["world_state_outstanding_bundles_max"] = _maximumOutstanding;
             diagnostics["world_state_nonviable_recipients"] = interest.NonviableRecipientCount;
+            diagnostics["sparse_capacity_profile_current10"] =
+                _capacity.Mode == SparseCapacityMode.Current10 ? 1 : 0;
+            diagnostics["sparse_capacity_region_edge_mm"] = _profile.RegionEdgeMillimeters;
+            diagnostics["sparse_capacity_steady_envelope_cells"] =
+                _capacity.SteadyEnvelopeCells;
+            diagnostics["sparse_capacity_boundary_union_cells"] =
+                _capacity.BoundaryUnionCells;
+            diagnostics["sparse_capacity_safety_slots"] = _capacity.SafetySlots;
+            diagnostics["sparse_capacity_relations_per_recipient"] =
+                _capacity.MaximumRelationsPerRecipient;
+            diagnostics["sparse_capacity_known_identities_per_client"] =
+                _capacity.MaximumKnownIdentities;
+            diagnostics["sparse_capacity_active_entities_per_client"] =
+                _capacity.MaximumActiveEntities;
+            diagnostics["sparse_capacity_baseline_records_per_recipient"] =
+                _capacity.MaximumBaselineRecords;
+            diagnostics["sparse_capacity_known_identities_max_observed"] =
+                _maximumKnownIdentities;
+            diagnostics["sparse_capacity_active_entities_max_observed"] =
+                _maximumActiveEntities;
             diagnostics["world_state_pending_writes"] = interest.PendingWrites;
             diagnostics["world_state_pending_obligations_created"] =
                 interest.PendingObligationsCreated;
@@ -1976,6 +2019,12 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 maintainedScope.Select(static value => (double)value).ToArray());
             NetworkMetricSummary exactSummary = NetworkMetricSummary.From(
                 exactScope.Select(static value => (double)value).ToArray());
+            if (maintained.Max > _capacity.MaximumRelationsPerRecipient ||
+                maintained.Max > _capacity.MaximumBaselineRecords)
+                throw new InvalidOperationException(
+                    $"The sparse converged scope ({maintained.Max:R}) exceeded its " +
+                    $"relation/baseline bounds ({_capacity.MaximumRelationsPerRecipient}/" +
+                    $"{_capacity.MaximumBaselineRecords}).");
             diagnostics["scope_census_measured"] = 1;
             diagnostics["scope_census_region_edge_mm"] = _profile.RegionEdgeMillimeters;
             int farCells = checked((_profile.FarRadiusMillimeters +
@@ -2828,7 +2877,8 @@ internal sealed record AdapterOptions(
     bool DiagnosticSuite,
     bool CadenceSuite,
     string? CadenceCase,
-    int SparseRegionEdgeMillimeters)
+    int SparseRegionEdgeMillimeters,
+    SparseCapacityMode SparseCapacityMode)
 {
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
@@ -2848,7 +2898,8 @@ internal sealed record AdapterOptions(
         Has(args, "--diagnostic-suite"),
         Has(args, "--cadence-suite"),
         Get(args, "--cadence-case="),
-        ParseInt(Get(args, "--sparse-region-edge-mm="), 16_000));
+        ParseInt(Get(args, "--sparse-region-edge-mm="), 10_000),
+        ParseSparseCapacityMode(Get(args, "--sparse-capacity-profile=")));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
@@ -2890,4 +2941,83 @@ internal sealed record AdapterOptions(
         "input-owner" => V3DiagnosticLayer.InputOwner,
         _ => throw new ArgumentException($"Unsupported diagnostic layer '{value}'."),
     };
+    private static SparseCapacityMode ParseSparseCapacityMode(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            null or "auto" => SparseCapacityMode.Auto,
+            "current10" or "derived10" => SparseCapacityMode.Current10,
+            "legacy128" => SparseCapacityMode.Legacy128,
+            _ => throw new ArgumentException($"Unsupported sparse capacity profile '{value}'."),
+        };
+}
+
+internal enum SparseCapacityMode : byte
+{
+    Auto = 0,
+    Legacy128 = 1,
+    Current10 = 2,
+}
+
+internal readonly record struct SparseCapacityBounds(
+    SparseCapacityMode Mode,
+    int SteadyEnvelopeCells,
+    int BoundaryUnionCells,
+    int SafetySlots,
+    int MaximumRelationsPerRecipient,
+    int MaximumKnownIdentities,
+    int MaximumActiveEntities,
+    int MaximumBaselineRecords)
+{
+    internal static SparseCapacityBounds Create(
+        SparseCapacityMode mode,
+        int regionEdgeMillimeters,
+        NetworkBotScenario scenario)
+    {
+        bool admitsCurrentWindow =
+            regionEdgeMillimeters == 10_000 &&
+            scenario.SpawnSpacingMeters >= 12 &&
+            checked(scenario.StageTicks + scenario.SettleTicks) /
+                (double)scenario.TickHz <= 6;
+        if (mode == SparseCapacityMode.Auto)
+            mode = admitsCurrentWindow
+                ? SparseCapacityMode.Current10
+                : SparseCapacityMode.Legacy128;
+        int farCells = checked((39_500 + regionEdgeMillimeters - 1) /
+            regionEdgeMillimeters);
+        int edgeWidth = checked(farCells * 2 + 1);
+        int steadyCells = checked(edgeWidth * edgeWidth);
+        int calculatedBoundaryUnionCells = checked(steadyCells + edgeWidth * 2 - 1);
+        if (mode == SparseCapacityMode.Legacy128)
+            return new(
+                mode,
+                steadyCells,
+                calculatedBoundaryUnionCells,
+                Math.Max(0, 128 - calculatedBoundaryUnionCells),
+                128, 128, 128, 128);
+        if (!admitsCurrentWindow)
+            throw new ArgumentException(
+                "The current10 sparse capacity profile requires the 10 m broadphase, " +
+                "at least 12 m spawn spacing, and a movement window no longer than six seconds.",
+                nameof(regionEdgeMillimeters));
+
+        // The sparse profile's 39.5 m Far radius occupies a steady 9x9 cell
+        // envelope. A diagonal one-cell crossing temporarily owns the old
+        // square plus one entering row and column: 81 + 17 = 98 cells. Fourteen
+        // explicit slots preserve baseline/application overlap and measurement
+        // variance without returning to the historical 128-slot bound.
+        const int steadyEnvelopeCells = 81;
+        const int boundaryUnionCells = 98;
+        const int safetySlots = 14;
+        const int transientCapacity = boundaryUnionCells + safetySlots;
+        const int baselineCapacity = steadyEnvelopeCells + safetySlots;
+        return new(
+            mode,
+            steadyEnvelopeCells,
+            boundaryUnionCells,
+            safetySlots,
+            transientCapacity,
+            transientCapacity,
+            transientCapacity,
+            baselineCapacity);
+    }
 }

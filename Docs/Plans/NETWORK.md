@@ -2557,15 +2557,47 @@ At 10 m, interest-update mean falls 12.773→8.886 ms, schedule mean
 7.327→4.749 ms, emitted records fall 16.389M→10.843M, and wire falls
 830.5→576.6 MiB. At 8 m, interest-update mean rises to 9.992 ms and server p95
 improves only another 4.1% while adding 163,840 edges. Therefore 10 m is the
-current evidence-backed knee, not yet the production/default policy. Freeze
-16 m until an alternating confirmation and a separate admitted-scope capacity/
-reservation decision; do not infer a need for workers, wider queues, relaxed
-cadence, or exact per-entity discovery from this result.
+current evidence-backed knee. Alternating probes-off confirmation subsequently
+preserved the direction in every fresh-process pair: mean integrated p95 changed
+19.843→17.180 ms at 1,024 and 105.157→84.693 ms at 4,096. Deep server-role p95
+changed 11.660→9.947 and 60.287→49.552 ms. Exact-tier × maintained-tier
+accounting also proved that 10 m reduces, rather than hides, Far-as-Near urgency
+promotion and coarse-only work.
+
+The capacity change was then isolated at fixed 10 m geometry. The sparse profile
+now admits 112 transient relation/known/active identities from its 81-cell steady
+envelope, 98-cell diagonal crossing union, and 14 explicit safety slots; baseline
+capture admits 95 current-scope rows. At 4,096 the observed maxima were 213,815
+global relations, 72 known identities/client, and 64 active entities/client, with
+zero drops/nonviable recipients. Known Network + Game/Replication reservation
+fell 932.89→899.17 MiB. Timing remained within ordinary run variation and is not
+claimed as a capacity optimization.
+
+Therefore 10 m plus `current10` capacity is now the accepted default only for
+this bounded sparse 7.5/23.5/39.5 m, 12 m-spacing comparison profile. Other
+region sizes automatically retain `legacy128`; no general GameInterest profile,
+reference 192 m Far policy, cadence, or transport contract changed. Do not infer
+a need for workers, wider queues, relaxed cadence, or exact per-entity discovery
+from this result.
 
 The full immutable summary is
 [`network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.json)
 with its readable
 [`report`](../../_Benchmarks/Baselines/network-v3-sparse-current-topology-region-sensitivity-2026-08-17.md).
+The adoption/capacity evidence is
+[`network-v3-sparse-10m-confirmation-capacity-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-10m-confirmation-capacity-2026-08-17.json)
+with its readable
+[`report`](../../_Benchmarks/Baselines/network-v3-sparse-10m-confirmation-capacity-2026-08-17.md).
+
+The fresh deep protocol census under the smaller honest workload still assigns
+the largest server-role phase to protocol/listener: 36.703 ms p95 versus 10.660
+ms interest update, 5.062 ms WorldState scheduling, and 1.950 ms application
+ingress. Unlike the negative `owner_movement` batching census, this WorldState
+shape finds 570,187 multi-ready unreliable inspections (32.37%), up to seven
+ready frames, and 1,267,303 co-batchable frames. That earns a narrow, no-wait,
+unreliable-only same-peer multi-frame assembly experiment as the next sparse CPU
+question. Conservative circle-vs-region-AABB cell admission remains later work;
+it is not part of this adoption.
 
 Protected profiles:
 

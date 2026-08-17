@@ -142,6 +142,7 @@ AdapterProcessObservation RunAdapter(string project, string output, bool v2Adapt
         Add($"--topology={options.V3Topology}");
         Add($"--shared-socket-io={options.V3SocketIo}");
         Add($"--sparse-region-edge-mm={options.V3SparseRegionEdgeMillimeters}");
+        Add($"--sparse-capacity-profile={options.V3SparseCapacityProfile}");
     }
     if (v2Adapter && options.NoBuildV2) Add("--no-build-v2");
 
@@ -515,7 +516,8 @@ internal sealed record RunnerOptions(
     bool NoBuildV2,
     string V3Topology,
     string V3SocketIo,
-    int V3SparseRegionEdgeMillimeters)
+    int V3SparseRegionEdgeMillimeters,
+    string V3SparseCapacityProfile)
 {
     internal static RunnerOptions Parse(string[] args)
     {
@@ -540,7 +542,8 @@ internal sealed record RunnerOptions(
             Has(args, "--no-build-v2"),
             ParseV3Topology(Get(args, "--v3-topology=")),
             ParseV3SocketIo(Get(args, "--v3-socket-io=")),
-            ParseInt(Get(args, "--v3-sparse-region-edge-mm="), 16_000));
+            ParseInt(Get(args, "--v3-sparse-region-edge-mm="), 10_000),
+            ParseV3SparseCapacityProfile(Get(args, "--v3-sparse-capacity-profile=")));
     }
 
     private static IReadOnlyList<int> ParseStages(string value)
@@ -575,6 +578,15 @@ internal sealed record RunnerOptions(
         "scalar" => "scalar",
         _ => throw new ArgumentException($"Unsupported V3 socket I/O mode '{value}'."),
     };
+    private static string ParseV3SparseCapacityProfile(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            null or "auto" => "auto",
+            "current10" or "derived10" => "current10",
+            "legacy128" => "legacy128",
+            _ => throw new ArgumentException(
+                $"Unsupported V3 sparse capacity profile '{value}'."),
+        };
 }
 
 internal readonly record struct AdapterProcessObservation(
