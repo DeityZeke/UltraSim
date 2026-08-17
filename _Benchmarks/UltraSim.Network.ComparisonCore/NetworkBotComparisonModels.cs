@@ -256,6 +256,13 @@ public sealed record NetworkBotStageResult
     public required IReadOnlyList<NetworkCanonicalOwnerState> CanonicalOwnerStates { get; init; }
     public required string CanonicalValidation { get; init; }
     public required IReadOnlyDictionary<string, double> Diagnostics { get; init; }
+
+    // Benchmark-only raw samples. They are intentionally excluded from ordinary
+    // adapter JSON; pooled-tail mode consumes them before the window is disposed.
+    [JsonIgnore]
+    public IReadOnlyList<double>? TickSamples { get; init; }
+    [JsonIgnore]
+    public IReadOnlyList<double>? ServerPumpSamples { get; init; }
 }
 
 public sealed record NetworkBotAdapterReport

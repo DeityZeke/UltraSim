@@ -2626,6 +2626,36 @@ The immutable experiment artifact is
 with its readable
 [`report`](../../_Benchmarks/Baselines/network-v3-sparse-unreliable-multiframe-2026-08-17.md).
 
+The pooled-tail follow-up used 51 independent valid `current10` windows and
+concatenated 18,360 raw measured ticks per mode. It is deliberately pooled
+CPU/tail evidence rather than a continuous five-minute roaming acceptance run.
+All windows passed their convergence, freshness, capacity, nonviability, and
+byte-capacity checks. At 4,096, control versus opt-in aggregation changed
+server-role p95/p99/p99.9 from 81.497/85.655/93.422 ms to
+72.946/75.565/87.007 ms, while unreliable Data datagrams fell
+101,291,122→79,159,327 (21.85%). Immediate/Near/Far p95 age remained
+1/2/3→1/1/2 ticks; input-ACK and worst-client WorldState p95 also improved.
+The aggregate and control had identical canonical hashes, zero capacity,
+nonviable-recipient, and byte-capacity failures, and equal deadline-miss counts
+because every tick in this 4K workload exceeded the 62 Hz wall-clock budget.
+The maximum tick and server-role samples were nevertheless higher in the
+aggregate run, so this is strong sustained opt-in CPU evidence, not a default
+promotion.
+
+The immutable pooled summary is
+[`network-v3-sparse-unreliable-multiframe-pooled-tail-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-unreliable-multiframe-pooled-tail-2026-08-17.json)
+with its readable
+[`report`](../../_Benchmarks/Baselines/network-v3-sparse-unreliable-multiframe-pooled-tail-2026-08-17.md).
+
+The attempted uninterrupted long-run extension also exposed a separate
+WorldState lifetime requirement: `legacy128` eventually became nonviable as
+roaming accumulated retained tombstone knowledge in the client's known-
+identity ledger. Increasing the arrays would only postpone that exhaustion.
+The next checkpoint is pressure/churn-triggered atomic baseline compaction,
+which preserves the connection, epoch, application session, AOI, and authority
+state while safely reclaiming old tombstone history. It remains separate from
+the aggregation decision.
+
 Protected profiles:
 
 ```text

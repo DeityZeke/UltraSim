@@ -215,6 +215,12 @@ corresponding protocol-stage counters. Deep timing also records a cold
 same-lane-only greedy opportunity census for deciding whether mixed-lane fate
 coupling is worthwhile. The paired evidence is recorded in
 `Baselines/network-v3-sparse-unreliable-multiframe-2026-08-17.md`.
+For tail work, `--pooled-tail-windows=N` runs repeated valid sparse windows and
+concatenates their raw measured tick/server samples before calculating
+p50/p95/p99/p99.9/max. Window setup/reset time is reported separately and is not
+included in those primary samples. This is pooled-window aggregation evidence,
+not a continuous roaming-session lifetime claim; `current10` still enforces its
+six-second movement envelope in every window.
 V3 visible-state AoI/fairness is sampled during the untimed 10-tick post-stage
 settle window. The result records both the sampling duration and compact
 histogram payload reservation, so freshness instrumentation is neither charged

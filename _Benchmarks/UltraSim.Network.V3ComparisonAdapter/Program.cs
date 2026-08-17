@@ -27,6 +27,11 @@ if (options.DiagnosticSuite)
     RunDiagnosticSuite(options, scenario);
     return;
 }
+if (options.PooledTailWindows > 0)
+{
+    RunPooledTail(options, scenario);
+    return;
+}
 using var harness = new V3OwnerMovementHarness(
     scenario, options.Topology,
     new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming),
@@ -39,6 +44,144 @@ NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(resu
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
     $"ping p95 {result.PingMilliseconds.P95:F3} ms, reserved {result.ReservedNetworkBytes / 1048576d:F2} MiB");
 Console.WriteLine(Path.GetFullPath(options.Output));
+
+static void RunPooledTail(AdapterOptions options, NetworkBotScenario scenario)
+{
+    if (!scenario.ObserverState)
+        throw new ArgumentException("Pooled tail mode is admitted only for the sparse observer workload.");
+    if (options.PooledTailWindows <= 0)
+        throw new ArgumentOutOfRangeException(nameof(options.PooledTailWindows));
+
+    var tickSamples = new List<double>(checked(options.PooledTailWindows * scenario.StageTicks));
+    var serverSamples = new List<double>(checked(options.PooledTailWindows * scenario.StageTicks));
+    var windows = new List<PooledTailWindowReport>(options.PooledTailWindows);
+    var setupMilliseconds = new List<double>(options.PooledTailWindows);
+    string? canonicalHash = null;
+    bool allWindowsAccepted = true;
+    ulong totalCapacityDrops = 0;
+    double maximumNonviable = 0;
+    double maximumByteFailures = 0;
+    long totalGen0 = 0;
+    long totalGen1 = 0;
+    long totalGen2 = 0;
+    long totalDeadlineMisses = 0;
+    long maximumDeadlineMisses = 0;
+    ulong totalRetransmissions = 0;
+    ulong maximumRetransmissions = 0;
+    long totalAllocatedBytes = 0;
+    long maximumAllocatedBytes = 0;
+    for (int index = 0; index < options.PooledTailWindows; index++)
+    {
+        long setupStarted = Stopwatch.GetTimestamp();
+        using var harness = new V3OwnerMovementHarness(
+            scenario, options.Topology,
+            new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming),
+            options.SharedSocketIoMode,
+            sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
+            sparseCapacityMode: options.SparseCapacityMode,
+            unreliableFrameAggregation: options.UnreliableFrameAggregation);
+        setupMilliseconds.Add(Stopwatch.GetElapsedTime(setupStarted).TotalMilliseconds);
+        NetworkBotStageResult result = harness.Run();
+        if (result.TickSamples is null || result.ServerPumpSamples is null)
+            throw new InvalidOperationException("Pooled tail mode requires raw stage samples.");
+        tickSamples.AddRange(result.TickSamples);
+        serverSamples.AddRange(result.ServerPumpSamples);
+        canonicalHash ??= result.CanonicalOwnerStateHash;
+        bool canonical = StringComparer.Ordinal.Equals(canonicalHash, result.CanonicalOwnerStateHash);
+        double nonviable = Diagnostic(result, "world_state_nonviable_recipients");
+        double byteFailures = Diagnostic(result, "retained_payload_byte_capacity_failures");
+        bool accepted = canonical && result.CapacityDrops == 0 && nonviable == 0 && byteFailures == 0;
+        allWindowsAccepted &= accepted;
+        totalCapacityDrops = checked(totalCapacityDrops + result.CapacityDrops);
+        maximumNonviable = Math.Max(maximumNonviable, nonviable);
+        maximumByteFailures = Math.Max(maximumByteFailures, byteFailures);
+        totalGen0 += result.Gen0Collections;
+        totalGen1 += result.Gen1Collections;
+        totalGen2 += result.Gen2Collections;
+        totalDeadlineMisses = checked(totalDeadlineMisses + result.TickDeadlineMisses);
+        maximumDeadlineMisses = Math.Max(maximumDeadlineMisses, result.TickDeadlineMisses);
+        totalRetransmissions = checked(totalRetransmissions + result.RetransmittedPackets);
+        maximumRetransmissions = Math.Max(maximumRetransmissions, result.RetransmittedPackets);
+        totalAllocatedBytes = checked(totalAllocatedBytes + result.AllocatedBytes);
+        maximumAllocatedBytes = Math.Max(maximumAllocatedBytes, result.AllocatedBytes);
+        windows.Add(new(
+            index + 1,
+            result.TickMilliseconds.P95,
+            result.ServerPumpMilliseconds.P95,
+            result.ImmediateWorldStateTicks.P95,
+            result.NearWorldStateTicks.P95,
+            result.FarWorldStateTicks.P95,
+            result.InputAcknowledgementMilliseconds.P95,
+            Diagnostic(result, "worst_client_input_ack_p95_ms"),
+            result.PerClientWorldStateP95Milliseconds.Max,
+            result.TickDeadlineMisses,
+            result.RetransmittedPackets,
+            result.AllocatedBytes,
+            result.CapacityDrops,
+            nonviable,
+            byteFailures,
+            result.Gen0Collections + result.Gen1Collections + result.Gen2Collections,
+            result.CanonicalOwnerStateHash,
+            Diagnostic(result, "unreliable_frames_consumed"),
+            Diagnostic(result, "unreliable_data_datagrams_sent"),
+            Diagnostic(result, "unreliable_sent_datagrams_two_or_more_frames"),
+            accepted));
+        Console.WriteLine($"POOLED WINDOW {index + 1}/{options.PooledTailWindows}: " +
+            $"tick p95 {result.TickMilliseconds.P95:F3} ms, " +
+            $"server p95 {result.ServerPumpMilliseconds.P95:F3} ms, accepted {accepted}");
+    }
+
+    var report = new PooledTailReport(
+        "ultrasim-network-v3-pooled-tail-v1",
+        DateTimeOffset.UtcNow,
+        scenario,
+        options.PooledTailWindows,
+        tickSamples.Count,
+        options.UnreliableFrameAggregation,
+        options.SparseCapacityMode.ToString(),
+        PooledMetricSummary.From(tickSamples),
+        PooledMetricSummary.From(serverSamples),
+        windows,
+        allWindowsAccepted,
+        canonicalHash ?? string.Empty,
+        new(
+            windows.Max(window => window.ImmediateWorldStateTicksP95),
+            windows.Max(window => window.NearWorldStateTicksP95),
+            windows.Max(window => window.FarWorldStateTicksP95),
+            windows.Max(window => window.InputAcknowledgementP95Milliseconds),
+            windows.Max(window => window.WorstClientInputAcknowledgementP95Milliseconds),
+            windows.Max(window => window.WorstClientWorldStateP95Milliseconds)),
+        new(totalCapacityDrops, maximumNonviable, maximumByteFailures,
+            totalGen0, totalGen1, totalGen2,
+            totalDeadlineMisses, maximumDeadlineMisses,
+            totalRetransmissions, maximumRetransmissions,
+            totalAllocatedBytes, maximumAllocatedBytes),
+        new(
+            SumDiagnostic(windows, resultKey: "unreliable_frames_consumed"),
+            SumDiagnostic(windows, resultKey: "unreliable_data_datagrams_sent"),
+            SumDiagnostic(windows, resultKey: "unreliable_sent_datagrams_two_or_more_frames")),
+        setupMilliseconds.Sum(),
+        setupMilliseconds.Max());
+    NetworkBotComparisonIo.Write(options.Output, report);
+    Console.WriteLine($"POOLED TAIL: {tickSamples.Count} measured ticks; " +
+        $"tick p50/p95/p99/p99.9/max {report.TickMilliseconds.P50:F3}/" +
+        $"{report.TickMilliseconds.P95:F3}/{report.TickMilliseconds.P99:F3}/" +
+        $"{report.TickMilliseconds.P999:F3}/{report.TickMilliseconds.Max:F3} ms; " +
+        $"server p95 {report.ServerPumpMilliseconds.P95:F3} ms; accepted {allWindowsAccepted}");
+    Console.WriteLine(Path.GetFullPath(options.Output));
+
+    static double Diagnostic(NetworkBotStageResult result, string key) =>
+        result.Diagnostics.TryGetValue(key, out double value) ? value : 0;
+
+    static double SumDiagnostic(
+        IReadOnlyList<PooledTailWindowReport> reports,
+        string resultKey) => resultKey switch
+        {
+            "unreliable_frames_consumed" => reports.Sum(report => report.UnreliableFramesConsumed),
+            "unreliable_data_datagrams_sent" => reports.Sum(report => report.UnreliableDataDatagramsSent),
+            _ => reports.Sum(report => report.UnreliableDatagramsTwoOrMoreFrames),
+        };
+}
 
 static void RunCadenceSuite(AdapterOptions options)
 {
@@ -215,6 +358,103 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
     NetworkBotComparisonIo.Write(options.Output, report);
     Console.WriteLine(Path.GetFullPath(options.Output));
 }
+
+internal readonly record struct PooledMetricSummary(
+    double Mean,
+    double P50,
+    double P95,
+    double P99,
+    double P999,
+    double Max)
+{
+    internal static PooledMetricSummary From(IReadOnlyList<double> values)
+    {
+        if (values.Count == 0) return default;
+        double[] sorted = values.ToArray();
+        Array.Sort(sorted);
+        return new(sorted.Average(), Percentile(sorted, .50), Percentile(sorted, .95),
+            Percentile(sorted, .99), Percentile(sorted, .999), sorted[^1]);
+    }
+
+    private static double Percentile(ReadOnlySpan<double> sorted, double percentile)
+    {
+        double position = (sorted.Length - 1) * percentile;
+        int lower = (int)position;
+        int upper = (int)Math.Ceiling(position);
+        return lower == upper
+            ? sorted[lower]
+            : sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+    }
+}
+
+internal sealed record PooledTailReport(
+    string Schema,
+    DateTimeOffset RecordedUtc,
+    NetworkBotScenario Scenario,
+    int WindowCount,
+    int MeasuredTicks,
+    bool UnreliableFrameAggregation,
+    string SparseCapacityProfile,
+    PooledMetricSummary TickMilliseconds,
+    PooledMetricSummary ServerPumpMilliseconds,
+    IReadOnlyList<PooledTailWindowReport> Windows,
+    bool AllWindowsAccepted,
+    string CanonicalOwnerStateHash,
+    PooledTailFreshnessSummary Freshness,
+    PooledTailPressureSummary Pressure,
+    PooledTailAggregationSummary Aggregation,
+    double ResetSetupMillisecondsTotal,
+    double ResetSetupMillisecondsMaximum);
+
+internal sealed record PooledTailFreshnessSummary(
+    double ImmediateWorldStateTicksP95Maximum,
+    double NearWorldStateTicksP95Maximum,
+    double FarWorldStateTicksP95Maximum,
+    double InputAcknowledgementP95MillisecondsMaximum,
+    double WorstClientInputAcknowledgementP95MillisecondsMaximum,
+    double WorstClientWorldStateP95MillisecondsMaximum);
+
+internal sealed record PooledTailPressureSummary(
+    ulong CapacityDrops,
+    double MaximumNonviableRecipients,
+    double MaximumByteCapacityFailures,
+    long Gen0Collections,
+    long Gen1Collections,
+    long Gen2Collections,
+    long TotalTickDeadlineMisses,
+    long MaximumTickDeadlineMisses,
+    ulong TotalRetransmittedPackets,
+    ulong MaximumRetransmittedPackets,
+    long TotalAllocatedBytes,
+    long MaximumAllocatedBytes);
+
+internal sealed record PooledTailAggregationSummary(
+    double UnreliableFramesConsumed,
+    double UnreliableDataDatagramsSent,
+    double UnreliableDatagramsTwoOrMoreFrames);
+
+internal sealed record PooledTailWindowReport(
+    int Window,
+    double TickP95Milliseconds,
+    double ServerP95Milliseconds,
+    double ImmediateWorldStateTicksP95,
+    double NearWorldStateTicksP95,
+    double FarWorldStateTicksP95,
+    double InputAcknowledgementP95Milliseconds,
+    double WorstClientInputAcknowledgementP95Milliseconds,
+    double WorstClientWorldStateP95Milliseconds,
+    long TickDeadlineMisses,
+    ulong RetransmittedPackets,
+    long AllocatedBytes,
+    ulong CapacityDrops,
+    double NonviableRecipients,
+    double ByteCapacityFailures,
+    int GarbageCollections,
+    string CanonicalOwnerStateHash,
+    double UnreliableFramesConsumed,
+    double UnreliableDataDatagramsSent,
+    double UnreliableDatagramsTwoOrMoreFrames,
+    bool Accepted);
 
 internal sealed class V3OwnerMovementHarness : IDisposable
 {
@@ -1052,6 +1292,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             ReadyClients = _bots.Length,
             TickMilliseconds = NetworkMetricSummary.From(tickMs),
             ServerPumpMilliseconds = NetworkMetricSummary.From(serverMs),
+            TickSamples = tickMs.ToArray(),
+            ServerPumpSamples = serverMs.ToArray(),
             ClientPumpMilliseconds = NetworkMetricSummary.From(clientMs),
             PingMilliseconds = NetworkMetricSummary.From(pingMs),
             InputAcknowledgementMilliseconds = NetworkMetricSummary.From(ackMs),
@@ -3100,7 +3342,8 @@ internal sealed record AdapterOptions(
     string? CadenceCase,
     int SparseRegionEdgeMillimeters,
     SparseCapacityMode SparseCapacityMode,
-    bool UnreliableFrameAggregation)
+    bool UnreliableFrameAggregation,
+    int PooledTailWindows)
 {
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
@@ -3122,7 +3365,8 @@ internal sealed record AdapterOptions(
         Get(args, "--cadence-case="),
         ParseInt(Get(args, "--sparse-region-edge-mm="), 10_000),
         ParseSparseCapacityMode(Get(args, "--sparse-capacity-profile=")),
-        Has(args, "--unreliable-frame-aggregation"));
+        Has(args, "--unreliable-frame-aggregation"),
+        ParseInt(Get(args, "--pooled-tail-windows="), 0));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
