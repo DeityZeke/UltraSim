@@ -15,7 +15,8 @@ public readonly record struct NetworkProtocolLimits(
     int MaximumCongestionWindowPackets,
     int MaximumIndependentUnreliableMessages,
     int ReliablePayloadByteCapacity = 262_144,
-    int ReceivedPayloadByteCapacity = 262_144)
+    int ReceivedPayloadByteCapacity = 262_144,
+    int MaximumUnreliableFramesPerDatagram = 1)
 {
     public static NetworkProtocolLimits Default => new(
         128, 128, 16_384, 64, 2_048, 64, 64, 2, 128, 4, 128, 128);
@@ -29,6 +30,8 @@ public readonly record struct NetworkProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumReceivedMessages));
         if (MaximumIndependentUnreliableMessages is <= 0 or > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumIndependentUnreliableMessages));
+        if (MaximumUnreliableFramesPerDatagram is <= 0 or > 64)
+            throw new ArgumentOutOfRangeException(nameof(MaximumUnreliableFramesPerDatagram));
         if (MaximumMessageBytes is <= 0 or > 16_777_216)
             throw new ArgumentOutOfRangeException(nameof(MaximumMessageBytes));
         if (ReliablePayloadByteCapacity < MaximumMessageBytes)
@@ -235,7 +238,45 @@ internal readonly record struct NetworkProtocolStageTiming(
     ulong SecureReceiveTicks,
     ulong FrameAdmissionTicks,
     ulong ReliableCompactionTicks,
-    ulong ReceivedCompactionTicks);
+    ulong ReceivedCompactionTicks,
+    ulong OutboundUnreliableFrames,
+    ulong InboundUnreliableFrames);
+
+/// <summary>
+/// Cold lifetime counters for the opt-in same-peer unreliable Data aggregate.
+/// Histogram fields count secure Data datagrams by embedded frame count; the final
+/// bucket is eight or more so the snapshot remains allocation-free.
+/// </summary>
+public readonly record struct NetworkUnreliableAggregationSnapshot(
+    int ConfiguredMaximumFramesPerDatagram,
+    ulong SentFrames,
+    ulong SentDatagrams,
+    ulong ReceivedFrames,
+    ulong ReceivedDatagrams,
+    ulong SentDatagramsWithTwoOrMoreFrames,
+    ulong ReceivedDatagramsWithTwoOrMoreFrames,
+    ulong SentHistogramOne,
+    ulong SentHistogramTwo,
+    ulong SentHistogramThree,
+    ulong SentHistogramFour,
+    ulong SentHistogramFive,
+    ulong SentHistogramSix,
+    ulong SentHistogramSeven,
+    ulong SentHistogramEightOrMore,
+    ulong ReceivedHistogramOne,
+    ulong ReceivedHistogramTwo,
+    ulong ReceivedHistogramThree,
+    ulong ReceivedHistogramFour,
+    ulong ReceivedHistogramFive,
+    ulong ReceivedHistogramSix,
+    ulong ReceivedHistogramSeven,
+    ulong ReceivedHistogramEightOrMore,
+    ulong SentPlaintextBytes,
+    ulong ReceivedPlaintextBytes,
+    int MaximumSentFramesPerDatagram,
+    int MaximumReceivedFramesPerDatagram,
+    int MaximumSentPlaintextBytes,
+    int MaximumReceivedPlaintextBytes);
 
 /// <summary>
 /// Cold protocol diagnostics. <see cref="ReservedBytes"/> is the exact payload
@@ -269,7 +310,8 @@ public readonly record struct NetworkProtocolSnapshot(
     ulong SmoothedRoundTripSteps,
     ulong RetransmissionTimeoutSteps,
     long ReservedBytes,
-    NetworkRetainedPayloadSnapshot RetainedPayloads);
+    NetworkRetainedPayloadSnapshot RetainedPayloads,
+    NetworkUnreliableAggregationSnapshot UnreliableAggregation);
 
 /// <summary>
 /// Exact cold diagnostics for payload bytes retained by one protocol peer. Capacities

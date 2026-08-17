@@ -19,6 +19,11 @@ internal static class N03ProtocolTests
         Run("UnreliableDataDoesNotElicitTransportAcknowledgements", UnreliableDataDoesNotElicitTransportAcknowledgements);
         Run("MixedTrafficAcknowledgesReliableDataOnly", MixedTrafficAcknowledgesReliableDataOnly);
         Run("UnreliableBatchCensusIsExactAndNonMutating", UnreliableBatchCensusIsExactAndNonMutating);
+        Run("UnreliableMultiframeAggregationPreservesOrderAndCounters", UnreliableMultiframeAggregationPreservesOrderAndCounters);
+        Run("UnreliableMultiframeSendBackpressureIsTransactional", UnreliableMultiframeSendBackpressureIsTransactional);
+        Run("UnreliableMultiframeReceiveValidationIsTransactional", UnreliableMultiframeReceiveValidationIsTransactional);
+        Run("UnreliableMultiframeAdmissionPreservesSequencingAndCapacity", UnreliableMultiframeAdmissionPreservesSequencingAndCapacity);
+        Run("WarmedUnreliableMultiframeAggregationAllocatesZero", WarmedUnreliableMultiframeAggregationAllocatesZero);
         Run("ProtocolStageTimingIsOptInAndResettable", ProtocolStageTimingIsOptInAndResettable);
         Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
         Run("UnreliableMessageFamiliesOwnIndependentStreams", UnreliableMessageFamiliesOwnIndependentStreams);
@@ -29,6 +34,7 @@ internal static class N03ProtocolTests
         Run("AuthenticatedRegionsRejectWithoutStatePublication", AuthenticatedRegionsRejectWithoutStatePublication);
         Run("ReceiveBackpressureRetainsReliableMessage", ReceiveBackpressureRetainsReliableMessage);
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
+        Run("AggregatedDataSurvivesSecurityEpochRotation", AggregatedDataSurvivesSecurityEpochRotation);
         Run("HostileNextEpochProbesReuseOnePreparedCipher", HostileNextEpochProbesReuseOnePreparedCipher);
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
         Run("PayloadReservationsFollowManifestAndLaneContracts", PayloadReservationsFollowManifestAndLaneContracts);
@@ -191,7 +197,9 @@ internal static class N03ProtocolTests
 
     private static void UnreliableLanesApplySequencingAndCoalescing()
     {
-        using ProtocolLoopback loopback = Create(new(77, 0, 500, 0, 7));
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using ProtocolLoopback loopback = Create(
+            new(77, 0, 500, 0, 7), s_datagrams, limits);
         Span<byte> payload = stackalloc byte[8];
         for (ulong value = 0; value < 10; value++)
         {
@@ -212,6 +220,7 @@ internal static class N03ProtocolTests
         Equal(9UL, seen[NetworkLane.Input]);
         Equal(9UL, seen[NetworkLane.OwnerState]);
         Equal(99UL, seen[NetworkLane.Disposable]);
+        True(loopback.Client.GetSnapshot().UnreliableAggregation.SentDatagramsWithTwoOrMoreFrames > 0);
     }
 
     private static void UnreliableDataDoesNotElicitTransportAcknowledgements()
@@ -276,6 +285,164 @@ internal static class N03ProtocolTests
 
         Drive(loopback, () => loopback.Server.ReceivedQueued == 3, 100);
         Equal(0, loopback.Client.InspectUnreliableBatchOpportunity().ReadyFrames);
+    }
+
+    private static void UnreliableMultiframeAggregationPreservesOrderAndCounters()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 3 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Disposable), stackalloc byte[] { 4 }));
+
+        loopback.Client.Emit(0);
+        NetworkUnreliableAggregationSnapshot sent =
+            loopback.Client.GetSnapshot().UnreliableAggregation;
+        Equal(4UL, sent.SentFrames);
+        Equal(1UL, sent.SentDatagrams);
+        Equal(1UL, sent.SentHistogramFour);
+        Equal(1UL, loopback.Client.GetSnapshot().DataPacketsSent);
+        Equal(0, loopback.Client.IndependentUnreliableQueued);
+
+        loopback.Server.ProcessInbound(0);
+        NetworkUnreliableAggregationSnapshot received =
+            loopback.Server.GetSnapshot().UnreliableAggregation;
+        Equal(4UL, received.ReceivedFrames);
+        Equal(1UL, received.ReceivedDatagrams);
+        Equal(1UL, received.ReceivedHistogramFour);
+        Equal(4, loopback.Server.ReceivedQueued);
+        NetworkLane[] expected =
+            [NetworkLane.Input, NetworkLane.OwnerState, NetworkLane.WorldState, NetworkLane.Disposable];
+        byte[] expectedPayload = new byte[1];
+        for (int index = 0; index < expected.Length; index++)
+        {
+            expectedPayload[0] = (byte)(index + 1);
+            AssertReceive(loopback.Server, expected[index], expectedPayload);
+        }
+    }
+
+    private static void UnreliableMultiframeSendBackpressureIsTransactional()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using RawPeerPair pair = new(s_manifest, limits, new DeterministicDatagramLimits(1, 512));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 3 }));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Disposable), stackalloc byte[] { 4 }));
+        Equal(DatagramSendStatus.Accepted, pair.Link.A.TrySend(stackalloc byte[] { 0 }));
+
+        pair.Sender.Emit(0);
+        Equal(0UL, pair.Sender.GetSnapshot().DataPacketsSent);
+        Equal(4, pair.Sender.InspectUnreliableBatchOpportunity().ReadyFrames);
+        Equal(0UL, pair.Sender.GetSnapshot().UnreliableAggregation.SentFrames);
+
+        Equal(1, Drain(pair.Link.B));
+        pair.Sender.Emit(0);
+        Equal(1UL, pair.Sender.GetSnapshot().DataPacketsSent);
+        Equal(4UL, pair.Sender.GetSnapshot().UnreliableAggregation.SentFrames);
+        Equal(0, pair.Sender.InspectUnreliableBatchOpportunity().ReadyFrames);
+    }
+
+    private static void UnreliableMultiframeReceiveValidationIsTransactional()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        Span<byte> malformed = stackalloc byte[NetworkProtocolDataHeader.EncodedBytes + 1 + 3];
+        var writer = new NetworkPacketWriter(malformed);
+        WriteFrame(ref writer, NetworkLane.Input, 0, stackalloc byte[] { 9 });
+        True(writer.TryWriteBytes(stackalloc byte[] { 0x01, 0x00, 0x00 }));
+        pair.InjectPlaintext(writer.WrittenSpan, 0);
+        Equal(0, pair.Receiver.ReceivedQueued);
+        Equal(0UL, pair.Receiver.GetSnapshot().UnreliableAggregation.ReceivedFrames);
+
+        Span<byte> reliableMixed = stackalloc byte[(NetworkProtocolDataHeader.EncodedBytes + 1) * 2];
+        writer = new NetworkPacketWriter(reliableMixed);
+        WriteFrame(ref writer, NetworkLane.Input, 0, stackalloc byte[] { 1 });
+        WriteFrame(ref writer, NetworkLane.Event, 0, stackalloc byte[] { 2 });
+        pair.InjectPlaintext(writer.WrittenSpan, 1);
+        Equal(0, pair.Receiver.ReceivedQueued);
+        Equal(0UL, pair.Receiver.GetSnapshot().ReceivedPackets);
+
+        Span<byte> valid = stackalloc byte[NetworkProtocolDataHeader.EncodedBytes + 1];
+        writer = new NetworkPacketWriter(valid);
+        WriteFrame(ref writer, NetworkLane.Input, 0, stackalloc byte[] { 7 });
+        pair.InjectPlaintext(writer.WrittenSpan, 2);
+        AssertReceive(pair.Receiver, NetworkLane.Input, stackalloc byte[] { 7 });
+    }
+
+    private static void UnreliableMultiframeAdmissionPreservesSequencingAndCapacity()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            MaximumUnreliableFramesPerDatagram = 7,
+            MaximumReceivedMessages = 1,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        Span<byte> aggregate = stackalloc byte[(NetworkProtocolDataHeader.EncodedBytes + 1) * 2];
+        var writer = new NetworkPacketWriter(aggregate);
+        WriteFrame(ref writer, NetworkLane.Input, 8, stackalloc byte[] { 8 });
+        WriteFrame(ref writer, NetworkLane.Input, 7, stackalloc byte[] { 7 });
+        pair.InjectPlaintext(writer.WrittenSpan, 0);
+        Equal(1, pair.Receiver.ReceivedQueued);
+        Equal(1UL, pair.Receiver.GetSnapshot().SequencedDrops);
+        Equal(0UL, pair.Receiver.GetSnapshot().CapacityDrops);
+        AssertReceive(pair.Receiver, NetworkLane.Input, stackalloc byte[] { 8 });
+
+        writer = new NetworkPacketWriter(aggregate);
+        WriteFrame(ref writer, NetworkLane.Input, 10, stackalloc byte[] { 10 });
+        WriteFrame(ref writer, NetworkLane.Input, 11, stackalloc byte[] { 11 });
+        pair.InjectPlaintext(writer.WrittenSpan, 1);
+        Equal(1, pair.Receiver.ReceivedQueued);
+        Equal(1UL, pair.Receiver.GetSnapshot().CapacityDrops);
+        AssertReceive(pair.Receiver, NetworkLane.Input, stackalloc byte[] { 10 });
+    }
+
+    private static void WarmedUnreliableMultiframeAggregationAllocatesZero()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        byte[] payload = new byte[1];
+        for (int iteration = 0; iteration < 32; iteration++)
+        {
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Input), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.OwnerState), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.WorldState), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Disposable), payload));
+            loopback.Pump();
+            while (loopback.Server.TryConsumeReceived()) { }
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 128; iteration++)
+        {
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Input), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.OwnerState), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.WorldState), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Disposable), payload));
+            loopback.Pump();
+            while (loopback.Server.TryConsumeReceived()) { }
+        }
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
     private static void ProtocolStageTimingIsOptInAndResettable()
@@ -607,6 +774,30 @@ internal static class N03ProtocolTests
         Equal(new SecurityEpoch(2), loopback.Server.GetSnapshot().ReceiveSecurityEpoch);
     }
 
+    private static void AggregatedDataSurvivesSecurityEpochRotation()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 2, 100);
+        while (loopback.Server.TryConsumeReceived()) { }
+        Drive(loopback, () => loopback.Client.GetSnapshot().InFlightPackets == 0, 100);
+        True(loopback.TryRotateSecurityEpoch());
+
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 3 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 4 }));
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 2, 100);
+        AssertReceive(loopback.Server, NetworkLane.Input, stackalloc byte[] { 3 });
+        AssertReceive(loopback.Server, NetworkLane.OwnerState, stackalloc byte[] { 4 });
+        Equal(new SecurityEpoch(2), loopback.Client.GetSnapshot().SendSecurityEpoch);
+        Equal(new SecurityEpoch(2), loopback.Server.GetSnapshot().ReceiveSecurityEpoch);
+    }
+
     private static void HostileNextEpochProbesReuseOnePreparedCipher()
     {
         Span<byte> secret = stackalloc byte[32];
@@ -891,6 +1082,21 @@ internal static class N03ProtocolTests
 
     private static NetworkMessageId Id(NetworkLane lane) => new((ushort)((int)lane + 1));
 
+    private static void WriteFrame(
+        ref NetworkPacketWriter writer,
+        NetworkLane lane,
+        ulong sequence,
+        ReadOnlySpan<byte> payload)
+    {
+        NetworkMessageId messageId = Id(lane);
+        True(s_manifest.TryGet(messageId, out NetworkMessageDescriptor descriptor));
+        var header = new NetworkDataFrameHeader(
+            lane, messageId, descriptor.Version, new LaneSequence(sequence),
+            0, 1, payload.Length, checked((ushort)payload.Length));
+        True(NetworkDataFrameCodec.TryWrite(ref writer, header));
+        True(writer.TryWriteBytes(payload));
+    }
+
     private static int Drain(DeterministicDatagramEndpoint endpoint)
     {
         byte[] scratch = new byte[s_datagrams.MaximumDatagramBytes];
@@ -1015,6 +1221,14 @@ internal static class N03ProtocolTests
             True(writer.TryWriteBytes(payload));
             byte[] datagram = CreateAuthenticatedDatagram(
                 _masterSecret, _connection, _epoch, new PacketNumber(packet), writer.WrittenSpan);
+            Equal(DatagramSendStatus.Accepted, Link.A.TrySend(datagram));
+            Receiver.ProcessInbound(packet);
+        }
+
+        internal void InjectPlaintext(ReadOnlySpan<byte> plaintext, ulong packet)
+        {
+            byte[] datagram = CreateAuthenticatedDatagram(
+                _masterSecret, _connection, _epoch, new PacketNumber(packet), plaintext);
             Equal(DatagramSendStatus.Accepted, Link.A.TrySend(datagram));
             Receiver.ProcessInbound(packet);
         }

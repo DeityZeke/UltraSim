@@ -1273,7 +1273,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             SaturatingAdd(left.SecureReceiveTicks, right.SecureReceiveTicks),
             SaturatingAdd(left.FrameAdmissionTicks, right.FrameAdmissionTicks),
             SaturatingAdd(left.ReliableCompactionTicks, right.ReliableCompactionTicks),
-            SaturatingAdd(left.ReceivedCompactionTicks, right.ReceivedCompactionTicks));
+            SaturatingAdd(left.ReceivedCompactionTicks, right.ReceivedCompactionTicks),
+            SaturatingAdd(left.OutboundUnreliableFrames, right.OutboundUnreliableFrames),
+            SaturatingAdd(left.InboundUnreliableFrames, right.InboundUnreliableFrames));
 
     private static ulong Remaining(ulong total, params ulong[] parts)
     {

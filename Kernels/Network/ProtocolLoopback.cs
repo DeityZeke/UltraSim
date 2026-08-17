@@ -246,6 +246,34 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _decryptedPlaintextBytes;
     private ulong _reliableFragmentsSent;
     private ulong _reliableRetransmittedWireBytes;
+    private ulong _unreliableFramesSent;
+    private ulong _unreliableDatagramsSent;
+    private ulong _unreliableFramesReceived;
+    private ulong _unreliableDatagramsReceived;
+    private ulong _unreliableSentDatagramsWithTwoOrMoreFrames;
+    private ulong _unreliableReceivedDatagramsWithTwoOrMoreFrames;
+    private ulong _unreliableSentHistogramOne;
+    private ulong _unreliableSentHistogramTwo;
+    private ulong _unreliableSentHistogramThree;
+    private ulong _unreliableSentHistogramFour;
+    private ulong _unreliableSentHistogramFive;
+    private ulong _unreliableSentHistogramSix;
+    private ulong _unreliableSentHistogramSeven;
+    private ulong _unreliableSentHistogramEightOrMore;
+    private ulong _unreliableReceivedHistogramOne;
+    private ulong _unreliableReceivedHistogramTwo;
+    private ulong _unreliableReceivedHistogramThree;
+    private ulong _unreliableReceivedHistogramFour;
+    private ulong _unreliableReceivedHistogramFive;
+    private ulong _unreliableReceivedHistogramSix;
+    private ulong _unreliableReceivedHistogramSeven;
+    private ulong _unreliableReceivedHistogramEightOrMore;
+    private ulong _unreliableSentPlaintextBytes;
+    private ulong _unreliableReceivedPlaintextBytes;
+    private int _maximumUnreliableSentFramesPerDatagram;
+    private int _maximumUnreliableReceivedFramesPerDatagram;
+    private int _maximumUnreliableSentPlaintextBytes;
+    private int _maximumUnreliableReceivedPlaintextBytes;
     private int _reliableRetainedBytes;
     private int _reliableRetainedHighWaterBytes;
     private int _independentRetainedBytes;
@@ -294,6 +322,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _frameAdmissionTicks;
     private ulong _reliableCompactionTicks;
     private ulong _receivedCompactionTicks;
+    private ulong _stageOutboundUnreliableFrames;
+    private ulong _stageInboundUnreliableFrames;
     private bool _acceptsNewSends = true;
     private bool _disposed;
 
@@ -560,6 +590,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         _frameAdmissionTicks = 0;
         _reliableCompactionTicks = 0;
         _receivedCompactionTicks = 0;
+        _stageOutboundUnreliableFrames = 0;
+        _stageInboundUnreliableFrames = 0;
         _stageTimingEnabled = enabled;
     }
 
@@ -582,7 +614,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             _secureReceiveTicks,
             _frameAdmissionTicks,
             _reliableCompactionTicks,
-            _receivedCompactionTicks);
+            _receivedCompactionTicks,
+            _stageOutboundUnreliableFrames,
+            _stageInboundUnreliableFrames);
     }
 
     /// <summary>
@@ -647,6 +681,8 @@ public sealed class NetworkProtocolPeer : IDisposable
             return;
         }
 
+        Span<UnreliableSelection> aggregate =
+            stackalloc UnreliableSelection[_limits.MaximumUnreliableFramesPerDatagram];
         while (budget > 0 && _inFlight < _congestionWindow)
         {
             long selectionStarted = StartStageTiming();
@@ -655,8 +691,35 @@ public sealed class NetworkProtocolPeer : IDisposable
             RecordStageTiming(ref _selectionTicks, selectionStarted);
             if (!selected) break;
             bool reliable = reliableSlot >= 0;
-            if (!TryEmitData(reliableSlot, fragment, independentSlot,
-                    unreliableSlot, step, reliable)) break;
+            if (reliable || _limits.MaximumUnreliableFramesPerDatagram == 1)
+            {
+                if (!TryEmitData(reliableSlot, fragment, independentSlot,
+                        unreliableSlot, step, reliable)) break;
+            }
+            else
+            {
+                int aggregateCount = 1;
+                aggregate[0] = new(independentSlot, unreliableSlot);
+                int aggregatePlaintextBytes = GetUnreliableFrameBytes(independentSlot, unreliableSlot);
+                int maximumPlaintextBytes = NetworkSecureDatagramFraming.MaximumPlaintextBytes(
+                    _datagramLimits.MaximumDatagramBytes);
+                while (aggregateCount < aggregate.Length)
+                {
+                    long nextSelectionStarted = StartStageTiming();
+                    bool nextSelected = TrySelectNext(aggregate[..aggregateCount],
+                        out int nextReliableSlot, out _,
+                        out int nextIndependentSlot, out int nextUnreliableSlot);
+                    RecordStageTiming(ref _selectionTicks, nextSelectionStarted);
+                    if (!nextSelected || nextReliableSlot >= 0) break;
+                    int nextFrameBytes = GetUnreliableFrameBytes(
+                        nextIndependentSlot, nextUnreliableSlot);
+                    if (checked(aggregatePlaintextBytes + nextFrameBytes) > maximumPlaintextBytes)
+                        break;
+                    aggregate[aggregateCount++] = new(nextIndependentSlot, nextUnreliableSlot);
+                    aggregatePlaintextBytes += nextFrameBytes;
+                }
+                if (!TryEmitUnreliableFrames(aggregate[..aggregateCount])) break;
+            }
             budget--;
             if (_usesMonotonicPacing && _smoothedRtt != 0)
             {
@@ -703,7 +766,26 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _reliablePayloadCompactions, _reliablePayloadCompactionBytesMoved,
                 _reliablePayloadMaximumBytesMovedPerCompaction,
                 _receivedPayloadCompactions, _receivedPayloadCompactionBytesMoved,
-                _receivedPayloadMaximumBytesMovedPerCompaction));
+                _receivedPayloadMaximumBytesMovedPerCompaction),
+            new NetworkUnreliableAggregationSnapshot(
+                _limits.MaximumUnreliableFramesPerDatagram,
+                _unreliableFramesSent, _unreliableDatagramsSent,
+                _unreliableFramesReceived, _unreliableDatagramsReceived,
+                _unreliableSentDatagramsWithTwoOrMoreFrames,
+                _unreliableReceivedDatagramsWithTwoOrMoreFrames,
+                _unreliableSentHistogramOne, _unreliableSentHistogramTwo,
+                _unreliableSentHistogramThree, _unreliableSentHistogramFour,
+                _unreliableSentHistogramFive, _unreliableSentHistogramSix,
+                _unreliableSentHistogramSeven, _unreliableSentHistogramEightOrMore,
+                _unreliableReceivedHistogramOne, _unreliableReceivedHistogramTwo,
+                _unreliableReceivedHistogramThree, _unreliableReceivedHistogramFour,
+                _unreliableReceivedHistogramFive, _unreliableReceivedHistogramSix,
+                _unreliableReceivedHistogramSeven, _unreliableReceivedHistogramEightOrMore,
+                _unreliableSentPlaintextBytes, _unreliableReceivedPlaintextBytes,
+                _maximumUnreliableSentFramesPerDatagram,
+                _maximumUnreliableReceivedFramesPerDatagram,
+                _maximumUnreliableSentPlaintextBytes,
+                _maximumUnreliableReceivedPlaintextBytes));
     }
 
     public void Dispose()
@@ -726,7 +808,50 @@ public sealed class NetworkProtocolPeer : IDisposable
         NetworkSecureDatagramFraming.MaximumPlaintextBytes(_datagramLimits.MaximumDatagramBytes) -
         NetworkProtocolDataHeader.EncodedBytes;
 
+    private readonly struct UnreliableSelection
+    {
+        internal UnreliableSelection(int independentSlot, int unreliableSlot)
+        {
+            IndependentSlot = independentSlot;
+            UnreliableSlot = unreliableSlot;
+        }
+
+        internal int IndependentSlot { get; }
+        internal int UnreliableSlot { get; }
+    }
+
+    private readonly struct ValidatedDataFrame
+    {
+        internal ValidatedDataFrame(
+            NetworkDataFrameHeader header,
+            int messageSlot,
+            int fragmentOffset,
+            int messageFragmentOffset)
+        {
+            Header = header;
+            MessageSlot = messageSlot;
+            FragmentOffset = fragmentOffset;
+            MessageFragmentOffset = messageFragmentOffset;
+        }
+
+        internal NetworkDataFrameHeader Header { get; }
+        internal int MessageSlot { get; }
+        internal int FragmentOffset { get; }
+        internal int MessageFragmentOffset { get; }
+    }
+
     private bool TrySelectNext(
+        out int reliableSlot,
+        out ushort fragment,
+        out int independentSlot,
+        out int unreliableSlot)
+    {
+        return TrySelectNext(ReadOnlySpan<UnreliableSelection>.Empty,
+            out reliableSlot, out fragment, out independentSlot, out unreliableSlot);
+    }
+
+    private bool TrySelectNext(
+        ReadOnlySpan<UnreliableSelection> excluded,
         out int reliableSlot,
         out ushort fragment,
         out int independentSlot,
@@ -742,7 +867,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 unreliableSlot = -1;
                 return true;
             }
-            int independent = FindIndependentPending(lane);
+            int independent = FindIndependentPending(lane, excluded);
             if (independent >= 0)
             {
                 reliableSlot = -1;
@@ -751,7 +876,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 unreliableSlot = -1;
                 return true;
             }
-            int pending = FindUnreliablePending(lane);
+            int pending = FindUnreliablePending(lane, excluded);
             if (pending >= 0)
             {
                 reliableSlot = -1;
@@ -768,23 +893,51 @@ public sealed class NetworkProtocolPeer : IDisposable
         return false;
     }
 
-    private int FindIndependentPending(NetworkLane lane)
+    private int FindIndependentPending(NetworkLane lane, ReadOnlySpan<UnreliableSelection> excluded)
     {
         for (int offset = 0; offset < _independent.Length; offset++)
         {
             int index = (_nextIndependentSchedule + offset) % _independent.Length;
-            if (_independent[index].Active && _independent[index].Lane == lane) return index;
+            if (_independent[index].Active && _independent[index].Lane == lane &&
+                !IsExcluded(excluded, index, -1)) return index;
         }
         return -1;
     }
 
-    private int FindUnreliablePending(NetworkLane lane) => _unreliableHeads[(int)lane];
+    private int FindUnreliablePending(NetworkLane lane, ReadOnlySpan<UnreliableSelection> excluded)
+    {
+        int head = _unreliableHeads[(int)lane];
+        if (head < 0 || !IsExcluded(excluded, -1, head)) return head;
+        return FindNextUnreliablePending(lane, excluded);
+    }
 
     private int FindNextUnreliablePending(NetworkLane lane)
     {
+        return FindNextUnreliablePending(lane, ReadOnlySpan<UnreliableSelection>.Empty);
+    }
+
+    private int FindNextUnreliablePending(
+        NetworkLane lane,
+        ReadOnlySpan<UnreliableSelection> excluded)
+    {
         for (int index = 0; index < _unreliableStreams.Length; index++)
-            if (_unreliableStreams[index].Pending && _unreliableStreams[index].Message.Lane == lane) return index;
+            if (_unreliableStreams[index].Pending && _unreliableStreams[index].Message.Lane == lane &&
+                !IsExcluded(excluded, -1, index)) return index;
         return -1;
+    }
+
+    private static bool IsExcluded(
+        ReadOnlySpan<UnreliableSelection> excluded,
+        int independentSlot,
+        int unreliableSlot)
+    {
+        for (int index = 0; index < excluded.Length; index++)
+        {
+            UnreliableSelection selection = excluded[index];
+            if (selection.IndependentSlot == independentSlot &&
+                selection.UnreliableSlot == unreliableSlot) return true;
+        }
+        return false;
     }
 
     private int FindReliableHead(NetworkLane lane)
@@ -817,6 +970,124 @@ public sealed class NetworkProtocolPeer : IDisposable
         }
         fragment = 0;
         return false;
+    }
+
+    private int GetUnreliableFrameBytes(int independentSlot, int unreliableSlot)
+    {
+        OutgoingMessage message = independentSlot >= 0
+            ? _independent[independentSlot]
+            : _unreliableStreams[unreliableSlot].Message;
+        return checked(NetworkProtocolDataHeader.EncodedBytes + message.Length);
+    }
+
+    private bool TryEmitUnreliableFrames(
+        ReadOnlySpan<UnreliableSelection> selections)
+    {
+        if (selections.IsEmpty) return false;
+        long frameStarted = StartStageTiming();
+        var writer = new NetworkPacketWriter(_plaintextScratch);
+        for (int index = 0; index < selections.Length; index++)
+        {
+            UnreliableSelection selection = selections[index];
+            bool independent = selection.IndependentSlot >= 0;
+            OutgoingMessage message = independent
+                ? _independent[selection.IndependentSlot]
+                : _unreliableStreams[selection.UnreliableSlot].Message;
+            ReadOnlySpan<byte> payload = independent
+                ? IndependentPayload(selection.IndependentSlot)[..message.Length]
+                : UnreliablePayload(selection.UnreliableSlot)[..message.Length];
+            var frame = new NetworkDataFrameHeader(
+                message.Lane, message.MessageId, message.MessageVersion, message.Sequence,
+                0, 1, message.Length, checked((ushort)message.Length));
+            if (!NetworkDataFrameCodec.TryWrite(ref writer, frame) ||
+                !writer.TryWriteBytes(payload))
+                throw new InvalidOperationException(
+                    "A validated unreliable aggregate exceeded its fixed plaintext buffer.");
+        }
+        RecordStageTiming(ref _frameEncodeTicks, frameStarted);
+
+        if (!TryEncryptAndSend(NetworkSecureDatagramKind.Data, writer.WrittenSpan,
+                out _, out DatagramSendStatus status)) return false;
+        if (status is not (DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment))
+            return false;
+
+        for (int index = 0; index < selections.Length; index++)
+            ConsumeUnreliableSelection(selections[index]);
+        _unreliableFramesSent = SaturatingAdd(
+            _unreliableFramesSent, checked((ulong)selections.Length));
+        _unreliableDatagramsSent = SaturatingIncrement(_unreliableDatagramsSent);
+        _unreliableSentPlaintextBytes = SaturatingAdd(
+            _unreliableSentPlaintextBytes, checked((ulong)writer.WrittenCount));
+        _maximumUnreliableSentFramesPerDatagram = Math.Max(
+            _maximumUnreliableSentFramesPerDatagram, selections.Length);
+        _maximumUnreliableSentPlaintextBytes = Math.Max(
+            _maximumUnreliableSentPlaintextBytes, writer.WrittenCount);
+        RecordUnreliableHistogram(sent: true, selections.Length);
+        if (_stageTimingEnabled)
+            _stageOutboundUnreliableFrames = SaturatingAdd(
+                _stageOutboundUnreliableFrames, checked((ulong)selections.Length));
+        return true;
+    }
+
+    private void ConsumeUnreliableSelection(UnreliableSelection selection)
+    {
+        if (selection.IndependentSlot >= 0)
+        {
+            FreeIndependent(selection.IndependentSlot);
+            _nextIndependentSchedule = (selection.IndependentSlot + 1) % _independent.Length;
+            return;
+        }
+
+        int unreliableSlot = selection.UnreliableSlot;
+        ref UnreliableStreamState stream = ref _unreliableStreams[unreliableSlot];
+        NetworkLane lane = stream.Message.Lane;
+        _unreliableRetainedBytes -= stream.Message.Length;
+        stream.Pending = false;
+        stream.Message = default;
+        UnreliablePayload(unreliableSlot).Clear();
+        _unreliableHeads[(int)lane] = FindNextUnreliablePending(lane);
+    }
+
+    private void RecordUnreliableHistogram(bool sent, int frameCount)
+    {
+        if (frameCount >= 2)
+        {
+            if (sent)
+                _unreliableSentDatagramsWithTwoOrMoreFrames =
+                    SaturatingIncrement(_unreliableSentDatagramsWithTwoOrMoreFrames);
+            else
+                _unreliableReceivedDatagramsWithTwoOrMoreFrames =
+                    SaturatingIncrement(_unreliableReceivedDatagramsWithTwoOrMoreFrames);
+        }
+
+        if (sent)
+        {
+            switch (frameCount)
+            {
+                case 1: _unreliableSentHistogramOne = SaturatingIncrement(_unreliableSentHistogramOne); break;
+                case 2: _unreliableSentHistogramTwo = SaturatingIncrement(_unreliableSentHistogramTwo); break;
+                case 3: _unreliableSentHistogramThree = SaturatingIncrement(_unreliableSentHistogramThree); break;
+                case 4: _unreliableSentHistogramFour = SaturatingIncrement(_unreliableSentHistogramFour); break;
+                case 5: _unreliableSentHistogramFive = SaturatingIncrement(_unreliableSentHistogramFive); break;
+                case 6: _unreliableSentHistogramSix = SaturatingIncrement(_unreliableSentHistogramSix); break;
+                case 7: _unreliableSentHistogramSeven = SaturatingIncrement(_unreliableSentHistogramSeven); break;
+                default: _unreliableSentHistogramEightOrMore = SaturatingIncrement(_unreliableSentHistogramEightOrMore); break;
+            }
+        }
+        else
+        {
+            switch (frameCount)
+            {
+                case 1: _unreliableReceivedHistogramOne = SaturatingIncrement(_unreliableReceivedHistogramOne); break;
+                case 2: _unreliableReceivedHistogramTwo = SaturatingIncrement(_unreliableReceivedHistogramTwo); break;
+                case 3: _unreliableReceivedHistogramThree = SaturatingIncrement(_unreliableReceivedHistogramThree); break;
+                case 4: _unreliableReceivedHistogramFour = SaturatingIncrement(_unreliableReceivedHistogramFour); break;
+                case 5: _unreliableReceivedHistogramFive = SaturatingIncrement(_unreliableReceivedHistogramFive); break;
+                case 6: _unreliableReceivedHistogramSix = SaturatingIncrement(_unreliableReceivedHistogramSix); break;
+                case 7: _unreliableReceivedHistogramSeven = SaturatingIncrement(_unreliableReceivedHistogramSeven); break;
+                default: _unreliableReceivedHistogramEightOrMore = SaturatingIncrement(_unreliableReceivedHistogramEightOrMore); break;
+            }
+        }
     }
 
     private bool TryEmitData(
@@ -888,23 +1159,30 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _lastSentSteps[reliableSlot * _limits.MaximumFragmentsPerMessage + fragmentIndex] = step + 1;
                 _inFlight++;
             }
-            else if (independent)
-            {
-                FreeIndependent(independentSlot);
-                _nextIndependentSchedule = (independentSlot + 1) % _independent.Length;
-            }
             else
             {
-                ref UnreliableStreamState stream = ref _unreliableStreams[unreliableSlot];
-                _unreliableRetainedBytes -= stream.Message.Length;
-                stream.Pending = false;
-                stream.Message = default;
-                UnreliablePayload(unreliableSlot).Clear();
-                _unreliableHeads[(int)message.Lane] = FindNextUnreliablePending(message.Lane);
+                ConsumeUnreliableSelection(new(independentSlot, unreliableSlot));
+                RecordSentUnreliableDatagram(writer.WrittenCount);
             }
             return true;
         }
         return false;
+    }
+
+    private void RecordSentUnreliableDatagram(int plaintextBytes)
+    {
+        _unreliableFramesSent = SaturatingIncrement(_unreliableFramesSent);
+        _unreliableDatagramsSent = SaturatingIncrement(_unreliableDatagramsSent);
+        _unreliableSentPlaintextBytes = SaturatingAdd(
+            _unreliableSentPlaintextBytes, checked((ulong)plaintextBytes));
+        _maximumUnreliableSentFramesPerDatagram = Math.Max(
+            _maximumUnreliableSentFramesPerDatagram, 1);
+        _maximumUnreliableSentPlaintextBytes = Math.Max(
+            _maximumUnreliableSentPlaintextBytes, plaintextBytes);
+        RecordUnreliableHistogram(sent: true, frameCount: 1);
+        if (_stageTimingEnabled)
+            _stageOutboundUnreliableFrames = SaturatingIncrement(
+                _stageOutboundUnreliableFrames);
     }
 
     private bool TryEmitAcknowledgement()
@@ -1053,33 +1331,143 @@ public sealed class NetworkProtocolPeer : IDisposable
         ReadOnlySpan<byte> plaintext,
         out bool acknowledgementEliciting)
     {
+        if (_limits.MaximumUnreliableFramesPerDatagram == 1)
+            return ProcessSingleData(plaintext, out acknowledgementEliciting);
+
+        acknowledgementEliciting = false;
+        var reader = new NetworkPacketReader(plaintext);
+        Span<ValidatedDataFrame> frames =
+            stackalloc ValidatedDataFrame[_limits.MaximumUnreliableFramesPerDatagram];
+        int frameCount = 0;
+        bool hasReliable = false;
+        int fragmentPayload = FragmentPayloadBytes;
+
+        while (reader.Remaining > 0)
+        {
+            if (frameCount == frames.Length ||
+                !NetworkDataFrameCodec.TryRead(ref reader, out NetworkDataFrameHeader header) ||
+                header.MessageLength > _limits.MaximumMessageBytes ||
+                header.FragmentCount > _limits.MaximumFragmentsPerMessage)
+                return NetworkDeliveryAdmission.Invalid;
+            if (!_manifest.TryGet(header.MessageId,
+                    out NetworkMessageDescriptor descriptor, out int messageSlot) ||
+                descriptor.Version != header.MessageVersion || descriptor.Lane != header.Lane ||
+                header.MessageLength > descriptor.MaximumEncodedBytes)
+                return NetworkDeliveryAdmission.Invalid;
+
+            int fragmentOffset = reader.ConsumedCount;
+            if (!reader.TryReadBytes(header.FragmentLength, out _) ||
+                !ValidateDataFrame(header, fragmentPayload, out int messageFragmentOffset))
+                return NetworkDeliveryAdmission.Invalid;
+            NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
+            bool reliable = contract.Delivery == NetworkDeliveryGuarantee.Reliable;
+            hasReliable |= reliable;
+            frames[frameCount++] = new(
+                header, messageSlot, fragmentOffset, messageFragmentOffset);
+        }
+
+        if (frameCount == 0 || (hasReliable && frameCount != 1))
+            return NetworkDeliveryAdmission.Invalid;
+
+        if (hasReliable)
+        {
+            ValidatedDataFrame frame = frames[0];
+            NetworkDeliveryAdmission reliable = ProcessReliableFragment(
+                frame.Header,
+                plaintext.Slice(frame.FragmentOffset, frame.Header.FragmentLength),
+                frame.MessageFragmentOffset);
+            acknowledgementEliciting = reliable == NetworkDeliveryAdmission.Admitted;
+            return reliable;
+        }
+
+        RecordReceivedUnreliableDatagram(frameCount, plaintext.Length);
+
+        for (int index = 0; index < frameCount; index++)
+        {
+            ValidatedDataFrame frame = frames[index];
+            ProcessUnreliableFrame(
+                frame.Header,
+                frame.MessageSlot,
+                plaintext.Slice(frame.FragmentOffset, frame.Header.FragmentLength));
+        }
+        return NetworkDeliveryAdmission.Admitted;
+    }
+
+    private NetworkDeliveryAdmission ProcessSingleData(
+        ReadOnlySpan<byte> plaintext,
+        out bool acknowledgementEliciting)
+    {
         acknowledgementEliciting = false;
         var reader = new NetworkPacketReader(plaintext);
         if (!NetworkDataFrameCodec.TryRead(ref reader, out NetworkDataFrameHeader header) ||
             header.MessageLength > _limits.MaximumMessageBytes ||
-            header.FragmentCount > _limits.MaximumFragmentsPerMessage ||
-            !reader.TryReadBytes(header.FragmentLength, out ReadOnlySpan<byte> fragment) || !reader.IsComplete ||
-            !_manifest.TryGet(header.MessageId, out NetworkMessageDescriptor descriptor, out int messageSlot) ||
+            header.FragmentCount > _limits.MaximumFragmentsPerMessage)
+            return NetworkDeliveryAdmission.Invalid;
+        if (!_manifest.TryGet(header.MessageId,
+                out NetworkMessageDescriptor descriptor, out int messageSlot) ||
             descriptor.Version != header.MessageVersion || descriptor.Lane != header.Lane ||
             header.MessageLength > descriptor.MaximumEncodedBytes)
             return NetworkDeliveryAdmission.Invalid;
 
-        int fragmentPayload = FragmentPayloadBytes;
-        int offset = header.FragmentIndex * fragmentPayload;
-        int expectedLength = Math.Min(fragmentPayload, header.MessageLength - offset);
-        if (offset < 0 || offset > header.MessageLength || expectedLength != header.FragmentLength ||
-            (header.FragmentCount > 1 && !NetworkLaneContracts.Get(header.Lane).AllowsFragmentation) ||
-            header.FragmentCount != Math.Max(1, (header.MessageLength + fragmentPayload - 1) / fragmentPayload))
+        int fragmentOffset = reader.ConsumedCount;
+        if (!reader.TryReadBytes(header.FragmentLength, out ReadOnlySpan<byte> fragment) ||
+            !reader.IsComplete ||
+            !ValidateDataFrame(header, FragmentPayloadBytes,
+                out int messageFragmentOffset))
             return NetworkDeliveryAdmission.Invalid;
 
         NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
         if (contract.Delivery == NetworkDeliveryGuarantee.Reliable)
         {
-            NetworkDeliveryAdmission reliable = ProcessReliableFragment(header, fragment, offset);
+            NetworkDeliveryAdmission reliable = ProcessReliableFragment(
+                header, fragment, messageFragmentOffset);
             acknowledgementEliciting = reliable == NetworkDeliveryAdmission.Admitted;
             return reliable;
         }
 
+        RecordReceivedUnreliableDatagram(1, plaintext.Length);
+        return ProcessUnreliableFrame(header, messageSlot, fragment);
+    }
+
+    private void RecordReceivedUnreliableDatagram(int frameCount, int plaintextBytes)
+    {
+        _unreliableFramesReceived = SaturatingAdd(
+            _unreliableFramesReceived, checked((ulong)frameCount));
+        _unreliableDatagramsReceived = SaturatingIncrement(_unreliableDatagramsReceived);
+        _unreliableReceivedPlaintextBytes = SaturatingAdd(
+            _unreliableReceivedPlaintextBytes, checked((ulong)plaintextBytes));
+        _maximumUnreliableReceivedFramesPerDatagram = Math.Max(
+            _maximumUnreliableReceivedFramesPerDatagram, frameCount);
+        _maximumUnreliableReceivedPlaintextBytes = Math.Max(
+            _maximumUnreliableReceivedPlaintextBytes, plaintextBytes);
+        RecordUnreliableHistogram(sent: false, frameCount);
+        if (_stageTimingEnabled)
+            _stageInboundUnreliableFrames = SaturatingAdd(
+                _stageInboundUnreliableFrames, checked((ulong)frameCount));
+    }
+
+    private bool ValidateDataFrame(
+        in NetworkDataFrameHeader header,
+        int fragmentPayload,
+        out int messageFragmentOffset)
+    {
+        messageFragmentOffset = header.FragmentIndex * fragmentPayload;
+        int expectedLength = Math.Min(
+            fragmentPayload, header.MessageLength - messageFragmentOffset);
+        NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
+        return messageFragmentOffset >= 0 && messageFragmentOffset <= header.MessageLength &&
+            expectedLength == header.FragmentLength &&
+            (header.FragmentCount == 1 || contract.AllowsFragmentation) &&
+            header.FragmentCount == Math.Max(1,
+                (header.MessageLength + fragmentPayload - 1) / fragmentPayload);
+    }
+
+    private NetworkDeliveryAdmission ProcessUnreliableFrame(
+        in NetworkDataFrameHeader header,
+        int messageSlot,
+        ReadOnlySpan<byte> fragment)
+    {
+        NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
         ref UnreliableStreamState unreliableStream = ref _unreliableStreams[messageSlot];
         if (contract.Order == NetworkDeliveryOrder.Sequenced &&
             unreliableStream.ReceiveSequenceInitialized &&

@@ -32,7 +32,8 @@ using var harness = new V3OwnerMovementHarness(
     new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming),
     options.SharedSocketIoMode,
     sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
-    sparseCapacityMode: options.SparseCapacityMode);
+    sparseCapacityMode: options.SparseCapacityMode,
+    unreliableFrameAggregation: options.UnreliableFrameAggregation);
 NetworkBotStageResult result = harness.Run();
 NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
@@ -167,7 +168,8 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
                 new V3HarnessProfile(item.Layer, item.ActiveRatio, DeepTiming: true),
                 options.SharedSocketIoMode,
                 sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
-                sparseCapacityMode: options.SparseCapacityMode);
+                sparseCapacityMode: options.SparseCapacityMode,
+                unreliableFrameAggregation: options.UnreliableFrameAggregation);
             NetworkBotStageResult measured = diagnostic.Run();
             observations.Add(new(pass == 0 ? "forward" : "reverse", order++, item, measured));
             Console.WriteLine($"DIAGNOSTIC {item.Id}/{(pass == 0 ? "forward" : "reverse")}: " +
@@ -247,6 +249,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             },
             RemoteWorldStateAppliedMessageCodec.Descriptor,
         ]);
+    private static readonly NetworkProtocolManifest SparseAggregatedManifest =
+        NetworkProtocolManifest.Create(11, SparseManifest.Messages.ToArray());
     private static readonly NetworkProtocolLimits ProtocolLimits = new(
         MaximumReliableMessages: 8,
         MaximumReceivedMessages: 8,
@@ -275,6 +279,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         MaximumIndependentUnreliableMessages: 8,
         ReliablePayloadByteCapacity: 16_384,
         ReceivedPayloadByteCapacity: 32_768);
+    private static readonly NetworkProtocolLimits SparseAggregatedProtocolLimits =
+        SparseProtocolLimits with { MaximumUnreliableFramesPerDatagram = 7 };
     private static readonly UdpProtocolLimits UdpLimits = new(
         MaximumDatagramBytes: 1_472,
         SocketSendBufferBytes: 16_384,
@@ -294,6 +300,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly V3HarnessProfile _profile;
     private readonly NetworkProtocolManifest _manifest;
     private readonly NetworkProtocolLimits _protocolLimits;
+    private readonly bool _unreliableFrameAggregation;
     private readonly SparseObserverWorkload? _observer;
     private readonly V3CadenceProfile? _cadence;
     private readonly int _activeBots;
@@ -315,17 +322,27 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         SharedUdpSocketIoMode sharedSocketIoMode = SharedUdpSocketIoMode.Scalar,
         V3CadenceProfile? cadence = null,
         int sparseRegionEdgeMillimeters = 10_000,
-        SparseCapacityMode sparseCapacityMode = SparseCapacityMode.Auto)
+        SparseCapacityMode sparseCapacityMode = SparseCapacityMode.Auto,
+        bool unreliableFrameAggregation = false)
     {
         _scenario = scenario.Validate();
         _topology = topology;
         _sharedSocketIoMode = sharedSocketIoMode;
         _profile = profile.Validate();
+        if (unreliableFrameAggregation && !_scenario.ObserverState)
+            throw new ArgumentException(
+                "Unreliable frame aggregation is only admitted by the sparse observer profile.",
+                nameof(unreliableFrameAggregation));
         if (sparseRegionEdgeMillimeters <= 0)
             throw new ArgumentOutOfRangeException(nameof(sparseRegionEdgeMillimeters));
         _sparseRegionEdgeMillimeters = sparseRegionEdgeMillimeters;
-        _manifest = scenario.ObserverState ? SparseManifest : Manifest;
-        _protocolLimits = scenario.ObserverState ? SparseProtocolLimits : ProtocolLimits;
+        _unreliableFrameAggregation = unreliableFrameAggregation;
+        _manifest = scenario.ObserverState
+            ? unreliableFrameAggregation ? SparseAggregatedManifest : SparseManifest
+            : Manifest;
+        _protocolLimits = scenario.ObserverState
+            ? unreliableFrameAggregation ? SparseAggregatedProtocolLimits : SparseProtocolLimits
+            : ProtocolLimits;
         _cadence = cadence?.Validate();
         _activeBots = checked((int)Math.Round(
             scenario.Clients * profile.ActiveRatio, MidpointRounding.AwayFromZero));
@@ -801,6 +818,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         ulong receivedPayloadCompactions = 0;
         ulong receivedPayloadCompactionBytesMoved = 0;
         int receivedPayloadMaximumBytesMovedPerCompaction = 0;
+        UnreliableAggregationCensus unreliableAggregation = default;
         long reserved = 0;
         long socketBuffers = 0;
         for (int index = 0; index < _bots.Length; index++)
@@ -828,6 +846,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 SaturatingAdd(snapshot.Client.DecryptedPlaintextBytes, snapshot.Server.DecryptedPlaintextBytes));
             reliableFragmentsSent = SaturatingAdd(reliableFragmentsSent,
                 SaturatingAdd(snapshot.Client.ReliableFragmentsSent, snapshot.Server.ReliableFragmentsSent));
+            unreliableAggregation = unreliableAggregation
+                .Add(snapshot.Client.UnreliableAggregation)
+                .Add(snapshot.Server.UnreliableAggregation);
             authenticationFailures = SaturatingAdd(authenticationFailures,
                 SaturatingAdd(snapshot.Client.AuthenticationFailures, snapshot.Server.AuthenticationFailures));
             replayRejections = SaturatingAdd(replayRejections,
@@ -937,6 +958,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             listenerReceiveCalls -= diagnosticBaseline.ListenerReceiveCalls;
             listenerNativeSendCalls -= diagnosticBaseline.ListenerNativeSendCalls;
             listenerNativeSentDatagrams -= diagnosticBaseline.ListenerNativeSentDatagrams;
+            unreliableAggregation = unreliableAggregation.Subtract(
+                diagnosticBaseline.UnreliableAggregation);
         }
         peakManagedHeap = Math.Max(peakManagedHeap, GC.GetTotalMemory(false));
         process.Refresh();
@@ -974,18 +997,24 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     ? string.Empty
                     : _cadence is not null
                         ? $"-cadence-{_cadence.Value.Id}"
-                        : $"-{_profile.Layer}-{_activeBots}"),
+                        : $"-{_profile.Layer}-{_activeBots}") +
+                (_unreliableFrameAggregation ? "-unreliable-multiframe" : string.Empty),
             Scenario = _scenario,
             EvidenceProfile = new(
                 _scenario.ObserverState
-                    ? "network-bot-sparse-observer-movement-v1"
+                    ? _unreliableFrameAggregation
+                        ? "network-bot-sparse-observer-movement-unreliable-multiframe-v1"
+                        : "network-bot-sparse-observer-movement-v1"
                     : _profile.IsComparisonDefault && _cadence is null
                     ? "network-bot-owner-movement-v1"
                     : _cadence is not null
                         ? "network-v3-cadence-acceptance-v1"
                         : "network-v3-peer-cost-diagnostic-v1",
                 _scenario.ObserverState
-                    ? "Historical sparse workload: deterministic phased owner input, one observer latest-state family, three AOI rings, owner correction, and ping; chat and ordered Events disabled."
+                    ? "Historical sparse workload: deterministic phased owner input, one observer latest-state family, three AOI rings, owner correction, and ping; chat and ordered Events disabled." +
+                        (_unreliableFrameAggregation
+                            ? " This run opts into bounded same-peer unreliable Data aggregation with a seven-frame cap; reliable Data remains single-frame."
+                            : string.Empty)
                     : _profile.IsComparisonDefault && _cadence is null
                     ? "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic."
                     : _cadence is not null
@@ -1160,6 +1189,53 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["worst_client_ping_p95_ms"] = _bots.Max(bot => bot.PingAcknowledgements.P95),
                 ["worst_client_ping_max_ms"] = _bots.Max(bot => bot.PingAcknowledgements.Max),
                 ["data_packets_sent"] = dataPacketsSent,
+                ["unreliable_frame_aggregation_enabled"] = _unreliableFrameAggregation ? 1 : 0,
+                ["unreliable_frames_consumed"] = unreliableAggregation.SentFrames,
+                ["unreliable_data_datagrams_sent"] = unreliableAggregation.SentDatagrams,
+                ["unreliable_frames_received"] = unreliableAggregation.ReceivedFrames,
+                ["unreliable_data_datagrams_received"] = unreliableAggregation.ReceivedDatagrams,
+                ["unreliable_sent_datagrams_two_or_more_frames"] =
+                    unreliableAggregation.SentDatagramsWithTwoOrMoreFrames,
+                ["unreliable_received_datagrams_two_or_more_frames"] =
+                    unreliableAggregation.ReceivedDatagramsWithTwoOrMoreFrames,
+                ["unreliable_sent_histogram_1"] = unreliableAggregation.SentHistogramOne,
+                ["unreliable_sent_histogram_2"] = unreliableAggregation.SentHistogramTwo,
+                ["unreliable_sent_histogram_3"] = unreliableAggregation.SentHistogramThree,
+                ["unreliable_sent_histogram_4"] = unreliableAggregation.SentHistogramFour,
+                ["unreliable_sent_histogram_5"] = unreliableAggregation.SentHistogramFive,
+                ["unreliable_sent_histogram_6"] = unreliableAggregation.SentHistogramSix,
+                ["unreliable_sent_histogram_7"] = unreliableAggregation.SentHistogramSeven,
+                ["unreliable_sent_histogram_8_plus"] = unreliableAggregation.SentHistogramEightOrMore,
+                ["unreliable_received_histogram_1"] = unreliableAggregation.ReceivedHistogramOne,
+                ["unreliable_received_histogram_2"] = unreliableAggregation.ReceivedHistogramTwo,
+                ["unreliable_received_histogram_3"] = unreliableAggregation.ReceivedHistogramThree,
+                ["unreliable_received_histogram_4"] = unreliableAggregation.ReceivedHistogramFour,
+                ["unreliable_received_histogram_5"] = unreliableAggregation.ReceivedHistogramFive,
+                ["unreliable_received_histogram_6"] = unreliableAggregation.ReceivedHistogramSix,
+                ["unreliable_received_histogram_7"] = unreliableAggregation.ReceivedHistogramSeven,
+                ["unreliable_received_histogram_8_plus"] = unreliableAggregation.ReceivedHistogramEightOrMore,
+                ["unreliable_sent_plaintext_bytes"] = unreliableAggregation.SentPlaintextBytes,
+                ["unreliable_received_plaintext_bytes"] = unreliableAggregation.ReceivedPlaintextBytes,
+                ["unreliable_max_sent_frames_per_datagram"] =
+                    unreliableAggregation.MaximumSentFramesPerDatagram,
+                ["unreliable_max_received_frames_per_datagram"] =
+                    unreliableAggregation.MaximumReceivedFramesPerDatagram,
+                ["unreliable_mean_sent_datagram_fill_ratio"] = unreliableAggregation.SentDatagrams == 0
+                    ? 0
+                    : unreliableAggregation.SentPlaintextBytes / (double)unreliableAggregation.SentDatagrams /
+                        UdpLimits.MaximumDatagramBytes,
+                ["unreliable_mean_received_datagram_fill_ratio"] = unreliableAggregation.ReceivedDatagrams == 0
+                    ? 0
+                    : unreliableAggregation.ReceivedPlaintextBytes / (double)unreliableAggregation.ReceivedDatagrams /
+                        UdpLimits.MaximumDatagramBytes,
+                ["unreliable_frames_per_network_pump"] = networkPumps == 0
+                    ? 0
+                    : unreliableAggregation.SentFrames / (double)networkPumps,
+                ["unreliable_receive_frames_per_network_pump"] = networkPumps == 0
+                    ? 0
+                    : unreliableAggregation.ReceivedFrames / (double)networkPumps,
+                ["unreliable_configured_max_frames_per_datagram"] =
+                    _protocolLimits.MaximumUnreliableFramesPerDatagram,
                 ["acknowledgement_packets_sent"] = acknowledgementPacketsSent,
                 ["keep_alive_packets_sent"] = keepAlivePacketsSent,
                 ["encrypted_plaintext_bytes"] = encryptedPlaintextBytes,
@@ -1416,6 +1492,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             Add(prefix + "reliable_payload_compaction", value.ReliableCompactionTicks);
             Add(prefix + "received_payload_compaction", value.ReceivedCompactionTicks);
             Add(prefix + "inbound_residual", inboundResidual);
+            diagnostics["protocol_stage_" + prefix + "outbound_unreliable_frames"] =
+                value.OutboundUnreliableFrames;
+            diagnostics["protocol_stage_" + prefix + "inbound_unreliable_frames"] =
+                value.InboundUnreliableFrames;
         }
 
         void Add(string key, ulong ticks)
@@ -2696,6 +2776,112 @@ internal struct BatchOpportunityCensus
     }
 }
 
+internal struct UnreliableAggregationCensus
+{
+    internal ulong SentFrames;
+    internal ulong SentDatagrams;
+    internal ulong ReceivedFrames;
+    internal ulong ReceivedDatagrams;
+    internal ulong SentDatagramsWithTwoOrMoreFrames;
+    internal ulong ReceivedDatagramsWithTwoOrMoreFrames;
+    internal ulong SentHistogramOne;
+    internal ulong SentHistogramTwo;
+    internal ulong SentHistogramThree;
+    internal ulong SentHistogramFour;
+    internal ulong SentHistogramFive;
+    internal ulong SentHistogramSix;
+    internal ulong SentHistogramSeven;
+    internal ulong SentHistogramEightOrMore;
+    internal ulong ReceivedHistogramOne;
+    internal ulong ReceivedHistogramTwo;
+    internal ulong ReceivedHistogramThree;
+    internal ulong ReceivedHistogramFour;
+    internal ulong ReceivedHistogramFive;
+    internal ulong ReceivedHistogramSix;
+    internal ulong ReceivedHistogramSeven;
+    internal ulong ReceivedHistogramEightOrMore;
+    internal ulong SentPlaintextBytes;
+    internal ulong ReceivedPlaintextBytes;
+    internal int MaximumSentFramesPerDatagram;
+    internal int MaximumReceivedFramesPerDatagram;
+    internal int MaximumSentPlaintextBytes;
+    internal int MaximumReceivedPlaintextBytes;
+
+    internal UnreliableAggregationCensus Add(NetworkUnreliableAggregationSnapshot value) => new()
+    {
+        SentFrames = checked(SentFrames + value.SentFrames),
+        SentDatagrams = checked(SentDatagrams + value.SentDatagrams),
+        ReceivedFrames = checked(ReceivedFrames + value.ReceivedFrames),
+        ReceivedDatagrams = checked(ReceivedDatagrams + value.ReceivedDatagrams),
+        SentDatagramsWithTwoOrMoreFrames = checked(
+            SentDatagramsWithTwoOrMoreFrames + value.SentDatagramsWithTwoOrMoreFrames),
+        ReceivedDatagramsWithTwoOrMoreFrames = checked(
+            ReceivedDatagramsWithTwoOrMoreFrames + value.ReceivedDatagramsWithTwoOrMoreFrames),
+        SentHistogramOne = checked(SentHistogramOne + value.SentHistogramOne),
+        SentHistogramTwo = checked(SentHistogramTwo + value.SentHistogramTwo),
+        SentHistogramThree = checked(SentHistogramThree + value.SentHistogramThree),
+        SentHistogramFour = checked(SentHistogramFour + value.SentHistogramFour),
+        SentHistogramFive = checked(SentHistogramFive + value.SentHistogramFive),
+        SentHistogramSix = checked(SentHistogramSix + value.SentHistogramSix),
+        SentHistogramSeven = checked(SentHistogramSeven + value.SentHistogramSeven),
+        SentHistogramEightOrMore = checked(SentHistogramEightOrMore + value.SentHistogramEightOrMore),
+        ReceivedHistogramOne = checked(ReceivedHistogramOne + value.ReceivedHistogramOne),
+        ReceivedHistogramTwo = checked(ReceivedHistogramTwo + value.ReceivedHistogramTwo),
+        ReceivedHistogramThree = checked(ReceivedHistogramThree + value.ReceivedHistogramThree),
+        ReceivedHistogramFour = checked(ReceivedHistogramFour + value.ReceivedHistogramFour),
+        ReceivedHistogramFive = checked(ReceivedHistogramFive + value.ReceivedHistogramFive),
+        ReceivedHistogramSix = checked(ReceivedHistogramSix + value.ReceivedHistogramSix),
+        ReceivedHistogramSeven = checked(ReceivedHistogramSeven + value.ReceivedHistogramSeven),
+        ReceivedHistogramEightOrMore = checked(
+            ReceivedHistogramEightOrMore + value.ReceivedHistogramEightOrMore),
+        SentPlaintextBytes = checked(SentPlaintextBytes + value.SentPlaintextBytes),
+        ReceivedPlaintextBytes = checked(ReceivedPlaintextBytes + value.ReceivedPlaintextBytes),
+        MaximumSentFramesPerDatagram = Math.Max(MaximumSentFramesPerDatagram,
+            value.MaximumSentFramesPerDatagram),
+        MaximumReceivedFramesPerDatagram = Math.Max(MaximumReceivedFramesPerDatagram,
+            value.MaximumReceivedFramesPerDatagram),
+        MaximumSentPlaintextBytes = Math.Max(MaximumSentPlaintextBytes,
+            value.MaximumSentPlaintextBytes),
+        MaximumReceivedPlaintextBytes = Math.Max(MaximumReceivedPlaintextBytes,
+            value.MaximumReceivedPlaintextBytes),
+    };
+
+    internal UnreliableAggregationCensus Subtract(UnreliableAggregationCensus baseline) => new()
+    {
+        SentFrames = checked(SentFrames - baseline.SentFrames),
+        SentDatagrams = checked(SentDatagrams - baseline.SentDatagrams),
+        ReceivedFrames = checked(ReceivedFrames - baseline.ReceivedFrames),
+        ReceivedDatagrams = checked(ReceivedDatagrams - baseline.ReceivedDatagrams),
+        SentDatagramsWithTwoOrMoreFrames = checked(
+            SentDatagramsWithTwoOrMoreFrames - baseline.SentDatagramsWithTwoOrMoreFrames),
+        ReceivedDatagramsWithTwoOrMoreFrames = checked(
+            ReceivedDatagramsWithTwoOrMoreFrames - baseline.ReceivedDatagramsWithTwoOrMoreFrames),
+        SentHistogramOne = checked(SentHistogramOne - baseline.SentHistogramOne),
+        SentHistogramTwo = checked(SentHistogramTwo - baseline.SentHistogramTwo),
+        SentHistogramThree = checked(SentHistogramThree - baseline.SentHistogramThree),
+        SentHistogramFour = checked(SentHistogramFour - baseline.SentHistogramFour),
+        SentHistogramFive = checked(SentHistogramFive - baseline.SentHistogramFive),
+        SentHistogramSix = checked(SentHistogramSix - baseline.SentHistogramSix),
+        SentHistogramSeven = checked(SentHistogramSeven - baseline.SentHistogramSeven),
+        SentHistogramEightOrMore = checked(SentHistogramEightOrMore - baseline.SentHistogramEightOrMore),
+        ReceivedHistogramOne = checked(ReceivedHistogramOne - baseline.ReceivedHistogramOne),
+        ReceivedHistogramTwo = checked(ReceivedHistogramTwo - baseline.ReceivedHistogramTwo),
+        ReceivedHistogramThree = checked(ReceivedHistogramThree - baseline.ReceivedHistogramThree),
+        ReceivedHistogramFour = checked(ReceivedHistogramFour - baseline.ReceivedHistogramFour),
+        ReceivedHistogramFive = checked(ReceivedHistogramFive - baseline.ReceivedHistogramFive),
+        ReceivedHistogramSix = checked(ReceivedHistogramSix - baseline.ReceivedHistogramSix),
+        ReceivedHistogramSeven = checked(ReceivedHistogramSeven - baseline.ReceivedHistogramSeven),
+        ReceivedHistogramEightOrMore = checked(
+            ReceivedHistogramEightOrMore - baseline.ReceivedHistogramEightOrMore),
+        SentPlaintextBytes = checked(SentPlaintextBytes - baseline.SentPlaintextBytes),
+        ReceivedPlaintextBytes = checked(ReceivedPlaintextBytes - baseline.ReceivedPlaintextBytes),
+        MaximumSentFramesPerDatagram = MaximumSentFramesPerDatagram,
+        MaximumReceivedFramesPerDatagram = MaximumReceivedFramesPerDatagram,
+        MaximumSentPlaintextBytes = MaximumSentPlaintextBytes,
+        MaximumReceivedPlaintextBytes = MaximumReceivedPlaintextBytes,
+    };
+}
+
 internal struct ProtocolStageTimingTotal
 {
     internal ulong EmitTicks;
@@ -2709,6 +2895,8 @@ internal struct ProtocolStageTimingTotal
     internal ulong FrameAdmissionTicks;
     internal ulong ReliableCompactionTicks;
     internal ulong ReceivedCompactionTicks;
+    internal ulong OutboundUnreliableFrames;
+    internal ulong InboundUnreliableFrames;
 
     internal void Add(NetworkProtocolStageTiming value)
     {
@@ -2723,6 +2911,8 @@ internal struct ProtocolStageTimingTotal
         FrameAdmissionTicks = Add(FrameAdmissionTicks, value.FrameAdmissionTicks);
         ReliableCompactionTicks = Add(ReliableCompactionTicks, value.ReliableCompactionTicks);
         ReceivedCompactionTicks = Add(ReceivedCompactionTicks, value.ReceivedCompactionTicks);
+        OutboundUnreliableFrames = Add(OutboundUnreliableFrames, value.OutboundUnreliableFrames);
+        InboundUnreliableFrames = Add(InboundUnreliableFrames, value.InboundUnreliableFrames);
     }
 
     internal void Add(ProtocolStageTimingTotal value)
@@ -2738,6 +2928,8 @@ internal struct ProtocolStageTimingTotal
         FrameAdmissionTicks = Add(FrameAdmissionTicks, value.FrameAdmissionTicks);
         ReliableCompactionTicks = Add(ReliableCompactionTicks, value.ReliableCompactionTicks);
         ReceivedCompactionTicks = Add(ReceivedCompactionTicks, value.ReceivedCompactionTicks);
+        OutboundUnreliableFrames = Add(OutboundUnreliableFrames, value.OutboundUnreliableFrames);
+        InboundUnreliableFrames = Add(InboundUnreliableFrames, value.InboundUnreliableFrames);
     }
 
     internal readonly ProtocolStageTimingTotal Subtract(ProtocolStageTimingTotal baseline) => new()
@@ -2753,6 +2945,8 @@ internal struct ProtocolStageTimingTotal
         FrameAdmissionTicks = checked(FrameAdmissionTicks - baseline.FrameAdmissionTicks),
         ReliableCompactionTicks = checked(ReliableCompactionTicks - baseline.ReliableCompactionTicks),
         ReceivedCompactionTicks = checked(ReceivedCompactionTicks - baseline.ReceivedCompactionTicks),
+        OutboundUnreliableFrames = checked(OutboundUnreliableFrames - baseline.OutboundUnreliableFrames),
+        InboundUnreliableFrames = checked(InboundUnreliableFrames - baseline.InboundUnreliableFrames),
     };
 
     internal readonly double TotalMilliseconds =>
@@ -2809,7 +3003,8 @@ internal readonly record struct DiagnosticCounterBaseline(
     ulong ListenerReceivePollCalls,
     ulong ListenerReceiveCalls,
     ulong ListenerNativeSendCalls,
-    ulong ListenerNativeSentDatagrams)
+    ulong ListenerNativeSentDatagrams,
+    UnreliableAggregationCensus UnreliableAggregation)
 {
     internal DiagnosticCounterBaseline Add(BenchmarkTransportSnapshot value) => this with
     {
@@ -2834,6 +3029,9 @@ internal readonly record struct DiagnosticCounterBaseline(
             value.Server.AuthenticationFailures),
         ReplayRejections = checked(ReplayRejections + value.Client.ReplayRejections +
             value.Server.ReplayRejections),
+        UnreliableAggregation = UnreliableAggregation
+            .Add(value.Client.UnreliableAggregation)
+            .Add(value.Server.UnreliableAggregation),
         SocketSendCalls = checked(SocketSendCalls + value.ClientDatagrams.SendCalls +
             value.ServerDatagrams.SendCalls),
         SocketReceivePollCalls = checked(SocketReceivePollCalls + value.ClientDatagrams.ReceivePollCalls +
@@ -2878,7 +3076,8 @@ internal sealed record AdapterOptions(
     bool CadenceSuite,
     string? CadenceCase,
     int SparseRegionEdgeMillimeters,
-    SparseCapacityMode SparseCapacityMode)
+    SparseCapacityMode SparseCapacityMode,
+    bool UnreliableFrameAggregation)
 {
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
@@ -2899,7 +3098,8 @@ internal sealed record AdapterOptions(
         Has(args, "--cadence-suite"),
         Get(args, "--cadence-case="),
         ParseInt(Get(args, "--sparse-region-edge-mm="), 10_000),
-        ParseSparseCapacityMode(Get(args, "--sparse-capacity-profile=")));
+        ParseSparseCapacityMode(Get(args, "--sparse-capacity-profile=")),
+        Has(args, "--unreliable-frame-aggregation"));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,

@@ -1,0 +1,113 @@
+{
+  "schema": "ultrasim-network-v3-sparse-unreliable-multiframe-v1",
+  "recorded_utc": "2026-08-17T11:05:38Z",
+  "workload": "sparse_observer_movement",
+  "configuration": {
+    "tick_hz": 62,
+    "input_hz": 20,
+    "stage_ticks": 310,
+    "settle_ticks": 10,
+    "spawn_grid_width": 64,
+    "active_ratio": 0.35,
+    "sparse_region_edge_mm": 10000,
+    "sparse_capacity_profile": "current10",
+    "topology": "shared-listener",
+    "socket_io": "platform-send-receive-batch",
+    "maximum_unreliable_frames_per_datagram": 7,
+    "reliable_data_aggregation": false
+  },
+  "paired_runs": [
+    {
+      "clients": 1024,
+      "order": "control-then-experiment",
+      "control": {
+        "tick_p95_ms": 17.314410,
+        "server_p95_ms": 13.180225,
+        "unreliable_data_datagrams": 482537,
+        "unreliable_frames": 482537,
+        "canonical_hash": "84c3da1bacc70e10",
+        "capacity_drops": 0
+      },
+      "experiment": {
+        "tick_p95_ms": 16.786020,
+        "server_p95_ms": 11.816670,
+        "unreliable_data_datagrams": 438118,
+        "unreliable_frames": 482935,
+        "histogram": {"1": 394625, "2": 42173, "3": 1316, "4": 4},
+        "canonical_hash": "84c3da1bacc70e10",
+        "capacity_drops": 0
+      }
+    },
+    {
+      "clients": 1024,
+      "order": "experiment-then-control",
+      "control": {
+        "tick_p95_ms": 19.846200,
+        "server_p95_ms": 16.244560,
+        "unreliable_data_datagrams": 482061,
+        "unreliable_frames": 482061,
+        "canonical_hash": "84c3da1bacc70e10",
+        "capacity_drops": 0
+      },
+      "experiment": {
+        "tick_p95_ms": 18.734415,
+        "server_p95_ms": 12.299120,
+        "unreliable_data_datagrams": 437877,
+        "unreliable_frames": 482937,
+        "histogram": {"1": 394178, "2": 42340, "3": 1357, "4": 2},
+        "canonical_hash": "84c3da1bacc70e10",
+        "capacity_drops": 0
+      }
+    },
+    {
+      "clients": 4096,
+      "order": "control-then-experiment",
+      "control": {
+        "tick_p95_ms": 76.011965,
+        "server_p95_ms": 60.258575,
+        "unreliable_data_datagrams": 1718019,
+        "unreliable_frames": 1718019,
+        "canonical_hash": "7f9da6540345abf8",
+        "capacity_drops": 0
+      },
+      "experiment": {
+        "tick_p95_ms": 71.804660,
+        "server_p95_ms": 55.980735,
+        "unreliable_data_datagrams": 1345625,
+        "unreliable_frames": 1721863,
+        "histogram": {"1": 992851, "2": 329874, "3": 22339, "4": 558},
+        "canonical_hash": "7f9da6540345abf8",
+        "capacity_drops": 0
+      }
+    },
+    {
+      "clients": 4096,
+      "order": "experiment-then-control",
+      "control": {
+        "tick_p95_ms": 77.288595,
+        "server_p95_ms": 61.767405,
+        "unreliable_data_datagrams": 1720165,
+        "unreliable_frames": 1720165,
+        "canonical_hash": "7f9da6540345abf8",
+        "capacity_drops": 0
+      },
+      "experiment": {
+        "tick_p95_ms": 70.955545,
+        "server_p95_ms": 54.852215,
+        "unreliable_data_datagrams": 1343862,
+        "unreliable_frames": 1721021,
+        "histogram": {"1": 990890, "2": 329440, "3": 22888, "4": 634},
+        "canonical_hash": "7f9da6540345abf8",
+        "capacity_drops": 0
+      }
+    }
+  ],
+  "deep_4096": {
+    "all_cases_canonical_across_orders": true,
+    "full_tick_p95_mean_ms": 159.414255,
+    "full_server_p95_mean_ms": 117.475375,
+    "full_process_cpu_core_mean": 0.9459605122,
+    "method": "forward/reverse idle, active-ratio, control, input, input-owner, and full cases with deep phase timing enabled"
+  },
+  "decision": "retain-opt-in-experiment"
+}

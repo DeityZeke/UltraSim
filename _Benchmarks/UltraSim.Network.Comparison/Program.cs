@@ -143,6 +143,8 @@ AdapterProcessObservation RunAdapter(string project, string output, bool v2Adapt
         Add($"--shared-socket-io={options.V3SocketIo}");
         Add($"--sparse-region-edge-mm={options.V3SparseRegionEdgeMillimeters}");
         Add($"--sparse-capacity-profile={options.V3SparseCapacityProfile}");
+        if (options.V3UnreliableFrameAggregation)
+            Add("--unreliable-frame-aggregation");
     }
     if (v2Adapter && options.NoBuildV2) Add("--no-build-v2");
 
@@ -517,7 +519,8 @@ internal sealed record RunnerOptions(
     string V3Topology,
     string V3SocketIo,
     int V3SparseRegionEdgeMillimeters,
-    string V3SparseCapacityProfile)
+    string V3SparseCapacityProfile,
+    bool V3UnreliableFrameAggregation)
 {
     internal static RunnerOptions Parse(string[] args)
     {
@@ -543,7 +546,8 @@ internal sealed record RunnerOptions(
             ParseV3Topology(Get(args, "--v3-topology=")),
             ParseV3SocketIo(Get(args, "--v3-socket-io=")),
             ParseInt(Get(args, "--v3-sparse-region-edge-mm="), 10_000),
-            ParseV3SparseCapacityProfile(Get(args, "--v3-sparse-capacity-profile=")));
+            ParseV3SparseCapacityProfile(Get(args, "--v3-sparse-capacity-profile=")),
+            Has(args, "--v3-unreliable-frame-aggregation"));
     }
 
     private static IReadOnlyList<int> ParseStages(string value)
