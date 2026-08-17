@@ -18,8 +18,17 @@ public readonly record struct NetworkProtocolLimits(
     int ReceivedPayloadByteCapacity = 262_144,
     int MaximumUnreliableFramesPerDatagram = 1)
 {
+    internal const int MaximumUnreliableFramesPerPumpBound = 262_144;
+
     public static NetworkProtocolLimits Default => new(
         128, 128, 16_384, 64, 2_048, 64, 64, 2, 128, 4, 128, 128);
+
+    /// <summary>
+    /// Explicit bounded-work contract for the maximum number of unreliable frames
+    /// a send pump may select before endpoint submission.
+    /// </summary>
+    public int MaximumUnreliableFramesPerPump => checked(
+        MaximumPacketsPerPump * MaximumUnreliableFramesPerDatagram);
 
     internal void Validate(DeterministicDatagramLimits datagrams)
     {
@@ -46,6 +55,10 @@ public readonly record struct NetworkProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumInboundPacketsPerPump));
         if (MaximumPacketsPerPump is <= 0 or > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumPacketsPerPump));
+        if ((long)MaximumPacketsPerPump * MaximumUnreliableFramesPerDatagram >
+            MaximumUnreliableFramesPerPumpBound)
+            throw new ArgumentOutOfRangeException(nameof(MaximumUnreliableFramesPerDatagram),
+                "The packet-pump and aggregate-frame limits exceed the bounded-work contract.");
         if (MinimumRetransmissionSteps <= 0 || MaximumRetransmissionSteps < MinimumRetransmissionSteps)
             throw new ArgumentOutOfRangeException(nameof(MinimumRetransmissionSteps));
         if (InitialCongestionWindowPackets <= 0 ||
@@ -216,7 +229,8 @@ internal static class NetworkDeliveredMessageMetadata
 internal readonly record struct NetworkUnreliableBatchOpportunity(
     int ReadyFrames,
     int PlaintextBytes,
-    int GreedyDatagrams);
+    int GreedyDatagrams,
+    int SameLaneGreedyDatagrams);
 
 /// <summary>
 /// Opt-in protocol-stage timing. Values are raw <see cref="System.Diagnostics.Stopwatch"/>

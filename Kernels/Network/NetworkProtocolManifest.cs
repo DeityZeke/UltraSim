@@ -65,31 +65,47 @@ public sealed class NetworkProtocolManifest
 {
     private readonly NetworkMessageDescriptor[] _byId;
 
-    private NetworkProtocolManifest(ushort version, NetworkMessageDescriptor[] byId, ulong fingerprint)
+    private NetworkProtocolManifest(
+        ushort version,
+        NetworkMessageDescriptor[] byId,
+        ulong fingerprint,
+        int maximumUnreliableDataFramesPerDatagram)
     {
         Version = version;
         _byId = byId;
         Fingerprint = fingerprint;
+        MaximumUnreliableDataFramesPerDatagram = maximumUnreliableDataFramesPerDatagram;
     }
 
     public ushort Version { get; }
     public int Count => _byId.Length;
     public ulong Fingerprint { get; }
+    /// <summary>
+    /// Maximum number of unreliable Data frames this manifest permits a peer to
+    /// decode in one authenticated datagram. This is a negotiated wire capability;
+    /// the local send policy remains <see cref="NetworkProtocolLimits.MaximumUnreliableFramesPerDatagram"/>.
+    /// </summary>
+    public int MaximumUnreliableDataFramesPerDatagram { get; }
+    public bool SupportsUnreliableDataAggregation => MaximumUnreliableDataFramesPerDatagram > 1;
     public ReadOnlySpan<NetworkMessageDescriptor> Messages => _byId;
 
     public static NetworkProtocolManifest Create(
         ushort version,
         ReadOnlySpan<NetworkMessageDescriptor> descriptors,
-        int maximumMessages = ushort.MaxValue)
+        int maximumMessages = ushort.MaxValue,
+        int maximumUnreliableDataFramesPerDatagram = 1)
     {
         ArgumentOutOfRangeException.ThrowIfZero(version);
         if (maximumMessages <= 0) throw new ArgumentOutOfRangeException(nameof(maximumMessages));
+        if (maximumUnreliableDataFramesPerDatagram is <= 0 or > 64)
+            throw new ArgumentOutOfRangeException(nameof(maximumUnreliableDataFramesPerDatagram));
         if (descriptors.Length == 0 || descriptors.Length > maximumMessages)
             throw new ArgumentOutOfRangeException(nameof(descriptors));
         var copy = descriptors.ToArray();
         Array.Sort(copy, static (left, right) => left.Id.CompareTo(right.Id));
         ulong fingerprint = 14695981039346656037UL;
         Mix(ref fingerprint, version);
+        Mix(ref fingerprint, unchecked((ulong)maximumUnreliableDataFramesPerDatagram));
         NetworkMessageDescriptor previous = default;
         for (int index = 0; index < copy.Length; index++)
         {
@@ -110,7 +126,8 @@ public sealed class NetworkProtocolManifest
             foreach (char character in current.CanonicalKey) Mix(ref fingerprint, character);
             previous = current;
         }
-        return new NetworkProtocolManifest(version, copy, fingerprint);
+        return new NetworkProtocolManifest(
+            version, copy, fingerprint, maximumUnreliableDataFramesPerDatagram);
     }
 
     public bool TryGet(NetworkMessageId id, out NetworkMessageDescriptor descriptor)

@@ -188,6 +188,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly INetworkDatagramEndpoint _endpoint;
     private readonly NetworkProtocolManifest _manifest;
     private readonly NetworkProtocolLimits _limits;
+    private readonly int _maximumUnreliableSendFramesPerDatagram;
+    private readonly int _maximumUnreliableReceiveFramesPerDatagram;
     private readonly DeterministicDatagramLimits _datagramLimits;
     private readonly ConnectionId _connection;
     private readonly NetworkDirectionalCryptography _sendCryptography;
@@ -343,6 +345,16 @@ public sealed class NetworkProtocolPeer : IDisposable
         _endpoint = endpoint;
         _manifest = manifest;
         _limits = limits;
+        _maximumUnreliableSendFramesPerDatagram = Math.Min(
+            limits.MaximumUnreliableFramesPerDatagram,
+            manifest.MaximumUnreliableDataFramesPerDatagram);
+        _maximumUnreliableReceiveFramesPerDatagram =
+            manifest.MaximumUnreliableDataFramesPerDatagram;
+        if ((long)limits.MaximumInboundPacketsPerPump *
+                _maximumUnreliableReceiveFramesPerDatagram >
+            NetworkProtocolLimits.MaximumUnreliableFramesPerPumpBound)
+            throw new ArgumentOutOfRangeException(nameof(manifest),
+                "The manifest receive capability exceeds the bounded-work contract.");
         _datagramLimits = datagramLimits;
         _connection = connection;
         _usesMonotonicPacing = usesMonotonicPacing;
@@ -543,15 +555,18 @@ public sealed class NetworkProtocolPeer : IDisposable
         int bytes = 0;
         int greedyDatagrams = 0;
         int currentDatagramBytes = 0;
+        Span<int> sameLaneDatagramBytes = stackalloc int[NetworkLaneContracts.Count];
+        int sameLaneGreedyDatagrams = 0;
 
         for (int index = 0; index < _independent.Length; index++)
-            if (_independent[index].Active) Add(_independent[index]);
+            if (_independent[index].Active) Add(_independent[index], sameLaneDatagramBytes);
         for (int index = 0; index < _unreliableStreams.Length; index++)
-            if (_unreliableStreams[index].Pending) Add(_unreliableStreams[index].Message);
+            if (_unreliableStreams[index].Pending)
+                Add(_unreliableStreams[index].Message, sameLaneDatagramBytes);
 
-        return new(ready, bytes, greedyDatagrams);
+        return new(ready, bytes, greedyDatagrams, sameLaneGreedyDatagrams);
 
-        void Add(in OutgoingMessage message)
+        void Add(in OutgoingMessage message, Span<int> sameLaneBytes)
         {
             int frameBytes = checked(NetworkProtocolDataHeader.EncodedBytes + message.Length);
             if (frameBytes > maximumPlaintext)
@@ -567,6 +582,18 @@ public sealed class NetworkProtocolPeer : IDisposable
             else
             {
                 currentDatagramBytes += frameBytes;
+            }
+
+            int laneIndex = (int)message.Lane;
+            if (sameLaneBytes[laneIndex] == 0 ||
+                checked(sameLaneBytes[laneIndex] + frameBytes) > maximumPlaintext)
+            {
+                sameLaneGreedyDatagrams++;
+                sameLaneBytes[laneIndex] = frameBytes;
+            }
+            else
+            {
+                sameLaneBytes[laneIndex] += frameBytes;
             }
         }
     }
@@ -681,8 +708,16 @@ public sealed class NetworkProtocolPeer : IDisposable
             return;
         }
 
-        Span<UnreliableSelection> aggregate =
-            stackalloc UnreliableSelection[_limits.MaximumUnreliableFramesPerDatagram];
+        if (_maximumUnreliableSendFramesPerDatagram == 1)
+            EmitScalarData(step, ref budget);
+        else
+            EmitAggregatedData(step, ref budget);
+        RecordStageTiming(ref _emitTicks, emitStarted);
+        RecordEmitCall(sentBefore);
+    }
+
+    private void EmitScalarData(ulong step, ref int budget)
+    {
         while (budget > 0 && _inFlight < _congestionWindow)
         {
             long selectionStarted = StartStageTiming();
@@ -691,7 +726,26 @@ public sealed class NetworkProtocolPeer : IDisposable
             RecordStageTiming(ref _selectionTicks, selectionStarted);
             if (!selected) break;
             bool reliable = reliableSlot >= 0;
-            if (reliable || _limits.MaximumUnreliableFramesPerDatagram == 1)
+            if (!TryEmitData(reliableSlot, fragment, independentSlot,
+                    unreliableSlot, step, reliable)) break;
+            budget--;
+            if (ShouldStopAfterData(step)) break;
+        }
+    }
+
+    private void EmitAggregatedData(ulong step, ref int budget)
+    {
+        Span<UnreliableSelection> aggregate =
+            stackalloc UnreliableSelection[_maximumUnreliableSendFramesPerDatagram];
+        while (budget > 0 && _inFlight < _congestionWindow)
+        {
+            long selectionStarted = StartStageTiming();
+            bool selected = TrySelectNext(out int reliableSlot, out ushort fragment,
+                out int independentSlot, out int unreliableSlot);
+            RecordStageTiming(ref _selectionTicks, selectionStarted);
+            if (!selected) break;
+            bool reliable = reliableSlot >= 0;
+            if (reliable)
             {
                 if (!TryEmitData(reliableSlot, fragment, independentSlot,
                         unreliableSlot, step, reliable)) break;
@@ -721,19 +775,18 @@ public sealed class NetworkProtocolPeer : IDisposable
                 if (!TryEmitUnreliableFrames(aggregate[..aggregateCount])) break;
             }
             budget--;
-            if (_usesMonotonicPacing && _smoothedRtt != 0)
-            {
-                ulong interval = _smoothedRtt /
-                    checked((ulong)Math.Max(1, _congestionWindow));
-                if (interval != 0)
-                {
-                    _nextPacedDataStep = checked(step + interval);
-                    break;
-                }
-            }
+            if (ShouldStopAfterData(step)) break;
         }
-        RecordStageTiming(ref _emitTicks, emitStarted);
-        RecordEmitCall(sentBefore);
+    }
+
+    private bool ShouldStopAfterData(ulong step)
+    {
+        if (!_usesMonotonicPacing || _smoothedRtt == 0) return false;
+        ulong interval = _smoothedRtt /
+            checked((ulong)Math.Max(1, _congestionWindow));
+        if (interval == 0) return false;
+        _nextPacedDataStep = checked(step + interval);
+        return true;
     }
 
     private void RecordEmitCall(ulong sentBefore)
@@ -768,7 +821,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _receivedPayloadCompactions, _receivedPayloadCompactionBytesMoved,
                 _receivedPayloadMaximumBytesMovedPerCompaction),
             new NetworkUnreliableAggregationSnapshot(
-                _limits.MaximumUnreliableFramesPerDatagram,
+                _maximumUnreliableSendFramesPerDatagram,
                 _unreliableFramesSent, _unreliableDatagramsSent,
                 _unreliableFramesReceived, _unreliableDatagramsReceived,
                 _unreliableSentDatagramsWithTwoOrMoreFrames,
@@ -1162,27 +1215,10 @@ public sealed class NetworkProtocolPeer : IDisposable
             else
             {
                 ConsumeUnreliableSelection(new(independentSlot, unreliableSlot));
-                RecordSentUnreliableDatagram(writer.WrittenCount);
             }
             return true;
         }
         return false;
-    }
-
-    private void RecordSentUnreliableDatagram(int plaintextBytes)
-    {
-        _unreliableFramesSent = SaturatingIncrement(_unreliableFramesSent);
-        _unreliableDatagramsSent = SaturatingIncrement(_unreliableDatagramsSent);
-        _unreliableSentPlaintextBytes = SaturatingAdd(
-            _unreliableSentPlaintextBytes, checked((ulong)plaintextBytes));
-        _maximumUnreliableSentFramesPerDatagram = Math.Max(
-            _maximumUnreliableSentFramesPerDatagram, 1);
-        _maximumUnreliableSentPlaintextBytes = Math.Max(
-            _maximumUnreliableSentPlaintextBytes, plaintextBytes);
-        RecordUnreliableHistogram(sent: true, frameCount: 1);
-        if (_stageTimingEnabled)
-            _stageOutboundUnreliableFrames = SaturatingIncrement(
-                _stageOutboundUnreliableFrames);
     }
 
     private bool TryEmitAcknowledgement()
@@ -1331,13 +1367,13 @@ public sealed class NetworkProtocolPeer : IDisposable
         ReadOnlySpan<byte> plaintext,
         out bool acknowledgementEliciting)
     {
-        if (_limits.MaximumUnreliableFramesPerDatagram == 1)
+        if (_maximumUnreliableReceiveFramesPerDatagram == 1)
             return ProcessSingleData(plaintext, out acknowledgementEliciting);
 
         acknowledgementEliciting = false;
         var reader = new NetworkPacketReader(plaintext);
         Span<ValidatedDataFrame> frames =
-            stackalloc ValidatedDataFrame[_limits.MaximumUnreliableFramesPerDatagram];
+            stackalloc ValidatedDataFrame[_maximumUnreliableReceiveFramesPerDatagram];
         int frameCount = 0;
         bool hasReliable = false;
         int fragmentPayload = FragmentPayloadBytes;
@@ -1425,7 +1461,6 @@ public sealed class NetworkProtocolPeer : IDisposable
             return reliable;
         }
 
-        RecordReceivedUnreliableDatagram(1, plaintext.Length);
         return ProcessUnreliableFrame(header, messageSlot, fragment);
     }
 

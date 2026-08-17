@@ -250,7 +250,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             RemoteWorldStateAppliedMessageCodec.Descriptor,
         ]);
     private static readonly NetworkProtocolManifest SparseAggregatedManifest =
-        NetworkProtocolManifest.Create(11, SparseManifest.Messages.ToArray());
+        NetworkProtocolManifest.Create(
+            11, SparseManifest.Messages.ToArray(),
+            maximumUnreliableDataFramesPerDatagram: 7);
     private static readonly NetworkProtocolLimits ProtocolLimits = new(
         MaximumReliableMessages: 8,
         MaximumReceivedMessages: 8,
@@ -961,6 +963,22 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             unreliableAggregation = unreliableAggregation.Subtract(
                 diagnosticBaseline.UnreliableAggregation);
         }
+        if (!_unreliableFrameAggregation)
+        {
+            // Scalar controls intentionally do not execute aggregation telemetry in
+            // the protocol hot path. Reconstruct the comparable one-frame sent
+            // census from existing packet counters in this cold report layer.
+            ulong scalarUnreliableDatagrams = dataPacketsSent >= reliableFragmentsSent
+                ? dataPacketsSent - reliableFragmentsSent
+                : 0;
+            unreliableAggregation = new()
+            {
+                SentFrames = scalarUnreliableDatagrams,
+                SentDatagrams = scalarUnreliableDatagrams,
+                SentHistogramOne = scalarUnreliableDatagrams,
+                MaximumSentFramesPerDatagram = scalarUnreliableDatagrams == 0 ? 0 : 1,
+            };
+        }
         peakManagedHeap = Math.Max(peakManagedHeap, GC.GetTotalMemory(false));
         process.Refresh();
         peakWorkingSet = Math.Max(peakWorkingSet, process.WorkingSet64);
@@ -1526,6 +1544,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         diagnostics["batch_opportunities_4_plus"] = _batchCensus.FourPlus;
         diagnostics["batch_maximum_ready_frames"] = _batchCensus.MaximumReadyFrames;
         diagnostics["batch_greedy_datagrams_observed"] = _batchCensus.GreedyDatagrams;
+        diagnostics["batch_same_lane_greedy_datagrams_observed"] =
+            _batchCensus.SameLaneGreedyDatagrams;
         diagnostics["actual_unreliable_data_packets"] = unreliablePackets;
         diagnostics["batch_mean_frames_when_nonempty"] = _batchCensus.WithReadyFrames == 0
             ? 0
@@ -2755,6 +2775,7 @@ internal struct BatchOpportunityCensus
     internal ulong ThreePlus;
     internal ulong FourPlus;
     internal ulong GreedyDatagrams;
+    internal ulong SameLaneGreedyDatagrams;
     internal int MaximumReadyFrames;
 
     internal void Add(NetworkUnreliableBatchOpportunity opportunity)
@@ -2765,6 +2786,8 @@ internal struct BatchOpportunityCensus
         ReadyFrames = checked(ReadyFrames + (ulong)opportunity.ReadyFrames);
         PlaintextBytes = checked(PlaintextBytes + (ulong)opportunity.PlaintextBytes);
         GreedyDatagrams = checked(GreedyDatagrams + (ulong)opportunity.GreedyDatagrams);
+        SameLaneGreedyDatagrams = checked(
+            SameLaneGreedyDatagrams + (ulong)opportunity.SameLaneGreedyDatagrams);
         MaximumReadyFrames = Math.Max(MaximumReadyFrames, opportunity.ReadyFrames);
         if (opportunity.ReadyFrames < 2) return;
         TwoPlus = checked(TwoPlus + 1);

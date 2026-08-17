@@ -7,6 +7,7 @@ internal static class N03ProtocolTests
         16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32, 16);
     private static readonly DeterministicDatagramLimits s_datagrams = new(256, 512);
     private static readonly NetworkProtocolManifest s_manifest = CreateManifest();
+    private static readonly NetworkProtocolManifest s_aggregatedManifest = CreateManifest(7);
 
     internal static void RunAll()
     {
@@ -23,6 +24,8 @@ internal static class N03ProtocolTests
         Run("UnreliableMultiframeSendBackpressureIsTransactional", UnreliableMultiframeSendBackpressureIsTransactional);
         Run("UnreliableMultiframeReceiveValidationIsTransactional", UnreliableMultiframeReceiveValidationIsTransactional);
         Run("UnreliableMultiframeAdmissionPreservesSequencingAndCapacity", UnreliableMultiframeAdmissionPreservesSequencingAndCapacity);
+        Run("UnreliableMultiframeCapabilityIsAsymmetricSafe", UnreliableMultiframeCapabilityIsAsymmetricSafe);
+        Run("UnreliableMultiframeSurvivesDeterministicImpairment", UnreliableMultiframeSurvivesDeterministicImpairment);
         Run("WarmedUnreliableMultiframeAggregationAllocatesZero", WarmedUnreliableMultiframeAggregationAllocatesZero);
         Run("ProtocolStageTimingIsOptInAndResettable", ProtocolStageTimingIsOptInAndResettable);
         Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
@@ -100,6 +103,14 @@ internal static class N03ProtocolTests
             out ProtocolLoopback? mismatch, out _, s_manifest,
             maximumHandshakeSteps: 64, serverManifest: incompatible));
         True(mismatch is null);
+
+        NetworkProtocolManifest incompatibleCapability = NetworkProtocolManifest.Create(
+            s_manifest.Version, descriptors, maximumUnreliableDataFramesPerDatagram: 7);
+        False(incompatibleCapability.Fingerprint == s_manifest.Fingerprint);
+        False(ProtocolLoopback.TryCreate(s_limits, s_datagrams, default,
+            out ProtocolLoopback? capabilityMismatch, out _, s_manifest,
+            maximumHandshakeSteps: 64, serverManifest: incompatibleCapability));
+        True(capabilityMismatch is null);
     }
 
     private static void ReliableLanesSurviveImpairment()
@@ -199,7 +210,7 @@ internal static class N03ProtocolTests
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
         using ProtocolLoopback loopback = Create(
-            new(77, 0, 500, 0, 7), s_datagrams, limits);
+            new(77, 0, 500, 0, 7), s_datagrams, limits, s_aggregatedManifest);
         Span<byte> payload = stackalloc byte[8];
         for (ulong value = 0; value < 10; value++)
         {
@@ -281,6 +292,7 @@ internal static class N03ProtocolTests
         Equal(3 * (NetworkProtocolDataHeader.EncodedBytes + payload.Length),
             opportunity.PlaintextBytes);
         Equal(2, opportunity.GreedyDatagrams);
+        Equal(3, opportunity.SameLaneGreedyDatagrams);
         Equal(1, loopback.Client.IndependentUnreliableQueued);
 
         Drive(loopback, () => loopback.Server.ReceivedQueued == 3, 100);
@@ -290,7 +302,7 @@ internal static class N03ProtocolTests
     private static void UnreliableMultiframeAggregationPreservesOrderAndCounters()
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
-        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits, s_aggregatedManifest);
         Equal(NetworkQueueStatus.Accepted,
             loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
         Equal(NetworkQueueStatus.Accepted,
@@ -329,7 +341,7 @@ internal static class N03ProtocolTests
     private static void UnreliableMultiframeSendBackpressureIsTransactional()
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
-        using RawPeerPair pair = new(s_manifest, limits, new DeterministicDatagramLimits(1, 512));
+        using RawPeerPair pair = new(s_aggregatedManifest, limits, new DeterministicDatagramLimits(1, 512));
         Equal(NetworkQueueStatus.Accepted,
             pair.Sender.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
         Equal(NetworkQueueStatus.Accepted,
@@ -355,7 +367,7 @@ internal static class N03ProtocolTests
     private static void UnreliableMultiframeReceiveValidationIsTransactional()
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
-        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        using RawPeerPair pair = new(s_aggregatedManifest, limits, s_datagrams);
         Span<byte> malformed = stackalloc byte[NetworkProtocolDataHeader.EncodedBytes + 1 + 3];
         var writer = new NetworkPacketWriter(malformed);
         WriteFrame(ref writer, NetworkLane.Input, 0, stackalloc byte[] { 9 });
@@ -386,7 +398,7 @@ internal static class N03ProtocolTests
             MaximumUnreliableFramesPerDatagram = 7,
             MaximumReceivedMessages = 1,
         };
-        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        using RawPeerPair pair = new(s_aggregatedManifest, limits, s_datagrams);
         Span<byte> aggregate = stackalloc byte[(NetworkProtocolDataHeader.EncodedBytes + 1) * 2];
         var writer = new NetworkPacketWriter(aggregate);
         WriteFrame(ref writer, NetworkLane.Input, 8, stackalloc byte[] { 8 });
@@ -406,10 +418,74 @@ internal static class N03ProtocolTests
         AssertReceive(pair.Receiver, NetworkLane.Input, stackalloc byte[] { 10 });
     }
 
+    private static void UnreliableMultiframeCapabilityIsAsymmetricSafe()
+    {
+        NetworkProtocolLimits senderLimits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using RawPeerPair pair = new(
+            s_aggregatedManifest, senderLimits, s_datagrams, receiverLimits: s_limits);
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+
+        pair.Sender.Emit(0);
+        pair.Receiver.ProcessInbound(0);
+        Equal(2, pair.Receiver.ReceivedQueued);
+        Equal(1UL, pair.Sender.GetSnapshot().UnreliableAggregation.SentDatagramsWithTwoOrMoreFrames);
+        Equal(1UL, pair.Receiver.GetSnapshot().UnreliableAggregation.ReceivedDatagramsWithTwoOrMoreFrames);
+        AssertReceive(pair.Receiver, NetworkLane.Input, stackalloc byte[] { 1 });
+        AssertReceive(pair.Receiver, NetworkLane.OwnerState, stackalloc byte[] { 2 });
+    }
+
+    private static void UnreliableMultiframeSurvivesDeterministicImpairment()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
+        using RawPeerPair pair = new(
+            s_aggregatedManifest, limits, s_datagrams,
+            impairment: new NetworkImpairmentOptions(0xA661, 180, 220, 260, 7));
+        byte[] payload = { 0x5A };
+        int delivered = 0;
+        for (ulong step = 0; step < 256; step++)
+        {
+            Equal(NetworkQueueStatus.Accepted,
+                pair.Sender.TryQueue(Id(NetworkLane.Input), payload));
+            Equal(NetworkQueueStatus.Accepted,
+                pair.Sender.TryQueue(Id(NetworkLane.OwnerState), payload));
+            pair.Sender.Emit(step);
+            pair.Receiver.ProcessInbound(step);
+            while (pair.Receiver.TryPeekReceived(out _, out ReadOnlySpan<byte> received))
+            {
+                True(payload.AsSpan().SequenceEqual(received));
+                True(pair.Receiver.TryConsumeReceived());
+                delivered++;
+            }
+            pair.Link.Advance();
+        }
+
+        for (ulong step = 256; step < 320; step++)
+        {
+            pair.Receiver.ProcessInbound(step);
+            while (pair.Receiver.TryPeekReceived(out _, out ReadOnlySpan<byte> received))
+            {
+                True(payload.AsSpan().SequenceEqual(received));
+                True(pair.Receiver.TryConsumeReceived());
+                delivered++;
+            }
+            pair.Link.Advance();
+        }
+
+        True(delivered > 0);
+        True(pair.Sender.GetSnapshot().UnreliableAggregation.SentDatagramsWithTwoOrMoreFrames > 0);
+        True(pair.Link.GetSnapshot().Dropped > 0);
+        True(pair.Link.GetSnapshot().Duplicated > 0);
+        True(pair.Link.GetSnapshot().Corrupted > 0);
+        True(pair.Receiver.GetSnapshot().AuthenticationFailures > 0);
+    }
+
     private static void WarmedUnreliableMultiframeAggregationAllocatesZero()
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
-        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits, s_aggregatedManifest);
         byte[] payload = new byte[1];
         for (int iteration = 0; iteration < 32; iteration++)
         {
@@ -777,7 +853,7 @@ internal static class N03ProtocolTests
     private static void AggregatedDataSurvivesSecurityEpochRotation()
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
-        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits, s_aggregatedManifest);
         Equal(NetworkQueueStatus.Accepted,
             loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
         Equal(NetworkQueueStatus.Accepted,
@@ -1064,20 +1140,22 @@ internal static class N03ProtocolTests
     private static ProtocolLoopback Create(
         NetworkImpairmentOptions impairment = default,
         DeterministicDatagramLimits? datagrams = null,
-        NetworkProtocolLimits? limits = null)
+        NetworkProtocolLimits? limits = null,
+        NetworkProtocolManifest? manifest = null)
     {
         True(ProtocolLoopback.TryCreate(limits ?? s_limits, datagrams ?? s_datagrams, impairment,
-            out ProtocolLoopback? loopback, out _, s_manifest));
+            out ProtocolLoopback? loopback, out _, manifest ?? s_manifest));
         return loopback!;
     }
 
-    private static NetworkProtocolManifest CreateManifest()
+    private static NetworkProtocolManifest CreateManifest(int maximumUnreliableDataFramesPerDatagram = 1)
     {
         var descriptors = new NetworkMessageDescriptor[NetworkLaneContracts.Count];
         foreach (NetworkLane lane in Enum.GetValues<NetworkLane>())
             descriptors[(int)lane] = new(new NetworkMessageId((ushort)((int)lane + 1)),
                 $"n0.3.test.{lane}", 1, lane, 4_096, (ulong)lane + 100);
-        return NetworkProtocolManifest.Create(3, descriptors);
+        return NetworkProtocolManifest.Create(3, descriptors,
+            maximumUnreliableDataFramesPerDatagram: maximumUnreliableDataFramesPerDatagram);
     }
 
     private static NetworkMessageId Id(NetworkLane lane) => new((ushort)((int)lane + 1));
@@ -1187,16 +1265,18 @@ internal static class N03ProtocolTests
         internal RawPeerPair(
             NetworkProtocolManifest manifest,
             NetworkProtocolLimits limits,
-            DeterministicDatagramLimits datagrams)
+            DeterministicDatagramLimits datagrams,
+            NetworkProtocolLimits? receiverLimits = null,
+            NetworkImpairmentOptions impairment = default)
         {
             _manifest = manifest;
             _masterSecret = Enumerable.Range(1, 32).Select(static value => (byte)(value * 3)).ToArray();
-            Link = new DeterministicDatagramLink(datagrams);
+            Link = new DeterministicDatagramLink(datagrams, impairment);
             Sender = new NetworkProtocolPeer(
                 Link.A, manifest, limits, datagrams, _connection, _epoch, _masterSecret,
                 sendsClientToServer: true);
             Receiver = new NetworkProtocolPeer(
-                Link.B, manifest, limits, datagrams, _connection, _epoch, _masterSecret,
+                Link.B, manifest, receiverLimits ?? limits, datagrams, _connection, _epoch, _masterSecret,
                 sendsClientToServer: false);
         }
 

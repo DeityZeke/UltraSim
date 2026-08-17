@@ -2594,10 +2594,37 @@ the largest server-role phase to protocol/listener: 36.703 ms p95 versus 10.660
 ms interest update, 5.062 ms WorldState scheduling, and 1.950 ms application
 ingress. Unlike the negative `owner_movement` batching census, this WorldState
 shape finds 570,187 multi-ready unreliable inspections (32.37%), up to seven
-ready frames, and 1,267,303 co-batchable frames. That earns a narrow, no-wait,
-unreliable-only same-peer multi-frame assembly experiment as the next sparse CPU
-question. Conservative circle-vs-region-AABB cell admission remains later work;
-it is not part of this adoption.
+ready frames, and 1,267,303 co-batchable frames. That earned a narrow, no-wait,
+unreliable-only same-peer multi-frame assembly implementation as an opt-in
+experiment. It retains scheduler order, fixed listener-owned storage, MTU and
+frame caps, endpoint transactional ownership, whole-aggregate receive
+validation, independent unreliable semantics, and scalar fallback.
+The cold opportunity census also reports the datagram count under a same-lane-only
+packing policy; it is evidence only and never changes live selection.
+
+The wire capability is explicit in the manifest and therefore included in the
+handshake fingerprint: manifest v11 advertises the maximum unreliable Data frame
+count a peer can decode, while `NetworkProtocolLimits.MaximumUnreliableFramesPerDatagram`
+remains only the local send-policy cap. A receiver whose local send cap is one
+still decodes the negotiated aggregate format. The send-pump product is bounded
+explicitly; the default cap-one path does not allocate aggregate selection storage
+or update aggregate telemetry. Deterministic tests cover asymmetric send caps,
+whole-aggregate malformed/reliable mixing, backpressure transactionality,
+sequencing/capacity, epoch rotation, and loss/duplication/reorder/corruption.
+
+The paired probes-off evidence improved 4,096-client tick p95 from 76.012/77.289
+to 71.805/70.956 ms and server p95 from 60.259/61.767 to 55.981/54.852 ms,
+with about 21.8% fewer unreliable Data datagrams and identical canonical hashes.
+This remains retained opt-in evidence, not default enablement: sustained tail
+validation must report p50/p95/p99/p99.9/max, freshness tiers, input-ACK fairness,
+worst-tick attribution, and zero capacity/deadline/retransmission/GC regressions
+before promotion. Conservative circle-vs-region-AABB cell admission remains
+later work; it is not part of this adoption.
+
+The immutable experiment artifact is
+[`network-v3-sparse-unreliable-multiframe-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-unreliable-multiframe-2026-08-17.json)
+with its readable
+[`report`](../../_Benchmarks/Baselines/network-v3-sparse-unreliable-multiframe-2026-08-17.md).
 
 Protected profiles:
 

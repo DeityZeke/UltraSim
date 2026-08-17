@@ -205,11 +205,15 @@ per-client canonical rows after their exact hash/match has been established;
 raw adapter artifacts retain those rows for an active investigation.
 
 The sparse protocol experiment accepts `--unreliable-frame-aggregation`. It is
-off by default and is admitted only by the sparse observer profile. It uses
-manifest v11 and a fixed seven-frame cap for same-peer unreliable Data; reliable
-Data remains scalar. The adapter reports aggregate frame histograms, original
+off by default and is admitted only by the sparse observer profile. Manifest v11
+explicitly fingerprints a seven-frame unreliable-Data receive capability; the
+local protocol limit remains an independent send-policy cap, so a cap-one sender
+still decodes aggregates. Reliable Data remains scalar. The adapter reports aggregate
+frame histograms, original
 frames consumed, Data datagrams, plaintext fill, frames per pump, and the
-corresponding protocol-stage counters. The paired evidence is recorded in
+corresponding protocol-stage counters. Deep timing also records a cold
+same-lane-only greedy opportunity census for deciding whether mixed-lane fate
+coupling is worthwhile. The paired evidence is recorded in
 `Baselines/network-v3-sparse-unreliable-multiframe-2026-08-17.md`.
 V3 visible-state AoI/fairness is sampled during the untimed 10-tick post-stage
 settle window. The result records both the sampling duration and compact

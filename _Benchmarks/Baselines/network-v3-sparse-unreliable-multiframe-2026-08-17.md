@@ -26,6 +26,14 @@ about 4.4%, but the order spread is still large enough that this is not a
 strong standalone acceptance claim. All four runs converged to the same
 canonical owner hash for their population and reported zero capacity drops.
 
+Freshness and fairness were also retained in the paired artifact. The control
+profiles preserve Immediate/Near/Far p95 freshness tiers of 1/2/2 ticks at
+1,024 and 1/2/3 ticks at 4,096. The aggregate profiles were 0/1/2 and 1/1/2
+ticks respectively. Input-ACK p95 / worst-client input-ACK p95 was
+68.15/72.66 ms versus 67.68/71.20 ms at 1,024 control-first, and
+251.46/312.88 ms versus 238.08/249.23 ms at 4,096 control-first. Reverse-order
+values are retained in JSON; no capacity drops occurred.
+
 The observed sent-frame histogram at 4,096 was approximately:
 
 ```text

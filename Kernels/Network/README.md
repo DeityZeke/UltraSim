@@ -289,8 +289,9 @@ Input+Owner p95 fell from 5.100 to 2.790 ms and Full from 4.975 to 2.868 ms;
 their timed wire bytes fell about 39%. The post-change 32/64/128/256 V3 p95
 range is 0.374-0.389 / 0.725-0.741 / 1.437-1.459 / 2.809-2.813 ms, with exact
 canonical V2/V3 state in every run. Full traffic still averages roughly 6.2%
-datagram fill and one send syscall per datagram, making bounded multi-message
-assembly the next measured CPU/wire experiment. Reservation specialization is
+datagram fill and one send syscall per datagram; bounded multi-message assembly
+was subsequently earned only by the WorldState-shaped sparse workload.
+Reservation specialization is
 still required independently for memory viability. See the
 [bot comparison guide](../../_Benchmarks/NETWORK_V2_V3_BOT_COMPARISON.md) for
 the complete before/after counters and immutable artifacts.
@@ -299,9 +300,14 @@ N0.10's batch-opportunity census and protocol-stage timing are deliberately
 internal, opt-in benchmark instrumentation. The census capacity-scans pending
 unreliable state and therefore never runs in normal protocol operation. Stage
 timing adds timestamp probes only after explicit reset/enable and is cleared when
-disabled. It shows no 2+ same-peer unreliable opportunities in `owner_movement`;
-endpoint send/receive, not selection or codec work, owns most remaining active
-peer time. No multi-frame wire form was added without evidence.
+disabled. A later WorldState-shaped sparse census earned a bounded same-peer
+unreliable multi-frame Data experiment. Manifest v11 fingerprints the maximum
+unreliable frame count a peer can decode; the local
+`MaximumUnreliableFramesPerDatagram` remains a send-policy cap, so a cap-one
+sender still decodes aggregates. The default cap-one path retains scalar
+selection/encoding/admission and does not update aggregate telemetry. The
+experiment remains opt-in pending sustained tail, freshness, and fairness
+acceptance.
 
 The follow-up shared-listener experiment optionally uses Linux `sendmmsg` beneath
 the endpoint contract. Peers still create and consume individual authenticated
