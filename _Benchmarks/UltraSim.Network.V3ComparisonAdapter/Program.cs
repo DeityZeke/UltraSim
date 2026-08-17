@@ -1816,6 +1816,21 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             diagnostics["world_state_outstanding_bundles_max"] = _maximumOutstanding;
             diagnostics["world_state_nonviable_recipients"] = interest.NonviableRecipientCount;
             diagnostics["world_state_pending_writes"] = interest.PendingWrites;
+            diagnostics["world_state_pending_obligations_created"] =
+                interest.PendingObligationsCreated;
+            diagnostics["world_state_pending_unsent_coalesces"] =
+                interest.PendingUnsentCoalesces;
+            diagnostics["world_state_pending_sent_supersessions"] =
+                interest.PendingSentSupersessions;
+            diagnostics["world_state_relation_sequence_allocations"] =
+                interest.RelationSequenceAllocations;
+            diagnostics["world_state_pending_list_relinks"] = interest.PendingListRelinks;
+            diagnostics["world_state_eligibility_deadlines_preserved"] =
+                interest.EligibilityDeadlinesPreserved;
+            diagnostics["world_state_eligibility_deadlines_advanced_after_send"] =
+                interest.EligibilityDeadlinesAdvancedAfterSend;
+            diagnostics["world_state_same_tier_coalesces_moved_eligibility_later"] =
+                interest.SameTierCoalescesMovedEligibilityLater;
             diagnostics["world_state_unique_semantic_constructions"] =
                 interest.UniqueSemanticConstructions;
             diagnostics["world_state_semantic_record_copies"] = interest.SemanticRecordCopies;

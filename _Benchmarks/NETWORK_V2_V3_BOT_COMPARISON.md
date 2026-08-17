@@ -216,7 +216,7 @@ under broader latency budgets, while 3K approached 10 ms server p95. It was
 already over the historical 4 ms investigation target above roughly 1.3K.
 Chat counters were zero; this was never a chat-bearing table.
 
-The current preserved diagnostic comparison is
+The preserved **pre-correction diagnostic** comparison is
 [`network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json`](Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json)
 with a readable
 [`matrix`](Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.md).
@@ -255,16 +255,58 @@ Network plus Game/Replication reservation was about 919 MiB, working set was
 1,202 MiB V3 versus 720 MiB V2, and timed allocation was 68 MiB V3 versus
 1,425 MiB V2.
 
-V3 did not remain cadence-fresh outside Immediate. Immediate p95 was one
+In that pre-correction artifact, V3 did not remain cadence-fresh outside
+Immediate. Immediate p95 was one
 authoritative step, but continuously dirty Near/Far visible state was about 111
 steps old at p95; Far p95 grew 1.80→8.07 seconds and input-ACK p95
-63.7→294.4 ms. A newer pending version currently recomputes a future phased
-eligibility deadline, allowing continuous rewrites to postpone Near/Far
-delivery. The next correction should preserve an already-earned deadline when
-coalescing newer pending state, then repeat this same matrix. Visible-state AoI
+63.7→294.4 ms. A newer pending version recomputed a future phased eligibility
+deadline, allowing continuous rewrites to postpone Near/Far delivery. That
+evidence established the requirement to preserve an already-earned deadline
+while coalescing newer pending state. Visible-state AoI
 and per-client fairness are sampled in the untimed 10-tick settle window. The
 compact telemetry payload is reported separately (16.42 MiB at 4,096), avoiding
 both timed-path distortion and the earlier oversized diagnostic reservation.
+
+### Corrected pending-obligation result
+
+The starvation defect is closed in
+[`network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.json`](Baselines/network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.json)
+with its readable
+[`matrix`](Baselines/network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.md).
+It repeats all 13 populations with the same 62/20 Hz, 35%-active, spatial,
+capacity, topology, and alternating-order controls. All canonical owner states
+match; capacity drops, nonviable recipients, and same-tier eligibility deferrals
+remain zero.
+
+The primary gate now passes at every population:
+
+```text
+Immediate p95 age    1 authority step
+Near p95 age         2 authority steps
+Far p95 age          3 authority steps
+```
+
+At 4,096, the unchanged 38.104M canonical pending writes classify as 462K new
+obligations, 21.813M unsent in-place coalesces, and 15.829M supersessions of an
+exposed sequence. They consume 16.291M relation-sequence allocations—one new
+obligation or exposed supersession each—and zero pending-list relinks in this
+stable sparse profile. All 37.641M same-tier coalesces preserve their deadline;
+16.285M actual sends advance cadence, and no coalesce moves a deadline later.
+
+Correctness makes the workload materially larger. At 4,096, emitted V3
+WorldState records rise from the pre-correction 1.874M to 16.291M, wire rises
+from 199.5 MiB to 845.9 MiB, and p95 tick rises from 87.669 ms to 121.154 ms.
+This is the intended honest charge, not a performance regression to hide with
+capacity or cadence changes. Independent-unreliable occupancy peaks at 87.5%
+with zero drops; retransmitted bytes remain about 793 KiB. Input-ACK p95 is
+399.3 ms under the overloaded 4K run, while tick-relative WorldState cadence
+remains correct. V3 still maintains 343,396 relations versus V2's 70,572
+observer items and now emits 3.11x V2's observer records, so the raw 3.779x p95
+ratio is neither an admitted-set nor per-record efficiency ratio.
+
+The next sparse investigation is therefore a matched admitted-set/region-policy
+sensitivity control plus cost attribution for the now-honest delivery volume.
+Do not optimize from the superseded pre-correction timing artifact.
 
 The first accepted provisional matrix is
 [`network-v2-v3-bot-n010-entry-2026-08-15.json`](Baselines/network-v2-v3-bot-n010-entry-2026-08-15.json).

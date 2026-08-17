@@ -360,6 +360,24 @@ static string BuildMatrixMarkdown(NetworkBotMatrixReport report)
             .Append(" | ").Append(F(D(v3, "world_state_pending_relations_max"))).Append('/').Append(F(D(v3, "world_state_nonviable_recipients")))
             .AppendLine(" |");
     }
+    text.AppendLine().AppendLine("## V3 pending-state obligation accounting").AppendLine();
+    text.AppendLine("| Bots | Writes | New obligations | Unsent coalesces | Sent supersessions | Sequence allocations | Pending relinks | Deadlines preserved / advanced | Same-tier coalesces moved later |");
+    text.AppendLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");
+    foreach (NetworkBotJoinedReport run in report.Runs)
+    {
+        NetworkBotStageResult v3 = run.V3.Result;
+        text.Append("| ").Append(v3.Scenario.Clients)
+            .Append(" | ").Append(F(D(v3, "world_state_pending_writes")))
+            .Append(" | ").Append(F(D(v3, "world_state_pending_obligations_created")))
+            .Append(" | ").Append(F(D(v3, "world_state_pending_unsent_coalesces")))
+            .Append(" | ").Append(F(D(v3, "world_state_pending_sent_supersessions")))
+            .Append(" | ").Append(F(D(v3, "world_state_relation_sequence_allocations")))
+            .Append(" | ").Append(F(D(v3, "world_state_pending_list_relinks")))
+            .Append(" | ").Append(F(D(v3, "world_state_eligibility_deadlines_preserved")))
+                .Append('/').Append(F(D(v3, "world_state_eligibility_deadlines_advanced_after_send")))
+            .Append(" | ").Append(F(D(v3, "world_state_same_tier_coalesces_moved_eligibility_later")))
+            .AppendLine(" |");
+    }
     text.AppendLine().AppendLine("## Memory, allocation, CPU, and headroom").AppendLine();
     text.AppendLine("| Bots | Working set MiB V2/V3 | Private MiB V2/V3 | Managed heap MiB V2/V3 | Alloc MiB V2/V3 | GC0/1/2 V2 | GC0/1/2 V3 | V3 Network / replication reserve MiB | Socket config MiB V2/V3 | V3 CPU cores | V3 max rel/recv occupancy | V3 SLO headroom ms |");
     text.AppendLine("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |");

@@ -172,7 +172,7 @@ dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
   --tick-hz=62 --input-hz=20 --stage-ticks=310 --settle-ticks=10 \
   --spawn-spacing=12 --spawn-grid-width=64 --active-ratio=0.35 \
   --v3-topology=shared-listener \
-  --v3-socket-io=platform-send-receive-batch \
+  --v3-socket-io=platform-batch \
   --single-order --alternate-order \
   --output-dir=_Benchmarks/results/network-v2-v3-sparse-ccu
 ```
@@ -184,6 +184,15 @@ V3 visible-state AoI/fairness is sampled during the untimed 10-tick post-stage
 settle window. The result records both the sampling duration and compact
 histogram payload reservation, so freshness instrumentation is neither charged
 to tick time nor mistaken for production Network/Game reservation.
+The first artifact exposed a Near/Far starvation defect and remains immutable
+pre-correction evidence. The corrected artifact is
+[`network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.json`](Baselines/network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.json)
+with its readable
+[`matrix`](Baselines/network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.md).
+It proves 1/2/3-step Immediate/Near/Far p95 freshness across the full matrix,
+zero same-tier deadline deferrals, zero capacity drops, and the larger honest
+delivery cost after starvation is removed. Use that artifact—not the earlier
+timing row—for subsequent sparse performance decisions.
 
 ## Comparability
 

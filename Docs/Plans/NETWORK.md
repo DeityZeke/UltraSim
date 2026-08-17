@@ -2418,7 +2418,7 @@ comfortable tail headroom is not yet a consistent acceptance claim. This closes
 the receive-call multiplier; it does not justify waiting, larger batches,
 workers, or changes to peer/security semantics.
 
-### N0.10 sparse 1K–4K diagnostic
+### N0.10 sparse 1K–4K diagnostic and liveness correction
 
 The historical V2 sparse result was recovered rather than reconstructed from
 memory. It was a one-server/four-client-worker run at 62 Hz, 20 Hz phased input,
@@ -2438,6 +2438,8 @@ diagnostic artifact is
 [`network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json`](../../_Benchmarks/Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.json)
 and the readable matrix is
 [`network-v2-v3-sparse-ccu-1024-4096-2026-08-17.md`](../../_Benchmarks/Baselines/network-v2-v3-sparse-ccu-1024-4096-2026-08-17.md).
+This artifact is retained as the **pre-correction diagnostic**, not an accepted
+performance baseline.
 
 All 13 rows reached every client, matched canonical owner state, and had zero V3
 capacity drops or nonviable recipients. Tick p95 was:
@@ -2460,10 +2462,8 @@ observer records because newest-state coalescing works: 0.419M versus 1.201M at
 the maintained graph. At 4,096, 460,076 unique semantic constructions and
 1,874,153 recipient copies sit behind 38,103,554 pending-version writes. That
 roughly 20:1 rewrite/copy ratio, plus 4.87x as many maintained relations as V2
-observer items, is the leading sparse-cost hypothesis. First attribute and
-remove avoidable pending-rewrite/requeue work, then run a matched admitted-set
-or region-sensitivity control. Do not add workers or inflate capacities from the
-raw ratio.
+observer items, identified the correction checkpoint recorded below. It was
+never evidence for workers or inflated capacities.
 
 Hard bounds did not fail: capacity drops/nonviable recipients stayed zero, all
 final debt converged, and retransmitted bytes were 0.10→0.38% of wire bytes.
@@ -2480,13 +2480,57 @@ The new age-of-information metric found a correctness/liveness issue hidden by
 ordinary delivery counters. Immediate state remained at p95 one authoritative
 step, but continuously dirty Near/Far relations retained visible versions about
 111 steps old at p95. Far p95 grew 1.80→8.07 seconds and input-ACK p95
-63.7→294.4 ms across the matrix. Replacing a pending version currently computes
-a new future phase and can repeatedly push cadence eligibility forward. The
-next correction should preserve the already-earned delivery deadline when a
-newer version supersedes pending state. AoI/fairness is sampled during the
+63.7→294.4 ms across the matrix. Replacing a pending version computed a new
+future phase and repeatedly pushed cadence eligibility forward. That evidence
+established the requirement to preserve the already-earned delivery deadline
+when a newer version supersedes pending state. AoI/fairness is sampled during the
 untimed 10-tick settle window; its compact histogram payload is reported
 separately (16.42 MiB at 4,096) so diagnostics do not contaminate tick timing or
 dominate process memory.
+
+The correction models pending latest-state as one recipient delivery obligation.
+An unsent same-lifetime/presence/tier payload coalesces in place without changing
+its sequence, age, cadence deadline, or list position. Once a sequence may have
+been observed through WorldState or a baseline cutoff, a newer value receives a
+fresh relation sequence while inheriting the next cadence opportunity advanced
+by the prior send. Old, lost, duplicate, rejected, and post-baseline proof cannot
+clear newer state. Presence, tier, and lifetime transitions retain their explicit
+requeue/tombstone/generation behavior.
+
+The corrected immutable matrix is
+[`network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.json`](../../_Benchmarks/Baselines/network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.json)
+with its readable
+[`matrix`](../../_Benchmarks/Baselines/network-v2-v3-sparse-ccu-coalescing-corrected-1024-4096-2026-08-17.md).
+It repeats all 13 populations under unchanged capacities and cadence. Every row
+matches canonical owner state; capacity drops, nonviable recipients, and illegal
+same-tier deadline deferrals are zero. Immediate/Near/Far p95 freshness is now
+exactly 1/2/3 authoritative steps at every scale.
+
+Selected corrected timing and work are:
+
+```text
+CCU     V2 p95    V3 p95    V3 records    V3 wire
+1024     6.988     22.433      3.492M       191.9 MiB
+2048    14.569     52.080      7.743M       410.4 MiB
+2560    18.624     71.790      9.900M       519.5 MiB
+3072    23.288     86.799     12.012M       629.7 MiB
+4096    32.062    121.154     16.291M       845.9 MiB
+```
+
+At 4,096, 38.104M writes now classify exactly as 462K new obligations,
+21.813M unsent coalesces, and 15.829M exposed-sequence supersessions. They use
+16.291M sequence allocations and zero pending-list relinks in this stable sparse
+shape. All 37.641M same-tier rewrites preserve their deadline; 16.285M sends
+advance it. The corrected machine emits 8.69x the pre-correction V3 records and
+4.24x the wire, explaining the p95 increase. This is required semantic work,
+not justification for wider queues or slower cadence: independent-unreliable
+occupancy peaks at 87.5%, with zero drops.
+
+The raw corrected 3.779x V3/V2 p95 at 4,096 remains a topology/representation
+observation. V3 maintains 343,396 relations versus 70,572 V2 observer items and
+now emits 3.11x the observer records. The next sparse checkpoint should isolate
+admitted-set/region-policy sensitivity and attribute the honest delivery cost;
+it should not optimize against the superseded starvation artifact.
 
 Protected profiles:
 

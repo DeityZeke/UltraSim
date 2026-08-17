@@ -180,7 +180,9 @@ public readonly record struct GameRecipientEntityRelationSnapshot(
     ulong KnownCanonicalVersion,
     ulong PendingCanonicalVersion,
     ulong PendingRelationSequence,
-    long EligibleAtMilliseconds);
+    long PendingSinceMilliseconds,
+    long EligibleAtMilliseconds,
+    bool PendingSequenceWasSent);
 
 /// <summary>Cold bounded diagnostics for the maintained-interest graph.</summary>
 public readonly record struct GameInterestSnapshot(
@@ -194,6 +196,14 @@ public readonly record struct GameInterestSnapshot(
     int OutstandingBundleCount,
     int NonviableRecipientCount,
     ulong PendingWrites,
+    ulong PendingObligationsCreated,
+    ulong PendingUnsentCoalesces,
+    ulong PendingSentSupersessions,
+    ulong RelationSequenceAllocations,
+    ulong PendingListRelinks,
+    ulong EligibilityDeadlinesPreserved,
+    ulong EligibilityDeadlinesAdvancedAfterSend,
+    ulong SameTierCoalescesMovedEligibilityLater,
     ulong UniqueSemanticConstructions,
     ulong SemanticRecordCopies,
     ulong SemanticBytesCopied,

@@ -79,6 +79,14 @@ public sealed class GameInterestService
     private ulong _nextRelationSequence = 1;
     private ulong _nextBundleId = 1;
     private ulong _pendingWrites;
+    private ulong _pendingObligationsCreated;
+    private ulong _pendingUnsentCoalesces;
+    private ulong _pendingSentSupersessions;
+    private ulong _relationSequenceAllocations;
+    private ulong _pendingListRelinks;
+    private ulong _eligibilityDeadlinesPreserved;
+    private ulong _eligibilityDeadlinesAdvancedAfterSend;
+    private ulong _sameTierCoalescesMovedEligibilityLater;
     private ulong _semanticConstructions;
     private ulong _semanticCopies;
     private ulong _semanticBytes;
@@ -319,8 +327,9 @@ public sealed class GameInterestService
 
     /// <summary>
     /// Copies one complete, sorted present-state cutoff for a recipient.
-    /// Existing pending sequences are reused so post-cutoff changes remain
-    /// distinguishable and baseline acknowledgement cannot clear newer debt.
+    /// Existing pending sequences are reused for the captured cutoff, then
+    /// conservatively marked exposed. A post-cutoff value therefore receives
+    /// a new sequence even if the baseline transport is later abandoned.
     /// </summary>
     public GameWorldBaselineCaptureStatus CopyRecipientBaseline(
         ParticipantId participant,
@@ -374,6 +383,18 @@ public sealed class GameInterestService
             int index = left.Entity.Index.CompareTo(right.Entity.Index);
             return index != 0 ? index : left.Entity.Generation.CompareTo(right.Entity.Generation);
         });
+
+        // Capture is the point after which this sequence may reach a client.
+        // Mark only after the complete cutoff has passed capacity validation;
+        // failed capture remains transactionally inert.
+        relation = _recipients[recipientIndex].RelationHead;
+        while (relation >= 0)
+        {
+            ref RelationState state = ref _relations[relation];
+            if (state.DesiredPresent && state.Pending && state.PendingPresent)
+                state.PendingSequenceWasSent = true;
+            relation = state.RecipientNext;
+        }
         return GameWorldBaselineCaptureStatus.Success;
     }
 
@@ -405,7 +426,8 @@ public sealed class GameInterestService
                 relation.KnownPresent = true;
             }
             if (relation.Pending && relation.PendingPresent &&
-                relation.PendingRelationSequence == item.RelationSequence)
+                relation.PendingRelationSequence == item.RelationSequence &&
+                relation.PendingCanonicalVersion == item.CanonicalVersion)
                 ClearPending(relationIndex);
         }
 
@@ -800,7 +822,9 @@ public sealed class GameInterestService
                 relation.KnownCanonicalVersion,
                 relation.Pending ? relation.PendingCanonicalVersion : 0,
                 relation.Pending ? relation.PendingRelationSequence : 0,
-                relation.EligibleAtMilliseconds);
+                relation.Pending ? relation.PendingSinceMilliseconds : 0,
+                relation.EligibleAtMilliseconds,
+                relation.Pending && relation.PendingSequenceWasSent);
         }
         destination[..count].Sort(static (left, right) =>
         {
@@ -826,6 +850,14 @@ public sealed class GameInterestService
             _bundleCount,
             _nonviableRecipients,
             _pendingWrites,
+            _pendingObligationsCreated,
+            _pendingUnsentCoalesces,
+            _pendingSentSupersessions,
+            _relationSequenceAllocations,
+            _pendingListRelinks,
+            _eligibilityDeadlinesPreserved,
+            _eligibilityDeadlinesAdvancedAfterSend,
+            _sameTierCoalescesMovedEligibilityLater,
             _semanticConstructions,
             _semanticCopies,
             _semanticBytes,
@@ -1314,30 +1346,86 @@ public sealed class GameInterestService
     private void MarkRelationPending(int relationIndex, bool present, ulong canonicalVersion, long now)
     {
         ref RelationState relation = ref _relations[relationIndex];
-        if (_nextRelationSequence == ulong.MaxValue)
+        GameInterestTier pendingTier = present ? relation.Tier : GameInterestTier.Immediate;
+        bool sameDeliveryClass = relation.Pending &&
+            relation.PendingPresent == present && relation.PendingTier == pendingTier;
+        if (sameDeliveryClass)
         {
-            MarkRecipientNonviable(relation.Recipient);
+            long eligibilityBefore = relation.EligibleAtMilliseconds;
+            if (!relation.PendingSequenceWasSent)
+            {
+                // No recipient could have observed this sequence. Replace the
+                // payload source in place: sequence, age, cadence deadline and
+                // intrusive-list position remain one delivery obligation.
+                relation.PendingCanonicalVersion = canonicalVersion;
+                SaturatingIncrement(ref _pendingWrites);
+                SaturatingIncrement(ref _eligibilityDeadlinesPreserved);
+                SaturatingIncrement(ref _pendingUnsentCoalesces);
+                if (relation.EligibleAtMilliseconds > eligibilityBefore)
+                    SaturatingIncrement(ref _sameTierCoalescesMovedEligibilityLater);
+                if (_attributionEnabled)
+                    SaturatingIncrement(ref _attributionPendingVersionRewrites);
+                return;
+            }
+
+            // A prior bundle may have been observed, rejected, lost, or still
+            // be awaiting proof. Fence it with a new relation sequence, while
+            // retaining the already-earned next cadence opportunity.
+            if (!TryAllocateRelationSequence(relation.Recipient, out ulong relationSequence))
+                return;
+            relation.PendingCanonicalVersion = canonicalVersion;
+            relation.PendingRelationSequence = relationSequence;
+            relation.PendingSequenceWasSent = false;
+            relation.HasSent = false;
+            relation.LastSentMilliseconds = 0;
+            SaturatingIncrement(ref _pendingWrites);
+            SaturatingIncrement(ref _eligibilityDeadlinesPreserved);
+            SaturatingIncrement(ref _pendingSentSupersessions);
+            if (relation.EligibleAtMilliseconds > eligibilityBefore)
+                SaturatingIncrement(ref _sameTierCoalescesMovedEligibilityLater);
+            if (_attributionEnabled)
+                SaturatingIncrement(ref _attributionPendingVersionRewrites);
             return;
         }
+
+        if (!TryAllocateRelationSequence(relation.Recipient, out ulong newRelationSequence))
+            return;
         if (relation.Pending)
         {
             if (_attributionEnabled) SaturatingIncrement(ref _attributionPendingVersionRewrites);
             UnlinkPending(relationIndex);
+            SaturatingIncrement(ref _pendingListRelinks);
         }
         else _pendingCount++;
         relation.Pending = true;
         relation.PendingPresent = present;
         relation.PendingCanonicalVersion = canonicalVersion;
-        relation.PendingRelationSequence = _nextRelationSequence++;
+        relation.PendingRelationSequence = newRelationSequence;
         relation.PendingSinceMilliseconds = now;
         relation.EligibleAtMilliseconds = ComputeEligibleAt(
-            present ? relation.Tier : GameInterestTier.Immediate,
+            pendingTier,
             now,
             relation.Recipient,
             relation.Entity);
+        relation.PendingSequenceWasSent = false;
         relation.HasSent = false;
-        LinkPending(relationIndex, EffectivePendingTier(in relation));
+        relation.LastSentMilliseconds = 0;
+        LinkPending(relationIndex, pendingTier);
         SaturatingIncrement(ref _pendingWrites);
+        SaturatingIncrement(ref _pendingObligationsCreated);
+    }
+
+    private bool TryAllocateRelationSequence(int recipientIndex, out ulong sequence)
+    {
+        sequence = 0;
+        if (_nextRelationSequence == ulong.MaxValue)
+        {
+            MarkRecipientNonviable(recipientIndex);
+            return false;
+        }
+        sequence = _nextRelationSequence++;
+        SaturatingIncrement(ref _relationSequenceAllocations);
+        return true;
     }
 
     private void ClearPending(int relationIndex)
@@ -1351,7 +1439,9 @@ public sealed class GameInterestService
         relation.PendingRelationSequence = 0;
         relation.PendingSinceMilliseconds = 0;
         relation.EligibleAtMilliseconds = 0;
+        relation.PendingSequenceWasSent = false;
         relation.HasSent = false;
+        relation.LastSentMilliseconds = 0;
         _pendingCount--;
     }
 
@@ -1364,6 +1454,7 @@ public sealed class GameInterestService
         if (!relation.Pending) return;
         UnlinkPending(relationIndex);
         LinkPending(relationIndex, EffectivePendingTier(in relation));
+        SaturatingIncrement(ref _pendingListRelinks);
     }
 
     private void LinkPending(int relationIndex, GameInterestTier tier)
@@ -1536,7 +1627,18 @@ public sealed class GameInterestService
                 relation.PendingCanonicalVersion,
                 relation.PendingPresent);
             relation.LastSentMilliseconds = now;
+            relation.PendingSequenceWasSent = true;
             relation.HasSent = true;
+            long nextEligibility = ComputeNextEligibilityAfterSend(
+                relation.PendingTier,
+                now,
+                relation.Recipient,
+                relation.Entity);
+            if (nextEligibility > relation.EligibleAtMilliseconds)
+            {
+                relation.EligibleAtMilliseconds = nextEligibility;
+                SaturatingIncrement(ref _eligibilityDeadlinesAdvancedAfterSend);
+            }
             count++;
             bytes += GameWorldStateRecord.MaximumEncodedBytes;
             SaturatingIncrement(ref _semanticCopies);
@@ -1796,6 +1898,21 @@ public sealed class GameInterestService
         long remainder = now % interval;
         long delay = phase >= remainder ? phase - remainder : interval - (remainder - phase);
         return delay > long.MaxValue - now ? long.MaxValue : now + delay;
+    }
+
+    private long ComputeNextEligibilityAfterSend(
+        GameInterestTier tier,
+        long now,
+        int recipientIndex,
+        ReplicationEntityId entity)
+    {
+        if (tier is GameInterestTier.Immediate or GameInterestTier.None) return now;
+        long next = ComputeEligibleAt(tier, now, recipientIndex, entity);
+        if (next > now) return next;
+        long interval = tier == GameInterestTier.Near
+            ? _profile.NearIntervalMilliseconds
+            : _profile.FarIntervalMilliseconds;
+        return interval > long.MaxValue - now ? long.MaxValue : now + interval;
     }
 
     private void RetireEntity(int entityIndex, long now)
@@ -2399,6 +2516,7 @@ public sealed class GameInterestService
         internal ulong PendingCanonicalVersion;
         internal long PendingSinceMilliseconds;
         internal long EligibleAtMilliseconds;
+        internal bool PendingSequenceWasSent;
         internal bool HasSent;
         internal long LastSentMilliseconds;
         internal GameInterestTier PendingTier;

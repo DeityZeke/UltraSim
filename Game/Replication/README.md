@@ -250,6 +250,22 @@ independent unreliable bundles: Game/Replication coalesces per relation, while
 Network merely carries arbitrary bounded relation subsets. Multiple bundles may
 be in flight; no application-RTT stop-and-wait exists.
 
+Pending latest-state is one delivery obligation, not a new scheduling object for
+every canonical write. A same-lifetime/presence/tier update coalesces an unsent
+payload in place, preserving its relation sequence, pending age, phased
+eligibility deadline, and intrusive-list position. Once a sequence has been put
+in a bundle—or captured into a baseline cutoff—a superseding value receives a
+new relation sequence so old proof cannot clear it, but retains the next cadence
+opportunity earned by the prior send. Near/Far eligibility advances only when a
+version is actually sent; same-tier coalescing must never move it later.
+Presence, tier, and lifetime changes continue through their explicit
+retier/tombstone/generation paths. Production snapshots separate new
+obligations, unsent coalesces, exposed-version supersessions, sequence
+allocations, relinks, preserved/advanced deadlines, and any illegal same-tier
+deadline deferral. Permanent tests cover skipped phase boundaries, continuous
+Near/Far dirtiness, old/lost/duplicate proof, baseline cutoffs, transitions,
+sequence exhaustion, and warmed zero allocation.
+
 `RemoteWorldStateServer` and `RemoteWorldStateClient` add one explicitly cold
 baseline transaction. The server copies a sorted complete present scope at a
 cutoff. The client admits its descriptor, stages reliable Bulk segments into a
