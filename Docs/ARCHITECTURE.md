@@ -61,8 +61,8 @@ authority through callback-scoped capabilities; hosts and clients never receive
 the ECS world as shared mutable state.
 
 Offline play remains server-authoritative. Its local semantic link avoids fake
-packetization while preserving the same authority/presentation separation now
-proved by the N0.4 remote ProtocolLoopback path.
+packetization while preserving the same authority/presentation separation proved
+by the accepted Network N0 OfflineDirect/ProtocolLoopback/UDP paths.
 
 ## Data and time boundaries
 
@@ -81,11 +81,11 @@ uncompromised performance baseline.
 
 ## Boundedness and allocation
 
-World, scheduler, command, lifecycle, content, persistence, and UI capacities are
-chosen explicitly. Hot paths use reserved unmanaged/native storage and avoid
-warmed managed allocation where their contract promises it. Capacity exhaustion
-is a named result or exception; it is not permission to allocate an unbounded
-fallback.
+World, scheduler, command, lifecycle, content, persistence, UI, Network, and
+future spatial-world capacities are chosen explicitly. Hot paths use reserved
+unmanaged/native or contiguous numeric storage and avoid warmed managed allocation
+where their contract promises it. Capacity exhaustion is a named result or
+exception; it is not permission to allocate an unbounded fallback.
 
 Managed collections remain acceptable in cold game composition and small
 derived/application indexes when their ownership and scale are explicit.
@@ -94,20 +94,26 @@ derived/application indexes when their ownership and scale are explicit.
 
 - `Kernels/ECS*`: ECS runtime and source generators.
 - `Kernels/Network`: dependency-clean Network V3 identities, lane contracts,
-  deterministic evidence controls, and eventually protocol/transport mechanisms.
+  protocol/security/reliability/transport mechanisms, and deterministic evidence
+  controls.
 - `Kernels/UI`: neutral view/model/action protocol.
 - `Server/Runtime`, `Server/Hosting`, `Server/Persistence`: authority,
   deployment, and durable save-set mechanics.
-- `Client/Core`, `Client/_Godot`: retained projection and rendering.
-- `Game/*`: concrete content, state, policy, and authoritative workflows.
+- `Client/Core`, `Client/Network`, `Client/_Godot`: retained projection, remote
+  delivery, and rendering.
+- `Game/*`: concrete content, state, policy, authoritative workflows, and
+  replication composition.
 - `_Tests`, `_Benchmarks`, `_Tools`: executable evidence and repository gates.
 - `_V2`: frozen historical/reference implementation, compiled only by explicit
   comparison projects.
 
-Network V3 is the active major layer. N0.0 evidence, N0.1 game-owned canonical
-projection/OfflineDirect, N0.2 bounded byte foundations, N0.3 secure reliable
-ProtocolLoopback, and N0.4 remote Admission/UI application binding are implemented.
-N0.5 real connected-UDP transport/session ownership and N0.6 bounded
-controlled-input/owner-state replication are also implemented. N0.7 AOI,
-recipient scheduling, and fanout are next. The remaining checkpoints are in
-[`Plans/NETWORK.md`](Plans/NETWORK.md).
+Network N0 is accepted as the current remote-authority reference, including
+bounded long-lived WorldState recovery and the measured dense/sparse evidence.
+Its final sparse experiments showed that steady-state replication scales much
+better than continuously mutating precise recipient/entity interest topology.
+The active major milestone is therefore [Terrain / World T0](Plans/TERRAIN.md):
+build a deterministic chunk-native world substrate with packed terrain/statics,
+derived dynamic membership, revisioned chunk publication, bounded dirty history,
+local streaming, and Godot rendering. [Network N1](Plans/NETWORK.md) is deferred
+until T0 proves those chunk/publication contracts, then will test recipient-to-
+chunk subscription/cursor replication against the frozen N0 relation graph.
