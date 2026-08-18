@@ -2656,6 +2656,44 @@ which preserves the connection, epoch, application session, AOI, and authority
 state while safely reclaiming old tombstone history. It remains separate from
 the aggregation decision.
 
+### N0.10 long-lived WorldState identity-ledger compaction — accepted opt-in checkpoint
+
+The retained client-side absence knowledge is a bounded stale-delivery ledger,
+not a permanently growable identity cache. The opt-in compaction path therefore
+uses the existing atomic WorldState baseline transaction as its reclamation
+boundary. `RemoteWorldStateClient` can derive a high-water mark from an explicit
+maximum-new-identities-while-waiting bound plus safety margin and emits one
+session/StateEpoch-fenced reliable Control request while pressure is outstanding.
+The request carries known, capacity, and active counts and grants no authority.
+
+`RemoteWorldStateCompactionScheduler` owns a fixed one-bit-per-recipient request
+set and starts maintenance baselines in deterministic round-robin order, with a
+fixed starts-per-tick budget. Duplicate and unknown requests do not grow a
+queue. The server captures the current recipient cutoff through the existing
+baseline machinery; a successful commit rebuilds client knowledge, advances the
+relation floor, and lets the server retire tombstone debt at or below that
+cutoff. Connection, security epoch, application session, AOI, authority, and
+Event-floor metadata remain owner-supplied and unchanged by the generic
+maintenance API. If pressure cannot be serviced, the existing fail-closed
+capacity/nonviable behavior remains in force.
+
+The 4,096-client calibration with `current10`, headroom 16, safety margin 16,
+and one start per tick produced 216 successful compactions in 600 measured
+ticks. The subsequent uninterrupted 55,800-tick (15 logical minute) run
+completed 10,596/10,596 maintenance baselines. Known identities remained
+bounded at p50/p95/max 77/79/82 of 112; pressure-to-start was 157/927/1,219
+ticks at p50/p95/max and baseline duration was 6/7/17 ticks. There were zero
+capacity drops, nonviable recipients, byte failures, rejected/timed-out/
+abandoned baselines, unfinished scheduler requests, pending relations, or
+outstanding bundles, with exact final canonical convergence. This accepts the
+compaction mechanism as an opt-in lifetime checkpoint; it does not make the
+overloaded 4K profile a 60 Hz CPU-feasibility result.
+
+The immutable acceptance artifact is
+[`network-v3-sparse-worldstate-compaction-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-worldstate-compaction-2026-08-17.json)
+with its readable
+[`report`](../../_Benchmarks/Baselines/network-v3-sparse-worldstate-compaction-2026-08-17.md).
+
 Protected profiles:
 
 ```text

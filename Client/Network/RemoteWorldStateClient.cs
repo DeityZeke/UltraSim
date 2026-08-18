@@ -24,6 +24,29 @@ public readonly record struct RemoteWorldEntitySnapshot(
     int TickMarker,
     int InputVelocity);
 
+/// <summary>
+/// Evidence-derived identity headroom reserved between client pressure
+/// detection and the start of a maintenance baseline. A zero value disables
+/// automatic requests so existing callers remain explicitly opt-in.
+/// </summary>
+public readonly record struct RemoteWorldStateCompactionPolicy(
+    int MaximumNewIdentitiesWhileWaiting,
+    int SafetyMargin)
+{
+    public bool Enabled => MaximumNewIdentitiesWhileWaiting > 0 || SafetyMargin > 0;
+
+    internal int GetHighWaterMark(int maximumKnownIdentities)
+    {
+        if (!Enabled) return 0;
+        if (MaximumNewIdentitiesWhileWaiting <= 0 || SafetyMargin <= 0)
+            throw new ArgumentOutOfRangeException(nameof(MaximumNewIdentitiesWhileWaiting));
+        int reserved = checked(MaximumNewIdentitiesWhileWaiting + SafetyMargin);
+        if (reserved >= maximumKnownIdentities)
+            throw new ArgumentOutOfRangeException(nameof(MaximumNewIdentitiesWhileWaiting));
+        return maximumKnownIdentities - reserved;
+    }
+}
+
 public readonly record struct RemoteWorldStateClientSnapshot(
     StateEpoch StateEpoch,
     ulong BaselineRevision,
@@ -39,6 +62,11 @@ public readonly record struct RemoteWorldStateClientSnapshot(
     ulong RejectedBaselines,
     bool BaselineCandidateActive,
     bool IsFaulted,
+    int KnownIdentityCapacity,
+    int CompactionHighWaterMark,
+    bool CompactionRequestOutstanding,
+    ulong CompactionRequestSequence,
+    ulong CompactionRequestsSent,
     long ReservedBytes);
 
 /// <summary>Cold inspection of proofs produced since the previous flush boundary.</summary>
@@ -81,6 +109,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     private readonly byte[] _ackScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly int _knowledgeMapCapacity;
+    private readonly int _compactionHighWaterMark;
     private int _activeHigh;
     private int _activeCount;
     private int _freeSlotCount;
@@ -114,6 +143,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     private bool _candidateCommitReceived;
     private ulong _appliedBaselines;
     private ulong _rejectedBaselines;
+    private ulong _nextCompactionRequestSequence = 1;
+    private ulong _compactionRequestSequence;
+    private ulong _compactionRequestsSent;
+    private bool _compactionRequestOutstanding;
+    private bool _compactionRequestQueued;
 
     public RemoteWorldStateClient(
         NetworkProtocolPeer peer,
@@ -122,7 +156,8 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         int maximumKnownIdentities,
         int maximumActiveEntities,
         int maximumRecordsPerBundle = 32,
-        int maximumPendingAcknowledgements = 64)
+        int maximumPendingAcknowledgements = 64,
+        RemoteWorldStateCompactionPolicy compactionPolicy = default)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (applicationSessionEpoch == 0) throw new ArgumentOutOfRangeException(nameof(applicationSessionEpoch));
@@ -137,6 +172,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         _applicationSessionEpoch = applicationSessionEpoch;
         _stateEpoch = stateEpoch;
         _maximumKnownIdentities = maximumKnownIdentities;
+        _compactionHighWaterMark = compactionPolicy.GetHighWaterMark(maximumKnownIdentities);
         _knowledge = new Dictionary<uint, KnowledgeState>(maximumKnownIdentities);
         _knowledgeMapCapacity = _knowledge.EnsureCapacity(maximumKnownIdentities);
         _active = new RemoteWorldEntitySnapshot[maximumActiveEntities];
@@ -224,6 +260,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         if (!anyChange)
         {
             SaturatingIncrement(ref _duplicateBundles);
+            MaybeRequestCompaction();
             return RemoteWorldStateClientApplyStatus.Duplicate;
         }
 
@@ -235,6 +272,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         for (int index = 0; index < records.Length; index++)
             if (records[index].IsPresent) ApplyRecord(in records[index]);
         SaturatingIncrement(ref _appliedBundles);
+        MaybeRequestCompaction();
         return RemoteWorldStateClientApplyStatus.Applied;
     }
 
@@ -248,6 +286,28 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
             if (!TryQueueBaselineAcknowledgement(in _pendingBaselineAcknowledgement)) return false;
             _pendingBaselineAcknowledgement = default;
             _hasPendingBaselineAcknowledgement = false;
+        }
+        if (_compactionRequestOutstanding && !_compactionRequestQueued)
+        {
+            var request = new RemoteWorldStateCompactionRequestMessage
+            {
+                ApplicationSessionEpoch = _applicationSessionEpoch,
+                StateEpoch = _stateEpoch.Value,
+                RequestSequence = _compactionRequestSequence,
+                KnownIdentityCount = checked((uint)_knowledge.Count),
+                KnownIdentityCapacity = checked((uint)_maximumKnownIdentities),
+                ActiveEntityCount = checked((uint)_activeCount),
+            };
+            if (!RemoteWorldStateCompactionRequestMessageCodec.TryWriteExact(
+                    _ackScratch.AsSpan(0, RemoteWorldStateCompactionRequestMessageCodec.EncodedSize),
+                    in request) ||
+                _peer.TryQueue(
+                    RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Id,
+                    _ackScratch.AsSpan(0, RemoteWorldStateCompactionRequestMessageCodec.EncodedSize)) !=
+                    NetworkQueueStatus.Accepted)
+                return false;
+            _compactionRequestQueued = true;
+            SaturatingIncrement(ref _compactionRequestsSent);
         }
         while (_ackCount != 0)
         {
@@ -368,6 +428,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
             _rejectedBaselines,
             _candidateBaselineId != 0,
             _faulted,
+            _maximumKnownIdentities,
+            _compactionHighWaterMark,
+            _compactionRequestOutstanding,
+            _compactionRequestSequence,
+            _compactionRequestsSent,
             bytes);
     }
 
@@ -529,7 +594,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
             cancel.StateEpoch == _candidateStateEpoch.Value &&
             cancel.BaselineId == _candidateBaselineId;
         RetirePendingBaselineAcknowledgement(cancel.StateEpoch, cancel.BaselineId);
-        if (candidateMatches) ClearCandidate();
+        if (candidateMatches)
+        {
+            ClearCandidate();
+            if (_compactionRequestOutstanding) _compactionRequestQueued = false;
+        }
     }
 
     private void TryCommitCandidate()
@@ -608,6 +677,8 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         _eventFloor = _candidateEventFloor;
         _relationSequenceFloor = _candidateRelationSequenceFloor;
         SaturatingIncrement(ref _appliedBaselines);
+        _compactionRequestOutstanding = false;
+        _compactionRequestQueued = false;
         QueueBaselineAcknowledgement(RemoteWorldBaselineApplyStatus.Applied);
         ClearCandidate();
     }
@@ -615,6 +686,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     private void RejectCandidate(RemoteWorldBaselineApplyStatus status)
     {
         SaturatingIncrement(ref _rejectedBaselines);
+        if (_compactionRequestOutstanding) _compactionRequestQueued = false;
         QueueBaselineAcknowledgement(status);
         ClearCandidate();
     }
@@ -946,6 +1018,21 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         _appliedAcknowledgementsSinceFlush = 0;
         _rejectedAcknowledgementsSinceFlush = 0;
         _capacityAcknowledgementsSinceFlush = 0;
+    }
+
+    private void MaybeRequestCompaction()
+    {
+        if (_compactionHighWaterMark == 0 || _compactionRequestOutstanding ||
+            _knowledge.Count < _compactionHighWaterMark)
+            return;
+        if (_nextCompactionRequestSequence == ulong.MaxValue)
+        {
+            _faulted = true;
+            return;
+        }
+        _compactionRequestSequence = _nextCompactionRequestSequence++;
+        _compactionRequestOutstanding = true;
+        _compactionRequestQueued = false;
     }
 
     private static bool WithinSquaredDistance(

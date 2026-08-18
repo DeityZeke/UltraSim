@@ -65,6 +65,11 @@ Useful current anchors can be located by their embedded workload or filename:
   accounting, and the separately isolated `legacy128` versus `current10`
   reservation experiment. This artifact adopts 10 m and its derived bounds only
   for the admitted sparse comparison profile;
+- `network-v3-sparse-worldstate-compaction-2026-08-17.*` — 4,096-client,
+  15-logical-minute `current10` roaming acceptance for client-originated
+  known-identity pressure, fixed round-robin baseline admission, repeated
+  atomic compaction, bounded occupancy, exact convergence, and zero final
+  maintenance debt. It is an opt-in lifetime checkpoint, not a 60 Hz CPU claim;
 - `network-n0.8-atomic-world-baseline-*` — paired secure ProtocolLoopback/connected
   localhost UDP evidence for one bounded segmented baseline, private atomic client
   publication, application acknowledgement, allocation, and reservation;

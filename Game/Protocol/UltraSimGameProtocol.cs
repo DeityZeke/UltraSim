@@ -234,6 +234,21 @@ public partial struct RemoteWorldBaselineCancelMessage
     public ulong BaselineId;
 }
 
+/// <summary>
+/// Reliable client-originated pressure signal for the retained WorldState
+/// stale-delivery ledger. It grants no authority and is idempotent by sequence.
+/// </summary>
+[NetworkMessage(118, "ultrasim.game.world-compaction-request", 1, NetworkLane.Control)]
+public partial struct RemoteWorldStateCompactionRequestMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong RequestSequence;
+    public uint KnownIdentityCount;
+    public uint KnownIdentityCapacity;
+    public uint ActiveEntityCount;
+}
+
 /// <summary>One retained non-coalescible game fact on the reliable Event lane.</summary>
 [NetworkMessage(115, "ultrasim.game.application-event", 1, NetworkLane.Event)]
 public partial struct RemoteApplicationEventMessage
@@ -318,6 +333,7 @@ public static class UltraSimGameProtocol
             RemoteApplicationEventMessageCodec.Descriptor,
             RemoteApplicationEventAppliedMessageCodec.Descriptor,
             RemoteWorldBaselineCancelMessageCodec.Descriptor,
+            RemoteWorldStateCompactionRequestMessageCodec.Descriptor,
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;

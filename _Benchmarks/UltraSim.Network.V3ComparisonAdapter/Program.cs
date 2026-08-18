@@ -38,12 +38,39 @@ using var harness = new V3OwnerMovementHarness(
     options.SharedSocketIoMode,
     sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
     sparseCapacityMode: options.SparseCapacityMode,
-    unreliableFrameAggregation: options.UnreliableFrameAggregation);
+    unreliableFrameAggregation: options.UnreliableFrameAggregation,
+    compactionSettings: options.CompactionSettings);
 NetworkBotStageResult result = harness.Run();
 NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
+if (options.CompactionSettings.Enabled)
+{
+    bool compactionAccepted = CompactionAcceptancePassed(result);
+    Console.WriteLine($"N0.10 compaction acceptance: {compactionAccepted}");
+    if (!compactionAccepted)
+        throw new InvalidOperationException(
+            "Long-lived WorldState compaction run failed one or more bounded acceptance gates.");
+}
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
     $"ping p95 {result.PingMilliseconds.P95:F3} ms, reserved {result.ReservedNetworkBytes / 1048576d:F2} MiB");
 Console.WriteLine(Path.GetFullPath(options.Output));
+
+static bool CompactionAcceptancePassed(NetworkBotStageResult result)
+{
+    double Diagnostic(string key) => result.Diagnostics.TryGetValue(key, out double value) ? value : 0;
+    return result.CapacityDrops == 0 &&
+        Diagnostic("retained_payload_byte_capacity_failures") == 0 &&
+        Diagnostic("shared_listener_capacity_drops") == 0 &&
+        Diagnostic("world_state_nonviable_recipients") == 0 &&
+        Diagnostic("world_state_compaction_scheduler_pending") == 0 &&
+        Diagnostic("world_state_compaction_baselines_in_progress") == 0 &&
+        Diagnostic("world_state_compaction_requests_rejected") == 0 &&
+        Diagnostic("world_state_compaction_scheduler_requests_rejected") == 0 &&
+        Diagnostic("world_state_baselines_rejected") == 0 &&
+        Diagnostic("world_state_baselines_timed_out") == 0 &&
+        Diagnostic("world_state_baselines_abandoned") == 0 &&
+        Diagnostic("world_state_compaction_scheduler_started") ==
+            Diagnostic("world_state_baselines_applied");
+}
 
 static void RunPooledTail(AdapterOptions options, NetworkBotScenario scenario)
 {
@@ -79,7 +106,8 @@ static void RunPooledTail(AdapterOptions options, NetworkBotScenario scenario)
             options.SharedSocketIoMode,
             sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
             sparseCapacityMode: options.SparseCapacityMode,
-            unreliableFrameAggregation: options.UnreliableFrameAggregation);
+            unreliableFrameAggregation: options.UnreliableFrameAggregation,
+            compactionSettings: options.CompactionSettings);
         setupMilliseconds.Add(Stopwatch.GetElapsedTime(setupStarted).TotalMilliseconds);
         NetworkBotStageResult result = harness.Run();
         if (result.TickSamples is null || result.ServerPumpSamples is null)
@@ -312,7 +340,8 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
                 options.SharedSocketIoMode,
                 sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
                 sparseCapacityMode: options.SparseCapacityMode,
-                unreliableFrameAggregation: options.UnreliableFrameAggregation);
+                unreliableFrameAggregation: options.UnreliableFrameAggregation,
+                compactionSettings: options.CompactionSettings);
             NetworkBotStageResult measured = diagnostic.Run();
             observations.Add(new(pass == 0 ? "forward" : "reverse", order++, item, measured));
             Console.WriteLine($"DIAGNOSTIC {item.Id}/{(pass == 0 ? "forward" : "reverse")}: " +
@@ -493,6 +522,34 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         NetworkProtocolManifest.Create(
             11, SparseManifest.Messages.ToArray(),
             maximumUnreliableDataFramesPerDatagram: 7);
+    private static readonly NetworkProtocolManifest SparseCompactionManifest =
+        NetworkProtocolManifest.Create(
+            12,
+            [
+                InputDescriptor,
+                OwnerDescriptor,
+                PingDescriptor,
+                PongDescriptor,
+                RemoteWorldStateBundleHeaderCodec.Descriptor with
+                {
+                    MaximumEncodedBytes = RemoteWorldStateBundleHeaderCodec.EncodedSize +
+                        SparseWorldRecordsPerBundle * RemoteWorldStateRecord.EncodedSize,
+                },
+                RemoteWorldStateAppliedMessageCodec.Descriptor,
+                RemoteWorldBaselineBeginMessageCodec.Descriptor,
+                RemoteWorldBaselineSegmentHeaderCodec.Descriptor with
+                {
+                    MaximumEncodedBytes = UltraSimGameProtocol.MaximumMessageBytes,
+                },
+                RemoteWorldBaselineCommitMessageCodec.Descriptor,
+                RemoteWorldBaselineAppliedMessageCodec.Descriptor,
+                RemoteWorldBaselineCancelMessageCodec.Descriptor,
+                RemoteWorldStateCompactionRequestMessageCodec.Descriptor,
+            ]);
+    private static readonly NetworkProtocolManifest SparseCompactionAggregatedManifest =
+        NetworkProtocolManifest.Create(
+            13, SparseCompactionManifest.Messages.ToArray(),
+            maximumUnreliableDataFramesPerDatagram: 7);
     private static readonly NetworkProtocolLimits ProtocolLimits = new(
         MaximumReliableMessages: 8,
         MaximumReceivedMessages: 8,
@@ -543,6 +600,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly NetworkProtocolManifest _manifest;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly bool _unreliableFrameAggregation;
+    private readonly SparseCompactionSettings _compactionSettings;
     private readonly SparseObserverWorkload? _observer;
     private readonly V3CadenceProfile? _cadence;
     private readonly int _activeBots;
@@ -565,9 +623,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         V3CadenceProfile? cadence = null,
         int sparseRegionEdgeMillimeters = 10_000,
         SparseCapacityMode sparseCapacityMode = SparseCapacityMode.Auto,
-        bool unreliableFrameAggregation = false)
+        bool unreliableFrameAggregation = false,
+        SparseCompactionSettings compactionSettings = default)
     {
         _scenario = scenario.Validate();
+        compactionSettings.Validate();
         _topology = topology;
         _sharedSocketIoMode = sharedSocketIoMode;
         _profile = profile.Validate();
@@ -579,8 +639,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             throw new ArgumentOutOfRangeException(nameof(sparseRegionEdgeMillimeters));
         _sparseRegionEdgeMillimeters = sparseRegionEdgeMillimeters;
         _unreliableFrameAggregation = unreliableFrameAggregation;
+        _compactionSettings = compactionSettings;
         _manifest = scenario.ObserverState
-            ? unreliableFrameAggregation ? SparseAggregatedManifest : SparseManifest
+            ? compactionSettings.Enabled
+                ? unreliableFrameAggregation ? SparseCompactionAggregatedManifest : SparseCompactionManifest
+                : unreliableFrameAggregation ? SparseAggregatedManifest : SparseManifest
             : Manifest;
         _protocolLimits = scenario.ObserverState
             ? unreliableFrameAggregation ? SparseAggregatedProtocolLimits : SparseProtocolLimits
@@ -646,7 +709,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _observer = new SparseObserverWorkload(
                 scenario, _bots, PumpAll, SparseApplicationEpoch,
                 SparseWorldRecordsPerBundle, SparseWorldByteBudget,
-                _sparseRegionEdgeMillimeters, sparseCapacityMode);
+                _sparseRegionEdgeMillimeters, sparseCapacityMode, compactionSettings);
             _observer.DrainInitialState();
         }
         for (int tick = 0; tick < scenario.SettleTicks; tick++)
@@ -892,6 +955,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
                 }
             }
+            _observer?.ObserveCompactionProgress(checked((int)authoritySteps));
             long end = Stopwatch.GetTimestamp();
 
             if (_profile.DeepTiming && _cadence is null)
@@ -1016,6 +1080,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             PumpAll(2);
             for (int index = 0; index < _bots.Length; index++)
                 ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
+            _observer?.ObserveCompactionProgress(
+                checked(_scenario.StageTicks + settle + 1));
             _observer?.ScanFreshness(
                 checked(_scenario.StageTicks + settle + 1), measure: true);
             PumpAll(1);
@@ -1943,6 +2009,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         private readonly GameInterestProfile _profile;
         private readonly GameInterestService _interest;
         private readonly SparseCapacityBounds _capacity;
+        private readonly SparseCompactionSettings _compactionSettings;
+        private readonly RemoteWorldStateCompactionScheduler? _compactionScheduler;
         private readonly ReplicationSpatialPoint[] _positions;
         private readonly ulong[] _versions;
         private readonly long[] _createdAtByAuthorityTick;
@@ -1956,7 +2024,17 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             new(1, 2_048, percentileBucketOffset: 0);
         private readonly LatencyHistogram _farTicks =
             new(1, 2_048, percentileBucketOffset: 0);
+        private readonly LatencyHistogram _knownIdentityCounts;
+        private readonly LatencyHistogram _compactionPressureToStartTicks =
+            new(1, 4_096, percentileBucketOffset: 0);
+        private readonly LatencyHistogram _compactionBaselineDurationTicks =
+            new(1, 4_096, percentileBucketOffset: 0);
         private readonly LatencyHistogram[] _clientFreshness;
+        private readonly ulong[] _lastCompactionRequestSequences;
+        private readonly ulong[] _lastBaselinesStarted;
+        private readonly ulong[] _lastBaselinesApplied;
+        private readonly int[] _compactionRequestTicks;
+        private readonly int[] _compactionStartTicks;
         private long _freshnessSamples;
         private int _maximumPending;
         private int _maximumOutstanding;
@@ -1972,15 +2050,22 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             int recordsPerBundle,
             int byteBudget,
             int regionEdgeMillimeters,
-            SparseCapacityMode capacityMode)
+            SparseCapacityMode capacityMode,
+            SparseCompactionSettings compactionSettings)
         {
             _scenario = scenario;
             _bots = bots;
             _pump = pump;
             _recordsPerBundle = recordsPerBundle;
             _byteBudget = byteBudget;
+            _compactionSettings = compactionSettings;
             _capacity = SparseCapacityBounds.Create(
-                capacityMode, regionEdgeMillimeters, scenario);
+                capacityMode, regionEdgeMillimeters, scenario, compactionSettings.Enabled);
+            if (compactionSettings.Enabled)
+                _compactionScheduler = new RemoteWorldStateCompactionScheduler(
+                    scenario.Clients, compactionSettings.MaximumStartsPerTick);
+            _knownIdentityCounts = new LatencyHistogram(
+                1, checked(_capacity.MaximumKnownIdentities + 1), percentileBucketOffset: 0);
             _scratch = new RemoteWorldEntitySnapshot[_capacity.MaximumActiveEntities];
             _profile = new GameInterestProfile(
                 RegionEdgeMillimeters: regionEdgeMillimeters,
@@ -2017,6 +2102,13 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _createdAtByAuthorityTick = new long[
                 checked(scenario.StageTicks + scenario.SettleTicks + 2_049)];
             _clientFreshness = new LatencyHistogram[scenario.Clients];
+            _lastCompactionRequestSequences = new ulong[scenario.Clients];
+            _lastBaselinesStarted = new ulong[scenario.Clients];
+            _lastBaselinesApplied = new ulong[scenario.Clients];
+            _compactionRequestTicks = new int[scenario.Clients];
+            _compactionStartTicks = new int[scenario.Clients];
+            Array.Fill(_compactionRequestTicks, -1);
+            Array.Fill(_compactionStartTicks, -1);
 
             for (int index = 0; index < bots.Length; index++)
             {
@@ -2051,12 +2143,17 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 bot.AttachWorldState(
                     new RemoteWorldStateServer(
                         bot.Server, _interest, Participant(index), applicationEpoch,
-                        recordsPerBundle, _capacity.MaximumBaselineRecords),
+                        recordsPerBundle, _capacity.MaximumBaselineRecords,
+                        compactionRequestSink: _compactionScheduler),
                     new RemoteWorldStateClient(
                         bot.Client, applicationEpoch, _interest.StateEpoch,
                         _capacity.MaximumKnownIdentities,
                         _capacity.MaximumActiveEntities,
-                        recordsPerBundle, 64));
+                        recordsPerBundle, 64,
+                        compactionPolicy: compactionSettings.Policy));
+                if (_compactionScheduler is not null &&
+                    !_compactionScheduler.TryRegister(Participant(index)))
+                    throw new InvalidOperationException("Sparse compaction scheduler registration exceeded its fixed bound.");
             }
         }
 
@@ -2093,6 +2190,22 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _maximumRelations = _interest.GetSnapshot().RelationCount;
             _maximumKnownIdentities = 0;
             _maximumActiveEntities = 0;
+            _knownIdentityCounts.Clear();
+            _compactionPressureToStartTicks.Clear();
+            _compactionBaselineDurationTicks.Clear();
+            if (_compactionScheduler is not null)
+            {
+                for (int index = 0; index < _bots.Length; index++)
+                {
+                    RemoteWorldStateClientSnapshot client = _bots[index].WorldClient!.GetSnapshot();
+                    RemoteWorldStateServerSnapshot server = _bots[index].WorldServer!.GetSnapshot();
+                    _lastCompactionRequestSequences[index] = client.CompactionRequestSequence;
+                    _lastBaselinesStarted[index] = server.BaselinesStarted;
+                    _lastBaselinesApplied[index] = server.BaselinesApplied;
+                    _compactionRequestTicks[index] = -1;
+                    _compactionStartTicks[index] = -1;
+                }
+            }
         }
 
         internal void UpdateChangedAuthority(int authorityTick)
@@ -2123,12 +2236,20 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         internal void Schedule(int authorityTick)
         {
             long now = SemanticMilliseconds(authorityTick);
+            ObserveCompactionProgress(authorityTick);
+            _compactionScheduler?.TryStartPending(TryStartCompaction);
+            ObserveCompactionProgress(authorityTick);
             for (int index = 0; index < _bots.Length; index++)
             {
+                RemoteWorldStateServer worldServer = _bots[index].WorldServer!;
+                if (worldServer.GetSnapshot().BaselineInProgress)
+                {
+                    _ = worldServer.TryProgressBaseline();
+                    continue;
+                }
                 for (int bundle = 0; bundle < 2; bundle++)
                 {
-                    GameWorldStateBuildStatus status =
-                        _bots[index].WorldServer!.TrySchedule(now, _byteBudget);
+                    GameWorldStateBuildStatus status = worldServer.TrySchedule(now, _byteBudget);
                     if (status == GameWorldStateBuildStatus.Success) continue;
                     if (status is GameWorldStateBuildStatus.NoData or
                         GameWorldStateBuildStatus.TransportNotAccepting or
@@ -2142,6 +2263,31 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _maximumPending = Math.Max(_maximumPending, snapshot.PendingRelationCount);
             _maximumOutstanding = Math.Max(_maximumOutstanding, snapshot.OutstandingBundleCount);
             _maximumRelations = Math.Max(_maximumRelations, snapshot.RelationCount);
+        }
+
+        private RemoteWorldStateCompactionStartStatus TryStartCompaction(
+            ParticipantId participant,
+            in RemoteWorldStateCompactionRequestMessage request)
+        {
+            if (participant.Value == 0 || participant.Value > (ulong)_bots.Length)
+                return RemoteWorldStateCompactionStartStatus.Reject;
+            RemoteWorldStateServer server = _bots[checked((int)participant.Value - 1)].WorldServer!;
+            if (!server.IsCurrentCompactionRequest(in request))
+                return RemoteWorldStateCompactionStartStatus.Reject;
+            RemoteWorldBaselineProgressStatus status = server.TryBeginCompactionBaseline(
+                eventFloor: 0,
+                recordsPerSegment: checked((ushort)_recordsPerBundle));
+            return status switch
+            {
+                RemoteWorldBaselineProgressStatus.AwaitingClientPreparation or
+                RemoteWorldBaselineProgressStatus.Progressed or
+                RemoteWorldBaselineProgressStatus.CompleteAwaitingApplication =>
+                    RemoteWorldStateCompactionStartStatus.Started,
+                RemoteWorldBaselineProgressStatus.AlreadyActive or
+                RemoteWorldBaselineProgressStatus.TransportBackpressure =>
+                    RemoteWorldStateCompactionStartStatus.Retry,
+                _ => RemoteWorldStateCompactionStartStatus.Reject,
+            };
         }
 
         internal void ScanFreshness(int authorityTick, bool measure)
@@ -2191,6 +2337,43 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             }
         }
 
+        internal void ObserveCompactionProgress(int authorityTick)
+        {
+            if (_compactionScheduler is null) return;
+            for (int index = 0; index < _bots.Length; index++)
+            {
+                RemoteWorldStateClientSnapshot client = _bots[index].WorldClient!.GetSnapshot();
+                RemoteWorldStateServerSnapshot server = _bots[index].WorldServer!.GetSnapshot();
+                _knownIdentityCounts.Observe(client.KnownIdentityCount);
+                if (client.CompactionRequestOutstanding &&
+                    client.CompactionRequestSequence != _lastCompactionRequestSequences[index])
+                {
+                    _lastCompactionRequestSequences[index] = client.CompactionRequestSequence;
+                    _compactionRequestTicks[index] = authorityTick;
+                }
+                if (server.BaselinesStarted > _lastBaselinesStarted[index])
+                {
+                    _lastBaselinesStarted[index] = server.BaselinesStarted;
+                    if (_compactionRequestTicks[index] >= 0)
+                    {
+                        _compactionPressureToStartTicks.Observe(
+                            Math.Max(0, authorityTick - _compactionRequestTicks[index]));
+                        _compactionStartTicks[index] = authorityTick;
+                    }
+                }
+                if (server.BaselinesApplied > _lastBaselinesApplied[index])
+                {
+                    _lastBaselinesApplied[index] = server.BaselinesApplied;
+                    if (_compactionStartTicks[index] >= 0)
+                    {
+                        _compactionBaselineDurationTicks.Observe(
+                            Math.Max(0, authorityTick - _compactionStartTicks[index]));
+                        _compactionStartTicks[index] = -1;
+                    }
+                }
+            }
+        }
+
         internal SparseObserverMetrics CaptureMetrics()
         {
             GameInterestSnapshot snapshot = _interest.GetSnapshot();
@@ -2215,6 +2398,17 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             long adapterReserved = interest.ReservedBytes;
             ulong bundlesQueued = 0;
             ulong applicationAcks = 0;
+            ulong baselinesStarted = 0;
+            ulong baselinesApplied = 0;
+            ulong compactionRequestsReceived = 0;
+            ulong compactionRequestsRejected = 0;
+            ulong compactionRequestsSent = 0;
+            ulong baselineRecordsQueued = 0;
+            ulong baselineWireBytesQueued = 0;
+            ulong baselinesRejected = 0;
+            ulong baselinesTimedOut = 0;
+            ulong baselinesAbandoned = 0;
+            int baselineInProgress = 0;
             for (int index = 0; index < _bots.Length; index++)
             {
                 RemoteWorldStateServerSnapshot server = _bots[index].WorldServer!.GetSnapshot();
@@ -2222,6 +2416,21 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 adapterReserved = checked(adapterReserved + server.ReservedBytes + client.ReservedBytes);
                 bundlesQueued = checked(bundlesQueued + server.BundlesQueued);
                 applicationAcks = checked(applicationAcks + server.ApplicationAcknowledgements);
+                baselinesStarted = checked(baselinesStarted + server.BaselinesStarted);
+                baselinesApplied = checked(baselinesApplied + server.BaselinesApplied);
+                baselinesRejected = checked(baselinesRejected + server.BaselinesRejected);
+                baselinesTimedOut = checked(baselinesTimedOut + server.BaselinesTimedOut);
+                baselinesAbandoned = checked(baselinesAbandoned + server.BaselinesAbandoned);
+                baselineRecordsQueued = checked(baselineRecordsQueued + server.BaselineRecordsQueued);
+                baselineWireBytesQueued = checked(
+                    baselineWireBytesQueued + server.BaselineWireBytesQueued);
+                compactionRequestsReceived = checked(
+                    compactionRequestsReceived + server.CompactionRequestsReceived);
+                compactionRequestsRejected = checked(
+                    compactionRequestsRejected + server.CompactionRequestsRejected);
+                compactionRequestsSent = checked(
+                    compactionRequestsSent + client.CompactionRequestsSent);
+                if (server.BaselineInProgress) baselineInProgress++;
             }
             diagnostics["world_state_relations"] = interest.RelationCount;
             diagnostics["world_state_relations_max"] = _maximumRelations;
@@ -2274,6 +2483,47 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             diagnostics["world_state_bundles_applied"] = interest.BundlesApplied;
             diagnostics["world_state_adapter_bundles_queued"] = bundlesQueued;
             diagnostics["world_state_application_acknowledgements"] = applicationAcks;
+            RemoteWorldStateCompactionSchedulerSnapshot compaction =
+                _compactionScheduler?.GetSnapshot() ?? default;
+            diagnostics["world_state_compaction_enabled"] = _compactionSettings.Enabled ? 1 : 0;
+            diagnostics["world_state_compaction_headroom_identities"] =
+                _compactionSettings.MaximumNewIdentitiesWhileWaiting;
+            diagnostics["world_state_compaction_safety_margin_identities"] =
+                _compactionSettings.SafetyMargin;
+            diagnostics["world_state_compaction_maximum_starts_per_tick"] =
+                compaction.MaximumStartsPerTick;
+            diagnostics["world_state_compaction_scheduler_pending"] = compaction.PendingRequests;
+            diagnostics["world_state_compaction_scheduler_requests_accepted"] =
+                compaction.RequestsAccepted;
+            diagnostics["world_state_compaction_scheduler_duplicate_requests"] =
+                compaction.DuplicateRequests;
+            diagnostics["world_state_compaction_scheduler_requests_rejected"] =
+                compaction.RequestsRejected;
+            diagnostics["world_state_compaction_scheduler_started"] =
+                compaction.CompactionsStarted;
+            diagnostics["world_state_compaction_requests_received"] = compactionRequestsReceived;
+            diagnostics["world_state_compaction_requests_rejected"] = compactionRequestsRejected;
+            diagnostics["world_state_compaction_requests_sent"] = compactionRequestsSent;
+            diagnostics["world_state_baselines_started"] = baselinesStarted;
+            diagnostics["world_state_baselines_applied"] = baselinesApplied;
+            diagnostics["world_state_baselines_rejected"] = baselinesRejected;
+            diagnostics["world_state_baselines_timed_out"] = baselinesTimedOut;
+            diagnostics["world_state_baselines_abandoned"] = baselinesAbandoned;
+            diagnostics["world_state_baseline_records_queued"] = baselineRecordsQueued;
+            diagnostics["world_state_baseline_wire_bytes_queued"] = baselineWireBytesQueued;
+            diagnostics["world_state_compaction_baselines_in_progress"] = baselineInProgress;
+            NetworkMetricSummary knownIdentitySummary = _knownIdentityCounts.Summary();
+            NetworkMetricSummary pressureToStart = _compactionPressureToStartTicks.Summary();
+            NetworkMetricSummary baselineDuration = _compactionBaselineDurationTicks.Summary();
+            diagnostics["world_state_known_identities_p50"] = knownIdentitySummary.P50;
+            diagnostics["world_state_known_identities_p95"] = knownIdentitySummary.P95;
+            diagnostics["world_state_known_identities_max"] = knownIdentitySummary.Max;
+            diagnostics["world_state_compaction_pressure_to_start_p50_ticks"] = pressureToStart.P50;
+            diagnostics["world_state_compaction_pressure_to_start_p95_ticks"] = pressureToStart.P95;
+            diagnostics["world_state_compaction_pressure_to_start_max_ticks"] = pressureToStart.Max;
+            diagnostics["world_state_compaction_baseline_duration_p50_ticks"] = baselineDuration.P50;
+            diagnostics["world_state_compaction_baseline_duration_p95_ticks"] = baselineDuration.P95;
+            diagnostics["world_state_compaction_baseline_duration_max_ticks"] = baselineDuration.Max;
             diagnostics["game_replication_reserved_bytes"] = adapterReserved;
             diagnostics["game_replication_reserved_bytes_per_client"] =
                 adapterReserved / (double)_bots.Length;
@@ -2411,9 +2661,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     _bots[index].ProcessServer(_scenario.TickHz);
                 for (int index = 0; index < _bots.Length; index++)
                     _ = _bots[index].ProcessClient([], []);
+                ObserveCompactionProgress(checked(authorityTick + round));
                 _pump(1);
                 GameInterestSnapshot snapshot = _interest.GetSnapshot();
-                if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0)
+                if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0 &&
+                    CompactionDrained())
                     return;
                 if ((round & 15) == 15) Thread.Sleep(1);
             }
@@ -2421,6 +2673,17 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 initializeKnowledge
                     ? "Initial sparse observer state did not converge."
                     : "Sparse observer state did not converge after measurement.");
+        }
+
+        private bool CompactionDrained()
+        {
+            if (_compactionScheduler is not null &&
+                _compactionScheduler.GetSnapshot().PendingRequests != 0)
+                return false;
+            for (int index = 0; index < _bots.Length; index++)
+                if (_bots[index].WorldServer!.GetSnapshot().BaselineInProgress)
+                    return false;
+            return true;
         }
 
         private GameInterestTier Tier(
@@ -3343,8 +3606,16 @@ internal sealed record AdapterOptions(
     int SparseRegionEdgeMillimeters,
     SparseCapacityMode SparseCapacityMode,
     bool UnreliableFrameAggregation,
-    int PooledTailWindows)
+    int PooledTailWindows,
+    int SparseCompactionHeadroom,
+    int SparseCompactionSafetyMargin,
+    int SparseCompactionStartsPerTick)
 {
+    internal SparseCompactionSettings CompactionSettings => new(
+        SparseCompactionHeadroom,
+        SparseCompactionSafetyMargin,
+        SparseCompactionStartsPerTick);
+
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
         Get(args, "--scenario=") ?? "owner_movement",
@@ -3366,7 +3637,10 @@ internal sealed record AdapterOptions(
         ParseInt(Get(args, "--sparse-region-edge-mm="), 10_000),
         ParseSparseCapacityMode(Get(args, "--sparse-capacity-profile=")),
         Has(args, "--unreliable-frame-aggregation"),
-        ParseInt(Get(args, "--pooled-tail-windows="), 0));
+        ParseInt(Get(args, "--pooled-tail-windows="), 0),
+        ParseInt(Get(args, "--sparse-compaction-headroom="), 0),
+        ParseInt(Get(args, "--sparse-compaction-safety="), 0),
+        ParseInt(Get(args, "--sparse-compaction-starts-per-tick="), 0));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
@@ -3425,6 +3699,27 @@ internal enum SparseCapacityMode : byte
     Current10 = 2,
 }
 
+internal readonly record struct SparseCompactionSettings(
+    int MaximumNewIdentitiesWhileWaiting,
+    int SafetyMargin,
+    int MaximumStartsPerTick)
+{
+    internal bool Enabled => MaximumNewIdentitiesWhileWaiting > 0 ||
+        SafetyMargin > 0 || MaximumStartsPerTick > 0;
+
+    internal RemoteWorldStateCompactionPolicy Policy => new(
+        MaximumNewIdentitiesWhileWaiting, SafetyMargin);
+
+    internal void Validate()
+    {
+        if (!Enabled) return;
+        if (MaximumNewIdentitiesWhileWaiting <= 0 || SafetyMargin <= 0 ||
+            MaximumStartsPerTick <= 0)
+            throw new ArgumentOutOfRangeException(
+                "Sparse compaction requires positive headroom, safety margin, and starts-per-tick.");
+    }
+}
+
 internal readonly record struct SparseCapacityBounds(
     SparseCapacityMode Mode,
     int SteadyEnvelopeCells,
@@ -3438,7 +3733,8 @@ internal readonly record struct SparseCapacityBounds(
     internal static SparseCapacityBounds Create(
         SparseCapacityMode mode,
         int regionEdgeMillimeters,
-        NetworkBotScenario scenario)
+        NetworkBotScenario scenario,
+        bool allowLongLivedCompaction = false)
     {
         bool admitsCurrentWindow =
             regionEdgeMillimeters == 10_000 &&
@@ -3446,7 +3742,8 @@ internal readonly record struct SparseCapacityBounds(
             checked(scenario.StageTicks + scenario.SettleTicks) /
                 (double)scenario.TickHz <= 6;
         if (mode == SparseCapacityMode.Auto)
-            mode = admitsCurrentWindow
+            mode = (admitsCurrentWindow || allowLongLivedCompaction) &&
+                regionEdgeMillimeters == 10_000 && scenario.SpawnSpacingMeters >= 12
                 ? SparseCapacityMode.Current10
                 : SparseCapacityMode.Legacy128;
         int farCells = checked((39_500 + regionEdgeMillimeters - 1) /
@@ -3461,7 +3758,7 @@ internal readonly record struct SparseCapacityBounds(
                 calculatedBoundaryUnionCells,
                 Math.Max(0, 128 - calculatedBoundaryUnionCells),
                 128, 128, 128, 128);
-        if (!admitsCurrentWindow)
+        if (!admitsCurrentWindow && !allowLongLivedCompaction)
             throw new ArgumentException(
                 "The current10 sparse capacity profile requires the 10 m broadphase, " +
                 "at least 12 m spawn spacing, and a movement window no longer than six seconds.",

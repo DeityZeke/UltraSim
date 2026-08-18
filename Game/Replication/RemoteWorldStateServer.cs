@@ -21,6 +21,10 @@ public readonly record struct RemoteWorldStateServerSnapshot(
     bool BaselineInProgress,
     ulong ActiveBaselineId,
     GameWorldStateBuildStatus LastBuildStatus,
+    ulong CompactionRequestsReceived,
+    ulong CompactionRequestsRejected,
+    ulong BaselineRecordsQueued,
+    ulong BaselineWireBytesQueued,
     long ReservedBytes);
 
 /// <summary>Opt-in connection-adapter attribution; all values are cumulative Stopwatch ticks/counts.</summary>
@@ -83,6 +87,10 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     private ulong _baselinesRejected;
     private ulong _baselinesTimedOut;
     private ulong _baselinesAbandoned;
+    private ulong _compactionRequestsReceived;
+    private ulong _compactionRequestsRejected;
+    private ulong _baselineRecordsQueued;
+    private ulong _baselineWireBytesQueued;
     private uint _consecutiveBaselineTimeouts;
     private readonly Func<long> _monotonicMilliseconds;
     private readonly long _baselineTimeoutMilliseconds;
@@ -129,7 +137,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         int maximumBaselineRecords = 4_096,
         long baselineTimeoutMilliseconds = 10_000,
         uint maximumConsecutiveBaselineTimeouts = 2,
-        Func<long>? monotonicMilliseconds = null)
+        Func<long>? monotonicMilliseconds = null,
+        IRemoteWorldStateCompactionRequestSink? compactionRequestSink = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         _interest = interest ?? throw new ArgumentNullException(nameof(interest));
@@ -152,7 +161,10 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         _baselineTimeoutMilliseconds = baselineTimeoutMilliseconds;
         _maximumConsecutiveBaselineTimeouts = maximumConsecutiveBaselineTimeouts;
         _monotonicMilliseconds = monotonicMilliseconds ?? ReadEnvironmentTickCount64;
+        CompactionRequestSink = compactionRequestSink;
     }
+
+    private IRemoteWorldStateCompactionRequestSink? CompactionRequestSink { get; }
 
     /// <summary>
     /// Rebinds the connection-owned adapter to a freshly rebuilt projection
@@ -299,6 +311,31 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         return TryProgressBaseline();
     }
 
+    /// <summary>
+    /// Starts a maintenance baseline using the next connection-local revision.
+    /// Application-owned baselines should continue to call TryBeginBaseline
+    /// with their projection revision and Event floor explicitly.
+    /// </summary>
+    public RemoteWorldBaselineProgressStatus TryBeginCompactionBaseline(
+        ulong eventFloor = 0,
+        ushort recordsPerSegment = 32)
+    {
+        EnsureOwnerThread();
+        if (_lastBaselineRevision == ulong.MaxValue)
+            return RemoteWorldBaselineProgressStatus.SequenceExhausted;
+        return TryBeginBaseline(_lastBaselineRevision + 1, eventFloor, recordsPerSegment);
+    }
+
+    /// <summary>Checks whether an admitted client pressure request still names this projection.</summary>
+    public bool IsCurrentCompactionRequest(
+        in RemoteWorldStateCompactionRequestMessage request)
+    {
+        EnsureOwnerThread();
+        return request.ApplicationSessionEpoch == _applicationSessionEpoch &&
+            request.StateEpoch == _interest.StateEpoch.Value &&
+            request.RequestSequence != 0;
+    }
+
     /// <summary>Queues as much of the active reliable baseline transaction as current bounds admit.</summary>
     public RemoteWorldBaselineProgressStatus TryProgressBaseline()
     {
@@ -307,7 +344,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         if (!TryFlushBaselineCancellation())
             return RemoteWorldBaselineProgressStatus.TransportBackpressure;
         if (_baselineId == 0) return RemoteWorldBaselineProgressStatus.NoBaseline;
-        if (!_baselineBeginQueued)
+            if (!_baselineBeginQueued)
         {
             var begin = new RemoteWorldBaselineBeginMessage
             {
@@ -330,6 +367,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _baselineBeginQueued = true;
+            SaturatingAdd(ref _baselineRecordsQueued, checked((ulong)_baselineRecordCount));
+            SaturatingAdd(ref _baselineWireBytesQueued, checked((ulong)bytes));
             MarkBaselineProgress();
         }
 
@@ -354,6 +393,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _nextBaselineSegment++;
+            SaturatingAdd(ref _baselineRecordsQueued, checked((ulong)count));
+            SaturatingAdd(ref _baselineWireBytesQueued, checked((ulong)written));
             MarkBaselineProgress();
         }
 
@@ -374,6 +415,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _baselineCommitQueued = true;
+            SaturatingAdd(ref _baselineWireBytesQueued, checked((ulong)bytes));
             MarkBaselineProgress();
         }
         return RemoteWorldBaselineProgressStatus.CompleteAwaitingApplication;
@@ -406,6 +448,25 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwnerThread();
+        if (message.MessageId == RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Id)
+        {
+            if (!RemoteWorldStateCompactionRequestMessageCodec.TryReadExact(
+                    payload, out RemoteWorldStateCompactionRequestMessage request) ||
+                request.ApplicationSessionEpoch != _applicationSessionEpoch ||
+                request.StateEpoch != _interest.StateEpoch.Value ||
+                request.RequestSequence == 0 ||
+                request.KnownIdentityCapacity == 0 ||
+                request.KnownIdentityCount > request.KnownIdentityCapacity ||
+                request.ActiveEntityCount > request.KnownIdentityCount)
+            {
+                SaturatingIncrement(ref _compactionRequestsRejected);
+                SaturatingIncrement(ref _malformed);
+                return true;
+            }
+            SaturatingIncrement(ref _compactionRequestsReceived);
+            CompactionRequestSink?.AcceptCompactionRequest(_participant, in request);
+            return true;
+        }
         if (message.MessageId == RemoteWorldBaselineAppliedMessageCodec.Descriptor.Id)
         {
             ProcessBaselineAcknowledgement(payload);
@@ -453,6 +514,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
             _baselinesTimedOut, _baselinesAbandoned, _consecutiveBaselineTimeouts,
             _baselineId != 0 || _cancelBaselineId != 0,
             _baselineId != 0 ? _baselineId : _cancelBaselineId, _lastBuild,
+            _compactionRequestsReceived, _compactionRequestsRejected,
+            _baselineRecordsQueued, _baselineWireBytesQueued,
             checked(
                 (long)_records.Length * Unsafe.SizeOf<GameWorldStateRecord>() +
                 (long)_wireRecords.Length * Unsafe.SizeOf<RemoteWorldStateRecord>() +

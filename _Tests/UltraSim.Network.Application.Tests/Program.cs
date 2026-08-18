@@ -58,6 +58,9 @@ internal static class Program
             ("WorldStateApplicationProofIsReconstructibleUnderLoss", WorldStateApplicationProofIsReconstructibleUnderLoss),
             ("WarmedReconstructibleWorldStateProofAllocatesZero", WarmedReconstructibleWorldStateProofAllocatesZero),
             ("WorldStateTombstoneKnowledgeIsIndependentFromPresentation", WorldStateTombstoneKnowledgeIsIndependentFromPresentation),
+            ("WorldStateCompactionPressureQueuesOneFencedRequest", WorldStateCompactionPressureQueuesOneFencedRequest),
+            ("WorldStateCompactionSchedulerIsBoundedAndIdempotent", WorldStateCompactionSchedulerIsBoundedAndIdempotent),
+            ("WorldStateCompactionReclaimsKnowledgeAcrossCycles", WorldStateCompactionReclaimsKnowledgeAcrossCycles),
             ("WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder", WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder),
             ("ClientEntitySlotGenerationSurvivesBaselineShrinkAndRegrow", ClientEntitySlotGenerationSurvivesBaselineShrinkAndRegrow),
             ("WorldStateCapacityFailureMakesRecipientExplicitlyNonviable", WorldStateCapacityFailureMakesRecipientExplicitlyNonviable),
@@ -92,7 +95,7 @@ internal static class Program
             body();
             Console.WriteLine($"PASS {name}");
         }
-        Console.WriteLine($"All {tests.Length} Network N0.4 through N0.9 application tests passed.");
+        Console.WriteLine($"All {tests.Length} Network N0.4 through N0.10 application tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
             RunN09Benchmark(args);
         else if (args.Contains("--benchmark-n08", StringComparer.Ordinal))
@@ -759,6 +762,267 @@ static void WorldStateTombstoneKnowledgeIsIndependentFromPresentation()
         "Camera selection incorrectly changed retained network knowledge.");
     Equal(1, client.CopyPresentationCandidates(
         new ClientWorldPoint(100_000, 0), 1_000, visible));
+}
+
+static void WorldStateCompactionPressureQueuesOneFencedRequest()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, new StateEpoch(0x90A),
+        maximumKnownIdentities: 8, maximumActiveEntities: 8,
+        maximumRecordsPerBundle: 8,
+        compactionPolicy: new RemoteWorldStateCompactionPolicy(2, 2));
+
+    RemoteWorldStateRecord[] records =
+    [
+        WorldRecord(1, 1, 1, 1, true, 1),
+        WorldRecord(2, 2, 1, 1, true, 2),
+        WorldRecord(3, 3, 1, 1, true, 3),
+        WorldRecord(4, 4, 1, 1, true, 4),
+    ];
+    Equal(RemoteWorldStateClientApplyStatus.Applied, client.ApplyDecodedBundle(records));
+    RemoteWorldStateClientSnapshot pressured = client.GetSnapshot();
+    Equal(4, pressured.KnownIdentityCount);
+    Equal(4, pressured.CompactionHighWaterMark);
+    True(pressured.CompactionRequestOutstanding);
+    Equal(1UL, pressured.CompactionRequestSequence);
+
+    True(client.TryFlushAcknowledgements());
+    RemoteWorldStateClientSnapshot queued = client.GetSnapshot();
+    Equal(1UL, queued.CompactionRequestsSent);
+    True(queued.CompactionRequestOutstanding);
+    True(client.TryFlushAcknowledgements());
+    Equal(1UL, client.GetSnapshot().CompactionRequestsSent,
+        "Compaction pressure was emitted more than once before maintenance began.");
+
+    bool found = false;
+    for (int attempt = 0; attempt < 128 && !found; attempt++)
+    {
+        fixture.PumpTransport();
+        while (!found && fixture.ServerPeer.TryPeekReceived(
+                   out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload))
+        {
+            if (delivered.MessageId == RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Id)
+            {
+                True(RemoteWorldStateCompactionRequestMessageCodec.TryReadExact(
+                    payload, out RemoteWorldStateCompactionRequestMessage request));
+                Equal(fixture.ApplicationSessionEpoch, request.ApplicationSessionEpoch);
+                Equal(0x90AUL, request.StateEpoch);
+                Equal(1UL, request.RequestSequence);
+                Equal(4U, request.KnownIdentityCount);
+                Equal(8U, request.KnownIdentityCapacity);
+                Equal(4U, request.ActiveEntityCount);
+                found = true;
+            }
+            True(fixture.ServerPeer.TryConsumeReceived());
+        }
+    }
+    True(found, "The client did not deliver its bounded compaction request.");
+
+    // The policy is session/epoch fenced: a stale request must not be accepted
+    // by the connection adapter even if its payload is otherwise well formed.
+    var interest = new GameInterestService(
+        new StateEpoch(0x90A),
+        new GameInterestLimits(8, 2, 1_024, 1_024, 32, 8, 4),
+        GameInterestProfile.Reference);
+    var scheduler = new RemoteWorldStateCompactionScheduler(1, 1);
+    True(scheduler.TryRegister(new ParticipantId(41)));
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, new ParticipantId(41), fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 8,
+        compactionRequestSink: scheduler);
+    var stale = new RemoteWorldStateCompactionRequestMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = 0x90A,
+        RequestSequence = 2,
+        KnownIdentityCount = 4,
+        KnownIdentityCapacity = 8,
+        ActiveEntityCount = 4,
+    };
+    Span<byte> stalePayload = stackalloc byte[RemoteWorldStateCompactionRequestMessageCodec.EncodedSize];
+    True(RemoteWorldStateCompactionRequestMessageCodec.TryWriteExact(stalePayload, in stale));
+    True(server.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Id,
+        RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Version, default,
+        stalePayload.Length), stalePayload));
+    Equal(1, scheduler.GetSnapshot().PendingRequests);
+
+    stale.StateEpoch = 0x90B;
+    True(RemoteWorldStateCompactionRequestMessageCodec.TryWriteExact(stalePayload, in stale));
+    True(server.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Id,
+        RemoteWorldStateCompactionRequestMessageCodec.Descriptor.Version, default,
+        stalePayload.Length), stalePayload));
+    Equal(1UL, server.GetSnapshot().CompactionRequestsRejected);
+    Equal(1, scheduler.GetSnapshot().PendingRequests);
+
+    var replacement = new GameInterestService(
+        new StateEpoch(0x90B),
+        new GameInterestLimits(8, 2, 1_024, 1_024, 32, 8, 4),
+        GameInterestProfile.Reference);
+    server.ReplaceInterest(replacement);
+    Equal(0, scheduler.TryStartPending(RejectStaleAfterEpochSwap));
+    Equal(0, scheduler.GetSnapshot().PendingRequests);
+    Equal(1UL, scheduler.GetSnapshot().RequestsRejected);
+
+    RemoteWorldStateCompactionStartStatus RejectStaleAfterEpochSwap(
+        ParticipantId ignoredParticipant,
+        in RemoteWorldStateCompactionRequestMessage request) =>
+        server.IsCurrentCompactionRequest(in request)
+            ? RemoteWorldStateCompactionStartStatus.Started
+            : RemoteWorldStateCompactionStartStatus.Reject;
+}
+
+static void WorldStateCompactionSchedulerIsBoundedAndIdempotent()
+{
+    var scheduler = new RemoteWorldStateCompactionScheduler(3, maximumStartsPerTick: 1);
+    True(scheduler.TryRegister(new ParticipantId(41)));
+    True(scheduler.TryRegister(new ParticipantId(42)));
+    True(scheduler.TryRegister(new ParticipantId(43)));
+    var request = new RemoteWorldStateCompactionRequestMessage
+    {
+        ApplicationSessionEpoch = 77,
+        StateEpoch = 0x90A,
+        RequestSequence = 1,
+        KnownIdentityCount = 6,
+        KnownIdentityCapacity = 8,
+        ActiveEntityCount = 4,
+    };
+    scheduler.AcceptCompactionRequest(new ParticipantId(41), in request);
+    scheduler.AcceptCompactionRequest(new ParticipantId(42), in request);
+    scheduler.AcceptCompactionRequest(new ParticipantId(43), in request);
+    scheduler.AcceptCompactionRequest(new ParticipantId(41), in request);
+
+    RemoteWorldStateCompactionSchedulerSnapshot pending = scheduler.GetSnapshot();
+    Equal(3, pending.PendingRequests);
+    Equal(3UL, pending.RequestsAccepted);
+    Equal(1UL, pending.DuplicateRequests);
+    var started = new List<ulong>();
+    bool Start(ParticipantId participant, in RemoteWorldStateCompactionRequestMessage ignored)
+    {
+        started.Add(participant.Value);
+        return true;
+    }
+
+    Equal(1, scheduler.TryStartPending(Start));
+    Equal(1, started.Count);
+    Equal(41UL, started[0]);
+    Equal(1, scheduler.TryStartPending(Start));
+    Equal(42UL, started[1]);
+    Equal(1, scheduler.TryStartPending(Start));
+    Equal(43UL, started[2]);
+    Equal(0, scheduler.GetSnapshot().PendingRequests);
+    Equal(3UL, scheduler.GetSnapshot().CompactionsStarted);
+
+    // Unknown participants cannot consume admission capacity, and an invalid
+    // request cannot create an unbounded side queue.
+    scheduler.AcceptCompactionRequest(new ParticipantId(99), in request);
+    request.RequestSequence = 0;
+    scheduler.AcceptCompactionRequest(new ParticipantId(41), in request);
+    Equal(2UL, scheduler.GetSnapshot().RequestsRejected);
+    Equal(0, scheduler.GetSnapshot().PendingRequests);
+}
+
+static void WorldStateCompactionReclaimsKnowledgeAcrossCycles()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    StateEpoch epoch = new(0x90C);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
+        maximumKnownIdentities: 8, maximumActiveEntities: 4,
+        maximumRecordsPerBundle: 8,
+        compactionPolicy: new RemoteWorldStateCompactionPolicy(1, 2));
+
+    Equal(RemoteWorldStateClientApplyStatus.Applied, client.ApplyDecodedBundle(
+    [
+        WorldRecord(1, 1, 1, 1, true, 1),
+        WorldRecord(2, 2, 1, 1, true, 2),
+        WorldRecord(3, 3, 1, 1, false, 0),
+        WorldRecord(4, 4, 1, 1, false, 0),
+        WorldRecord(5, 5, 1, 1, false, 0),
+    ]));
+    True(client.GetSnapshot().CompactionRequestOutstanding);
+    True(client.TryFlushAcknowledgements());
+    ApplyBaseline(1, 1, 10, [WorldRecord(10, 1, 1, 2, true, 10)]);
+    Equal(1UL, client.GetSnapshot().AppliedBaselines);
+    Equal(1, client.GetSnapshot().KnownIdentityCount);
+    False(client.GetSnapshot().CompactionRequestOutstanding);
+    Equal(RemoteWorldStateClientApplyStatus.Duplicate,
+        client.ApplyDecodedBundle([WorldRecord(3, 3, 1, 2, true, 30)]));
+    Equal(1, client.GetSnapshot().KnownIdentityCount,
+        "A pre-compaction stale present was resurrected after the first cycle.");
+
+    Equal(RemoteWorldStateClientApplyStatus.Applied, client.ApplyDecodedBundle(
+    [
+        WorldRecord(20, 6, 1, 1, true, 20),
+        WorldRecord(21, 7, 1, 1, false, 0),
+        WorldRecord(22, 8, 1, 1, false, 0),
+        WorldRecord(23, 9, 1, 1, false, 0),
+    ]));
+    True(client.GetSnapshot().CompactionRequestOutstanding);
+    True(client.TryFlushAcknowledgements());
+    ApplyBaseline(2, 2, 30, [WorldRecord(30, 6, 1, 2, true, 30)]);
+    RemoteWorldStateClientSnapshot final = client.GetSnapshot();
+    Equal(2UL, final.AppliedBaselines);
+    Equal(2UL, final.CompactionRequestsSent);
+    Equal(1, final.KnownIdentityCount);
+    Equal(1, final.ActiveEntityCount);
+    False(final.CompactionRequestOutstanding);
+    Equal(RemoteWorldStateClientApplyStatus.Duplicate,
+        client.ApplyDecodedBundle([WorldRecord(20, 6, 1, 3, true, 40)]));
+
+    void ApplyBaseline(
+        ulong baselineId,
+        ulong revision,
+        ulong relationFloor,
+        ReadOnlySpan<RemoteWorldStateRecord> records)
+    {
+        ulong hash = UltraSimGameProtocol.ComputeWorldBaselineHash(records);
+        var begin = new RemoteWorldBaselineBeginMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = epoch.Value,
+            BaselineId = baselineId,
+            BaselineRevision = revision,
+            RelationSequenceFloor = relationFloor,
+            SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+            ContentHash = hash,
+            RecordCount = checked((uint)records.Length),
+            SegmentCount = 1,
+            RecordsPerSegment = checked((ushort)records.Length),
+        };
+        Span<byte> beginBytes = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(beginBytes, in begin));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default,
+            beginBytes.Length), beginBytes));
+        Span<byte> segment = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+            segment, fixture.ApplicationSessionEpoch, epoch.Value, baselineId,
+            0, 1, records, out int written));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Bulk, RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Id,
+            RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Version, default, written),
+            segment[..written]));
+        var commit = new RemoteWorldBaselineCommitMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = epoch.Value,
+            BaselineId = baselineId,
+            BaselineRevision = revision,
+            ContentHash = hash,
+        };
+        Span<byte> commitBytes = stackalloc byte[RemoteWorldBaselineCommitMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineCommitMessageCodec.TryWriteExact(commitBytes, in commit));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineCommitMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineCommitMessageCodec.Descriptor.Version, default,
+            commitBytes.Length), commitBytes));
+    }
 }
 
 static void WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder()

@@ -221,6 +221,30 @@ p50/p95/p99/p99.9/max. Window setup/reset time is reported separately and is not
 included in those primary samples. This is pooled-window aggregation evidence,
 not a continuous roaming-session lifetime claim; `current10` still enforces its
 six-second movement envelope in every window.
+
+The opt-in N0.10 lifetime-compaction probe enables long-lived `current10` only
+when all three bounded policy values are supplied:
+
+```text
+--sparse-compaction-headroom=<identities>
+--sparse-compaction-safety=<identities>
+--sparse-compaction-starts-per-tick=<starts>
+```
+
+The client requests maintenance when known-identity occupancy reaches
+`capacity - headroom - safety`; a fixed server scheduler admits at most the
+configured starts per tick. Results report known-identity p50/p95/max,
+pressure-to-start and baseline durations, baseline records/queued bytes,
+requests, rejected/timeout/cancel outcomes, and final scheduler debt. The
+flags are deliberately opt-in: no capacity is widened and ordinary sparse
+benchmarks retain the six-second `current10` evidence restriction. A long-lived
+run is accepted only when repeated compactions finish with zero capacity drops,
+nonviable recipients, byte failures, unfinished baselines, and exact
+convergence.
+The accepted 4,096-client, 15-logical-minute result is recorded in
+[`Baselines/network-v3-sparse-worldstate-compaction-2026-08-17.json`](Baselines/network-v3-sparse-worldstate-compaction-2026-08-17.json)
+with its readable
+[`report`](Baselines/network-v3-sparse-worldstate-compaction-2026-08-17.md).
 V3 visible-state AoI/fairness is sampled during the untimed 10-tick post-stage
 settle window. The result records both the sampling duration and compact
 histogram payload reservation, so freshness instrumentation is neither charged
