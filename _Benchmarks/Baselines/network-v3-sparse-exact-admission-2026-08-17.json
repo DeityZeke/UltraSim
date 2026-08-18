@@ -1,0 +1,25 @@
+{
+  "scenario": "sparse_observer_movement",
+  "clients": [1024, 2048, 4096],
+  "tick_hz": 62,
+  "input_hz": 20,
+  "stage_ticks": 310,
+  "settle_ticks": 10,
+  "spawn_spacing_m": 12,
+  "spawn_grid_width": 64,
+  "active_ratio": 0.35,
+  "region_edge_mm": 10000,
+  "topology": "shared-listener",
+  "socket_io": "platform-send-receive-batch",
+  "deep_timing": true,
+  "rows": [
+    {"clients":1024,"mode":"coarse-envelope","tick_p95_ms":19.196675,"server_role_p95_ms":9.9727013,"interest_update_p95_ms":1.673585,"world_state_schedule_p95_ms":0.828415,"server_protocol_p95_ms":7.35963135,"relations":48760,"exact_relations":33672,"coarse_only_relations":15088,"world_state_records":2453441,"wire_datagrams":485316,"wire_bytes":144973862,"input_ack_p95_ms":81.97356,"freshness_p95_ticks":[1,2,2],"capacity_drops":0,"nonviable_recipients":0,"canonical_owner_state_hash":"0f80374b1d4f0eb7"},
+    {"clients":1024,"mode":"exact-distance","tick_p95_ms":20.26612,"server_role_p95_ms":11.75214,"interest_update_p95_ms":4.1009,"world_state_schedule_p95_ms":0.64245,"server_protocol_p95_ms":6.99798315,"relations":33672,"exact_relations":33672,"coarse_only_relations":0,"world_state_records":1475049,"wire_datagrams":428676,"wire_bytes":99299232,"input_ack_p95_ms":84.39333,"freshness_p95_ticks":[1,1,2],"capacity_drops":0,"nonviable_recipients":0,"canonical_owner_state_hash":"0f80374b1d4f0eb7"},
+    {"clients":2048,"mode":"coarse-envelope","tick_p95_ms":41.68915,"server_role_p95_ms":22.10591955,"interest_update_p95_ms":4.591195,"world_state_schedule_p95_ms":1.93842,"server_protocol_p95_ms":15.3277904,"relations":103040,"exact_relations":70728,"coarse_only_relations":32312,"world_state_records":5266290,"wire_datagrams":921131,"wire_bytes":300091871,"input_ack_p95_ms":170.30145,"freshness_p95_ticks":[1,2,2],"capacity_drops":0,"nonviable_recipients":0,"canonical_owner_state_hash":"594d0a3c47498ebe"},
+    {"clients":2048,"mode":"exact-distance","tick_p95_ms":41.240915,"server_role_p95_ms":24.67136115,"interest_update_p95_ms":9.512495,"world_state_schedule_p95_ms":1.458945,"server_protocol_p95_ms":13.752,"relations":70728,"exact_relations":70728,"coarse_only_relations":0,"world_state_records":3139745,"wire_datagrams":754827,"wire_bytes":196834305,"input_ack_p95_ms":173.1751,"freshness_p95_ticks":[1,1,2],"capacity_drops":0,"nonviable_recipients":0,"canonical_owner_state_hash":"594d0a3c47498ebe"},
+    {"clients":4096,"mode":"coarse-envelope","tick_p95_ms":97.070305,"server_role_p95_ms":50.77946025,"interest_update_p95_ms":10.46996,"world_state_schedule_p95_ms":5.788905,"server_protocol_p95_ms":33.6355282,"relations":211600,"exact_relations":144840,"coarse_only_relations":66760,"world_state_records":10843509,"wire_datagrams":1759972,"wire_bytes":604708469,"input_ack_p95_ms":409.96145,"freshness_p95_ticks":[1,2,3],"capacity_drops":0,"nonviable_recipients":0,"canonical_owner_state_hash":"8892e044a40fd288"},
+    {"clients":4096,"mode":"exact-distance","tick_p95_ms":95.553145,"server_role_p95_ms":55.80964085,"interest_update_p95_ms":21.04121,"world_state_schedule_p95_ms":3.295045,"server_protocol_p95_ms":30.9381756,"relations":144840,"exact_relations":144840,"coarse_only_relations":0,"world_state_records":6469229,"wire_datagrams":1416681,"wire_bytes":392219117,"input_ack_p95_ms":410.22882,"freshness_p95_ticks":[1,2,2],"capacity_drops":0,"nonviable_recipients":0,"canonical_owner_state_hash":"8892e044a40fd288"}
+  ],
+  "decision": "reject-for-production-performance",
+  "reason": "Exact admission removes coarse-only relations and lowers protocol work, but full candidate reconciliation raises interest-update cost and worsens server-role p95 at every tested scale."
+}

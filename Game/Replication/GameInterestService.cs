@@ -23,6 +23,7 @@ public sealed class GameInterestService
 
     private readonly GameInterestLimits _limits;
     private readonly GameInterestProfile _profile;
+    private readonly GameInterestAdmissionMode _admissionMode;
     private readonly int _immediateCellRadius;
     private readonly int _nearCellRadius;
     private readonly int _farCellRadius;
@@ -175,15 +176,19 @@ public sealed class GameInterestService
     public GameInterestService(
         StateEpoch stateEpoch,
         GameInterestLimits limits = default,
-        GameInterestProfile profile = default)
+        GameInterestProfile profile = default,
+        GameInterestAdmissionMode admissionMode = GameInterestAdmissionMode.CoarseEnvelope)
     {
         if (!stateEpoch.IsValid) throw new ArgumentException("A valid projection epoch is required.", nameof(stateEpoch));
         if (limits == default) limits = GameInterestLimits.Default;
         if (profile == default) profile = GameInterestProfile.Reference;
         limits.Validate();
         profile.Validate();
+        if ((uint)admissionMode > (uint)GameInterestAdmissionMode.ExactDistance)
+            throw new ArgumentOutOfRangeException(nameof(admissionMode));
         _limits = limits;
         _profile = profile;
+        _admissionMode = admissionMode;
         _stateEpoch = stateEpoch;
         _immediateCellRadius = CandidateCellRadius(
             profile.ImmediateLeaveRadiusMillimeters, profile.RegionEdgeMillimeters);
@@ -1093,6 +1098,9 @@ public sealed class GameInterestService
 
     private GameInterestUpdateStatus ReconcileRecipientImmediate(int recipientIndex, long now)
     {
+        if (_admissionMode == GameInterestAdmissionMode.ExactDistance)
+            return ReconcileRecipientExact(recipientIndex, now);
+
         ref RecipientState recipient = ref _recipients[recipientIndex];
 
         // Only the exact R0 set needs exit reconciliation when an anchor moves;
@@ -1142,6 +1150,57 @@ public sealed class GameInterestService
                 }
             }
         }
+        return _recipients[recipientIndex].Nonviable
+            ? GameInterestUpdateStatus.RecipientNonviable
+            : GameInterestUpdateStatus.Success;
+    }
+
+    private GameInterestUpdateStatus ReconcileRecipientExact(int recipientIndex, long now)
+    {
+        ref RecipientState recipient = ref _recipients[recipientIndex];
+
+        // Exact admission makes every anchor move capable of changing every
+        // tier, including a Near/Far transition within one broadphase cell.
+        int relation = recipient.RelationHead;
+        while (relation >= 0)
+        {
+            int next = _relations[relation].RecipientNext;
+            _lastRelationsExamined++;
+            if (_relations[relation].EntityLinked)
+            {
+                int entityIndex = _relations[relation].EntitySlot;
+                int region = _entities[entityIndex].Region;
+                if (_regionEdgeMap.TryGetValue(
+                        new RecipientRegionKey(recipientIndex, region), out int edge))
+                    SetRelationTierAndPresence(relation, _regionEdges[edge].Tier, now);
+                else
+                    SetRelationAbsent(relation, now);
+            }
+            relation = next;
+        }
+
+        // Revisit all broadphase candidates so an entity that was previously
+        // outside exact scope can be admitted after the anchor moves.
+        int regionEdge = recipient.RegionEdgeHead;
+        while (regionEdge >= 0)
+        {
+            int nextEdge = _regionEdges[regionEdge].RecipientNext;
+            int entityIndex = _regions[_regionEdges[regionEdge].Region].EntityHead;
+            while (entityIndex >= 0)
+            {
+                int nextEntity = _entities[entityIndex].RegionNext;
+                _lastRelationsExamined++;
+                if (!EnsureDesiredRelation(
+                        recipientIndex, entityIndex, _regionEdges[regionEdge].Tier, now))
+                {
+                    MarkRecipientNonviable(recipientIndex);
+                    return GameInterestUpdateStatus.RecipientNonviable;
+                }
+                entityIndex = nextEntity;
+            }
+            regionEdge = nextEdge;
+        }
+
         return _recipients[recipientIndex].Nonviable
             ? GameInterestUpdateStatus.RecipientNonviable
             : GameInterestUpdateStatus.Success;
@@ -1863,7 +1922,20 @@ public sealed class GameInterestService
         if (WithinSquaredDistance(recipient.Anchor, entity.Position, radius) &&
             Allows(entity.Horizon, GameInterestTier.Immediate))
             return GameInterestTier.Immediate;
+        if (_admissionMode == GameInterestAdmissionMode.ExactDistance)
+            baseTier = ExactDistanceTier(recipient.Anchor, entity.Position);
         return Allows(entity.Horizon, baseTier) ? baseTier : GameInterestTier.None;
+    }
+
+    private GameInterestTier ExactDistanceTier(
+        in ReplicationSpatialPoint anchor,
+        in ReplicationSpatialPoint entity)
+    {
+        if (!WithinSquaredDistance(anchor, entity, _profile.FarRadiusMillimeters))
+            return GameInterestTier.None;
+        return WithinSquaredDistance(anchor, entity, _profile.NearRadiusMillimeters)
+            ? GameInterestTier.Near
+            : GameInterestTier.Far;
     }
 
     private static bool Allows(GameReplicationHorizon horizon, GameInterestTier tier)

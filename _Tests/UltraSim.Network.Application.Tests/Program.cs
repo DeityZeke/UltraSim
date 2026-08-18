@@ -54,6 +54,7 @@ internal static class Program
             ("ControlledStateMatchesAcrossLoopbackAndUdp", ControlledStateMatchesAcrossLoopbackAndUdp),
             ("ControlledAuthorityDespawnPublishesTombstone", ControlledAuthorityDespawnPublishesTombstone),
             ("WorldStateCodecIsCanonicalAndTransactional", WorldStateCodecIsCanonicalAndTransactional),
+            ("ExactAdmissionFiltersCoarseCandidatesAndTiersPrecisely", ExactAdmissionFiltersCoarseCandidatesAndTiersPrecisely),
             ("MaintainedWorldStateCrossesLoopbackWithApplicationAck", MaintainedWorldStateCrossesLoopbackWithApplicationAck),
             ("WorldStateApplicationProofIsReconstructibleUnderLoss", WorldStateApplicationProofIsReconstructibleUnderLoss),
             ("WarmedReconstructibleWorldStateProofAllocatesZero", WarmedReconstructibleWorldStateProofAllocatesZero),
@@ -556,6 +557,63 @@ static void WorldStateCodecIsCanonicalAndTransactional()
         encoded, 77, 81, 5, [invalidTombstone], out _));
 }
 
+static void ExactAdmissionFiltersCoarseCandidatesAndTiersPrecisely()
+{
+    var profile = new GameInterestProfile(
+        RegionEdgeMillimeters: 10_000,
+        ImmediateEnterRadiusMillimeters: 7_500,
+        ImmediateLeaveRadiusMillimeters: 7_500,
+        NearRadiusMillimeters: 23_500,
+        FarRadiusMillimeters: 39_500,
+        NearIntervalMilliseconds: 32,
+        FarIntervalMilliseconds: 48,
+        ApplicationAckRetryMilliseconds: 100,
+        ApplicationAckTimeoutMilliseconds: 2_000);
+    var interest = new GameInterestService(
+        new StateEpoch(0x711),
+        new GameInterestLimits(16, 2, 256, 256, 32, 8, 8),
+        profile,
+        GameInterestAdmissionMode.ExactDistance);
+    var participant = new ParticipantId(41);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(1, 1, 1), 1,
+            new ReplicationSpatialPoint(45_000, 0), GameReplicationHorizon.Far, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(2, 1, 2), 1,
+            new ReplicationSpatialPoint(30_000, 0), GameReplicationHorizon.Far, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 3), 1,
+            new ReplicationSpatialPoint(20_000, 0), GameReplicationHorizon.Far, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(4, 1, 4), 1,
+            new ReplicationSpatialPoint(2_000, 0), GameReplicationHorizon.Far, 0));
+
+    GameInterestSnapshot snapshot = interest.GetSnapshot();
+    Equal(3, snapshot.RelationCount,
+        "Exact admission retained a broadphase candidate outside the Far radius.");
+    Span<GameRecipientEntityRelationSnapshot> relations = stackalloc GameRecipientEntityRelationSnapshot[4];
+    Equal(3, interest.CopyRelations(relations));
+    Equal(2U, relations[0].Entity.Index);
+    Equal(GameInterestTier.Far, relations[0].Tier);
+    Equal(3U, relations[1].Entity.Index);
+    Equal(GameInterestTier.Near, relations[1].Tier);
+    Equal(4U, relations[2].Entity.Index);
+    Equal(GameInterestTier.Immediate, relations[2].Tier);
+
+    // A same-cell anchor move must both retier an admitted relation and admit
+    // a broadphase candidate that newly enters the exact Far circle.
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(8_000, 0), 1));
+    Equal(4, interest.GetSnapshot().RelationCount);
+    Equal(4, interest.CopyRelations(relations));
+    Equal(GameInterestTier.Far, relations[0].Tier);
+    Equal(1U, relations[0].Entity.Index);
+    Equal(GameInterestTier.Near, relations[1].Tier);
+    Equal(2U, relations[1].Entity.Index);
+}
+
 static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
 {
     using Fixture fixture = Fixture.CreateN06(default);
@@ -868,7 +926,7 @@ static void WorldStateCompactionPressureQueuesOneFencedRequest()
         new GameInterestLimits(8, 2, 1_024, 1_024, 32, 8, 4),
         GameInterestProfile.Reference);
     server.ReplaceInterest(replacement);
-    Equal(0, scheduler.TryStartPending(RejectStaleAfterEpochSwap));
+    Equal(0, scheduler.TryStartPending(0, RejectStaleAfterEpochSwap));
     Equal(0, scheduler.GetSnapshot().PendingRequests);
     Equal(1UL, scheduler.GetSnapshot().RequestsRejected);
 

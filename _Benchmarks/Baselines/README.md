@@ -65,6 +65,11 @@ Useful current anchors can be located by their embedded workload or filename:
   accounting, and the separately isolated `legacy128` versus `current10`
   reservation experiment. This artifact adopts 10 m and its derived bounds only
   for the admitted sparse comparison profile;
+- `network-v3-sparse-exact-admission-2026-08-17.*` — canonical 62 Hz/35%-active
+  coarse-envelope versus exact-distance admission at 1,024/2,048/4,096. Exact
+  admission removes coarse-only relations and lowers wire work, but its full
+  candidate reconciliation raises interest-update and server-role p95; it is
+  retained only as an opt-in diagnostic, not a production policy;
 - `network-v3-sparse-worldstate-compaction-2026-08-17.*` — 4,096-client,
   15-logical-minute `current10` roaming acceptance for client-originated
   known-identity pressure, fixed round-robin baseline admission, repeated

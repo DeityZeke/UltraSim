@@ -2698,6 +2698,38 @@ The immutable acceptance artifact is
 with its readable
 [`report`](../../_Benchmarks/Baselines/network-v3-sparse-worldstate-compaction-2026-08-17.md).
 
+### N0.11 sparse exact AOI admission/tiering — rejected performance experiment
+
+The cold scope census showed that the 10 m broadphase still maintained 66,760
+coarse-only relations at 4,096, so an opt-in `ExactDistance` admission mode was
+implemented. The region grid remains a candidate generator; exact squared
+distance determines Outside/Near/Far admission and tier, and exact-mode anchor
+moves reconcile both existing relations and broadphase candidates. The default
+`CoarseEnvelope` mode is unchanged.
+
+The canonical 62 Hz/35%-active 1,024/2,048/4,096 matrix removed the expected
+false-positive work, but did not earn retention as a production optimization:
+
+```text
+CCU     coarse server p95   exact server p95   coarse tick p95   exact tick p95
+1024          9.973              11.752              19.197             20.266 ms
+2048         22.106              24.671              41.689             41.241 ms
+4096         50.779              55.810              97.070             95.553 ms
+```
+
+At 4,096, exact admission removed 31.55% of maintained relations, 40.36% of
+WorldState records, and 35.14% of wire bytes. Interest-update p95 nevertheless
+doubled from 10.470 to 21.041 ms, leaving server-role p95 9.91% worse. All rows
+preserved canonical convergence, zero capacity/nonviable failures, and bounded
+freshness. This rejects the full-scan exact mode for production and closes the
+specific checkpoint; a future candidate-index design would need to avoid the
+per-anchor broadphase reconciliation cost before reopening it.
+
+The experiment artifact is
+[`network-v3-sparse-exact-admission-2026-08-17.json`](../../_Benchmarks/Baselines/network-v3-sparse-exact-admission-2026-08-17.json)
+with its readable
+[`report`](../../_Benchmarks/Baselines/network-v3-sparse-exact-admission-2026-08-17.md).
+
 Protected profiles:
 
 ```text

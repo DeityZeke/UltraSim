@@ -191,6 +191,13 @@ region sizes; the coordinator forwards the capacity option as
 Those probe-enabled rows are not directly comparable with ordinary probes-off
 timing or suitable for a joined V2/V3 canonical run.
 
+The sparse admission experiment also accepts `--sparse-exact-admission`. It
+keeps the 10 m region grid as a broadphase, then applies exact squared-distance
+admission and Near/Far classification before creating or updating relations.
+It is off by default. The canonical experiment found lower relation and wire
+work but higher interest-update and server-role p95, so the mode remains a
+diagnostic candidate-index checkpoint rather than a production policy.
+
 Every sparse V3 result performs a cold exact-scope census after measured work.
 It reports maintained/exact/coarse-only relations, coarse-vs-exact tiers,
 recipient-scope p50/p95/max, and its temporary allocation. The census is an

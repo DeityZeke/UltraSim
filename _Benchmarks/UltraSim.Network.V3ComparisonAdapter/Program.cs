@@ -38,6 +38,7 @@ using var harness = new V3OwnerMovementHarness(
     options.SharedSocketIoMode,
     sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
     sparseCapacityMode: options.SparseCapacityMode,
+    sparseExactAdmission: options.SparseExactAdmission,
     unreliableFrameAggregation: options.UnreliableFrameAggregation,
     compactionSettings: options.CompactionSettings);
 NetworkBotStageResult result = harness.Run();
@@ -106,6 +107,7 @@ static void RunPooledTail(AdapterOptions options, NetworkBotScenario scenario)
             options.SharedSocketIoMode,
             sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
             sparseCapacityMode: options.SparseCapacityMode,
+            sparseExactAdmission: options.SparseExactAdmission,
             unreliableFrameAggregation: options.UnreliableFrameAggregation,
             compactionSettings: options.CompactionSettings);
         setupMilliseconds.Add(Stopwatch.GetElapsedTime(setupStarted).TotalMilliseconds);
@@ -340,6 +342,7 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
                 options.SharedSocketIoMode,
                 sparseRegionEdgeMillimeters: options.SparseRegionEdgeMillimeters,
                 sparseCapacityMode: options.SparseCapacityMode,
+                sparseExactAdmission: options.SparseExactAdmission,
                 unreliableFrameAggregation: options.UnreliableFrameAggregation,
                 compactionSettings: options.CompactionSettings);
             NetworkBotStageResult measured = diagnostic.Run();
@@ -623,6 +626,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         V3CadenceProfile? cadence = null,
         int sparseRegionEdgeMillimeters = 10_000,
         SparseCapacityMode sparseCapacityMode = SparseCapacityMode.Auto,
+        bool sparseExactAdmission = false,
         bool unreliableFrameAggregation = false,
         SparseCompactionSettings compactionSettings = default)
     {
@@ -709,7 +713,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _observer = new SparseObserverWorkload(
                 scenario, _bots, PumpAll, SparseApplicationEpoch,
                 SparseWorldRecordsPerBundle, SparseWorldByteBudget,
-                _sparseRegionEdgeMillimeters, sparseCapacityMode, compactionSettings);
+                _sparseRegionEdgeMillimeters, sparseCapacityMode,
+                sparseExactAdmission
+                    ? GameInterestAdmissionMode.ExactDistance
+                    : GameInterestAdmissionMode.CoarseEnvelope,
+                compactionSettings);
             _observer.DrainInitialState();
         }
         for (int tick = 0; tick < scenario.SettleTicks; tick++)
@@ -2009,6 +2017,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         private readonly GameInterestProfile _profile;
         private readonly GameInterestService _interest;
         private readonly SparseCapacityBounds _capacity;
+        private readonly GameInterestAdmissionMode _admissionMode;
         private readonly SparseCompactionSettings _compactionSettings;
         private readonly RemoteWorldStateCompactionScheduler? _compactionScheduler;
         private readonly ReplicationSpatialPoint[] _positions;
@@ -2051,6 +2060,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             int byteBudget,
             int regionEdgeMillimeters,
             SparseCapacityMode capacityMode,
+            GameInterestAdmissionMode admissionMode,
             SparseCompactionSettings compactionSettings)
         {
             _scenario = scenario;
@@ -2058,6 +2068,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _pump = pump;
             _recordsPerBundle = recordsPerBundle;
             _byteBudget = byteBudget;
+            _admissionMode = admissionMode;
             _compactionSettings = compactionSettings;
             _capacity = SparseCapacityBounds.Create(
                 capacityMode, regionEdgeMillimeters, scenario, compactionSettings.Enabled);
@@ -2096,7 +2107,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         scenario.Clients * _capacity.MaximumRelationsPerRecipient),
                     MaximumOutstandingBundles: checked(scenario.Clients * 8),
                     MaximumRecordsPerBundle: recordsPerBundle),
-                _profile);
+                _profile,
+                _admissionMode);
             _positions = new ReplicationSpatialPoint[scenario.Clients];
             _versions = new ulong[scenario.Clients];
             _createdAtByAuthorityTick = new long[
@@ -2433,6 +2445,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 if (server.BaselineInProgress) baselineInProgress++;
             }
             diagnostics["world_state_relations"] = interest.RelationCount;
+            diagnostics["world_state_exact_admission_enabled"] =
+                _admissionMode == GameInterestAdmissionMode.ExactDistance ? 1 : 0;
             diagnostics["world_state_relations_max"] = _maximumRelations;
             diagnostics["world_state_pending_relations_final"] = interest.PendingRelationCount;
             diagnostics["world_state_pending_relations_max"] = _maximumPending;
@@ -3609,6 +3623,7 @@ internal sealed record AdapterOptions(
     string? CadenceCase,
     int SparseRegionEdgeMillimeters,
     SparseCapacityMode SparseCapacityMode,
+    bool SparseExactAdmission,
     bool UnreliableFrameAggregation,
     int PooledTailWindows,
     int SparseCompactionHeadroom,
@@ -3640,6 +3655,7 @@ internal sealed record AdapterOptions(
         Get(args, "--cadence-case="),
         ParseInt(Get(args, "--sparse-region-edge-mm="), 10_000),
         ParseSparseCapacityMode(Get(args, "--sparse-capacity-profile=")),
+        Has(args, "--sparse-exact-admission"),
         Has(args, "--unreliable-frame-aggregation"),
         ParseInt(Get(args, "--pooled-tail-windows="), 0),
         ParseInt(Get(args, "--sparse-compaction-headroom="), 0),

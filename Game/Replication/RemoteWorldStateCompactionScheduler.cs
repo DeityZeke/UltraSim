@@ -162,17 +162,12 @@ public sealed class RemoteWorldStateCompactionScheduler :
     }
 
     /// <summary>
-    /// Starts pending requests while allowing a caller to discard a request that
-    /// became stale after admission (for example, across a StateEpoch swap).
-    /// Retry leaves the fixed request bit set for a later tick.
-    /// </summary>
-    public int TryStartPending(RemoteWorldStateCompactionStarterV2 starter)
-        => TryStartPending(long.MaxValue, starter);
-
-    /// <summary>
-    /// Starts pending requests at a monotonic owner tick. The fixed
-    /// per-recipient interval bounds repeated client-requested maintenance even
-    /// when the global starts-per-tick budget has spare capacity.
+    /// Starts pending requests at a monotonic owner tick while allowing a
+    /// caller to discard a request that became stale after admission (for
+    /// example, across a StateEpoch swap). Retry leaves the fixed request bit
+    /// set for a later tick. The fixed per-recipient interval bounds repeated
+    /// client-requested maintenance even when the global starts-per-tick budget
+    /// has spare capacity.
     /// </summary>
     public int TryStartPending(
         long currentTick,

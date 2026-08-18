@@ -22,6 +22,13 @@ public enum GameInterestTier : byte
     Immediate = 3,
 }
 
+/// <summary>Controls whether the spatial broadphase is also the admitted relation set.</summary>
+public enum GameInterestAdmissionMode : byte
+{
+    CoarseEnvelope = 0,
+    ExactDistance = 1,
+}
+
 /// <summary>Farthest ordinary dynamic horizon admitted by one game replication family.</summary>
 public enum GameReplicationHorizon : byte
 {
