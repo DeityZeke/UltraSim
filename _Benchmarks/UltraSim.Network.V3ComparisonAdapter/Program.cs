@@ -2237,7 +2237,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         {
             long now = SemanticMilliseconds(authorityTick);
             ObserveCompactionProgress(authorityTick);
-            _compactionScheduler?.TryStartPending(TryStartCompaction);
+            _compactionScheduler?.TryStartPending(authorityTick, TryStartCompaction);
             ObserveCompactionProgress(authorityTick);
             for (int index = 0; index < _bots.Length; index++)
             {
@@ -2492,6 +2492,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 _compactionSettings.SafetyMargin;
             diagnostics["world_state_compaction_maximum_starts_per_tick"] =
                 compaction.MaximumStartsPerTick;
+            diagnostics["world_state_compaction_minimum_ticks_between_starts"] =
+                compaction.MinimumTicksBetweenStarts;
+            diagnostics["world_state_compaction_scheduler_rate_limited"] =
+                compaction.RequestsRateLimited;
             diagnostics["world_state_compaction_scheduler_pending"] = compaction.PendingRequests;
             diagnostics["world_state_compaction_scheduler_requests_accepted"] =
                 compaction.RequestsAccepted;

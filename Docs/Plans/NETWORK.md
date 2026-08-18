@@ -2669,7 +2669,11 @@ The request carries known, capacity, and active counts and grants no authority.
 `RemoteWorldStateCompactionScheduler` owns a fixed one-bit-per-recipient request
 set and starts maintenance baselines in deterministic round-robin order, with a
 fixed starts-per-tick budget. Duplicate and unknown requests do not grow a
-queue. The server captures the current recipient cutoff through the existing
+queue. A canceled or rejected compaction candidate is rearmed with a fresh
+request sequence; the scheduler continues to reject delayed copies of the old
+sequence. The owner-thread scheduler also applies a fixed per-recipient minimum
+interval between admitted starts, bounding repeated client-requested maintenance
+in addition to the global starts-per-tick budget. The server captures the current recipient cutoff through the existing
 baseline machinery; a successful commit rebuilds client knowledge, advances the
 relation floor, and lets the server retire tombstone debt at or below that
 cutoff. Connection, security epoch, application session, AOI, authority, and

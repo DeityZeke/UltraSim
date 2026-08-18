@@ -367,7 +367,6 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _baselineBeginQueued = true;
-            SaturatingAdd(ref _baselineRecordsQueued, checked((ulong)_baselineRecordCount));
             SaturatingAdd(ref _baselineWireBytesQueued, checked((ulong)bytes));
             MarkBaselineProgress();
         }

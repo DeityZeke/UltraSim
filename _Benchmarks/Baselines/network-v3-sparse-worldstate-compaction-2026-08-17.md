@@ -5,7 +5,7 @@ Scenario: `sparse_observer_movement`
 Clients: 4,096  
 Measured window: 55,800 ticks at 60 Hz (15 logical minutes) plus 60 untimed settle ticks  
 Topology: one shared UDP listener with platform send/receive batching  
-Capacity: explicit `current10`; 112 known identities and 67 active entities per client  
+Capacity: explicit `current10`; 112 known / 112 active capacity per client; observed active maximum 67
 Compaction policy: headroom 16, safety margin 16, one baseline start per tick  
 
 ## Result
@@ -27,7 +27,7 @@ capacity drops were all zero.
 | Server-role p50 / p95 / p99 / max | 156.105 / 172.456 / 178.493 / 360.475 ms |
 | Pressure → baseline start p50 / p95 / max | 157 / 927 / 1,219 ticks |
 | Baseline duration p50 / p95 / max | 6 / 7 / 17 ticks |
-| Baseline records queued | 1,220,090 |
+| Baseline records queued | 610,045 |
 | Baseline wire bytes queued | 27,762,282 |
 | Tick deadline misses | 55,800 / 55,800 |
 | Allocated bytes | 37,908,776,144 |

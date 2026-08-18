@@ -189,6 +189,14 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         _pendingAcknowledgements = new RemoteWorldStateAppliedMessage[maximumPendingAcknowledgements];
     }
 
+    /// <summary>Test-only injection for the request-sequence exhaustion boundary.</summary>
+    internal void SetNextCompactionRequestSequenceForTesting(ulong nextSequence)
+    {
+        EnsureOwnerThread();
+        if (nextSequence == 0) throw new ArgumentOutOfRangeException(nameof(nextSequence));
+        _nextCompactionRequestSequence = nextSequence;
+    }
+
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwnerThread();
@@ -597,7 +605,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         if (candidateMatches)
         {
             ClearCandidate();
-            if (_compactionRequestOutstanding) _compactionRequestQueued = false;
+            RearmCompactionRequest();
         }
     }
 
@@ -686,7 +694,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     private void RejectCandidate(RemoteWorldBaselineApplyStatus status)
     {
         SaturatingIncrement(ref _rejectedBaselines);
-        if (_compactionRequestOutstanding) _compactionRequestQueued = false;
+        RearmCompactionRequest();
         QueueBaselineAcknowledgement(status);
         ClearCandidate();
     }
@@ -1025,14 +1033,27 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         if (_compactionHighWaterMark == 0 || _compactionRequestOutstanding ||
             _knowledge.Count < _compactionHighWaterMark)
             return;
+        if (!TryAllocateCompactionRequestSequence()) return;
+        _compactionRequestOutstanding = true;
+        _compactionRequestQueued = false;
+    }
+
+    private void RearmCompactionRequest()
+    {
+        if (!_compactionRequestOutstanding) return;
+        if (!TryAllocateCompactionRequestSequence()) return;
+        _compactionRequestQueued = false;
+    }
+
+    private bool TryAllocateCompactionRequestSequence()
+    {
         if (_nextCompactionRequestSequence == ulong.MaxValue)
         {
             _faulted = true;
-            return;
+            return false;
         }
         _compactionRequestSequence = _nextCompactionRequestSequence++;
-        _compactionRequestOutstanding = true;
-        _compactionRequestQueued = false;
+        return true;
     }
 
     private static bool WithinSquaredDistance(

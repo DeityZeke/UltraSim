@@ -37301,7 +37301,7 @@
       "world_state_baselines_rejected": 0,
       "world_state_baselines_timed_out": 0,
       "world_state_baselines_abandoned": 0,
-      "world_state_baseline_records_queued": 1220090,
+      "world_state_baseline_records_queued": 610045,
       "world_state_baseline_wire_bytes_queued": 27762282,
       "world_state_compaction_baselines_in_progress": 0,
       "world_state_known_identities_p50": 77,

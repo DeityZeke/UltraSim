@@ -8,9 +8,11 @@ public readonly record struct RemoteWorldStateCompactionSchedulerSnapshot(
     int RegisteredRecipients,
     int PendingRequests,
     int MaximumStartsPerTick,
+    int MinimumTicksBetweenStarts,
     ulong RequestsAccepted,
     ulong DuplicateRequests,
     ulong RequestsRejected,
+    ulong RequestsRateLimited,
     ulong CompactionsStarted);
 
 /// <summary>Owner-thread sink for validated client compaction pressure.</summary>
@@ -48,6 +50,7 @@ public sealed class RemoteWorldStateCompactionScheduler :
 {
     private readonly Entry[] _entries;
     private readonly int _maximumStartsPerTick;
+    private readonly int _minimumTicksBetweenStarts;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private int _registeredRecipients;
     private int _pendingRequests;
@@ -55,18 +58,23 @@ public sealed class RemoteWorldStateCompactionScheduler :
     private ulong _requestsAccepted;
     private ulong _duplicateRequests;
     private ulong _requestsRejected;
+    private ulong _requestsRateLimited;
     private ulong _compactionsStarted;
 
     public RemoteWorldStateCompactionScheduler(
         int maximumRecipients,
-        int maximumStartsPerTick)
+        int maximumStartsPerTick,
+        int minimumTicksBetweenStarts = 30)
     {
         if (maximumRecipients <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumRecipients));
         if (maximumStartsPerTick <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumStartsPerTick));
+        if (minimumTicksBetweenStarts < 0)
+            throw new ArgumentOutOfRangeException(nameof(minimumTicksBetweenStarts));
         _entries = new Entry[maximumRecipients];
         _maximumStartsPerTick = maximumStartsPerTick;
+        _minimumTicksBetweenStarts = minimumTicksBetweenStarts;
     }
 
     public bool TryRegister(ParticipantId participant)
@@ -134,6 +142,7 @@ public sealed class RemoteWorldStateCompactionScheduler :
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(starter);
+        if (_pendingRequests == 0) return 0;
         int started = 0;
         int inspected = 0;
         while (inspected < _entries.Length && started < _maximumStartsPerTick)
@@ -158,9 +167,21 @@ public sealed class RemoteWorldStateCompactionScheduler :
     /// Retry leaves the fixed request bit set for a later tick.
     /// </summary>
     public int TryStartPending(RemoteWorldStateCompactionStarterV2 starter)
+        => TryStartPending(long.MaxValue, starter);
+
+    /// <summary>
+    /// Starts pending requests at a monotonic owner tick. The fixed
+    /// per-recipient interval bounds repeated client-requested maintenance even
+    /// when the global starts-per-tick budget has spare capacity.
+    /// </summary>
+    public int TryStartPending(
+        long currentTick,
+        RemoteWorldStateCompactionStarterV2 starter)
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(starter);
+        if (currentTick < 0) throw new ArgumentOutOfRangeException(nameof(currentTick));
+        if (_pendingRequests == 0) return 0;
         int started = 0;
         int inspected = 0;
         while (inspected < _entries.Length && started < _maximumStartsPerTick)
@@ -170,6 +191,13 @@ public sealed class RemoteWorldStateCompactionScheduler :
             inspected++;
             ref Entry entry = ref _entries[index];
             if (!entry.Registered || !entry.Pending) continue;
+            if (entry.HasStarted &&
+                (currentTick < entry.LastStartedTick ||
+                    currentTick - entry.LastStartedTick < _minimumTicksBetweenStarts))
+            {
+                SaturatingIncrement(ref _requestsRateLimited);
+                continue;
+            }
             RemoteWorldStateCompactionStartStatus status =
                 starter(entry.Participant, in entry.Request);
             if (status == RemoteWorldStateCompactionStartStatus.Retry) continue;
@@ -181,6 +209,8 @@ public sealed class RemoteWorldStateCompactionScheduler :
                 continue;
             }
             started++;
+            entry.HasStarted = true;
+            entry.LastStartedTick = currentTick;
             SaturatingIncrement(ref _compactionsStarted);
         }
         return started;
@@ -193,9 +223,11 @@ public sealed class RemoteWorldStateCompactionScheduler :
             _registeredRecipients,
             _pendingRequests,
             _maximumStartsPerTick,
+            _minimumTicksBetweenStarts,
             _requestsAccepted,
             _duplicateRequests,
             _requestsRejected,
+            _requestsRateLimited,
             _compactionsStarted);
     }
 
@@ -225,5 +257,7 @@ public sealed class RemoteWorldStateCompactionScheduler :
         internal ParticipantId Participant;
         internal ulong LastRequestSequence;
         internal RemoteWorldStateCompactionRequestMessage Request;
+        internal bool HasStarted;
+        internal long LastStartedTick;
     }
 }
