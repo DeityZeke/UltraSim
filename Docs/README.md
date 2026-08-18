@@ -18,8 +18,9 @@ reports live in git history. Accepted measurements live in immutable JSON under
   Godot presentation.
 - [Game](GAME.md) — concrete game composition, schema/content ownership,
   Accounting, Admission, and Inventory.
-- [Game replication](../Game/Replication/README.md) — N0.1 canonical projection,
-  capture/history, authoritative ingress, and OfflineDirect oracle.
+- [Game replication](../Game/Replication/README.md) — canonical projection,
+  capture/history, authoritative ingress, WorldState/Events, and the accepted N0
+  replication contracts.
 
 ## ECS
 
@@ -31,12 +32,20 @@ reports live in git history. Accepted measurements live in immutable JSON under
   - [lifecycle publication](../Kernels/ECS/LIFECYCLE.md)
   - [persistence](../Kernels/ECS/PERSISTENCE.md)
 
+## World / terrain
+
+- [Terrain / World T0 active plan](Plans/TERRAIN.md) — deterministic world/chunk
+  coordinates, packed terrain/statics, UO-like Multi/property composition,
+  dynamic chunk membership, revisioned chunk publication, bounded dirty history,
+  client streaming, Godot batching, and the playable woods/cabin vertical.
+
 ## Network
 
-- [Network kernel foundation](../Kernels/Network/README.md) — N0.0 contracts,
-  N0.2 bounded bytes, and N0.3 secure reliable ProtocolLoopback.
-- [Network V3 active plan](Plans/NETWORK.md) — accepted correctness-hardened N0.9
-  integrated vertical and active evidence-driven N0.10 scale specialization.
+- [Network kernel foundation](../Kernels/Network/README.md) — bounded byte,
+  protocol, reliability, security, and transport mechanisms accepted during N0.
+- [Network V3 N1 forward plan](Plans/NETWORK.md) — deferred chunk-native public
+  spatial replication. N1 begins only after T0 accepts its chunk/publication
+  contracts; current N0 remains the executable reference meanwhile.
 
 ## Evidence and tools
 
@@ -46,9 +55,15 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 ## Active plan
 
-- [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  N0.0 through N0.9 are accepted; N0.10 now measures and specializes proven
-  scale costs while refusing unearned shards, workers, or semantic degradation.
+- [Terrain / World T0](Plans/TERRAIN.md) is the active major implementation plan.
+  It builds the world-spatial substrate first: chunk identity and compact data,
+  terrain/statics/Multi streaming, dynamic membership, shared packed publication,
+  bounded dirty history, client rendering, persistence seams, and one playable
+  cabin vertical.
+- [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
+  N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0
+  sparse relation graph: snapshot on first interest, query bounded dirty history
+  thereafter, cadence by chunk tier, client-side fine public visibility.
 
 ## Source-of-truth hierarchy
 
