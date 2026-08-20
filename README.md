@@ -75,7 +75,9 @@ per-step behavior is an explicit documented choice.
 - `Game/*` — concrete game schema/content/state, authoritative workflows,
   canonical replication projection, and game-owned network application binding.
 - `_Tests`, `_Benchmarks`, `_Tools` — executable correctness, evidence, and gates.
-- `_V2` — frozen historical/reference source used only by explicit comparisons.
+- `_Archive/_V2` — frozen historical/reference source used only by explicit
+  comparisons. Other archived generations and reference material live beside it
+  under `_Archive` and are excluded from active Godot project discovery.
 
 Terrain T0 will add the first concrete game-owned world/spatial implementation;
 it does not create a generic world kernel before another game proves one is needed.

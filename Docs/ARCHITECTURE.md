@@ -104,8 +104,9 @@ derived/application indexes when their ownership and scale are explicit.
 - `Game/*`: concrete content, state, policy, authoritative workflows, and
   replication composition.
 - `_Tests`, `_Benchmarks`, `_Tools`: executable evidence and repository gates.
-- `_V2`: frozen historical/reference implementation, compiled only by explicit
-  comparison projects.
+- `_Archive/_V2`: frozen historical/reference implementation, compiled only by
+  explicit comparison projects. The rest of `_Archive` is likewise outside the
+  active project/build and Godot discovery surfaces.
 
 Network N0 is accepted as the current remote-authority reference, including
 bounded long-lived WorldState recovery and the measured dense/sparse evidence.

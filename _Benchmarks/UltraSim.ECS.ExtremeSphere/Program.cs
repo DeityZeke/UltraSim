@@ -280,7 +280,7 @@ static string FindRepositoryRoot()
     while (directory is not null)
     {
         if (Directory.Exists(Path.Combine(directory.FullName, "Kernels", "ECS")) &&
-            Directory.Exists(Path.Combine(directory.FullName, "_V2", "Kernels", "ECS")))
+            Directory.Exists(Path.Combine(directory.FullName, "_Archive", "_V2", "Kernels", "ECS")))
             return directory.FullName;
         directory = directory.Parent;
     }

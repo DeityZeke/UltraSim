@@ -1,3 +1,5 @@
+config_version=5
+
 [application]
 config/name="UltraSim S0.4 UI"
 run/main_scene="res://Demo.tscn"

@@ -11,8 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\UltraSim.ECS.ComparisonCore\UltraSim.ECS.ComparisonCore.csproj" />
-    <Compile Include="..\..\_V2\Kernels\ECS\**\*.cs"
-             Exclude="..\..\_V2\Kernels\ECS\bin\**\*.cs;..\..\_V2\Kernels\ECS\obj\**\*.cs" />
+    <Compile Include="..\..\_Archive\_V2\Kernels\ECS\**\*.cs"
+             Exclude="..\..\_Archive\_V2\Kernels\ECS\bin\**\*.cs;..\..\_Archive\_V2\Kernels\ECS\obj\**\*.cs" />
   </ItemGroup>
 
 </Project>

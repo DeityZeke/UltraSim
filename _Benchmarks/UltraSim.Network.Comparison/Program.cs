@@ -491,7 +491,7 @@ static string FindRepositoryRoot()
     while (current is not null)
     {
         if (File.Exists(Path.Combine(current.FullName, "README.md")) &&
-            Directory.Exists(Path.Combine(current.FullName, "_V2")) &&
+            Directory.Exists(Path.Combine(current.FullName, "_Archive", "_V2")) &&
             Directory.Exists(Path.Combine(current.FullName, "Kernels", "Network")))
             return current.FullName;
         current = current.Parent;

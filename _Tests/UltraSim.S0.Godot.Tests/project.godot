@@ -1,3 +1,5 @@
+config_version=5
+
 [application]
 config/name="UltraSim S0.8 Integrated UI Acceptance"
 run/main_scene="res://S08HeadlessAcceptance.tscn"

@@ -175,7 +175,9 @@ static void VerifyArchitecture(string root)
             .OrderBy(static path => path, StringComparer.Ordinal)
             .ToArray();
         string[] orderedAllowed = allowed.OrderBy(static path => path, StringComparer.Ordinal).ToArray();
-        if (references.Any(static path => path.StartsWith("_V2/", StringComparison.Ordinal)))
+        if (references.Any(static path =>
+                path.StartsWith("_V2/", StringComparison.Ordinal) ||
+                path.StartsWith("_Archive/_V2/", StringComparison.Ordinal)))
             throw new InvalidOperationException($"Active project '{project}' references frozen V2 source.");
         if (!references.SequenceEqual(orderedAllowed, StringComparer.Ordinal))
             throw new InvalidOperationException(

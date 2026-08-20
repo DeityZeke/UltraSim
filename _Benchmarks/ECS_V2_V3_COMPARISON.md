@@ -10,7 +10,8 @@ instrument, not a claim that internal representations or all capabilities match.
 
 - `UltraSim.ECS.ComparisonCore` owns the catalog, report schema, measurement,
   canonical writer/hash, and strict joiner.
-- `UltraSim.ECS.V2ComparisonAdapter` compiles frozen `_V2` in a child process.
+- `UltraSim.ECS.V2ComparisonAdapter` compiles frozen `_Archive/_V2` in a child
+  process.
 - `UltraSim.ECS.V3ComparisonAdapter` references current V3 in another child.
 - `UltraSim.ECS.Comparison` runs and joins them by stable scenario ID/scale.
 - comparison tests protect descriptors, hash sensitivity, mismatch suppression,

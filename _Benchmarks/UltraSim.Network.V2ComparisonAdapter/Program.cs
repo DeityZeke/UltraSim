@@ -6,7 +6,8 @@ using UltraSim.Network.Comparison;
 AdapterOptions options = AdapterOptions.Parse(args);
 NetworkBotScenario scenario = options.CreateScenario();
 string repository = FindRepositoryRoot();
-string v2Project = Path.Combine(repository, "_V2", "_Benchmarks",
+string v2Root = Path.Combine(repository, "_Archive", "_V2");
+string v2Project = Path.Combine(v2Root, "_Benchmarks",
     "UltraSim.Network.BotHarness", "UltraSim.Network.BotHarness.csproj");
 string temporary = Path.Combine(Path.GetTempPath(), "ultrasim-network-v2-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(temporary);
@@ -17,7 +18,7 @@ try
         UseShellExecute = false,
         RedirectStandardOutput = true,
         RedirectStandardError = true,
-        WorkingDirectory = Path.Combine(repository, "_V2"),
+        WorkingDirectory = v2Root,
     };
     start.Environment["DOTNET_TieredCompilation"] =
         Environment.GetEnvironmentVariable("DOTNET_TieredCompilation") ?? "0";
@@ -285,7 +286,7 @@ static string FindRepositoryRoot()
     while (current is not null)
     {
         if (File.Exists(Path.Combine(current.FullName, "README.md")) &&
-            Directory.Exists(Path.Combine(current.FullName, "_V2")) &&
+            Directory.Exists(Path.Combine(current.FullName, "_Archive", "_V2")) &&
             Directory.Exists(Path.Combine(current.FullName, "Kernels", "Network")))
             return current.FullName;
         current = current.Parent;

@@ -212,7 +212,7 @@ policy.
 ## Historical sparse V2 reference and current 1K–4K comparison
 
 The historical table the project previously used is
-[`aggregate.json`](../_V2/_Benchmarks/results/sharded_v1_shape_singlefamily_linux_1024_3072/sharded_20260428_032248/aggregate.json).
+[`aggregate.json`](../_Archive/_V2/_Benchmarks/results/sharded_v1_shape_singlefamily_linux_1024_3072/sharded_20260428_032248/aggregate.json).
 It used one server plus four client-worker processes, 30 measured seconds and a
 10-second settle per independent stage. Its exact server arguments also record
 62 Hz, 20 Hz phased input, 35% active, one observer movement family, the sparse

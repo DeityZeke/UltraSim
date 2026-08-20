@@ -263,11 +263,11 @@ This limitation is recorded rather than relabeling the editor host as an export.
 
 The historical implementation and intended test were found, including:
 
-- `_V2/_OLD/_OLD/Server/ECS/Systems/EntitySpawnerSystem.cs`;
-- `_V2/_OLD/_OLD/Server/ECS/Systems/OptimizedPulsingMovementSystem.cs`;
-- `_V2/_OLD/_OLD/Server/ECS/Systems/OptimizedMovementSystem.cs`;
-- `_V2/_OLD/_OLD/Client/ECS/Systems/AdaptiveMultiMeshRenderSystem.cs`;
-- `_V2/_OLD/_OLD/tests/OldECS.Tests/MovementBenchmarkTests.cs`.
+- `_Archive/_V2/_OLD/_OLD/Server/ECS/Systems/EntitySpawnerSystem.cs`;
+- `_Archive/_V2/_OLD/_OLD/Server/ECS/Systems/OptimizedPulsingMovementSystem.cs`;
+- `_Archive/_V2/_OLD/_OLD/Server/ECS/Systems/OptimizedMovementSystem.cs`;
+- `_Archive/_V2/_OLD/_OLD/Client/ECS/Systems/AdaptiveMultiMeshRenderSystem.cs`;
+- `_Archive/_V2/_OLD/_OLD/tests/OldECS.Tests/MovementBenchmarkTests.cs`.
 
 They confirm the remembered shape: on-demand random sphere-volume spawning,
 pulse/velocity work, movement work, a manual reusable thread pool, low-poly
