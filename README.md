@@ -87,8 +87,8 @@ profile. T0.1 accepted the persisted component wrapper and first game-owned,
 generation-coherent maintained spatial index after full-capacity migration and
 reference-model hardening, without creating a generic world storage kernel.
 T0.2 now proposes an evidence-backed compact terrain-height/foundation contract
-and is stopped for review. WorldPack loading, publication, and Network N1 remain
-later gates.
+using a per-chunk int32 base plus unsigned q5 offsets, and is stopped for review.
+WorldPack loading, publication, and Network N1 remain later gates.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

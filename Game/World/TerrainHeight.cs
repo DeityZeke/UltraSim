@@ -11,14 +11,17 @@ public static class TerrainChunkFormat
     public const int HeightVertexCount = HeightVertexEdge * HeightVertexEdge;
     public const int TriangleCount = MaterialCellCount * 2;
     public const int TriangleIndexCount = TriangleCount * 3;
-    public const int HeightQuantumMillimeters = 10;
-    public const int MinimumHeightMillimeters = short.MinValue * HeightQuantumMillimeters;
-    public const int MaximumHeightMillimeters = short.MaxValue * HeightQuantumMillimeters;
+    public const int HeightQuantumMillimeters = 5;
+    public const int MaximumHeightReliefMillimeters = ushort.MaxValue * HeightQuantumMillimeters;
+    public const int MinimumQuantizedHeightMillimeters = -2_147_483_645;
+    public const int MaximumQuantizedHeightMillimeters = 2_147_483_645;
     public const int MaterialPlaneBytes = MaterialCellCount * sizeof(ushort);
-    public const int HeightPlaneBytes = HeightVertexCount * sizeof(short);
+    public const int HeightPlaneBaseBytes = sizeof(int);
+    public const int HeightOffsetPlaneBytes = HeightVertexCount * sizeof(ushort);
+    public const int HeightPlaneBytes = HeightPlaneBaseBytes + HeightOffsetPlaneBytes;
     public const int FoundationBytes = MaterialPlaneBytes + HeightPlaneBytes;
     public const int DuplicatedBorderVertexCountPerChunk = HeightVertexCount - MaterialCellCount;
-    public const int DuplicatedBorderBytesPerChunk = DuplicatedBorderVertexCountPerChunk * sizeof(short);
+    public const int DuplicatedBorderBytesPerChunk = DuplicatedBorderVertexCountPerChunk * sizeof(ushort);
 
     public static int GetMaterialIndex(TerrainCellCoord cell) =>
         checked(cell.Z * MaterialCellEdge + cell.X);
@@ -61,57 +64,68 @@ public readonly struct TerrainVertexCoord : IEquatable<TerrainVertexCoord>, ICom
     public static bool operator !=(TerrainVertexCoord left, TerrainVertexCoord right) => !left.Equals(right);
 }
 
-/// <summary>A signed 16-bit terrain height with a permanent ten-millimetre quantum.</summary>
-[StructLayout(LayoutKind.Sequential, Size = 2)]
-public readonly struct TerrainHeight : IEquatable<TerrainHeight>, IComparable<TerrainHeight>
+/// <summary>Validated absolute millimetre base for one terrain height plane.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 4)]
+public readonly struct TerrainHeightPlaneBase : IEquatable<TerrainHeightPlaneBase>, IComparable<TerrainHeightPlaneBase>
 {
-    public short Units { get; }
-    public int Millimeters => checked(Units * TerrainChunkFormat.HeightQuantumMillimeters);
+    public int Millimeters { get; }
 
-    public TerrainHeight(short units) => Units = units;
+    private TerrainHeightPlaneBase(int millimeters) => Millimeters = millimeters;
 
-    /// <summary>
-    /// Quantizes an admitted millimetre height to nearest ten millimetres, midpoint away from zero.
-    /// Values outside the permanent decoded terrain range reject rather than clamp.
-    /// </summary>
-    public static bool TryFromMillimeters(int millimeters, out TerrainHeight height)
+    public static bool TryCreate(int millimeters, out TerrainHeightPlaneBase value)
     {
-        if (millimeters < TerrainChunkFormat.MinimumHeightMillimeters ||
-            millimeters > TerrainChunkFormat.MaximumHeightMillimeters)
+        if (millimeters < TerrainChunkFormat.MinimumQuantizedHeightMillimeters ||
+            millimeters > TerrainChunkFormat.MaximumQuantizedHeightMillimeters ||
+            millimeters % TerrainChunkFormat.HeightQuantumMillimeters != 0)
         {
-            height = default;
+            value = default;
             return false;
         }
-
-        long magnitude = millimeters < 0 ? -(long)millimeters : millimeters;
-        long units = (magnitude + TerrainChunkFormat.HeightQuantumMillimeters / 2) /
-            TerrainChunkFormat.HeightQuantumMillimeters;
-        if (millimeters < 0) units = -units;
-        height = new TerrainHeight(checked((short)units));
+        value = new TerrainHeightPlaneBase(millimeters);
         return true;
     }
 
-    public int CompareTo(TerrainHeight other) => Units.CompareTo(other.Units);
-    public bool Equals(TerrainHeight other) => Units == other.Units;
-    public override bool Equals(object? obj) => obj is TerrainHeight other && Equals(other);
-    public override int GetHashCode() => Units;
+    public int CompareTo(TerrainHeightPlaneBase other) => Millimeters.CompareTo(other.Millimeters);
+    public bool Equals(TerrainHeightPlaneBase other) => Millimeters == other.Millimeters;
+    public override bool Equals(object? obj) => obj is TerrainHeightPlaneBase other && Equals(other);
+    public override int GetHashCode() => Millimeters;
     public override string ToString() => $"{Millimeters}mm";
-    public static bool operator ==(TerrainHeight left, TerrainHeight right) => left.Equals(right);
-    public static bool operator !=(TerrainHeight left, TerrainHeight right) => !left.Equals(right);
+    public static bool operator ==(TerrainHeightPlaneBase left, TerrainHeightPlaneBase right) => left.Equals(right);
+    public static bool operator !=(TerrainHeightPlaneBase left, TerrainHeightPlaneBase right) => !left.Equals(right);
+}
+
+/// <summary>Unsigned five-millimetre offset from one terrain plane's validated absolute base.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 2)]
+public readonly struct TerrainHeightOffset : IEquatable<TerrainHeightOffset>, IComparable<TerrainHeightOffset>
+{
+    public ushort Units { get; }
+    public int OffsetMillimeters => Units * TerrainChunkFormat.HeightQuantumMillimeters;
+
+    public TerrainHeightOffset(ushort units) => Units = units;
+
+    public int CompareTo(TerrainHeightOffset other) => Units.CompareTo(other.Units);
+    public bool Equals(TerrainHeightOffset other) => Units == other.Units;
+    public override bool Equals(object? obj) => obj is TerrainHeightOffset other && Equals(other);
+    public override int GetHashCode() => Units;
+    public override string ToString() => $"+{OffsetMillimeters}mm";
+    public static bool operator ==(TerrainHeightOffset left, TerrainHeightOffset right) => left.Equals(right);
+    public static bool operator !=(TerrainHeightOffset left, TerrainHeightOffset right) => !left.Equals(right);
 }
 
 /// <summary>Cold compiler evidence returned after a complete terrain height plane is preflighted.</summary>
 public readonly record struct TerrainHeightEncodingSummary(
     int MaximumAbsoluteErrorMillimeters,
-    long TotalAbsoluteErrorMillimeters);
+    long TotalAbsoluteErrorMillimeters,
+    int ReliefMillimeters);
 
-/// <summary>Transactional, allocation-free conversion between authored millimetres and terrain height units.</summary>
+/// <summary>Transactional, allocation-free conversion between absolute authored heights and based offsets.</summary>
 public static class TerrainHeightEncoding
 {
     public static bool TryEncodePlane(
         ReadOnlySpan<int> sourceMillimeters,
-        Span<TerrainHeight> destination,
-        out int firstInvalidIndex,
+        Span<TerrainHeightOffset> destination,
+        out TerrainHeightPlaneBase planeBase,
+        out int failureIndex,
         out TerrainHeightEncodingSummary summary)
     {
         if (sourceMillimeters.Length != TerrainChunkFormat.HeightVertexCount)
@@ -123,33 +137,59 @@ public static class TerrainHeightEncoding
             throw new ArgumentException("Terrain height source and destination storage must not overlap.",
                 nameof(destination));
 
+        int minimum = int.MaxValue;
+        int maximum = int.MinValue;
+        int maximumIndex = -1;
         int maximumError = 0;
         long totalError = 0;
         for (int index = 0; index < sourceMillimeters.Length; index++)
         {
-            if (!TerrainHeight.TryFromMillimeters(sourceMillimeters[index], out TerrainHeight encoded))
+            if (!TryQuantizeMillimeters(sourceMillimeters[index], out int quantized))
             {
-                firstInvalidIndex = index;
+                planeBase = default;
+                failureIndex = index;
                 summary = default;
                 return false;
             }
-            int error = Math.Abs(sourceMillimeters[index] - encoded.Millimeters);
+            if (quantized < minimum) minimum = quantized;
+            if (quantized > maximum)
+            {
+                maximum = quantized;
+                maximumIndex = index;
+            }
+            int error = Math.Abs(sourceMillimeters[index] - quantized);
             maximumError = Math.Max(maximumError, error);
             totalError = checked(totalError + error);
         }
 
-        for (int index = 0; index < sourceMillimeters.Length; index++)
+        long relief = (long)maximum - minimum;
+        if (relief > TerrainChunkFormat.MaximumHeightReliefMillimeters ||
+            !TerrainHeightPlaneBase.TryCreate(minimum, out planeBase))
         {
-            bool encoded = TerrainHeight.TryFromMillimeters(sourceMillimeters[index], out destination[index]);
-            if (!encoded) throw new InvalidOperationException("Terrain height changed after successful preflight.");
+            planeBase = default;
+            failureIndex = maximumIndex;
+            summary = default;
+            return false;
         }
 
-        firstInvalidIndex = -1;
-        summary = new TerrainHeightEncodingSummary(maximumError, totalError);
+        for (int index = 0; index < sourceMillimeters.Length; index++)
+        {
+            bool quantized = TryQuantizeMillimeters(sourceMillimeters[index], out int absolute);
+            if (!quantized) throw new InvalidOperationException("Terrain height changed after successful preflight.");
+            int units = checked((absolute - minimum) / TerrainChunkFormat.HeightQuantumMillimeters);
+            destination[index] = new TerrainHeightOffset(checked((ushort)units));
+        }
+
+        failureIndex = -1;
+        summary = new TerrainHeightEncodingSummary(maximumError, totalError, checked((int)relief));
         return true;
     }
 
-    public static void DecodePlane(ReadOnlySpan<TerrainHeight> source, Span<int> destinationMillimeters)
+    public static bool TryDecodePlane(
+        TerrainHeightPlaneBase planeBase,
+        ReadOnlySpan<TerrainHeightOffset> source,
+        Span<int> destinationMillimeters,
+        out int failureIndex)
     {
         if (source.Length != TerrainChunkFormat.HeightVertexCount)
             throw new ArgumentException("A terrain height source must contain exactly one complete vertex plane.",
@@ -159,7 +199,35 @@ public static class TerrainHeightEncoding
         if (MemoryMarshal.AsBytes(source).Overlaps(MemoryMarshal.AsBytes(destinationMillimeters)))
             throw new ArgumentException("Terrain height source and destination storage must not overlap.",
                 nameof(destinationMillimeters));
+
         for (int index = 0; index < source.Length; index++)
-            destinationMillimeters[index] = source[index].Millimeters;
+        {
+            long absolute = (long)planeBase.Millimeters + source[index].OffsetMillimeters;
+            if (absolute is < int.MinValue or > int.MaxValue)
+            {
+                failureIndex = index;
+                return false;
+            }
+        }
+        for (int index = 0; index < source.Length; index++)
+            destinationMillimeters[index] = checked(planeBase.Millimeters + source[index].OffsetMillimeters);
+        failureIndex = -1;
+        return true;
+    }
+
+    private static bool TryQuantizeMillimeters(int millimeters, out int quantized)
+    {
+        long magnitude = millimeters < 0 ? -(long)millimeters : millimeters;
+        long units = (magnitude + TerrainChunkFormat.HeightQuantumMillimeters / 2) /
+            TerrainChunkFormat.HeightQuantumMillimeters;
+        if (millimeters < 0) units = -units;
+        long decoded = units * TerrainChunkFormat.HeightQuantumMillimeters;
+        if (decoded is < int.MinValue or > int.MaxValue)
+        {
+            quantized = 0;
+            return false;
+        }
+        quantized = (int)decoded;
+        return true;
     }
 }

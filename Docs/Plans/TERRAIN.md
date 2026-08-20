@@ -823,7 +823,8 @@ The baseline layout is two dense planes per 16 m `TerrainChunk`:
 
 ```
 material[cellZ * 32 + cellX]              ushort material/content id
-height[vertexZ * 33 + vertexX]            signed fixed-point height
+heightBase                                int32 absolute millimetres
+height[vertexZ * 33 + vertexX]            ushort fixed-point offset
 
 material cells                            32 × 32 = 1,024
 height lattice                            33 × 33 = 1,089
@@ -832,9 +833,9 @@ height lattice                            33 × 33 = 1,089
 Ignoring headers and statics, this is approximately:
 
 ```
-materials: 1,024 × ushort  ~= 2.00 KiB
-16-bit heights: 1,089 × short ~= 2.13 KiB
-raw terrain foundation ~= 4.13 KiB / chunk
+materials: 1,024 × ushort                   ~= 2.00 KiB
+based 16-bit heights: int32 + 1,089 × ushort ~= 2.13 KiB
+raw terrain foundation                       ~= 4.13 KiB / chunk
 ```
 
 The `(N+1) × (N+1)` height lattice gives every terrain chunk complete edge vertices for its `N × N` material cells. Neighboring chunks must agree on their shared edge; the pack compiler validates that invariant. Runtime mesh generation therefore does not need to borrow mutable neighbor memory merely to close a seam.
@@ -845,10 +846,15 @@ Terrain material behavior comes from compiled content whenever possible. Do not 
 Horizontal/world position quantum is already 1 mm. Terrain height encoding is intentionally separate.
 Benchmark/requirements compare at least:
 
-- signed 16-bit fixed height with a world-declared height quantum;
+- signed 16-bit global fixed height as a range-control candidate;
+- unsigned 16-bit fixed offsets from a per-chunk int32 base;
 - signed 32-bit millimeters if exact vertical millimeters are required.
 
-A 16-bit height plane is preferred only if its range/resolution can be stated as a permanent gameplay/content contract. Terrain sampling converts `HeightUnits -> authoritative Y millimeters` deterministically. Dynamic `YMillimeters` may remain int32 regardless of terrain storage width.
+A 16-bit height plane is preferred only if its absolute range, per-chunk relief,
+and resolution can be stated as permanent gameplay/content contracts. Terrain
+sampling converts `BaseHeightMillimeters + HeightOffsetUnits * Quantum` to
+authoritative Y millimeters deterministically. Dynamic `YMillimeters` may remain
+int32 regardless of terrain storage width.
 
 ### Fixed-profile validation
 
@@ -868,31 +874,38 @@ T0.10. Do **not** rerun a 16/32/64 m search by default. Reopen chunk edge or 0.5
 **T0.2 gate:** the fixed 16 m chunk edge, 0.5 m terrain cell, 1 mm dynamic quantum, selected terrain height encoding/quantum, maximum supported local coordinates, and resulting representation evidence are written into the world-format contract and benchmark artifact.
 
 **T0.2 implementation checkpoint (2026-08-20): complete and stopped for
-review.** The proposed `TerrainHeights/v1` representation is a signed 16-bit
-height with a permanent 10 mm quantum. Its decoded range is
-`-327,680..327,670` mm; authored millimetres quantize to nearest 10 mm with
-midpoints away from zero and at most 5 mm error. Inputs outside that decoded
-range reject rather than clamp. Dynamic authoritative Y remains signed int32
-millimetres and is not constrained to the terrain lattice.
+review after encoding hardening.** The proposed `TerrainHeights/v1`
+representation is one signed int32 absolute base per chunk followed by 1,089
+unsigned 16-bit offsets with a permanent 5 mm quantum. Authored millimetres
+quantize to the canonical absolute q5 lattice with at most 2 mm integer-input
+error; the minimum quantized value becomes the plane base. A chunk may contain
+at most 327,675 mm of local vertical relief. Absolute quantized terrain covers
+`-2,147,483,645..2,147,483,645` mm, so the packed range is no longer tied to
+distance from world zero. Out-of-domain absolute values or excessive local
+relief reject transactionally rather than clamp or partially write. Dynamic
+authoritative Y remains signed int32 millimetres and is independent of the
+terrain lattice.
 
-The first authored-terrain contract requires the base heightfield to cover
-`-300,000..300,000` mm. This is a format/content bound, not a claim that dynamic
-entities share it. In the 64-chunk deterministic authored-style woods/coast/ridge
-fixture, 1 mm and 5 mm signed-16 candidates rejected 53,780 and 13,711 of 69,696
-stored samples. The selected 10 mm candidate rejected none; its mean absolute
-error was 2.491 mm and p95/max were 5 mm. A 25 mm candidate also fit with 12 mm
-maximum error, while exact int32 millimetres increased the height plane from
-2,178 to 4,356 bytes without an observed T0 requirement for that precision.
-This fixture is representative deterministic evidence only; production world
-content has not yet been authored, and T0.10 retains final whole-pipeline
-validation.
+The hardening matrix repeats the deterministic woods/coast/ridge fixture in
+three independent elevation datums spanning `-1,500,000..1,500,000` mm: 192
+chunks and 209,088 stored height samples. The previous global signed q10 control
+rejects 139,392 samples across 128 chunks because its absolute range remains
+`-327,680..327,670` mm. Both based q5 and based q10 reject no chunks. Based q5
+wins because it retains the same two bytes per vertex and four-byte base as q10
+while reducing mean error to 1.204 mm and p95/max error to 2 mm. Exact int32
+millimetres increase the foundation to 6,404 bytes without an observed T0 need
+for exact per-vertex millimetres. This fixture is synthetic evidence only;
+production world content has not yet been authored, and T0.10 retains final
+whole-pipeline validation.
 
 The frozen per-chunk foundation is:
 
 ```text
 materials       32 x 32 x ushort        2,048 B
-heights         33 x 33 x int16         2,178 B
-foundation                               4,226 B (4.127 KiB)
+height base     int32 absolute mm            4 B
+height offsets  33 x 33 x ushort        2,178 B
+height plane                             2,182 B
+foundation                               4,230 B (4.131 KiB)
 triangles       2 x 1,024               2,048
 triangle indices                         6,144
 duplicated positive-edge vertices           65 / 130 B per standalone chunk
@@ -900,21 +913,24 @@ terrain vertex local X/Z                0..16,000 mm inclusive
 dynamic entity local X/Z                0..15,999 mm inclusive
 ```
 
-All 3,696 adjacent-edge comparisons in the 8 x 8 fixture were bit-identical.
-The fixture stored 69,696 height vertices versus 66,049 unique global vertices,
-making the exact finite-grid duplication 3,647 vertices / 7,294 bytes. One
-reusable authored-height/material/encoded-height scratch set is 8,582 bytes;
-timed encoding allocates 0 B. Exact T0.3 directory layout remains deliberately
-unfrozen. T0.2 records a 48-byte candidate minimum (`SpatialChunkKey` plus two
-offset/length references) solely as directory-accounting input; T0.3 owns the
-sectioned container decision.
+All 11,088 reconstructed adjacent-edge comparisons across the three fixtures
+were exact, including 330 neighboring pairs with different plane bases. Packed
+offsets need not be equal across a seam; reconstructed canonical absolute
+heights must be. The fixtures stored 209,088 height vertices versus 198,147
+unique global vertices, making finite-grid duplication 10,941 vertices / 21,882
+bytes. One reusable authored-height/material/encoded-height scratch set is 8,586
+bytes; timed encoding allocates 0 B. Exact T0.3 directory layout remains
+deliberately unfrozen. The four-byte base is charged to the height plane. T0.2
+records a 48-byte candidate minimum (`SpatialChunkKey` plus two offset/length
+references) solely as directory-accounting input; T0.3 owns the sectioned
+container decision.
 
 The Release observation records:
 
 ```text
-encode int16 / 10 mm       4.502 ns/vertex mean / 4.530 ns p95 / 0 B
-decode int16 / 10 mm       0.543 ns/vertex mean / 0.547 ns p95 / 0 B
-copy exact int32 mm        0.040 ns/vertex mean / 0.042 ns p95 / 0 B
+encode based uint16 / 5 mm  5.391 ns/vertex mean / 5.999 ns p95 / 0 B
+decode based uint16 / 5 mm  1.420 ns/vertex mean / 1.468 ns p95 / 0 B
+copy exact int32 mm         0.036 ns/vertex mean / 0.037 ns p95 / 0 B
 ```
 
 The candidate matrix, source/material distribution, scratch accounting, exact

@@ -120,8 +120,9 @@ T0.0 accepted the dependency-neutral Spatial seam plus the 16-byte game-world
 position/profile. T0.1 accepted persisted ECS position authority paired with a
 bounded, generation-owned maintained index through a generic Runtime post-ECS-step
 capability. Its full-capacity migration behavior is model-checked. Packed
-terrain storage begins with T0.2's proposed 32 x 32 ushort material plane and
-33 x 33 signed-16 10 mm height plane; the pack/container is not yet implemented.
+terrain storage begins with T0.2's proposed 32 x 32 ushort material plane and a
+33 x 33 unsigned-q5 offset plane with one int32 absolute base per chunk; the
+pack/container is not yet implemented.
 Statics, revisioned publication, bounded dirty history, local streaming, and
 Godot rendering remain later Terrain gates.
 [Network N1](Plans/NETWORK.md) is deferred

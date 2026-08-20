@@ -14,46 +14,39 @@ if (warmups < 1 || iterations < 5 || planesPerIteration < 1)
     throw new ArgumentOutOfRangeException(nameof(args));
 
 const int chunkGridEdge = 8;
-const int requiredMinimumHeightMillimeters = -300_000;
-const int requiredMaximumHeightMillimeters = 300_000;
-AuthoredTerrainFixture authored = AuthoredTerrainFixture.Create(chunkGridEdge);
+int[] elevationDatumsMillimeters = [-1_200_000, 0, 1_200_000];
+AuthoredTerrainFixture authored = AuthoredTerrainFixture.Create(chunkGridEdge, elevationDatumsMillimeters);
+int requiredMinimum = authored.MinimumHeight;
+int requiredMaximum = authored.MaximumHeight;
 HeightCandidateEvidence[] candidates =
 [
-    EvaluateInt16Candidate("int16-q1mm", 1, authored.StoredHeightMillimeters,
-        requiredMinimumHeightMillimeters, requiredMaximumHeightMillimeters),
-    EvaluateInt16Candidate("int16-q5mm", 5, authored.StoredHeightMillimeters,
-        requiredMinimumHeightMillimeters, requiredMaximumHeightMillimeters),
-    EvaluateInt16Candidate("int16-q10mm-selected", 10, authored.StoredHeightMillimeters,
-        requiredMinimumHeightMillimeters, requiredMaximumHeightMillimeters),
-    EvaluateInt16Candidate("int16-q25mm", 25, authored.StoredHeightMillimeters,
-        requiredMinimumHeightMillimeters, requiredMaximumHeightMillimeters),
-    EvaluateInt16Candidate("int16-q50mm", 50, authored.StoredHeightMillimeters,
-        requiredMinimumHeightMillimeters, requiredMaximumHeightMillimeters),
-    EvaluateInt32Candidate(authored.StoredHeightMillimeters,
-        requiredMinimumHeightMillimeters, requiredMaximumHeightMillimeters),
+    EvaluateGlobalInt16Candidate("int16-global-q5mm", 5, authored, requiredMinimum, requiredMaximum),
+    EvaluateGlobalInt16Candidate("int16-global-q10mm-control", 10, authored, requiredMinimum, requiredMaximum),
+    EvaluateBasedUInt16Candidate("uint16-based-q5mm-selected", 5, authored, requiredMinimum, requiredMaximum),
+    EvaluateBasedUInt16Candidate("uint16-based-q10mm", 10, authored, requiredMinimum, requiredMaximum),
+    EvaluateGlobalInt16Candidate("int16-global-q25mm", 25, authored, requiredMinimum, requiredMaximum),
+    EvaluateInt32Candidate(authored, requiredMinimum, requiredMaximum),
 ];
-HeightCandidateEvidence selected = candidates.Single(static candidate => candidate.Name == "int16-q10mm-selected");
-if (!selected.SupportsRequiredEnvelope || selected.RejectedSourceSamples != 0 ||
-    selected.MaximumAbsoluteErrorMillimeters > 5)
+HeightCandidateEvidence selected = candidates.Single(
+    static candidate => candidate.Name == "uint16-based-q5mm-selected");
+if (!selected.SupportsRequiredAbsoluteEnvelope || selected.RejectedSourceSamples != 0 ||
+    selected.RejectedChunks != 0 || selected.MaximumAbsoluteErrorMillimeters > 2)
     throw new InvalidOperationException("The selected terrain encoding did not satisfy its declared contract.");
 
 SharedEdgeEvidence sharedEdges = authored.ValidateSharedEdges();
-if (sharedEdges.MismatchedEncodedEdges != 0)
-    throw new InvalidOperationException("Deterministic authored terrain did not compile to exact shared edges.");
+if (sharedEdges.MismatchedReconstructedEdges != 0 || sharedEdges.NeighborPairsWithDifferentBases == 0)
+    throw new InvalidOperationException("Based terrain did not reconstruct exact cross-base shared edges.");
 
 using var performance = new EncodingPerformanceFixture();
 TerrainEncodingTiming[] timings =
 [
-    Measure("encode-int16-q10mm", warmups, iterations, planesPerIteration,
-        performance.RunEncode),
-    Measure("decode-int16-q10mm", warmups, iterations, planesPerIteration,
-        performance.RunDecode),
-    Measure("copy-int32-millimeters", warmups, iterations, planesPerIteration,
-        performance.RunInt32Copy),
+    Measure("encode-uint16-offset-q5mm", warmups, iterations, planesPerIteration, performance.RunEncode),
+    Measure("decode-uint16-offset-q5mm", warmups, iterations, planesPerIteration, performance.RunDecode),
+    Measure("copy-int32-millimeters", warmups, iterations, planesPerIteration, performance.RunInt32Copy),
 ];
 
 var report = new TerrainEncodingBenchmarkReport(
-    "terrain-t0.2-height-encoding-v1",
+    "terrain-t0.2-height-encoding-v2-based",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -77,15 +70,18 @@ var report = new TerrainEncodingBenchmarkReport(
         TerrainChunkFormat.TriangleCount,
         TerrainChunkFormat.TriangleIndexCount,
         TerrainChunkFormat.MaterialPlaneBytes,
+        TerrainChunkFormat.HeightPlaneBaseBytes,
+        TerrainChunkFormat.HeightOffsetPlaneBytes,
         TerrainChunkFormat.HeightPlaneBytes,
         TerrainChunkFormat.FoundationBytes,
         TerrainChunkFormat.DuplicatedBorderVertexCountPerChunk,
         TerrainChunkFormat.DuplicatedBorderBytesPerChunk,
         TerrainChunkFormat.HeightQuantumMillimeters,
-        TerrainChunkFormat.MinimumHeightMillimeters,
-        TerrainChunkFormat.MaximumHeightMillimeters,
-        requiredMinimumHeightMillimeters,
-        requiredMaximumHeightMillimeters,
+        TerrainChunkFormat.MaximumHeightReliefMillimeters,
+        TerrainChunkFormat.MinimumQuantizedHeightMillimeters,
+        TerrainChunkFormat.MaximumQuantizedHeightMillimeters,
+        requiredMinimum,
+        requiredMaximum,
         16_000,
         15_999),
     new DirectoryAccountingEvidence(
@@ -94,7 +90,8 @@ var report = new TerrainEncodingBenchmarkReport(
         RequiredTerrainSectionReferences: 2,
         CandidateOffsetLengthBytesPerReference: 16,
         CandidateMinimumChunkDirectoryRowBytes: Marshal.SizeOf<SpatialChunkKey>() + 2 * 16,
-        Note: "T0.2 accounting candidate only; T0.3 freezes the sectioned container and exact directory."),
+        HeightBaseChargedToHeightPlaneBytes: TerrainChunkFormat.HeightPlaneBaseBytes,
+        Note: "T0.2 charges the base to TerrainHeights/v1; T0.3 freezes the container and directory."),
     new CompilerScratchEvidence(
         AuthoredHeightPlaneBytes: TerrainChunkFormat.HeightVertexCount * sizeof(int),
         MaterialPlaneBytes: TerrainChunkFormat.MaterialPlaneBytes,
@@ -111,81 +108,182 @@ Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
 File.WriteAllText(output, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }) +
     Environment.NewLine);
 foreach (HeightCandidateEvidence candidate in candidates)
-    Console.WriteLine($"{candidate.Name}: range [{candidate.MinimumDecodedMillimeters}," +
-        $"{candidate.MaximumDecodedMillimeters}]mm, envelope={candidate.SupportsRequiredEnvelope}, " +
-        $"rejected={candidate.RejectedSourceSamples}, max_error={candidate.MaximumAbsoluteErrorMillimeters}mm, " +
+    Console.WriteLine($"{candidate.Name}: absolute [{candidate.MinimumAbsoluteDecodedMillimeters}," +
+        $"{candidate.MaximumAbsoluteDecodedMillimeters}]mm, local_relief={candidate.MaximumLocalReliefMillimeters}mm, " +
+        $"envelope={candidate.SupportsRequiredAbsoluteEnvelope}, rejected_chunks={candidate.RejectedChunks}, " +
+        $"rejected_samples={candidate.RejectedSourceSamples}, max_error={candidate.MaximumAbsoluteErrorMillimeters}mm, " +
         $"foundation={candidate.FoundationBytesPerChunk}B");
 foreach (TerrainEncodingTiming timing in timings)
     Console.WriteLine($"{timing.Name}: mean {timing.MeanNanosecondsPerVertex:F3} ns/vertex, " +
         $"p95 {timing.P95NanosecondsPerVertex:F3}, max {timing.MaximumNanosecondsPerVertex:F3}, " +
         $"allocation {timing.MaximumAllocatedBytes} B");
 Console.WriteLine($"fixture heights [{authored.MinimumHeight},{authored.MaximumHeight}]mm, " +
-    $"edge comparisons={sharedEdges.EncodedEdgeComparisons}, mismatches={sharedEdges.MismatchedEncodedEdges}");
+    $"edge comparisons={sharedEdges.ReconstructedEdgeComparisons}, " +
+    $"cross-base pairs={sharedEdges.NeighborPairsWithDifferentBases}, " +
+    $"mismatches={sharedEdges.MismatchedReconstructedEdges}");
 Console.WriteLine(Path.GetFullPath(output));
 
-static HeightCandidateEvidence EvaluateInt16Candidate(
+static HeightCandidateEvidence EvaluateGlobalInt16Candidate(
     string name,
     int quantum,
-    ReadOnlySpan<int> source,
+    AuthoredTerrainFixture fixture,
     int requiredMinimum,
     int requiredMaximum)
 {
     int minimum = checked(short.MinValue * quantum);
     int maximum = checked(short.MaxValue * quantum);
-    var errors = new int[source.Length];
+    var errors = new int[fixture.StoredHeightMillimeters.Length];
     int accepted = 0;
     int rejected = 0;
+    int rejectedChunks = 0;
     long totalError = 0;
     int maximumError = 0;
-    for (int index = 0; index < source.Length; index++)
+    for (int chunk = 0; chunk < fixture.ChunkCount; chunk++)
     {
-        int value = source[index];
-        if (value < minimum || value > maximum)
+        bool chunkRejected = false;
+        int start = chunk * TerrainChunkFormat.HeightVertexCount;
+        for (int local = 0; local < TerrainChunkFormat.HeightVertexCount; local++)
         {
-            rejected++;
-            continue;
+            int value = fixture.StoredHeightMillimeters[start + local];
+            if (!TryQuantize(value, quantum, out int decoded) || decoded < minimum || decoded > maximum)
+            {
+                rejected++;
+                chunkRejected = true;
+                continue;
+            }
+            int error = Math.Abs(value - decoded);
+            errors[accepted++] = error;
+            totalError = checked(totalError + error);
+            maximumError = Math.Max(maximumError, error);
         }
-        long magnitude = value < 0 ? -(long)value : value;
-        long units = (magnitude + quantum / 2) / quantum;
-        if (value < 0) units = -units;
-        int decoded = checked((int)units * quantum);
-        int error = Math.Abs(value - decoded);
-        errors[accepted++] = error;
-        totalError = checked(totalError + error);
-        maximumError = Math.Max(maximumError, error);
+        if (chunkRejected) rejectedChunks++;
     }
     Array.Sort(errors, 0, accepted);
     return new HeightCandidateEvidence(
         name,
+        "signed-int16-global",
         sizeof(short),
+        0,
         quantum,
         minimum,
         maximum,
+        checked(maximum - minimum),
         minimum <= requiredMinimum && maximum >= requiredMaximum,
-        source.Length,
+        fixture.StoredHeightMillimeters.Length,
         rejected,
+        rejectedChunks,
         maximumError,
         accepted == 0 ? 0 : totalError / (double)accepted,
         accepted == 0 ? 0 : errors[PercentileIndex(accepted, .95)],
         TerrainChunkFormat.MaterialPlaneBytes + TerrainChunkFormat.HeightVertexCount * sizeof(short));
 }
 
+static HeightCandidateEvidence EvaluateBasedUInt16Candidate(
+    string name,
+    int quantum,
+    AuthoredTerrainFixture fixture,
+    int requiredMinimum,
+    int requiredMaximum)
+{
+    int minimumAbsolute = int.MinValue / quantum * quantum;
+    int maximumAbsolute = int.MaxValue / quantum * quantum;
+    int maximumRelief = checked(ushort.MaxValue * quantum);
+    var errors = new int[fixture.StoredHeightMillimeters.Length];
+    int accepted = 0;
+    int rejected = 0;
+    int rejectedChunks = 0;
+    long totalError = 0;
+    int maximumError = 0;
+    int[] plane = new int[TerrainChunkFormat.HeightVertexCount];
+    for (int chunk = 0; chunk < fixture.ChunkCount; chunk++)
+    {
+        int start = chunk * TerrainChunkFormat.HeightVertexCount;
+        int minimum = int.MaxValue;
+        int maximum = int.MinValue;
+        bool invalid = false;
+        for (int local = 0; local < plane.Length; local++)
+        {
+            int value = fixture.StoredHeightMillimeters[start + local];
+            if (!TryQuantize(value, quantum, out int decoded))
+            {
+                invalid = true;
+                break;
+            }
+            plane[local] = decoded;
+            minimum = Math.Min(minimum, decoded);
+            maximum = Math.Max(maximum, decoded);
+        }
+        if (invalid || (long)maximum - minimum > maximumRelief)
+        {
+            rejectedChunks++;
+            rejected += plane.Length;
+            continue;
+        }
+        for (int local = 0; local < plane.Length; local++)
+        {
+            int value = fixture.StoredHeightMillimeters[start + local];
+            int error = Math.Abs(value - plane[local]);
+            errors[accepted++] = error;
+            totalError = checked(totalError + error);
+            maximumError = Math.Max(maximumError, error);
+        }
+    }
+    Array.Sort(errors, 0, accepted);
+    return new HeightCandidateEvidence(
+        name,
+        "uint16-offset-plus-int32-base",
+        sizeof(ushort),
+        sizeof(int),
+        quantum,
+        minimumAbsolute,
+        maximumAbsolute,
+        maximumRelief,
+        minimumAbsolute <= requiredMinimum && maximumAbsolute >= requiredMaximum,
+        fixture.StoredHeightMillimeters.Length,
+        rejected,
+        rejectedChunks,
+        maximumError,
+        accepted == 0 ? 0 : totalError / (double)accepted,
+        accepted == 0 ? 0 : errors[PercentileIndex(accepted, .95)],
+        TerrainChunkFormat.MaterialPlaneBytes + sizeof(int) +
+            TerrainChunkFormat.HeightVertexCount * sizeof(ushort));
+}
+
 static HeightCandidateEvidence EvaluateInt32Candidate(
-    ReadOnlySpan<int> source,
+    AuthoredTerrainFixture fixture,
     int requiredMinimum,
     int requiredMaximum) => new(
         "int32-q1mm-exact",
+        "signed-int32-global",
         sizeof(int),
+        0,
         1,
         int.MinValue,
         int.MaxValue,
+        (long)int.MaxValue - int.MinValue,
         int.MinValue <= requiredMinimum && int.MaxValue >= requiredMaximum,
-        source.Length,
+        fixture.StoredHeightMillimeters.Length,
+        0,
         0,
         0,
         0,
         0,
         TerrainChunkFormat.MaterialPlaneBytes + TerrainChunkFormat.HeightVertexCount * sizeof(int));
+
+static bool TryQuantize(int millimeters, int quantum, out int quantized)
+{
+    long magnitude = millimeters < 0 ? -(long)millimeters : millimeters;
+    long units = (magnitude + quantum / 2) / quantum;
+    if (millimeters < 0) units = -units;
+    long decoded = units * quantum;
+    if (decoded is < int.MinValue or > int.MaxValue)
+    {
+        quantized = 0;
+        return false;
+    }
+    quantized = (int)decoded;
+    return true;
+}
 
 static TerrainEncodingTiming Measure(
     string name,
@@ -233,15 +331,16 @@ static string? ReadString(string[] values, string prefix) =>
 sealed class EncodingPerformanceFixture : IDisposable
 {
     private readonly int[] _source = new int[TerrainChunkFormat.HeightVertexCount];
-    private readonly TerrainHeight[] _encoded = new TerrainHeight[TerrainChunkFormat.HeightVertexCount];
+    private readonly TerrainHeightOffset[] _encoded = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
     private readonly int[] _decoded = new int[TerrainChunkFormat.HeightVertexCount];
     private readonly int[] _int32Copy = new int[TerrainChunkFormat.HeightVertexCount];
+    private TerrainHeightPlaneBase _planeBase;
 
     internal EncodingPerformanceFixture()
     {
         for (int index = 0; index < _source.Length; index++)
-            _source[index] = checked((index * 7_919 % 590_001) - 295_000);
-        if (!TerrainHeightEncoding.TryEncodePlane(_source, _encoded, out _, out _))
+            _source[index] = checked(1_400_000 + (index * 7_919 % 300_001) - 150_000);
+        if (!TerrainHeightEncoding.TryEncodePlane(_source, _encoded, out _planeBase, out _, out _))
             throw new InvalidOperationException();
     }
 
@@ -250,11 +349,12 @@ sealed class EncodingPerformanceFixture : IDisposable
         ulong checksum = 0;
         for (int index = 0; index < planes; index++)
         {
-            if (!TerrainHeightEncoding.TryEncodePlane(_source, _encoded, out _,
+            if (!TerrainHeightEncoding.TryEncodePlane(_source, _encoded, out _planeBase, out _,
                     out TerrainHeightEncodingSummary summary))
                 throw new InvalidOperationException();
-            checksum = unchecked(checksum + (uint)summary.MaximumAbsoluteErrorMillimeters +
-                (uint)_encoded[index % _encoded.Length].Units);
+            checksum = unchecked(checksum + (uint)_planeBase.Millimeters +
+                (uint)summary.MaximumAbsoluteErrorMillimeters +
+                _encoded[index % _encoded.Length].Units);
         }
         return checksum;
     }
@@ -264,7 +364,8 @@ sealed class EncodingPerformanceFixture : IDisposable
         ulong checksum = 0;
         for (int index = 0; index < planes; index++)
         {
-            TerrainHeightEncoding.DecodePlane(_encoded, _decoded);
+            if (!TerrainHeightEncoding.TryDecodePlane(_planeBase, _encoded, _decoded, out _))
+                throw new InvalidOperationException();
             checksum = unchecked(checksum + (uint)_decoded[index % _decoded.Length]);
         }
         return checksum;
@@ -288,122 +389,127 @@ sealed class AuthoredTerrainFixture
 {
     private AuthoredTerrainFixture(
         int chunkGridEdge,
+        int worldCount,
         int[] storedHeightMillimeters,
-        TerrainHeight[] encodedHeights,
+        TerrainHeightPlaneBase[] planeBases,
+        TerrainHeightOffset[] encodedOffsets,
         ushort[] materials,
         int minimumHeight,
         int maximumHeight)
     {
         ChunkGridEdge = chunkGridEdge;
+        WorldCount = worldCount;
         StoredHeightMillimeters = storedHeightMillimeters;
-        EncodedHeights = encodedHeights;
+        PlaneBases = planeBases;
+        EncodedOffsets = encodedOffsets;
         Materials = materials;
         MinimumHeight = minimumHeight;
         MaximumHeight = maximumHeight;
     }
 
     internal int ChunkGridEdge { get; }
+    internal int WorldCount { get; }
+    internal int ChunkCount => checked(WorldCount * ChunkGridEdge * ChunkGridEdge);
     internal int[] StoredHeightMillimeters { get; }
-    internal TerrainHeight[] EncodedHeights { get; }
+    internal TerrainHeightPlaneBase[] PlaneBases { get; }
+    internal TerrainHeightOffset[] EncodedOffsets { get; }
     internal ushort[] Materials { get; }
     internal int MinimumHeight { get; }
     internal int MaximumHeight { get; }
 
-    internal static AuthoredTerrainFixture Create(int chunkGridEdge)
+    internal static AuthoredTerrainFixture Create(int chunkGridEdge, ReadOnlySpan<int> elevationDatums)
     {
-        int chunkCount = checked(chunkGridEdge * chunkGridEdge);
+        int chunksPerWorld = checked(chunkGridEdge * chunkGridEdge);
+        int chunkCount = checked(elevationDatums.Length * chunksPerWorld);
         var heights = new int[checked(chunkCount * TerrainChunkFormat.HeightVertexCount)];
-        var encoded = new TerrainHeight[heights.Length];
+        var planeBases = new TerrainHeightPlaneBase[chunkCount];
+        var encoded = new TerrainHeightOffset[heights.Length];
         var materials = new ushort[checked(chunkCount * TerrainChunkFormat.MaterialCellCount)];
         int minimum = int.MaxValue;
         int maximum = int.MinValue;
-        for (int chunkZ = 0; chunkZ < chunkGridEdge; chunkZ++)
+        for (int world = 0; world < elevationDatums.Length; world++)
         {
-            for (int chunkX = 0; chunkX < chunkGridEdge; chunkX++)
+            int elevationDatum = elevationDatums[world];
+            for (int chunkZ = 0; chunkZ < chunkGridEdge; chunkZ++)
             {
-                int chunk = chunkZ * chunkGridEdge + chunkX;
-                int heightBase = chunk * TerrainChunkFormat.HeightVertexCount;
-                var sourcePlane = heights.AsSpan(heightBase, TerrainChunkFormat.HeightVertexCount);
-                for (byte localZ = 0; localZ < TerrainChunkFormat.HeightVertexEdge; localZ++)
+                for (int chunkX = 0; chunkX < chunkGridEdge; chunkX++)
                 {
-                    for (byte localX = 0; localX < TerrainChunkFormat.HeightVertexEdge; localX++)
+                    int chunk = world * chunksPerWorld + chunkZ * chunkGridEdge + chunkX;
+                    int heightStart = chunk * TerrainChunkFormat.HeightVertexCount;
+                    Span<int> sourcePlane = heights.AsSpan(heightStart, TerrainChunkFormat.HeightVertexCount);
+                    for (byte localZ = 0; localZ < TerrainChunkFormat.HeightVertexEdge; localZ++)
                     {
-                        int globalX = chunkX * TerrainChunkFormat.MaterialCellEdge + localX;
-                        int globalZ = chunkZ * TerrainChunkFormat.MaterialCellEdge + localZ;
-                        int value = GenerateHeight(globalX, globalZ, chunkGridEdge * TerrainChunkFormat.MaterialCellEdge);
-                        sourcePlane[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(localX, localZ))] = value;
-                        minimum = Math.Min(minimum, value);
-                        maximum = Math.Max(maximum, value);
+                        for (byte localX = 0; localX < TerrainChunkFormat.HeightVertexEdge; localX++)
+                        {
+                            int globalX = chunkX * TerrainChunkFormat.MaterialCellEdge + localX;
+                            int globalZ = chunkZ * TerrainChunkFormat.MaterialCellEdge + localZ;
+                            int relative = GenerateHeight(globalX, globalZ,
+                                chunkGridEdge * TerrainChunkFormat.MaterialCellEdge);
+                            int value = checked(elevationDatum + relative);
+                            sourcePlane[TerrainChunkFormat.GetHeightIndex(
+                                new TerrainVertexCoord(localX, localZ))] = value;
+                            minimum = Math.Min(minimum, value);
+                            maximum = Math.Max(maximum, value);
+                        }
                     }
-                }
-                if (!TerrainHeightEncoding.TryEncodePlane(sourcePlane,
-                        encoded.AsSpan(heightBase, TerrainChunkFormat.HeightVertexCount), out _, out _))
-                    throw new InvalidOperationException("Representative terrain exceeded the selected height contract.");
+                    if (!TerrainHeightEncoding.TryEncodePlane(sourcePlane,
+                            encoded.AsSpan(heightStart, TerrainChunkFormat.HeightVertexCount),
+                            out planeBases[chunk], out _, out _))
+                        throw new InvalidOperationException("Representative terrain exceeded the selected contract.");
 
-                int materialBase = chunk * TerrainChunkFormat.MaterialCellCount;
-                for (byte localZ = 0; localZ < TerrainChunkFormat.MaterialCellEdge; localZ++)
-                {
-                    for (byte localX = 0; localX < TerrainChunkFormat.MaterialCellEdge; localX++)
+                    int materialStart = chunk * TerrainChunkFormat.MaterialCellCount;
+                    for (byte localZ = 0; localZ < TerrainChunkFormat.MaterialCellEdge; localZ++)
                     {
-                        int globalX = chunkX * TerrainChunkFormat.MaterialCellEdge + localX;
-                        int globalZ = chunkZ * TerrainChunkFormat.MaterialCellEdge + localZ;
-                        int value = GenerateHeight(globalX, globalZ, chunkGridEdge * TerrainChunkFormat.MaterialCellEdge);
-                        materials[materialBase + TerrainChunkFormat.GetMaterialIndex(
-                            new TerrainCellCoord(localX, localZ))] = SelectMaterial(value, globalX, globalZ);
+                        for (byte localX = 0; localX < TerrainChunkFormat.MaterialCellEdge; localX++)
+                        {
+                            int globalX = chunkX * TerrainChunkFormat.MaterialCellEdge + localX;
+                            int globalZ = chunkZ * TerrainChunkFormat.MaterialCellEdge + localZ;
+                            int relative = GenerateHeight(globalX, globalZ,
+                                chunkGridEdge * TerrainChunkFormat.MaterialCellEdge);
+                            materials[materialStart + TerrainChunkFormat.GetMaterialIndex(
+                                new TerrainCellCoord(localX, localZ))] = SelectMaterial(relative, globalX, globalZ);
+                        }
                     }
                 }
             }
         }
-        return new AuthoredTerrainFixture(chunkGridEdge, heights, encoded, materials, minimum, maximum);
+        return new AuthoredTerrainFixture(chunkGridEdge, elevationDatums.Length, heights, planeBases,
+            encoded, materials, minimum, maximum);
     }
 
     internal SharedEdgeEvidence ValidateSharedEdges()
     {
         int comparisons = 0;
         int mismatches = 0;
-        for (int chunkZ = 0; chunkZ < ChunkGridEdge; chunkZ++)
+        int differentBasePairs = 0;
+        int chunksPerWorld = checked(ChunkGridEdge * ChunkGridEdge);
+        for (int world = 0; world < WorldCount; world++)
         {
-            for (int chunkX = 0; chunkX < ChunkGridEdge; chunkX++)
+            for (int chunkZ = 0; chunkZ < ChunkGridEdge; chunkZ++)
             {
-                int current = (chunkZ * ChunkGridEdge + chunkX) * TerrainChunkFormat.HeightVertexCount;
-                if (chunkX + 1 < ChunkGridEdge)
+                for (int chunkX = 0; chunkX < ChunkGridEdge; chunkX++)
                 {
-                    int right = (chunkZ * ChunkGridEdge + chunkX + 1) * TerrainChunkFormat.HeightVertexCount;
-                    for (byte vertex = 0; vertex < TerrainChunkFormat.HeightVertexEdge; vertex++)
-                    {
-                        comparisons++;
-                        if (EncodedHeights[current + TerrainChunkFormat.GetHeightIndex(
-                                new TerrainVertexCoord(32, vertex))] !=
-                            EncodedHeights[right + TerrainChunkFormat.GetHeightIndex(
-                                new TerrainVertexCoord(0, vertex))])
-                            mismatches++;
-                    }
-                }
-                if (chunkZ + 1 < ChunkGridEdge)
-                {
-                    int bottom = ((chunkZ + 1) * ChunkGridEdge + chunkX) * TerrainChunkFormat.HeightVertexCount;
-                    for (byte vertex = 0; vertex < TerrainChunkFormat.HeightVertexEdge; vertex++)
-                    {
-                        comparisons++;
-                        if (EncodedHeights[current + TerrainChunkFormat.GetHeightIndex(
-                                new TerrainVertexCoord(vertex, 32))] !=
-                            EncodedHeights[bottom + TerrainChunkFormat.GetHeightIndex(
-                                new TerrainVertexCoord(vertex, 0))])
-                            mismatches++;
-                    }
+                    int chunk = world * chunksPerWorld + chunkZ * ChunkGridEdge + chunkX;
+                    if (chunkX + 1 < ChunkGridEdge)
+                        CompareNeighbor(chunk, chunk + 1, verticalEdge: true,
+                            ref comparisons, ref mismatches, ref differentBasePairs);
+                    if (chunkZ + 1 < ChunkGridEdge)
+                        CompareNeighbor(chunk, chunk + ChunkGridEdge, verticalEdge: false,
+                            ref comparisons, ref mismatches, ref differentBasePairs);
                 }
             }
         }
-        int stored = checked(ChunkGridEdge * ChunkGridEdge * TerrainChunkFormat.HeightVertexCount);
+        int stored = checked(ChunkCount * TerrainChunkFormat.HeightVertexCount);
         int uniqueEdge = checked(ChunkGridEdge * TerrainChunkFormat.MaterialCellEdge + 1);
-        int unique = checked(uniqueEdge * uniqueEdge);
+        int unique = checked(WorldCount * uniqueEdge * uniqueEdge);
         return new SharedEdgeEvidence(
             comparisons,
             mismatches,
+            differentBasePairs,
             stored,
             unique,
             stored - unique,
-            checked((stored - unique) * sizeof(short)));
+            checked((stored - unique) * sizeof(ushort)));
     }
 
     internal AuthoredTerrainDistribution GetDistributionEvidence()
@@ -416,8 +522,9 @@ sealed class AuthoredTerrainFixture
             .Select(static group => new MaterialCount(group.Key, group.Count()))
             .ToArray();
         return new AuthoredTerrainDistribution(
-            "deterministic-authored-style woods/coast/ridge fixture; production world content is not yet authored",
-            ChunkGridEdge * ChunkGridEdge,
+            "synthetic woods/coast/ridge fixture repeated in three independent elevation datums; production content is not authored",
+            WorldCount,
+            ChunkCount,
             StoredHeightMillimeters.Length,
             Materials.Length,
             ordered[0],
@@ -428,6 +535,34 @@ sealed class AuthoredTerrainFixture
             materialCounts);
     }
 
+    private void CompareNeighbor(
+        int firstChunk,
+        int secondChunk,
+        bool verticalEdge,
+        ref int comparisons,
+        ref int mismatches,
+        ref int differentBasePairs)
+    {
+        if (PlaneBases[firstChunk] != PlaneBases[secondChunk]) differentBasePairs++;
+        int firstStart = firstChunk * TerrainChunkFormat.HeightVertexCount;
+        int secondStart = secondChunk * TerrainChunkFormat.HeightVertexCount;
+        for (byte vertex = 0; vertex < TerrainChunkFormat.HeightVertexEdge; vertex++)
+        {
+            TerrainVertexCoord firstCoord = verticalEdge
+                ? new TerrainVertexCoord(32, vertex)
+                : new TerrainVertexCoord(vertex, 32);
+            TerrainVertexCoord secondCoord = verticalEdge
+                ? new TerrainVertexCoord(0, vertex)
+                : new TerrainVertexCoord(vertex, 0);
+            int first = checked(PlaneBases[firstChunk].Millimeters +
+                EncodedOffsets[firstStart + TerrainChunkFormat.GetHeightIndex(firstCoord)].OffsetMillimeters);
+            int second = checked(PlaneBases[secondChunk].Millimeters +
+                EncodedOffsets[secondStart + TerrainChunkFormat.GetHeightIndex(secondCoord)].OffsetMillimeters);
+            comparisons++;
+            if (first != second) mismatches++;
+        }
+    }
+
     private static int GenerateHeight(int globalX, int globalZ, int worldCellEdge)
     {
         if (globalX == 0 && globalZ == 0) return -300_000;
@@ -436,9 +571,7 @@ sealed class AuthoredTerrainFixture
         int noise = (int)(hash % 10_001) - 5_000;
         int height;
         if (globalX < worldCellEdge / 3)
-        {
             height = -105_000 + globalX * 1_050 + globalZ * 90 + noise;
-        }
         else if (globalX < worldCellEdge * 2 / 3)
         {
             int dx = globalX - worldCellEdge / 2;
@@ -500,13 +633,16 @@ sealed record TerrainGeometryEvidence(
     int TrianglesPerChunk,
     int TriangleIndicesPerChunk,
     int MaterialPlaneBytes,
+    int HeightPlaneBaseBytes,
+    int HeightOffsetPlaneBytes,
     int HeightPlaneBytes,
     int FoundationBytes,
     int DuplicatedBorderVerticesPerChunk,
     int DuplicatedBorderBytesPerChunk,
     int SelectedHeightQuantumMillimeters,
-    int MinimumTerrainHeightMillimeters,
-    int MaximumTerrainHeightMillimeters,
+    long MaximumLocalReliefMillimeters,
+    int MinimumAbsoluteQuantizedMillimeters,
+    int MaximumAbsoluteQuantizedMillimeters,
     int RequiredAuthoredMinimumMillimeters,
     int RequiredAuthoredMaximumMillimeters,
     int MaximumTerrainVertexLocalAxisMillimetersInclusive,
@@ -518,6 +654,7 @@ sealed record DirectoryAccountingEvidence(
     int RequiredTerrainSectionReferences,
     int CandidateOffsetLengthBytesPerReference,
     int CandidateMinimumChunkDirectoryRowBytes,
+    int HeightBaseChargedToHeightPlaneBytes,
     string Note);
 
 sealed record CompilerScratchEvidence(
@@ -529,6 +666,7 @@ sealed record CompilerScratchEvidence(
 
 sealed record AuthoredTerrainDistribution(
     string Classification,
+    int IndependentElevationDatums,
     int Chunks,
     int StoredHeightSamples,
     int MaterialSamples,
@@ -542,8 +680,9 @@ sealed record AuthoredTerrainDistribution(
 sealed record MaterialCount(ushort MaterialId, int Count);
 
 sealed record SharedEdgeEvidence(
-    int EncodedEdgeComparisons,
-    int MismatchedEncodedEdges,
+    int ReconstructedEdgeComparisons,
+    int MismatchedReconstructedEdges,
+    int NeighborPairsWithDifferentBases,
     int StoredHeightVertices,
     int UniqueGlobalHeightVertices,
     int DuplicatedHeightVertices,
@@ -551,13 +690,17 @@ sealed record SharedEdgeEvidence(
 
 sealed record HeightCandidateEvidence(
     string Name,
+    string Representation,
     int StorageBytesPerVertex,
+    int BaseBytesPerChunk,
     int QuantumMillimeters,
-    int MinimumDecodedMillimeters,
-    int MaximumDecodedMillimeters,
-    bool SupportsRequiredEnvelope,
+    int MinimumAbsoluteDecodedMillimeters,
+    int MaximumAbsoluteDecodedMillimeters,
+    long MaximumLocalReliefMillimeters,
+    bool SupportsRequiredAbsoluteEnvelope,
     int SourceSamples,
     int RejectedSourceSamples,
+    int RejectedChunks,
     int MaximumAbsoluteErrorMillimeters,
     double MeanAbsoluteErrorMillimeters,
     int P95AbsoluteErrorMillimeters,
