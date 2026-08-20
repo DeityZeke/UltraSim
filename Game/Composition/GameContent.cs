@@ -26,6 +26,17 @@ public static class GameTerrainMaterialIds
     public const ushort Snow = 5;
 }
 
+/// <summary>Compact immutable-world definition identities admitted by the first game world profile.</summary>
+public static class GameWorldStaticDefinitionIds
+{
+    public const uint Tree = 1;
+    public const uint Rock = 2;
+    public const uint CabinWall = 3;
+    public const uint CabinRoof = 4;
+    public const uint Shelf = 5;
+    public const uint Book = 6;
+}
+
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
 public sealed class GameContent : IInventoryContentCatalog
 {
@@ -167,6 +178,14 @@ public sealed class GameContent : IInventoryContentCatalog
                 GameTerrainMaterialIds.Grass,
                 GameTerrainMaterialIds.Rock,
                 GameTerrainMaterialIds.Snow,
+            ],
+            [
+                GameWorldStaticDefinitionIds.Tree,
+                GameWorldStaticDefinitionIds.Rock,
+                GameWorldStaticDefinitionIds.CabinWall,
+                GameWorldStaticDefinitionIds.CabinRoof,
+                GameWorldStaticDefinitionIds.Shelf,
+                GameWorldStaticDefinitionIds.Book,
             ]));
     }
 

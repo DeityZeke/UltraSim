@@ -1,0 +1,62 @@
+{
+  "Schema": "terrain-t0.5-frozen-statics-static-multis-v1",
+  "CapturedAtUtc": "2026-08-20T23:47:26.9357339+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "LogicalProcessors": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "Fixture": {
+    "Description": "deterministic synthetic 16x16 base world with independent trees/rocks and static placed cabin/shelf fragments; not production content",
+    "GridEdge": 16,
+    "ChunkCount": 256,
+    "FrozenStaticCount": 8192,
+    "MultiInstanceCount": 64,
+    "MultiFragmentCount": 512,
+    "PackBytes": 1589672,
+    "SectionCount": 4,
+    "MaximumStaticsInOneChunk": 32,
+    "MaximumFragmentsInOneChunk": 8,
+    "MaximumRenderGroupsInOneChunk": 4,
+    "MaximumQueryHits": 1,
+    "ScopeBoundary": "logical Multi identity survives chunk fragmentation; no moving aggregate or vehicle contract"
+  },
+  "Timings": [
+    {
+      "Name": "random-static-or-fragment-read",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 166.48755500000001,
+      "P50NanosecondsPerOperation": 167.067003,
+      "P95NanosecondsPerOperation": 169.255811,
+      "MaximumNanosecondsPerOperation": 169.319891,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 106888407886
+    },
+    {
+      "Name": "copy-compatible-render-groups",
+      "OperationsPerSample": 250000,
+      "MeanNanosecondsPerOperation": 1941.5811860952388,
+      "P50NanosecondsPerOperation": 1935.057008,
+      "P95NanosecondsPerOperation": 1974.552576,
+      "MaximumNanosecondsPerOperation": 1975.77044,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 85925424
+    },
+    {
+      "Name": "bounded-static-bounds-query",
+      "OperationsPerSample": 25000,
+      "MeanNanosecondsPerOperation": 23098.85035047619,
+      "P50NanosecondsPerOperation": 23160.46316,
+      "P95NanosecondsPerOperation": 23373.15544,
+      "MaximumNanosecondsPerOperation": 23399.2212,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 2275000
+    }
+  ]
+}

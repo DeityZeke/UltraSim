@@ -1792,6 +1792,77 @@ delivery/labor simulation, community building, or autonomous settlement planning
 it only preserves representations that those future workflows can validate and
 lower into.
 
+### T0.5 implementation stop — 2026-08-20
+
+T0.5 is implemented and stopped for checkpoint review. It does not begin T0.6.
+The frozen `WorldPack/v1` header and 48-byte main chunk row remain unchanged.
+Terrain-only packs retain their original two-section canonical byte layout;
+structure data adds optional section-local layouts only when present:
+
+```text
+FrozenStatics/v1
+    32-byte header
+    8-byte range / canonical main chunk
+    56-byte packed static row
+
+MultiFragments/v1
+    40-byte header
+    8-byte range / canonical main chunk
+    40-byte logical instance row
+    56-byte packed fragment row
+```
+
+The implementation freezes `WorldStaticDefinitionId`, stable 64-bit
+`WorldStaticId`, stable 64-bit `MultiInstanceId`, and stable per-Multi
+`MultiPieceId`. Canonical compilation sorts chunk-local rows by compatible render
+key and stable identity. A Multi root remains independently searchable while its
+pieces are compiled into their home chunks. Renderer grouping never becomes
+authority.
+
+Opening validates optional section hashes, bounds/counts, canonical CSR ranges,
+row ordering, stable-ID uniqueness, Multi piece totals, roots, flags, local
+coordinates, and exact half-open integer-mm bounds before publication.
+`WorldContentBinding` additionally admits every referenced static definition.
+Normal use returns borrowed packed views; it does not create a list/object graph
+per chunk.
+
+`TryQueryStaticBounds` is now the first exact static-bounds query. Placement
+bounds are limited to a one-chunk home halo, queries admit an explicit maximum
+candidate-chunk budget, and an undersized output span receives no partial writes.
+`BoundWorldPack` answers immutable-artifact truth while `GameWorldState` is the
+authoritative current-world route retained for T0.9 overlays.
+
+The permanent T0.0–T0.5 world suite contains 52 tests. It covers canonical
+insertion-order-independent bytes, cross-chunk Multi identity, allocation-free
+packed reads/grouping, transactional exact bounds queries, malformed optional
+sections, invalid identities/placements/capacity, content binding, and generation
+publication.
+
+Accepted synthetic evidence:
+
+```text
+chunks                                      256
+independent frozen statics                8,192
+logical static Multis                        64
+Multi fragments                             512
+complete pack bytes                   1,589,672
+
+random static/fragment read mean/p95   166.488 /   169.256 ns / 0 B
+copy compatible render groups          1.942 /     1.975 us / 0 B
+bounded exact static-bounds query      23.099 /    23.373 us / 0 B
+```
+
+The bounds workload deliberately includes the admitted neighboring home-chunk
+halo and two-pass transactional output, not a single-row lookup. It is evidence
+of the current exact query cost, not a collision-engine SLO. The fixture is
+synthetic and is not production woods/cabin content or Godot evidence. The
+machine-readable observation is
+[`terrain-t0.5-frozen-structures-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.5-frozen-structures-2026-08-20.json).
+
+The checkpoint does not add dynamic/interactable statics, mutable overlays,
+publication/history, client residency, Godot nodes/resources, property/region/
+construction systems, sparse additional terrain surfaces, or moving Multis.
+
 
 ## T0.6 — packed chunk publication and bounded dirty history
 

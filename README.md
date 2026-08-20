@@ -89,9 +89,11 @@ generation-coherent maintained spatial index after full-capacity migration and
 reference-model hardening, without creating a generic world storage kernel.
 T0.2 accepted the compact dense base-terrain contract using a per-chunk int32
 base plus unsigned q5 offsets, and T0.3 accepted the canonical sectioned
-immutable WorldPack/source. T0.4 now proposes exact integer base queries and the
-bounded deterministic base-mesh payload and is stopped for review. Statics,
-publication, and Network N1 remain later gates.
+immutable WorldPack/source. T0.4 accepted exact integer base queries and the
+bounded deterministic base-mesh payload. T0.5 now implements optional packed
+frozen-static and static-Multi sections, stable logical identities, deterministic
+render groups, and bounded exact static-bounds queries; it is stopped for review.
+Publication and Network N1 remain later gates.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

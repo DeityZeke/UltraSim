@@ -127,6 +127,12 @@ sorted directories, bounded validation, immutable ownership, and content binding
 T0.4 adds exact integer base-height/material queries and a bounded deterministic
 engine-neutral base mesh with neighbor-aware seam frames; it does not introduce
 Godot or make the base sampler a general multi-surface ground contract.
+T0.5 adds optional section-local frozen-static and static-Multi layouts without
+changing the frozen terrain chunk row. Stable world/static/Multi/piece identities,
+borrowed chunk views, deterministic compatible render groups, definition binding,
+and bounded exact 3D static overlap now remain above the dependency-neutral
+Spatial kernel. Static-Multi placement is frozen-world data, not one ECS entity
+per piece and not a moving-aggregate contract.
 The pack remains extensible to future sparse structural surfaces; world topology
 is not restricted to one heightfield surface per X/Z.
 Future `WorldRegion`, property, property-unit, Multi, terrain, and edit-lease
@@ -135,8 +141,8 @@ metadata rather than chunk partitions or ECS entities by default, and concrete
 policy domains may resolve different members of the bounded region set applying
 at one location instead of relying on one universal winning region. T0 preserves
 this seam without implementing a region/property framework.
-Statics, revisioned publication, bounded dirty history, local streaming, and
-Godot rendering remain later Terrain gates.
+Revisioned publication, bounded dirty history, local streaming, and Godot
+rendering remain later Terrain gates.
 [Network N1](Plans/NETWORK.md) is deferred
 until T0 proves those chunk/publication contracts, then will test recipient-to-
 chunk subscription/cursor replication against the frozen N0 relation graph.

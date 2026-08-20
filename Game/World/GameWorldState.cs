@@ -100,6 +100,30 @@ public sealed class GameWorldState : IDisposable
         return BaseWorld.TryResolveBaseTerrainMaterial(location, out materialId);
     }
 
+    /// <summary>
+    /// Queries authoritative immutable static geometry. Later durable overlays may shadow or augment
+    /// the base pack behind this game-world route without changing gameplay callers.
+    /// </summary>
+    public bool TryQueryStaticBounds(
+        in WorldStaticBounds bounds,
+        int maximumCandidateChunks,
+        Span<WorldStaticQueryHit> destination,
+        out int count,
+        out int required,
+        out WorldStaticQueryError error)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (BaseWorld is null)
+        {
+            count = 0;
+            required = 0;
+            error = WorldStaticQueryError.None;
+            return true;
+        }
+        return BaseWorld.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
+            out count, out required, out error);
+    }
+
     public bool TrySetPosition(EcsWorld world, Entity entity, in WorldPosition position)
     {
         EnsureWorld(world);

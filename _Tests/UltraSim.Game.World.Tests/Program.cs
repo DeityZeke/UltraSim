@@ -38,6 +38,15 @@ var tests = new (string Name, Action Body)[]
     ("WorldPackFileReopensWithStableFingerprint", WorldPackFileReopensWithStableFingerprint),
     ("WorldPackBoundsRejectBeforeProportionalAllocation", WorldPackBoundsRejectBeforeProportionalAllocation),
     ("WorldPackContentBindingPublishesWithGameGeneration", WorldPackContentBindingPublishesWithGameGeneration),
+    ("FrozenStaticsAndStaticMultisCompileCanonically", FrozenStaticsAndStaticMultisCompileCanonically),
+    ("FrozenStructureSectionsAreIndependentlyOptional", FrozenStructureSectionsAreIndependentlyOptional),
+    ("FrozenStructureReadsAndRenderGroupsAllocateZero", FrozenStructureReadsAndRenderGroupsAllocateZero),
+    ("StaticBoundsQueryIsExactBoundedAndTransactional", StaticBoundsQueryIsExactBoundedAndTransactional),
+    ("FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity",
+        FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity),
+    ("FrozenStructureOpenRejectsMalformedSectionPayloads",
+        FrozenStructureOpenRejectsMalformedSectionPayloads),
+    ("StaticDefinitionsBindBeforeGenerationPublication", StaticDefinitionsBindBeforeGenerationPublication),
     ("BaseTerrainQueriesHonorParityBoundariesAndSignedRounding",
         BaseTerrainQueriesHonorParityBoundariesAndSignedRounding),
     ("BaseTerrainQueriesOwnNegativeAndCrossChunkCoordinates",
@@ -71,7 +80,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.4 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.5 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -261,10 +270,18 @@ static void WorldPackFormatAndFingerprintsAreFrozen()
     Equal(1U, WorldPackFormat.ContainerVersion);
     Equal(1U, WorldPackFormat.TerrainMaterialsSchemaVersion);
     Equal(1U, WorldPackFormat.TerrainHeightsSchemaVersion);
+    Equal(1U, WorldPackFormat.FrozenStaticsSchemaVersion);
+    Equal(1U, WorldPackFormat.MultiFragmentsSchemaVersion);
     Equal(16, Marshal.SizeOf<WorldContentFingerprint>());
     Equal(32, Marshal.SizeOf<WorldPackFingerprint>());
     Equal(1U, (uint)WorldPackSectionKind.TerrainMaterials);
     Equal(2U, (uint)WorldPackSectionKind.TerrainHeights);
+    Equal(3U, (uint)WorldPackSectionKind.FrozenStatics);
+    Equal(4U, (uint)WorldPackSectionKind.MultiFragments);
+    Equal(4, Marshal.SizeOf<WorldStaticDefinitionId>());
+    Equal(8, Marshal.SizeOf<WorldStaticId>());
+    Equal(8, Marshal.SizeOf<MultiInstanceId>());
+    Equal(4, Marshal.SizeOf<MultiPieceId>());
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldContentFingerprint(0, 0));
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(159, 1, 2));
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(160, 0, 2));
@@ -489,6 +506,8 @@ static void WorldPackContentBindingPublishesWithGameGeneration()
 {
     Throws<ArgumentException>(() => _ = new WorldContentBinding(GameContent.WorldFingerprint, [0]));
     Throws<ArgumentException>(() => _ = new WorldContentBinding(GameContent.WorldFingerprint, [1, 1]));
+    Throws<ArgumentException>(() => _ = new WorldContentBinding(GameContent.WorldFingerprint, [1], [0U]));
+    Throws<ArgumentException>(() => _ = new WorldContentBinding(GameContent.WorldFingerprint, [1], [2U, 2U]));
     WorldPack wrongContent = CreateWorldPackArtifact(reverse: false).Open();
     var gameBinding = new WorldContentBinding(GameContent.WorldFingerprint,
     [
@@ -541,6 +560,266 @@ static void WorldPackContentBindingPublishesWithGameGeneration()
         True(game.WorldState.BaseWorld.TryResolveBaseTerrainMaterial(location, out ushort immutableMaterial));
         True(game.WorldState.TryResolveBaseTerrainMaterial(location, out ushort authoritativeMaterial));
         Equal(immutableMaterial, authoritativeMaterial);
+        return true;
+    }, out bool published));
+    True(published);
+}
+
+static void FrozenStaticsAndStaticMultisCompileCanonically()
+{
+    WorldPackArtifact forward = CreateStructuredWorldPackArtifact(reverse: false);
+    WorldPackArtifact reverse = CreateStructuredWorldPackArtifact(reverse: true);
+    Equal(forward.Length, reverse.Length);
+    Equal(forward.Fingerprint, reverse.Fingerprint);
+    var first = new byte[forward.Length];
+    var second = new byte[reverse.Length];
+    forward.CopyTo(first);
+    reverse.CopyTo(second);
+    True(first.AsSpan().SequenceEqual(second));
+
+    WorldPack pack = forward.Open();
+    Equal(4, pack.SectionCount);
+    Equal(3, pack.FrozenStaticCount);
+    Equal(2, pack.MultiInstanceCount);
+    Equal(4, pack.MultiFragmentCount);
+    var zero = new SpatialChunkKey(pack.Space, 0, 0);
+    True(pack.TryGetFrozenStatics(zero, out WorldFrozenStaticChunkView statics));
+    Equal(2, statics.Count);
+    Equal(new WorldStaticId(10), statics.GetRecord(0).Id);
+    Equal(new WorldStaticId(30), statics.GetRecord(1).Id);
+    Equal(1, statics.GetRenderGroupCount());
+    Span<WorldStaticRenderGroup> groups = stackalloc WorldStaticRenderGroup[1];
+    True(statics.TryCopyRenderGroups(groups, out int required));
+    Equal(1, required);
+    Equal(2, groups[0].Count);
+
+    True(pack.TryGetMultiFragments(zero, out WorldMultiFragmentChunkView fragments));
+    Equal(2, fragments.Count);
+    WorldMultiFragmentRecord roof = fragments.GetRecord(0);
+    Equal(new MultiInstanceId(700), roof.MultiId);
+    Equal(new MultiPieceId(3), roof.PieceId);
+    True(pack.TryGetMultiFragments(new SpatialChunkKey(pack.Space, -1, -1),
+        out WorldMultiFragmentChunkView cabinLeft));
+    True(pack.TryGetMultiFragments(new SpatialChunkKey(pack.Space, 0, -1),
+        out WorldMultiFragmentChunkView cabinRight));
+    Equal(new MultiInstanceId(700), cabinLeft.GetRecord(0).MultiId);
+    Equal(new MultiInstanceId(700), cabinRight.GetRecord(0).MultiId);
+    Equal(new MultiPieceId(1), cabinLeft.GetRecord(0).PieceId);
+    Equal(new MultiPieceId(2), cabinRight.GetRecord(0).PieceId);
+    True(pack.TryGetMultiInstance(new MultiInstanceId(700), out WorldMultiInstanceRecord cabin));
+    Equal(3, cabin.PieceCount);
+    Equal(new SpatialChunkCoord(-1, -1), cabin.Root.Chunk);
+    True(pack.TryGetMultiInstance(new MultiInstanceId(600), out WorldMultiInstanceRecord shelf));
+    Equal(1, shelf.PieceCount);
+    False(pack.TryGetMultiInstance(new MultiInstanceId(999), out _));
+}
+
+static void FrozenStructureSectionsAreIndependentlyOptional()
+{
+    WorldPackBuilder staticsOnly = CreateTerrainBuilder();
+    True(staticsOnly.TryAddFrozenStatic(CreateFrozenStatic(1, 1,
+        new WorldPosition(0, 0, 1_000, 1_000, 0)), out _));
+    True(staticsOnly.TryBuild(out WorldPackArtifact? staticArtifact, out _));
+    WorldPack staticPack = staticArtifact!.Open();
+    Equal(3, staticPack.SectionCount);
+    Equal(1, staticPack.FrozenStaticCount);
+    Equal(0, staticPack.MultiInstanceCount);
+
+    WorldPackBuilder multiOnly = CreateTerrainBuilder();
+    var root = new WorldPosition(0, 0, 1_000, 1_000, 0);
+    WorldMultiPieceSource[] pieces = [CreateMultiPiece(1, 3, root)];
+    True(multiOnly.TryAddStaticMulti(new MultiInstanceId(1), root, 0, pieces, out _));
+    True(multiOnly.TryBuild(out WorldPackArtifact? multiArtifact, out _));
+    WorldPack multiPack = multiArtifact!.Open();
+    Equal(3, multiPack.SectionCount);
+    Equal(0, multiPack.FrozenStaticCount);
+    Equal(1, multiPack.MultiInstanceCount);
+    Equal(1, multiPack.MultiFragmentCount);
+}
+
+static void FrozenStructureReadsAndRenderGroupsAllocateZero()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(reverse: false).Open();
+    var key = new SpatialChunkKey(pack.Space, 0, 0);
+    var staticGroups = new WorldStaticRenderGroup[4];
+    var multiGroups = new WorldStaticRenderGroup[4];
+    ulong expected = Read(1_000);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    ulong actual = Read(100_000);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+    True(expected != 0);
+    True(actual != 0);
+
+    ulong Read(int iterations)
+    {
+        ulong checksum = 0;
+        for (int iteration = 0; iteration < iterations; iteration++)
+        {
+            True(pack.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView statics));
+            True(statics.TryCopyRenderGroups(staticGroups, out int staticRequired));
+            True(pack.TryGetMultiFragments(key, out WorldMultiFragmentChunkView multis));
+            True(multis.TryCopyRenderGroups(multiGroups, out int multiRequired));
+            WorldFrozenStaticRecord value = statics.GetRecord(iteration % statics.Count);
+            checksum = unchecked(checksum + value.Id.Value + (uint)value.Position.YMillimeters +
+                (uint)staticRequired + (uint)multiRequired + multis.GetRecord(0).MultiId.Value);
+        }
+        return checksum;
+    }
+}
+
+static void StaticBoundsQueryIsExactBoundedAndTransactional()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(reverse: false).Open();
+    var query = new WorldStaticBounds(-500, -1_000, -500, 2_500, 3_000, 2_500);
+    var hits = new WorldStaticQueryHit[16];
+    True(pack.TryQueryStaticBounds(query, 16, hits, out int count, out int required,
+        out WorldStaticQueryError error));
+    Equal(WorldStaticQueryError.None, error);
+    Equal(required, count);
+    True(count >= 4);
+    int expectedCount = count;
+    True(hits.AsSpan(0, count).ToArray().Any(hit => hit.StaticId == new WorldStaticId(20)));
+    True(hits.AsSpan(0, count).ToArray().Any(hit => hit.Kind == WorldStaticQueryKind.MultiFragment));
+
+    WorldStaticQueryHit sentinel = hits[0];
+    var tooSmall = new WorldStaticQueryHit[1] { sentinel };
+    False(pack.TryQueryStaticBounds(query, 16, tooSmall, out count, out required, out error));
+    Equal(0, count);
+    True(required > tooSmall.Length);
+    Equal(WorldStaticQueryError.DestinationTooSmall, error);
+    Equal(sentinel, tooSmall[0]);
+
+    False(pack.TryQueryStaticBounds(query, 8, hits, out count, out required, out error));
+    Equal(0, count);
+    Equal(0, required);
+    Equal(WorldStaticQueryError.CandidateLimitExceeded, error);
+    False(pack.TryQueryStaticBounds(default, 16, hits, out count, out required, out error));
+    Equal(WorldStaticQueryError.InvalidBounds, error);
+
+    WorldPack gamePack = CreateStructuredWorldPackArtifact(
+        reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    var binding = new WorldContentBinding(GameContent.WorldFingerprint, [1, 2, 3, 4, 5],
+        [1U, 2U, 3U, 4U, 5U]);
+    True(gamePack.TryBind(binding, out BoundWorldPack? bound, out _));
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 16, baseWorld: bound);
+    True(fixture.State.TryQueryStaticBounds(query, 16, hits, out int gameCount, out int gameRequired,
+        out error));
+    Equal(expectedCount, gameRequired);
+    Equal(gameRequired, gameCount);
+}
+
+static void FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity()
+{
+    WorldPackBuilder duplicate = CreateTerrainBuilder();
+    WorldFrozenStaticSource source = CreateFrozenStatic(1, 1, new WorldPosition(0, 0, 1_000, 1_000, 0));
+    True(duplicate.TryAddFrozenStatic(source, out _));
+    False(duplicate.TryAddFrozenStatic(source, out WorldPackBuildError error));
+    Equal(WorldPackBuildError.DuplicateStaticId, error);
+
+    var position = new WorldPosition(0, 0, 1_000, 1_000, 0);
+    var farBounds = new WorldStaticBounds(100_000, 0, 100_000, 101_000, 1_000, 101_000);
+    var far = source with { Id = new WorldStaticId(2), Bounds = farBounds };
+    False(duplicate.TryAddFrozenStatic(far, out error));
+    Equal(WorldPackBuildError.InvalidStaticPlacement, error);
+    False(duplicate.TryAddFrozenStatic(source with
+    {
+        Id = new WorldStaticId(3),
+        Bounds = default,
+    }, out error));
+    Equal(WorldPackBuildError.InvalidStaticPlacement, error);
+
+    WorldPackBuilder missing = CreateTerrainBuilder();
+    True(missing.TryAddFrozenStatic(CreateFrozenStatic(9, 1,
+        new WorldPosition(20, 20, 1_000, 1_000, 0)), out _));
+    False(missing.TryBuild(out _, out error));
+    Equal(WorldPackBuildError.MissingChunk, error);
+
+    WorldPackBuilder malformedMulti = CreateTerrainBuilder();
+    WorldMultiPieceSource piece = CreateMultiPiece(1, 3, new WorldPosition(0, 0, 1_000, 1_000, 0));
+    WorldMultiPieceSource[] duplicatePieces = [piece, piece];
+    False(malformedMulti.TryAddStaticMulti(new MultiInstanceId(1), position, 0, duplicatePieces, out error));
+    Equal(WorldPackBuildError.InvalidMulti, error);
+
+    var tight = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(2 * 1024 * 1024, 1, 8, maximumFrozenStatics: 1,
+            maximumMultiInstances: 1, maximumMultiFragments: 1));
+    CreatePackPlanes(0, 0, out ushort[] materials, out TerrainHeightPlaneBase heightBase,
+        out TerrainHeightOffset[] heights);
+    True(tight.TryAddBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0),
+        materials, heightBase, heights, out _));
+    True(tight.TryAddFrozenStatic(source, out _));
+    False(tight.TryAddFrozenStatic(source with { Id = new WorldStaticId(8) }, out error));
+    Equal(WorldPackBuildError.CapacityExceeded, error);
+
+    var sectionLimited = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(2 * 1024 * 1024, 1, 2, maximumFrozenStatics: 1));
+    True(sectionLimited.TryAddBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0),
+        materials, heightBase, heights, out _));
+    True(sectionLimited.TryAddFrozenStatic(source, out _));
+    False(sectionLimited.TryBuild(out _, out error));
+    Equal(WorldPackBuildError.CapacityExceeded, error);
+}
+
+static void FrozenStructureOpenRejectsMalformedSectionPayloads()
+{
+    WorldPackArtifact artifact = CreateStructuredWorldPackArtifact(reverse: false);
+    var valid = new byte[artifact.Length];
+    artifact.CopyTo(valid);
+    var limits = new WorldPackLimits(4 * 1024 * 1024, 64, 8);
+    int chunks = BinaryPrimitives.ReadInt32LittleEndian(valid.AsSpan(64));
+    int sections = WorldPackFormat.HeaderBytes + chunks * WorldPackFormat.ChunkDirectoryRowBytes;
+    int staticRow = sections + 2 * WorldPackFormat.SectionDirectoryRowBytes;
+    int multiRow = sections + 3 * WorldPackFormat.SectionDirectoryRowBytes;
+
+    byte[] badStatic = (byte[])valid.Clone();
+    int staticPayload = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(badStatic.AsSpan(staticRow + 8)));
+    badStatic[staticPayload + 24] = 1;
+    RewriteSectionDigest(badStatic, staticRow);
+    RewritePackFingerprint(badStatic);
+    AssertPackOpenFails(badStatic, limits, WorldPackOpenError.InvalidFrozenStaticPayload);
+
+    byte[] badMulti = (byte[])valid.Clone();
+    int multiPayload = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(badMulti.AsSpan(multiRow + 8)));
+    badMulti[multiPayload + 36] = 1;
+    RewriteSectionDigest(badMulti, multiRow);
+    RewritePackFingerprint(badMulti);
+    AssertPackOpenFails(badMulti, limits, WorldPackOpenError.InvalidMultiPayload);
+
+    byte[] unsupported = (byte[])valid.Clone();
+    BinaryPrimitives.WriteUInt32LittleEndian(unsupported.AsSpan(staticRow + 4), 2);
+    RewritePackFingerprint(unsupported);
+    AssertPackOpenFails(unsupported, limits, WorldPackOpenError.UnsupportedRequiredSection);
+}
+
+static void StaticDefinitionsBindBeforeGenerationPublication()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(
+        reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    var incomplete = new WorldContentBinding(GameContent.WorldFingerprint,
+        [GameTerrainMaterialIds.Water, GameTerrainMaterialIds.Sand, GameTerrainMaterialIds.Grass,
+            GameTerrainMaterialIds.Rock, GameTerrainMaterialIds.Snow],
+        [GameWorldStaticDefinitionIds.Tree]);
+    False(pack.TryBind(incomplete, out BoundWorldPack? bound, out WorldPackBindingError error));
+    Equal(null, bound);
+    Equal(WorldPackBindingError.UnknownStaticDefinition, error);
+
+    var composition = new UltraSimGameComposition(baseWorldPack: pack);
+    using var runtime = new ServerRuntime(composition,
+        new ServerRuntimeOptions(UltraSimGameComposition.CreateWorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((_, _, game) =>
+    {
+        Equal(3, game.WorldState.BaseWorld!.FrozenStaticCount);
+        Equal(2, game.WorldState.BaseWorld.MultiInstanceCount);
+        var query = new WorldStaticBounds(-500, -1_000, -500, 2_500, 3_000, 2_500);
+        Span<WorldStaticQueryHit> hits = stackalloc WorldStaticQueryHit[16];
+        True(game.WorldState.TryQueryStaticBounds(query, 16, hits, out int count, out int required,
+            out WorldStaticQueryError queryError));
+        Equal(WorldStaticQueryError.None, queryError);
+        Equal(required, count);
+        True(count > 0);
         return true;
     }, out bool published));
     True(published);
@@ -983,6 +1262,106 @@ static string ComputeMeshHash(
         offset += sizeof(int);
     }
 }
+
+static WorldPackArtifact CreateStructuredWorldPackArtifact(
+    bool reverse,
+    WorldContentFingerprint? content = null,
+    SpatialSpaceId? space = null)
+{
+    WorldPackBuilder builder = CreateTerrainBuilder(content, space);
+    WorldFrozenStaticSource[] statics =
+    [
+        CreateFrozenStatic(30, 1, new WorldPosition(0, 0, 1_000, 1_000, 0)),
+        CreateFrozenStatic(10, 1, new WorldPosition(0, 0, 2_000, 2_000, 0)),
+        CreateFrozenStatic(20, 2, new WorldPosition(-1, 0, 15_900, 200, 0), halfExtent: 300),
+    ];
+    WorldMultiPieceSource[] cabin =
+    [
+        CreateMultiPiece(1, 3, new WorldPosition(-1, -1, 15_500, 15_500, 0)),
+        CreateMultiPiece(2, 3, new WorldPosition(0, -1, 500, 15_500, 0)),
+        CreateMultiPiece(3, 4, new WorldPosition(0, 0, 500, 500, 2_000)),
+    ];
+    WorldMultiPieceSource[] shelf =
+    [
+        CreateMultiPiece(1, 5, new WorldPosition(0, 0, 1_500, 1_500, 0)),
+    ];
+    if (reverse)
+    {
+        Array.Reverse(statics);
+        Array.Reverse(cabin);
+        True(builder.TryAddStaticMulti(new MultiInstanceId(700),
+            new WorldPosition(-1, -1, 15_500, 15_500, 0), 0, cabin, out _));
+        True(builder.TryAddStaticMulti(new MultiInstanceId(600),
+            new WorldPosition(0, 0, 1_500, 1_500, 0), 0, shelf, out _));
+    }
+    else
+    {
+        True(builder.TryAddStaticMulti(new MultiInstanceId(600),
+            new WorldPosition(0, 0, 1_500, 1_500, 0), 0, shelf, out _));
+        True(builder.TryAddStaticMulti(new MultiInstanceId(700),
+            new WorldPosition(-1, -1, 15_500, 15_500, 0), 0, cabin, out _));
+    }
+    foreach (WorldFrozenStaticSource value in statics)
+        True(builder.TryAddFrozenStatic(value, out _));
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError error));
+    Equal(WorldPackBuildError.None, error);
+    True(artifact is not null);
+    return artifact!;
+}
+
+static WorldPackBuilder CreateTerrainBuilder(
+    WorldContentFingerprint? content = null,
+    SpatialSpaceId? space = null)
+{
+    SpatialSpaceId selectedSpace = space ?? WorldPackTestProfile.Space;
+    var builder = new WorldPackBuilder(selectedSpace, content ?? WorldPackTestProfile.Content,
+        new WorldPackLimits(4 * 1024 * 1024, 64, 8));
+    for (int z = -2; z < 2; z++)
+    {
+        for (int x = -2; x < 2; x++)
+        {
+            CreatePackPlanes(x, z, out ushort[] materials, out TerrainHeightPlaneBase heightBase,
+                out TerrainHeightOffset[] heights);
+            True(builder.TryAddBaseTerrain(new SpatialChunkKey(selectedSpace, x, z),
+                materials, heightBase, heights, out _));
+        }
+    }
+    return builder;
+}
+
+static WorldFrozenStaticSource CreateFrozenStatic(
+    ulong id,
+    uint definition,
+    WorldPosition position,
+    int halfExtent = 200) => new(
+        new WorldStaticId(id),
+        new WorldStaticDefinitionId(definition),
+        position,
+        0,
+        0,
+        WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
+        BoundsAround(position, halfExtent));
+
+static WorldMultiPieceSource CreateMultiPiece(
+    uint piece,
+    uint definition,
+    WorldPosition position,
+    int halfExtent = 400) => new(
+        new MultiPieceId(piece),
+        new WorldStaticDefinitionId(definition),
+        position,
+        0,
+        0,
+        WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
+        BoundsAround(position, halfExtent));
+
+static WorldStaticBounds BoundsAround(WorldPosition position, int halfExtent) => new(
+    checked(position.GlobalXMillimeters - halfExtent),
+    checked((long)position.YMillimeters - halfExtent),
+    checked(position.GlobalZMillimeters - halfExtent),
+    checked(position.GlobalXMillimeters + halfExtent),
+    checked((long)position.YMillimeters + halfExtent),
+    checked(position.GlobalZMillimeters + halfExtent));
 
 static WorldPackArtifact CreateWorldPackArtifact(
     bool reverse,
@@ -1768,7 +2147,7 @@ static class WorldPackTestProfile
 
 sealed class RawSpatialFixture : IDisposable
 {
-    internal RawSpatialFixture(int lifecycleCapacity, int entityCapacity = 32)
+    internal RawSpatialFixture(int lifecycleCapacity, int entityCapacity = 32, BoundWorldPack? baseWorld = null)
     {
         var options = new EcsWorldOptions(
             new EntityCapacity(entityCapacity),
@@ -1777,7 +2156,7 @@ sealed class RawSpatialFixture : IDisposable
             maximumPreparedTransitions: 2,
             lifecycleRecordCapacity: lifecycleCapacity);
         World = new EcsWorld(GameSchema.CreateSchema(), options);
-        State = new GameWorldState(World);
+        State = new GameWorldState(World, baseWorld);
         RawPositionLookup = World.PrepareLookup<WorldPositionComponent>();
         ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
         NonSpatialArchetype = World.RegisterArchetype(

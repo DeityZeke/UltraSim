@@ -67,8 +67,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
   terrain foundation, and T0.3 accepted the canonical sectioned immutable
   WorldPack/source. T0.4 accepted exact base-terrain queries plus the bounded
   deterministic engine-neutral mesh payload after single-space admission,
-  current-world query ownership, and four-way seam hardening. The plan next
-  proceeds to statics/Multi compilation and streaming,
+  current-world query ownership, and four-way seam hardening. T0.5 is now
+  implemented and stopped for review with optional packed statics/Multi sections,
+  stable cross-chunk logical identities, deterministic render grouping, and
+  bounded exact static-bounds queries. The plan next proceeds to streaming,
   dynamic membership, shared packed publication,
   bounded dirty history, client rendering, persistence seams, and one playable
   cabin vertical.

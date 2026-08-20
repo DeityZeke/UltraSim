@@ -2,7 +2,9 @@
 
 Terrain T0.0 established the game-owned integer position/profile layer over the
 dependency-neutral [Spatial contracts](../../Kernels/Spatial/README.md). T0.1
-adds authoritative ECS position and generation-owned dynamic membership.
+adds authoritative ECS position and generation-owned dynamic membership; T0.2–T0.5
+add the dense base terrain, immutable pack, base queries/mesh payload, and packed
+frozen-static/static-Multi content.
 
 The frozen first profile is:
 
@@ -99,8 +101,11 @@ T0.3 freezes `WorldPack/v1` as a canonical uncompressed little-endian sectioned
 container. It owns a 160-byte header, sorted 48-byte chunk rows, versioned
 48-byte section rows, full-pack SHA-256 identity, and per-section hash checks.
 The required sections are the dense base `TerrainMaterials/v1` and
-`TerrainHeights/v1`; a future sparse structural-surface section can be added
-without changing either base section, but no such row schema exists yet.
+`TerrainHeights/v1`. T0.5 optionally adds `FrozenStatics/v1` and
+`MultiFragments/v1`; each owns a section-local range table aligned to canonical
+main-chunk order. The frozen top-level 48-byte terrain chunk row remains
+unchanged. A future sparse additional structural-surface section can likewise be
+added without changing any accepted section, but no such surface schema exists.
 
 Opening is bounded by `WorldPackLimits` before proportional allocation. The
 reader validates geometry, content fingerprint, all checked offsets/counts,
@@ -111,8 +116,8 @@ borrowed, allocation-free `WorldTerrainChunkView` rather than constructing a
 cell or chunk object graph.
 
 `WorldContentBinding` is supplied cold by Composition. A pack becomes a
-`BoundWorldPack` only after its content fingerprint and every structural
-material ID resolve. An optional bound pack is then generation-owned through
+`BoundWorldPack` only after its content fingerprint, every structural material
+ID, and every frozen-static definition ID resolve. An optional bound pack is then generation-owned through
 `GameWorldState`; the current single-space game additionally rejects a bound pack
 whose `SpatialSpaceId` is not `GameWorldState.DefaultSpace` before generation
 publication. Default worlds may still run without one until the T0 vertical
@@ -161,5 +166,57 @@ frames regardless of presentation residency. Output capacity and target identity
 are validated before any write, and the warmed query/build paths allocate 0 B.
 
 The simple fixed grid is deliberate. Greedy geometry merging, float/Godot upload
-formats, live collision resources, static bounds, and sparse additional terrain
+formats, live collision resources, and sparse additional terrain
 surfaces remain later measured contracts.
+
+## Frozen statics and static placed Multis
+
+T0.5 keeps immutable non-simulated world geometry out of ECS. The two optional
+section layouts are:
+
+```text
+FrozenStatics/v1
+    32-byte header
+    8-byte range / canonical main chunk
+    56-byte frozen-static rows
+
+MultiFragments/v1
+    40-byte header
+    8-byte range / canonical main chunk
+    40-byte logical Multi-instance rows
+    56-byte chunk-local fragment rows
+```
+
+An independent row retains its stable `WorldStaticId`; every Multi fragment
+retains `MultiInstanceId` plus its stable `MultiPieceId`. Those identities are
+pack/world identities. Chunk indices, row offsets, render group offsets, and
+future renderer instance indices are not authority. A logical static placed
+Multi may cross chunk boundaries while retaining one root record and one piece
+count. T0.5 does not establish moving local-coordinate frames, ships, vehicles,
+or moving aggregates.
+
+The compiler sorts rows canonically by main chunk, compatible render key, and
+stable identity. Borrowed per-chunk views decode directly from owned pack bytes
+and can copy deterministic compatible render groups into caller spans. Normal
+reads allocate no per-chunk lists or objects.
+
+`WorldStaticBounds` is an exact half-open integer-millimetre 3D bound. Frozen
+rows are assigned one canonical home chunk and may extend only through its
+bounded one-chunk halo. `TryQueryStaticBounds` expands the query's candidate
+chunk range by that halo, rejects work beyond the caller's explicit candidate
+budget, counts matches before writing, and therefore never partially publishes
+an undersized destination. Pure artifact queries live on `WorldPack`/
+`BoundWorldPack`; authoritative gameplay routes through `GameWorldState` so a
+future durable overlay can shadow or augment the immutable base without changing
+callers.
+
+All optional section counts and offsets are validated against `WorldPackLimits`
+before a pack is published. Canonical ranges, row ordering, stable-ID uniqueness,
+logical Multi piece totals, root residency, flags, local coordinates, bounds,
+hashes, and content definitions are fail-closed.
+
+The accepted synthetic T0.5 evidence uses 256 chunks, 8,192 independent statics,
+64 logical Multis, and 512 fragments in a 1,589,672-byte pack. Warmed packed
+reads, render-group copies, and bounded exact overlap queries all allocate 0 B.
+The overlap fixture deliberately exercises the transactional halo scan; it is
+not a collision-engine or production-content throughput claim.

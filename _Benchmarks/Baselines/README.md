@@ -45,6 +45,10 @@ Useful current anchors can be located by their embedded workload or filename:
 - `terrain-t0.4-query-mesh-*` — exact integer base-height/material queries,
   deterministic fixed-grid mesh payload identity, neighbor-aware seam frames,
   fixed output accounting, and warmed allocation-free timings;
+- `terrain-t0.5-frozen-structures-*` — canonical optional frozen-static and
+  static-Multi sections, stable cross-chunk logical identity, borrowed packed
+  reads, compatible render-group extraction, and bounded transactional exact
+  static-bounds query evidence;
 - `s0.8-integrated-acceptance-cadence-independent-*` — accepted integrated
   Runtime/game/persistence/cadence gate;
 - `network-n0.1-game-projection-100k-*` — canonical changed-state capture and
