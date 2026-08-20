@@ -21,7 +21,8 @@ the next architectural dependency rather than another packet/codec problem.
 The active major milestone is **Terrain / World T0**. T0 builds the chunk-native
 world substrate originally intended for terrain, statics, streaming, and AOI:
 deterministic chunk-relative coordinates, packed terrain and UO-like statics,
-logical Multi/property composition, derived dynamic ECS membership, one shared
+logical Multi structure composition, a separate future 3D region/property seam,
+derived dynamic ECS membership, one shared
 revisioned publication page per chunk, bounded dirty history, local snapshot/delta
 streaming, and efficient Godot terrain/static rendering. The acceptance vertical
 is a small woods/cabin world rather than another isolated kernel demo.

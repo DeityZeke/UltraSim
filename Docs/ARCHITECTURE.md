@@ -129,6 +129,12 @@ engine-neutral base mesh with neighbor-aware seam frames; it does not introduce
 Godot or make the base sampler a general multi-surface ground contract.
 The pack remains extensible to future sparse structural surfaces; world topology
 is not restricted to one heightfield surface per X/Z.
+Future `WorldRegion`, property, property-unit, Multi, terrain, and edit-lease
+identities are likewise distinct. Regions are durable true-3D spatial-policy
+metadata rather than chunk partitions or ECS entities by default, and concrete
+policy domains may resolve different members of the bounded region set applying
+at one location instead of relying on one universal winning region. T0 preserves
+this seam without implementing a region/property framework.
 Statics, revisioned publication, bounded dirty history, local streaming, and
 Godot rendering remain later Terrain gates.
 [Network N1](Plans/NETWORK.md) is deferred

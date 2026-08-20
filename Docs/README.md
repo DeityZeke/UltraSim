@@ -39,7 +39,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## World / terrain
 
 - [Terrain / World T0 active plan](Plans/TERRAIN.md) — deterministic world/chunk
-  coordinates, packed terrain/statics, UO-like Multi/property composition,
+  coordinates, packed terrain/statics, UO-like Multi structure composition,
+  and a preserved separate seam for future 3D regions/property semantics,
   dynamic chunk membership, revisioned chunk publication, bounded dirty history,
   client streaming, Godot batching, and the playable woods/cabin vertical.
 
@@ -64,7 +65,7 @@ reports live in git history. Accepted measurements live in immutable JSON under
   world-spatial index after saturated-capacity/model-oracle hardening. T0.2
   accepted the per-chunk-base 5 mm terrain height and 4,230-byte dense base
   terrain foundation, and T0.3 accepted the canonical sectioned immutable
-  WorldPack/source. T0.4 now proposes exact base-terrain queries plus the bounded
+  WorldPack/source. T0.4 now implements exact base-terrain queries plus the bounded
   deterministic engine-neutral mesh payload and is stopped for checkpoint
   review. The plan next proceeds to statics/Multi compilation and streaming,
   dynamic membership, shared packed publication,

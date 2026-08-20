@@ -121,7 +121,21 @@ STATIC VISUAL SCALE DOES NOT REQUIRE ONE NODE PER STATIC.
 
 FROZEN HETEROGENEOUS GEOMETRY MAY BE BAKED; REPEATED IDENTICAL GEOMETRY MAY BE INSTANCED.
 
-LOGICAL MULTI/PROPERTY GROUPING IS SEPARATE FROM GODOT MULTIMESH GROUPING.
+LOGICAL MULTI STRUCTURE GROUPING IS SEPARATE FROM GODOT MULTIMESH GROUPING.
+
+A MULTI IS LOGICAL STRUCTURE/PLACEMENT GROUPING; IT IS NOT PROPERTY OWNERSHIP.
+
+WORLD REGIONS ARE DURABLE SPATIAL-POLICY METADATA, NOT WORLD STORAGE
+PARTITIONS OR ECS ENTITIES BY DEFAULT.
+
+PROPERTY, PROPERTY UNIT, WORLD REGION, MULTI, TERRAIN, AND EDIT-LEASE IDENTITIES
+ARE DISTINCT EVEN WHEN THEIR GEOMETRY OVERLAPS.
+
+FUTURE PROPERTY/ROOM REGIONS ARE TRUE 3D VOLUME SETS; LAND OWNERSHIP AND POLICY
+ARE NOT DEFINED BY THE 16 M WORLD-CHUNK GRID.
+
+A LOCATION MAY MATCH SEVERAL SEMANTIC REGIONS. CONCRETE POLICY DOMAINS RESOLVE
+THE RELEVANT MEMBERS; THERE IS NO REQUIRED UNIVERSAL WINNING REGION.
 
 TERRAIN EDITING AND MULTI/STATIC AUTHORING HAVE SEPARATE SEMANTIC AND
 REVERSIBILITY DOMAINS.
@@ -266,7 +280,9 @@ Physics/Nav/AI regions
 
 A terrain resident slot, spatial-index slot, publication row slot, client resident slot, render RID, ECS slot, network connection slot, or AOI subscription slot are all different process-local identities. No subsystem may assume their numeric values correspond.
 `PublicationRevision` is chunk-local monotonic latest-state publication identity. It is not authoritative simulation tick identity, although a publication records the authoritative tick that produced it.
-A `Multi` remains the UO-like logical property/structure grouping. It is separate from spatial partitioning and separate from Godot `MultiMesh` batching.
+A `Multi` remains the UO-like logical structure/placement grouping. It is
+separate from property ownership, spatial-policy regions, spatial partitioning,
+and Godot `MultiMesh` batching.
 
 ## Scope and deliberate non-goals
 
@@ -280,7 +296,8 @@ T0 includes:
 - an extensible world-data seam for later sparse structural surfaces without
   changing the dense base heightfield;
 - a deterministic runtime `WorldPack` format and reader;
-- UO-like frozen static placements and logical Multi/property composition;
+- UO-like frozen static placements and logical Multi structure composition,
+  without conflating it with future property ownership;
 - a concrete, game-owned `WorldSpatialIndex` for coarse dynamic home-chunk membership;
 - incremental maintenance from a deduplicated, barrier-scoped ECS position/lifecycle change view rather than full-world spatial rescans or per-movement messages;
 - explicit multi-reader/owned change-set semantics so Spatial, publication, persistence, or other derived consumers do not race over one destructive dirty drain;
@@ -305,6 +322,8 @@ T0 does **not** require:
 - final public package-manager/SDK packaging for optional Spatial adapters;
 - a production terrain/world editor or parallel multi-user editor UI;
 - player housing/property ownership and private/public customization UI;
+- a runtime `WorldRegionStore`, property/unit/lease model, or generalized region
+  policy framework;
 - staged construction gameplay, community construction events, or autonomous
   settlement planning;
 - a UO-, Sims-, Valheim-, or Banished-specific authority model;
@@ -443,7 +462,7 @@ T0.1   authoritative WorldPosition + WorldSpatialIndex
 T0.2   terrain profile validation + height encoding
 T0.3   sectioned WorldPack container + terrain source
 T0.4   authoritative base-terrain query + deterministic base mesh payload
-T0.5   frozen statics + Multi/property compilation
+T0.5   frozen statics + Multi structure compilation
 T0.6   ChunkPublicationStore + bounded history
 T0.7   interest/subscription oracle
 T0.8   client residency + production Godot renderer/streaming
@@ -1344,7 +1363,7 @@ No static-bounds query, greedy mesh, additional structural surface, collision
 engine, client residency, live Godot resource, publication, or Network work is
 part of T0.4.
 
-## T0.5 — UO-like statics, properties, and `Multi`
+## T0.5 — UO-like statics and `Multi` structure compilation
 
 Terrain and non-simulated world decoration must not become one ECS entity per
 placement merely to render or stream it.
@@ -1380,7 +1399,7 @@ Placements in an immutable pack use a CSR-style layout: one chunk directory row
 stores `StaticOffset + StaticCount` into packed global/static section arrays. Do
 not allocate one `List<Static>` for every chunk during normal read-only use.
 
-### Logical Multi/property
+### Logical `Multi` structure identity
 
 A `Multi` is the UO-like logical grouping: a building, structure, ship, shelf set,
 or authored collection of placements with one root identity/transform and many
@@ -1413,6 +1432,105 @@ A door may visually align with a static building but remains dynamic if gameplay
 state changes. A chest's frozen body may eventually be batched visually while its
 interaction/inventory identity remains authoritative elsewhere. Do not erase game
 identity merely to earn a render batch.
+
+### Future region/property seam — preserved, not implemented by T0.5
+
+Historical RunUO `Region`, Regions-in-a-Box, Town Houses, and Rental Contract
+implementations provide useful requirements without providing an implementation
+shape to copy. They demonstrate unions of true 3D volumes, nested semantic
+areas, authoring visualization, property applied over existing world geometry,
+and vertically bounded rental subspaces. UltraSim preserves those capabilities
+while rejecting a giant callback-driven `Region` base class, one universal flag
+bag, and one priority winner for every gameplay decision.
+
+The identities remain independent:
+
+```text
+SpatialChunkKey
+    coarse storage, streaming, publication, and AOI identity
+
+WorldRegionId
+    durable spatial-policy identity
+
+PropertyId
+    durable ownership/economic/build-entitlement identity
+
+PropertyUnitId
+    stable assignable/rentable subspace identity
+
+MultiInstanceId
+    logical authored structure/group identity
+
+EditSessionId / EditRegionLease
+    transient authoring session and mutation-ownership identity
+
+ConstructionProjectId
+    authoritative incomplete-construction identity
+```
+
+There is no numeric correspondence between them. A property may reference one
+or more Multis, already-frozen world geometry, region definitions, or a
+combination. A town building may therefore become a property without respawning
+or reclassifying its geometry:
+
+```text
+PROPERTY != MULTI
+WORLD REGION != SPATIAL CHUNK
+PROPERTY UNIT != CURRENT OCCUPANT
+```
+
+A future `WorldRegion` is durable world-policy metadata. Its first earned
+geometry should be a bounded union of integer-millimeter 3D AABBs rather than an
+implicitly full-height 2D footprint. One logical region may span many chunks or
+contain disjoint volumes; one chunk may intersect many regions. A private
+read-optimized index may compile chunk-to-candidate-region references before
+exact 3D containment, but it is not `WorldSpatialIndex` and boundaries may occur
+inside a chunk.
+
+A point may simultaneously participate in several semantic regions:
+
+```text
+Britain
+Market District
+Drunken Badger Hotel
+Room 203
+Harvest Festival
+```
+
+Concrete gameplay domains resolve the relevant bounded region set. Room tenancy
+may control occupancy/storage while hotel ownership controls structural changes,
+town regions control law, and an event region controls event behavior. Do not
+encode those unrelated answers through one global priority number or subtract a
+child room from every parent semantic region.
+
+A future property is ownership, economics, and build entitlement rather than a
+geometry container. A `PropertyUnit` is a stable subspace such as a hotel room,
+apartment, market stall, workshop, field, guild room, or NPC quarters. A
+separate occupancy/lease relationship associates that unit with its current
+holder, so changing tenants does not destroy/recreate the room identity. Player,
+NPC, household, guild, business, or settlement holders may eventually share the
+same relationship semantics; the fundamental geometry must not embed `PlayerId`.
+
+Parent property rights remain applicable inside child units. Child occupancy
+does not grant structural remodeling, terrain excavation, sale of the parent,
+or other landlord authority unless a concrete policy explicitly grants it.
+Property units may later reserve bounded shares of parent resources—storage,
+decoration, merchant, resident, or utility capacity—when a real consumer earns
+those budgets. T0 adds no generic quota system.
+
+Region/property definitions may accompany a private structure candidate and
+publish transactionally after validation. Editor boxes, colors, and gizmos are
+presentation, not authority. Pure region-definition editing owns the region
+identity/revision; it does not automatically acquire every terrain backing chunk
+it overlaps. Terrain edits acquire terrain chunk leases, structure/property
+edits acquire their own ownership, and a combined transaction acquires only the
+domains it actually mutates.
+
+This seam also leaves room for future semantic spaces used by simulation—rooms,
+shops, work zones, pastures, districts, and similar concepts—without turning
+static policy volumes into ECS entities. Concrete consumers must first earn any
+policy channels or runtime store. T0.5 implements only packed statics and Multi
+structure identity.
 
 ### Authoring and reversibility vocabulary
 
@@ -1486,7 +1604,7 @@ changing the underlying authoritative structure representation:
 
 ```text
 PrivateDraft
-    published property/structure
+    published structure + any separately owned property/region metadata
         -> private parallel design candidate
         -> validate complete candidate
         -> atomic structure publication
@@ -1595,7 +1713,7 @@ Important distinction:
 
 - heterogeneous frozen clutter may instead be compiled into one combined mesh for
 
-  the shelf/property/chunk, or several compatible `MultiMesh` groups.
+  the shelf/Multi/chunk, or several compatible `MultiMesh` groups.
 
 Picking/interaction may map render-instance indices back to logical static or
 interactive identities. Presentation batching never changes authority.
@@ -1603,7 +1721,7 @@ The asset pipeline should preserve reuse tricks such as statuettes/clockwork
 figures using the same creature mesh at another scale/animation state. That is a
 content/render decision built on numeric prefab identity, not a special terrain
 entity type.
-**T0.5 gate:** a cabin/property compiles deterministically across chunk boundaries,
+**T0.5 gate:** a cabin/Multi structure compiles deterministically across chunk boundaries,
 uses packed/CSR-style static and Multi-fragment representation, preserves stable
 logical identities, and emits bounded render-ready grouping evidence. Production
 streaming and the no-node-per-static Godot proof arrive at T0.8.
@@ -2224,6 +2342,12 @@ basements, hobbit-hole excavation, and future cave/underground surfaces can shar
 the same validation path. World chunks do not become land-ownership parcels.
 T0 does not design the full property system.
 
+A pure future `WorldRegion` metadata edit is a different ownership domain from
+terrain compilation and does not automatically take a terrain chunk lease merely
+because its volume overlaps that chunk. A transaction that changes region,
+property, structure, and/or terrain state must acquire and validate only the
+specific authority domains it mutates.
+
 Structure `PrivateDraft` may use the same published-world/private-candidate shape.
 Structure `PublicLive` may instead commit each validated structural operation.
 That choice never changes terrain: terrain modification remains private and
@@ -2638,7 +2762,8 @@ T0 is accepted only when:
 - terrain height encoding is documented by evidence;
 - immutable world-pack validation is transactional and bounded;
 - terrain and frozen statics stream without ECS/entity/node-per-placement explosion;
-- logical Multi/property identity survives chunk splitting;
+- logical Multi structure identity survives chunk splitting without being
+  mistaken for property or region identity;
 - terrain, spatial membership, publication, client semantic, AOI subscription, and render storage do not share mutable chunk objects or local slot identity;
 - dynamic ECS entities rebuild into one exact canonical home-chunk spatial index;
 - ordinary spatial maintenance consumes a deduplicated committed ECS change view/equivalent rather than proportionally rescanning every spatial entity;
@@ -2692,6 +2817,9 @@ These require measurements or real content rather than premature commitment:
 - mutable terrain/static overlay and replacement-generation format;
 - edit-session heartbeat/expiry, administrative conflict policy, property-volume
   authorization, and client terrain-patch distribution;
+- future `WorldRegionId`, `PropertyId`, `PropertyUnitId`, region-volume storage,
+  bounded region candidate indexing, domain-specific policy resolution, and
+  occupancy/lease schemas;
 - concrete ConstructionProject schema, authored stage granularity, and
   contribution authorization;
 - interior/portal/occlusion policy;
@@ -2722,6 +2850,9 @@ terrain edits remain private candidates until an atomic validated commit
 terrain content revision is separate from dynamic publication revision
 Harden preserves Multi identity; Freeze lowers representation
 Unfreeze is not Undo
+Multi, Property, PropertyUnit, WorldRegion, terrain, and edit leases are distinct
+WorldRegions are true 3D spatial-policy metadata, not chunk partitions
+policy domains resolve a bounded applicable region set, not one universal winner
 structure visibility policy is separate from construction realization
 publication identity is game-owned and cross-chunk ordered by EntityPublicVersion
 history pressure invalidates deltas but never rejects current public state
