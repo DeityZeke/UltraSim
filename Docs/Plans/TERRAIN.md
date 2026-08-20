@@ -1,7 +1,8 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.3 are accepted/frozen as of
-2026-08-20; T0.4 implementation is complete and stopped for checkpoint review.
+Status: active forward plan. T0.0 through T0.4 are accepted/frozen as of
+2026-08-20 after T0.4 ownership, single-space admission, and four-way seam
+hardening. T0.5 is not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -1064,7 +1065,8 @@ WorldPackHeader
 
 ChunkDirectory[]               canonical sorted keys
     SpatialChunkKey
-    section references / counts
+    TerrainMaterials/v1 offset / length / count
+    TerrainHeights/v1 offset / length / count
 
 SectionDirectory[]
     section kind
@@ -1089,6 +1091,15 @@ later sections using the same container
 T0.3 freezes the **sectioned container**, not the later static/Multi row schema.
 Do not finalize a future record layout merely so the first terrain-only pack can
 write an empty section with a misleading permanent version.
+The frozen 48-byte top-level chunk row remains terrain-specific and does not grow
+`StaticOffset`, `StaticCount`, Multi, or later-domain fields. Future sections own
+their section-local chunk range/index metadata and relate it to canonical
+`SpatialChunkKey`/main-directory order without changing this row:
+
+```text
+SHARED SPATIAL CHUNK IDENTITY != SHARED STORAGE LAYOUT
+```
+
 `TerrainMaterials/v1` and `TerrainHeights/v1` describe only the dense base
 surface. The container must admit a future structural-surface section without
 changing either base section, but T0.3 must not invent that future section's
@@ -1193,6 +1204,19 @@ optional; supplying a pack makes binding part of private generation construction
 so failure occurs before generation publication. Hot reads retain compact numeric
 material IDs and never callback into Composition.
 
+The current concrete game is single-space: dynamic membership uses
+`GameWorldState.DefaultSpace`, and a bound base pack must carry that same
+`SpatialSpaceId`. A correctly fingerprinted pack from another space rejects
+during private generation construction before publication. This does not create a
+generic multi-space/facet resolver; a real second space must first earn that
+representation.
+
+`GameContent.WorldFingerprint` must advance whenever the semantic meaning of any
+packed numeric world-content identity changes incompatibly, even if the numeric
+ID itself remains admitted. This governance applies to material/static/prefab and
+future packed content meanings. T0 does not create an automatic fingerprint
+framework.
+
 The preserved 16 x 16 synthetic base-terrain pack contains 256 chunks:
 
 ```text
@@ -1272,8 +1296,12 @@ vertex, rather than mutating two independent border copies.
 
 ### Mesh contract
 
-Mesh generation consumes an immutable terrain chunk snapshot and emits a bounded
-render payload. The server never builds this mesh. This payload is specifically
+Mesh generation consumes one immutable root terrain chunk plus the bounded
+resolved semantic neighbor halo required by incident edge/corner triangles, and
+emits a bounded render payload. For the current base grid this dependency is at
+most the surrounding 3 x 3 chunk neighborhood. Neighbor presentation residency
+is irrelevant as long as immutable semantic data can be resolved. The server
+never builds this mesh. This payload is specifically
 the deterministic base-heightfield mesh. If additional structural terrain is
 later implemented, it owns its own deterministic query/mesh representation while
 sharing canonical world coordinates and spatial chunk identity.
@@ -1296,6 +1324,10 @@ Requirements:
 
 - absent neighbor presentation never changes authoritative terrain.
 
+A terrain replacement invalidates the changed root mesh and only the bounded
+adjacent mesh frames whose incident triangles read that chunk. This is local
+neighbor invalidation, not an unbounded dependency graph.
+
 If greedy merging costs more CPU than the vertex/triangle reduction earns for
 real content, retain the simpler mesh. The benchmark records both mesh build time
 and Godot render cost; triangle count alone is not an acceptance metric.
@@ -1303,8 +1335,8 @@ and Godot render cost; triangle count alone is not an acceptance metric.
 and a warmed mesh-build allocation profile. Live Godot rendering/streaming is not
 required until T0.8.
 
-**T0.4 implementation checkpoint (2026-08-20): complete and stopped for
-review.** `BoundWorldPack` now exposes allocation-free base-surface height and
+**T0.4 implementation checkpoint (2026-08-20): accepted/frozen after focused
+hardening.** `BoundWorldPack` now exposes allocation-free base-surface height and
 material queries. The location's canonical half-open `WorldPosition` chooses the
 chunk/cell. Height sampling reads the four packed q5 vertices and evaluates the
 one triangle selected by global terrain-cell parity. Interpolation uses checked
@@ -1312,6 +1344,12 @@ integer plane numerators and signed nearest division with midpoint away from zer
 the caller's Y is irrelevant. Exact `+500 mm` cell and `+16,000 mm` chunk edges
 therefore resolve through the next canonical cell/chunk, including negative
 coordinates.
+
+Those `BoundWorldPack` methods answer what one immutable content artifact
+contains. Gameplay/current-authority callers use the equivalent concrete
+`GameWorldState` routes. They delegate to `BaseWorld` in T0.4 and provide the
+single place where a later durable replacement/overlay may shadow the base pack;
+no generic terrain-provider interface is introduced.
 
 The engine-neutral mesh builder retains the simple fixed grid because neither
 real authored content nor T0.8 Godot evidence has earned greedy merging:
@@ -1328,6 +1366,13 @@ per-triangle material IDs (ushort)    2,048 /  4,096 B
 complete caller-owned payload                  55,588 B
 ```
 
+The 36-byte row is the current repository-internal, engine-neutral
+mesh-preparation payload and remains regression-tested for this benchmark. It is
+not a `WorldPack` or persistence schema, Network ABI, Game.Contracts ABI, mod API,
+or long-term presentation compatibility promise. T0.8 may change presentation
+packing, split streams, or normalized attributes when real Godot evidence earns
+it without reopening base-terrain authority or `WorldPack/v1`.
+
 The builder preflights every caller span and chunk identity before writing. It
 emits upward canonical winding and the same global-parity diagonal used by the
 authoritative sampler. Each vertex frame accumulates every incident triangle
@@ -1342,7 +1387,9 @@ negative signed half-millimetre rounding, exact negative/cross-chunk vertices,
 material ownership, undersized/overlapping destination transactionality,
 maximum-relief checked arithmetic, canonical indices, query/mesh height agreement,
 tangent/normal orthogonality, deterministic rebuild, and all 33 frames along an
-independently generated chunk seam. The canonical
+independently generated chunk seam. Four independently built meshes meeting at a
+negative-coordinate four-way chunk corner also reproduce one exact global
+position, normal, and tangent, directly covering the diagonal-neighbor halo. The canonical
 nonlinear synthetic payload hash is
 `943EC206C09A4E539F252C8B117C926B19FFC0E422185152F3662CBD7D5C1B6D`.
 
@@ -1395,13 +1442,16 @@ Godot resource paths/text names are presentation metadata, never server hot data
 overlays refer to that ID plus the required pack fingerprint. Renderer instance
 indices may map back to it but never become authority.
 Authoring/building tools may snap placements to the 100 mm grid, but the runtime format must not infer that all world objects are permanently restricted to that lattice. Dynamic or physically moved objects use the 1 mm authoritative position quantum.
-Placements in an immutable pack use a CSR-style layout: one chunk directory row
-stores `StaticOffset + StaticCount` into packed global/static section arrays. Do
-not allocate one `List<Static>` for every chunk during normal read-only use.
+Placements in an immutable pack use a CSR-style layout owned by
+`FrozenStatics/v1`: a section-local chunk range/index maps canonical main chunk
+index or `SpatialChunkKey` to `StaticOffset + StaticCount` in packed static rows.
+The frozen 48-byte `WorldPack/v1` top-level terrain chunk row does not grow.
+T0.5 chooses the exact section-local representation from its workload evidence.
+Do not allocate one `List<Static>` for every chunk during normal read-only use.
 
 ### Logical `Multi` structure identity
 
-A `Multi` is the UO-like logical grouping: a building, structure, ship, shelf set,
+A `Multi` is the UO-like logical grouping: a building, static placed structure, shelf set,
 or authored collection of placements with one root identity/transform and many
 local pieces.
 Authoring keeps the logical Multi intact. Runtime compilation may split its frozen
@@ -1410,6 +1460,12 @@ independently. Every fragment retains the logical Multi/instance identity needed
 for inspection, rebuilding, or future editing.
 That `MultiInstanceId` is stable in the same pack/world domain; chunk-fragment and
 packed row slots are not its identity.
+`MultiFragments/v1` likewise owns its section-local chunk range/index metadata;
+it does not add fields to the frozen top-level terrain chunk row.
+T0.5 proves static placed Multi structures only. It does not establish moving
+local-coordinate frames, ships, vehicles, or moving aggregates. A future moving
+system may reuse authored structure definitions only when a concrete workload
+proves that relationship.
 This enables the desired building split:
 
 ```
@@ -1468,6 +1524,11 @@ ConstructionProjectId
     authoritative incomplete-construction identity
 ```
 
+These names are conceptual vocabulary used to preserve semantic separation.
+Except for identities already implemented by a concrete accepted checkpoint,
+future names in this section are not accepted public type names, APIs, schemas,
+or storage layouts.
+
 There is no numeric correspondence between them. A property may reference one
 or more Multis, already-frozen world geometry, region definitions, or a
 combination. A town building may therefore become a property without respawning
@@ -1479,10 +1540,11 @@ WORLD REGION != SPATIAL CHUNK
 PROPERTY UNIT != CURRENT OCCUPANT
 ```
 
-A future `WorldRegion` is durable world-policy metadata. Its first earned
-geometry should be a bounded union of integer-millimeter 3D AABBs rather than an
-implicitly full-height 2D footprint. One logical region may span many chunks or
-contain disjoint volumes; one chunk may intersect many regions. A private
+A future `WorldRegion` is durable world-policy metadata. A bounded union of
+integer-millimeter 3D AABBs is the current evidence-backed first candidate when a
+real region consumer arrives, rather than an implicitly full-height 2D
+footprint; the exact region-volume encoding remains unfrozen. One logical region
+may span many chunks or contain disjoint volumes; one chunk may intersect many regions. A private
 read-optimized index may compile chunk-to-candidate-region references before
 exact 3D containment, but it is not `WorldSpatialIndex` and boundaries may occur
 inside a chunk.
@@ -2103,8 +2165,11 @@ resolve + validate immutable WorldPack
 Upgrade the current lightweight staging record to an explicit owned staging
 aggregate before this composition grows. Failed preparation disposes every
 candidate-owned ECS/world-pack/overlay/spatial/publication/inventory/accounting
-resource exactly once. `GameGenerationState` gains `GameWorldState` as one coherent
-owned member rather than publishing world roots independently.
+resource exactly once. `GameGenerationState` already owns `GameWorldState` as
+one coherent world member. Future staging continues to preserve that root while
+expanding private preparation to include any overlay/publication resources
+required before whole-generation publication rather than publishing world roots
+independently.
 Runtime streaming state is never persisted:
 
 ```

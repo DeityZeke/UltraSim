@@ -65,9 +65,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
   world-spatial index after saturated-capacity/model-oracle hardening. T0.2
   accepted the per-chunk-base 5 mm terrain height and 4,230-byte dense base
   terrain foundation, and T0.3 accepted the canonical sectioned immutable
-  WorldPack/source. T0.4 now implements exact base-terrain queries plus the bounded
-  deterministic engine-neutral mesh payload and is stopped for checkpoint
-  review. The plan next proceeds to statics/Multi compilation and streaming,
+  WorldPack/source. T0.4 accepted exact base-terrain queries plus the bounded
+  deterministic engine-neutral mesh payload after single-space admission,
+  current-world query ownership, and four-way seam hardening. The plan next
+  proceeds to statics/Multi compilation and streaming,
   dynamic membership, shared packed publication,
   bounded dirty history, client rendering, persistence seams, and one playable
   cabin vertical.

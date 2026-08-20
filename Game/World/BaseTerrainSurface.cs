@@ -23,6 +23,8 @@ public readonly record struct TerrainBaseMeshSummary(
 /// <summary>
 /// Engine-neutral deterministic base-terrain vertex. Position is chunk-local X/Z plus absolute Y.
 /// Normal and tangent are exact unnormalized integer directions; presentation may normalize them.
+/// This is an internal repository mesh-preparation payload, not a persistence, pack, Network,
+/// Game.Contracts, mod, or long-term presentation ABI.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4, Size = 36)]
 public readonly struct TerrainBaseMeshVertex : IEquatable<TerrainBaseMeshVertex>
@@ -74,7 +76,7 @@ public readonly struct TerrainBaseMeshVertex : IEquatable<TerrainBaseMeshVertex>
     public static bool operator !=(TerrainBaseMeshVertex left, TerrainBaseMeshVertex right) => !left.Equals(right);
 }
 
-/// <summary>Authoritative base-heightfield queries and deterministic fixed-grid mesh preparation.</summary>
+/// <summary>Immutable-pack base-heightfield queries and deterministic fixed-grid mesh preparation.</summary>
 public static class BaseTerrainSurface
 {
     private const int NorthWest = 0;
@@ -130,8 +132,9 @@ public static class BaseTerrainSurface
     }
 
     /// <summary>
-    /// Emits one complete 33x33 fixed-grid base mesh. All destinations are preflighted before writes.
-    /// Triangle materials are parallel to the two triangles emitted for each terrain cell.
+    /// Emits one complete 33x33 fixed-grid base mesh. Border frames resolve a bounded immutable
+    /// neighbor halo around the root chunk. All destinations are preflighted before writes. Triangle
+    /// materials are parallel to the two triangles emitted for each terrain cell.
     /// </summary>
     public static bool TryBuildBaseTerrainMesh(
         this BoundWorldPack world,

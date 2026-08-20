@@ -85,6 +85,8 @@ public sealed class GameContent : IInventoryContentCatalog
     public InventoryItemDefinition Apple { get; }
     public WorldContentBinding World { get; }
 
+    // Governance: bump this identity whenever the semantic meaning of any packed numeric world-content
+    // ID changes incompatibly, even when the numeric value itself remains admitted and unchanged.
     public static WorldContentFingerprint WorldFingerprint { get; } =
         new(0x3B8D_14CB_E652_EE21UL, 0xD241_8739_B74F_10A5UL);
 

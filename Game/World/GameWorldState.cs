@@ -45,6 +45,12 @@ public sealed class GameWorldState : IDisposable
     public GameWorldState(EcsWorld world, BoundWorldPack? baseWorld = null)
     {
         ArgumentNullException.ThrowIfNull(world);
+        if (baseWorld is not null && baseWorld.Space != DefaultSpace)
+        {
+            throw new ArgumentException(
+                $"The base WorldPack belongs to {baseWorld.Space}; this game generation requires {DefaultSpace}.",
+                nameof(baseWorld));
+        }
         if (world.Options.LifecycleRecordCapacity <= 0)
             throw new ArgumentException("Spatial-enabled worlds require retained ECS lifecycle history.", nameof(world));
         _worldId = world.Id;
@@ -64,6 +70,35 @@ public sealed class GameWorldState : IDisposable
     public WorldId WorldId => _worldId;
     public WorldSpatialIndex Index { get; private set; }
     public BoundWorldPack? BaseWorld { get; }
+
+    /// <summary>
+    /// Samples the authoritative current base terrain. T0.4 resolves the immutable base pack directly;
+    /// later durable replacements may shadow it behind this game-world route.
+    /// </summary>
+    public bool TrySampleBaseTerrainHeight(in WorldPosition location, out int heightMillimeters)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (BaseWorld is null)
+        {
+            heightMillimeters = 0;
+            return false;
+        }
+        return BaseWorld.TrySampleBaseTerrainHeight(location, out heightMillimeters);
+    }
+
+    /// <summary>
+    /// Resolves the authoritative current base-terrain material. T0.4 delegates to the immutable base pack.
+    /// </summary>
+    public bool TryResolveBaseTerrainMaterial(in WorldPosition location, out ushort materialId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (BaseWorld is null)
+        {
+            materialId = 0;
+            return false;
+        }
+        return BaseWorld.TryResolveBaseTerrainMaterial(location, out materialId);
+    }
 
     public bool TrySetPosition(EcsWorld world, Entity entity, in WorldPosition position)
     {

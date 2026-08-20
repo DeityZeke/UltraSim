@@ -113,12 +113,20 @@ cell or chunk object graph.
 `WorldContentBinding` is supplied cold by Composition. A pack becomes a
 `BoundWorldPack` only after its content fingerprint and every structural
 material ID resolve. An optional bound pack is then generation-owned through
-`GameWorldState`; default worlds may still run without one until the T0 vertical
+`GameWorldState`; the current single-space game additionally rejects a bound pack
+whose `SpatialSpaceId` is not `GameWorldState.DefaultSpace` before generation
+publication. Default worlds may still run without one until the T0 vertical
 supplies authored content.
+
+`GameContent.WorldFingerprint` is explicit governance for packed numeric world
+content. It must change whenever the semantic meaning of an admitted material,
+static, prefab, or other packed numeric identity changes incompatibly—even if the
+numeric value itself remains present. T0 does not add an automatic fingerprint
+framework.
 
 ## Base-terrain queries and mesh payload
 
-T0.4 adds authoritative queries directly over a `BoundWorldPack`:
+T0.4 keeps pure immutable-artifact queries on `BoundWorldPack`:
 
 ```text
 TrySampleBaseTerrainHeight
@@ -130,11 +138,25 @@ parity, the exact triangle plane represented by the packed q5 vertices, and
 signed nearest integer division with midpoint away from zero. It is explicitly a
 base-heightfield query, not a future general multi-surface ground resolver.
 
+Gameplay/current-authority callers route the same operations through
+`GameWorldState`. Today those methods delegate to `BaseWorld`; T0.9 may resolve a
+durable replacement/overlay first without changing callers:
+
+```text
+BoundWorldPack
+    what this immutable content artifact contains
+
+GameWorldState
+    what is authoritative in this game world now
+```
+
 `TryBuildBaseTerrainMesh` fills caller-owned fixed spans with 1,089
 `TerrainBaseMeshVertex` values, 6,144 ushort indices, and 2,048 triangle material
 IDs. Vertices retain integer local X/Z, absolute Y, and exact unnormalized normal
-and tangent directions. Frames include incident triangles from immutable packed
-neighbor chunks, so adjacent chunks independently reproduce identical seam
+and tangent directions. The 36-byte row is an internal mesh-preparation payload,
+not a pack/persistence/Network/Game.Contracts/mod ABI. Frames include incident
+triangles from the bounded immutable packed-neighbor halo, so adjacent chunks
+independently reproduce identical seam
 frames regardless of presentation residency. Output capacity and target identity
 are validated before any write, and the warmed query/build paths allocate 0 B.
 

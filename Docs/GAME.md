@@ -89,6 +89,12 @@ advancement. Same-home motion retains its membership row; chunk crossings relink
 that row; lifecycle overrun rebuilds privately from current ECS truth. Terrain
 packs, public chunk projection, and rendering remain absent.
 
+T0.4 binds an optional immutable `WorldPack` to the same concrete game space and
+content meaning before generation publication. Pure pack queries describe that
+artifact; authoritative gameplay queries route through generation-owned
+`GameWorldState`, leaving one concrete place for future durable terrain
+replacements to shadow the base without introducing a generic provider.
+
 ## Simulation rules
 
 Scheduled work selected by component topology uses generated chunk systems.

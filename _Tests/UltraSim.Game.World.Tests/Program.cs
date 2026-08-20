@@ -46,6 +46,8 @@ var tests = new (string Name, Action Body)[]
         BaseTerrainMeshIsCanonicalBoundedAndMatchesQueries),
     ("BaseTerrainMeshSharesExactFramesAcrossChunkSeams",
         BaseTerrainMeshSharesExactFramesAcrossChunkSeams),
+    ("BaseTerrainMeshSharesExactFrameAtNegativeFourWayCorner",
+        BaseTerrainMeshSharesExactFrameAtNegativeFourWayCorner),
     ("BaseTerrainMeshHandlesMaximumReliefAcrossASeam",
         BaseTerrainMeshHandlesMaximumReliefAcrossASeam),
     ("BaseTerrainMeshFailuresAreTransactionalAndWarmedPathsAllocateZero",
@@ -500,7 +502,22 @@ static void WorldPackContentBindingPublishesWithGameGeneration()
     Equal(null, bound);
     Equal(WorldPackBindingError.ContentMismatch, error);
 
-    WorldPack gamePack = CreateWorldPackArtifact(reverse: true, GameContent.WorldFingerprint).Open();
+    WorldPack wrongSpaceGamePack = CreateWorldPackArtifact(
+        reverse: true,
+        GameContent.WorldFingerprint,
+        WorldPackTestProfile.Space).Open();
+    var wrongSpaceComposition = new UltraSimGameComposition(baseWorldPack: wrongSpaceGamePack);
+    using (var wrongSpaceRuntime = new ServerRuntime(wrongSpaceComposition,
+        new ServerRuntimeOptions(UltraSimGameComposition.CreateWorldOptions(), WorldClockOptions.Default)))
+    {
+        Throws<ArgumentException>(() => wrongSpaceRuntime.Initialize());
+        Equal(ServerRuntimeState.Faulted, wrongSpaceRuntime.State);
+    }
+
+    WorldPack gamePack = CreateWorldPackArtifact(
+        reverse: true,
+        GameContent.WorldFingerprint,
+        GameWorldState.DefaultSpace).Open();
     var incomplete = new WorldContentBinding(GameContent.WorldFingerprint, [GameTerrainMaterialIds.Water]);
     False(gamePack.TryBind(incomplete, out bound, out error));
     Equal(null, bound);
@@ -516,6 +533,14 @@ static void WorldPackContentBindingPublishesWithGameGeneration()
         True(game.WorldState.BaseWorld is not null);
         Equal(gamePack.Fingerprint, game.WorldState.BaseWorld!.Fingerprint);
         Equal(gamePack.ChunkCount, game.WorldState.BaseWorld.ChunkCount);
+        Equal(GameWorldState.DefaultSpace, game.WorldState.BaseWorld.Space);
+        var location = new WorldPosition(-1, 0, 12_345, 6_789, 0);
+        True(game.WorldState.BaseWorld.TrySampleBaseTerrainHeight(location, out int immutableHeight));
+        True(game.WorldState.TrySampleBaseTerrainHeight(location, out int authoritativeHeight));
+        Equal(immutableHeight, authoritativeHeight);
+        True(game.WorldState.BaseWorld.TryResolveBaseTerrainMaterial(location, out ushort immutableMaterial));
+        True(game.WorldState.TryResolveBaseTerrainMaterial(location, out ushort authoritativeMaterial));
+        Equal(immutableMaterial, authoritativeMaterial);
         return true;
     }, out bool published));
     True(published);
@@ -693,6 +718,51 @@ static void BaseTerrainMeshSharesExactFramesAcrossChunkSeams()
         var materials = new ushort[TerrainChunkFormat.TriangleCount];
         True(world.TryBuildBaseTerrainMesh(key, vertices, indices, materials, out _, out _));
         return vertices;
+    }
+}
+
+static void BaseTerrainMeshSharesExactFrameAtNegativeFourWayCorner()
+{
+    BoundWorldPack world = CreateBoundTerrainWorld(-2, 1, -2, 1, SmoothHeight, QueryMaterial, reverse: true);
+    SpatialChunkKey[] keys =
+    [
+        new(world.Space, -1, -1),
+        new(world.Space, 0, -1),
+        new(world.Space, -1, 0),
+        new(world.Space, 0, 0),
+    ];
+    TerrainVertexCoord[] coordinates =
+    [
+        new(32, 32),
+        new(0, 32),
+        new(32, 0),
+        new(0, 0),
+    ];
+
+    TerrainBaseMeshVertex expected = default;
+    for (int index = 0; index < keys.Length; index++)
+    {
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var materials = new ushort[TerrainChunkFormat.TriangleCount];
+        True(world.TryBuildBaseTerrainMesh(keys[index], vertices, indices, materials, out _, out _));
+        TerrainBaseMeshVertex actual = vertices[TerrainChunkFormat.GetHeightIndex(coordinates[index])];
+        Equal(0L, checked((long)keys[index].Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+            actual.LocalXMillimeters));
+        Equal(0L, checked((long)keys[index].Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+            actual.LocalZMillimeters));
+        if (index == 0)
+        {
+            expected = actual;
+            continue;
+        }
+        Equal(expected.AbsoluteYMillimeters, actual.AbsoluteYMillimeters);
+        Equal(expected.NormalX, actual.NormalX);
+        Equal(expected.NormalY, actual.NormalY);
+        Equal(expected.NormalZ, actual.NormalZ);
+        Equal(expected.TangentX, actual.TangentX);
+        Equal(expected.TangentY, actual.TangentY);
+        Equal(expected.TangentZ, actual.TangentZ);
     }
 }
 
@@ -916,15 +986,17 @@ static string ComputeMeshHash(
 
 static WorldPackArtifact CreateWorldPackArtifact(
     bool reverse,
-    WorldContentFingerprint? content = null)
+    WorldContentFingerprint? content = null,
+    SpatialSpaceId? space = null)
 {
-    var builder = new WorldPackBuilder(WorldPackTestProfile.Space,
+    SpatialSpaceId selectedSpace = space ?? WorldPackTestProfile.Space;
+    var builder = new WorldPackBuilder(selectedSpace,
         content ?? WorldPackTestProfile.Content,
         new WorldPackLimits(2 * 1024 * 1024, 64, 8));
     var keys = new List<SpatialChunkKey>();
     for (int z = -2; z < 2; z++)
         for (int x = -2; x < 2; x++)
-            keys.Add(new SpatialChunkKey(WorldPackTestProfile.Space, x, z));
+            keys.Add(new SpatialChunkKey(selectedSpace, x, z));
     if (reverse) keys.Reverse();
     foreach (SpatialChunkKey key in keys)
     {
