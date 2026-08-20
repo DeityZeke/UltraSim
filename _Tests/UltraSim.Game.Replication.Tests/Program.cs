@@ -11,7 +11,7 @@ using UltraSim.UI;
 
 var tests = new (string Name, Action Body)[]
 {
-    ("NetworkProfileIsExplicitAndLocalProfilePaysNoLifecycleReservation", NetworkProfileIsExplicit),
+    ("NetworkProfileIsExplicitAndLocalProfileRetainsSpatialLifecycle", NetworkProfileIsExplicit),
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),
     ("ChangedConsumersIngressAndWarmedCaptureAreIndependentAndBounded", ChangedConsumersIngressAndAllocation),
     ("OwnerPublicationCapturesOnceBeforeMultiOwnerFanout", OwnerPublicationCapturesOnceBeforeMultiOwnerFanout),
@@ -72,7 +72,7 @@ static void NetworkProfileIsExplicit()
         64,
         new PersistenceIdentityOptions(new PersistentWorldId(0x9102)),
         GameRuntimeProfile.Networked);
-    Check.Equal(0, local.LifecycleRecordCapacity);
+    Check.Equal(UltraSimGameComposition.SpatialLifecycleRecordCapacity, local.LifecycleRecordCapacity);
     Check.Equal(UltraSimGameComposition.NetworkLifecycleRecordCapacity, networked.LifecycleRecordCapacity);
 
     using var fixture = new Fixture(GameRuntimeProfile.Local, 0x9103, 64);
@@ -1394,7 +1394,10 @@ static void LifecycleHistoryOverflowRequiresBaseline()
         (world, generationId, game) =>
         {
             for (int index = 0; index < population; index++)
-                if (!world.TryInstantiate(game.Content.Character, out _)) return false;
+            {
+                if (!world.TryInstantiate(game.Content.Character, out Entity transient) ||
+                    !world.TryDestroy(transient)) return false;
+            }
             return true;
         }, out bool populated));
     Check.True(populated);
@@ -1406,7 +1409,7 @@ static void LifecycleHistoryOverflowRequiresBaseline()
     Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, repaired.Status);
     Check.Equal(baseline.Frame.StateEpoch, repaired.Frame.StateEpoch);
     Check.True(repaired.Frame.BaselineRevision > baseline.Frame.BaselineRevision);
-    Check.Equal(population + 1, projection.GetSnapshot().EntityCount);
+    Check.Equal(1, projection.GetSnapshot().EntityCount);
     GameProjectionHistoryReadResult retainedRead = projection.ReadApplicationEvents(firstRead.NextSequence, eventScratch);
     Check.Equal(GameProjectionHistoryReadStatus.Success, retainedRead.Status);
     Check.Equal(1, retainedRead.Count);
@@ -1674,6 +1677,7 @@ static void GenerationReplacementRebindsDurableAdmission()
         accounting,
         staging.Inventory,
         staging.Content,
+        staging.WorldState,
         staging.SimulationLookup,
         staging.Replication);
     Check.True(fixture.Runtime.Game.TryPublishPreparedGeneration(
@@ -1717,6 +1721,7 @@ static void GenerationReplacementRebuildsEpoch()
         new UltraSim.Game.Accounting.AccountingStore(),
         staging.Inventory,
         staging.Content,
+        staging.WorldState,
         staging.SimulationLookup,
         staging.Replication);
     Check.True(fixture.Runtime.Game.TryPublishPreparedGeneration(

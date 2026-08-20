@@ -116,10 +116,11 @@ bounded long-lived WorldState recovery and the measured dense/sparse evidence.
 Its final sparse experiments showed that steady-state replication scales much
 better than continuously mutating precise recipient/entity interest topology.
 The active major milestone is therefore [Terrain / World T0](Plans/TERRAIN.md).
-T0.0 has accepted the dependency-neutral Spatial seam plus the 16-byte game-world
-position/profile and stopped before runtime membership. T0.1 next builds the
-game-owned maintained index, followed by packed terrain/statics, revisioned chunk
-publication, bounded dirty history, local streaming, and Godot rendering.
+T0.0 accepted the dependency-neutral Spatial seam plus the 16-byte game-world
+position/profile. T0.1 now pairs persisted ECS position authority with a bounded,
+generation-owned maintained index through a generic Runtime post-ECS-step
+capability. Packed terrain/statics, revisioned publication, bounded dirty history,
+local streaming, and Godot rendering remain later Terrain gates.
 [Network N1](Plans/NETWORK.md) is deferred
 until T0 proves those chunk/publication contracts, then will test recipient-to-
 chunk subscription/cursor replication against the frozen N0 relation graph.

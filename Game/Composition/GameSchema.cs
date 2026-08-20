@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.World;
 
 namespace UltraSim.Game.Composition;
 
@@ -28,6 +29,7 @@ public struct GameSimulationState : IComponent<GameSimulationState>
     typeof(InventoryItem),
     typeof(InventoryContainerOwner),
     typeof(GameCharacter),
+    typeof(WorldPositionComponent),
     typeof(InventoryEquipCapability),
     typeof(InventoryStackPolicy))]
 public static partial class GameSchema

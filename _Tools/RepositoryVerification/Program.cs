@@ -117,12 +117,13 @@ static void VerifyArchitecture(string root)
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
         ["Game/World/UltraSim.Game.World.csproj"] =
-            ["Kernels/Spatial/UltraSim.Spatial.csproj"],
+            ["Kernels/ECS/UltraSim.ECS.csproj", "Kernels/Spatial/UltraSim.Spatial.csproj"],
         ["Game/Composition/UltraSim.Game.Composition.csproj"] =
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Inventory/UltraSim.Game.Inventory.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
             "Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj",
             "Kernels/ECS/UltraSim.ECS.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
@@ -131,6 +132,7 @@ static void VerifyArchitecture(string root)
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
@@ -147,6 +149,7 @@ static void VerifyArchitecture(string root)
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
             "Kernels/ECS/UltraSim.ECS.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Kernels/UI/UltraSim.UI.csproj",

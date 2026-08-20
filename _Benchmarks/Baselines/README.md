@@ -32,6 +32,9 @@ Useful current anchors can be located by their embedded workload or filename:
   spatial math and fixed game-position profile evidence, including warmed
   allocation for normalization, reconstruction, key/hash/order, AABB distance,
   and terrain-cell lookup;
+- `terrain-t0.1-world-spatial-index-*` — accepted maintained dynamic membership
+  split costs, exceptional full-rebuild cost/allocation, member reads, and warmed
+  zero-allocation evidence for ordinary post-step movement/lifecycle maintenance;
 - `s0.8-integrated-acceptance-cadence-independent-*` — accepted integrated
   Runtime/game/persistence/cadence gate;
 - `network-n0.1-game-projection-100k-*` — canonical changed-state capture and

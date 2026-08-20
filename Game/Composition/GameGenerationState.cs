@@ -1,6 +1,8 @@
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.World;
+using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Composition;
 
@@ -10,6 +12,8 @@ public interface IGameGenerationStateProvider :
     IInventoryGenerationStateProvider
 {
     GameContent Content { get; }
+
+    GameWorldState WorldState { get; }
 
     bool TryReadSimulationState(
         EcsWorld world,
@@ -21,7 +25,10 @@ public interface IGameGenerationStateProvider :
 /// Concrete game-owned aggregate published atomically with one ECS world.
 /// Feature projects no longer own sibling game domains or publication.
 /// </summary>
-public sealed class GameGenerationState : IGameGenerationStateProvider, IDisposable
+public sealed class GameGenerationState :
+    IGameGenerationStateProvider,
+    IServerGenerationStepParticipant,
+    IDisposable
 {
     private bool _disposed;
 
@@ -29,16 +36,20 @@ public sealed class GameGenerationState : IGameGenerationStateProvider, IDisposa
         AccountingStore accounting,
         InventoryGenerationState inventory,
         GameContent content,
+        GameWorldState worldState,
         ComponentLookup<GameSimulationState> simulationLookup,
         GameReplicationBindings? replication = null)
     {
         Accounting = accounting ?? throw new ArgumentNullException(nameof(accounting));
         Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         Content = content ?? throw new ArgumentNullException(nameof(content));
+        WorldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         if (!simulationLookup.IsValid)
             throw new ArgumentException("A prepared simulation lookup is required.", nameof(simulationLookup));
         if (inventory.WorldId != content.Prefabs.WorldId)
             throw new ArgumentException("Inventory and content belong to different ECS worlds.", nameof(content));
+        if (worldState.WorldId != inventory.WorldId)
+            throw new ArgumentException("World state and Inventory belong to different ECS worlds.", nameof(worldState));
         _simulationLookup = simulationLookup;
         Replication = replication;
     }
@@ -46,6 +57,7 @@ public sealed class GameGenerationState : IGameGenerationStateProvider, IDisposa
     public AccountingStore Accounting { get; }
     public InventoryGenerationState Inventory { get; }
     public GameContent Content { get; }
+    public GameWorldState WorldState { get; }
 
     /// <summary>Gets generation-bound replication capabilities when the network profile was selected.</summary>
     public GameReplicationBindings? Replication { get; }
@@ -64,14 +76,22 @@ public sealed class GameGenerationState : IGameGenerationStateProvider, IDisposa
         return world.TryRead(entity, _simulationLookup, out state);
     }
 
+    void IServerGenerationStepParticipant.InitializeGeneration(EcsWorld world) =>
+        WorldState.Initialize(world);
+
+    void IServerGenerationStepParticipant.CommitAfterEcsStep(EcsWorld world) =>
+        WorldState.CommitAfterEcsStep(world);
+
     public void Dispose()
     {
         if (_disposed)
             return;
         _disposed = true;
         Exception? first = null;
-        try { Inventory.Dispose(); }
+        try { WorldState.Dispose(); }
         catch (Exception exception) { first = exception; }
+        try { Inventory.Dispose(); }
+        catch (Exception exception) { first ??= exception; }
         try { Accounting.Dispose(); }
         catch (Exception exception) { first ??= exception; }
         if (first is not null)

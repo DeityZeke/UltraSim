@@ -37,6 +37,21 @@ Publication is forbidden while an old-generation callback is active.
 Generation-publication observers reconcile derived sessions/indexes. Observer
 failure is isolated and reported; it cannot roll back an already published root.
 
+Generation-owned state may implement the narrow
+`IServerGenerationStepParticipant` ordering capability. Runtime initializes it
+while a candidate is still private and invokes its commit after the complete ECS
+graph/post-graph structural barrier but before clock advancement:
+
+```text
+EcsWorld.Tick(delta)
+game-owned post-step derived commit
+Clock.AdvanceSimulationTick()
+```
+
+Runtime does not interpret the participant's domain state. Terrain T0.1 uses the
+capability for `WorldSpatialIndex`; later game-owned post-step projection may
+compose behind the same single generation root.
+
 ## Hosts
 
 - `InternalHost` is the in-process/offline host boundary.

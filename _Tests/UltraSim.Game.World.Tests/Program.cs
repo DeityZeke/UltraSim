@@ -1,5 +1,9 @@
 using System.Runtime.InteropServices;
+using UltraSim.ECS;
+using UltraSim.Game.Accounting;
+using UltraSim.Game.Composition;
 using UltraSim.Game.World;
+using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 
 var tests = new (string Name, Action Body)[]
@@ -19,6 +23,13 @@ var tests = new (string Name, Action Body)[]
     ("TerrainCellsUseIndependentFiveHundredMillimeterGrid", TerrainCellsUseIndependentFiveHundredMillimeterGrid),
     ("DynamicPositionIsNotPlacementOrTerrainSnapped", DynamicPositionIsNotPlacementOrTerrainSnapped),
     ("WarmedCoordinateMachineAllocatesZero", WarmedCoordinateMachineAllocatesZero),
+    ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
+    ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
+    ("ComponentRemovalReadditionAndSlotReuseConverge", ComponentRemovalReadditionAndSlotReuseConverge),
+    ("LifecycleOverrunRebuildsFromCurrentTruth", LifecycleOverrunRebuildsFromCurrentTruth),
+    ("FailedRebuildPreservesPublishedSpatialIndex", FailedRebuildPreservesPublishedSpatialIndex),
+    ("GenerationReplacementPublishesFreshDerivedIndex", GenerationReplacementPublishesFreshDerivedIndex),
+    ("MillionSameAndCrossChunkMovesAllocateZero", MillionSameAndCrossChunkMovesAllocateZero),
 };
 
 foreach ((string name, Action body) in tests)
@@ -27,7 +38,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0 spatial/value tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0/T0.1 spatial tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -43,7 +54,243 @@ static void FrozenProfileAndPayloadWidths()
     Equal(32, Marshal.SizeOf<SpatialBounds>());
     Equal(8, Marshal.SizeOf<WorldLocalPosition>());
     Equal(16, Marshal.SizeOf<WorldPosition>());
+    Equal(16, Marshal.SizeOf<WorldPositionComponent>());
     Equal(2, Marshal.SizeOf<TerrainCellCoord>());
+}
+
+static void PositionComponentIsPersistedCanonicalAuthority()
+{
+    ComponentSchema schema = GameSchema.CreateSchema();
+    Equal(8, schema.ComponentCount);
+    ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
+    True(position.IsValid);
+    PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();
+    Equal(schema.Id, catalog.Schema.Id);
+
+    var source = new WorldPosition(-7, 11, 15_999, 3, -400);
+    var component = new WorldPositionComponent(source);
+    True(component.TryGetValue(out WorldPosition restored));
+    Equal(source, restored);
+    component.LocalXMillimeters = 16_000;
+    False(component.TryGetValue(out _));
+}
+
+static void RuntimeCommitsFinalPositionAfterCompleteEcsStep()
+{
+    var composition = new UltraSimGameComposition(runtimeProfile: GameRuntimeProfile.Local);
+    EcsWorldOptions options = UltraSimGameComposition.CreateWorldOptions(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(0x8101)),
+        GameRuntimeProfile.Local);
+    using var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(options, WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+
+    Entity entity = default;
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+    {
+        if (!world.TryInstantiate(game.Content.Character, out entity)) return false;
+        for (int index = 0; index < 10; index++)
+        {
+            var value = new WorldPosition(0, 0, checked((ushort)(100 + index)), 200, index);
+            if (!game.WorldState.TrySetPosition(world, entity, value)) return false;
+        }
+        return true;
+    }, out bool written));
+    True(written);
+    runtime.Tick();
+
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+    {
+        True(game.WorldState.Index.TryGetHome(entity, out SpatialChunkKey home));
+        Equal(new SpatialChunkCoord(0, 0), home.Coord);
+        GameWorldStateSnapshot snapshot = game.WorldState.GetSnapshot();
+        Equal(1, snapshot.Index.EntityCount);
+        Equal(1L, snapshot.ReconciledEntities);
+        return true;
+    }, out bool checkedFirst));
+    True(checkedFirst);
+
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+        game.WorldState.TrySetPosition(world, entity, new WorldPosition(0, 0, 500, 600, 0)), out bool same));
+    True(same);
+    runtime.Tick();
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+        game.WorldState.TrySetPosition(world, entity, new WorldPosition(-1, -1, 15_999, 15_999, 0)), out bool crossed));
+    True(crossed);
+    runtime.Tick();
+
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+    {
+        True(game.WorldState.Index.TryGetHome(entity, out SpatialChunkKey home));
+        Equal(new SpatialChunkCoord(-1, -1), home.Coord);
+        WorldSpatialIndexSnapshot snapshot = game.WorldState.Index.GetSnapshot();
+        Equal(1L, snapshot.SameChunkObservations);
+        Equal(1L, snapshot.CrossChunkMigrations);
+        return true;
+    }, out bool checkedFinal));
+    True(checkedFinal);
+}
+
+static void ComponentRemovalReadditionAndSlotReuseConverge()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 64);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity first));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(2, 3, 1, 2, 3)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    True(fixture.State.Index.TryGetHome(first, out _));
+
+    True(fixture.World.TryTransition(first, fixture.RemovePosition));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    False(fixture.State.Index.TryGetHome(first, out _));
+
+    True(fixture.World.TryTransition(first, fixture.AddPosition));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    True(fixture.World.TryGetEntity(first.Index, out Entity readded));
+    True(fixture.State.Index.TryGetHome(readded, out SpatialChunkKey origin));
+    Equal(new SpatialChunkCoord(0, 0), origin.Coord);
+
+    True(fixture.World.TryDestroy(readded));
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity replacement));
+    Equal(readded.Index, replacement.Index);
+    True(replacement.Generation > readded.Generation);
+    True(fixture.State.TrySetPosition(fixture.World, replacement, new WorldPosition(-4, 8, 9, 10, 11)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    False(fixture.State.Index.TryGetHome(readded, out _));
+    True(fixture.State.Index.TryGetHome(replacement, out SpatialChunkKey replacementHome));
+    Equal(new SpatialChunkCoord(-4, 8), replacementHome.Coord);
+}
+
+static void LifecycleOverrunRebuildsFromCurrentTruth()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 4);
+    for (int index = 0; index < 8; index++)
+    {
+        True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity transient));
+        True(fixture.World.TryDestroy(transient));
+    }
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity survivor));
+    True(fixture.State.TrySetPosition(fixture.World, survivor, new WorldPosition(-2, -3, 4, 5, 6)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    GameWorldStateSnapshot snapshot = fixture.State.GetSnapshot();
+    Equal(2L, snapshot.FullRebuildCount);
+    Equal(1, snapshot.Index.EntityCount);
+    True(fixture.State.Index.TryGetHome(survivor, out SpatialChunkKey home));
+    Equal(new SpatialChunkCoord(-2, -3), home.Coord);
+}
+
+static void FailedRebuildPreservesPublishedSpatialIndex()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 32);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+    True(fixture.State.TrySetPosition(fixture.World, entity, new WorldPosition(1, 2, 3, 4, 5)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    WorldSpatialIndex published = fixture.State.Index;
+    True(fixture.World.TryWrite(entity, fixture.RawPositionLookup, new WorldPositionComponent
+    {
+        ChunkX = 9,
+        ChunkZ = 9,
+        LocalXMillimeters = 16_000,
+        LocalZMillimeters = 0,
+        YMillimeters = 0,
+    }));
+    Throws<InvalidOperationException>(() => fixture.State.Rebuild(fixture.World));
+    True(ReferenceEquals(published, fixture.State.Index));
+    True(published.TryGetHome(entity, out SpatialChunkKey oldHome));
+    Equal(new SpatialChunkCoord(1, 2), oldHome.Coord);
+}
+
+static void GenerationReplacementPublishesFreshDerivedIndex()
+{
+    var composition = new UltraSimGameComposition(runtimeProfile: GameRuntimeProfile.Local);
+    EcsWorldOptions options = UltraSimGameComposition.CreateWorldOptions(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(0x8102)),
+        GameRuntimeProfile.Local);
+    using var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(options, WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    ulong oldGeneration = runtime.ActiveGenerationId;
+
+    GameStaging staging = composition.CreateFresh(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(0x8102)));
+    var accounting = new AccountingStore();
+    GameGenerationState? candidate = null;
+    bool published = false;
+    try
+    {
+        staging.World.Seal();
+        staging.World.Initialize();
+        staging.World.BeginRun();
+        True(staging.World.TryInstantiate(staging.Content.Character, out Entity entity));
+        True(staging.WorldState.TrySetPosition(
+            staging.World,
+            entity,
+            new WorldPosition(7, -9, 11, 13, 17)));
+        candidate = new GameGenerationState(
+            accounting,
+            staging.Inventory,
+            staging.Content,
+            staging.WorldState,
+            staging.SimulationLookup,
+            staging.Replication);
+        True(runtime.Game.TryPublishPreparedGeneration(staging.World, candidate, out ulong newGeneration));
+        published = true;
+        candidate = null;
+        True(newGeneration > oldGeneration);
+        True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, generation, game) =>
+        {
+            Equal(newGeneration, generation);
+            True(game.WorldState.Index.TryGetHome(entity, out SpatialChunkKey home));
+            Equal(new SpatialChunkCoord(7, -9), home.Coord);
+            Equal(1L, game.WorldState.GetSnapshot().FullRebuildCount);
+            return true;
+        }, out bool verified));
+        True(verified);
+    }
+    finally
+    {
+        if (!published)
+        {
+            candidate?.Dispose();
+            if (candidate is null)
+            {
+                accounting.Dispose();
+                staging.WorldState.Dispose();
+                staging.Inventory.Dispose();
+            }
+            if (!staging.World.IsDisposed) staging.World.Dispose();
+        }
+    }
+}
+
+static void MillionSameAndCrossChunkMovesAllocateZero()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 32);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+    True(fixture.State.TrySetPosition(fixture.World, entity, new WorldPosition(0, 0, 0, 0, 0)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    for (int index = 0; index < 1_000; index++)
+    {
+        int chunk = index & 1;
+        True(fixture.State.TrySetPosition(fixture.World, entity,
+            new WorldPosition(chunk, -chunk, checked((ushort)(index & 15_999)), 0, index)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+    }
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 1_000_000; index++)
+    {
+        int chunk = (index >> 4) & 1;
+        True(fixture.State.TrySetPosition(fixture.World, entity,
+            new WorldPosition(chunk, -chunk, checked((ushort)(index & 15_999)), 0, index)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+    Equal(1, fixture.State.Index.GetSnapshot().EntityCount);
 }
 
 static void FloorDivisionOwnsNegativeBoundaries()
@@ -319,4 +566,50 @@ static void Throws<TException>(Action action) where TException : Exception
     }
 
     throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
+}
+
+sealed class RawSpatialFixture : IDisposable
+{
+    internal RawSpatialFixture(int lifecycleCapacity)
+    {
+        var options = new EcsWorldOptions(
+            new EntityCapacity(32),
+            maximumArchetypes: 4,
+            maximumPreparedPlans: 8,
+            maximumPreparedTransitions: 2,
+            lifecycleRecordCapacity: lifecycleCapacity);
+        World = new EcsWorld(GameSchema.CreateSchema(), options);
+        State = new GameWorldState(World);
+        RawPositionLookup = World.PrepareLookup<WorldPositionComponent>();
+        ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
+        NonSpatialArchetype = World.RegisterArchetype(
+            ReadOnlySpan<ComponentId>.Empty,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        Span<ComponentId> spatialSignature = stackalloc ComponentId[1] { position };
+        SpatialArchetype = World.RegisterArchetype(
+            spatialSignature,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        RemovePosition = World.PrepareTransition(SpatialArchetype, NonSpatialArchetype);
+        AddPosition = World.PrepareTransition(NonSpatialArchetype, SpatialArchetype);
+        World.Seal();
+        World.Initialize();
+        World.BeginRun();
+        State.Initialize(World);
+    }
+
+    internal EcsWorld World { get; }
+    internal GameWorldState State { get; }
+    internal ComponentLookup<WorldPositionComponent> RawPositionLookup { get; }
+    internal ArchetypeHandle SpatialArchetype { get; }
+    internal ArchetypeHandle NonSpatialArchetype { get; }
+    internal ArchetypeTransition RemovePosition { get; }
+    internal ArchetypeTransition AddPosition { get; }
+
+    public void Dispose()
+    {
+        State.Dispose();
+        World.Dispose();
+    }
 }

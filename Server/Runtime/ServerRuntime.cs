@@ -166,6 +166,9 @@ public sealed class ServerRuntime : IDisposable
             if (_nextGenerationId == ulong.MaxValue)
                 throw new InvalidOperationException("The server generation identity space is exhausted.");
 
+            if (preparedGameState is IServerGenerationStepParticipant participant)
+                participant.InitializeGeneration(preparedWorld);
+
             int playbackRate = active.Clock.PlaybackRate;
             int simulationFrequencyHz = active.Clock.SimulationFrequencyHz;
             PersistentWorldClockState clockState = persistentClockState ??

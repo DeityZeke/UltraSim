@@ -6,7 +6,7 @@ namespace UltraSim.Game.Composition;
 /// <summary>Selects whether a game generation reserves replication observation and ingress machinery.</summary>
 public enum GameRuntimeProfile : byte
 {
-    /// <summary>Ordinary local/S0 generation with no lifecycle or replication reservation.</summary>
+    /// <summary>Ordinary local generation with Spatial lifecycle retention but no replication machinery.</summary>
     Local = 0,
 
     /// <summary>Network-enabled generation with exact observation, lifecycle, and bounded command ingress.</summary>

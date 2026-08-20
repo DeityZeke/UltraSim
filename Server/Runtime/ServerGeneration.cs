@@ -3,6 +3,22 @@ using UltraSim.ECS;
 namespace UltraSim.Server.Runtime;
 
 /// <summary>
+/// Optional generation-owned maintenance performed after one complete ECS step.
+/// </summary>
+/// <remarks>
+/// Runtime knows only the ordering contract: initialization occurs while a
+/// candidate is private, and step maintenance occurs after the ECS graph and
+/// structural barrier but before authoritative clock advancement. Domain state
+/// remains owned by the game generation.
+/// </remarks>
+public interface IServerGenerationStepParticipant
+{
+    void InitializeGeneration(EcsWorld world);
+
+    void CommitAfterEcsStep(EcsWorld world);
+}
+
+/// <summary>
 /// One coherent, generation-owned authoritative root.
 /// </summary>
 /// <remarks>
@@ -34,7 +50,8 @@ internal sealed class ServerGeneration
 
     /// <summary>
     /// Opaque game-owned state that must change coherently with this ECS world.
-    /// Runtime owns its lifetime but never interprets its domain meaning.
+    /// Runtime owns its lifetime and recognizes only generic lifecycle/step
+    /// capabilities; it never interprets domain state.
     /// </summary>
     public object? GameState { get; }
 
@@ -52,6 +69,8 @@ internal sealed class ServerGeneration
                 "A server generation requires an enabled ECS scheduler.");
         }
         EcsWorld.BeginRun();
+        if (GameState is IServerGenerationStepParticipant participant)
+            participant.InitializeGeneration(EcsWorld);
     }
 
     internal void MarkPublished() => IsPublished = true;
@@ -59,6 +78,8 @@ internal sealed class ServerGeneration
     internal void TickSimulationStep()
     {
         EcsWorld.Tick(Clock.FixedStepSeconds);
+        if (GameState is IServerGenerationStepParticipant participant)
+            participant.CommitAfterEcsStep(EcsWorld);
         Clock.AdvanceSimulationTick();
     }
 
@@ -131,8 +152,9 @@ public sealed class ServerGenerationBuilder
     /// <remarks>
     /// Use one composition-owned aggregate when several game-domain objects
     /// must publish with the ECS world. Runtime owns and disposes the supplied
-    /// object when it implements <see cref="IDisposable"/> but never interprets
-    /// its type or contents.
+    /// object when it implements <see cref="IDisposable"/>. A state may also
+    /// implement <see cref="IServerGenerationStepParticipant"/>; Runtime invokes
+    /// only that ordering capability and never interprets domain contents.
     /// </remarks>
     public void SetGameState<TState>(TState state) where TState : class
     {

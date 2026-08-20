@@ -46,7 +46,7 @@ static void ClosedGameSchemaOwnsFinalInventoryIds()
 {
     _ = new UltraSimGameComposition();
     ComponentSchema schema = GameSchema.CreateSchema();
-    Assert.Equal(7, schema.ComponentCount);
+    Assert.Equal(8, schema.ComponentCount);
     ComponentId simulation = GameSchema.GetComponentId<GameSimulationState>();
     ComponentId character = GameSchema.GetComponentId<GameCharacter>();
     ComponentId container = GameSchema.GetComponentId<InventoryContainer>();
@@ -75,12 +75,15 @@ static void GameAggregateRejectsCrossWorldFeatureState()
                 accounting,
                 first.Inventory,
                 second.Content,
+                first.WorldState,
                 first.SimulationLookup));
     }
     finally
     {
+        first.WorldState.Dispose();
         first.Inventory.Dispose();
         first.World.Dispose();
+        second.WorldState.Dispose();
         second.Inventory.Dispose();
         second.World.Dispose();
     }
@@ -363,6 +366,7 @@ static void MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity()
     }
     finally
     {
+        staging.WorldState.Dispose();
         staging.Inventory.Dispose();
         staging.World.Dispose();
     }
@@ -453,6 +457,7 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
             new AccountingStore(),
             staging.Inventory,
             staging.Content,
+            staging.WorldState,
             staging.SimulationLookup);
         Assert.True(fixture.Runtime.Game.TryPublishPreparedGeneration(
             staging.World, candidate, out _));
@@ -481,7 +486,10 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
             if (candidate is not null)
                 candidate.Dispose();
             else
+            {
+                staging.WorldState.Dispose();
                 staging.Inventory.Dispose();
+            }
             if (!staging.World.IsDisposed)
                 staging.World.Dispose();
         }

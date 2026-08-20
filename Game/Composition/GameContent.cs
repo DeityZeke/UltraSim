@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.World;
 
 namespace UltraSim.Game.Composition;
 
@@ -104,11 +105,13 @@ public sealed class GameContent : IInventoryContentCatalog
         PrefabBuilder character = content.Define(GamePrefabKeys.Character);
         character.With(new GameCharacter { Marker = 1 });
         character.With(new GameSimulationState { TickMarker = 0 });
+        character.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         character.DisplayName("Character");
         // The paired no-simulation shape is a real content route used when a
         // character's scheduled simulation membership is explicitly suspended.
         PrefabBuilder dormantCharacter = content.Define(GamePrefabKeys.CharacterDormant);
         dormantCharacter.With(new GameCharacter { Marker = 1 });
+        dormantCharacter.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         dormantCharacter.DisplayName("Dormant Character");
         InventoryContainerAuthoring backpackSource = InventoryContent.DefineContainer(
             content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);

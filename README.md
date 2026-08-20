@@ -75,17 +75,17 @@ per-step behavior is an explicit documented choice.
 - `Client/*` — retained client projection, remote network bridge, and Godot
   presentation.
 - `Game/*` — concrete game schema/content/state, authoritative workflows,
-  canonical replication projection, the fixed game-world position profile, and
-  game-owned network application binding.
+  canonical replication projection, persisted world-position authority,
+  generation-owned dynamic spatial membership, and game-owned network binding.
 - `_Tests`, `_Benchmarks`, `_Tools` — executable correctness, evidence, and gates.
 - `_Archive/_V2` — frozen historical/reference source used only by explicit
   comparisons. Other archived generations and reference material live beside it
   under `_Archive` and are excluded from active Godot project discovery.
 
-Terrain T0.0 has added the tiny Spatial contracts seam and concrete game position
-profile. The T0.1 stop gate will add the first game-owned maintained spatial
-runtime; it does not create a generic world kernel before another game proves one
-is needed.
+Terrain T0.0 accepted the tiny Spatial contracts seam and concrete game position
+profile. T0.1 now adds the persisted component wrapper and first game-owned,
+generation-coherent maintained spatial index without creating a generic world
+storage kernel. Terrain data, publication, and Network N1 remain later gates.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

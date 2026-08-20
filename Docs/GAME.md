@@ -65,9 +65,9 @@ rows and lifecycle cursors, publishes connection-independent
 participants, and retains projection lifecycle separately from explicit
 application events.
 
-The network-enabled composition profile alone reserves lifecycle history,
-structural merge capacity, prepared observation, and bounded authoritative
-ingress. The normal local profile remains free of this cost. `OfflineDirect` is
+Every Spatial-enabled composition profile now reserves lifecycle history; the
+Network profile additionally reserves structural merge capacity, prepared
+replication observation, and bounded authoritative ingress. `OfflineDirect` is
 the packet-free semantic oracle; it receives no ECS entities or mutable world
 authority and atomically applies only complete baselines/frames.
 
@@ -82,9 +82,12 @@ The game profile uses signed 32-bit 16 m chunk X/Z, canonical `0..15,999` local
 millimeters, signed 32-bit Y, 500 mm terrain cells, and a separate 100 mm authoring
 snap. Dynamic position remains free on the 1 mm lattice.
 
-This checkpoint contains no world store, ECS position component, terrain pack,
-publication, or renderer. T0.1 introduces the persisted component wrapper and
-maintained game-owned `WorldSpatialIndex` only after the T0.0 stop review.
+T0.1 adds a flattened, persisted `WorldPositionComponent` and a bounded
+generation-owned `WorldSpatialIndex`. Exact ECS changed-row and lifecycle cursors
+are consumed after the complete ECS graph/structural barrier and before clock
+advancement. Same-home motion retains its membership row; chunk crossings relink
+that row; lifecycle overrun rebuilds privately from current ECS truth. Terrain
+packs, public chunk projection, and rendering remain absent.
 
 ## Simulation rules
 

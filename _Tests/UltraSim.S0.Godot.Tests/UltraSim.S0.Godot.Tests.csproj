@@ -13,6 +13,7 @@
     <ProjectReference Include="../../Client/_Godot/UltraSim.Client.Godot.csproj" />
     <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
   </ItemGroup>
 </Project>

@@ -441,6 +441,7 @@ static TestMetrics RuntimeTickBenchmark()
         direct.World.BeginRun();
         for (int index = 0; index < population; index++)
             Expect(direct.World.TryInstantiate(direct.Content.Character, out _), "Direct benchmark population failed.");
+        direct.WorldState.Initialize(direct.World);
 
         var hostedComposition = new UltraSimGameComposition(
             new InventoryLimits(8, population + 8, 8),
@@ -461,7 +462,11 @@ static TestMetrics RuntimeTickBenchmark()
 
         // Intentional fixed-60 performance control. Variable/adaptive cadence
         // is disabled in both paths so cadence cannot conceal a regression.
-        Action directTick = () => direct.World.Tick(1d / 60d);
+        Action directTick = () =>
+        {
+            direct.World.Tick(1d / 60d);
+            direct.WorldState.CommitAfterEcsStep(direct.World);
+        };
         Action hostedTick = host.Tick;
 
         for (int tick = 0; tick < warmupTicks; tick++)
@@ -514,6 +519,7 @@ static TestMetrics RuntimeTickBenchmark()
     }
     finally
     {
+        direct.WorldState.Dispose();
         direct.Inventory.Dispose();
         direct.World.Dispose();
     }

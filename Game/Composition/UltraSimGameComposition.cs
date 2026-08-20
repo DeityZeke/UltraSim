@@ -3,6 +3,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Composition;
@@ -12,13 +13,15 @@ public readonly record struct GameStaging(
     EcsWorld World,
     InventoryGenerationState Inventory,
     GameContent Content,
+    GameWorldState WorldState,
     ComponentLookup<GameSimulationState> SimulationLookup,
     GameReplicationBindings? Replication = null);
 
 /// <summary>Concrete game composition owning one schema, content set, and generation-state root.</summary>
 public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEntityBinder
 {
-    public const int NetworkLifecycleRecordCapacity = 4_096;
+    public const int SpatialLifecycleRecordCapacity = 8_192;
+    public const int NetworkLifecycleRecordCapacity = SpatialLifecycleRecordCapacity;
     public const int NetworkCommandCapacity = 256;
 
     private readonly ConditionalWeakTable<EcsWorld, GameContent> _contentByWorld = new();
@@ -59,6 +62,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             new AccountingStore(),
             new InventoryGenerationState(generation.World, content, _inventoryLimits),
             content,
+            new GameWorldState(generation.World),
             simulation,
             replication));
     }
@@ -80,6 +84,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
+                new GameWorldState(world),
                 simulation,
                 replication);
         }
@@ -105,6 +110,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
+                new GameWorldState(world),
                 simulation,
                 replication);
         }
@@ -136,7 +142,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local) => new(
         new EntityCapacity(entityCapacity),
         maximumArchetypes: 32,
-        maximumPreparedPlans: 32,
+        maximumPreparedPlans: 40,
         maximumStructuralCommands: runtimeProfile switch
         {
             GameRuntimeProfile.Local => 0,
@@ -151,8 +157,8 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             backgroundWorkerCount: 0),
         lifecycleRecordCapacity: runtimeProfile switch
         {
-            GameRuntimeProfile.Local => 0,
-            GameRuntimeProfile.Networked => NetworkLifecycleRecordCapacity,
+            GameRuntimeProfile.Local => SpatialLifecycleRecordCapacity,
+            GameRuntimeProfile.Networked => SpatialLifecycleRecordCapacity,
             _ => throw new ArgumentOutOfRangeException(nameof(runtimeProfile)),
         },
         persistence: identity ?? new PersistenceIdentityOptions(new PersistentWorldId(0x7007)));

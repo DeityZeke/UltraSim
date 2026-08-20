@@ -1,0 +1,80 @@
+{
+  "Workload": "terrain-t0.1-world-spatial-index-v1",
+  "TimestampUtc": "2026-08-20T05:20:25.3730869+00:00",
+  "RuntimeVersion": "8.0.29",
+  "FrameworkDescription": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "DotnetTieredCompilation": "0",
+  "DotnetReadyToRun": "0",
+  "Warmups": 5,
+  "Iterations": 21,
+  "HotOperationsPerIteration": 100000,
+  "RebuildsPerIteration": 64,
+  "Profile": {
+    "EntityCapacity": 4104,
+    "ChunkCapacity": 4104,
+    "IndexReservedBytes": 606720,
+    "WorldPositionComponentBytes": 16,
+    "DefaultLifecycleCapacity": 8192
+  },
+  "Scenarios": [
+    {
+      "Name": "post-step-observation-no-change",
+      "MeanNanosecondsPerOperation": 34.76149904761905,
+      "P50NanosecondsPerOperation": 34.77883,
+      "P95NanosecondsPerOperation": 34.92433,
+      "MaximumNanosecondsPerOperation": 35.15613,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 35100026
+    },
+    {
+      "Name": "changed-position-same-home",
+      "MeanNanosecondsPerOperation": 139.39938857142863,
+      "P50NanosecondsPerOperation": 139.11163,
+      "P95NanosecondsPerOperation": 140.58952,
+      "MaximumNanosecondsPerOperation": 140.93112,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 35100000
+    },
+    {
+      "Name": "changed-position-cross-chunk",
+      "MeanNanosecondsPerOperation": 181.71442476190475,
+      "P50NanosecondsPerOperation": 181.63831,
+      "P95NanosecondsPerOperation": 182.72489,
+      "MaximumNanosecondsPerOperation": 183.59209,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 35099974
+    },
+    {
+      "Name": "create-insert-destroy-remove-pair",
+      "MeanNanosecondsPerOperation": 563.8839657142858,
+      "P50NanosecondsPerOperation": 563.28688,
+      "P95NanosecondsPerOperation": 567.8336,
+      "MaximumNanosecondsPerOperation": 568.2392,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 211250325000
+    },
+    {
+      "Name": "full-rebuild-4096",
+      "MeanNanosecondsPerOperation": 357921.5662202381,
+      "P50NanosecondsPerOperation": 357483.5,
+      "P95NanosecondsPerOperation": 360807.375,
+      "MaximumNanosecondsPerOperation": 361335.1875,
+      "MaximumAllocatedBytes": 38846976,
+      "Checksum": 22490
+    },
+    {
+      "Name": "chunk-member-copy-1024",
+      "MeanNanosecondsPerOperation": 2017.3099657142857,
+      "P50NanosecondsPerOperation": 2014.81488,
+      "P95NanosecondsPerOperation": 2037.90432,
+      "MaximumNanosecondsPerOperation": 2052.95216,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 166400000
+    }
+  ]
+}

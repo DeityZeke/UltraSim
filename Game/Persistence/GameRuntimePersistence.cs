@@ -149,6 +149,7 @@ public sealed class GameRuntimePersistence
                 stagedAccounting,
                 built.Inventory,
                 built.Content,
+                built.WorldState,
                 built.SimulationLookup,
                 built.Replication);
 
@@ -177,6 +178,7 @@ public sealed class GameRuntimePersistence
                 else
                 {
                     stagedAccounting?.Dispose();
+                    staging?.WorldState.Dispose();
                     staging?.Inventory.Dispose();
                 }
                 if (stagedWorld is not null && !stagedWorld.IsDisposed)

@@ -60,7 +60,9 @@ authority; they do not retain stale ECS handles as authorization.
 
 The network-enabled game profile reserves ECS lifecycle history, the canonical
 main structural merge arena, exact changed-row observation, and a bounded input
-RangeJob. The local profile reserves none of the replication/lifecycle machinery.
+RangeJob. The local profile reserves no replication observation/ingress machinery;
+it now retains the lifecycle history required by the independent T0.1 Spatial
+consumer.
 
 A capture reads complete committed ECS state only after a Runtime step. It stages
 all lifecycle and changed-value work, then publishes canonical slots and advances

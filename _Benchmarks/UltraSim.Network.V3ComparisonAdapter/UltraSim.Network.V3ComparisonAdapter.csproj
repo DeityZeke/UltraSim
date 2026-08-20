@@ -12,5 +12,6 @@
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
     <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
     <ProjectReference Include="../../Game/Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
   </ItemGroup>
 </Project>

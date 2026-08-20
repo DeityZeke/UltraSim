@@ -119,7 +119,8 @@ public sealed class ServerGameFacet
     /// </summary>
     /// <remarks>
     /// <paramref name="preparedGameState"/> becomes candidate-owned before
-    /// publication. Runtime never interprets its domain type or contents. Once
+    /// publication. Runtime recognizes only generic generation lifecycle/step
+    /// capabilities and never interprets domain contents. Once
     /// the inputs pass active-root alias rejection, this call takes ownership
     /// and reclaims both inputs if candidate validation fails.
     /// </remarks>
