@@ -62,14 +62,24 @@ COARSE SPATIAL MEMBERSHIP IS A DERIVED ACCELERATOR.
 
 BASE TERRAIN AND FROZEN STATICS ARE WORLD DATA, NOT ECS ENTITIES BY DEFAULT.
 
-BASE TERRAIN IS A DENSE HEIGHTFIELD.
+THE DENSE BASE TERRAIN SURFACE IS A 2D HEIGHTFIELD.
 
-THE WORLD IS NOT PERMANENTLY LIMITED TO ONE SURFACE PER X/Z.
+BASE TERRAIN IS NOT THE PERMANENT MAXIMUM TOPOLOGY OF WORLD TERRAIN.
+
+WORLD TERRAIN IS NOT PERMANENTLY LIMITED TO ONE SURFACE PER X/Z.
 
 TERRAIN CHUNKS ARE WORLD-DATA PARTITIONS, NOT ECS STORAGE CHUNKS.
 
-SPARSE ADDITIONAL CLIFF, LEDGE, OVERHANG, CAVE, OR TUNNEL SURFACES MAY SHARE A
-SPATIAL CHUNK KEY WITHOUT SHARING THE BASE HEIGHT PLANE.
+FUTURE AUTHORED CLIFF, LEDGE, OVERHANG, CAVE, TUNNEL, OR UNDERGROUND
+FLOOR/CEILING SURFACES MAY USE SPARSE ADDITIONAL WORLD-TERRAIN GEOMETRY AND
+SHARE A SPATIAL CHUNK KEY WITHOUT SHARING THE BASE HEIGHT PLANE.
+
+ADDITIONAL TERRAIN SURFACES ARE WORLD DATA, NOT ECS ENTITIES BY DEFAULT.
+
+SUPPORTING MULTIPLE TERRAIN SURFACES DOES NOT REQUIRE VOXEL TERRAIN.
+
+MULTIS AND STATICS ARE NOT THE REQUIRED CATCH-ALL REPRESENTATION FOR
+NON-HEIGHTFIELD GEOLOGY.
 
 TERRAIN, PUBLICATION, AOI, CLIENT, RENDER, PHYSICS, AND NAV CHUNKS/REGIONS MAY DIFFER IN GRANULARITY LATER.
 
@@ -112,6 +122,41 @@ STATIC VISUAL SCALE DOES NOT REQUIRE ONE NODE PER STATIC.
 FROZEN HETEROGENEOUS GEOMETRY MAY BE BAKED; REPEATED IDENTICAL GEOMETRY MAY BE INSTANCED.
 
 LOGICAL MULTI/PROPERTY GROUPING IS SEPARATE FROM GODOT MULTIMESH GROUPING.
+
+TERRAIN EDITING AND MULTI/STATIC AUTHORING HAVE SEPARATE SEMANTIC AND
+REVERSIBILITY DOMAINS.
+
+TERRAIN EDITS ARE PRIVATE CANDIDATES UNTIL ONE COMPLETE SERVER-VALIDATED
+TERRAIN COMMIT SUCCEEDS.
+
+A TERRAIN COMMIT IS ALL-OR-NOTHING ACROSS ITS DIRTY REGION.
+
+EDIT-REGION OWNERSHIP IS EXCLUSIVE; SPATIAL CHUNKS ARE LOCKING/STORAGE UNITS,
+NOT AUTOMATIC PROPERTY-OWNERSHIP PARCELS.
+
+SURROUNDING PUBLISHED WORLD DATA MAY BE READ-ONLY EDIT CONTEXT WITHOUT JOINING
+THE EDIT CLAIM.
+
+TERRAIN CONTENT REVISION IS SEPARATE FROM DYNAMIC PUBLICATION REVISION.
+
+HARDENING PRESERVES LOGICAL MULTI GROUPING; FREEZING LOWERS WORLD CONTENT TO A
+CHEAPER REPRESENTATION.
+
+UNFREEZE IS NOT UNDO. HARDEN IS NOT FREEZE.
+
+STRUCTURE-DESIGN VISIBILITY AND CONSTRUCTION REALIZATION ARE SEPARATE POLICIES.
+
+TERRAIN MODIFICATION REMAINS PRIVATE/ATOMIC EVEN WHEN STRUCTURE CONSTRUCTION IS
+PUBLIC/LIVE.
+
+AN APPROVED STRUCTURE MAY COMPLETE IMMEDIATELY OR PROGRESS THROUGH AN
+AUTHORITATIVE CONSTRUCTION PROJECT.
+
+PLAYER, NPC, COMMUNITY, QUEST, AND ADMIN CONSTRUCTION CONVERGE ON THE SAME
+VALIDATED WORLD-CONSTRUCTION SEMANTICS WHEN THEIR REQUIREMENTS MATCH.
+
+AI/SETTLEMENT PLANNING MAY REQUEST CONSTRUCTION; IT MAY NOT BYPASS VALIDATION OR
+WRITE FROZEN WORLD DATA DIRECTLY.
 
 LOAD/PREPARE MAY BE ASYNCHRONOUS.
 
@@ -258,7 +303,12 @@ T0 does **not** require:
 - making `Kernels/Network`, ECS, UI, or another independent kernel depend on Spatial;
 - a generic spatial manager/framework, event bus, service container, or `IChunk<T>` hierarchy;
 - final public package-manager/SDK packaging for optional Spatial adapters;
-- a production world editor;
+- a production terrain/world editor or parallel multi-user editor UI;
+- player housing/property ownership and private/public customization UI;
+- staged construction gameplay, community construction events, or autonomous
+  settlement planning;
+- a UO-, Sims-, Valheim-, or Banished-specific authority model;
+- a general multi-surface cliff/cave editor;
 - procedural infinite terrain;
 - voxel terrain or arbitrary volumetric caves/destruction (sparse authored
   non-heightfield cliff/cave surfaces remain permitted world data);
@@ -392,12 +442,12 @@ T0.0   Spatial contracts + coordinate/value machine
 T0.1   authoritative WorldPosition + WorldSpatialIndex
 T0.2   terrain profile validation + height encoding
 T0.3   sectioned WorldPack container + terrain source
-T0.4   authoritative terrain query + deterministic mesh payload
+T0.4   authoritative base-terrain query + deterministic base mesh payload
 T0.5   frozen statics + Multi/property compilation
 T0.6   ChunkPublicationStore + bounded history
 T0.7   interest/subscription oracle
 T0.8   client residency + production Godot renderer/streaming
-T0.9   persistence + mutable overlay
+T0.9   persistence + durable mutable-overlay seam
 T0.10  playable whole-pipeline acceptance
 ```
 
@@ -828,14 +878,21 @@ Network N1 work is part of this checkpoint.
 ## T0.2 — validate the fixed terrain profile and choose height encoding
 
 T0.2 no longer chooses among 16/32/64 m chunk sizes. The game spatial profile is already fixed at 16 m with 0.5 m terrain cells. T0.2 validates the consequences of that geometry and chooses the remaining physical terrain encoding decisions, especially terrain height representation.
-T0.2 encodes the common dense base terrain surface, closer to UO than a voxel
-world. It does not define the maximum topology a world chunk may ever contain,
-and the terrain surface is not represented as one ECS entity per tile. Future
+T0's base terrain surface is one dense 2D heightfield using that fixed 16 m /
+0.5 m geometry, closer to UO than a voxel world. T0.2 freezes the physical
+encoding of this common base surface; it does not freeze all future world
+terrain topology to one heightfield or one surface per X/Z. The base surface is
+not represented as one ECS entity per tile. Future
 authored chunks may add sparse structural surface geometry for cliffs, ledges,
 overhangs, caves, tunnels, or other places where multiple/non-heightfield
 surfaces occupy one X/Z footprint. Those surfaces remain WorldPack/world data by
 default rather than ECS entities, but their exact representation is deliberately
 unfrozen.
+
+For example, one X/Z footprint may eventually contain a mountain surface at
+`+42 m`, a cave ceiling at `+31 m`, and a cave floor at `+27 m`. The dense base
+heightfield remains the cheap common case; it is not required to encode all
+three surfaces.
 
 The base-surface layout is two dense planes per 16 m `TerrainChunk`:
 
@@ -904,6 +961,12 @@ relief reject transactionally rather than clamp or partially write. Dynamic
 authoritative Y remains signed int32 millimetres and is independent of the
 terrain lattice.
 
+The 327,675 mm relief bound belongs to one encoded dense surface plane in one
+chunk. It is not a global vertical-world limit and does not constrain the format
+of future sparse structural surfaces. Those later surfaces might prove to be
+secondary masked heightfield patches, compact authored triangle/surface patches,
+or another bounded structural representation; T0.2 deliberately chooses none.
+
 The hardening matrix repeats the deterministic woods/coast/ridge fixture in
 three independent elevation datums spanning `-1,500,000..1,500,000` mm: 192
 chunks and 209,088 stored height samples. The previous global signed q10 control
@@ -934,7 +997,8 @@ dynamic entity local X/Z                0..15,999 mm inclusive
 All 11,088 reconstructed adjacent-edge comparisons across the three fixtures
 were exact, including 330 neighboring pairs with different plane bases. Packed
 offsets need not be equal across a seam; reconstructed canonical absolute
-heights must be. The fixtures stored 209,088 height vertices versus 198,147
+heights for adjacent pieces of the same logical base surface must be. The
+fixtures stored 209,088 height vertices versus 198,147
 unique global vertices, making finite-grid duplication 10,941 vertices / 21,882
 bytes. One reusable authored-height/material/encoded-height scratch set is 8,586
 bytes; timed encoding allocates 0 B. Exact T0.3 directory layout remains
@@ -996,7 +1060,8 @@ T0.3 required sections
     TerrainHeights/v1
 
 later sections using the same container
-    TerrainSurfaceLayers/v1   future only; schema deliberately unfrozen
+    additional structural-terrain surface section
+                              future name/version/schema deliberately unfrozen
     FrozenStatics/v1           introduced by T0.5
     MultiFragments/v1          introduced by T0.5
 
@@ -1007,7 +1072,8 @@ Do not finalize a future record layout merely so the first terrain-only pack can
 write an empty section with a misleading permanent version.
 `TerrainMaterials/v1` and `TerrainHeights/v1` describe only the dense base
 surface. The container must admit a future structural-surface section without
-changing either base section, but T0.3 must not invent that future row schema.
+changing either base section, but T0.3 must not invent that future section's
+name, version, or row schema.
 
 The first format should be uncompressed unless I/O measurement proves compression
 is needed. Compression complicates random access, corruption boundaries, scratch
@@ -1141,7 +1207,7 @@ The world layer provides deterministic integer queries directly over chunk data:
 
 TrySampleBaseTerrainHeight(location)
 
-TryResolveTerrainMaterial(location)
+TryResolveBaseTerrainMaterial(location)
 
 QueryStaticBounds(aabb, destination)
 
@@ -1155,6 +1221,11 @@ Later movement/collision requirements may earn a bounded world-surface query ove
 an X/Z footprint plus vertical interval so several floors, ceilings, ledges, or
 vertical/non-heightfield surfaces can coexist. That API and its sparse geometry
 encoding remain deliberately unfrozen until a real workload proves them.
+
+Conceptually, later work may need a shape such as
+`QueryWorldSurfaces(xz, verticalInterval, destination)`, but that spelling is not
+an accepted API. `TrySampleBaseTerrainHeight` is a base-heightfield query. It is
+not the permanent general definition of "what can I stand on?"
 
 The terrain surface is two deterministic planar triangles per 500 mm cell—not a
 bilinear four-vertex height function. The diagonal is selected from **global**
@@ -1172,15 +1243,19 @@ ties away from zero; it never relies on C# truncation. Exact +500 mm cell edges
 and +16,000 mm chunk edges belong to the next half-open cell/chunk.
 
 The duplicated 33×33 border values in adjacent immutable chunks represent one
-global terrain-vertex identity. Pack compilation requires bit-exact shared base
-vertices. T0.9 mutable height overlays are keyed by global terrain-vertex
+global base-surface terrain-vertex identity. Pack compilation requires bit-exact
+shared base vertices for adjacent pieces of that logical surface. T0.9 mutable
+height overlays are keyed by global terrain-vertex
 coordinate and invalidate every adjacent chunk representation containing that
 vertex, rather than mutating two independent border copies.
 
 ### Mesh contract
 
 Mesh generation consumes an immutable terrain chunk snapshot and emits a bounded
-render payload. The server never builds this mesh.
+render payload. The server never builds this mesh. This payload is specifically
+the deterministic base-heightfield mesh. If additional structural terrain is
+later implemented, it owns its own deterministic query/mesh representation while
+sharing canonical world coordinates and spatial chunk identity.
 Requirements:
 
 - shared chunk edges produce bit-identical world-space seam positions;
@@ -1277,6 +1352,169 @@ state changes. A chest's frozen body may eventually be batched visually while it
 interaction/inventory identity remains authoritative elsewhere. Do not erase game
 identity merely to earn a render batch.
 
+### Authoring and reversibility vocabulary
+
+Terrain editing and static/Multi authoring do not share one representation or
+one reversibility vocabulary. Preserve these distinct operations:
+
+```text
+Harden
+    loose modular authored placements -> logical Multi
+
+    Preserves higher-level grouping and identity. A hardened cabin remains
+    "Cabin / Multi N".
+
+Break
+    logical Multi -> editable constituent authored pieces
+
+Freeze
+    static-like/structural content -> cheapest appropriate frozen world form
+
+    This is representation lowering, not grouping. It may deliberately discard
+    authoring structure that the frozen runtime representation does not need.
+    T0.5 Multi fragments still retain their required logical Multi identity;
+    deeper lowering may discard only provenance that no admitted runtime or
+    editing contract requires.
+
+Unfreeze
+    frozen static-like data -> editable proxy placements
+
+    This materializes something editable; it does not promise to reconstruct
+    the original class, Multi, transaction, or high-level design unless separate
+    provenance was retained.
+
+Undo
+    reverse a retained editor transaction
+```
+
+Therefore:
+
+```text
+Harden != Freeze
+Unfreeze != Undo
+```
+
+Do not reuse `Freeze`/`Unfreeze` as ordinary terrain-editing verbs. Base terrain
+is already close to its runtime form, so normal terrain authoring uses `Edit`,
+`Save`/`Commit`, `Discard`, and editor-history `Undo`. A terrain Save validates
+and publishes a complete private candidate; it is not another lowering command.
+
+The conceptual structure-lowering flow is:
+
+```text
+Loose modular pieces
+        |
+      Harden
+        v
+      Multi
+        |
+      Freeze
+        v
+Frozen/packed world representation
+
+Break:     Multi -> pieces
+Unfreeze:  frozen statics -> editable proxies
+Undo:      separate retained authoring-transaction history
+```
+
+### Future structure design and construction
+
+Structure authoring may eventually support two visibility policies without
+changing the underlying authoritative structure representation:
+
+```text
+PrivateDraft
+    published property/structure
+        -> private parallel design candidate
+        -> validate complete candidate
+        -> atomic structure publication
+
+PublicLive
+    validate one permitted structural operation
+        -> commit it immediately
+        -> nearby players may observe construction/design evolving
+```
+
+Terrain changes remain private and all-or-nothing even when structural work uses
+`PublicLive`. Structure UI, placement granularity, and authority are also
+separate concerns. UO-style coarse prefabs, Sims-style wall/room/floor tools, and
+Valheim-style beam/socket placement should be possible consumers of the same
+validated structure semantics. Do not make `HouseCell[,]`, one snap lattice, or
+unconstrained transforms a permanent authority assumption merely because one UI
+prefers them. Placement granularity remains content/tool/policy.
+
+Structure design is distinct from its realization:
+
+```text
+Draft
+   -> ApprovedBlueprint
+        -> CompleteImmediately
+        -> ConstructionProject
+             -> resources + labor/work + authored stages
+             -> CompletedStructure
+                  -> Multi / packed fragments / appropriate frozen lowering
+```
+
+A blueprint describes what should be built; it is not a `Multi` and does not
+claim that the structure already exists. A `ConstructionProject` is an
+authoritative incomplete world structure, not merely a presentation timer. Its
+future concrete schema may include target design, phase, delivered/required
+resources, performed/required labor, and current structural realization.
+Materials and labor are independent; `materials complete, labor incomplete` is
+a valid state. A hammer/work action advances the approved project rather than
+granting arbitrary geometry mutation.
+
+Stage count and piece granularity are content-defined. A simple project might
+show only foundation/frame/completed, while richer content may show survey
+stakes, stockpiles, scaffolding, partial floors/walls, roof, windows, and finish.
+Construction-only bookkeeping should disappear when complete unless gameplay
+explicitly retains history; the finished result returns to ordinary
+`CompletedStructure`/Multi/frozen world representation.
+
+The initiating actor is orchestration, authorization, and planning—not a second
+construction representation:
+
+```text
+player / property owner / guild / quest / community / NPC settlement / admin
+                              |
+                              v
+                     ApprovedBlueprint
+                              |
+                              v
+                    ConstructionProject
+                       /             \
+                  players             NPCs
+                       \             /
+                    resources + labor
+                              |
+                              v
+                     CompletedStructure
+```
+
+An admin-prepared town tavern, bridge, dock, guild hall, wall repair, temple,
+festival structure, mine entrance, or siege defense can therefore become public
+gameplay rather than teleporting directly into existence. Autonomous settlement
+planning follows the same path: needs select a suitable blueprint/site, then
+ordinary hauling and labor jobs realize it. AI may request and work on a project;
+it does not operate the player UI, bypass validation, or write frozen rows.
+Construction labor may compete with harvesting, food production, repair,
+crafting, or guarding, allowing overbuilding to have simulation consequences.
+
+Current construction state is coalescible latest state. Contribution credit,
+quest facts, achievements, and town history are separate retained Events when
+needed:
+
+```text
+LATEST STATE COALESCES.
+EVENTS RETAIN FACTS.
+```
+
+These are future semantic seams, not a T0 construction checkpoint. Do not build
+`IWorldEditor`, `IBuildMode`, `IConstructionStrategy`,
+`ITerrainLayerProvider`, `IGenericEditableChunk`, or a contributor/plugin
+framework from this description. Concrete consumers must first prove reusable
+mechanisms.
+
 ### Render-ready static batching contract (production implementation at T0.8)
 
 T0.5 compiles deterministic compatible render groups; T0.8 consumes them in the
@@ -1307,6 +1545,10 @@ entity type.
 uses packed/CSR-style static and Multi-fragment representation, preserves stable
 logical identities, and emits bounded render-ready grouping evidence. Production
 streaming and the no-node-per-static Godot proof arrive at T0.8.
+T0.5 does not require structure customization UI, construction projects, resource
+delivery/labor simulation, community building, or autonomous settlement planning;
+it only preserves representations that those future workflows can validate and
+lower into.
 
 
 ## T0.6 — packed chunk publication and bounded dirty history
@@ -1703,7 +1945,8 @@ client cursors
 
 Do not rewrite base-pack bytes in place. When terrain construction/destruction or
 runtime static placement becomes real, persist a bounded/versioned **world overlay**
-per changed chunk (or region pack) through the existing save-set transaction.
+or replacement generation per changed chunk (or region pack) through the
+existing save-set transaction.
 The first mutable overlay format must distinguish:
 
 - terrain cell/height overrides;
@@ -1716,7 +1959,214 @@ The first mutable overlay format must distinguish:
 
 A complete prepared chunk is `base + durable overlay`, validated before resident
 publication. Compaction of long overlay histories is a persistence concern and
-must be atomic.
+must be atomic. A changed terrain chunk may shadow the base pack's dense terrain
+record without modifying that immutable pack. Long-lived patch generations may
+later compact into a newly built base pack through an atomic maintenance
+transaction; the exact patch-file layout remains unfrozen until implementation
+needs it.
+
+Conceptually:
+
+```text
+immutable Base WorldPack
+    + durable terrain/static/Multi replacement generations
+    = current prepared world view
+```
+
+### Future private terrain-edit sessions
+
+Terrain authoring uses a private parallel candidate over the current published
+world. This is an architectural direction for later tooling, not a production
+editor requirement in T0:
+
+```text
+Published World
+      |
+      | begin edit session
+      v
+Private Edit Instance
+    immutable published-world read-through
+        +
+    private mutable terrain overlay
+      |
+ +----+----+
+ |         |
+Discard   Save
+            |
+         validate
+         /      \
+      reject   commit
+        |        |
+ retain edit    publish complete dirty terrain replacement
+  session       revisions/chunks
+```
+
+The private instance shares immutable published data and owns only changed
+candidate data; it does not clone the entire world. Intermediate sculpting,
+painting, cave, or landscaping work is invisible to normal players. All terrain
+changes—including future property terrain changes—remain private until one
+complete server-authoritative Save succeeds.
+
+The private `EditOverlay` is transient authoring state. It is not the durable
+published overlay:
+
+```text
+private EditOverlay
+      |
+      | validated Save
+      v
+durable committed terrain/static/Multi overlay or replacement
+      |
+      v
+published world generation/view
+```
+
+Do not persist preview meshes/RIDs, grey-overlay state, context-halo residency,
+editor selections, or other presentation state.
+
+### Edit-region claims, context, and shared borders
+
+An edit session claims a bounded `EditRegion` expressed in `SpatialChunkKey`
+backing units. An exclusive `EditRegionLease` coordinates concurrent authoring;
+it is not durable terrain identity or a property parcel. Acquisition is atomic:
+
+```text
+request {A, B, C, D}
+
+either acquire A+B+C+D
+or acquire none and report the conflicting active claim
+```
+
+Normal users may wait, choose/resize another region, request release, or leave.
+Only explicit privileged policy may force-end a conflicting session. Exact
+heartbeat, expiry, and administrative workflow remain future implementation
+decisions.
+
+The editor may display surrounding authoritative world data as a read-only
+`ContextHalo` so elevations, walls, roads, cliffs, cave entrances, and adjacent
+properties line up against the real published world:
+
+```text
+Edit Core       claimed chunks; mutable; normal presentation
+Context Halo    published chunks; read-only; visually marked/desaturated
+Outside         ordinary editor/world streaming policy
+```
+
+The grey/desaturated treatment is client presentation, not authority. Tools
+must reject writes outside the claim.
+
+The dense base heightfield duplicates positive-edge vertices, but each duplicate
+represents one canonical global terrain vertex. The first edit-ownership rule is:
+
+```text
+A global terrain vertex is editable only when the session owns every chunk
+representation affected by that vertex.
+
+interior claimed vertex       editable
+outer claimed-region border   pinned/read-only unless claim expands
+shared edge                   requires both adjacent chunks
+shared four-way corner        requires every applicable chunk
+```
+
+An editor may offer “expand edit region” at a protected boundary. This avoids
+cross-session seam reconciliation and preserves exact reconstructed shared
+edges. Future sparse additional surfaces define equivalent ownership at their
+own topology boundaries when their representation is earned.
+
+### Terrain Save is one authoritative multi-chunk transaction
+
+The client may preview rich tools and candidate meshes, but it never uploads
+trusted terrain bytes for blind installation. The server captures the base
+terrain revisions/hashes used to create the session and validates/recompiles the
+canonical candidate on Save:
+
+```text
+collect all dirty terrain chunks/surfaces
+    -> verify authorization and exclusive claims
+    -> verify captured base revisions/hashes remain current
+    -> validate material/range/geometry/topology/shared-boundary contracts
+    -> compile every complete candidate replacement privately
+
+if any step fails:
+    publish nothing
+    retain the private edit session for correction/discard
+
+if every step succeeds:
+    atomically commit the whole dirty region
+    advance affected terrain content revisions/hashes
+    publish the new prepared terrain view
+```
+
+The lease prevents ordinary human conflicts. Revision/hash validation is the
+correctness proof if some other authorized process replaced terrain beneath the
+session.
+
+Terrain content identity is independent from T0.6 dynamic publication identity:
+
+```text
+SpatialChunkKey
+    terrain content revision/hash       immutable/replacement world-data domain
+    ChunkPublicationRevision            dynamic public-entity projection domain
+```
+
+Do not overload `ChunkPublicationRevision` to version terrain and do not push
+terrain blobs through `ChunkPublicationStore`. The two domains may share chunk
+interest identity while retaining independent storage, lifetime, and revision
+semantics. World chunks still own no observer lists.
+
+Normal authoritative world mutation remains owner-bound. Private editing may
+prepare candidate buffers and preview meshes away from the published authority
+root, but accepted publication is an owner-bound transaction. A private edit
+instance may never mutate published `WorldPack` bytes or live terrain storage.
+
+### Verified client-local terrain residency
+
+A client may satisfy terrain residency from an installed base `WorldPack` or
+verified local terrain cache when its identity matches the authoritative required
+version:
+
+```text
+authoritative server
+    Chunk A terrain revision 72
+    Chunk B terrain revision 19
+
+client cache
+    A revision 71 -> stale -> fetch verified replacement
+    B revision 19 -> current hash matches -> read locally
+```
+
+The cache is never authority. Validity derives from the world/pack identity,
+`SpatialChunkKey`, terrain revision, and content hash. Local modification cannot
+change server collision/gameplay truth and may require replacement before the
+client is considered current. Normal play should not retransmit unchanged base
+terrain merely because dynamic publication also uses chunk identity.
+
+### Housing/property terrain reuse
+
+Future property terrain mode reuses this same private edit-session transaction.
+A property grants authorization over a bounded area or volume; the edit session
+claims whatever complete backing chunks are needed for safe compilation:
+
+```text
+property authorization boundary
+    what the owner may modify
+
+chunk claim/storage boundary
+    which backing chunks must be exclusively edited and recompiled
+```
+
+A property may authorize part of a chunk while its active edit session
+temporarily claims the whole backing chunk. Authorization may later include
+height/depth/surface restrictions over a 3D build volume so landscaping,
+basements, hobbit-hole excavation, and future cave/underground surfaces can share
+the same validation path. World chunks do not become land-ownership parcels.
+T0 does not design the full property system.
+
+Structure `PrivateDraft` may use the same published-world/private-candidate shape.
+Structure `PublicLive` may instead commit each validated structural operation.
+That choice never changes terrain: terrain modification remains private and
+all-or-nothing.
+
 T0 does not need a full building editor to prove this seam. One deterministic
 static/terrain overlay mutation and restore is enough if implementation reaches
 this checkpoint; otherwise preserve the contract for the first construction
@@ -1724,10 +2174,15 @@ feature.
 **T0.9 gate:** save/restore reproduces the same world-pack identity, ECS dynamic
 entities, derived chunk membership, and any implemented overlay mutation without
 persisting runtime slots.
+Private edit sessions, leases, housing, construction projects, client patch-cache
+distribution, and multi-user editor UI are explicitly not added to this gate.
 
 ## T0.10 — playable woods/cabin vertical and acceptance
 
-Build a deliberately small real world rather than another isolated microbenchmark:
+Build a deliberately small real world rather than another isolated microbenchmark.
+This is a preauthored playable proof; it does not require terrain-editor,
+housing-customization, staged-construction, community-project, or autonomous
+settlement gameplay:
 
 ```
 
@@ -1930,6 +2385,21 @@ maximum overlap-query chunk output
 maximum world-overlay bytes/chunk           when implemented
 ```
 
+Future editing/construction systems add their own explicit proportional bounds
+only when those systems exist:
+
+```text
+maximum concurrent edit sessions
+maximum claimed chunks/edit session
+maximum dirty terrain chunks/edit session
+maximum private edit-overlay bytes
+maximum construction projects
+maximum pieces/stages/resources per construction project
+```
+
+These are not numerical T0 gates. Their values must come from the concrete
+editor/construction workloads rather than speculative reservations.
+
 Do not reserve worst-case dynamic/static arrays for every theoretical chunk in an unloaded world. Capacity distinguishes **world addressability** from **resident working set**. Large immutable pack sections may live on disk/mapped storage while bounded resident stores own hot mutable/publication state.
 If one town chunk exceeds an admitted dynamic/static/publication capacity, report the exact high-water and choose a larger bounded capacity or an explicitly designed bounded overflow-page mechanism. Do not silently fall back to an unbounded list. Reopening the fixed 16 m world profile is a last resort requiring whole-pipeline evidence, not the first response to a local capacity miss.
 
@@ -1964,6 +2434,11 @@ ECS -> copy to Spatial queue -> wait -> copy to Network
 The concrete world stores are updated once, then consumers read the committed memory according to explicit ownership/lifetime rules.
 Immutable/base terrain and frozen statics are even simpler: once their prepared resident lifetime is valid, readers do not need a per-tick dynamic publication barrier. Rare durable overlay mutations publish a new prepared/revisioned state only when they change.
 File read, decompression if later added, validation, and mesh generation may occur on workers after ownership of immutable buffers is clear. A worker never mutates live owner-bound spatial/publication state.
+Private editors may likewise prepare mutable candidates and presentation payloads
+away from the published authority root under exclusive bounded edit claims. Only
+the owner-bound world commit may install an accepted terrain/structure candidate.
+Workers and previews operate over private or immutable buffers and never mutate
+published `WorldPack` or live authoritative terrain storage.
 Prepared ownership is single-use. If publication fails after trusted mutation begins unexpectedly, fault the owning world/runtime path under the same principle used elsewhere in UltraSim rather than pretending a partial world update can be rolled back.
 Any borrowed span/ref/read view has an explicit validity scope. It cannot survive generation replacement, store compaction/reallocation, or a mutation boundary that invalidates the underlying storage. The same lifetime discipline applies to ECS changed-set views: a consumer may read the finalized barrier set during its declared epoch, but may not retain it after the owning world advances/recycles the capture storage.
 
@@ -2131,7 +2606,8 @@ T0 is accepted only when:
 
 These require measurements or real content rather than premature commitment:
 
-- terrain height quantum/width and total supported vertical range;
+- exact encoding/query/mesh topology for future sparse additional structural
+  terrain surfaces (the dense base q5 encoding is already frozen);
 - exact physical project/package name for the tiny Spatial contracts boundary if repository conventions constrain it;
 - whether any shared spatial query interface is ever justified beyond values/math (do not add one until multiple concrete consumers earn it);
 - managed arrays versus aligned unmanaged slabs for spatial/publication hot storage;
@@ -2151,7 +2627,11 @@ These require measurements or real content rather than premature commitment:
 - render-region granularity, combined static mesh granularity, and `MultiMesh` grouping;
 - runtime texture atlas policy and atlas dimensions;
 - world-pack compression and I/O backend;
-- mutable terrain/static overlay format;
+- mutable terrain/static overlay and replacement-generation format;
+- edit-session heartbeat/expiry, administrative conflict policy, property-volume
+  authorization, and client terrain-patch distribution;
+- concrete ConstructionProject schema, authored stage granularity, and
+  contribution authorization;
 - interior/portal/occlusion policy;
 - later physics/nav/AI spatial subdivision or aggregation;
 - whether server residency eventually unloads chunks containing dormant ECS entities or whether entity simulation partitioning becomes a later milestone;
@@ -2176,6 +2656,11 @@ systems share spatial identity/geometry, not mutable chunk storage
 canonical Spatial commit is post-complete-ECS-graph per simulation step
 base terrain is one deterministic parity-diagonal triangle surface
 world topology is not permanently limited to one surface per X/Z
+terrain edits remain private candidates until an atomic validated commit
+terrain content revision is separate from dynamic publication revision
+Harden preserves Multi identity; Freeze lowers representation
+Unfreeze is not Undo
+structure visibility policy is separate from construction realization
 publication identity is game-owned and cross-chunk ordered by EntityPublicVersion
 history pressure invalidates deltas but never rejects current public state
 ```
