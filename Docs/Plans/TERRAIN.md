@@ -1,7 +1,7 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 is accepted/frozen; T0.1 implementation is
-complete and stopped for checkpoint review on 2026-08-20. Revised from the
+Status: active forward plan. T0.0 and T0.1 are accepted/frozen as of
+2026-08-20; T0.2 has not started. Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
 Network N0 is accepted and frozen as the current remote-authority reference. T0 is the next major implementation milestone. Network N1 is deliberately deferred until T0 has proved the world/spatial/publication contracts that N1 can consume.
@@ -778,7 +778,8 @@ Spatial DTO allocation
 Consumers must obey explicit lifetime/ownership rules and may not retain spans/references beyond the committed view's valid generation/barrier lifetime.
 **T0.1 gate:** millions of deterministic same-chunk moves and boundary crossings preserve exact membership, zero duplicate/lost entities, zero warmed owner-thread allocation, successful rebuild after generation replacement/lifecycle overrun, explicit failure-during-rebuild behavior, create/move/destroy and Position remove/re-add/index-reuse regressions, no proportional full-ECS scan on ordinary ticks, repeated same-entity writes within one barrier coalesce to one spatial maintenance observation of the final value, no correctness dependency on destructive dirty-drain ordering between consumers, and a measured direct committed read path.
 
-**T0.1 implementation checkpoint (2026-08-20): complete and stopped for review.**
+**T0.1 acceptance checkpoint (2026-08-20): accepted and frozen after
+saturated-capacity hardening.**
 `WorldPositionComponent` is persisted as a flattened 16-byte primitive payload.
 `GameWorldState` owns independent exact Position/lifecycle cursors and a fixed
 intrusive `WorldSpatialIndex`; Runtime invokes it through the domain-neutral
@@ -788,19 +789,24 @@ facts. Lifecycle overwrite privately rebuilds from current ECS truth, failed
 rebuild leaves the old derived root intact, and prepared generation publication
 rebuilds a fresh index before root swap.
 
-Twenty-two checked Release tests cover final-value coalescing, same-home motion,
+Twenty-five checked Release tests cover final-value coalescing, same-home motion,
 negative crossings, create/destroy, Position remove/re-add, ECS slot reuse,
 lifecycle overrun, failed rebuild, generation replacement, and one million
-warmed moves at 0 B. The split Release observation records:
+warmed moves at 0 B. They also prove both legal full-capacity migrations:
+singleton source into an already-resident destination collapses the source chunk,
+while singleton source into a new destination re-keys its existing chunk slot.
+A deterministic reference model checks create, move, merge, removal, and
+generational slot reuse after every operation across 20,000 bounded churn
+operations. The split Release observation records:
 
 ```text
-post-step observation, no change          34.761 ns mean / 34.924 ns p95 / 0 B
-changed Position, same home              139.399 ns mean / 140.590 ns p95 / 0 B
-changed Position, cross chunk            181.714 ns mean / 182.725 ns p95 / 0 B
-create+insert+destroy+remove pair        563.884 ns mean / 567.834 ns p95 / 0 B
-full rebuild, 4,096 entities             357.922 us mean / 360.807 us p95
+post-step observation, no change          35.245 ns mean / 35.656 ns p95 / 0 B
+changed Position, same home              137.001 ns mean / 137.651 ns p95 / 0 B
+changed Position, cross chunk            186.664 ns mean / 189.594 ns p95 / 0 B
+create+insert+destroy+remove pair        579.302 ns mean / 582.691 ns p95 / 0 B
+full rebuild, 4,096 entities             380.498 us mean / 390.995 us p95
                                                606,984 B/rebuild (cold recovery)
-copy 1,024 members from committed chunk    2.017 us mean /   2.038 us p95 / 0 B
+copy 1,024 members from committed chunk    2.041 us mean /   2.058 us p95 / 0 B
 ```
 
 The immutable evidence is

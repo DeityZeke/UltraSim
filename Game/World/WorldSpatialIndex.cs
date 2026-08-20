@@ -118,6 +118,8 @@ public sealed class WorldSpatialIndex
     {
         if (!entity.IsValid || entity.Index >= (uint)_homes.Length)
             throw new InvalidOperationException("Spatial authority referenced an entity outside the admitted capacity.");
+        if (!key.Space.IsValid)
+            throw new ArgumentException("A spatial chunk key must name a valid space.", nameof(key));
         int homeIndex = checked((int)entity.Index);
         ref HomeRecord home = ref _homes[homeIndex];
         if (home.Occupied && home.Entity != entity)
@@ -139,6 +141,17 @@ public sealed class WorldSpatialIndex
             return;
         }
 
+        // A destination that already exists never needs another chunk slot.
+        // Resolve it before the saturated singleton re-key path: at full
+        // capacity a legal A -> existing B move collapses A and frees its slot.
+        if (TryFindChunk(key, out int existingDestination))
+        {
+            Unlink(homeIndex);
+            LinkExisting(homeIndex, entity, existingDestination);
+            _crossChunkMigrations++;
+            return;
+        }
+
         if (_freeChunkCount == 0 && current.Count == 1)
         {
             RemoveMap(current.Key);
@@ -149,7 +162,7 @@ public sealed class WorldSpatialIndex
             return;
         }
 
-        int destinationSlot = GetOrCreateChunk(key);
+        int destinationSlot = CreateChunk(key);
         Unlink(homeIndex);
         LinkExisting(homeIndex, entity, destinationSlot);
         _crossChunkMigrations++;
@@ -173,10 +186,13 @@ public sealed class WorldSpatialIndex
 
     private int GetOrCreateChunk(SpatialChunkKey key)
     {
-        if (!key.Space.IsValid)
-            throw new ArgumentException("A spatial chunk key must name a valid space.", nameof(key));
         if (TryFindChunk(key, out int existing))
             return existing;
+        return CreateChunk(key);
+    }
+
+    private int CreateChunk(SpatialChunkKey key)
+    {
         if (_freeChunkCount == 0)
             throw new InvalidOperationException("Spatial chunk capacity was exhausted despite the entity-capacity guarantee.");
 

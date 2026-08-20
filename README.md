@@ -83,9 +83,10 @@ per-step behavior is an explicit documented choice.
   under `_Archive` and are excluded from active Godot project discovery.
 
 Terrain T0.0 accepted the tiny Spatial contracts seam and concrete game position
-profile. T0.1 now adds the persisted component wrapper and first game-owned,
-generation-coherent maintained spatial index without creating a generic world
-storage kernel. Terrain data, publication, and Network N1 remain later gates.
+profile. T0.1 accepted the persisted component wrapper and first game-owned,
+generation-coherent maintained spatial index after full-capacity migration and
+reference-model hardening, without creating a generic world storage kernel.
+Terrain data, publication, and Network N1 remain later gates.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

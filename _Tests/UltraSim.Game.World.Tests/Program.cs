@@ -26,6 +26,9 @@ var tests = new (string Name, Action Body)[]
     ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
     ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
     ("ComponentRemovalReadditionAndSlotReuseConverge", ComponentRemovalReadditionAndSlotReuseConverge),
+    ("SaturatedMigrationMergesIntoExistingDestination", SaturatedMigrationMergesIntoExistingDestination),
+    ("SaturatedMigrationRekeysSingletonForNewDestination", SaturatedMigrationRekeysSingletonForNewDestination),
+    ("SpatialIndexMatchesReferenceModelUnderBoundedChurn", SpatialIndexMatchesReferenceModelUnderBoundedChurn),
     ("LifecycleOverrunRebuildsFromCurrentTruth", LifecycleOverrunRebuildsFromCurrentTruth),
     ("FailedRebuildPreservesPublishedSpatialIndex", FailedRebuildPreservesPublishedSpatialIndex),
     ("GenerationReplacementPublishesFreshDerivedIndex", GenerationReplacementPublishesFreshDerivedIndex),
@@ -178,6 +181,149 @@ static void LifecycleOverrunRebuildsFromCurrentTruth()
     Equal(1, snapshot.Index.EntityCount);
     True(fixture.State.Index.TryGetHome(survivor, out SpatialChunkKey home));
     Equal(new SpatialChunkCoord(-2, -3), home.Coord);
+}
+
+static void SaturatedMigrationMergesIntoExistingDestination()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 16, entityCapacity: 2);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity first));
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity second));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(0, 0, 0, 0, 0)));
+    True(fixture.State.TrySetPosition(fixture.World, second, new WorldPosition(1, 0, 0, 0, 0)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(2, fixture.State.Index.GetSnapshot().ChunkCount);
+
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(1, 0, 1, 0, 0)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    WorldSpatialIndexSnapshot snapshot = fixture.State.Index.GetSnapshot();
+    Equal(2, snapshot.EntityCount);
+    Equal(1, snapshot.ChunkCount);
+    var destination = new SpatialChunkKey(GameWorldState.DefaultSpace, 1, 0);
+    Span<Entity> members = stackalloc Entity[2];
+    Equal(2, fixture.State.Index.CopyMembers(destination, members));
+    True(members.Contains(first));
+    True(members.Contains(second));
+}
+
+static void SaturatedMigrationRekeysSingletonForNewDestination()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 16, entityCapacity: 2);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity first));
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity second));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(0, 0, 0, 0, 0)));
+    True(fixture.State.TrySetPosition(fixture.World, second, new WorldPosition(1, 0, 0, 0, 0)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(2, 0, 0, 0, 0)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    WorldSpatialIndexSnapshot snapshot = fixture.State.Index.GetSnapshot();
+    Equal(2, snapshot.EntityCount);
+    Equal(2, snapshot.ChunkCount);
+    True(fixture.State.Index.TryGetHome(first, out SpatialChunkKey firstHome));
+    True(fixture.State.Index.TryGetHome(second, out SpatialChunkKey secondHome));
+    Equal(new SpatialChunkCoord(2, 0), firstHome.Coord);
+    Equal(new SpatialChunkCoord(1, 0), secondHome.Coord);
+}
+
+static void SpatialIndexMatchesReferenceModelUnderBoundedChurn()
+{
+    for (int capacity = 4; capacity <= 16; capacity += 4)
+    {
+        using RawSpatialFixture fixture = new(lifecycleCapacity: 64, entityCapacity: capacity);
+        var live = new List<Entity>(capacity);
+        var expected = new Dictionary<Entity, SpatialChunkKey>(capacity);
+        var stale = new List<Entity>();
+        uint state = unchecked((uint)(0x9E37_79B9u ^ capacity));
+        for (int operation = 0; operation < 5_000; operation++)
+        {
+            state = unchecked(state * 1_664_525u + 1_013_904_223u);
+            int choice = (int)(state % 100);
+            if (live.Count == 0 || (choice < 28 && live.Count < capacity))
+            {
+                True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+                WorldPosition position = RandomPosition(ref state);
+                True(fixture.State.TrySetPosition(fixture.World, entity, position));
+                live.Add(entity);
+                expected.Add(entity, position.ToChunkKey(GameWorldState.DefaultSpace));
+            }
+            else if (choice < 78)
+            {
+                int selected = (int)(state % (uint)live.Count);
+                Entity entity = live[selected];
+                WorldPosition position = RandomPosition(ref state);
+                True(fixture.State.TrySetPosition(fixture.World, entity, position));
+                expected[entity] = position.ToChunkKey(GameWorldState.DefaultSpace);
+            }
+            else
+            {
+                int selected = (int)(state % (uint)live.Count);
+                Entity entity = live[selected];
+                True(fixture.World.TryDestroy(entity));
+                live.RemoveAt(selected);
+                expected.Remove(entity);
+                stale.Add(entity);
+                if (stale.Count > 64)
+                    stale.RemoveAt(0);
+            }
+
+            fixture.State.CommitAfterEcsStep(fixture.World);
+            AssertSpatialModel(fixture.State.Index, expected, stale);
+        }
+    }
+}
+
+static WorldPosition RandomPosition(ref uint state)
+{
+    state = unchecked(state * 1_664_525u + 1_013_904_223u);
+    int chunkX = (int)(state % 9) - 4;
+    state = unchecked(state * 1_664_525u + 1_013_904_223u);
+    int chunkZ = (int)(state % 9) - 4;
+    state = unchecked(state * 1_664_525u + 1_013_904_223u);
+    ushort localX = checked((ushort)(state % (uint)GameWorldSpatialProfile.WorldChunkEdgeUnits));
+    state = unchecked(state * 1_664_525u + 1_013_904_223u);
+    ushort localZ = checked((ushort)(state % (uint)GameWorldSpatialProfile.WorldChunkEdgeUnits));
+    return new WorldPosition(chunkX, chunkZ, localX, localZ, unchecked((int)state));
+}
+
+static void AssertSpatialModel(
+    WorldSpatialIndex index,
+    IReadOnlyDictionary<Entity, SpatialChunkKey> expected,
+    IReadOnlyList<Entity> stale)
+{
+    WorldSpatialIndexSnapshot snapshot = index.GetSnapshot();
+    Equal(expected.Count, snapshot.EntityCount);
+    int expectedChunks = expected.Values.Distinct().Count();
+    Equal(expectedChunks, snapshot.ChunkCount);
+    foreach ((Entity entity, SpatialChunkKey key) in expected)
+    {
+        True(index.TryGetHome(entity, out SpatialChunkKey actual));
+        Equal(key, actual);
+    }
+    for (int indexValue = 0; indexValue < stale.Count; indexValue++)
+        False(index.TryGetHome(stale[indexValue], out _));
+
+    var copied = new Entity[Math.Max(1, expected.Count)];
+    foreach (IGrouping<SpatialChunkKey, KeyValuePair<Entity, SpatialChunkKey>> group in
+        expected.GroupBy(static pair => pair.Value))
+    {
+        int count = index.CopyMembers(group.Key, copied);
+        Equal(group.Count(), count);
+        var actual = copied.AsSpan(0, count).ToArray();
+        Array.Sort(actual, static (left, right) =>
+        {
+            int slot = left.Index.CompareTo(right.Index);
+            return slot != 0 ? slot : left.Generation.CompareTo(right.Generation);
+        });
+        Entity[] wanted = group.Select(static pair => pair.Key).ToArray();
+        Array.Sort(wanted, static (left, right) =>
+        {
+            int slot = left.Index.CompareTo(right.Index);
+            return slot != 0 ? slot : left.Generation.CompareTo(right.Generation);
+        });
+        True(actual.SequenceEqual(wanted));
+    }
 }
 
 static void FailedRebuildPreservesPublishedSpatialIndex()
@@ -570,10 +716,10 @@ static void Throws<TException>(Action action) where TException : Exception
 
 sealed class RawSpatialFixture : IDisposable
 {
-    internal RawSpatialFixture(int lifecycleCapacity)
+    internal RawSpatialFixture(int lifecycleCapacity, int entityCapacity = 32)
     {
         var options = new EcsWorldOptions(
-            new EntityCapacity(32),
+            new EntityCapacity(entityCapacity),
             maximumArchetypes: 4,
             maximumPreparedPlans: 8,
             maximumPreparedTransitions: 2,

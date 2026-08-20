@@ -39,9 +39,11 @@ one fixed free-chunk stack
 
 Component presence opts an entity into membership. Same-chunk value changes do
 not mutate topology; a crossing unlinks/relinks the existing home record. Empty
-chunk slots return to the free pool. The table admits the theoretical maximum of
-one occupied chunk per admitted entity, reports reserved payload/high-water
-diagnostics, and allocates nothing during ordinary movement.
+chunk slots return to the free pool. At full capacity, a singleton source moving
+to an existing chunk collapses into that destination; moving to a new chunk
+re-keys the source slot in place. The table therefore admits the theoretical
+maximum of one occupied chunk per admitted entity, reports reserved
+payload/high-water diagnostics, and allocates nothing during ordinary movement.
 
 Runtime invokes the game generation through the domain-neutral
 `IServerGenerationStepParticipant` after `EcsWorld.Tick()` has completed its
