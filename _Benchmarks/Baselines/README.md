@@ -42,6 +42,9 @@ Useful current anchors can be located by their embedded workload or filename:
 - `terrain-t0.3-worldpack-*` — canonical sectioned WorldPack compilation,
   bounded memory/file opening, immutable hash identity, exact container/directory
   accounting, and allocation-free random/copy base-terrain reads;
+- `terrain-t0.4-query-mesh-*` — exact integer base-height/material queries,
+  deterministic fixed-grid mesh payload identity, neighbor-aware seam frames,
+  fixed output accounting, and warmed allocation-free timings;
 - `s0.8-integrated-acceptance-cadence-independent-*` — accepted integrated
   Runtime/game/persistence/cadence gate;
 - `network-n0.1-game-projection-100k-*` — canonical changed-state capture and

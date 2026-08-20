@@ -63,10 +63,11 @@ reports live in git history. Accepted measurements live in immutable JSON under
   T0.0 accepted the value/coordinate seam and T0.1 accepted the maintained
   world-spatial index after saturated-capacity/model-oracle hardening. T0.2
   accepted the per-chunk-base 5 mm terrain height and 4,230-byte dense base
-  terrain foundation. T0.3 now proposes the canonical sectioned immutable
-  WorldPack/source and is stopped for checkpoint review. The plan next proceeds
-  to authoritative base-terrain queries and deterministic mesh payloads,
-  terrain/statics/Multi streaming, dynamic membership, shared packed publication,
+  terrain foundation, and T0.3 accepted the canonical sectioned immutable
+  WorldPack/source. T0.4 now proposes exact base-terrain queries plus the bounded
+  deterministic engine-neutral mesh payload and is stopped for checkpoint
+  review. The plan next proceeds to statics/Multi compilation and streaming,
+  dynamic membership, shared packed publication,
   bounded dirty history, client rendering, persistence seams, and one playable
   cabin vertical.
 - [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,

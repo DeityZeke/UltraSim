@@ -115,3 +115,29 @@ cell or chunk object graph.
 material ID resolve. An optional bound pack is then generation-owned through
 `GameWorldState`; default worlds may still run without one until the T0 vertical
 supplies authored content.
+
+## Base-terrain queries and mesh payload
+
+T0.4 adds authoritative queries directly over a `BoundWorldPack`:
+
+```text
+TrySampleBaseTerrainHeight
+TryResolveBaseTerrainMaterial
+```
+
+Sampling uses canonical half-open `WorldPosition` ownership, global terrain-cell
+parity, the exact triangle plane represented by the packed q5 vertices, and
+signed nearest integer division with midpoint away from zero. It is explicitly a
+base-heightfield query, not a future general multi-surface ground resolver.
+
+`TryBuildBaseTerrainMesh` fills caller-owned fixed spans with 1,089
+`TerrainBaseMeshVertex` values, 6,144 ushort indices, and 2,048 triangle material
+IDs. Vertices retain integer local X/Z, absolute Y, and exact unnormalized normal
+and tangent directions. Frames include incident triangles from immutable packed
+neighbor chunks, so adjacent chunks independently reproduce identical seam
+frames regardless of presentation residency. Output capacity and target identity
+are validated before any write, and the warmed query/build paths allocate 0 B.
+
+The simple fixed grid is deliberate. Greedy geometry merging, float/Godot upload
+formats, live collision resources, static bounds, and sparse additional terrain
+surfaces remain later measured contracts.

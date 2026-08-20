@@ -1,0 +1,71 @@
+{
+  "Workload": "terrain-t0.4-base-query-mesh-v1",
+  "TimestampUtc": "2026-08-20T13:24:16.6746325+00:00",
+  "RuntimeVersion": "8.0.29",
+  "FrameworkDescription": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "DotnetTieredCompilation": "0",
+  "DotnetReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "Format": {
+    "MaterialCellEdge": 32,
+    "HeightVertexEdge": 33,
+    "VertexCount": 1089,
+    "TriangleCount": 2048,
+    "IndexCount": 6144,
+    "VertexBytes": 36,
+    "VertexPayloadBytes": 39204,
+    "IndexPayloadBytes": 12288,
+    "TriangleMaterialPayloadBytes": 4096,
+    "CompletePayloadBytes": 55588,
+    "CanonicalMeshHash": "943EC206C09A4E539F252C8B117C926B19FFC0E422185152F3662CBD7D5C1B6D",
+    "ExactSeamFrameComparisons": 33,
+    "MergePolicy": "simple fixed grid retained; greedy merging deferred until real Godot/content evidence"
+  },
+  "Fixture": {
+    "Classification": "deterministic synthetic nonlinear q5 base terrain; no statics or additional structural surfaces",
+    "GridEdge": 16,
+    "Chunks": 256,
+    "MinimumChunkCoordinate": -8,
+    "MaximumChunkCoordinate": 7,
+    "QueryOperations": 1000000,
+    "MeshBuildOperations": 32
+  },
+  "Timings": [
+    {
+      "Name": "sample-base-terrain-height",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 153.59260257142859,
+      "P50NanosecondsPerOperation": 154.337862,
+      "P95NanosecondsPerOperation": 154.951667,
+      "MaximumNanosecondsPerOperation": 155.042445,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 19501097834504
+    },
+    {
+      "Name": "resolve-base-terrain-material",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 75.99503523809524,
+      "P50NanosecondsPerOperation": 76.445668,
+      "P95NanosecondsPerOperation": 76.739954,
+      "MaximumNanosecondsPerOperation": 76.847154,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 77908350
+    },
+    {
+      "Name": "build-fixed-grid-base-mesh",
+      "OperationsPerSample": 32,
+      "MeanNanosecondsPerOperation": 632053.8199404762,
+      "P50NanosecondsPerOperation": 631438.34375,
+      "P95NanosecondsPerOperation": 635291.125,
+      "MaximumNanosecondsPerOperation": 641784.8125,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 1544799698
+    }
+  ]
+}

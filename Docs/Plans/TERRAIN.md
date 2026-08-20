@@ -1,7 +1,7 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.2 are accepted/frozen as of
-2026-08-20; T0.3 implementation is complete and stopped for checkpoint review.
+Status: active forward plan. T0.0 through T0.3 are accepted/frozen as of
+2026-08-20; T0.4 implementation is complete and stopped for checkpoint review.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -1209,9 +1209,11 @@ TrySampleBaseTerrainHeight(location)
 
 TryResolveBaseTerrainMaterial(location)
 
-QueryStaticBounds(aabb, destination)
-
 ```
+
+`QueryStaticBounds(aabb, destination)` joins the world query surface at T0.5,
+after frozen static rows and their bounds actually exist. T0.4 does not fabricate
+a static store or placeholder query merely to reserve that name.
 
 T0 does not need a general physics engine. It needs enough authoritative ground
 and static occupancy information to move a character through the cabin slice.
@@ -1281,6 +1283,66 @@ and Godot render cost; triangle count alone is not an acceptance metric.
 **T0.4 gate:** seam torture tests, deterministic mesh-payload hash, bounded output,
 and a warmed mesh-build allocation profile. Live Godot rendering/streaming is not
 required until T0.8.
+
+**T0.4 implementation checkpoint (2026-08-20): complete and stopped for
+review.** `BoundWorldPack` now exposes allocation-free base-surface height and
+material queries. The location's canonical half-open `WorldPosition` chooses the
+chunk/cell. Height sampling reads the four packed q5 vertices and evaluates the
+one triangle selected by global terrain-cell parity. Interpolation uses checked
+integer plane numerators and signed nearest division with midpoint away from zero;
+the caller's Y is irrelevant. Exact `+500 mm` cell and `+16,000 mm` chunk edges
+therefore resolve through the next canonical cell/chunk, including negative
+coordinates.
+
+The engine-neutral mesh builder retains the simple fixed grid because neither
+real authored content nor T0.8 Godot evidence has earned greedy merging:
+
+```text
+TerrainBaseMeshVertex                    36 B
+    chunk-local X/Z + absolute Y         12 B
+    exact unnormalized integer normal    12 B
+    exact unnormalized integer tangent   12 B
+
+vertices                              1,089 / 39,204 B
+triangle indices (ushort)             6,144 / 12,288 B
+per-triangle material IDs (ushort)    2,048 /  4,096 B
+complete caller-owned payload                  55,588 B
+```
+
+The builder preflights every caller span and chunk identity before writing. It
+emits upward canonical winding and the same global-parity diagonal used by the
+authoritative sampler. Each vertex frame accumulates every incident triangle
+from the immutable base surface, including neighboring packed chunks, so
+independently built adjacent meshes reproduce the same absolute edge position,
+normal, and tangent even when residency/build order differs. A later terrain
+replacement must invalidate every mesh whose shared frame depends on it; missing
+presentation residency never changes the calculation.
+
+Permanent tests cover both diagonal halves, diagonal boundaries, positive and
+negative signed half-millimetre rounding, exact negative/cross-chunk vertices,
+material ownership, undersized/overlapping destination transactionality,
+maximum-relief checked arithmetic, canonical indices, query/mesh height agreement,
+tangent/normal orthogonality, deterministic rebuild, and all 33 frames along an
+independently generated chunk seam. The canonical
+nonlinear synthetic payload hash is
+`943EC206C09A4E539F252C8B117C926B19FFC0E422185152F3662CBD7D5C1B6D`.
+
+The preserved 16 x 16 / 256-chunk Release observation records:
+
+```text
+sample base height mean / p95          153.593 / 154.952 ns / 0 B
+resolve base material mean / p95        75.995 /  76.740 ns / 0 B
+build complete fixed-grid mesh mean    632.054 us
+build complete fixed-grid mesh p95     635.291 us / 0 B
+exact adjacent seam frames              33 / 33
+```
+
+The fixture is deterministic synthetic nonlinear q5 base terrain, not production
+content or a Godot renderer measurement. Evidence is preserved in
+[`terrain-t0.4-query-mesh-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.4-query-mesh-2026-08-20.json).
+No static-bounds query, greedy mesh, additional structural surface, collision
+engine, client residency, live Godot resource, publication, or Network work is
+part of T0.4.
 
 ## T0.5 — UO-like statics, properties, and `Multi`
 

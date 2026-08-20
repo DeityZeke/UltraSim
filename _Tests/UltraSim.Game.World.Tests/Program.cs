@@ -38,6 +38,18 @@ var tests = new (string Name, Action Body)[]
     ("WorldPackFileReopensWithStableFingerprint", WorldPackFileReopensWithStableFingerprint),
     ("WorldPackBoundsRejectBeforeProportionalAllocation", WorldPackBoundsRejectBeforeProportionalAllocation),
     ("WorldPackContentBindingPublishesWithGameGeneration", WorldPackContentBindingPublishesWithGameGeneration),
+    ("BaseTerrainQueriesHonorParityBoundariesAndSignedRounding",
+        BaseTerrainQueriesHonorParityBoundariesAndSignedRounding),
+    ("BaseTerrainQueriesOwnNegativeAndCrossChunkCoordinates",
+        BaseTerrainQueriesOwnNegativeAndCrossChunkCoordinates),
+    ("BaseTerrainMeshIsCanonicalBoundedAndMatchesQueries",
+        BaseTerrainMeshIsCanonicalBoundedAndMatchesQueries),
+    ("BaseTerrainMeshSharesExactFramesAcrossChunkSeams",
+        BaseTerrainMeshSharesExactFramesAcrossChunkSeams),
+    ("BaseTerrainMeshHandlesMaximumReliefAcrossASeam",
+        BaseTerrainMeshHandlesMaximumReliefAcrossASeam),
+    ("BaseTerrainMeshFailuresAreTransactionalAndWarmedPathsAllocateZero",
+        BaseTerrainMeshFailuresAreTransactionalAndWarmedPathsAllocateZero),
     ("WarmedCoordinateMachineAllocatesZero", WarmedCoordinateMachineAllocatesZero),
     ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
     ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
@@ -57,7 +69,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.3 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.4 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -507,6 +519,399 @@ static void WorldPackContentBindingPublishesWithGameGeneration()
         return true;
     }, out bool published));
     True(published);
+}
+
+static void BaseTerrainQueriesHonorParityBoundariesAndSignedRounding()
+{
+    BoundWorldPack world = CreateBoundTerrainWorld(0, 0, 0, 0, QueryHeight, QueryMaterial);
+
+    Equal(1_400, Sample(400, 100));
+    Equal(2_000, Sample(100, 400));
+    Equal(2_000, Sample(600, 100));
+    Equal(6_200, Sample(900, 400));
+    Equal(2_000, Sample(250, 250));
+    Equal(3_600, Sample(700, 300));
+    Equal(-3, Sample(250, 1_000));
+    Equal(3, Sample(750, 1_000));
+
+    var firstCell = new WorldPosition(0, 0, 499, 499, int.MinValue);
+    True(world.TryResolveBaseTerrainMaterial(firstCell, out ushort firstMaterial));
+    Equal(QueryMaterial(0, 0), firstMaterial);
+    var nextCell = new WorldPosition(0, 0, 500, 0, int.MaxValue);
+    True(world.TryResolveBaseTerrainMaterial(nextCell, out ushort nextMaterial));
+    Equal(QueryMaterial(1, 0), nextMaterial);
+
+    var absent = new WorldPosition(1, 0, 0, 0, 0);
+    False(world.TrySampleBaseTerrainHeight(absent, out int absentHeight));
+    Equal(0, absentHeight);
+    False(world.TryResolveBaseTerrainMaterial(absent, out ushort absentMaterial));
+    Equal((ushort)0, absentMaterial);
+
+    int Sample(ushort x, ushort z)
+    {
+        var location = new WorldPosition(0, 0, x, z, 123_456_789);
+        True(world.TrySampleBaseTerrainHeight(location, out int height));
+        return height;
+    }
+
+    static int QueryHeight(int x, int z) => (x, z) switch
+    {
+        (0, 0) => 0,
+        (1, 0) => 1_000,
+        (2, 0) => 3_000,
+        (0, 1) => 2_000,
+        (1, 1) => 4_000,
+        (2, 1) => 8_000,
+        (0, 2) => -5,
+        (1, 2) => 0,
+        (2, 2) => 5,
+        (0, 3) => -5,
+        (1, 3) => 0,
+        (2, 3) => 5,
+        _ => 0,
+    };
+}
+
+static void BaseTerrainQueriesOwnNegativeAndCrossChunkCoordinates()
+{
+    BoundWorldPack world = CreateBoundTerrainWorld(-2, 1, -2, 1, SmoothHeight, QueryMaterial, reverse: true);
+    for (int vertexZ = -31; vertexZ <= 31; vertexZ++)
+    {
+        for (int vertexX = -31; vertexX <= 31; vertexX++)
+        {
+            long globalX = checked((long)vertexX * GameWorldSpatialProfile.TerrainCellEdgeUnits);
+            long globalZ = checked((long)vertexZ * GameWorldSpatialProfile.TerrainCellEdgeUnits);
+            True(WorldPosition.TryFromGlobalMillimeters(globalX, int.MinValue, globalZ, out WorldPosition location));
+            True(world.TrySampleBaseTerrainHeight(location, out int height));
+            Equal(SmoothHeight(vertexX, vertexZ), height);
+        }
+    }
+
+    (long X, long Z)[] probes =
+    [
+        (-1, -1),
+        (-500, -500),
+        (-501, -999),
+        (-16_000, 0),
+        (-16_001, 15_999),
+        (0, 0),
+        (15_999, -1),
+        (16_000, 16_000),
+    ];
+    foreach ((long x, long z) in probes)
+    {
+        True(WorldPosition.TryFromGlobalMillimeters(x, 0, z, out WorldPosition location));
+        True(world.TryResolveBaseTerrainMaterial(location, out ushort material));
+        int globalCellX = checked((int)FloorDivideReference(x, GameWorldSpatialProfile.TerrainCellEdgeUnits));
+        int globalCellZ = checked((int)FloorDivideReference(z, GameWorldSpatialProfile.TerrainCellEdgeUnits));
+        Equal(QueryMaterial(globalCellX, globalCellZ), material);
+    }
+}
+
+static void BaseTerrainMeshIsCanonicalBoundedAndMatchesQueries()
+{
+    Equal(36, Marshal.SizeOf<TerrainBaseMeshVertex>());
+    BoundWorldPack world = CreateBoundTerrainWorld(-2, 1, -2, 1, SmoothHeight, QueryMaterial);
+    var key = new SpatialChunkKey(world.Space, 0, 0);
+    TerrainBaseMeshVertex[] vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+    ushort[] indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+    ushort[] materials = new ushort[TerrainChunkFormat.TriangleCount];
+    True(world.TryBuildBaseTerrainMesh(key, vertices, indices, materials,
+        out TerrainBaseMeshSummary summary, out TerrainBaseMeshBuildError error));
+    Equal(TerrainBaseMeshBuildError.None, error);
+    Equal(TerrainChunkFormat.HeightVertexCount, summary.VertexCount);
+    Equal(TerrainChunkFormat.TriangleCount, summary.TriangleCount);
+    Equal(TerrainChunkFormat.TriangleIndexCount, summary.IndexCount);
+    Equal(vertices.Min(vertex => vertex.AbsoluteYMillimeters), summary.MinimumHeightMillimeters);
+    Equal(vertices.Max(vertex => vertex.AbsoluteYMillimeters), summary.MaximumHeightMillimeters);
+
+    Equal((ushort)0, indices[0]);
+    Equal((ushort)33, indices[1]);
+    Equal((ushort)34, indices[2]);
+    Equal((ushort)0, indices[3]);
+    Equal((ushort)34, indices[4]);
+    Equal((ushort)1, indices[5]);
+    True(indices.All(index => index < TerrainChunkFormat.HeightVertexCount));
+    for (int triangle = 0; triangle < materials.Length; triangle += 2)
+        Equal(materials[triangle], materials[triangle + 1]);
+
+    for (int index = 0; index < vertices.Length; index += 37)
+    {
+        TerrainBaseMeshVertex vertex = vertices[index];
+        long globalX = checked((long)key.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+            vertex.LocalXMillimeters);
+        long globalZ = checked((long)key.Coord.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+            vertex.LocalZMillimeters);
+        True(WorldPosition.TryFromGlobalMillimeters(globalX, 0, globalZ, out WorldPosition location));
+        True(world.TrySampleBaseTerrainHeight(location, out int sampled));
+        Equal(vertex.AbsoluteYMillimeters, sampled);
+        True(vertex.NormalY > 0);
+        Equal(0L, checked((long)vertex.NormalX * vertex.TangentX +
+            (long)vertex.NormalY * vertex.TangentY + (long)vertex.NormalZ * vertex.TangentZ));
+    }
+
+    TerrainBaseMeshVertex[] secondVertices = new TerrainBaseMeshVertex[vertices.Length];
+    ushort[] secondIndices = new ushort[indices.Length];
+    ushort[] secondMaterials = new ushort[materials.Length];
+    True(world.TryBuildBaseTerrainMesh(key, secondVertices, secondIndices, secondMaterials, out _, out _));
+    True(vertices.AsSpan().SequenceEqual(secondVertices));
+    True(indices.AsSpan().SequenceEqual(secondIndices));
+    True(materials.AsSpan().SequenceEqual(secondMaterials));
+    string hash = ComputeMeshHash(vertices, indices, materials);
+    Equal("943EC206C09A4E539F252C8B117C926B19FFC0E422185152F3662CBD7D5C1B6D", hash);
+    Equal(hash, ComputeMeshHash(secondVertices, secondIndices, secondMaterials));
+}
+
+static void BaseTerrainMeshSharesExactFramesAcrossChunkSeams()
+{
+    BoundWorldPack world = CreateBoundTerrainWorld(-2, 1, -2, 1, SmoothHeight, QueryMaterial, reverse: true);
+    var leftKey = new SpatialChunkKey(world.Space, -1, 0);
+    var rightKey = new SpatialChunkKey(world.Space, 0, 0);
+    TerrainBaseMeshVertex[] left = Build(leftKey);
+    TerrainBaseMeshVertex[] right = Build(rightKey);
+    for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
+    {
+        TerrainBaseMeshVertex first = left[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(32, z))];
+        TerrainBaseMeshVertex second = right[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(0, z))];
+        Equal(checked((long)leftKey.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+            first.LocalXMillimeters),
+            checked((long)rightKey.Coord.X * GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                second.LocalXMillimeters));
+        Equal(first.AbsoluteYMillimeters, second.AbsoluteYMillimeters);
+        Equal(first.NormalX, second.NormalX);
+        Equal(first.NormalY, second.NormalY);
+        Equal(first.NormalZ, second.NormalZ);
+        Equal(first.TangentX, second.TangentX);
+        Equal(first.TangentY, second.TangentY);
+        Equal(first.TangentZ, second.TangentZ);
+    }
+
+    TerrainBaseMeshVertex[] Build(SpatialChunkKey key)
+    {
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var materials = new ushort[TerrainChunkFormat.TriangleCount];
+        True(world.TryBuildBaseTerrainMesh(key, vertices, indices, materials, out _, out _));
+        return vertices;
+    }
+}
+
+static void BaseTerrainMeshHandlesMaximumReliefAcrossASeam()
+{
+    int minimum = TerrainChunkFormat.MinimumQuantizedHeightMillimeters;
+    int relief = TerrainChunkFormat.MaximumHeightReliefMillimeters;
+    BoundWorldPack world = CreateBoundTerrainWorld(-1, 0, 0, 0,
+        (x, _) => x < 0 ? minimum : x == 0 ? checked(minimum + relief) : checked(minimum + relief * 2),
+        QueryMaterial);
+    TerrainBaseMeshVertex[] left = Build(new SpatialChunkKey(world.Space, -1, 0));
+    TerrainBaseMeshVertex[] right = Build(new SpatialChunkKey(world.Space, 0, 0));
+    for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
+    {
+        TerrainBaseMeshVertex first = left[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(32, z))];
+        TerrainBaseMeshVertex second = right[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(0, z))];
+        Equal(checked(minimum + relief), first.AbsoluteYMillimeters);
+        Equal(first.AbsoluteYMillimeters, second.AbsoluteYMillimeters);
+        Equal(first.NormalX, second.NormalX);
+        Equal(first.NormalY, second.NormalY);
+        Equal(first.NormalZ, second.NormalZ);
+        True(first.NormalY > 0);
+        Equal(0L, checked((long)first.NormalX * first.TangentX +
+            (long)first.NormalY * first.TangentY + (long)first.NormalZ * first.TangentZ));
+    }
+
+    TerrainBaseMeshVertex[] Build(SpatialChunkKey key)
+    {
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var materials = new ushort[TerrainChunkFormat.TriangleCount];
+        True(world.TryBuildBaseTerrainMesh(key, vertices, indices, materials, out _, out _));
+        return vertices;
+    }
+}
+
+static void BaseTerrainMeshFailuresAreTransactionalAndWarmedPathsAllocateZero()
+{
+    BoundWorldPack world = CreateBoundTerrainWorld(-1, 1, -1, 1, SmoothHeight, QueryMaterial);
+    var key = new SpatialChunkKey(world.Space, 0, 0);
+    var sentinel = new TerrainBaseMeshVertex(123, 123, 123, 123, 123, 123, 123, 123, 123);
+    TerrainBaseMeshVertex[] vertices = Enumerable.Repeat(sentinel, TerrainChunkFormat.HeightVertexCount).ToArray();
+    ushort[] indices = Enumerable.Repeat(ushort.MaxValue, TerrainChunkFormat.TriangleIndexCount).ToArray();
+    ushort[] materials = Enumerable.Repeat(ushort.MaxValue, TerrainChunkFormat.TriangleCount).ToArray();
+    False(world.TryBuildBaseTerrainMesh(key, vertices.AsSpan(1), indices, materials,
+        out TerrainBaseMeshSummary summary, out TerrainBaseMeshBuildError error));
+    Equal(default, summary);
+    Equal(TerrainBaseMeshBuildError.DestinationTooSmall, error);
+    True(vertices.All(value => value == sentinel));
+    True(indices.All(value => value == ushort.MaxValue));
+    True(materials.All(value => value == ushort.MaxValue));
+
+    int vertexByteCount = TerrainChunkFormat.HeightVertexCount * Marshal.SizeOf<TerrainBaseMeshVertex>();
+    var overlappingStorage = new byte[vertexByteCount];
+    Span<TerrainBaseMeshVertex> overlappingVertices =
+        MemoryMarshal.Cast<byte, TerrainBaseMeshVertex>(overlappingStorage);
+    Span<ushort> overlappingIndices = MemoryMarshal.Cast<byte, ushort>(
+        overlappingStorage.AsSpan(0, TerrainChunkFormat.TriangleIndexCount * sizeof(ushort)));
+    False(world.TryBuildBaseTerrainMesh(key, overlappingVertices, overlappingIndices, materials,
+        out summary, out error));
+    Equal(default, summary);
+    Equal(TerrainBaseMeshBuildError.OverlappingDestinations, error);
+    True(overlappingStorage.All(value => value == 0));
+    True(materials.All(value => value == ushort.MaxValue));
+
+    False(world.TryBuildBaseTerrainMesh(new SpatialChunkKey(world.Space, 99, 99), vertices, indices, materials,
+        out summary, out error));
+    Equal(default, summary);
+    Equal(TerrainBaseMeshBuildError.MissingChunk, error);
+    True(vertices.All(value => value == sentinel));
+    True(indices.All(value => value == ushort.MaxValue));
+    True(materials.All(value => value == ushort.MaxValue));
+
+    True(world.TryBuildBaseTerrainMesh(key, vertices, indices, materials, out _, out _));
+    var probe = new WorldPosition(0, 0, 12_345, 6_789, 0);
+    True(world.TrySampleBaseTerrainHeight(probe, out _));
+    True(world.TryResolveBaseTerrainMaterial(probe, out _));
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    long checksum = 0;
+    for (int iteration = 0; iteration < 64; iteration++)
+    {
+        True(world.TryBuildBaseTerrainMesh(key, vertices, indices, materials, out summary, out _));
+        checksum += vertices[iteration].NormalY + indices[iteration] + materials[iteration];
+    }
+    for (int iteration = 0; iteration < 100_000; iteration++)
+    {
+        var location = new WorldPosition(0, 0, checked((ushort)(iteration % 16_000)),
+            checked((ushort)(iteration * 37 % 16_000)), 0);
+        True(world.TrySampleBaseTerrainHeight(location, out int height));
+        True(world.TryResolveBaseTerrainMaterial(location, out ushort material));
+        checksum += height + material;
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+    True(checksum != 0);
+}
+
+static BoundWorldPack CreateBoundTerrainWorld(
+    int minimumChunkX,
+    int maximumChunkX,
+    int minimumChunkZ,
+    int maximumChunkZ,
+    Func<int, int, int> heightSource,
+    Func<int, int, ushort> materialSource,
+    bool reverse = false)
+{
+    int chunkCount = checked((maximumChunkX - minimumChunkX + 1) *
+        (maximumChunkZ - minimumChunkZ + 1));
+    var builder = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(16 * 1024 * 1024, chunkCount, 8));
+    var coordinates = new List<(int X, int Z)>(chunkCount);
+    for (int chunkZ = minimumChunkZ; chunkZ <= maximumChunkZ; chunkZ++)
+        for (int chunkX = minimumChunkX; chunkX <= maximumChunkX; chunkX++)
+            coordinates.Add((chunkX, chunkZ));
+    if (reverse) coordinates.Reverse();
+    foreach ((int chunkX, int chunkZ) in coordinates)
+    {
+        var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+        for (byte z = 0; z < TerrainChunkFormat.MaterialCellEdge; z++)
+        {
+            for (byte x = 0; x < TerrainChunkFormat.MaterialCellEdge; x++)
+            {
+                int globalX = checked(chunkX * TerrainChunkFormat.MaterialCellEdge + x);
+                int globalZ = checked(chunkZ * TerrainChunkFormat.MaterialCellEdge + z);
+                materials[TerrainChunkFormat.GetMaterialIndex(new TerrainCellCoord(x, z))] =
+                    materialSource(globalX, globalZ);
+            }
+        }
+        var heights = new int[TerrainChunkFormat.HeightVertexCount];
+        for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
+        {
+            for (byte x = 0; x < TerrainChunkFormat.HeightVertexEdge; x++)
+            {
+                int globalX = checked(chunkX * TerrainChunkFormat.MaterialCellEdge + x);
+                int globalZ = checked(chunkZ * TerrainChunkFormat.MaterialCellEdge + z);
+                heights[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(x, z))] =
+                    heightSource(globalX, globalZ);
+            }
+        }
+        var encoded = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        True(TerrainHeightEncoding.TryEncodePlane(heights, encoded, out TerrainHeightPlaneBase heightBase,
+            out _, out _));
+        True(builder.TryAddBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, chunkX, chunkZ),
+            materials, heightBase, encoded, out WorldPackBuildError error));
+        Equal(WorldPackBuildError.None, error);
+    }
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError));
+    Equal(WorldPackBuildError.None, buildError);
+    True(artifact is not null);
+    WorldPack pack = artifact!.Open();
+    var binding = new WorldContentBinding(WorldPackTestProfile.Content, [1, 2, 3, 4, 5]);
+    True(pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError bindError));
+    Equal(WorldPackBindingError.None, bindError);
+    True(bound is not null);
+    return bound!;
+}
+
+static int SmoothHeight(int globalVertexX, int globalVertexZ)
+{
+    long shape = (long)globalVertexX * globalVertexX +
+        3L * globalVertexZ * globalVertexZ + (long)globalVertexX * globalVertexZ;
+    long pattern = shape % 17;
+    if (pattern < 0) pattern += 17;
+    return checked((int)(750_000L + globalVertexX * 25L + globalVertexZ * 15L + pattern * 5L));
+}
+
+static ushort QueryMaterial(int globalCellX, int globalCellZ)
+{
+    int value = (globalCellX + globalCellZ * 2) % 5;
+    if (value < 0) value += 5;
+    return checked((ushort)(value + 1));
+}
+
+static long FloorDivideReference(long value, int positiveDivisor)
+{
+    long quotient = value / positiveDivisor;
+    if (value % positiveDivisor < 0) quotient--;
+    return quotient;
+}
+
+static string ComputeMeshHash(
+    ReadOnlySpan<TerrainBaseMeshVertex> vertices,
+    ReadOnlySpan<ushort> indices,
+    ReadOnlySpan<ushort> materials)
+{
+    int length = checked(vertices.Length * 9 * sizeof(int) +
+        indices.Length * sizeof(ushort) + materials.Length * sizeof(ushort));
+    var bytes = new byte[length];
+    int offset = 0;
+    foreach (TerrainBaseMeshVertex vertex in vertices)
+    {
+        Write(vertex.LocalXMillimeters);
+        Write(vertex.AbsoluteYMillimeters);
+        Write(vertex.LocalZMillimeters);
+        Write(vertex.NormalX);
+        Write(vertex.NormalY);
+        Write(vertex.NormalZ);
+        Write(vertex.TangentX);
+        Write(vertex.TangentY);
+        Write(vertex.TangentZ);
+    }
+    foreach (ushort index in indices)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset), index);
+        offset += sizeof(ushort);
+    }
+    foreach (ushort material in materials)
+    {
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset), material);
+        offset += sizeof(ushort);
+    }
+    Equal(bytes.Length, offset);
+    return Convert.ToHexString(SHA256.HashData(bytes));
+
+    void Write(int value)
+    {
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(offset), value);
+        offset += sizeof(int);
+    }
 }
 
 static WorldPackArtifact CreateWorldPackArtifact(

@@ -124,6 +124,9 @@ terrain storage begins with T0.2's accepted 32 x 32 ushort material plane and a
 33 x 33 unsigned-q5 offset plane with one int32 absolute base per chunk.
 T0.3 sectioned WorldPack now stores those dense base planes behind canonical
 sorted directories, bounded validation, immutable ownership, and content binding.
+T0.4 adds exact integer base-height/material queries and a bounded deterministic
+engine-neutral base mesh with neighbor-aware seam frames; it does not introduce
+Godot or make the base sampler a general multi-surface ground contract.
 The pack remains extensible to future sparse structural surfaces; world topology
 is not restricted to one heightfield surface per X/Z.
 Statics, revisioned publication, bounded dirty history, local streaming, and
