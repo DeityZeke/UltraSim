@@ -42,7 +42,7 @@ public sealed class GameWorldState : IDisposable
     private long _changedRowsObserved;
     private long _reconciledEntities;
 
-    public GameWorldState(EcsWorld world)
+    public GameWorldState(EcsWorld world, BoundWorldPack? baseWorld = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         if (world.Options.LifecycleRecordCapacity <= 0)
@@ -58,10 +58,12 @@ public sealed class GameWorldState : IDisposable
         _entityScratch = new uint[_entityCapacity];
         _stageStamps = new uint[_entityCapacity];
         Index = new WorldSpatialIndex(_entityCapacity);
+        BaseWorld = baseWorld;
     }
 
     public WorldId WorldId => _worldId;
     public WorldSpatialIndex Index { get; private set; }
+    public BoundWorldPack? BaseWorld { get; }
 
     public bool TrySetPosition(EcsWorld world, Entity entity, in WorldPosition position)
     {

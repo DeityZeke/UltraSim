@@ -16,6 +16,16 @@ public static class GamePrefabKeys
     public static readonly PrefabKey Apple = new("game.item.apple");
 }
 
+/// <summary>Compact structural terrain identities admitted by the first game world content profile.</summary>
+public static class GameTerrainMaterialIds
+{
+    public const ushort Water = 1;
+    public const ushort Sand = 2;
+    public const ushort Grass = 3;
+    public const ushort Rock = 4;
+    public const ushort Snow = 5;
+}
+
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
 public sealed class GameContent : IInventoryContentCatalog
 {
@@ -31,7 +41,8 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryContainerDefinition worldChest,
         InventoryItemDefinition bread,
         InventoryItemDefinition ironSword,
-        InventoryItemDefinition apple)
+        InventoryItemDefinition apple,
+        WorldContentBinding world)
     {
         Prefabs = prefabs;
         Character = character;
@@ -40,6 +51,7 @@ public sealed class GameContent : IInventoryContentCatalog
         Bread = bread;
         IronSword = ironSword;
         Apple = apple;
+        World = world;
         _itemsByHandle = new Dictionary<PrefabHandle, InventoryItemDefinition>(3)
         {
             [bread.Handle] = bread,
@@ -71,6 +83,10 @@ public sealed class GameContent : IInventoryContentCatalog
     public InventoryItemDefinition Bread { get; }
     public InventoryItemDefinition IronSword { get; }
     public InventoryItemDefinition Apple { get; }
+    public WorldContentBinding World { get; }
+
+    public static WorldContentFingerprint WorldFingerprint { get; } =
+        new(0x3B8D_14CB_E652_EE21UL, 0xD241_8739_B74F_10A5UL);
 
     public bool TryGetContainer(PrefabHandle handle, out InventoryContainerDefinition definition)
     {
@@ -141,7 +157,15 @@ public sealed class GameContent : IInventoryContentCatalog
             BindContainer(compiled, chestSource),
             bread,
             sword,
-            apple);
+            apple,
+            new WorldContentBinding(WorldFingerprint,
+            [
+                GameTerrainMaterialIds.Water,
+                GameTerrainMaterialIds.Sand,
+                GameTerrainMaterialIds.Grass,
+                GameTerrainMaterialIds.Rock,
+                GameTerrainMaterialIds.Snow,
+            ]));
     }
 
     private static InventoryContainerDefinition BindContainer(

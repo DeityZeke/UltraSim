@@ -91,5 +91,27 @@ and decode paths are allocation-free.
 16,000 mm and is the duplicated immutable border shared with the neighboring
 chunk; dynamic position locals remain half-open at `0..15,999`. Neighboring
 packed offsets may differ because bases differ, but reconstructed absolute shared
-edge heights must be exact. Exact pack headers, directories, sections, hashes,
-and loading remain T0.3 work.
+edge heights must be exact.
+
+## Immutable WorldPack
+
+T0.3 freezes `WorldPack/v1` as a canonical uncompressed little-endian sectioned
+container. It owns a 160-byte header, sorted 48-byte chunk rows, versioned
+48-byte section rows, full-pack SHA-256 identity, and per-section hash checks.
+The required sections are the dense base `TerrainMaterials/v1` and
+`TerrainHeights/v1`; a future sparse structural-surface section can be added
+without changing either base section, but no such row schema exists yet.
+
+Opening is bounded by `WorldPackLimits` before proportional allocation. The
+reader validates geometry, content fingerprint, all checked offsets/counts,
+canonical ordering, section and pack hashes, material/height payloads, and
+reconstructed seams before publishing immutable owned bytes. Buffered file and
+owned-memory inputs use the same validator. `TryGetBaseTerrain` returns a
+borrowed, allocation-free `WorldTerrainChunkView` rather than constructing a
+cell or chunk object graph.
+
+`WorldContentBinding` is supplied cold by Composition. A pack becomes a
+`BoundWorldPack` only after its content fingerprint and every structural
+material ID resolve. An optional bound pack is then generation-owned through
+`GameWorldState`; default worlds may still run without one until the T0 vertical
+supplies authored content.

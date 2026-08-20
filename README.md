@@ -86,9 +86,10 @@ Terrain T0.0 accepted the tiny Spatial contracts seam and concrete game position
 profile. T0.1 accepted the persisted component wrapper and first game-owned,
 generation-coherent maintained spatial index after full-capacity migration and
 reference-model hardening, without creating a generic world storage kernel.
-T0.2 now proposes an evidence-backed compact terrain-height/foundation contract
-using a per-chunk int32 base plus unsigned q5 offsets, and is stopped for review.
-WorldPack loading, publication, and Network N1 remain later gates.
+T0.2 accepted the compact dense base-terrain contract using a per-chunk int32
+base plus unsigned q5 offsets. T0.3 now proposes the canonical sectioned
+immutable WorldPack/source and is stopped for review. Terrain queries,
+publication, and Network N1 remain later gates.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

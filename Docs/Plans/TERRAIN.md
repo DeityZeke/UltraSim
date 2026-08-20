@@ -1,7 +1,7 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 and T0.1 are accepted/frozen as of
-2026-08-20; T0.2 implementation is complete and stopped for checkpoint review.
+Status: active forward plan. T0.0 through T0.2 are accepted/frozen as of
+2026-08-20; T0.3 implementation is complete and stopped for checkpoint review.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -62,7 +62,14 @@ COARSE SPATIAL MEMBERSHIP IS A DERIVED ACCELERATOR.
 
 BASE TERRAIN AND FROZEN STATICS ARE WORLD DATA, NOT ECS ENTITIES BY DEFAULT.
 
-TERRAIN CHUNKS ARE 2D HEIGHTFIELD/STATIC PARTITIONS, NOT ECS STORAGE CHUNKS.
+BASE TERRAIN IS A DENSE HEIGHTFIELD.
+
+THE WORLD IS NOT PERMANENTLY LIMITED TO ONE SURFACE PER X/Z.
+
+TERRAIN CHUNKS ARE WORLD-DATA PARTITIONS, NOT ECS STORAGE CHUNKS.
+
+SPARSE ADDITIONAL CLIFF, LEDGE, OVERHANG, CAVE, OR TUNNEL SURFACES MAY SHARE A
+SPATIAL CHUNK KEY WITHOUT SHARING THE BASE HEIGHT PLANE.
 
 TERRAIN, PUBLICATION, AOI, CLIENT, RENDER, PHYSICS, AND NAV CHUNKS/REGIONS MAY DIFFER IN GRANULARITY LATER.
 
@@ -186,8 +193,8 @@ World spatial chunk / WorldSpatialIndex
     coarse 16 m address + dynamic home membership
 
 TerrainChunk
-    32 × 32 material cells
-    33 × 33 height lattice
+    dense base: 32 × 32 material cells + 33 × 33 height lattice
+    optional future sparse structural surface geometry
     frozen statics / Multi fragments
 
 PublicationChunk
@@ -225,6 +232,8 @@ T0 includes:
 - the fixed game spatial profile: 16 m chunks, 0.5 m terrain cells, 0.1 m placement snap policy, 1 mm dynamic position quantum;
 - deterministic world/chunk/local coordinate math with correct negative-coordinate behavior;
 - a compact terrain height/material representation;
+- an extensible world-data seam for later sparse structural surfaces without
+  changing the dense base heightfield;
 - a deterministic runtime `WorldPack` format and reader;
 - UO-like frozen static placements and logical Multi/property composition;
 - a concrete, game-owned `WorldSpatialIndex` for coarse dynamic home-chunk membership;
@@ -251,7 +260,8 @@ T0 does **not** require:
 - final public package-manager/SDK packaging for optional Spatial adapters;
 - a production world editor;
 - procedural infinite terrain;
-- voxel caves/destruction;
+- voxel terrain or arbitrary volumetric caves/destruction (sparse authored
+  non-heightfield cliff/cave surfaces remain permitted world data);
 - final physics, navigation, pathfinding, water, weather, seasons, farming, or biome simulation;
 - final occlusion/portal systems;
 - final texture-atlas policy;
@@ -818,8 +828,16 @@ Network N1 work is part of this checkpoint.
 ## T0.2 — validate the fixed terrain profile and choose height encoding
 
 T0.2 no longer chooses among 16/32/64 m chunk sizes. The game spatial profile is already fixed at 16 m with 0.5 m terrain cells. T0.2 validates the consequences of that geometry and chooses the remaining physical terrain encoding decisions, especially terrain height representation.
-T0 uses a 2D heightfield surface plus statics, closer to UO than a voxel world. The terrain surface is not represented as one ECS entity per tile.
-The baseline layout is two dense planes per 16 m `TerrainChunk`:
+T0.2 encodes the common dense base terrain surface, closer to UO than a voxel
+world. It does not define the maximum topology a world chunk may ever contain,
+and the terrain surface is not represented as one ECS entity per tile. Future
+authored chunks may add sparse structural surface geometry for cliffs, ledges,
+overhangs, caves, tunnels, or other places where multiple/non-heightfield
+surfaces occupy one X/Z footprint. Those surfaces remain WorldPack/world data by
+default rather than ECS entities, but their exact representation is deliberately
+unfrozen.
+
+The base-surface layout is two dense planes per 16 m `TerrainChunk`:
 
 ```
 material[cellZ * 32 + cellX]              ushort material/content id
@@ -873,8 +891,8 @@ systems exist. Final whole-pipeline validation of the fixed geometry belongs to
 T0.10. Do **not** rerun a 16/32/64 m search by default. Reopen chunk edge or 0.5 m cell size only if concrete evidence shows a correctness/capacity/performance failure that cannot be solved more locally, and document the rejection/evidence explicitly.
 **T0.2 gate:** the fixed 16 m chunk edge, 0.5 m terrain cell, 1 mm dynamic quantum, selected terrain height encoding/quantum, maximum supported local coordinates, and resulting representation evidence are written into the world-format contract and benchmark artifact.
 
-**T0.2 implementation checkpoint (2026-08-20): complete and stopped for
-review after encoding hardening.** The proposed `TerrainHeights/v1`
+**T0.2 checkpoint (2026-08-20): accepted and frozen after encoding and topology
+contract hardening.** The accepted `TerrainHeights/v1`
 representation is one signed int32 absolute base per chunk followed by 1,089
 unsigned 16-bit offsets with a permanent 5 mm quantum. Authored millimetres
 quantize to the canonical absolute q5 lattice with at most 2 mm integer-input
@@ -939,6 +957,9 @@ edge census, geometry bounds, and timings are preserved in
 No `WorldPack`, terrain source/loader, runtime terrain store, query, mesh,
 publication, Network, or Godot work is part of T0.2.
 
+T0.2 freezes the dense **base-terrain** encoding only. It does not establish a
+permanent invariant that one X/Z coordinate has exactly one world surface.
+
 ## T0.3 — immutable `WorldPack` and terrain source
 
 Authoring data and runtime data are separate. T0 first compiles/generates a small
@@ -975,6 +996,7 @@ T0.3 required sections
     TerrainHeights/v1
 
 later sections using the same container
+    TerrainSurfaceLayers/v1   future only; schema deliberately unfrozen
     FrozenStatics/v1           introduced by T0.5
     MultiFragments/v1          introduced by T0.5
 
@@ -983,6 +1005,9 @@ later sections using the same container
 T0.3 freezes the **sectioned container**, not the later static/Multi row schema.
 Do not finalize a future record layout merely so the first terrain-only pack can
 write an empty section with a misleading permanent version.
+`TerrainMaterials/v1` and `TerrainHeights/v1` describe only the dense base
+surface. The container must admit a future structural-surface section without
+changing either base section, but T0.3 must not invent that future row schema.
 
 The first format should be uncompressed unless I/O measurement proves compression
 is needed. Compression complicates random access, corruption boundaries, scratch
@@ -1038,6 +1063,75 @@ later measured backend choices, not T0 assumptions.
 reject transactionally; random chunk read has bounded scratch/allocation; one pack
 reopens and hashes identically across supported platforms.
 
+**T0.3 implementation checkpoint (2026-08-20): complete and stopped for
+review.** `WorldPack/v1` is an uncompressed canonical little-endian container.
+The frozen physical rows are:
+
+```text
+header                              160 B
+chunk-directory row                  48 B
+section-directory row                48 B
+
+chunk row:
+    SpatialChunkKey                  16 B
+    material offset/length/count     16 B
+    height offset/length/count       16 B
+
+section row:
+    kind/version                      8 B
+    offset/length/count              24 B
+    SHA-256 section digest prefix    16 B
+```
+
+The header fixes geometry, space, content fingerprint, bounded directory/payload
+ranges, and a full 32-byte SHA-256 pack fingerprint. The pack fingerprint hashes
+the complete canonical artifact with its own digest field zeroed. Chunk keys are
+strictly sorted and unique. Sections are strictly kind-ordered and contiguous,
+and required `TerrainMaterials/v1` and `TerrainHeights/v1` references must match
+their exact per-chunk counts and lengths. Unknown future section kinds remain a
+container possibility; the T0.3 compiler emits no speculative surface/static
+schema.
+
+Open reads only the fixed header before applying `WorldPackLimits`. Proportional
+storage is allocated only after declared byte/chunk/section bounds are admitted.
+The owned bytes become immutable, full and per-section hashes validate before
+publication, all structural IDs and based heights are checked, and reconstructed
+shared edges are revalidated. Random reads binary-search the packed directory and
+return a borrowed `WorldTerrainChunkView`; no parsed object/cell graph is retained.
+The buffered file source uses the same validator and rejects trailing/truncated
+files.
+
+Composition supplies a cold `WorldContentBinding`. Every material ID is resolved
+against that binding and the content fingerprint must match before a
+`BoundWorldPack` can enter `GameWorldState`. The default composition remains pack
+optional; supplying a pack makes binding part of private generation construction,
+so failure occurs before generation publication. Hot reads retain compact numeric
+material IDs and never callback into Composition.
+
+The preserved 16 x 16 synthetic base-terrain pack contains 256 chunks:
+
+```text
+terrain payload                    1,082,880 B
+header + directories                  12,544 B
+complete artifact                 1,095,424 B
+
+canonical compile mean / p95       1.929 / 1.966 ms
+owned-memory open mean / p95       1.999 / 2.024 ms
+buffered-file reopen mean / p95    2.022 / 2.041 ms
+random chunk/value read mean/p95  74.704 / 76.044 ns / 0 B
+copy complete base chunk mean/p95  3.593 / 3.613 us / 0 B
+```
+
+Forward and reverse insertion order produced byte-identical artifacts and the
+same fingerprint. Corruption, wrong content, unsupported required schema,
+unsorted keys, broken seams, invalid material/height planes, trailing/truncated
+files, and preallocation limit attacks have permanent regressions. The evidence
+is preserved in
+[`terrain-t0.3-worldpack-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.3-worldpack-2026-08-20.json).
+No runtime terrain sampling, mesh payload, statics/Multi rows, sparse additional
+surface schema, publication, client residency, Network, or Godot work is part of
+T0.3.
+
 ## T0.4 — terrain queries and deterministic mesh generation
 
 Server/gameplay code must not depend on a Godot collision mesh to know the ground.
@@ -1045,7 +1139,7 @@ The world layer provides deterministic integer queries directly over chunk data:
 
 ```
 
-TrySampleTerrainHeight(location)
+TrySampleBaseTerrainHeight(location)
 
 TryResolveTerrainMaterial(location)
 
@@ -1055,6 +1149,12 @@ QueryStaticBounds(aabb, destination)
 
 T0 does not need a general physics engine. It needs enough authoritative ground
 and static occupancy information to move a character through the cabin slice.
+The base-height sampler is explicitly a base-heightfield convenience query; it
+must not become the permanent definition of "the one ground height" at X/Z.
+Later movement/collision requirements may earn a bounded world-surface query over
+an X/Z footprint plus vertical interval so several floors, ceilings, ledges, or
+vertical/non-heightfield surfaces can coexist. That API and its sparse geometry
+encoding remain deliberately unfrozen until a real workload proves them.
 
 The terrain surface is two deterministic planar triangles per 500 mm cell—not a
 bilinear four-vertex height function. The diagonal is selected from **global**
@@ -2074,7 +2174,8 @@ Spatial contracts are storage-free/dependency-neutral
 Network kernel does not require Spatial
 systems share spatial identity/geometry, not mutable chunk storage
 canonical Spatial commit is post-complete-ECS-graph per simulation step
-terrain is one deterministic parity-diagonal triangle surface
+base terrain is one deterministic parity-diagonal triangle surface
+world topology is not permanently limited to one surface per X/Z
 publication identity is game-owned and cross-chunk ordered by EntityPublicVersion
 history pressure invalidates deltas but never rejects current public state
 ```

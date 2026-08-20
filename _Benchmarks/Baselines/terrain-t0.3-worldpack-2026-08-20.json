@@ -1,0 +1,92 @@
+{
+  "Workload": "terrain-t0.3-worldpack-v1",
+  "TimestampUtc": "2026-08-20T12:32:17.2473341+00:00",
+  "RuntimeVersion": "8.0.29",
+  "FrameworkDescription": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "DotnetTieredCompilation": "0",
+  "DotnetReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "Format": {
+    "ContainerVersion": 1,
+    "HeaderBytes": 160,
+    "ChunkDirectoryRowBytes": 48,
+    "SectionDirectoryRowBytes": 48,
+    "ChunkCount": 256,
+    "ArtifactBytes": 1095424,
+    "TerrainPayloadBytes": 1082880,
+    "HeaderAndDirectoryBytes": 12544,
+    "PackFingerprint": "D81452391714A4B62CC84D93A3756D7E1D5DFA2BCBE4CD0AE7B664A2F0C5D2EB",
+    "DeterministicBytesAcrossInsertionOrder": true,
+    "DeterministicFingerprintAcrossInsertionOrder": true,
+    "FoundationBytesPerChunk": 4230,
+    "MaterialBytesPerChunk": 2048,
+    "HeightBytesPerChunk": 2182
+  },
+  "Fixture": {
+    "Classification": "deterministic synthetic base terrain only; no future structural-surface section is invented",
+    "GridEdge": 16,
+    "Chunks": 256,
+    "MinimumChunkCoordinate": -8,
+    "MaximumChunkCoordinate": 7,
+    "RandomReadOperations": 1000000,
+    "ChunkCopyOperations": 10000
+  },
+  "Timings": [
+    {
+      "Name": "compile-canonical-pack",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 1929394,
+      "P50NanosecondsPerOperation": 1918481,
+      "P95NanosecondsPerOperation": 1966041,
+      "MaximumNanosecondsPerOperation": 2079240,
+      "MaximumAllocatedBytes": 1098016,
+      "Checksum": 9837612611960177118
+    },
+    {
+      "Name": "open-owned-memory",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 1999176.619047619,
+      "P50NanosecondsPerOperation": 1999861,
+      "P95NanosecondsPerOperation": 2024120,
+      "MaximumNanosecondsPerOperation": 2037631,
+      "MaximumAllocatedBytes": 1095896,
+      "Checksum": 18125695967187396868
+    },
+    {
+      "Name": "reopen-buffered-file",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 2021998.761904762,
+      "P50NanosecondsPerOperation": 2023041,
+      "P95NanosecondsPerOperation": 2040910,
+      "MaximumNanosecondsPerOperation": 2049260,
+      "MaximumAllocatedBytes": 1096336,
+      "Checksum": 10112798872420988108
+    },
+    {
+      "Name": "random-base-terrain-read",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 74.70380766666665,
+      "P50NanosecondsPerOperation": 74.545349,
+      "P95NanosecondsPerOperation": 76.043625,
+      "MaximumNanosecondsPerOperation": 76.059415,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 19500070069948
+    },
+    {
+      "Name": "copy-complete-base-terrain",
+      "OperationsPerSample": 10000,
+      "MeanNanosecondsPerOperation": 3593.2985000000003,
+      "P50NanosecondsPerOperation": 3588.8998,
+      "P95NanosecondsPerOperation": 3613.0896,
+      "MaximumNanosecondsPerOperation": 3649.5652,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 194997377354
+    }
+  ]
+}

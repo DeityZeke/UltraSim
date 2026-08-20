@@ -1,4 +1,6 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
@@ -28,6 +30,14 @@ var tests = new (string Name, Action Body)[]
     ("TerrainSharedEdgesReconstructExactlyAcrossDifferentBases",
         TerrainSharedEdgesReconstructExactlyAcrossDifferentBases),
     ("TerrainHeightCodecWarmedAllocationZero", TerrainHeightCodecWarmedAllocationZero),
+    ("WorldPackFormatAndFingerprintsAreFrozen", WorldPackFormatAndFingerprintsAreFrozen),
+    ("WorldPackCompilationIsCanonicalAndOrderIndependent", WorldPackCompilationIsCanonicalAndOrderIndependent),
+    ("WorldPackRandomTerrainReadsAreExactAndAllocationFree", WorldPackRandomTerrainReadsAreExactAndAllocationFree),
+    ("WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams", WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams),
+    ("WorldPackOpenRejectsCorruptionAndMalformedStructure", WorldPackOpenRejectsCorruptionAndMalformedStructure),
+    ("WorldPackFileReopensWithStableFingerprint", WorldPackFileReopensWithStableFingerprint),
+    ("WorldPackBoundsRejectBeforeProportionalAllocation", WorldPackBoundsRejectBeforeProportionalAllocation),
+    ("WorldPackContentBindingPublishesWithGameGeneration", WorldPackContentBindingPublishesWithGameGeneration),
     ("WarmedCoordinateMachineAllocatesZero", WarmedCoordinateMachineAllocatesZero),
     ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
     ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
@@ -47,7 +57,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0/T0.1/T0.2 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.3 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -225,6 +235,367 @@ static void TerrainHeightCodecWarmedAllocationZero()
     long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
     Equal(0L, allocated);
     True(checksum != 0);
+}
+
+static void WorldPackFormatAndFingerprintsAreFrozen()
+{
+    Equal(160, WorldPackFormat.HeaderBytes);
+    Equal(48, WorldPackFormat.ChunkDirectoryRowBytes);
+    Equal(48, WorldPackFormat.SectionDirectoryRowBytes);
+    Equal(128, WorldPackFormat.PackFingerprintOffset);
+    Equal(32, WorldPackFormat.PackFingerprintBytes);
+    Equal(1U, WorldPackFormat.ContainerVersion);
+    Equal(1U, WorldPackFormat.TerrainMaterialsSchemaVersion);
+    Equal(1U, WorldPackFormat.TerrainHeightsSchemaVersion);
+    Equal(16, Marshal.SizeOf<WorldContentFingerprint>());
+    Equal(32, Marshal.SizeOf<WorldPackFingerprint>());
+    Equal(1U, (uint)WorldPackSectionKind.TerrainMaterials);
+    Equal(2U, (uint)WorldPackSectionKind.TerrainHeights);
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldContentFingerprint(0, 0));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(159, 1, 2));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(160, 0, 2));
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(160, 1, 1));
+}
+
+static void WorldPackCompilationIsCanonicalAndOrderIndependent()
+{
+    WorldPackArtifact forward = CreateWorldPackArtifact(reverse: false);
+    WorldPackArtifact reverse = CreateWorldPackArtifact(reverse: true);
+    Equal(forward.Length, reverse.Length);
+    Equal(forward.Fingerprint, reverse.Fingerprint);
+    var first = new byte[forward.Length];
+    var second = new byte[reverse.Length];
+    forward.CopyTo(first);
+    reverse.CopyTo(second);
+    True(first.AsSpan().SequenceEqual(second));
+
+    WorldPack pack = forward.Open();
+    Equal(16, pack.ChunkCount);
+    Equal(2, pack.SectionCount);
+    Equal(WorldPackTestProfile.Space, pack.Space);
+    Equal(WorldPackTestProfile.Content, pack.ContentFingerprint);
+    Equal(forward.Fingerprint, pack.Fingerprint);
+    Equal(forward.Length, pack.Length);
+}
+
+static void WorldPackRandomTerrainReadsAreExactAndAllocationFree()
+{
+    WorldPack pack = CreateWorldPackArtifact(reverse: true).Open();
+    ulong expected = Read(1_000);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    ulong actual = Read(100_000);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+    True(expected != 0);
+    True(actual != 0);
+    False(pack.TryGetBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, 100, 100), out _));
+
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    var heights = new int[TerrainChunkFormat.HeightVertexCount];
+    var key = new SpatialChunkKey(WorldPackTestProfile.Space, -2, -2);
+    True(pack.TryGetBaseTerrain(key, out WorldTerrainChunkView view));
+    view.CopyMaterials(materials);
+    view.CopyAbsoluteHeights(heights);
+    Equal(PackMaterial(-2, -2, 17, 9), materials[TerrainChunkFormat.GetMaterialIndex(
+        new TerrainCellCoord(17, 9))]);
+    Equal(QuantizePackHeight(PackHeight(-2, -2, 32, 32)),
+        heights[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(32, 32))]);
+
+    ulong Read(int operations)
+    {
+        ulong checksum = 0;
+        for (int operation = 0; operation < operations; operation++)
+        {
+            int chunkX = operation % 4 - 2;
+            int chunkZ = operation / 4 % 4 - 2;
+            var chunk = new SpatialChunkKey(WorldPackTestProfile.Space, chunkX, chunkZ);
+            if (!pack.TryGetBaseTerrain(chunk, out WorldTerrainChunkView terrain))
+                throw new InvalidOperationException("Expected packed chunk was absent.");
+            int materialIndex = operation % TerrainChunkFormat.MaterialCellCount;
+            int vertexIndex = operation % TerrainChunkFormat.HeightVertexCount;
+            checksum = unchecked(checksum + terrain.GetMaterial(materialIndex) +
+                (uint)terrain.GetAbsoluteHeightMillimeters(vertexIndex) +
+                (uint)terrain.HeightBase.Millimeters);
+        }
+        return checksum;
+    }
+}
+
+static void WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams()
+{
+    var limits = new WorldPackLimits(2 * 1024 * 1024, 16, 8);
+    CreatePackPlanes(-1, 0, out ushort[] materials, out TerrainHeightPlaneBase heightBase,
+        out TerrainHeightOffset[] heights);
+    var firstKey = new SpatialChunkKey(WorldPackTestProfile.Space, -1, 0);
+    var secondKey = new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0);
+
+    var duplicate = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content, limits);
+    True(duplicate.TryAddBaseTerrain(firstKey, materials, heightBase, heights, out _));
+    False(duplicate.TryAddBaseTerrain(firstKey, materials, heightBase, heights, out WorldPackBuildError error));
+    Equal(WorldPackBuildError.DuplicateChunk, error);
+    False(duplicate.TryAddBaseTerrain(new SpatialChunkKey(new SpatialSpaceId(999), 0, 0),
+        materials, heightBase, heights, out error));
+    Equal(WorldPackBuildError.SpaceMismatch, error);
+    False(duplicate.TryAddBaseTerrain(secondKey, materials.AsSpan(1), heightBase, heights, out error));
+    Equal(WorldPackBuildError.MalformedMaterialPlane, error);
+    materials[4] = 0;
+    False(duplicate.TryAddBaseTerrain(secondKey, materials, heightBase, heights, out error));
+    Equal(WorldPackBuildError.InvalidMaterialId, error);
+    materials[4] = 1;
+    False(duplicate.TryAddBaseTerrain(secondKey, materials, heightBase, heights.AsSpan(1), out error));
+    Equal(WorldPackBuildError.MalformedHeightPlane, error);
+    True(TerrainHeightPlaneBase.TryCreate(TerrainChunkFormat.MaximumQuantizedHeightMillimeters,
+        out TerrainHeightPlaneBase maximumBase));
+    Array.Fill(heights, new TerrainHeightOffset(ushort.MaxValue));
+    False(duplicate.TryAddBaseTerrain(secondKey, materials, maximumBase, heights, out error));
+    Equal(WorldPackBuildError.InvalidHeightPlane, error);
+
+    var capacity = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(2 * 1024 * 1024, 1, 8));
+    CreatePackPlanes(-1, 0, out materials, out heightBase, out heights);
+    True(capacity.TryAddBaseTerrain(firstKey, materials, heightBase, heights, out _));
+    CreatePackPlanes(0, 0, out materials, out heightBase, out heights);
+    False(capacity.TryAddBaseTerrain(secondKey, materials, heightBase, heights, out error));
+    Equal(WorldPackBuildError.CapacityExceeded, error);
+
+    var brokenSeam = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content, limits);
+    CreatePackPlanes(-1, 0, out materials, out heightBase, out heights);
+    True(brokenSeam.TryAddBaseTerrain(firstKey, materials, heightBase, heights, out _));
+    CreatePackPlanes(0, 0, out materials, out heightBase, out heights);
+    int edge = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(0, 11));
+    heights[edge] = new TerrainHeightOffset(checked((ushort)(heights[edge].Units + 1)));
+    True(brokenSeam.TryAddBaseTerrain(secondKey, materials, heightBase, heights, out _));
+    False(brokenSeam.TryBuild(out WorldPackArtifact? artifact, out error));
+    Equal(null, artifact);
+    Equal(WorldPackBuildError.SharedEdgeMismatch, error);
+}
+
+static void WorldPackOpenRejectsCorruptionAndMalformedStructure()
+{
+    WorldPackArtifact artifact = CreateWorldPackArtifact(reverse: false);
+    var valid = new byte[artifact.Length];
+    artifact.CopyTo(valid);
+    var limits = new WorldPackLimits(2 * 1024 * 1024, 64, 8);
+    False(WorldPack.TryOpen(valid, limits, new WorldContentFingerprint(8, 9),
+        out WorldPack? pack, out WorldPackOpenError error));
+    Equal(null, pack);
+    Equal(WorldPackOpenError.ContentMismatch, error);
+
+    byte[] corrupted = (byte[])valid.Clone();
+    corrupted[^1] ^= 0x80;
+    AssertPackOpenFails(corrupted, limits, WorldPackOpenError.HashMismatch);
+    byte[] sectionCorrupted = (byte[])valid.Clone();
+    sectionCorrupted[^1] ^= 0x40;
+    RewritePackFingerprint(sectionCorrupted);
+    AssertPackOpenFails(sectionCorrupted, limits, WorldPackOpenError.HashMismatch);
+    AssertPackOpenFails(valid.AsSpan(0, WorldPackFormat.HeaderBytes - 1).ToArray(), limits,
+        WorldPackOpenError.Truncated);
+    byte[] trailing = new byte[valid.Length + 1];
+    valid.CopyTo(trailing, 0);
+    AssertPackOpenFails(trailing, limits, WorldPackOpenError.LengthMismatch);
+
+    byte[] badVersion = (byte[])valid.Clone();
+    BinaryPrimitives.WriteUInt32LittleEndian(badVersion.AsSpan(8), 2);
+    AssertPackOpenFails(badVersion, limits, WorldPackOpenError.UnsupportedVersion);
+
+    byte[] unsorted = (byte[])valid.Clone();
+    BinaryPrimitives.WriteInt32LittleEndian(unsorted.AsSpan(WorldPackFormat.HeaderBytes + 8), int.MaxValue);
+    RewritePackFingerprint(unsorted);
+    AssertPackOpenFails(unsorted, limits, WorldPackOpenError.InvalidChunkDirectory);
+
+    byte[] unsupportedHeight = (byte[])valid.Clone();
+    int sectionDirectory = WorldPackFormat.HeaderBytes + 16 * WorldPackFormat.ChunkDirectoryRowBytes;
+    BinaryPrimitives.WriteUInt32LittleEndian(unsupportedHeight.AsSpan(
+        sectionDirectory + WorldPackFormat.SectionDirectoryRowBytes + 4), 2);
+    RewritePackFingerprint(unsupportedHeight);
+    AssertPackOpenFails(unsupportedHeight, limits, WorldPackOpenError.UnsupportedRequiredSection);
+
+    byte[] brokenPackedSeam = (byte[])valid.Clone();
+    int heightRow = sectionDirectory + WorldPackFormat.SectionDirectoryRowBytes;
+    int heightSection = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(
+        brokenPackedSeam.AsSpan(heightRow + 8)));
+    int rightEdgeVertex = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(32, 0));
+    int heightValue = heightSection + TerrainChunkFormat.HeightPlaneBaseBytes + rightEdgeVertex * sizeof(ushort);
+    ushort oldUnits = BinaryPrimitives.ReadUInt16LittleEndian(brokenPackedSeam.AsSpan(heightValue));
+    BinaryPrimitives.WriteUInt16LittleEndian(brokenPackedSeam.AsSpan(heightValue),
+        checked((ushort)(oldUnits + 1)));
+    RewriteSectionDigest(brokenPackedSeam, heightRow);
+    RewritePackFingerprint(brokenPackedSeam);
+    AssertPackOpenFails(brokenPackedSeam, limits, WorldPackOpenError.SharedEdgeMismatch);
+}
+
+static void WorldPackFileReopensWithStableFingerprint()
+{
+    WorldPackArtifact artifact = CreateWorldPackArtifact(reverse: true);
+    string path = Path.Combine(Path.GetTempPath(), $"ultrasim-worldpack-{Guid.NewGuid():N}.uwp");
+    try
+    {
+        using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            artifact.WriteTo(stream);
+        True(WorldPack.TryOpenFile(path, new WorldPackLimits(2 * 1024 * 1024, 64, 8), WorldPackTestProfile.Content,
+            out WorldPack? reopened, out WorldPackOpenError error));
+        Equal(WorldPackOpenError.None, error);
+        True(reopened is not null);
+        Equal(artifact.Fingerprint, reopened!.Fingerprint);
+        Equal(artifact.Length, reopened.Length);
+        True(reopened.TryGetBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, 1, 1),
+            out WorldTerrainChunkView terrain));
+        Equal(QuantizePackHeight(PackHeight(1, 1, 32, 32)),
+            terrain.GetAbsoluteHeightMillimeters(TerrainChunkFormat.GetHeightIndex(
+                new TerrainVertexCoord(32, 32))));
+    }
+    finally
+    {
+        if (File.Exists(path)) File.Delete(path);
+    }
+}
+
+static void WorldPackBoundsRejectBeforeProportionalAllocation()
+{
+    var header = new byte[WorldPackFormat.HeaderBytes];
+    BinaryPrimitives.WriteUInt64LittleEndian(header, WorldPackFormat.Magic);
+    BinaryPrimitives.WriteUInt32LittleEndian(header.AsSpan(8), WorldPackFormat.ContainerVersion);
+    BinaryPrimitives.WriteUInt64LittleEndian(header.AsSpan(16), 16 * 1024 * 1024);
+    var limits = new WorldPackLimits(1024 * 1024, 64, 8);
+    False(WorldPack.TryOpen(header, limits, WorldPackTestProfile.Content, out _, out WorldPackOpenError warmError));
+    Equal(WorldPackOpenError.CapacityExceeded, warmError);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 10_000; index++)
+    {
+        False(WorldPack.TryOpen(header, limits, WorldPackTestProfile.Content, out WorldPack? pack,
+            out WorldPackOpenError error));
+        Equal(null, pack);
+        Equal(WorldPackOpenError.CapacityExceeded, error);
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+}
+
+static void WorldPackContentBindingPublishesWithGameGeneration()
+{
+    Throws<ArgumentException>(() => _ = new WorldContentBinding(GameContent.WorldFingerprint, [0]));
+    Throws<ArgumentException>(() => _ = new WorldContentBinding(GameContent.WorldFingerprint, [1, 1]));
+    WorldPack wrongContent = CreateWorldPackArtifact(reverse: false).Open();
+    var gameBinding = new WorldContentBinding(GameContent.WorldFingerprint,
+    [
+        GameTerrainMaterialIds.Water,
+        GameTerrainMaterialIds.Sand,
+        GameTerrainMaterialIds.Grass,
+        GameTerrainMaterialIds.Rock,
+        GameTerrainMaterialIds.Snow,
+    ]);
+    False(wrongContent.TryBind(gameBinding, out BoundWorldPack? bound, out WorldPackBindingError error));
+    Equal(null, bound);
+    Equal(WorldPackBindingError.ContentMismatch, error);
+
+    WorldPack gamePack = CreateWorldPackArtifact(reverse: true, GameContent.WorldFingerprint).Open();
+    var incomplete = new WorldContentBinding(GameContent.WorldFingerprint, [GameTerrainMaterialIds.Water]);
+    False(gamePack.TryBind(incomplete, out bound, out error));
+    Equal(null, bound);
+    Equal(WorldPackBindingError.UnknownTerrainMaterial, error);
+
+    var composition = new UltraSimGameComposition(baseWorldPack: gamePack);
+    using var runtime = new ServerRuntime(composition,
+        new ServerRuntimeOptions(UltraSimGameComposition.CreateWorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((_, _, game) =>
+    {
+        True(game.WorldState.BaseWorld is not null);
+        Equal(gamePack.Fingerprint, game.WorldState.BaseWorld!.Fingerprint);
+        Equal(gamePack.ChunkCount, game.WorldState.BaseWorld.ChunkCount);
+        return true;
+    }, out bool published));
+    True(published);
+}
+
+static WorldPackArtifact CreateWorldPackArtifact(
+    bool reverse,
+    WorldContentFingerprint? content = null)
+{
+    var builder = new WorldPackBuilder(WorldPackTestProfile.Space,
+        content ?? WorldPackTestProfile.Content,
+        new WorldPackLimits(2 * 1024 * 1024, 64, 8));
+    var keys = new List<SpatialChunkKey>();
+    for (int z = -2; z < 2; z++)
+        for (int x = -2; x < 2; x++)
+            keys.Add(new SpatialChunkKey(WorldPackTestProfile.Space, x, z));
+    if (reverse) keys.Reverse();
+    foreach (SpatialChunkKey key in keys)
+    {
+        CreatePackPlanes(key.Coord.X, key.Coord.Z, out ushort[] materials,
+            out TerrainHeightPlaneBase heightBase, out TerrainHeightOffset[] heights);
+        True(builder.TryAddBaseTerrain(key, materials, heightBase, heights, out WorldPackBuildError error));
+        Equal(WorldPackBuildError.None, error);
+    }
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError));
+    Equal(WorldPackBuildError.None, buildError);
+    True(artifact is not null);
+    return artifact!;
+}
+
+static void CreatePackPlanes(
+    int chunkX,
+    int chunkZ,
+    out ushort[] materials,
+    out TerrainHeightPlaneBase heightBase,
+    out TerrainHeightOffset[] heights)
+{
+    materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    for (byte z = 0; z < TerrainChunkFormat.MaterialCellEdge; z++)
+        for (byte x = 0; x < TerrainChunkFormat.MaterialCellEdge; x++)
+            materials[TerrainChunkFormat.GetMaterialIndex(new TerrainCellCoord(x, z))] =
+                PackMaterial(chunkX, chunkZ, x, z);
+    var source = new int[TerrainChunkFormat.HeightVertexCount];
+    for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
+        for (byte x = 0; x < TerrainChunkFormat.HeightVertexEdge; x++)
+            source[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(x, z))] =
+                PackHeight(chunkX, chunkZ, x, z);
+    heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    True(TerrainHeightEncoding.TryEncodePlane(source, heights, out heightBase, out _, out _));
+}
+
+static ushort PackMaterial(int chunkX, int chunkZ, int localX, int localZ)
+{
+    int globalX = checked(chunkX * TerrainChunkFormat.MaterialCellEdge + localX);
+    int globalZ = checked(chunkZ * TerrainChunkFormat.MaterialCellEdge + localZ);
+    uint hash = unchecked((uint)(globalX * 31) ^ (uint)(globalZ * 17));
+    return checked((ushort)(hash % 5 + 1));
+}
+
+static int PackHeight(int chunkX, int chunkZ, int localX, int localZ)
+{
+    int globalX = checked(chunkX * TerrainChunkFormat.MaterialCellEdge + localX);
+    int globalZ = checked(chunkZ * TerrainChunkFormat.MaterialCellEdge + localZ);
+    return checked(1_200_003 + globalX * 35 + globalZ * 20);
+}
+
+static int QuantizePackHeight(int millimeters) => checked(
+    (int)Math.Round(millimeters / (double)TerrainChunkFormat.HeightQuantumMillimeters,
+        MidpointRounding.AwayFromZero) * TerrainChunkFormat.HeightQuantumMillimeters);
+
+static void AssertPackOpenFails(byte[] bytes, WorldPackLimits limits, WorldPackOpenError expected)
+{
+    False(WorldPack.TryOpen(bytes, limits, WorldPackTestProfile.Content, out WorldPack? pack, out WorldPackOpenError error));
+    Equal(null, pack);
+    Equal(expected, error);
+}
+
+static void RewritePackFingerprint(byte[] bytes)
+{
+    bytes.AsSpan(WorldPackFormat.PackFingerprintOffset, WorldPackFormat.PackFingerprintBytes).Clear();
+    Span<byte> digest = stackalloc byte[WorldPackFormat.PackFingerprintBytes];
+    SHA256.HashData(bytes, digest);
+    digest.CopyTo(bytes.AsSpan(WorldPackFormat.PackFingerprintOffset, WorldPackFormat.PackFingerprintBytes));
+}
+
+static void RewriteSectionDigest(byte[] bytes, int rowOffset)
+{
+    int payloadOffset = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(rowOffset + 8)));
+    int payloadLength = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(rowOffset + 16)));
+    Span<byte> digest = stackalloc byte[32];
+    SHA256.HashData(bytes.AsSpan(payloadOffset, payloadLength), digest);
+    digest[..16].CopyTo(bytes.AsSpan(rowOffset + 32, 16));
 }
 
 static void AssertSharedTerrainEdgeWithDifferentBases(int elevationOffset)
@@ -909,6 +1280,13 @@ static void Throws<TException>(Action action) where TException : Exception
     }
 
     throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
+}
+
+static class WorldPackTestProfile
+{
+    internal static SpatialSpaceId Space { get; } = new(901);
+    internal static WorldContentFingerprint Content { get; } =
+        new(0x1122_3344_5566_7788UL, 0x8877_6655_4433_2211UL);
 }
 
 sealed class RawSpatialFixture : IDisposable

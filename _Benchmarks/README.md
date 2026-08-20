@@ -40,6 +40,7 @@ when those systems exist.
 | `UltraSim.Spatial.Benchmarks` | Terrain T0.0 dependency-neutral spatial math and fixed game-position profile: normalization, reconstruction, key/hash/order, AABB distance, and terrain-cell lookup. |
 | `UltraSim.WorldSpatialIndex.Benchmarks` | Terrain T0.1 split post-step/index costs: idle observation, same-home change, cross-chunk migration, create/remove, full rebuild, and member reads. |
 | `UltraSim.TerrainEncoding.Benchmarks` | Terrain T0.2 fixed 16 m/0.5 m geometry, global-vs-based height candidate matrix, synthetic multi-datum distribution, reconstructed shared-edge equality, scratch, and encode/decode evidence. |
+| `UltraSim.WorldPack.Benchmarks` | Terrain T0.3 canonical sectioned-pack compilation/open/file-reopen evidence plus allocation-free random base-terrain reads and complete-chunk copies. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |

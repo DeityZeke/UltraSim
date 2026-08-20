@@ -39,6 +39,9 @@ Useful current anchors can be located by their embedded workload or filename:
   global-vs-per-chunk-base height range/error evidence, synthetic multi-datum
   height/material distribution, reconstructed shared-edge duplication/equality,
   compiler scratch accounting, and allocation-free plane codec timings;
+- `terrain-t0.3-worldpack-*` — canonical sectioned WorldPack compilation,
+  bounded memory/file opening, immutable hash identity, exact container/directory
+  accounting, and allocation-free random/copy base-terrain reads;
 - `s0.8-integrated-acceptance-cadence-independent-*` — accepted integrated
   Runtime/game/persistence/cadence gate;
 - `network-n0.1-game-projection-100k-*` — canonical changed-state capture and

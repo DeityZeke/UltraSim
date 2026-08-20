@@ -28,11 +28,13 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
     private readonly InventoryLimits _inventoryLimits;
     private readonly int _maximumChunksPerContentArchetype;
     private readonly GameRuntimeProfile _runtimeProfile;
+    private readonly WorldPack? _baseWorldPack;
 
     public UltraSimGameComposition(
         InventoryLimits? inventoryLimits = null,
         int maximumChunksPerContentArchetype = 16,
-        GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local)
+        GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local,
+        WorldPack? baseWorldPack = null)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
@@ -42,6 +44,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             throw new ArgumentOutOfRangeException(nameof(runtimeProfile));
         _maximumChunksPerContentArchetype = maximumChunksPerContentArchetype;
         _runtimeProfile = runtimeProfile;
+        _baseWorldPack = baseWorldPack;
         Schema = GameSchema.CreateSchema();
         PersistenceCatalog = GameSchema.CreatePersistenceCatalog(static builder =>
             builder.RegisterHistoricalReader<GameSimulationState>(
@@ -62,7 +65,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             new AccountingStore(),
             new InventoryGenerationState(generation.World, content, _inventoryLimits),
             content,
-            new GameWorldState(generation.World),
+            CreateWorldState(generation.World, content),
             simulation,
             replication));
     }
@@ -84,7 +87,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                new GameWorldState(world),
+                CreateWorldState(world, content),
                 simulation,
                 replication);
         }
@@ -110,7 +113,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                new GameWorldState(world),
+                CreateWorldState(world, content),
                 simulation,
                 replication);
         }
@@ -172,6 +175,15 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 maximumChunksPerNewArchetype: _maximumChunksPerContentArchetype));
         _contentByWorld.Add(world, content);
         return content;
+    }
+
+    private GameWorldState CreateWorldState(EcsWorld world, GameContent content)
+    {
+        BoundWorldPack? bound = null;
+        if (_baseWorldPack is not null &&
+            !_baseWorldPack.TryBind(content.World, out bound, out WorldPackBindingError error))
+            throw new InvalidOperationException($"WorldPack could not bind to compiled game content: {error}.");
+        return new GameWorldState(world, bound);
     }
 
     private static (ComponentLookup<GameSimulationState>, GameReplicationBindings?) PrepareSimulation(
