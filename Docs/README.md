@@ -61,8 +61,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Terrain / World T0](Plans/TERRAIN.md) is the active major implementation plan.
   T0.0 accepted the value/coordinate seam and T0.1 accepted the maintained
-  world-spatial index after saturated-capacity/model-oracle hardening. The plan
-  next proceeds to compact terrain data,
+  world-spatial index after saturated-capacity/model-oracle hardening. T0.2 now
+  proposes the evidence-backed 10 mm signed-16 terrain height and 4,226-byte
+  terrain foundation and is stopped for checkpoint review. The plan next
+  proceeds to the immutable WorldPack only after that review,
   terrain/statics/Multi streaming, dynamic membership, shared packed publication,
   bounded dirty history, client rendering, persistence seams, and one playable
   cabin vertical.

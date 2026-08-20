@@ -39,6 +39,7 @@ when those systems exist.
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Spatial.Benchmarks` | Terrain T0.0 dependency-neutral spatial math and fixed game-position profile: normalization, reconstruction, key/hash/order, AABB distance, and terrain-cell lookup. |
 | `UltraSim.WorldSpatialIndex.Benchmarks` | Terrain T0.1 split post-step/index costs: idle observation, same-home change, cross-chunk migration, create/remove, full rebuild, and member reads. |
+| `UltraSim.TerrainEncoding.Benchmarks` | Terrain T0.2 fixed 16 m/0.5 m geometry, signed-height candidate matrix, deterministic authored-style distribution, shared-edge duplication/equality, scratch, and encode/decode evidence. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |
@@ -76,6 +77,9 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.WorldSpatialIndex.Benchmarks -c Release -- \
     --output=_Benchmarks/results/terrain-t0.1-world-spatial-index-local.json
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.TerrainEncoding.Benchmarks -c Release -- \
+    --output=_Benchmarks/results/terrain-t0.2-height-encoding-local.json
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \

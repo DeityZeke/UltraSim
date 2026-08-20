@@ -61,3 +61,28 @@ generation boundary.
 
 Terrain packs, statics, chunk publication/history, client streaming, rendering,
 and Network N1 are not part of T0.1.
+
+## Terrain foundation format
+
+T0.2 freezes the physical terrain planes without introducing a loader or mutable
+terrain store:
+
+```text
+material cells       32 x 32 x ushort       2,048 B
+height vertices      33 x 33 x TerrainHeight 2,178 B
+foundation                                     4,226 B
+height quantum                                  10 mm
+decoded range                   -327,680..327,670 mm
+```
+
+`TerrainHeight` is a two-byte signed value. Authored integer millimetres quantize
+nearest with midpoint away from zero and reject outside the decoded range.
+`TerrainHeightEncoding` preflights a complete 1,089-vertex plane before writing,
+so malformed input cannot partially publish a destination. Its ordinary encode
+and decode paths are allocation-free.
+
+`TerrainVertexCoord` admits `0..32` on each axis. The positive edge at 32 maps to
+16,000 mm and is the duplicated immutable border shared with the neighboring
+chunk; dynamic position locals remain half-open at `0..15,999`. Compiled shared
+edge units must be bit-identical. Exact pack headers, directories, sections,
+hashes, and loading remain T0.3 work.

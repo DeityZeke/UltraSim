@@ -1,0 +1,209 @@
+{
+  "Workload": "terrain-t0.2-height-encoding-v1",
+  "TimestampUtc": "2026-08-20T06:01:46.3906109+00:00",
+  "RuntimeVersion": "8.0.29",
+  "FrameworkDescription": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "DotnetTieredCompilation": "0",
+  "DotnetReadyToRun": "0",
+  "Warmups": 5,
+  "Iterations": 21,
+  "PlanesPerIteration": 1000,
+  "Geometry": {
+    "WorldChunkEdgeMillimeters": 16000,
+    "TerrainCellEdgeMillimeters": 500,
+    "TerrainCellsPerChunkEdge": 32,
+    "DynamicPositionQuantumMillimeters": 1,
+    "MaterialCellsPerChunk": 1024,
+    "HeightVerticesPerChunk": 1089,
+    "TrianglesPerChunk": 2048,
+    "TriangleIndicesPerChunk": 6144,
+    "MaterialPlaneBytes": 2048,
+    "HeightPlaneBytes": 2178,
+    "FoundationBytes": 4226,
+    "DuplicatedBorderVerticesPerChunk": 65,
+    "DuplicatedBorderBytesPerChunk": 130,
+    "SelectedHeightQuantumMillimeters": 10,
+    "MinimumTerrainHeightMillimeters": -327680,
+    "MaximumTerrainHeightMillimeters": 327670,
+    "RequiredAuthoredMinimumMillimeters": -300000,
+    "RequiredAuthoredMaximumMillimeters": 300000,
+    "MaximumTerrainVertexLocalAxisMillimetersInclusive": 16000,
+    "MaximumDynamicLocalAxisMillimetersInclusive": 15999
+  },
+  "DirectoryAccounting": {
+    "FrozenAtT02": false,
+    "SpatialChunkKeyBytes": 16,
+    "RequiredTerrainSectionReferences": 2,
+    "CandidateOffsetLengthBytesPerReference": 16,
+    "CandidateMinimumChunkDirectoryRowBytes": 48,
+    "Note": "T0.2 accounting candidate only; T0.3 freezes the sectioned container and exact directory."
+  },
+  "CompilerScratch": {
+    "AuthoredHeightPlaneBytes": 4356,
+    "MaterialPlaneBytes": 2048,
+    "EncodedHeightPlaneBytes": 2178,
+    "OneChunkScratchHighWaterBytes": 8582,
+    "TimedEncodingAllocatedBytes": 0
+  },
+  "AuthoredSource": {
+    "Classification": "deterministic-authored-style woods/coast/ridge fixture; production world content is not yet authored",
+    "Chunks": 64,
+    "StoredHeightSamples": 69696,
+    "MaterialSamples": 65536,
+    "MinimumHeightMillimeters": -300000,
+    "P05HeightMillimeters": -80127,
+    "P50HeightMillimeters": 46178,
+    "P95HeightMillimeters": 259810,
+    "MaximumHeightMillimeters": 300000,
+    "MaterialCounts": [
+      {
+        "MaterialId": 1,
+        "Count": 20236
+      },
+      {
+        "MaterialId": 2,
+        "Count": 17816
+      },
+      {
+        "MaterialId": 3,
+        "Count": 903
+      },
+      {
+        "MaterialId": 4,
+        "Count": 15431
+      },
+      {
+        "MaterialId": 5,
+        "Count": 11150
+      }
+    ]
+  },
+  "SharedEdges": {
+    "EncodedEdgeComparisons": 3696,
+    "MismatchedEncodedEdges": 0,
+    "StoredHeightVertices": 69696,
+    "UniqueGlobalHeightVertices": 66049,
+    "DuplicatedHeightVertices": 3647,
+    "DuplicatedHeightBytes": 7294
+  },
+  "HeightCandidates": [
+    {
+      "Name": "int16-q1mm",
+      "StorageBytesPerVertex": 2,
+      "QuantumMillimeters": 1,
+      "MinimumDecodedMillimeters": -32768,
+      "MaximumDecodedMillimeters": 32767,
+      "SupportsRequiredEnvelope": false,
+      "SourceSamples": 69696,
+      "RejectedSourceSamples": 53780,
+      "MaximumAbsoluteErrorMillimeters": 0,
+      "MeanAbsoluteErrorMillimeters": 0,
+      "P95AbsoluteErrorMillimeters": 0,
+      "FoundationBytesPerChunk": 4226
+    },
+    {
+      "Name": "int16-q5mm",
+      "StorageBytesPerVertex": 2,
+      "QuantumMillimeters": 5,
+      "MinimumDecodedMillimeters": -163840,
+      "MaximumDecodedMillimeters": 163835,
+      "SupportsRequiredEnvelope": false,
+      "SourceSamples": 69696,
+      "RejectedSourceSamples": 13711,
+      "MaximumAbsoluteErrorMillimeters": 2,
+      "MeanAbsoluteErrorMillimeters": 1.2044833437527909,
+      "P95AbsoluteErrorMillimeters": 2,
+      "FoundationBytesPerChunk": 4226
+    },
+    {
+      "Name": "int16-q10mm-selected",
+      "StorageBytesPerVertex": 2,
+      "QuantumMillimeters": 10,
+      "MinimumDecodedMillimeters": -327680,
+      "MaximumDecodedMillimeters": 327670,
+      "SupportsRequiredEnvelope": true,
+      "SourceSamples": 69696,
+      "RejectedSourceSamples": 0,
+      "MaximumAbsoluteErrorMillimeters": 5,
+      "MeanAbsoluteErrorMillimeters": 2.4911903122130394,
+      "P95AbsoluteErrorMillimeters": 5,
+      "FoundationBytesPerChunk": 4226
+    },
+    {
+      "Name": "int16-q25mm",
+      "StorageBytesPerVertex": 2,
+      "QuantumMillimeters": 25,
+      "MinimumDecodedMillimeters": -819200,
+      "MaximumDecodedMillimeters": 819175,
+      "SupportsRequiredEnvelope": true,
+      "SourceSamples": 69696,
+      "RejectedSourceSamples": 0,
+      "MaximumAbsoluteErrorMillimeters": 12,
+      "MeanAbsoluteErrorMillimeters": 6.237301997245179,
+      "P95AbsoluteErrorMillimeters": 12,
+      "FoundationBytesPerChunk": 4226
+    },
+    {
+      "Name": "int16-q50mm",
+      "StorageBytesPerVertex": 2,
+      "QuantumMillimeters": 50,
+      "MinimumDecodedMillimeters": -1638400,
+      "MaximumDecodedMillimeters": 1638350,
+      "SupportsRequiredEnvelope": true,
+      "SourceSamples": 69696,
+      "RejectedSourceSamples": 0,
+      "MaximumAbsoluteErrorMillimeters": 25,
+      "MeanAbsoluteErrorMillimeters": 12.45675505050505,
+      "P95AbsoluteErrorMillimeters": 24,
+      "FoundationBytesPerChunk": 4226
+    },
+    {
+      "Name": "int32-q1mm-exact",
+      "StorageBytesPerVertex": 4,
+      "QuantumMillimeters": 1,
+      "MinimumDecodedMillimeters": -2147483648,
+      "MaximumDecodedMillimeters": 2147483647,
+      "SupportsRequiredEnvelope": true,
+      "SourceSamples": 69696,
+      "RejectedSourceSamples": 0,
+      "MaximumAbsoluteErrorMillimeters": 0,
+      "MeanAbsoluteErrorMillimeters": 0,
+      "P95AbsoluteErrorMillimeters": 0,
+      "FoundationBytesPerChunk": 6404
+    }
+  ],
+  "Timings": [
+    {
+      "Name": "encode-int16-q10mm",
+      "MeanNanosecondsPerVertex": 4.501774891774891,
+      "P50NanosecondsPerVertex": 4.496544536271809,
+      "P95NanosecondsPerVertex": 4.52974839302112,
+      "MaximumNanosecondsPerVertex": 4.534982552800734,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 57286263639202
+    },
+    {
+      "Name": "decode-int16-q10mm",
+      "MeanNanosecondsPerVertex": 0.5426323844505663,
+      "P50NanosecondsPerVertex": 0.5379017447199266,
+      "P95NanosecondsPerVertex": 0.5473415977961432,
+      "MaximumNanosecondsPerVertex": 0.641426997245179,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 57286170945588
+    },
+    {
+      "Name": "copy-int32-millimeters",
+      "MeanNanosecondsPerVertex": 0.0401119856574402,
+      "P50NanosecondsPerVertex": 0.03970523415977961,
+      "P95NanosecondsPerVertex": 0.04166115702479339,
+      "MaximumNanosecondsPerVertex": 0.04378236914600551,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 57286170945562
+    }
+  ]
+}

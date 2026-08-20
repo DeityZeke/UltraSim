@@ -22,6 +22,11 @@ var tests = new (string Name, Action Body)[]
     ("FloatImportRejectsNonfiniteAndOutOfProfile", FloatImportRejectsNonfiniteAndOutOfProfile),
     ("TerrainCellsUseIndependentFiveHundredMillimeterGrid", TerrainCellsUseIndependentFiveHundredMillimeterGrid),
     ("DynamicPositionIsNotPlacementOrTerrainSnapped", DynamicPositionIsNotPlacementOrTerrainSnapped),
+    ("TerrainFoundationLayoutIsFrozen", TerrainFoundationLayoutIsFrozen),
+    ("TerrainHeightQuantizationIsDeterministic", TerrainHeightQuantizationIsDeterministic),
+    ("TerrainHeightPlaneEncodingIsTransactional", TerrainHeightPlaneEncodingIsTransactional),
+    ("TerrainSharedEdgesAreBitExact", TerrainSharedEdgesAreBitExact),
+    ("TerrainHeightCodecWarmedAllocationZero", TerrainHeightCodecWarmedAllocationZero),
     ("WarmedCoordinateMachineAllocatesZero", WarmedCoordinateMachineAllocatesZero),
     ("PositionComponentIsPersistedCanonicalAuthority", PositionComponentIsPersistedCanonicalAuthority),
     ("RuntimeCommitsFinalPositionAfterCompleteEcsStep", RuntimeCommitsFinalPositionAfterCompleteEcsStep),
@@ -41,7 +46,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0/T0.1 spatial tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0/T0.1/T0.2 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -59,6 +64,172 @@ static void FrozenProfileAndPayloadWidths()
     Equal(16, Marshal.SizeOf<WorldPosition>());
     Equal(16, Marshal.SizeOf<WorldPositionComponent>());
     Equal(2, Marshal.SizeOf<TerrainCellCoord>());
+    Equal(2, Marshal.SizeOf<TerrainVertexCoord>());
+    Equal(2, Marshal.SizeOf<TerrainHeight>());
+}
+
+static void TerrainFoundationLayoutIsFrozen()
+{
+    Equal(32, TerrainChunkFormat.MaterialCellEdge);
+    Equal(1_024, TerrainChunkFormat.MaterialCellCount);
+    Equal(33, TerrainChunkFormat.HeightVertexEdge);
+    Equal(1_089, TerrainChunkFormat.HeightVertexCount);
+    Equal(2_048, TerrainChunkFormat.TriangleCount);
+    Equal(6_144, TerrainChunkFormat.TriangleIndexCount);
+    Equal(10, TerrainChunkFormat.HeightQuantumMillimeters);
+    Equal(-327_680, TerrainChunkFormat.MinimumHeightMillimeters);
+    Equal(327_670, TerrainChunkFormat.MaximumHeightMillimeters);
+    Equal(2_048, TerrainChunkFormat.MaterialPlaneBytes);
+    Equal(2_178, TerrainChunkFormat.HeightPlaneBytes);
+    Equal(4_226, TerrainChunkFormat.FoundationBytes);
+    Equal(65, TerrainChunkFormat.DuplicatedBorderVertexCountPerChunk);
+    Equal(130, TerrainChunkFormat.DuplicatedBorderBytesPerChunk);
+
+    var maximumCell = new TerrainCellCoord(31, 31);
+    var maximumVertex = new TerrainVertexCoord(32, 32);
+    Equal(65, TerrainChunkFormat.GetMaterialIndex(new TerrainCellCoord(1, 2)));
+    Equal(67, TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(1, 2)));
+    Equal(1_023, TerrainChunkFormat.GetMaterialIndex(maximumCell));
+    Equal(1_088, TerrainChunkFormat.GetHeightIndex(maximumVertex));
+    Equal(16_000, maximumVertex.LocalXMillimeters);
+    Equal(16_000, maximumVertex.LocalZMillimeters);
+    Throws<ArgumentOutOfRangeException>(() => _ = new TerrainVertexCoord(33, 0));
+    Throws<ArgumentOutOfRangeException>(() => _ = new TerrainVertexCoord(0, 33));
+}
+
+static void TerrainHeightQuantizationIsDeterministic()
+{
+    True(TerrainHeight.TryFromMillimeters(0, out TerrainHeight zero));
+    Equal((short)0, zero.Units);
+    True(TerrainHeight.TryFromMillimeters(4, out TerrainHeight positiveBelow));
+    Equal(0, positiveBelow.Millimeters);
+    True(TerrainHeight.TryFromMillimeters(-4, out TerrainHeight negativeBelow));
+    Equal(0, negativeBelow.Millimeters);
+    True(TerrainHeight.TryFromMillimeters(5, out TerrainHeight positiveTie));
+    Equal(10, positiveTie.Millimeters);
+    True(TerrainHeight.TryFromMillimeters(-5, out TerrainHeight negativeTie));
+    Equal(-10, negativeTie.Millimeters);
+    True(TerrainHeight.TryFromMillimeters(TerrainChunkFormat.MinimumHeightMillimeters, out TerrainHeight minimum));
+    Equal(short.MinValue, minimum.Units);
+    True(TerrainHeight.TryFromMillimeters(TerrainChunkFormat.MaximumHeightMillimeters, out TerrainHeight maximum));
+    Equal(short.MaxValue, maximum.Units);
+    False(TerrainHeight.TryFromMillimeters(TerrainChunkFormat.MinimumHeightMillimeters - 1, out _));
+    False(TerrainHeight.TryFromMillimeters(TerrainChunkFormat.MaximumHeightMillimeters + 1, out _));
+    for (int units = short.MinValue; units <= short.MaxValue; units++)
+    {
+        int millimeters = units * TerrainChunkFormat.HeightQuantumMillimeters;
+        True(TerrainHeight.TryFromMillimeters(millimeters, out TerrainHeight roundTrip));
+        Equal(checked((short)units), roundTrip.Units);
+    }
+    for (int millimeters = -100; millimeters <= 100; millimeters++)
+    {
+        True(TerrainHeight.TryFromMillimeters(millimeters, out TerrainHeight quantized));
+        int expected = checked((int)Math.Round(
+            millimeters / (double)TerrainChunkFormat.HeightQuantumMillimeters,
+            MidpointRounding.AwayFromZero)) * TerrainChunkFormat.HeightQuantumMillimeters;
+        Equal(expected, quantized.Millimeters);
+    }
+}
+
+static void TerrainHeightPlaneEncodingIsTransactional()
+{
+    var source = new int[TerrainChunkFormat.HeightVertexCount];
+    var encoded = Enumerable.Repeat(new TerrainHeight(123), TerrainChunkFormat.HeightVertexCount).ToArray();
+    Throws<ArgumentException>(() =>
+        TerrainHeightEncoding.TryEncodePlane(source.AsSpan(1), encoded, out _, out _));
+    Throws<ArgumentException>(() =>
+        TerrainHeightEncoding.TryEncodePlane(source, encoded.AsSpan(1), out _, out _));
+    Throws<ArgumentException>(() =>
+        TerrainHeightEncoding.DecodePlane(encoded.AsSpan(1), source));
+    Throws<ArgumentException>(() =>
+        TerrainHeightEncoding.DecodePlane(encoded, source.AsSpan(1)));
+    var overlapping = new byte[TerrainChunkFormat.HeightVertexCount * sizeof(int)];
+    Throws<ArgumentException>(() => EncodeOverlappingTerrainPlane(overlapping));
+    Throws<ArgumentException>(() => DecodeOverlappingTerrainPlane(overlapping));
+    for (int index = 0; index < source.Length; index++)
+        source[index] = checked((index - 544) * 37);
+    source[700] = TerrainChunkFormat.MaximumHeightMillimeters + 1;
+    False(TerrainHeightEncoding.TryEncodePlane(source, encoded, out int invalid, out _));
+    Equal(700, invalid);
+    True(encoded.All(static value => value.Units == 123));
+
+    source[700] = 12_345;
+    True(TerrainHeightEncoding.TryEncodePlane(source, encoded, out invalid,
+        out TerrainHeightEncodingSummary summary));
+    Equal(-1, invalid);
+    Equal(5, summary.MaximumAbsoluteErrorMillimeters);
+    True(summary.TotalAbsoluteErrorMillimeters > 0);
+    var decoded = new int[TerrainChunkFormat.HeightVertexCount];
+    TerrainHeightEncoding.DecodePlane(encoded, decoded);
+    for (int index = 0; index < source.Length; index++)
+        True(Math.Abs(source[index] - decoded[index]) <= 5);
+}
+
+static void EncodeOverlappingTerrainPlane(byte[] storage)
+{
+    ReadOnlySpan<int> source = MemoryMarshal.Cast<byte, int>(storage);
+    Span<TerrainHeight> destination = MemoryMarshal.Cast<byte, TerrainHeight>(storage)
+        [..TerrainChunkFormat.HeightVertexCount];
+    TerrainHeightEncoding.TryEncodePlane(source, destination, out _, out _);
+}
+
+static void DecodeOverlappingTerrainPlane(byte[] storage)
+{
+    ReadOnlySpan<TerrainHeight> source = MemoryMarshal.Cast<byte, TerrainHeight>(storage)
+        [..TerrainChunkFormat.HeightVertexCount];
+    Span<int> destination = MemoryMarshal.Cast<byte, int>(storage);
+    TerrainHeightEncoding.DecodePlane(source, destination);
+}
+
+static void TerrainSharedEdgesAreBitExact()
+{
+    TerrainHeight[] left = EncodeDeterministicTerrainPlane(globalVertexOffsetX: 0);
+    TerrainHeight[] right = EncodeDeterministicTerrainPlane(
+        globalVertexOffsetX: GameWorldSpatialProfile.TerrainCellsPerChunkEdge);
+    for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
+    {
+        int leftIndex = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(32, z));
+        int rightIndex = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(0, z));
+        Equal(left[leftIndex], right[rightIndex]);
+    }
+}
+
+static void TerrainHeightCodecWarmedAllocationZero()
+{
+    var source = new int[TerrainChunkFormat.HeightVertexCount];
+    var encoded = new TerrainHeight[TerrainChunkFormat.HeightVertexCount];
+    var decoded = new int[TerrainChunkFormat.HeightVertexCount];
+    for (int index = 0; index < source.Length; index++) source[index] = index * 17 - 9_000;
+    True(TerrainHeightEncoding.TryEncodePlane(source, encoded, out _, out _));
+    TerrainHeightEncoding.DecodePlane(encoded, decoded);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    long checksum = 0;
+    for (int iteration = 0; iteration < 10_000; iteration++)
+    {
+        True(TerrainHeightEncoding.TryEncodePlane(source, encoded, out _, out _));
+        TerrainHeightEncoding.DecodePlane(encoded, decoded);
+        checksum += decoded[iteration % decoded.Length];
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+    True(checksum != 0);
+}
+
+static TerrainHeight[] EncodeDeterministicTerrainPlane(int globalVertexOffsetX)
+{
+    var source = new int[TerrainChunkFormat.HeightVertexCount];
+    for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
+    {
+        for (byte x = 0; x < TerrainChunkFormat.HeightVertexEdge; x++)
+        {
+            int globalX = globalVertexOffsetX + x;
+            source[TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(x, z))] =
+                checked((globalX * 137 + z * 251 - 4_000) % 30_001);
+        }
+    }
+    var encoded = new TerrainHeight[TerrainChunkFormat.HeightVertexCount];
+    True(TerrainHeightEncoding.TryEncodePlane(source, encoded, out _, out _));
+    return encoded;
 }
 
 static void PositionComponentIsPersistedCanonicalAuthority()

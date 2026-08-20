@@ -1,7 +1,8 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
 Status: active forward plan. T0.0 and T0.1 are accepted/frozen as of
-2026-08-20; T0.2 has not started. Revised from the
+2026-08-20; T0.2 implementation is complete and stopped for checkpoint review.
+Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
 Network N0 is accepted and frozen as the current remote-authority reference. T0 is the next major implementation milestone. Network N1 is deliberately deferred until T0 has proved the world/spatial/publication contracts that N1 can consume.
@@ -865,6 +866,62 @@ it does not claim publication, AOI, streaming, or Godot evidence before those
 systems exist. Final whole-pipeline validation of the fixed geometry belongs to
 T0.10. Do **not** rerun a 16/32/64 m search by default. Reopen chunk edge or 0.5 m cell size only if concrete evidence shows a correctness/capacity/performance failure that cannot be solved more locally, and document the rejection/evidence explicitly.
 **T0.2 gate:** the fixed 16 m chunk edge, 0.5 m terrain cell, 1 mm dynamic quantum, selected terrain height encoding/quantum, maximum supported local coordinates, and resulting representation evidence are written into the world-format contract and benchmark artifact.
+
+**T0.2 implementation checkpoint (2026-08-20): complete and stopped for
+review.** The proposed `TerrainHeights/v1` representation is a signed 16-bit
+height with a permanent 10 mm quantum. Its decoded range is
+`-327,680..327,670` mm; authored millimetres quantize to nearest 10 mm with
+midpoints away from zero and at most 5 mm error. Inputs outside that decoded
+range reject rather than clamp. Dynamic authoritative Y remains signed int32
+millimetres and is not constrained to the terrain lattice.
+
+The first authored-terrain contract requires the base heightfield to cover
+`-300,000..300,000` mm. This is a format/content bound, not a claim that dynamic
+entities share it. In the 64-chunk deterministic authored-style woods/coast/ridge
+fixture, 1 mm and 5 mm signed-16 candidates rejected 53,780 and 13,711 of 69,696
+stored samples. The selected 10 mm candidate rejected none; its mean absolute
+error was 2.491 mm and p95/max were 5 mm. A 25 mm candidate also fit with 12 mm
+maximum error, while exact int32 millimetres increased the height plane from
+2,178 to 4,356 bytes without an observed T0 requirement for that precision.
+This fixture is representative deterministic evidence only; production world
+content has not yet been authored, and T0.10 retains final whole-pipeline
+validation.
+
+The frozen per-chunk foundation is:
+
+```text
+materials       32 x 32 x ushort        2,048 B
+heights         33 x 33 x int16         2,178 B
+foundation                               4,226 B (4.127 KiB)
+triangles       2 x 1,024               2,048
+triangle indices                         6,144
+duplicated positive-edge vertices           65 / 130 B per standalone chunk
+terrain vertex local X/Z                0..16,000 mm inclusive
+dynamic entity local X/Z                0..15,999 mm inclusive
+```
+
+All 3,696 adjacent-edge comparisons in the 8 x 8 fixture were bit-identical.
+The fixture stored 69,696 height vertices versus 66,049 unique global vertices,
+making the exact finite-grid duplication 3,647 vertices / 7,294 bytes. One
+reusable authored-height/material/encoded-height scratch set is 8,582 bytes;
+timed encoding allocates 0 B. Exact T0.3 directory layout remains deliberately
+unfrozen. T0.2 records a 48-byte candidate minimum (`SpatialChunkKey` plus two
+offset/length references) solely as directory-accounting input; T0.3 owns the
+sectioned container decision.
+
+The Release observation records:
+
+```text
+encode int16 / 10 mm       4.502 ns/vertex mean / 4.530 ns p95 / 0 B
+decode int16 / 10 mm       0.543 ns/vertex mean / 0.547 ns p95 / 0 B
+copy exact int32 mm        0.040 ns/vertex mean / 0.042 ns p95 / 0 B
+```
+
+The candidate matrix, source/material distribution, scratch accounting, exact
+edge census, geometry bounds, and timings are preserved in
+[`terrain-t0.2-height-encoding-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.2-height-encoding-2026-08-20.json).
+No `WorldPack`, terrain source/loader, runtime terrain store, query, mesh,
+publication, Network, or Godot work is part of T0.2.
 
 ## T0.3 — immutable `WorldPack` and terrain source
 
