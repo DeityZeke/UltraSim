@@ -1,0 +1,57 @@
+@page "/forums/{sectionSlug}/{threadId:long}/posts/{postId:long}/edit"
+@model UltraSim.Portal.Pages.Forums.EditPostModel
+@{
+    ViewData["Title"] = Model.ThreadEntry?.IsOpeningPost == true ? "Edit Thread" : "Edit Post";
+}
+
+@if (Model.Section is null || Model.ThreadEntry is null || Model.PostEntry is null)
+{
+    <div class="status-error">
+        <p>Post not found.</p>
+    </div>
+}
+else
+{
+    <section class="portal-header">
+        <p class="eyebrow">Forum editor</p>
+        <h1>@(Model.ThreadEntry.IsOpeningPost ? "Edit Thread" : "Edit Post")</h1>
+        <p>
+            <a asp-page="/Forums/Section" asp-route-sectionSlug="@Model.Section.Slug">@Model.Section.Title</a>
+            /
+            <a asp-page="/Forums/Thread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id">@Model.ThreadEntry.Title</a>
+        </p>
+    </section>
+
+    <form method="post" class="claim-form forum-form">
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+        @if (Model.ThreadEntry.IsOpeningPost)
+        {
+            <label>
+                Thread Title
+                <input asp-for="Input.Title" />
+                <span asp-validation-for="Input.Title" class="text-danger"></span>
+            </label>
+        }
+
+        <label>
+            Content
+            <textarea asp-for="Input.Content"></textarea>
+            <span asp-validation-for="Input.Content" class="text-danger"></span>
+        </label>
+
+        @if (Model.RequiresModerationReason)
+        {
+            <label>
+                Moderation Reason
+                <input asp-for="Input.ModerationReason" />
+                <span asp-validation-for="Input.ModerationReason" class="text-danger"></span>
+            </label>
+        }
+
+        <div class="hero-actions">
+            <button type="submit">Save Changes</button>
+            <a class="button-secondary" asp-page="/Forums/Thread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id" asp-route-pageNumber="@Model.PageNumber">Cancel</a>
+        </div>
+    </form>
+}

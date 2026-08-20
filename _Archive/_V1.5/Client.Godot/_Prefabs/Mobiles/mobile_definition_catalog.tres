@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="MobileDefinitionCatalog" format=3 uid="uid://cnl4jj0yb0vxf"]
+
+[ext_resource type="Script" uid="uid://bsiorxhcnms1b" path="res://Client.Godot/_Prefabs/Mobiles/MobileDefinitionCatalog.cs" id="1_catalog"]
+[ext_resource type="Resource" path="res://Client.Godot/_Prefabs/Mobiles/Mannequin/mannequin_definition.tres" id="2_default"]
+[ext_resource type="Resource" path="res://Client.Godot/_Prefabs/Mobiles/x_bot/x_bot_definition.tres" id="3_xbot"]
+[ext_resource type="Resource" path="res://Client.Godot/_Prefabs/Mobiles/y_bot/y_bot_definition.tres" id="4_ybot"]
+[ext_resource type="Script" uid="uid://bca5lrrgwi1nk" path="res://Client.Godot/_Prefabs/Mobiles/MobileCatalogEntry.cs" id="5_entry"]
+
+[sub_resource type="Resource" id="Entry_PlayerMale"]
+script = ExtResource("5_entry")
+SharedActorDefinitionId = 4097
+Definition = ExtResource("4_ybot")
+
+[sub_resource type="Resource" id="Entry_PlayerFemale"]
+script = ExtResource("5_entry")
+SharedActorDefinitionId = 4098
+Definition = ExtResource("3_xbot")
+
+[resource]
+script = ExtResource("1_catalog")
+DefaultDefinition = ExtResource("2_default")
+Entries = Array[ExtResource("5_entry")]([SubResource("Entry_PlayerMale"), SubResource("Entry_PlayerFemale")])

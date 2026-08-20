@@ -1,0 +1,49 @@
+@page
+@model UltraSim.Portal.Pages.Admin.Servers.ActionModel
+@{
+    ViewData["Title"] = "Server Admin Action";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>@Model.ActionLabel</h1>
+        <p>Apply a registry admin action with a required audit reason.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        @if (Model.Record != null)
+        {
+            <div class="claim-form">
+                <div>
+                    <strong>@Model.Record.Row.DisplayName</strong><br />
+                    <span class="detail-muted">@Model.Record.Row.ServerId</span><br />
+                    <span class="detail-muted">@Model.Record.Row.ConnectHint</span>
+                </div>
+
+                <form method="post">
+                    <input type="hidden" asp-for="ServerId" />
+                    <input type="hidden" asp-for="ActionName" />
+                    <label>
+                        <span>Reason</span>
+                        <textarea asp-for="Reason" placeholder="Required audit reason"></textarea>
+                        <span asp-validation-for="Reason" class="text-danger"></span>
+                    </label>
+
+                    <div asp-validation-summary="ModelOnly" class="status-error"></div>
+
+                    <div class="hero-actions">
+                        <button type="submit">@Model.ActionLabel</button>
+                        <a class="button-secondary" asp-page="/Admin/Servers/Index">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        }
+    </section>
+</div>

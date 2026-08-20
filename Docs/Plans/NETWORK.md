@@ -33,6 +33,14 @@ N0 proved the difficult semantic foundations:
 The remaining sparse problem is therefore treated as a world-spatial architecture
 problem, not an invitation to keep tuning packet code.
 
+N0's shared UDP host is still controlled IPv4 loopback topology, not a public WAN
+acceptor. A later hosted-Network checkpoint must separately earn pinned deployment
+identity, listener-lifetime cookie keys, bounded/rate-limited unauthenticated
+handshake admission, amplification limits, IPv6 and path-rebinding policy, and
+connection sharding with explicit cross-owner packet-memory transfer. Do not fold
+that lifecycle/security work into N1's chunk-replication experiment, and do not
+quote same-process loopback population as public remote CCU.
+
 N1 tests the original chunk-native AOI model against that frozen N0 baseline.
 
 The N1 milestone is:

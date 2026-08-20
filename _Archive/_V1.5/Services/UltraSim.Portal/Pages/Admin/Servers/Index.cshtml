@@ -1,0 +1,118 @@
+@page
+@using UltraSim.Discovery
+@model UltraSim.Portal.Pages.Admin.Servers.IndexModel
+@{
+    ViewData["Title"] = "Admin Servers";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Server Listings</h1>
+        <p>All registry records including active, disabled, and delisted listings.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        <form method="get" class="server-filter">
+            <label>
+                <span>Lifecycle</span>
+                <select asp-for="Lifecycle">
+                    <option value="">All</option>
+                    <option value="@ServerListingLifecycleState.Active">Active</option>
+                    <option value="@ServerListingLifecycleState.Delisted">Delisted</option>
+                    <option value="@ServerListingLifecycleState.Disabled">Disabled</option>
+                </select>
+            </label>
+            <label>
+                <span>Health</span>
+                <select asp-for="Health">
+                    <option value="">All</option>
+                    <option value="@ServerListingHealthState.Online">Online</option>
+                    <option value="@ServerListingHealthState.Stale">Stale</option>
+                    <option value="@ServerListingHealthState.Offline">Offline</option>
+                    <option value="@ServerListingHealthState.Pending">Pending</option>
+                </select>
+            </label>
+            <button type="submit">Apply</button>
+        </form>
+
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <div class="status-error">@Model.ErrorMessage</div>
+        }
+        else if (Model.Records.Count == 0)
+        {
+            <div class="status-empty">No server records matched the current admin filter.</div>
+        }
+        else
+        {
+            <div class="server-table admin-server-list">
+                @foreach (var record in Model.Records)
+                {
+                    <article class="admin-server-card">
+                        <div class="admin-server-actions-bar">
+                            <div class="admin-actions-cell admin-actions-block">
+                                <a asp-page="/Admin/Servers/Action" asp-route-serverId="@record.Row.ServerId" asp-route-actionName="disable">Disable</a>
+                                <a asp-page="/Admin/Servers/Action" asp-route-serverId="@record.Row.ServerId" asp-route-actionName="restore">Restore</a>
+                                <a asp-page="/Admin/Servers/Action" asp-route-serverId="@record.Row.ServerId" asp-route-actionName="retention-reset">Reset TTL</a>
+                                <a class="danger-link" asp-page="/Admin/Servers/Action" asp-route-serverId="@record.Row.ServerId" asp-route-actionName="host-ban">Ban Host</a>
+                                <a class="danger-link" asp-page="/Admin/Servers/Action" asp-route-serverId="@record.Row.ServerId" asp-route-actionName="delete">Delete</a>
+                            </div>
+                        </div>
+
+                        <div class="admin-server-row admin-server-row-top">
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Name</span>
+                                <span class="admin-field-value">@record.Row.DisplayName</span>
+                            </div>
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Target</span>
+                                <span class="admin-field-value cell-wrap">@(record.Row.ConnectHint ?? "-")</span>
+                            </div>
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Trust</span>
+                                <span class="admin-field-value">@record.Row.TrustLevel</span>
+                            </div>
+                        </div>
+
+                        <div class="admin-server-row admin-server-row-mid">
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Lifecycle</span>
+                                <span class="admin-field-value">@record.Row.LifecycleState</span>
+                            </div>
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Health</span>
+                                <span class="admin-field-value">@record.Row.HealthState</span>
+                            </div>
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Players</span>
+                                <span class="admin-field-value">@record.Row.CurrentUsers / @(record.Row.MaxUsers?.ToString() ?? "-")</span>
+                            </div>
+                            <div class="admin-server-field">
+                                <span class="admin-field-label">Last Poll</span>
+                                <span class="admin-field-value">@(record.LastSuccessfulPollUtc?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss") + "Z" ?? "Never")</span>
+                            </div>
+                        </div>
+
+                        <div class="admin-server-owner">
+                            <span class="admin-field-label">Owner</span>
+                            <span class="admin-field-value cell-wrap">@(record.OwnerAccountId ?? "Unclaimed")</span>
+                        </div>
+
+                        <div class="admin-server-meta">
+                            <div><strong>Server ID:</strong> <span class="cell-wrap">@record.Row.ServerId</span></div>
+                            <div><strong>Registration ID:</strong> <span class="cell-wrap">@record.RegistrationId</span></div>
+                            <div><strong>Created:</strong> @record.CreatedAtUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")Z</div>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+</div>

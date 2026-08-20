@@ -48,9 +48,11 @@ public sealed class GameProjectionService : IDisposable
     private readonly Dictionary<ParticipantId, int> _applicationEventConsumerMap;
     private readonly GameAuthoritativeInput[] _inputs;
     private readonly GameSimulationCommand[] _commandScratch;
+    private readonly Dictionary<ParticipantId, ulong> _inputSequenceScratch;
     private readonly ParticipantId[] _participantScratch;
     private readonly Dictionary<ParticipantId, ParticipantState> _participants;
     private readonly int _participantMapCapacity;
+    private readonly int _inputSequenceScratchCapacity;
     private readonly int _applicationEventConsumerMapCapacity;
     private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _captureOperation;
     private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _rebuildOperation;
@@ -155,6 +157,8 @@ public sealed class GameProjectionService : IDisposable
         _applicationEventConsumerMapCapacity = _applicationEventConsumerMap.EnsureCapacity(limits.MaximumParticipants);
         _inputs = new GameAuthoritativeInput[limits.AuthoritativeInputCapacity];
         _commandScratch = new GameSimulationCommand[limits.AuthoritativeInputCapacity];
+        _inputSequenceScratch = new Dictionary<ParticipantId, ulong>(limits.MaximumParticipants);
+        _inputSequenceScratchCapacity = _inputSequenceScratch.EnsureCapacity(limits.MaximumParticipants);
         _participantScratch = new ParticipantId[limits.MaximumParticipants];
         _participants = new Dictionary<ParticipantId, ParticipantState>(limits.MaximumParticipants);
         _participantMapCapacity = _participants.EnsureCapacity(limits.MaximumParticipants);
@@ -688,6 +692,7 @@ public sealed class GameProjectionService : IDisposable
         int accepted = 0;
         int rejected = 0;
         ulong expectedGeneration = 0;
+        _inputSequenceScratch.Clear();
         for (int index = 0; index < _inputCount; index++)
         {
             ref readonly GameAuthoritativeInput input = ref _inputs[index];
@@ -697,13 +702,9 @@ public sealed class GameProjectionService : IDisposable
                 rejected++;
                 continue;
             }
-            ulong sequenceFloor = state.LastAcceptedInputSequence;
-            for (int previous = accepted - 1; previous >= 0; previous--)
-            {
-                if (_commandScratch[previous].Participant != input.Participant) continue;
-                sequenceFloor = _commandScratch[previous].ClientSequence;
-                break;
-            }
+            ulong sequenceFloor = _inputSequenceScratch.TryGetValue(input.Participant, out ulong staged)
+                ? staged
+                : state.LastAcceptedInputSequence;
             if (input.ClientSequence <= sequenceFloor ||
                 (expectedGeneration != 0 && state.Session.GenerationId != expectedGeneration))
             {
@@ -718,6 +719,7 @@ public sealed class GameProjectionService : IDisposable
                 input.ClientSequence,
                 input.Kind,
                 input.TickMarkerDelta);
+            _inputSequenceScratch[input.Participant] = input.ClientSequence;
         }
 
         IngressCommit commit = default;
@@ -789,6 +791,7 @@ public sealed class GameProjectionService : IDisposable
         _runtime.GenerationPublished -= HandleGenerationPublished;
         _participants.Clear();
         _applicationEventConsumerMap.Clear();
+        _inputSequenceScratch.Clear();
         _fault = null;
         FaultInjector = null;
     }
@@ -1395,6 +1398,8 @@ public sealed class GameProjectionService : IDisposable
         (long)_commandScratch.Length * Unsafe.SizeOf<GameSimulationCommand>() +
         (long)_participantScratch.Length * Unsafe.SizeOf<ParticipantId>() +
         (long)_participantMapCapacity * (sizeof(int) + Unsafe.SizeOf<ParticipantMapEntryEstimate>()) +
+        (long)_inputSequenceScratchCapacity *
+        (sizeof(int) + Unsafe.SizeOf<InputSequenceMapEntryEstimate>()) +
         (long)_applicationEventConsumerMapCapacity *
         (sizeof(int) + Unsafe.SizeOf<ApplicationEventConsumerMapEntryEstimate>()));
 
@@ -1448,6 +1453,12 @@ public sealed class GameProjectionService : IDisposable
         int Next,
         ParticipantId Key,
         ParticipantState Value);
+
+    private readonly record struct InputSequenceMapEntryEstimate(
+        uint HashCode,
+        int Next,
+        ParticipantId Key,
+        ulong Value);
 
     private readonly record struct ApplicationEventConsumerMapEntryEstimate(
         uint HashCode,

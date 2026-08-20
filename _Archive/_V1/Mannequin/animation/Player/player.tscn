@@ -1,0 +1,43 @@
+[gd_scene load_steps=3 format=3 uid="uid://bw540rnrcvoaq"]
+
+[ext_resource type="Script" uid="uid://day4ksbt7svei" path="res://Player/SimpleMovement.cs" id="1_4ntmi"]
+[ext_resource type="PackedScene" uid="uid://dn2pjta04w65i" path="res://Scenes/Characters/Mannequin.tscn" id="2_btcbx"]
+
+[node name="Player" type="Node3D" node_paths=PackedStringArray("characterBody", "animationDriver", "Visual")]
+script = ExtResource("1_4ntmi")
+characterBody = NodePath("Mannequin")
+animationDriver = NodePath("Mannequin/Mannequin_Mesh/AnimatorDriver")
+Visual = NodePath("Mannequin/Mannequin_Mesh")
+
+[node name="Mannequin" parent="." instance=ExtResource("2_btcbx")]
+
+[node name="Skeleton3D" parent="Mannequin/Mannequin_Mesh" index="0"]
+bones/0/position = Vector3(-0.005001483, 0.9955738, 0.013098761)
+bones/0/rotation = Quaternion(-0.032907657, -0.046528194, -0.025336644, 0.99805325)
+bones/1/rotation = Quaternion(-0.032568615, 0.012391842, 0.024142804, 0.99910104)
+bones/2/rotation = Quaternion(0.00991536, 0.0018996345, 0.014550613, 0.9998432)
+bones/3/rotation = Quaternion(0.009529628, 0.0018242763, 0.014486874, 0.999848)
+bones/4/rotation = Quaternion(0.107963845, -0.0017474404, 0.004780022, 0.9941418)
+bones/5/rotation = Quaternion(0.04767441, -0.0016672754, 0.0052107205, 0.99884796)
+bones/7/rotation = Quaternion(-0.679509, -0.32441133, 0.5295311, -0.3906682)
+bones/8/rotation = Quaternion(0.47192168, 0.14538525, 0.053310405, 0.86793494)
+bones/9/rotation = Quaternion(0.0016514742, -0.0027877397, 0.013849003, 0.9998989)
+bones/10/rotation = Quaternion(0.07168814, -0.23447382, -0.014890515, 0.96936125)
+bones/31/rotation = Quaternion(0.68294424, -0.31602135, 0.5453523, 0.36920023)
+bones/32/rotation = Quaternion(0.39475033, -0.2384276, -0.07157485, 0.88442165)
+bones/33/rotation = Quaternion(0.006653367, 0.0028700794, -0.057737432, 0.99830556)
+bones/34/rotation = Quaternion(0.06925576, 0.12340037, 0.035633385, 0.9892959)
+bones/55/rotation = Quaternion(0.13342506, 0.05847437, 0.98652875, -0.07442798)
+bones/56/rotation = Quaternion(-0.107467405, -0.016881086, 0.033956155, 0.9934852)
+bones/57/rotation = Quaternion(0.47151795, -0.02845934, -0.010255515, 0.8813376)
+bones/60/rotation = Quaternion(-0.08939125, -0.022565119, 0.9954084, -0.025732074)
+bones/61/rotation = Quaternion(-0.069739535, 0.08533021, -0.024402933, 0.9936094)
+bones/62/rotation = Quaternion(0.5145999, 0.017829435, -0.02930774, 0.85674393)
+bones/63/rotation = Quaternion(0.3464071, 0.061485283, -0.018032918, 0.9358935)
+
+[node name="Camera_Anchor" type="Node3D" parent="Mannequin"]
+
+[node name="Camera3D" type="Camera3D" parent="Mannequin/Camera_Anchor"]
+transform = Transform3D(0.7071067, -0.6123724, 0.35355332, 0, 0.49999994, 0.8660254, -0.7071067, -0.6123724, 0.35355332, 3, 8, 3)
+
+[editable path="Mannequin"]

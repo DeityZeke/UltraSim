@@ -1,0 +1,60 @@
+@page
+@model UltraSim.Portal.Pages.Admin.Bans.IndexModel
+@{
+    ViewData["Title"] = "Admin Bans";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Host Bans</h1>
+        <p>Active host/IP bans applied to registry registration and polling.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        @if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+        {
+            <div class="status-error">@Model.ErrorMessage</div>
+        }
+        else if (Model.Records.Count == 0)
+        {
+            <div class="status-empty">No active host bans.</div>
+        }
+        else
+        {
+            <div class="server-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Host</th>
+                            <th>Issued</th>
+                            <th>Last Applied</th>
+                            <th>Reason</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var record in Model.Records)
+                    {
+                        <tr>
+                            <td class="cell-wrap">@record.Host</td>
+                            <td>@record.IssuedAtUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                            <td>@(record.LastAppliedAtUtc?.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss") + "Z" ?? "-")</td>
+                            <td class="cell-wrap">@(string.IsNullOrWhiteSpace(record.Reason) ? "-" : record.Reason)</td>
+                            <td>
+                                <a asp-page="/Admin/Bans/Action" asp-route-host="@record.Host" asp-route-actionName="lift">Lift</a>
+                            </td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>

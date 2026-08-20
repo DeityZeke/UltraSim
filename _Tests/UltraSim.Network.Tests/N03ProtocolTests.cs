@@ -43,6 +43,7 @@ internal static class N03ProtocolTests
         Run("PayloadReservationsFollowManifestAndLaneContracts", PayloadReservationsFollowManifestAndLaneContracts);
         Run("RetainedPayloadPressureIsExact", RetainedPayloadPressureIsExact);
         Run("RetainedPayloadByteBudgetsRejectAndCompactTransactionally", RetainedPayloadByteBudgetsRejectAndCompactTransactionally);
+        Run("ReliableFlightIndicesSurviveBoundedHighChurn", ReliableFlightIndicesSurviveBoundedHighChurn);
         Run("InboundBudgetCannotStarveOutboundControl", InboundBudgetCannotStarveOutboundControl);
         Run("AbortiveShutdownIsBalancedAndIdempotent", AbortiveShutdownIsBalancedAndIdempotent);
         Run("N03WarmedSecureDeliveryAllocatesZero", WarmedSecureDeliveryAllocatesZero);
@@ -1080,6 +1081,67 @@ internal static class N03ProtocolTests
         receiver.Emit(0);
         byte[] outbound = new byte[s_datagrams.MaximumDatagramBytes];
         True(link.A.TryReceive(outbound, out _));
+    }
+
+    private static void ReliableFlightIndicesSurviveBoundedHighChurn()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            MaximumReliableMessages = 4,
+            MaximumReceivedMessages = 4,
+            SentPacketCapacity = 4,
+            InitialCongestionWindowPackets = 4,
+            MaximumCongestionWindowPackets = 4,
+        };
+        using ProtocolLoopback loopback = Create(default, s_datagrams, limits);
+        Span<byte> payload = stackalloc byte[8];
+
+        // Establish all code paths before the allocation observation.
+        for (ulong value = 0; value < 4; value++)
+        {
+            WriteUInt64(payload, value);
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Control), payload));
+        }
+        for (int pump = 0; pump < 64 && loopback.Server.ReceivedQueued != 4; pump++)
+            loopback.Pump();
+        Equal(4, loopback.Server.ReceivedQueued);
+        while (loopback.Server.TryConsumeReceived()) { }
+        for (int pump = 0; pump < 64 && loopback.Client.ReliableQueued != 0; pump++)
+            loopback.Pump();
+        Equal(0, loopback.Client.ReliableQueued);
+
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        ulong checksum = 0;
+        const int batchCount = 1_024;
+        for (int batch = 0; batch < batchCount; batch++)
+        {
+            for (int item = 0; item < 4; item++)
+            {
+                ulong value = checked((ulong)(batch * 4 + item));
+                WriteUInt64(payload, value);
+                Equal(NetworkQueueStatus.Accepted,
+                    loopback.Client.TryQueue(Id(NetworkLane.Control), payload));
+            }
+
+            for (int pump = 0; pump < 64 && loopback.Server.ReceivedQueued != 4; pump++)
+                loopback.Pump();
+            Equal(4, loopback.Server.ReceivedQueued);
+            for (int item = 0; item < 4; item++)
+            {
+                True(loopback.Server.TryPeekReceived(out _, out ReadOnlySpan<byte> delivered));
+                checksum = checked(checksum + ReadUInt64(delivered));
+                True(loopback.Server.TryConsumeReceived());
+            }
+            for (int pump = 0; pump < 64 && loopback.Client.ReliableQueued != 0; pump++)
+                loopback.Pump();
+            Equal(0, loopback.Client.ReliableQueued);
+            Equal(0, loopback.Client.GetSnapshot().InFlightPackets);
+        }
+
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Equal(8_386_560UL, checksum);
+        Equal(4_100UL, loopback.Client.GetSnapshot().ReliableAcknowledgements);
     }
 
     private static void WarmedSecureDeliveryAllocatesZero()

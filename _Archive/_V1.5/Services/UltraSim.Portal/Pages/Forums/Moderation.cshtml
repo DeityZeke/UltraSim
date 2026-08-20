@@ -1,0 +1,230 @@
+@page "/forums/moderation"
+@model UltraSim.Portal.Pages.Forums.ModerationModel
+@{
+    ViewData["Title"] = "Forum Moderation";
+}
+
+<section class="portal-header">
+    <p class="eyebrow">Forum moderation</p>
+    <h1>Moderation Dashboard</h1>
+    <p>Review thread state, hidden posts, and recent forum moderation activity.</p>
+    <div class="hero-actions">
+        <a class="button-secondary" asp-page="/Forums/Index">Back To Forums</a>
+        <a class="button-secondary" asp-page="/Admin/Audit" asp-route-ForumOnly="true">Open Forum Audit Log</a>
+    </div>
+</section>
+
+<form method="get" class="server-filter forum-filter">
+    <label>
+        Section
+        <select name="SectionSlug">
+            <option value="">All Sections</option>
+            @foreach (var forumSection in Model.Sections)
+            {
+                @if (string.Equals(forumSection.Slug, Model.SectionSlug, StringComparison.OrdinalIgnoreCase))
+                {
+                    <option value="@forumSection.Slug" selected>@forumSection.Title</option>
+                }
+                else
+                {
+                    <option value="@forumSection.Slug">@forumSection.Title</option>
+                }
+            }
+        </select>
+    </label>
+    <button type="submit">Apply</button>
+    @if (!string.IsNullOrWhiteSpace(Model.SectionSlug))
+    {
+        <a class="button-secondary" asp-page="/Forums/Moderation">Clear</a>
+    }
+</form>
+
+<section class="metric-grid">
+    <article class="metric-card">
+        <span class="metric-label">Scope</span>
+        <strong class="metric-value">@Model.CurrentFilterLabel</strong>
+    </article>
+    <article class="metric-card">
+        <span class="metric-label">Hidden Threads</span>
+        <strong class="metric-value">@Model.HiddenThreadCount</strong>
+    </article>
+    <article class="metric-card">
+        <span class="metric-label">Locked Threads</span>
+        <strong class="metric-value">@Model.LockedThreadCount</strong>
+    </article>
+    <article class="metric-card">
+        <span class="metric-label">Pinned Threads</span>
+        <strong class="metric-value">@Model.PinnedThreadCount</strong>
+    </article>
+    <article class="metric-card">
+        <span class="metric-label">Hidden Posts</span>
+        <strong class="metric-value">@Model.HiddenPostCount</strong>
+    </article>
+</section>
+
+<section class="metric-section">
+    <div class="metric-section-header">
+        <h2>Recent Moderation Audit</h2>
+    </div>
+    @if (Model.RecentAudit.Count == 0)
+    {
+        <div class="status-empty">
+            <p>No forum audit records matched this view.</p>
+        </div>
+    }
+    else
+    {
+        <div class="server-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Actor</th>
+                        <th>Action</th>
+                        <th>Target</th>
+                        <th>Section</th>
+                        <th>Result</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var record in Model.RecentAudit)
+                {
+                    <tr>
+                        <td>@record.CreatedUtc.ToString("u")</td>
+                        <td>@record.Actor <span class="stacked-meta">@record.ActorRole</span></td>
+                        <td>@record.ActionType</td>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(record.SectionSlug) && record.ThreadId.HasValue)
+                            {
+                                <a asp-page="/Forums/Thread"
+                                   asp-route-sectionSlug="@record.SectionSlug"
+                                   asp-route-threadId="@record.ThreadId.Value">@record.TargetLabel</a>
+                            }
+                            else
+                            {
+                                @record.TargetLabel
+                            }
+                        </td>
+                        <td>@(record.SectionTitle ?? "-")</td>
+                        <td>@record.Result</td>
+                        <td>@record.Reason</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section class="metric-section">
+    <div class="metric-section-header">
+        <h2>Moderated Threads</h2>
+    </div>
+    @if (Model.Threads.Count == 0)
+    {
+        <div class="status-empty">
+            <p>No matching moderated threads.</p>
+        </div>
+    }
+    else
+    {
+        <section class="forum-thread-list">
+            @foreach (var thread in Model.Threads)
+            {
+                <article class="forum-thread-card">
+                    <div class="forum-thread-main">
+                        <div>
+                            <h2>
+                                <a asp-page="/Forums/Thread"
+                                   asp-route-sectionSlug="@thread.SectionSlug"
+                                   asp-route-threadId="@thread.ThreadId">@thread.Title</a>
+                            </h2>
+                            <div class="forum-meta-row">
+                                <span>@thread.SectionTitle</span>
+                                <span>@thread.AuthorName</span>
+                                @if (!string.IsNullOrWhiteSpace(thread.AuthorBadge))
+                                {
+                                    <span class="forum-role-badge @thread.AuthorBadgeCssClass">@thread.AuthorBadge</span>
+                                }
+                                <span>Updated @thread.UpdatedUtc.ToLocalTime().ToString("g")</span>
+                            </div>
+                        </div>
+                        <div class="forum-thread-flags">
+                            @if (thread.IsPinned)
+                            {
+                                <span class="detail-pill detail-pill-sm">Pinned</span>
+                            }
+                            @if (thread.IsLocked)
+                            {
+                                <span class="detail-pill detail-pill-sm">Locked</span>
+                            }
+                            @if (thread.IsHidden)
+                            {
+                                <span class="detail-pill detail-pill-sm">Hidden</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="forum-meta-row">
+                        <a asp-page="/Forums/MoveThread" asp-route-sectionSlug="@thread.SectionSlug" asp-route-threadId="@thread.ThreadId">Move</a>
+                        <a asp-page="/Forums/DeleteThread" asp-route-sectionSlug="@thread.SectionSlug" asp-route-threadId="@thread.ThreadId">Delete</a>
+                        <span>Last post @thread.LastPostedUtc.ToLocalTime().ToString("g")</span>
+                    </div>
+                </article>
+            }
+        </section>
+    }
+</section>
+
+<section class="metric-section">
+    <div class="metric-section-header">
+        <h2>Hidden Posts</h2>
+    </div>
+    @if (Model.HiddenPosts.Count == 0)
+    {
+        <div class="status-empty">
+            <p>No matching hidden posts.</p>
+        </div>
+    }
+    else
+    {
+        <section class="forum-thread-list">
+            @foreach (var post in Model.HiddenPosts)
+            {
+                <article class="forum-thread-card">
+                    <div class="forum-thread-main">
+                        <div>
+                            <h2>
+                                <a asp-page="/Forums/Thread"
+                                   asp-route-sectionSlug="@post.SectionSlug"
+                                   asp-route-threadId="@post.ThreadId">@post.ThreadTitle</a>
+                            </h2>
+                            <div class="forum-meta-row">
+                                <span>@post.SectionTitle</span>
+                                <span>@post.AuthorName</span>
+                                @if (!string.IsNullOrWhiteSpace(post.AuthorBadge))
+                                {
+                                    <span class="forum-role-badge @post.AuthorBadgeCssClass">@post.AuthorBadge</span>
+                                }
+                                <span>Updated @post.UpdatedUtc.ToLocalTime().ToString("g")</span>
+                            </div>
+                        </div>
+                        <div class="forum-thread-flags">
+                            <span class="detail-pill detail-pill-sm">Hidden Post</span>
+                        </div>
+                    </div>
+                    <div class="forum-meta-row">
+                        <a asp-page="/Forums/Thread"
+                           asp-route-sectionSlug="@post.SectionSlug"
+                           asp-route-threadId="@post.ThreadId">Open Thread</a>
+                        <a asp-page="/Forums/DeletePost"
+                           asp-route-sectionSlug="@post.SectionSlug"
+                           asp-route-threadId="@post.ThreadId"
+                           asp-route-postId="@post.PostId">Delete Post</a>
+                        <span>Created @post.CreatedUtc.ToLocalTime().ToString("g")</span>
+                    </div>
+                </article>
+            }
+        </section>
+    }
+</section>

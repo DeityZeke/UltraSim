@@ -1,0 +1,120 @@
+[gd_scene format=3 uid="uid://8hfkadatblkc"]
+
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/Mobiles/CharacterRoot.tscn" id="1_4nh5p"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/Camera/OrbitFollowCameraRig.tscn" id="2_2ttgw"]
+[ext_resource type="Script" uid="uid://yi78qpoxqnr2" path="res://Client.Godot/Controllers/LocalPlayerController.cs" id="3_2l8k0"]
+[ext_resource type="Script" uid="uid://6ghl8dxuv6i5" path="res://Client.Godot/World/ClientCharacterWorld.cs" id="4_qwqv8"]
+[ext_resource type="Resource" path="res://Client.Godot/_Prefabs/Mobiles/Mannequin/mannequin_definition.tres" id="5_j2f1f"]
+[ext_resource type="Resource" path="res://Client.Godot/_Prefabs/Mobiles/mobile_definition_catalog.tres" id="6_catalog"]
+[ext_resource type="Script" uid="uid://rjq40fcq7st1" path="res://Client.Godot/GodotClientRuntimeRoot.cs" id="6_wlvbi"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/ClientRuntimeHud.tscn" id="7_68gk2"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/ClientChatMenu.tscn" id="16_chat_menu"]
+[ext_resource type="Texture2D" uid="uid://bba2lu7gawnlh" path="res://Client.Godot/textures/texture_07.png" id="8_legxy"]
+[ext_resource type="Script" path="res://Client.Godot/_Prefabs/Mobiles/MobileCatalogNode.cs" id="9_catalog_node"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/ClientAppShell.tscn" id="10_app_shell"]
+[ext_resource type="Script" path="res://Client.Godot/UI/UiManager.cs" id="11_ui_manager"]
+[ext_resource type="Script" path="res://Client.Godot/UI/WorldCanvasManager.cs" id="12_world_canvas"]
+[ext_resource type="Script" path="res://Client.Godot/UI/HudCanvasManager.cs" id="13_hud_canvas"]
+[ext_resource type="Script" path="res://Client.Godot/UI/MenuCanvasManager.cs" id="14_menu_canvas"]
+[ext_resource type="Script" path="res://Client.Godot/UI/DebugCanvasManager.cs" id="15_debug_canvas"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_i4oc6"]
+sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+
+[sub_resource type="Sky" id="Sky_ig1kv"]
+sky_material = SubResource("ProceduralSkyMaterial_i4oc6")
+
+[sub_resource type="Environment" id="Environment_vrb22"]
+background_mode = 2
+sky = SubResource("Sky_ig1kv")
+tonemap_mode = 2
+glow_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_4o44m"]
+albedo_texture = ExtResource("8_legxy")
+uv1_scale = Vector3(16, 16, 16)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_d4678"]
+size = Vector2(16, 16)
+
+[node name="Client" type="Node" unique_id=1450510654]
+script = ExtResource("6_wlvbi")
+CharacterWorldPath = NodePath("World/DynamicEntities")
+LocalPlayerControllerPath = NodePath("Controller")
+CameraRigPath = NodePath("World/CameraRig")
+WorldCanvasManagerPath = NodePath("UILayers/World")
+MenuCanvasManagerPath = NodePath("UILayers/Menus")
+SessionMode = 1
+AutoStartSessionOnReady = false
+SpawnPreviewActorOnReady = false
+PreviewActorId = 2
+NetworkPort = 42042
+
+[node name="Controller" type="Node" parent="." unique_id=1345956797]
+script = ExtResource("3_2l8k0")
+EnablePreviewControls = false
+
+[node name="MobileCatalog" type="Node" parent="." unique_id=1462024100]
+script = ExtResource("9_catalog_node")
+Catalog = ExtResource("6_catalog")
+
+[node name="World" type="Node3D" parent="." unique_id=238684719]
+
+[node name="Map" type="Node3D" parent="World" unique_id=1500798152]
+
+[node name="TerrainChunks" type="Node3D" parent="World/Map" unique_id=195511289]
+
+[node name="StaticChunks" type="Node3D" parent="World/Map" unique_id=1465692661]
+
+[node name="MapEnvironment" type="Node3D" parent="World/Map" unique_id=1741577191]
+
+[node name="DynamicEntities" type="Node3D" parent="World" unique_id=23310126]
+script = ExtResource("4_qwqv8")
+CharacterRootScene = ExtResource("1_4nh5p")
+DefaultMobileDefinition = ExtResource("5_j2f1f")
+MobileCatalogNodePath = NodePath("../../MobileCatalog")
+SpawnPreviewActorOnReady = false
+
+[node name="Effects" type="Node3D" parent="World" unique_id=303004844]
+
+[node name="CameraRig" parent="World" unique_id=1254082647 instance=ExtResource("2_2ttgw")]
+
+[node name="UILayers" type="Node" parent="." unique_id=939903561]
+script = ExtResource("11_ui_manager")
+ShowMainMenuOnReady = true
+RuntimeRootPath = NodePath("..")
+WorldCanvasPath = NodePath("World")
+HudCanvasPath = NodePath("HUD")
+MenuCanvasPath = NodePath("Menus")
+DebugCanvasPath = NodePath("Debug")
+
+[node name="World" type="CanvasLayer" parent="UILayers" unique_id=808479717]
+script = ExtResource("12_world_canvas")
+CharacterWorldPath = NodePath("../../World/DynamicEntities")
+
+[node name="HUD" type="CanvasLayer" parent="UILayers" unique_id=1689658682]
+script = ExtResource("13_hud_canvas")
+HudScene = ExtResource("7_68gk2")
+
+[node name="Menus" type="CanvasLayer" parent="UILayers" unique_id=219289072]
+script = ExtResource("14_menu_canvas")
+AppShellScene = ExtResource("10_app_shell")
+SharedChatScene = ExtResource("16_chat_menu")
+ScreenHostPath = NodePath("ScreenHost")
+
+[node name="Debug" type="CanvasLayer" parent="UILayers" unique_id=1854217748]
+script = ExtResource("15_debug_canvas")
+
+[node name="tmp" type="Node" parent="." unique_id=1588271118]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="tmp" unique_id=2005244750]
+environment = SubResource("Environment_vrb22")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="tmp" unique_id=1264201855]
+transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
+shadow_enabled = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="tmp" unique_id=1828437300]
+material_override = SubResource("StandardMaterial3D_4o44m")
+mesh = SubResource("PlaneMesh_d4678")

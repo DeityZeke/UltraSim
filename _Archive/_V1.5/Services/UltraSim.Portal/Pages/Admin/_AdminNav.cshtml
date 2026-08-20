@@ -1,0 +1,23 @@
+@{
+    string currentPath = ViewContext.HttpContext.Request.Path.Value ?? string.Empty;
+
+    string NavClass(string exactPath, string? prefixPath = null)
+    {
+        bool isActive =
+            string.Equals(currentPath, exactPath, StringComparison.OrdinalIgnoreCase) ||
+            (!string.IsNullOrWhiteSpace(prefixPath) &&
+             currentPath.StartsWith(prefixPath, StringComparison.OrdinalIgnoreCase));
+
+        return isActive
+            ? "admin-link active"
+            : "admin-link";
+    }
+}
+
+<nav class="admin-nav-links">
+    <a class="@NavClass("/Admin", "/Admin/Index")" asp-page="/Admin/Index">Dashboard</a>
+    <a class="@NavClass("/Admin/Servers", "/Admin/Servers/")" asp-page="/Admin/Servers/Index">Servers</a>
+    <a class="@NavClass("/Admin/Bans", "/Admin/Bans/")" asp-page="/Admin/Bans/Index">Bans</a>
+    <a class="@NavClass("/Admin/Accounts", "/Admin/Accounts/")" asp-page="/Admin/Accounts/Index">Accounts</a>
+    <a class="@NavClass("/Admin/Audit")" asp-page="/Admin/Audit">Audit</a>
+</nav>

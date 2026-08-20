@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="MobileDefinition" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/_Prefabs/Mobiles/MobileDefinition.cs" id="1_w6qmu"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/Mobiles/Mannequin/mannequin_visual.tscn" id="2_0736v"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/Mobiles/Mannequin/mannequin_collision.tscn" id="3_ngvmb"]
+
+[resource]
+script = ExtResource("1_w6qmu")
+Id = &"mobile.mannequin"
+VisualScene = ExtResource("2_0736v")
+CollisionScene = ExtResource("3_ngvmb")
+AnimationProfileId = &"mannequin"
+CollisionRadius = 0.3
+CollisionHeight = 1.8
+VisualOffset = Vector3(0, 0, 0)
+CameraPivotOffset = Vector3(0, 1.6, 0)
+NameplateOffset = Vector3(0, 2, 0)
+EffectsOffset = Vector3(0, 0.9, 0)
+VisualRotationDegrees = Vector3(0, 0, 0)
+VisualScale = Vector3(1, 1, 1)

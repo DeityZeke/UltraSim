@@ -1,0 +1,66 @@
+[gd_scene format=3 uid="uid://c6s0g4ook4l4x"]
+
+[ext_resource type="Script" uid="uid://cuvfqeqle1lmf" path="res://Client.Godot/UI/StartMenuScreen.cs" id="1_script"]
+
+[node name="StartMenuScreen" type="Control" unique_id=1594970735]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+SinglePlayerButtonPath = NodePath("Center/Panel/VBox/SinglePlayerButton")
+MultiplayerButtonPath = NodePath("Center/Panel/VBox/MultiplayerButton")
+SettingsButtonPath = NodePath("Center/Panel/VBox/SettingsButton")
+ExitButtonPath = NodePath("Center/Panel/VBox/ExitButton")
+StatusLabelPath = NodePath("Center/Panel/VBox/StatusLabel")
+
+[node name="Center" type="CenterContainer" parent="." unique_id=474959710]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Panel" type="PanelContainer" parent="Center" unique_id=1149731933]
+custom_minimum_size = Vector2(360, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Center/Panel" unique_id=1323659669]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Center/Panel/VBox" unique_id=1068116394]
+layout_mode = 2
+text = "Ultra Sim"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="Center/Panel/VBox" unique_id=901638479]
+layout_mode = 2
+text = " "
+horizontal_alignment = 1
+
+[node name="SinglePlayerButton" type="Button" parent="Center/Panel/VBox" unique_id=171547507]
+layout_mode = 2
+text = "Single Player"
+
+[node name="MultiplayerButton" type="Button" parent="Center/Panel/VBox" unique_id=607706617]
+layout_mode = 2
+text = "Multiplayer"
+
+[node name="SettingsButton" type="Button" parent="Center/Panel/VBox" unique_id=551628982]
+layout_mode = 2
+text = "Settings"
+
+[node name="ExitButton" type="Button" parent="Center/Panel/VBox" unique_id=182550849]
+layout_mode = 2
+text = "Exit"
+
+[node name="StatusLabel" type="Label" parent="Center/Panel/VBox" unique_id=1332490326]
+layout_mode = 2
+text = "select a mode"
+horizontal_alignment = 1
+autowrap_mode = 3

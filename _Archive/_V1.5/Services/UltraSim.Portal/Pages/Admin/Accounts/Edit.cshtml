@@ -1,0 +1,72 @@
+@page
+@using UltraSim.Portal.Authorization
+@model UltraSim.Portal.Pages.Admin.Accounts.EditModel
+@{
+    ViewData["Title"] = "Manage Account";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Manage Account</h1>
+        <p>Role assignment with protected PrimaryOwner rules and audit reasons.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        @if (Model.TargetUser != null)
+        {
+            <div class="claim-form">
+                <div>
+                    <strong>@(Model.TargetUser.Email ?? Model.TargetUser.UserName ?? Model.TargetUser.Id)</strong><br />
+                    <span class="detail-muted">Current Role: @Model.CurrentRole</span><br />
+                    @if (Model.TargetUser.IsPrimaryOwner)
+                    {
+                        <span class="detail-muted">Protected PrimaryOwner account</span>
+                    }
+                </div>
+
+                @if (!Model.CanEditTarget)
+                {
+                    <div class="status-error">This account cannot be modified through the normal admin UI.</div>
+                }
+                else
+                {
+                    <form method="post">
+                        <input type="hidden" asp-for="Id" />
+
+                        <label>
+                            <span>Role</span>
+                            <select asp-for="SelectedRole">
+                            @foreach (string role in Model.AssignableRoles)
+                            {
+                                <option value="@role">@role</option>
+                            }
+                            </select>
+                        </label>
+
+                        <label>
+                            <span>Reason</span>
+                            <textarea asp-for="Reason" placeholder="Required audit reason"></textarea>
+                            <span asp-validation-for="Reason" class="text-danger"></span>
+                        </label>
+
+                        <div asp-validation-summary="ModelOnly" class="status-error"></div>
+
+                        <div class="hero-actions">
+                            <a class="button-secondary" asp-page="/Admin/Accounts/Detail" asp-route-id="@Model.TargetUser.Id">Account Detail</a>
+                            <a class="button-secondary" asp-page="/Admin/Accounts/Index">Back to Accounts</a>
+                            <button type="submit">Apply Role</button>
+                            <a class="button-secondary" asp-page="/Admin/Accounts/Index">Cancel</a>
+                        </div>
+                    </form>
+                }
+            </div>
+        }
+    </section>
+</div>

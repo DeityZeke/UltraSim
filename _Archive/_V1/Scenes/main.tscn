@@ -1,0 +1,63 @@
+[gd_scene format=3 uid="uid://dpdngux01ogyp"]
+
+[ext_resource type="Script" uid="uid://ccoexd7034ge6" path="res://_OLD/_temp/HybridBootstrapper.cs" id="1_bo1nx"]
+[ext_resource type="Script" uid="uid://c0bmkl4wjtvou" path="res://_OLD/UltraSim/CameraController.cs" id="2_bo1nx"]
+[ext_resource type="Script" uid="uid://bk33g8a6t0rvy" path="res://_OLD/Client/UI/PerfOverlay.cs" id="3_8gbba"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_7u77a"]
+sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+ground_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
+
+[sub_resource type="Sky" id="Sky_jjgbg"]
+sky_material = SubResource("ProceduralSkyMaterial_7u77a")
+
+[sub_resource type="Environment" id="Environment_bo1nx"]
+background_mode = 2
+sky = SubResource("Sky_jjgbg")
+tonemap_mode = 2
+glow_enabled = true
+
+[sub_resource type="SphereMesh" id="SphereMesh_bo1nx"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_bo1nx"]
+size = Vector3(32, 0.1, 32)
+
+[node name="Main" type="Node3D" unique_id=810605979]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1180672425]
+transform = Transform3D(-0.8660254, -0.43301278, 0.25, 0, 0.49999997, 0.86602545, -0.50000006, 0.75, -0.43301266, 0, 0, 0)
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=111659117]
+environment = SubResource("Environment_bo1nx")
+
+[node name="WorldECS" type="Node3D" parent="." unique_id=1509107791]
+script = ExtResource("1_bo1nx")
+EnablePulsingMovement = true
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=63363195]
+current = true
+script = ExtResource("2_bo1nx")
+InitialPosition = Vector3(0, 1.8, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=479608491]
+mesh = SubResource("SphereMesh_bo1nx")
+
+[node name="Control" type="Control" parent="." unique_id=1168968485]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="MeshInstance3D2" type="MeshInstance3D" parent="." unique_id=1900861310]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 0, 16)
+mesh = SubResource("BoxMesh_bo1nx")
+
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=314490908]
+
+[node name="Control" type="Control" parent="CanvasLayer" unique_id=1743404719]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("3_8gbba")

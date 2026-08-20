@@ -139,9 +139,12 @@ handoff is not claimed. N0.5 keeps socket I/O and protocol buffers on the same
 owner thread, so no handoff exists. A future socket worker must admit per-owner
 pools or one transactional ownership-transfer-plus-publication primitive first.
 
-Reliable-head, ACK-record, and deterministic-datagram selection still use bounded
-linear scans. They are acceptable at admitted N0.3 capacities; N0.7/N0.10 scale
-measurements decide whether another index is earned.
+Reliable-head and deterministic-datagram selection still use bounded linear
+scans. ACK lookup and sent-record allocation no longer do: a pre-reserved packet
+number index, free-record stack, and fragment-to-flight index remove repeated
+full-array searches while preserving the same loss/RTO policy. Deadline discovery
+remains a bounded scan only when the cached earliest deadline is reached; reliable
+loss/Bulk profiles decide whether a deadline queue is ever earned.
 
 An N0.3 ACK is specifically a **transport-delivery ACK**: the remote protocol peer
 authenticated the packet and admitted its reliable payload into bounded receive or
@@ -242,6 +245,11 @@ proofs, AEAD, replay, delivery ACK, lanes, fragmentation, and application meanin
 remain the N0.3/N0.4 contracts. Connected-path filtering rejects unrelated source
 endpoints before protocol parsing.
 
+The ordinary UDP construction path requires an explicit pinned server public key.
+Controlled in-process evidence uses the deliberately named
+`TryCreateSelfTrustedLoopback`; an empty key no longer silently changes production-
+shaped construction into trust-on-first-use.
+
 Normal pumping uses monotonic milliseconds for RTT, retransmission, loss discovery,
 and admitted pacing. Empty receives poll readiness rather than allocate a normal
 `SocketException`; the warmed secure UDP delivery test remains 0 B. Beginning
@@ -263,9 +271,12 @@ its own `NetworkProtocolPeer`, cryptographic state, replay/ACK windows, lane
 queues, congestion state, and application semantics. There are no workers,
 shards, cross-connection packet batches, compression, or alternate protocol.
 
-The shared socket requests the aggregate send/receive capacity formerly spread
-across the server sockets it replaces, capped by the existing socket-buffer
-contract. Client socket and protocol capacities are unchanged. This matters:
+By default the shared socket requests aggregate send/receive capacity formerly
+spread across the server sockets it replaces, capped by the existing socket-buffer
+contract. `AggregateSocketSendBufferBytes` and
+`AggregateSocketReceiveBufferBytes` provide independent deployment budgets;
+snapshots report configured and OS-observed listener sizes separately. Client
+socket and protocol capacities are unchanged. This matters:
 using one connection's buffer for the aggregate listener caused kernel-level
 burst loss that was invisible to managed queue counters. The permanent
 64-session initial-flight regression proves exact delivery without
@@ -273,9 +284,29 @@ retransmission when the admitted burst fits that aggregate contract.
 
 Session capacity, demux queues, listener receive budget, path registration,
 connection generation reuse, unknown paths, drain/retirement, socket bytes, and
-known managed payload are explicit and observable. The current public
-constructor remains controlled loopback evidence, not an Internet listener or
-multi-owner socket host.
+known managed payload are explicit and observable. Snapshots split known server-
+owned and in-process-client-owned reservation so combined benchmark memory cannot
+masquerade as production server memory. The pinned constructor and explicitly
+self-trusted loopback factory both still create controlled loopback clients;
+neither is an Internet listener or multi-owner socket host.
+
+Native send batching adds one ownership distinction. Endpoint `Accepted` means a
+private datagram copy entered the bounded listener queue; listener `Sent` and
+`SentBytes` advance only after kernel submission. Reliable application proof is
+still ACK-based. A prolonged queued-but-unsubmitted datagram can start protocol
+RTO early, and a later fatal socket failure can discard unreliable traffic. A
+future production acceptor must therefore define queue-age/fatal-transport policy
+and fault-inject `EAGAIN`, `ENOBUFS`, and partial submissions.
+
+### Deferred production host boundary
+
+The current loopback host is not a public CCU acceptor. That future topology must
+earn listener-lifetime cookie keys, bounded unauthenticated handshake admission,
+amplification/rate limits, IPv6 and path-rebinding policy, and owner-thread/core
+sharding with explicit packet-memory transfer. Those are production Network-host
+requirements, not safe micro-patches to the accepted single-owner loopback proof.
+They remain deferred while Terrain T0 is the active repository milestone; N1 or a
+dedicated hosted-Network milestone must measure them before claiming remote CCU.
 
 ### N0.10.2 reliable-only ACK elicitation
 

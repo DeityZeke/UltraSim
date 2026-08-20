@@ -1136,6 +1136,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         int receivedPayloadMaximumBytesMovedPerCompaction = 0;
         UnreliableAggregationCensus unreliableAggregation = default;
         long reserved = 0;
+        long serverReserved = 0;
+        long clientReserved = 0;
         long socketBuffers = 0;
         for (int index = 0; index < _bots.Length; index++)
         {
@@ -1222,6 +1224,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             if (_sharedHost is null)
             {
                 reserved = checked(reserved + snapshot.Client.ReservedBytes + snapshot.Server.ReservedBytes);
+                clientReserved = checked(clientReserved + snapshot.Client.ReservedBytes);
+                serverReserved = checked(serverReserved + snapshot.Server.ReservedBytes);
                 socketBuffers = checked(socketBuffers + snapshot.ConfiguredSocketBufferBytes);
             }
         }
@@ -1240,6 +1244,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             listenerNativeSendCalls = sharedSnapshot.Listener.NativeSendCalls;
             listenerNativeSentDatagrams = sharedSnapshot.Listener.NativeSentDatagrams;
             reserved = sharedSnapshot.KnownReservedBytes;
+            serverReserved = sharedSnapshot.KnownServerReservedBytes;
+            clientReserved = sharedSnapshot.KnownClientReservedBytes;
             socketBuffers = sharedSnapshot.ConfiguredSocketBufferBytes;
             capacityDrops = SaturatingAdd(capacityDrops, sharedSnapshot.Listener.CapacityDrops);
             socketSendCalls = SaturatingAdd(socketSendCalls, sharedSnapshot.Listener.SendCalls);
@@ -1462,6 +1468,18 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             Diagnostics = new Dictionary<string, double>
             {
                 ["reserved_bytes_per_client"] = reserved / (double)_bots.Length,
+                ["known_server_network_reserved_bytes"] = serverReserved,
+                ["known_client_network_reserved_bytes"] = clientReserved,
+                ["known_server_network_reserved_bytes_per_client"] =
+                    serverReserved / (double)_bots.Length,
+                ["known_client_network_reserved_bytes_per_client"] =
+                    clientReserved / (double)_bots.Length,
+                ["configured_listener_socket_buffer_bytes"] =
+                    sharedSnapshot.ConfiguredListenerSocketBufferBytes,
+                ["configured_client_socket_buffer_bytes"] =
+                    sharedSnapshot.ConfiguredClientSocketBufferBytes,
+                ["actual_listener_socket_buffer_bytes"] =
+                    sharedSnapshot.Listener.ActualSocketBufferBytes,
                 ["configured_socket_bytes_per_client"] = socketBuffers / (double)_bots.Length,
                 ["wire_bytes_per_input"] = logicalInputs == 0 ? 0 : bytes / (double)logicalInputs,
                 ["mean_wire_bytes_per_datagram"] = datagrams == 0 ? 0 : bytes / (double)datagrams,

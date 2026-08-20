@@ -1,0 +1,62 @@
+[gd_scene format=3 uid="uid://pe7o7ee376j7"]
+
+[node name="LoginMenu" type="Control" unique_id=1687804589]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+size_flags_horizontal = 4
+
+[node name="Panel" type="Panel" parent="." unique_id=659465454]
+custom_minimum_size = Vector2(275, 160)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -128.0
+offset_top = -75.0
+offset_right = 128.0
+offset_bottom = 75.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Panel" unique_id=1880989895]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -125.0
+offset_top = -75.0
+offset_right = 125.0
+offset_bottom = 75.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Username" type="LineEdit" parent="Panel/VBoxContainer" unique_id=1565833018]
+layout_mode = 2
+placeholder_text = "USERNAME"
+alignment = 1
+
+[node name="Password" type="LineEdit" parent="Panel/VBoxContainer" unique_id=502089928]
+layout_mode = 2
+placeholder_text = "PASSWORD"
+alignment = 1
+
+[node name="Button_Connect" type="Button" parent="Panel/VBoxContainer" unique_id=644824264]
+layout_mode = 2
+text = "CONNECT (PLAY)"
+
+[node name="Connection_Status" type="RichTextLabel" parent="Panel/VBoxContainer" unique_id=893275140]
+layout_mode = 2
+text = "STATUS - NOT CONNECTED
+"
+fit_content = true
+tab_size = 5
+horizontal_alignment = 1
+vertical_alignment = 3

@@ -1,0 +1,81 @@
+@page
+@model UltraSim.Portal.Pages.Admin.Accounts.IndexModel
+@{
+    ViewData["Title"] = "Admin Accounts";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Accounts</h1>
+        <p>Role management and protected primary-owner visibility.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        <form method="get" class="server-filter">
+            <label>
+                <span>Search</span>
+                <input asp-for="Search" placeholder="Email, username, display name, or user id" />
+            </label>
+
+            <label>
+                <span>Role</span>
+                <select asp-for="Role">
+                    <option value="">All roles</option>
+                    @foreach (string role in Model.AvailableRoles)
+                    {
+                        <option value="@role">@role</option>
+                    }
+                </select>
+            </label>
+
+            <button type="submit">Apply Filters</button>
+            <a class="button-secondary" asp-page="/Admin/Accounts/Index">Clear</a>
+        </form>
+
+        <div class="server-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Account</th>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Protected</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @if (Model.Accounts.Count == 0)
+                {
+                    <tr>
+                        <td colspan="5">No accounts matched the current filters.</td>
+                    </tr>
+                }
+                else
+                {
+                    @foreach (var account in Model.Accounts)
+                    {
+                        <tr>
+                            <td>@account.DisplayNameOrEmail</td>
+                            <td>@(account.UserName ?? "-")</td>
+                            <td>@account.EffectiveRole</td>
+                            <td>@(account.IsPrimaryOwner ? "PrimaryOwner" : "-")</td>
+                            <td>
+                                <a asp-page="/Admin/Accounts/Detail" asp-route-id="@account.UserId">View</a>
+                                |
+                                <a asp-page="/Admin/Accounts/Edit" asp-route-id="@account.UserId">Manage</a>
+                            </td>
+                        </tr>
+                    }
+                }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>

@@ -1,0 +1,22 @@
+@page
+@model UltraSim.Portal.Pages.Account.Servers.AddModel
+@{
+    ViewData["Title"] = "Add Server";
+    Layout = "/Areas/Identity/Pages/Account/Manage/_Layout.cshtml";
+}
+
+<div class="status-empty">
+    The portal submits the claim to the registry immediately.
+    Verification completes after the next successful poll if the server publishes a matching
+    ownership token hash.
+</div>
+
+<form method="post" class="claim-form">
+    <div asp-validation-summary="ModelOnly" class="status-error" data-valmsg-summary="true"></div>
+    <partial name="_ServerFormPartial" for="Input" />
+
+    <div class="hero-actions page-actions">
+        <button type="submit">Submit Claim</button>
+        <a class="button-secondary" asp-page="/Account/Servers/Index">Cancel</a>
+    </div>
+</form>

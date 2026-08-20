@@ -1,0 +1,31 @@
+[gd_scene format=3 uid="uid://blvm45m5egobn"]
+
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/Mobiles/Mannequin/mannequin_character.tscn" id="1_k85ya"]
+
+[sub_resource type="Environment" id="1_env8e"]
+background_mode = 2
+background_color = Color(0.188235, 0.203922, 0.235294, 1)
+ambient_light_source = 2
+ambient_light_color = Color(1, 1, 1, 1)
+ambient_light_energy = 0.6
+
+[sub_resource type="PlaneMesh" id="2_planeq"]
+size = Vector2(12, 12)
+
+[node name="MobilePreview" type="Node3D" unique_id=1064441053]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1518503007]
+environment = SubResource("1_env8e")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=1106517923]
+transform = Transform3D(0.866025, 0, -0.5, 0.12941, 0.965926, 0.224144, 0.482963, -0.258819, 0.836516, 0, 4, 0)
+shadow_enabled = true
+
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=1614105]
+mesh = SubResource("2_planeq")
+
+[node name="Mannequin" parent="." unique_id=1754814399 instance=ExtResource("1_k85ya")]
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=821433146]
+transform = Transform3D(0.6628161, 0, 0.74878204, 0, 1, 0, -0.74878246, 0, 0.66281617, 2.5, 1.8, 4.5)
+current = true

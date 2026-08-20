@@ -1,0 +1,43 @@
+@page "/forums/{sectionSlug}/{threadId:long}/move"
+@model UltraSim.Portal.Pages.Forums.MoveThreadModel
+@{
+    ViewData["Title"] = "Move Thread";
+}
+
+@if (Model.CurrentSection is null || Model.ThreadEntry is null)
+{
+    <div class="status-error">
+        <p>Thread not found.</p>
+    </div>
+}
+else
+{
+    <section class="portal-header">
+        <p class="eyebrow">Forum moderation</p>
+        <h1>Move Thread</h1>
+        <p>
+            Move <strong>@Model.ThreadEntry.Title</strong> from @Model.CurrentSection.Title to a different section.
+        </p>
+    </section>
+
+    <form method="post" class="claim-form forum-form">
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+        <label>
+            Target Section
+            <select asp-for="Input.TargetSectionId" asp-items="Model.AvailableSections"></select>
+            <span asp-validation-for="Input.TargetSectionId" class="text-danger"></span>
+        </label>
+
+        <label>
+            Reason
+            <input asp-for="Input.Reason" />
+            <span asp-validation-for="Input.Reason" class="text-danger"></span>
+        </label>
+
+        <div class="hero-actions">
+            <button type="submit">Move Thread</button>
+            <a class="button-secondary" asp-page="/Forums/Thread" asp-route-sectionSlug="@Model.CurrentSection.Slug" asp-route-threadId="@Model.ThreadEntry.Id">Cancel</a>
+        </div>
+    </form>
+}

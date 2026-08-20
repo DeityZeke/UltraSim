@@ -1,0 +1,65 @@
+@page
+@using UltraSim.Portal.Models
+@model UltraSim.Portal.Pages.Account.Servers.IndexModel
+@{
+    ViewData["Title"] = "My Servers";
+    Layout = "/Areas/Identity/Pages/Account/Manage/_Layout.cshtml";
+}
+
+<div class="hero-actions page-actions">
+    <a class="button-primary" asp-page="/Account/Servers/Add">Add Server</a>
+</div>
+
+@if (Model.Claims.Count == 0)
+{
+    <div class="status-empty">You do not have any server claims yet.</div>
+}
+else
+{
+    <div class="server-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Target</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th>Registry Id</th>
+                    <th>Edit</th>
+                    <th>Delete</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (ServerClaim claim in Model.Claims)
+            {
+                <tr class="server-row-main">
+                    <td>
+                        <strong>@claim.DisplayName</strong>
+                    </td>
+                    <td><code>@claim.TargetHost:@claim.TargetPort</code></td>
+                    <td>@claim.Status</td>
+                    <td>@claim.UpdatedUtc.ToString("u")</td>
+                    <td>@(claim.RequestedServerId ?? "-")</td>
+                    <td>
+                        <a class="action-link action-link-edit" asp-page="/Account/Servers/Edit" asp-route-id="@claim.Id">Edit</a>
+                    </td>
+                    <td>
+                        <a class="action-link action-link-delete" asp-page="/Account/Servers/Delete" asp-route-id="@claim.Id">Delete</a>
+                    </td>
+                </tr>
+                <tr class="server-row-description">
+                    <td colspan="7">
+                        <div class="description-panel">
+                            @(string.IsNullOrWhiteSpace(claim.Description) ? "No description yet." : claim.Description)
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(claim.LastError))
+                        {
+                            <div class="description-note">@claim.LastError</div>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}

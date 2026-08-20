@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- Disable xUnit parallelization — ECS uses static registries that would collide. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Include ECS source directly. The ECS layer is intentionally engine-agnostic
+      (no Godot types) so it compiles cleanly under the standard .NET SDK without
+      the Godot.NET.Sdk. Because these files are compiled into this assembly the
+      tests can access 'internal' members (e.g. ComponentManager.Clear()).
+    -->
+    <Compile Include="..\..\UltraSim\ECS\**\*.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,28 @@
+@page
+@model UltraSim.Portal.Pages.IndexModel
+@{
+    ViewData["Title"] = "Home";
+}
+
+<section class="hero">
+    <div class="hero-copy">
+        <p class="eyebrow">Local-first platform surface</p>
+        <h1>UltraSim Portal</h1>
+        <p>
+            This is the first web consumer for the registry. It gives the platform a second live
+            surface for listings, detail views, account flows, platform forums, and owner/admin tooling.
+        </p>
+        <div class="hero-actions">
+            <a class="button-primary" asp-page="/Servers/Index">Browse Servers</a>
+            <a class="button-secondary" asp-page="/Forums/Index">Visit Forums</a>
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <a class="button-secondary" asp-page="/Account/Servers/Index">My Servers</a>
+            }
+            else
+            {
+                <a class="button-secondary" asp-area="Identity" asp-page="/Account/Register">Create Account</a>
+            }
+        </div>
+    </div>
+</section>

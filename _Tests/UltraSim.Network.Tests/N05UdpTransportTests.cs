@@ -53,6 +53,10 @@ internal static class N05UdpTransportTests
         using var serverIdentity = NetworkServerIdentity.CreateEphemeral();
         using var wrongIdentity = NetworkServerIdentity.CreateEphemeral();
         False(UdpProtocolSession.TryCreate(
+            s_protocol, s_udp, out UdpProtocolSession? unpinned, out _,
+            CoreNetworkProtocol.Manifest, serverIdentity));
+        True(unpinned is null);
+        False(UdpProtocolSession.TryCreate(
             s_protocol, s_udp, out UdpProtocolSession? rejected, out _,
             CoreNetworkProtocol.Manifest, serverIdentity,
             wrongIdentity.PublicKey.ToArray()));
@@ -296,7 +300,7 @@ internal static class N05UdpTransportTests
 
     private static UdpProtocolSession Create()
     {
-        True(UdpProtocolSession.TryCreate(
+        True(UdpProtocolSession.TryCreateSelfTrustedLoopback(
             s_protocol, s_udp, out UdpProtocolSession? session, out _));
         return session!;
     }

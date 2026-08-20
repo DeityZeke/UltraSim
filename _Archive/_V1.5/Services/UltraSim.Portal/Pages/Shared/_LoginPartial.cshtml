@@ -1,0 +1,25 @@
+@using Microsoft.AspNetCore.Identity
+@using UltraSim.Portal.Models
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+
+<ul class="nav-account">
+@if (SignInManager.IsSignedIn(User))
+{
+    @if (User.IsInRole("PrimaryOwner") || User.IsInRole("Owner") || User.IsInRole("Admin"))
+    {
+        <li><a asp-area="" asp-page="/Admin/Index">Admin</a></li>
+    }
+    <li><a asp-area="Identity" asp-page="/Account/Manage/Index">Account</a></li>
+    <li>
+        <form asp-area="Identity" asp-page="/Account/Logout" asp-route-returnUrl="@Url.Page("/Index", new { area = "" })" method="post">
+            <button type="submit" class="link-button">Logout</button>
+        </form>
+    </li>
+}
+else
+{
+    <li><a asp-area="Identity" asp-page="/Account/Register">Register</a></li>
+    <li><a asp-area="Identity" asp-page="/Account/Login">Login</a></li>
+}
+</ul>

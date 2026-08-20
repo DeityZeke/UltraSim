@@ -1,0 +1,26 @@
+@page "{id:int}"
+@model UltraSim.Portal.Pages.Account.Servers.DeleteModel
+@{
+    ViewData["Title"] = "Delete Server";
+    Layout = "/Areas/Identity/Pages/Account/Manage/_Layout.cshtml";
+}
+
+<div class="status-error">
+    You are about to delete the server <strong>@Model.ServerName</strong>.
+    Type <code>DELETE</code> and press OK to confirm, or cancel to back out.
+</div>
+
+<form method="post" class="claim-form">
+    <div asp-validation-summary="ModelOnly" class="status-error" data-valmsg-summary="true"></div>
+
+    <label>
+        Confirmation
+        <input asp-for="ConfirmationText" />
+        <span asp-validation-for="ConfirmationText"></span>
+    </label>
+
+    <div class="hero-actions page-actions">
+        <button type="submit">OK</button>
+        <a class="button-secondary" asp-page="/Account/Servers/Index">Cancel</a>
+    </div>
+</form>

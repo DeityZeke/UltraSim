@@ -1,0 +1,30 @@
+
+using System;
+
+using Godot;
+
+namespace ExportMenus
+{
+    [Tool]
+    public partial class TestParent : Menu
+    {
+        public TestParent() : base()
+        {
+            AddLabel("", 0f, 0f, new Color("ffffffff") );
+
+            AddTextureRect("res://icon.svg", 0f, 0f, 128f, 128f );
+            {
+                AddRichText("", 0f, 0f, 40f, 40f ,2);
+                {
+                    AddLabel("", 0f, 0f, new Color("ffffffff") ,3);
+                }
+
+                AddButton("", 0f, 0f, 8f, 8f, OnButton__0_0_8_8_Pressed ,2);
+            }
+        }
+
+         private void OnButton__0_0_8_8_Pressed()
+        {
+        }
+    }
+}

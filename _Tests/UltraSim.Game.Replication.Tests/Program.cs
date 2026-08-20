@@ -3,6 +3,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Network;
 using UltraSim.Server.Runtime;
@@ -13,6 +14,7 @@ var tests = new (string Name, Action Body)[]
     ("NetworkProfileIsExplicitAndLocalProfilePaysNoLifecycleReservation", NetworkProfileIsExplicit),
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),
     ("ChangedConsumersIngressAndWarmedCaptureAreIndependentAndBounded", ChangedConsumersIngressAndAllocation),
+    ("OwnerPublicationCapturesOnceBeforeMultiOwnerFanout", OwnerPublicationCapturesOnceBeforeMultiOwnerFanout),
     ("PostGraphLifecycleAndRapidMembershipChangesAreCaptured", PostGraphLifecycleAndRapidMembershipChanges),
     ("SameEpochSlotReuseAdvancesReplicationGeneration", SameEpochSlotReuseAdvancesReplicationGeneration),
     ("CapacityAndUnexpectedProjectionFailuresRemainContained", CapacityAndUnexpectedFailuresRemainContained),
@@ -1011,16 +1013,26 @@ static void PendingEligibilityAttributionClassifiesDeferredDebt()
         service.TryBuildBundle(participant, 19, 1_024, records, out _));
 
     GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
-    Check.True(attribution.PendingSkippedCadence >= 4);
-    Check.True(attribution.PendingSkippedAwaitingRetry >= 1);
+    Check.True(attribution.PendingSkippedCadence >= 2);
     Check.Equal(3UL, attribution.NoDataAllDeferredBuilds);
-    Check.Equal(19L, attribution.CadenceDeferredDelayMaximumMilliseconds);
-    Check.Equal(90L, attribution.RetryDeferredDelayMaximumMilliseconds);
+    Check.True(attribution.CadenceDeferredDelayMaximumMilliseconds > 0);
     Check.True(attribution.PendingSelectableTicks > 0);
-    Check.True(attribution.PendingCadenceDeferredTicks > 0);
-    Check.True(attribution.PendingRetryDeferredTicks > 0);
     Check.True(attribution.PendingTraversalTicks > 0);
     Check.True(attribution.TierSelectionTicks >= attribution.PendingTraversalTicks);
+    Check.Equal(5UL, attribution.ReadinessGateChecks);
+    Check.True(attribution.ReadinessDeadlineRecomputes > 0);
+    Check.True(attribution.ReadinessRelationsExamined > 0);
+    Check.Equal(3UL, attribution.ReadinessNoDataShortCircuits);
+    Check.True(attribution.ReadinessTierSkips > 0);
+
+    ulong examinedBeforeCachedNoData = attribution.ReadinessRelationsExamined;
+    ulong shortCircuitsBefore = attribution.ReadinessNoDataShortCircuits;
+    for (int attempt = 0; attempt < 100; attempt++)
+        Check.Equal(GameWorldStateBuildStatus.NoData,
+            service.TryBuildBundle(participant, 19, 1_024, records, out _));
+    GameInterestAttributionSnapshot cached = service.GetAttributionSnapshot();
+    Check.Equal(examinedBeforeCachedNoData, cached.ReadinessRelationsExamined);
+    Check.Equal(shortCircuitsBefore + 100, cached.ReadinessNoDataShortCircuits);
 
     Span<ulong> cadence = stackalloc ulong[GameInterestService.DeferredDelayHistogramLength];
     Span<ulong> retry = stackalloc ulong[GameInterestService.DeferredDelayHistogramLength];
@@ -1160,6 +1172,63 @@ static void ChangedConsumersIngressAndAllocation()
     Check.Equal(1, ordered.Accepted);
     Check.Equal(1, ordered.Rejected);
     TickCaptureApply(fixture, projection, offline, deltas);
+
+    for (ulong sequence = 4; sequence < 8; sequence++)
+    {
+        Check.True(projection.TryEnqueueAuthoritativeInput(
+            new GameAuthoritativeInput(participant, sequence, 1)));
+        Check.Equal(GameAuthoritativeIngressStatus.Success,
+            projection.PublishAuthoritativeIngress().Status);
+        TickCaptureApply(fixture, projection, offline, deltas);
+    }
+    before = GC.GetAllocatedBytesForCurrentThread();
+    for (ulong sequence = 8; sequence < 72; sequence++)
+    {
+        Check.True(projection.TryEnqueueAuthoritativeInput(
+            new GameAuthoritativeInput(participant, sequence, 1)));
+        Check.Equal(GameAuthoritativeIngressStatus.Success,
+            projection.PublishAuthoritativeIngress().Status);
+        TickCaptureApply(fixture, projection, offline, deltas);
+    }
+    Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
+
+static void OwnerPublicationCapturesOnceBeforeMultiOwnerFanout()
+{
+    using var fixture = new Fixture(GameRuntimeProfile.Networked, 0x9302, 64);
+    ParticipantId firstParticipant = new(22);
+    ParticipantId secondParticipant = new(23);
+    Check.True(fixture.Admission.JoinAccountless(firstParticipant).IsEntered);
+    Check.True(fixture.Admission.JoinAccountless(secondParticipant).IsEntered);
+    using var projection = fixture.CreateProjection();
+    Check.True(projection.SynchronizeParticipant(firstParticipant));
+    Check.True(projection.SynchronizeParticipant(secondParticipant));
+    Check.True(projection.RebuildBaseline().Succeeded);
+
+    var datagrams = new DeterministicDatagramLimits(256, 512);
+    Check.True(ProtocolLoopback.TryCreate(
+        NetworkProtocolLimits.Default, datagrams, default,
+        out ProtocolLoopback? firstLink, out _, UltraSimGameProtocol.Manifest));
+    Check.True(ProtocolLoopback.TryCreate(
+        NetworkProtocolLimits.Default, datagrams, default,
+        out ProtocolLoopback? secondLink, out _, UltraSimGameProtocol.Manifest));
+    using (firstLink)
+    using (secondLink)
+    {
+        var first = new RemoteControlledSimulationServer(
+            firstLink!.Server, fixture.Runtime.Game, projection, firstParticipant, 1);
+        var second = new RemoteControlledSimulationServer(
+            secondLink!.Server, fixture.Runtime.Game, projection, secondParticipant, 1);
+        ulong before = projection.GetSnapshot().FrameSequence;
+        fixture.Runtime.Tick();
+        RemoteControlledSimulationServer[] owners = [first, second];
+        Check.True(RemoteControlledSimulationServer.CaptureAndQueueOwnerStates(
+            projection, fixture.Runtime.Game, owners, out GameProjectionCaptureResult capture));
+        Check.Equal(before + 1, capture.Frame.FrameSequence);
+        Check.Equal(capture.Frame.FrameSequence, projection.GetSnapshot().FrameSequence);
+        Check.Equal(1UL, first.GetSnapshot().OwnerStatesQueued);
+        Check.Equal(1UL, second.GetSnapshot().OwnerStatesQueued);
+    }
 }
 
 static void PostGraphLifecycleAndRapidMembershipChanges()

@@ -1,0 +1,62 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/UI/ClientChatMenu.cs" id="1_chat"]
+
+[node name="ClientChatMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+script = ExtResource("1_chat")
+RuntimeRootPath = NodePath("../../..")
+ChatScrollPath = NodePath("ChatMargin/ChatPanel/ChatVBox/ChatScroll")
+ChatMessagesPath = NodePath("ChatMargin/ChatPanel/ChatVBox/ChatScroll/ChatMessages")
+ChatInputPath = NodePath("ChatMargin/ChatPanel/ChatVBox/ChatRow/ChatInput")
+SendButtonPath = NodePath("ChatMargin/ChatPanel/ChatVBox/ChatRow/SendButton")
+
+[node name="ChatMargin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_top = 1.0
+anchor_right = 0.0
+anchor_bottom = 1.0
+offset_left = 12.0
+offset_top = -248.0
+offset_right = 780.0
+offset_bottom = -12.0
+
+[node name="ChatPanel" type="PanelContainer" parent="ChatMargin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="ChatVBox" type="VBoxContainer" parent="ChatMargin/ChatPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ChatTitle" type="Label" parent="ChatMargin/ChatPanel/ChatVBox"]
+layout_mode = 2
+text = "Chat"
+
+[node name="ChatScroll" type="ScrollContainer" parent="ChatMargin/ChatPanel/ChatVBox"]
+custom_minimum_size = Vector2(0, 140)
+layout_mode = 2
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="ChatMessages" type="VBoxContainer" parent="ChatMargin/ChatPanel/ChatVBox/ChatScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="ChatRow" type="HBoxContainer" parent="ChatMargin/ChatPanel/ChatVBox"]
+layout_mode = 2
+
+[node name="ChatInput" type="LineEdit" parent="ChatMargin/ChatPanel/ChatVBox/ChatRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Send chat..."
+
+[node name="SendButton" type="Button" parent="ChatMargin/ChatPanel/ChatVBox/ChatRow"]
+layout_mode = 2
+text = "Send"

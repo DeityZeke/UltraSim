@@ -169,6 +169,12 @@ public sealed class GameInterestService
     private ulong _attributionApplicationAcknowledgements;
     private ulong _attributionAcknowledgementRecordsExamined;
     private ulong _attributionAcknowledgementTicks;
+    private ulong _attributionReadinessGateChecks;
+    private ulong _attributionReadinessDeadlineRecomputes;
+    private ulong _attributionReadinessRelationsExamined;
+    private ulong _attributionReadinessNoDataShortCircuits;
+    private ulong _attributionReadinessTierSkips;
+    private ulong _attributionReadinessRecomputeTicks;
     private readonly ulong[] _attributionBundleRecordHistogram;
     private readonly ulong[] _attributionCadenceDeferredDelayHistogram;
     private readonly ulong[] _attributionRetryDeferredDelayHistogram;
@@ -285,6 +291,9 @@ public sealed class GameInterestService
                 PendingNearTail = -1,
                 PendingFarHead = -1,
                 PendingFarTail = -1,
+                ImmediateReadyAtMilliseconds = long.MaxValue,
+                NearReadyAtMilliseconds = long.MaxValue,
+                FarReadyAtMilliseconds = long.MaxValue,
             };
             _recipientMap.Add(participant, recipientIndex);
             _recipientCount++;
@@ -778,6 +787,7 @@ public sealed class GameInterestService
                 relation.PendingRelationSequence == item.RelationSequence)
             {
                 relation.HasSent = false;
+                MarkReadyDeadlineDirty(relation.Recipient, relation.PendingTier);
             }
         }
         if (applied) SaturatingIncrement(ref _bundlesApplied);
@@ -803,7 +813,10 @@ public sealed class GameInterestService
             ref RelationState relation = ref _relations[item.Relation];
             if (relation.Active && relation.Generation == item.RelationGeneration && relation.Pending &&
                 relation.PendingRelationSequence == item.RelationSequence)
+            {
                 relation.HasSent = false;
+                MarkReadyDeadlineDirty(relation.Recipient, relation.PendingTier);
+            }
         }
         ReleaseBundle(bundleIndex);
         return true;
@@ -951,6 +964,12 @@ public sealed class GameInterestService
         _attributionApplicationAcknowledgements = 0;
         _attributionAcknowledgementRecordsExamined = 0;
         _attributionAcknowledgementTicks = 0;
+        _attributionReadinessGateChecks = 0;
+        _attributionReadinessDeadlineRecomputes = 0;
+        _attributionReadinessRelationsExamined = 0;
+        _attributionReadinessNoDataShortCircuits = 0;
+        _attributionReadinessTierSkips = 0;
+        _attributionReadinessRecomputeTicks = 0;
         Array.Clear(_attributionBundleRecordHistogram);
         Array.Clear(_attributionCadenceDeferredDelayHistogram);
         Array.Clear(_attributionRetryDeferredDelayHistogram);
@@ -1026,7 +1045,13 @@ public sealed class GameInterestService
             _attributionMaximumBundleEstimatedBytes,
             _attributionApplicationAcknowledgements,
             _attributionAcknowledgementRecordsExamined,
-            _attributionAcknowledgementTicks);
+            _attributionAcknowledgementTicks,
+            _attributionReadinessGateChecks,
+            _attributionReadinessDeadlineRecomputes,
+            _attributionReadinessRelationsExamined,
+            _attributionReadinessNoDataShortCircuits,
+            _attributionReadinessTierSkips,
+            _attributionReadinessRecomputeTicks);
     }
 
     public int CopyBundleRecordHistogram(Span<ulong> destination)
@@ -1437,6 +1462,7 @@ public sealed class GameInterestService
             relation.PendingSequenceWasSent = false;
             relation.HasSent = false;
             relation.LastSentMilliseconds = 0;
+            MarkReadyDeadlineDirty(relation.Recipient, relation.PendingTier);
             SaturatingIncrement(ref _pendingWrites);
             SaturatingIncrement(ref _eligibilityDeadlinesPreserved);
             SaturatingIncrement(ref _pendingSentSupersessions);
@@ -1546,12 +1572,14 @@ public sealed class GameInterestService
             case GameInterestTier.Near: recipient.PendingNearTail = relationIndex; break;
             case GameInterestTier.Far: recipient.PendingFarTail = relationIndex; break;
         }
+        MarkReadyDeadlineDirty(relation.Recipient, tier);
     }
 
     private void UnlinkPending(int relationIndex)
     {
         ref RelationState relation = ref _relations[relationIndex];
         ref RecipientState recipient = ref _recipients[relation.Recipient];
+        MarkReadyDeadlineDirty(relation.Recipient, relation.PendingTier);
         if (relation.PendingPrevious >= 0)
             _relations[relation.PendingPrevious].PendingNext = relation.PendingNext;
         else
@@ -1579,6 +1607,106 @@ public sealed class GameInterestService
         relation.PendingNext = -1;
     }
 
+    private byte GetReadyTierMask(int recipientIndex, long now)
+    {
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionReadinessGateChecks);
+        byte ready = 0;
+        if (GetReadyAt(recipientIndex, GameInterestTier.Immediate, now) <= now)
+            ready |= TierBit(GameInterestTier.Immediate);
+        if (GetReadyAt(recipientIndex, GameInterestTier.Near, now) <= now)
+            ready |= TierBit(GameInterestTier.Near);
+        if (GetReadyAt(recipientIndex, GameInterestTier.Far, now) <= now)
+            ready |= TierBit(GameInterestTier.Far);
+        return ready;
+    }
+
+    private long GetReadyAt(int recipientIndex, GameInterestTier tier, long now)
+    {
+        ref RecipientState recipient = ref _recipients[recipientIndex];
+        byte bit = TierBit(tier);
+        if ((recipient.ReadyDeadlineDirtyMask & bit) == 0)
+            return tier switch
+            {
+                GameInterestTier.Immediate => recipient.ImmediateReadyAtMilliseconds,
+                GameInterestTier.Near => recipient.NearReadyAtMilliseconds,
+                GameInterestTier.Far => recipient.FarReadyAtMilliseconds,
+                _ => long.MaxValue,
+            };
+
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionReadinessDeadlineRecomputes);
+        long recomputeStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
+        long earliest = long.MaxValue;
+        int relation = tier switch
+        {
+            GameInterestTier.Immediate => recipient.PendingImmediateHead,
+            GameInterestTier.Near => recipient.PendingNearHead,
+            GameInterestTier.Far => recipient.PendingFarHead,
+            _ => -1,
+        };
+        while (relation >= 0)
+        {
+            ref readonly RelationState candidate = ref _relations[relation];
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionReadinessRelationsExamined);
+            long candidateReady = candidate.EligibleAtMilliseconds;
+            if (candidate.HasSent)
+            {
+                long retryReady = candidate.LastSentMilliseconds >
+                    long.MaxValue - _profile.ApplicationAckRetryMilliseconds
+                    ? long.MaxValue
+                    : candidate.LastSentMilliseconds + _profile.ApplicationAckRetryMilliseconds;
+                candidateReady = Math.Max(candidateReady, retryReady);
+            }
+            if (_attributionEnabled && candidateReady > now)
+            {
+                if (candidate.EligibleAtMilliseconds > now)
+                {
+                    SaturatingIncrement(ref _attributionPendingSkippedCadence);
+                    RecordDeferredDelay(
+                        _attributionCadenceDeferredDelayHistogram,
+                        candidate.EligibleAtMilliseconds - now,
+                        ref _attributionCadenceDeferredDelayTotalMilliseconds,
+                        ref _attributionCadenceDeferredDelayMaximumMilliseconds);
+                }
+                else if (candidate.HasSent)
+                {
+                    SaturatingIncrement(ref _attributionPendingSkippedAwaitingRetry);
+                    RecordDeferredDelay(
+                        _attributionRetryDeferredDelayHistogram,
+                        candidateReady - now,
+                        ref _attributionRetryDeferredDelayTotalMilliseconds,
+                        ref _attributionRetryDeferredDelayMaximumMilliseconds);
+                }
+            }
+            earliest = Math.Min(earliest, candidateReady);
+            relation = candidate.PendingNext;
+        }
+        switch (tier)
+        {
+            case GameInterestTier.Immediate: recipient.ImmediateReadyAtMilliseconds = earliest; break;
+            case GameInterestTier.Near: recipient.NearReadyAtMilliseconds = earliest; break;
+            case GameInterestTier.Far: recipient.FarReadyAtMilliseconds = earliest; break;
+        }
+        recipient.ReadyDeadlineDirtyMask &= unchecked((byte)~bit);
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionReadinessRecomputeTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - recomputeStarted)));
+        return earliest;
+    }
+
+    private void MarkReadyDeadlineDirty(int recipientIndex, GameInterestTier tier)
+    {
+        if ((uint)recipientIndex >= (uint)_recipients.Length || tier == GameInterestTier.None) return;
+        _recipients[recipientIndex].ReadyDeadlineDirtyMask |= TierBit(tier);
+    }
+
+    private static byte TierBit(GameInterestTier tier) => tier switch
+    {
+        GameInterestTier.Immediate => 1,
+        GameInterestTier.Near => 2,
+        GameInterestTier.Far => 4,
+        _ => 0,
+    };
+
     private GameWorldStateBuildStatus TryBuildBundleCore(
         int recipientIndex,
         long now,
@@ -1599,6 +1727,18 @@ public sealed class GameInterestService
             return GameWorldStateBuildStatus.OutstandingCapacityExceeded;
         if (_nextBundleId == ulong.MaxValue)
             return GameWorldStateBuildStatus.SequenceExhausted;
+
+        byte readyTiers = GetReadyTierMask(recipientIndex, now);
+        if (readyTiers == 0)
+        {
+            if (_attributionEnabled)
+            {
+                SaturatingIncrement(ref _attributionReadinessNoDataShortCircuits);
+                SaturatingIncrement(ref _attributionNoDataAllDeferredBuilds);
+                SaturatingIncrement(ref _attributionBundleStopsNoEligibleDebt);
+            }
+            return GameWorldStateBuildStatus.NoData;
+        }
 
         ulong examinedBefore = 0;
         ulong deferredBefore = 0;
@@ -1621,7 +1761,8 @@ public sealed class GameInterestService
         while (count < maximum && bytes + GameWorldStateRecord.MaximumEncodedBytes <= byteBudget)
         {
             int selected = SelectEligibleRelation(
-                recipientIndex, now, ref immediateCursor, ref nearCursor, ref farCursor);
+                recipientIndex, now, readyTiers,
+                ref immediateCursor, ref nearCursor, ref farCursor);
             if (selected < 0) break;
             long materializationStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
             ref RelationState relation = ref _relations[selected];
@@ -1698,6 +1839,7 @@ public sealed class GameInterestService
                 relation.EligibleAtMilliseconds = nextEligibility;
                 SaturatingIncrement(ref _eligibilityDeadlinesAdvancedAfterSend);
             }
+            MarkReadyDeadlineDirty(relation.Recipient, relation.PendingTier);
             count++;
             bytes += GameWorldStateRecord.MaximumEncodedBytes;
             SaturatingIncrement(ref _semanticCopies);
@@ -1764,6 +1906,7 @@ public sealed class GameInterestService
     private int SelectEligibleRelation(
         int recipientIndex,
         long now,
+        byte readyTiers,
         ref int immediateCursor,
         ref int nearCursor,
         ref int farCursor)
@@ -1781,6 +1924,11 @@ public sealed class GameInterestService
                 3 or 5 => GameInterestTier.Near,
                 _ => GameInterestTier.Far,
             };
+            if ((readyTiers & TierBit(tier)) == 0)
+            {
+                if (_attributionEnabled) SaturatingIncrement(ref _attributionReadinessTierSkips);
+                continue;
+            }
             int selected = tier switch
             {
                 GameInterestTier.Immediate =>
@@ -2224,7 +2372,10 @@ public sealed class GameInterestService
                 ref RelationState relation = ref _relations[item.Relation];
                 if (relation.Active && relation.Generation == item.RelationGeneration && relation.Pending &&
                     relation.PendingRelationSequence == item.RelationSequence)
+                {
                     relation.HasSent = false;
+                    MarkReadyDeadlineDirty(relation.Recipient, relation.PendingTier);
+                }
             }
             SaturatingIncrement(ref _timedOutBundles);
             if (_attributionEnabled) SaturatingIncrement(ref _attributionExpirationActualExpirations);
@@ -2544,6 +2695,10 @@ public sealed class GameInterestService
         internal int PendingNearTail;
         internal int PendingFarHead;
         internal int PendingFarTail;
+        internal long ImmediateReadyAtMilliseconds;
+        internal long NearReadyAtMilliseconds;
+        internal long FarReadyAtMilliseconds;
+        internal byte ReadyDeadlineDirtyMask;
         internal int OutstandingBundleCount;
         internal byte NextTierSchedule;
     }

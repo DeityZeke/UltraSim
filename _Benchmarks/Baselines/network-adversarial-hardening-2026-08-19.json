@@ -1,0 +1,65 @@
+{
+  "schema": "ultrasim-network-adversarial-hardening-v1",
+  "date": "2026-08-19",
+  "methodology": "Sequential same-machine Release observations with DOTNET_TieredCompilation=0 and DOTNET_ReadyToRun=0. Dense runs enable phase and WorldState attribution and combine server plus in-process clients; they are not a pure-server replay or a paired statistical acceptance run.",
+  "dense_400_worldstate_only": {
+    "profile": {
+      "clients": 400,
+      "entities": 1000,
+      "ticks": 120,
+      "warmup_ticks": 30,
+      "dirty_percent": 2,
+      "socket_io": "platform-send-receive-batch"
+    },
+    "control": {
+      "tick_mean_ms": 13.20889,
+      "tick_p95_ms": 13.66885,
+      "tick_p99_ms": 13.728531,
+      "adapter_build_total_ms": 459.750077,
+      "pending_traversal_total_ms": 271.874866,
+      "tier_selection_total_ms": 378.135861
+    },
+    "readiness_index_and_hardening": {
+      "tick_mean_ms": 12.1767925,
+      "tick_p95_ms": 12.64973,
+      "tick_p99_ms": 12.843186,
+      "adapter_build_total_ms": 315.22584,
+      "pending_traversal_total_ms": 127.000071,
+      "tier_selection_total_ms": 179.760174,
+      "readiness_recompute_total_ms": 46.45127,
+      "readiness_gate_checks": 97912,
+      "readiness_recomputes": 130808,
+      "readiness_relations_examined": 4704634,
+      "readiness_no_data_short_circuits": 44712,
+      "readiness_tier_skips": 2387740,
+      "known_server_reserved_bytes": 255220275,
+      "known_client_reserved_bytes": 210731200,
+      "known_total_reserved_bytes": 465951475,
+      "configured_listener_socket_buffer_bytes": 52428800,
+      "actual_listener_socket_buffer_bytes": 16777216
+    },
+    "invariant_controls": {
+      "bundles_built": 53200,
+      "wire_bytes": 50108800,
+      "semantic_record_bytes": 40320000,
+      "pending_relations_max": 12255,
+      "freshness_p95_ms": 46.875,
+      "capacity_drops": 0,
+      "nonviable_recipients": 0
+    }
+  },
+  "owner_256_post_hardening": {
+    "tick_mean_ms": 2.6637708333333325,
+    "tick_p95_ms": 2.63034,
+    "tick_p99_ms": 3.496758000000001,
+    "server_pump_p95_ms": 2.36256,
+    "input_ack_p95_ms": 19.062505,
+    "ping_p95_ms": 19.05078,
+    "known_server_network_reserved_bytes": 5341867,
+    "known_client_network_reserved_bytes": 2215424,
+    "known_total_network_reserved_bytes": 7557291,
+    "configured_listener_socket_buffer_bytes": 8388608,
+    "actual_listener_socket_buffer_bytes": 16777216,
+    "capacity_drops": 0
+  }
+}

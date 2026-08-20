@@ -223,6 +223,12 @@ zero caller allocation. N0.6 deliberately has one participant, one controlled
 entity, and one complete owner-state family. Per-recipient AOI, observer/world
 state, pending newest versions, and fanout belong to N0.7.
 
+Global projection capture is performed once after each complete authoritative
+step. `CaptureAndQueueOwnerStates` fans the immutable frame/clock result to every
+owner adapter; invoking one global capture independently per connection is not an
+admitted multi-owner composition. The one-owner convenience method remains for
+focused fixtures.
+
 `InputVelocity` in this diagnostic vertical is persisted authoritative physical
 state. Input expiry is an arrival/admission deadline, not a continuing control
 lease, and application disconnect does not implicitly zero the value. Before this
@@ -368,6 +374,28 @@ and 44,430 all-deferred `NoData` builds. A service-private 256-bucket
 ready/deferred wheel removed those scans but regressed the normal integrated
 workload, so it was rejected and no deferred-wheel state remains in relations.
 Counts alone do not justify enlarging or churning the hot maintained graph.
+
+The later adversarial Dense-400 audit earned a smaller sidecar: each recipient
+stores only the earliest effective ready time for its three existing pending
+tiers plus dirty bits. Enqueue, requeue, send, rejection, abandon, ACK cleanup,
+and timeout invalidate the affected tier. A clean future deadline makes repeated
+`NoData` builds O(1); a dirty tier recomputes from the authoritative intrusive
+list, so the cache cannot suppress newly ready work. A permanent regression proves
+100 repeated same-time no-data builds examine no additional relations. In one
+sequential same-machine WorldState-only observation, p95 moved 13.669→12.650 ms
+and adapter build time 459.8→315.2 ms across the run. Deadline recomputation
+examined 4.70 million relations in 46.5 ms, while ordinary pending traversal fell
+271.9→127.0 ms. Semantics, 53,200 bundles,
+40.32 MB semantic bytes, 50.11 MB wire bytes, debt, and freshness were unchanged.
+This is retained as a measured bounded specialization, not a dense acceptance
+claim or a replacement for the rejected wheel. The compact control/candidate
+evidence is preserved in
+[`network-adversarial-hardening-2026-08-19.json`](../../_Benchmarks/Baselines/network-adversarial-hardening-2026-08-19.json).
+
+Authoritative ingress similarly stages each participant's last accepted sequence
+in a pre-sized scratch dictionary. Batch validation is now linear in admitted
+commands instead of scanning every earlier accepted command; generation preflight
+and transactional Runtime commit remain unchanged.
 
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces

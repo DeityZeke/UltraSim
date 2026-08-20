@@ -1,0 +1,92 @@
+@page "/forums/search"
+@model UltraSim.Portal.Pages.Forums.SearchModel
+@{
+    ViewData["Title"] = "Forum Search";
+}
+
+<section class="portal-header">
+    <p class="eyebrow">Forum search</p>
+    <h1>Search Forums</h1>
+    <p>Search thread titles, post content, and matching author identities across the platform forums.</p>
+</section>
+
+<form method="get" class="server-filter forum-filter">
+    <label>
+        Search Query
+        <input type="text" name="Query" value="@Model.NormalizedQuery" placeholder="Search forums" />
+    </label>
+    <button type="submit">Search</button>
+    @if (!string.IsNullOrWhiteSpace(Model.NormalizedQuery))
+    {
+        <a class="button-secondary" asp-page="/Forums/Search">Clear</a>
+    }
+</form>
+
+@if (string.IsNullOrWhiteSpace(Model.NormalizedQuery))
+{
+    <div class="status-empty">
+        <p>Enter a query to search the forums.</p>
+    </div>
+}
+else if (Model.Results.Count == 0)
+{
+    <div class="status-empty">
+        <p>No results matched "@Model.NormalizedQuery".</p>
+    </div>
+}
+else
+{
+    <section class="forum-thread-list">
+        @foreach (var result in Model.Results)
+        {
+            <article class="forum-thread-card">
+                <div class="forum-thread-main">
+                    <div>
+                        <h2>
+                            <a asp-page="/Forums/Thread"
+                               asp-route-sectionSlug="@result.SectionSlug"
+                               asp-route-threadId="@result.ThreadId">@result.Title</a>
+                        </h2>
+                        <div class="forum-meta-row">
+                            <span>@result.SectionTitle</span>
+                            <span>@result.AuthorName</span>
+                            @if (!string.IsNullOrWhiteSpace(result.AuthorBadge))
+                            {
+                                <span class="forum-role-badge @result.AuthorBadgeCssClass">@result.AuthorBadge</span>
+                            }
+                            <span>Match: @result.MatchLabel</span>
+                            <span>Activity @result.LastVisibleActivityUtc.ToLocalTime().ToString("g")</span>
+                        </div>
+                    </div>
+                    <div class="forum-thread-flags">
+                        @if (result.IsHidden)
+                        {
+                            <span class="detail-pill detail-pill-sm">Hidden</span>
+                        }
+                    </div>
+                </div>
+            </article>
+        }
+    </section>
+
+    @if (Model.TotalPages > 1)
+    {
+        <nav class="forum-pagination">
+            @if (Model.HasPreviousPage)
+            {
+                <a class="button-secondary"
+                   asp-page="/Forums/Search"
+                   asp-route-query="@Model.NormalizedQuery"
+                   asp-route-pageNumber="@(Model.PageNumber - 1)">Previous</a>
+            }
+            <span class="detail-muted">Page @Model.PageNumber of @Model.TotalPages</span>
+            @if (Model.HasNextPage)
+            {
+                <a class="button-secondary"
+                   asp-page="/Forums/Search"
+                   asp-route-query="@Model.NormalizedQuery"
+                   asp-route-pageNumber="@(Model.PageNumber + 1)">Next</a>
+            }
+        </nav>
+    }
+}

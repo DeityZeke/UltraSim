@@ -1,0 +1,58 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/UI/SessionStatusScreen.cs" id="1_script"]
+
+[node name="SessionStatusScreen" type="Control"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_script")
+TitleLabelPath = NodePath("Center/Panel/VBox/Title")
+DetailLabelPath = NodePath("Center/Panel/VBox/Detail")
+RetryButtonPath = NodePath("Center/Panel/VBox/ButtonRow/RetryButton")
+EditConnectionButtonPath = NodePath("Center/Panel/VBox/ButtonRow/EditConnectionButton")
+ReturnToMainMenuButtonPath = NodePath("Center/Panel/VBox/ReturnToMainMenuButton")
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Panel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(460, 0)
+layout_mode = 2
+
+[node name="VBox" type="VBoxContainer" parent="Center/Panel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Center/Panel/VBox"]
+layout_mode = 2
+text = "Connection Status"
+horizontal_alignment = 1
+
+[node name="Detail" type="Label" parent="Center/Panel/VBox"]
+layout_mode = 2
+text = "detail"
+autowrap_mode = 3
+horizontal_alignment = 1
+
+[node name="ButtonRow" type="HBoxContainer" parent="Center/Panel/VBox"]
+layout_mode = 2
+
+[node name="RetryButton" type="Button" parent="Center/Panel/VBox/ButtonRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Retry"
+
+[node name="EditConnectionButton" type="Button" parent="Center/Panel/VBox/ButtonRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Edit Connection"
+
+[node name="ReturnToMainMenuButton" type="Button" parent="Center/Panel/VBox"]
+layout_mode = 2
+text = "Return To Main Menu"

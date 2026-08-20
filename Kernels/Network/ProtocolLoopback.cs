@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Runtime.CompilerServices;
 
@@ -207,6 +208,10 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly int _independentPayloadStride;
     private readonly int[] _independentFree;
     private readonly SentPacketRecord[] _sentPackets;
+    private readonly int[] _sentPacketFree;
+    private readonly int[] _sentRecordByFragment;
+    private readonly ulong[] _sentPacketMapKeys;
+    private readonly int[] _sentPacketMapValues;
     private readonly UnreliableStreamState[] _unreliableStreams;
     private readonly int[] _unreliableHeads;
     private readonly byte[] _unreliablePayloads;
@@ -226,6 +231,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _reliableCount;
     private int _independentFreeCount;
     private int _independentCount;
+    private int _sentPacketFreeCount;
     private int _nextIndependentSchedule;
     private int _receivedFreeCount;
     private int _receivedHead;
@@ -384,6 +390,17 @@ public sealed class NetworkProtocolPeer : IDisposable
             _independentFree[index] = _independentFree.Length - 1 - index;
         _independentFreeCount = _independentFree.Length;
         _sentPackets = new SentPacketRecord[limits.SentPacketCapacity];
+        _sentPacketFree = new int[limits.SentPacketCapacity];
+        for (int index = 0; index < _sentPacketFree.Length; index++)
+            _sentPacketFree[index] = _sentPacketFree.Length - 1 - index;
+        _sentPacketFreeCount = _sentPacketFree.Length;
+        _sentRecordByFragment = new int[_lastSentSteps.Length];
+        Array.Fill(_sentRecordByFragment, -1);
+        int sentPacketMapCapacity = checked((int)BitOperations.RoundUpToPowerOf2(
+            checked((uint)limits.SentPacketCapacity * 2U)));
+        _sentPacketMapKeys = new ulong[sentPacketMapCapacity];
+        _sentPacketMapValues = new int[sentPacketMapCapacity];
+        Array.Fill(_sentPacketMapValues, -1);
         _unreliableStreams = new UnreliableStreamState[manifest.Count];
         _unreliableHeads = new int[NetworkLaneContracts.Count];
         Array.Fill(_unreliableHeads, -1);
@@ -533,6 +550,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (!_sendCryptography.TryAdvanceTo(next)) return false;
         _nextPacketNumber = 0;
         Array.Clear(_sentPackets);
+        Array.Clear(_sentPacketMapKeys);
+        Array.Fill(_sentPacketMapValues, -1);
+        Array.Fill(_sentRecordByFragment, -1);
+        for (int index = 0; index < _sentPacketFree.Length; index++)
+            _sentPacketFree[index] = _sentPacketFree.Length - 1 - index;
+        _sentPacketFreeCount = _sentPacketFree.Length;
         return true;
     }
 
@@ -1175,7 +1198,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             throw new InvalidOperationException("A validated protocol frame exceeded its fixed plaintext buffer.");
         RecordStageTiming(ref _frameEncodeTicks, frameStarted);
 
-        int reservedSentRecord = reliable ? FindFreeSentRecord() : -1;
+        int reservedSentRecord = reliable && _sentPacketFreeCount != 0
+            ? _sentPacketFree[_sentPacketFreeCount - 1]
+            : -1;
         if (reliable && reservedSentRecord < 0) return false;
         int sentMarkerIndex = reliable
             ? reliableSlot * _limits.MaximumFragmentsPerMessage + fragmentIndex
@@ -1196,6 +1221,9 @@ public sealed class NetworkProtocolPeer : IDisposable
                             writer.WrittenCount + NetworkSecureDatagramFraming.TagBytes)));
                 _sentPackets[reservedSentRecord] = new(
                     packet.Value, step, reliableSlot, checked((uint)_rto), fragmentIndex, true);
+                _sentPacketFreeCount--;
+                AddSentPacketIndex(packet.Value, reservedSentRecord);
+                _sentRecordByFragment[sentMarkerIndex] = reservedSentRecord;
                 ulong deadline = _sentPackets[reservedSentRecord].DeadlineStep;
                 if (_nextLossCheckStep != 0)
                 {
@@ -1591,31 +1619,27 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void AcknowledgePacket(ulong packet, ulong step)
     {
-        for (int index = 0; index < _sentPackets.Length; index++)
+        if (!TryGetSentPacketIndex(packet, out int index)) return;
+        SentPacketRecord record = _sentPackets[index];
+        if (!record.Active || record.PacketNumber != packet)
+            throw new InvalidOperationException("The sent-packet index disagrees with retained flight state.");
+        ReleaseSentRecord(index, in record);
+        ulong sample = Math.Max(1, step - record.SentStep);
+        UpdateRtt(sample);
+        if ((uint)record.MessageSlot < (uint)_reliable.Length && _reliable[record.MessageSlot].Active)
         {
-            SentPacketRecord record = _sentPackets[index];
-            if (!record.Active || record.PacketNumber != packet) continue;
-            _sentPackets[index] = default;
-            if (_inFlight > 0) _inFlight--;
-            TrackRemovedDeadline(record.DeadlineStep);
-            ulong sample = Math.Max(1, step - record.SentStep);
-            UpdateRtt(sample);
-            if ((uint)record.MessageSlot < (uint)_reliable.Length && _reliable[record.MessageSlot].Active)
+            OutgoingMessage message = _reliable[record.MessageSlot];
+            ulong bit = 1UL << record.FragmentIndex;
+            if ((message.AcknowledgedMask & bit) == 0)
             {
-                OutgoingMessage message = _reliable[record.MessageSlot];
-                ulong bit = 1UL << record.FragmentIndex;
-                if ((message.AcknowledgedMask & bit) == 0)
-                {
-                    message = message with { AcknowledgedMask = message.AcknowledgedMask | bit };
-                    _reliable[record.MessageSlot] = message;
-                    _acknowledgements++;
-                    OnCongestionAcknowledgement();
-                    ulong complete = message.FragmentCount == 64 ? ulong.MaxValue :
-                        (1UL << message.FragmentCount) - 1;
-                    if (message.AcknowledgedMask == complete) FreeReliable(record.MessageSlot);
-                }
+                message = message with { AcknowledgedMask = message.AcknowledgedMask | bit };
+                _reliable[record.MessageSlot] = message;
+                _acknowledgements++;
+                OnCongestionAcknowledgement();
+                ulong complete = message.FragmentCount == 64 ? ulong.MaxValue :
+                    (1UL << message.FragmentCount) - 1;
+                if (message.AcknowledgedMask == complete) FreeReliable(record.MessageSlot);
             }
-            return;
         }
     }
 
@@ -1693,13 +1717,99 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void RetireSentRecords(int messageSlot, ushort fragment)
     {
-        for (int index = 0; index < _sentPackets.Length; index++)
+        int fragmentMarker = messageSlot * _limits.MaximumFragmentsPerMessage + fragment;
+        int index = _sentRecordByFragment[fragmentMarker];
+        if (index < 0) return;
+        SentPacketRecord record = _sentPackets[index];
+        if (!record.Active || record.MessageSlot != messageSlot || record.FragmentIndex != fragment)
+            throw new InvalidOperationException("The reliable-fragment flight index is inconsistent.");
+        ReleaseSentRecord(index, in record);
+    }
+
+    private void ReleaseSentRecord(int index, in SentPacketRecord record)
+    {
+        _sentPackets[index] = default;
+        if (!RemoveSentPacketIndex(record.PacketNumber))
+            throw new InvalidOperationException("A retained flight was missing from the packet index.");
+        int fragmentMarker = record.MessageSlot * _limits.MaximumFragmentsPerMessage +
+            record.FragmentIndex;
+        if (_sentRecordByFragment[fragmentMarker] == index)
+            _sentRecordByFragment[fragmentMarker] = -1;
+        _sentPacketFree[_sentPacketFreeCount++] = index;
+        if (_inFlight > 0) _inFlight--;
+        TrackRemovedDeadline(record.DeadlineStep);
+    }
+
+    private void AddSentPacketIndex(ulong packet, int sentRecord)
+    {
+        int mask = _sentPacketMapValues.Length - 1;
+        int index = SentPacketHash(packet) & mask;
+        for (int examined = 0; examined < _sentPacketMapValues.Length; examined++)
         {
-            SentPacketRecord record = _sentPackets[index];
-            if (!record.Active || record.MessageSlot != messageSlot || record.FragmentIndex != fragment) continue;
-            _sentPackets[index] = default;
-            if (_inFlight > 0) _inFlight--;
-            TrackRemovedDeadline(record.DeadlineStep);
+            if (_sentPacketMapValues[index] < 0)
+            {
+                _sentPacketMapKeys[index] = packet;
+                _sentPacketMapValues[index] = sentRecord;
+                return;
+            }
+            if (_sentPacketMapKeys[index] == packet)
+                throw new InvalidOperationException("A packet number was inserted twice into flight state.");
+            index = (index + 1) & mask;
+        }
+        throw new InvalidOperationException("The bounded sent-packet index exhausted unexpectedly.");
+    }
+
+    private bool TryGetSentPacketIndex(ulong packet, out int sentRecord)
+    {
+        int mask = _sentPacketMapValues.Length - 1;
+        int index = SentPacketHash(packet) & mask;
+        for (int examined = 0; examined < _sentPacketMapValues.Length; examined++)
+        {
+            sentRecord = _sentPacketMapValues[index];
+            if (sentRecord < 0) return false;
+            if (_sentPacketMapKeys[index] == packet) return true;
+            index = (index + 1) & mask;
+        }
+        sentRecord = -1;
+        return false;
+    }
+
+    private bool RemoveSentPacketIndex(ulong packet)
+    {
+        int mask = _sentPacketMapValues.Length - 1;
+        int index = SentPacketHash(packet) & mask;
+        for (int examined = 0; examined < _sentPacketMapValues.Length; examined++)
+        {
+            if (_sentPacketMapValues[index] < 0) return false;
+            if (_sentPacketMapKeys[index] == packet)
+            {
+                _sentPacketMapKeys[index] = 0;
+                _sentPacketMapValues[index] = -1;
+                int displaced = (index + 1) & mask;
+                while (_sentPacketMapValues[displaced] >= 0)
+                {
+                    ulong displacedPacket = _sentPacketMapKeys[displaced];
+                    int displacedRecord = _sentPacketMapValues[displaced];
+                    _sentPacketMapKeys[displaced] = 0;
+                    _sentPacketMapValues[displaced] = -1;
+                    AddSentPacketIndex(displacedPacket, displacedRecord);
+                    displaced = (displaced + 1) & mask;
+                }
+                return true;
+            }
+            index = (index + 1) & mask;
+        }
+        return false;
+    }
+
+    private static int SentPacketHash(ulong value)
+    {
+        unchecked
+        {
+            value ^= value >> 33;
+            value *= 0xff51afd7ed558ccdUL;
+            value ^= value >> 33;
+            return (int)value;
         }
     }
 
@@ -1713,13 +1823,6 @@ public sealed class NetworkProtocolPeer : IDisposable
             _nextLossCheckStep = ulong.MaxValue;
             _nextLossDeadlineCount = 0;
         }
-    }
-
-    private int FindFreeSentRecord()
-    {
-        for (int index = 0; index < _sentPackets.Length; index++)
-            if (!_sentPackets[index].Active) return index;
-        return -1;
     }
 
     private void FreeReliable(int slot)
@@ -1881,6 +1984,9 @@ public sealed class NetworkProtocolPeer : IDisposable
         _independentPayloads.Length +
         (long)_independentFree.Length * sizeof(int) +
         (long)_sentPackets.Length * Unsafe.SizeOf<SentPacketRecord>() +
+        (long)(_sentPacketFree.Length + _sentRecordByFragment.Length) * sizeof(int) +
+        (long)_sentPacketMapKeys.Length * sizeof(ulong) +
+        (long)_sentPacketMapValues.Length * sizeof(int) +
         (long)_unreliableStreams.Length * Unsafe.SizeOf<UnreliableStreamState>() +
         (long)_unreliableHeads.Length * sizeof(int) +
         (long)_unreliablePayloadOffsets.Length * sizeof(int) +
@@ -1975,6 +2081,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             ? ulong.MaxValue
             : SentStep + TimeoutSteps;
     }
+
 
     private readonly record struct ReassemblyState(
         bool Active,

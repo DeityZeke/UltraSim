@@ -1,0 +1,207 @@
+@page "/forums/{sectionSlug}/{threadId:long}"
+@model UltraSim.Portal.Pages.Forums.ThreadModel
+@{
+    ViewData["Title"] = Model.ThreadEntry?.Title ?? "Thread";
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.StatusMessage))
+{
+    <div class="status-success">
+        <p>@Model.StatusMessage</p>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(Model.ErrorMessage))
+{
+    <div class="status-error">
+        <p>@Model.ErrorMessage</p>
+    </div>
+}
+
+@if (Model.Section is null || Model.ThreadEntry is null)
+{
+    <div class="status-error">
+        <p>Thread not found.</p>
+    </div>
+}
+else
+{
+    <section class="portal-header">
+        <p class="eyebrow">Forum thread</p>
+        <h1>@Model.ThreadEntry.Title</h1>
+        <div class="forum-meta-row">
+            <a asp-page="/Forums/Index">Forums</a>
+            <span>/</span>
+            <a asp-page="/Forums/Section" asp-route-sectionSlug="@Model.Section.Slug">@Model.Section.Title</a>
+            <span>Started by @Model.ThreadEntry.AuthorName</span>
+            @if (!string.IsNullOrWhiteSpace(Model.ThreadEntry.AuthorBadge))
+            {
+                <span class="forum-role-badge @Model.ThreadEntry.AuthorBadgeCssClass">@Model.ThreadEntry.AuthorBadge</span>
+            }
+            <span>@Model.ThreadEntry.CreatedUtc.ToLocalTime().ToString("g")</span>
+        </div>
+        <div class="detail-pill-row">
+            @if (Model.ThreadEntry.IsPinned)
+            {
+                <span class="detail-pill detail-pill-sm">Pinned</span>
+            }
+            @if (Model.ThreadEntry.IsLocked)
+            {
+                <span class="detail-pill detail-pill-sm">Locked</span>
+            }
+            @if (Model.ThreadEntry.IsHidden)
+            {
+                <span class="detail-pill detail-pill-sm">Hidden</span>
+            }
+        </div>
+        @if (Model.CanModerate)
+        {
+            <div class="hero-actions">
+                <a class="button-secondary" asp-page="/Forums/MoveThread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id">Move Thread</a>
+                @if (Model.ThreadEntry.CanDelete)
+                {
+                    <a class="button-secondary" asp-page="/Forums/DeleteThread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id">Delete Thread</a>
+                }
+            </div>
+        }
+        else if (Model.ThreadEntry.CanDelete)
+        {
+            <div class="hero-actions">
+                <a class="button-secondary" asp-page="/Forums/DeleteThread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id">Delete Thread</a>
+            </div>
+        }
+    </section>
+
+    @if (Model.CanModerate)
+    {
+        <section class="forum-moderation-panel">
+            <form method="post" asp-page-handler="TogglePin" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id" asp-route-pageNumber="@Model.PageNumber">
+                <input type="text" name="reason" placeholder="Reason for pin/unpin" />
+                <button type="submit">@((Model.ThreadEntry.IsPinned) ? "Unpin Thread" : "Pin Thread")</button>
+            </form>
+            <form method="post" asp-page-handler="ToggleLock" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id" asp-route-pageNumber="@Model.PageNumber">
+                <input type="text" name="reason" placeholder="Reason for lock/unlock" />
+                <button type="submit">@((Model.ThreadEntry.IsLocked) ? "Unlock Thread" : "Lock Thread")</button>
+            </form>
+            <form method="post" asp-page-handler="ToggleHidden" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id" asp-route-pageNumber="@Model.PageNumber">
+                <input type="text" name="reason" placeholder="Reason for hide/unhide" />
+                <button type="submit">@((Model.ThreadEntry.IsHidden) ? "Unhide Thread" : "Hide Thread")</button>
+            </form>
+        </section>
+    }
+
+    <section class="forum-post-list">
+        @foreach (var post in Model.Posts)
+        {
+            <article class="forum-post-card">
+                <div class="forum-post-header">
+                    <div class="forum-post-author">
+                        <strong>@post.AuthorName</strong>
+                        @if (!string.IsNullOrWhiteSpace(post.AuthorBadge))
+                        {
+                            <span class="forum-role-badge @post.AuthorBadgeCssClass">@post.AuthorBadge</span>
+                        }
+                    </div>
+                    <div class="forum-meta-row">
+                        <span>@post.CreatedUtc.ToLocalTime().ToString("g")</span>
+                        @if (post.UpdatedUtc > post.CreatedUtc)
+                        {
+                            <span>Edited @post.UpdatedUtc.ToLocalTime().ToString("g")</span>
+                        }
+                        @if (post.CanEdit)
+                        {
+                            <a asp-page="/Forums/EditPost"
+                               asp-route-sectionSlug="@Model.Section.Slug"
+                               asp-route-threadId="@Model.ThreadEntry.Id"
+                               asp-route-postId="@post.Id"
+                               asp-route-pageNumber="@Model.PageNumber">Edit</a>
+                        }
+                        @if (post.CanDelete)
+                        {
+                            <a asp-page="/Forums/DeletePost"
+                               asp-route-sectionSlug="@Model.Section.Slug"
+                               asp-route-threadId="@Model.ThreadEntry.Id"
+                               asp-route-postId="@post.Id"
+                               asp-route-pageNumber="@Model.PageNumber">Delete</a>
+                        }
+                    </div>
+                </div>
+                @if (Model.CanModerate)
+                {
+                    <form method="post"
+                          asp-page-handler="TogglePostHidden"
+                          asp-route-sectionSlug="@Model.Section.Slug"
+                          asp-route-threadId="@Model.ThreadEntry.Id"
+                          asp-route-postId="@post.Id"
+                          asp-route-pageNumber="@Model.PageNumber"
+                          class="forum-post-moderation">
+                        <input type="text" name="reason" placeholder="Reason for post moderation" />
+                        <button type="submit">@(post.IsHidden ? "Unhide Post" : "Hide Post")</button>
+                    </form>
+                }
+
+                @if (post.IsHidden)
+                {
+                    <div class="forum-post-hidden">Post hidden by moderation.</div>
+                }
+                else
+                {
+                    <div class="description-panel forum-post-body">@post.Content</div>
+                }
+            </article>
+        }
+    </section>
+
+    @if (Model.CanReply)
+    {
+        <section class="forum-reply-panel">
+            <h2>Reply</h2>
+            <form method="post" asp-page-handler="Reply" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id" asp-route-pageNumber="@Model.PageNumber" class="claim-form forum-form">
+                <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+                <label>
+                    Reply
+                    <textarea asp-for="Input.Content"></textarea>
+                    <span asp-validation-for="Input.Content" class="text-danger"></span>
+                </label>
+                <div class="hero-actions">
+                    <button type="submit">Post Reply</button>
+                </div>
+            </form>
+        </section>
+    }
+    else if (User.Identity?.IsAuthenticated != true)
+    {
+        <div class="status-warning">
+            <p>Sign in to reply.</p>
+        </div>
+    }
+    else if (Model.ThreadEntry.IsLocked)
+    {
+        <div class="status-warning">
+            <p>This thread is locked.</p>
+        </div>
+    }
+
+    @if (Model.TotalPages > 1)
+    {
+        <nav class="forum-pagination">
+            @if (Model.HasPreviousPage)
+            {
+                <a class="button-secondary"
+                   asp-page="/Forums/Thread"
+                   asp-route-sectionSlug="@Model.Section.Slug"
+                   asp-route-threadId="@Model.ThreadEntry.Id"
+                   asp-route-pageNumber="@(Model.PageNumber - 1)">Newer Posts</a>
+            }
+            <span class="detail-muted">Page @Model.PageNumber of @Model.TotalPages</span>
+            @if (Model.HasNextPage)
+            {
+                <a class="button-secondary"
+                   asp-page="/Forums/Thread"
+                   asp-route-sectionSlug="@Model.Section.Slug"
+                   asp-route-threadId="@Model.ThreadEntry.Id"
+                   asp-route-pageNumber="@(Model.PageNumber + 1)">Older Posts</a>
+            }
+        </nav>
+    }
+}

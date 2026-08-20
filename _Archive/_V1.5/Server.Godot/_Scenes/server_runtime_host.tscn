@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://bdki0skxxam2h"]
+
+[ext_resource type="Script" uid="uid://di4ev6rvb1lsw" path="res://Server.Godot/ServerRuntimeHostNode.cs" id="1_host"]
+
+[node name="ServerRuntimeHost" type="Node" unique_id=1613181890]
+script = ExtResource("1_host")
+PublicVisible = true
+PublicServerId = "Ultra Sim"
+EnableUdp = true
+DiscoveryStatusBindHost = "0.0.0.0"
+OfficialRegistryBaseUrl = "http://192.168.40.138:5180"
+RegisterWithTrackerOnStartup = true

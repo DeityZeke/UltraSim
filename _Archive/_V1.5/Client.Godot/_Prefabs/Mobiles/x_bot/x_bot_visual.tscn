@@ -1,0 +1,21 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/Mobiles/x_bot/X Bot.fbx" id="1_model"]
+[ext_resource type="Script" path="res://Client.Godot/_Prefabs/Mobiles/ImportedModelPresenter.cs" id="2_script"]
+
+[node name="XBotVisual" type="Node3D"]
+script = ExtResource("2_script")
+ImportedModelPath = NodePath("ImportedModel")
+
+[node name="ImportedModel" parent="." instance=ExtResource("1_model")]
+
+[node name="Anchors" type="Node3D" parent="."]
+
+[node name="CameraPivot" type="Node3D" parent="Anchors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.6, 0)
+
+[node name="NameplatePivot" type="Node3D" parent="Anchors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+
+[node name="EffectsRoot" type="Node3D" parent="Anchors"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)

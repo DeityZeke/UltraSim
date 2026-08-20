@@ -1,0 +1,55 @@
+@page "/forums/{sectionSlug}/{threadId:long}/posts/{postId:long}/delete"
+@model UltraSim.Portal.Pages.Forums.DeletePostModel
+@{
+    ViewData["Title"] = "Delete Post";
+}
+
+@if (Model.Section is null || Model.ThreadEntry is null || Model.PostEntry is null)
+{
+    <div class="status-error">
+        <p>Post not found.</p>
+    </div>
+}
+else
+{
+    <section class="portal-header">
+        <p class="eyebrow">Forum moderation</p>
+        <h1>Delete Post</h1>
+        <p>
+            <a asp-page="/Forums/Section" asp-route-sectionSlug="@Model.Section.Slug">@Model.Section.Title</a>
+            /
+            <a asp-page="/Forums/Thread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id">@Model.ThreadEntry.Title</a>
+        </p>
+    </section>
+
+    <div class="status-warning">
+        <p>This permanently deletes the selected post.</p>
+    </div>
+
+    <div class="forum-post-card">
+        @if (Model.PostEntry.IsHidden)
+        {
+            <div class="forum-post-hidden">This post is currently hidden by moderation.</div>
+        }
+        else
+        {
+            <div class="description-panel forum-post-body">@Model.PostEntry.Content</div>
+        }
+    </div>
+
+    <form method="post" class="claim-form forum-form">
+        @if (Model.RequiresModerationReason)
+        {
+            <label>
+                Moderation Reason
+                <input asp-for="Input.Reason" />
+                <span asp-validation-for="Input.Reason" class="text-danger"></span>
+            </label>
+        }
+
+        <div class="hero-actions">
+            <button type="submit">Delete Post</button>
+            <a class="button-secondary" asp-page="/Forums/Thread" asp-route-sectionSlug="@Model.Section.Slug" asp-route-threadId="@Model.ThreadEntry.Id" asp-route-pageNumber="@Model.PageNumber">Cancel</a>
+        </div>
+    </form>
+}

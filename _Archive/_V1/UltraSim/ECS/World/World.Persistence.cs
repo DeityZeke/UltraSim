@@ -1,0 +1,312 @@
+#nullable enable
+
+using System;
+using System.IO;
+
+using UltraSim;
+using UltraSim.IO;
+using UltraSim.Configuration;
+using UltraSim.ECS.Systems;
+
+namespace UltraSim.ECS
+{
+    /// <summary>
+    /// World persistence - coordinates save/load across all managers.
+    /// Each manager is responsible for saving its own data.
+    /// </summary>
+    public sealed partial class World
+    {
+        #region IOProfile Integration
+
+        /// <summary>
+        /// Gets the active IOProfile from the Host, or falls back to DefaultIOProfile.
+        /// </summary>
+        private IIOProfile GetIOProfile()
+        {
+            return Host.GetIOProfile() ?? DefaultIOProfile.Instance;
+        }
+
+        #endregion
+
+        #region Paths
+
+        /// <summary>
+        /// Legacy path helpers for system settings/state files.
+        /// </summary>
+        public static class Paths
+        {
+            public static string SavesDir => PathManager.SavePath;
+            public static string ECSDir => Path.Combine(SavesDir, "ECS");
+            public static string SystemsDir => Path.Combine(ECSDir, "Systems");
+            public static string WorldDir => Path.Combine(ECSDir, "World");
+            
+            public static string MasterConfigPath => Path.Combine(ECSDir, "ecs_master.cfg");
+
+            public static void EnsureDirectoriesExist()
+            {
+                Directory.CreateDirectory(SavesDir);
+                Directory.CreateDirectory(ECSDir);
+                Directory.CreateDirectory(SystemsDir);
+                Directory.CreateDirectory(WorldDir);
+            }
+
+            public static string GetSystemDirectory(string systemName)
+            {
+                var systemDir = Path.Combine(SystemsDir, systemName);
+                Directory.CreateDirectory(systemDir);
+                return systemDir;
+            }
+
+            public static string GetSystemSettingsPath(string systemName)
+            {
+                var systemDir = GetSystemDirectory(systemName);
+                return Path.Combine(systemDir, $"{systemName}.settings.cfg");
+            }
+
+            public static string GetSystemStatePath(string systemName)
+            {
+                var systemDir = GetSystemDirectory(systemName);
+                return Path.Combine(systemDir, $"{systemName}.sav");
+            }
+        }
+
+        #endregion
+
+        #region Save
+
+        /// <summary>
+        /// Saves the world using the specified IO profile.
+        /// </summary>
+        public void Save(IIOProfile profile, string name = "world")
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            
+            EventSink.InvokeWorldSave();
+            
+            try
+            {
+                Paths.EnsureDirectoriesExist();
+
+                var worldDir = Path.Combine(profile.BasePath, "World");
+                Directory.CreateDirectory(worldDir);
+
+                var savePath = profile.GetFullPath(Path.Combine("World", name));
+                profile.EnsureDirectory(savePath);
+
+                var config = new ConfigFile();
+
+                // Save World's own state
+                SaveWorldState(config);
+
+                // TODO Phase 5: When managers are extracted, add:
+                // _entities.Save(config, "Entities");
+                // _components.Save(config, "Components");
+                // _archetypes.Save(config, "Archetypes");
+
+                // Save all systems (settings + state)
+                _systems.SaveAllSettings();
+                SaveAllSystemStates(config, profile);
+
+                // Write to disk
+                var error = config.Save(savePath);
+                if (error != Error.Ok)
+                {
+                    Logging.Log($"[World] âŒ Failed to save: {error}", LogSeverity.Error);
+                    return;
+                }
+
+                sw.Stop();
+                Logging.Log($"\nðŸ’¾ WORLD SAVED");
+                Logging.Log($"   Path: {savePath}");
+                Logging.Log($"   Time: {sw.Elapsed.TotalMilliseconds:F2}ms");
+                Logging.Log($"   Entities: {EntityCount}, Systems: {_systems.Count}");
+                
+                EventSink.InvokeWorldSaved();
+            }
+            catch (Exception ex)
+            {
+                Logging.Log($"[World] âŒ Save failed with exception: {ex.Message}", LogSeverity.Error);
+                Logging.Log(ex.StackTrace ?? "(no stack trace)", LogSeverity.Error);
+            }
+        }
+
+        /// <summary>
+        /// Saves the world using the host-provided IO profile.
+        /// </summary>
+        /// <param name="filename">Legacy filename (extension optional)</param>
+        public void Save(string filename = "world.sav")
+        {
+            var profile = GetIOProfile();
+            var name = Path.GetFileNameWithoutExtension(filename);
+            Save(profile, string.IsNullOrWhiteSpace(name) ? "world" : name);
+        }
+
+        /// <summary>
+        /// Saves World's own state (not delegated to managers).
+        /// </summary>
+        private void SaveWorldState(ConfigFile config)
+        {
+            // Record the save timestamp
+            LastSaveTime = DateTimeOffset.UtcNow;
+
+            config.SetValue("World", "Version", "2.0");
+            config.SetValue("World", "EntityCount", EntityCount);
+            config.SetValue("World", "ArchetypeCount", ArchetypeCount);
+            config.SetValue("World", "AutoSaveEnabled", AutoSaveEnabled);
+            config.SetValue("World", "AutoSaveInterval", AutoSaveInterval);
+            config.SetValue("World", "SaveTimestamp", LastSaveTime.Value.ToUnixTimeSeconds());
+        }
+
+        /// <summary>
+        /// Saves all system states by calling Serialize() on each system.
+        /// </summary>
+        private void SaveAllSystemStates(ConfigFile config, IIOProfile profile)
+        {
+            var allSystems = _systems.GetAllSystems();
+            int statesSaved = 0;
+
+            foreach (var system in allSystems)
+            {
+                var relativePath = Path.Combine("World", "Systems", system.Name);
+                var context = new SystemSaveContext(profile, relativePath);
+                system.Serialize(context);
+                statesSaved++;
+            }
+
+            config.SetValue("World", "SystemStatesSaved", statesSaved);
+        }
+
+        #endregion
+
+        #region Load
+
+        /// <summary>
+        /// Loads the entire world state from a file.
+        /// Coordinates loads across all managers.
+        /// </summary>
+        /// <param name="filename">Filename relative to World save directory (e.g., "quicksave.sav")</param>
+        public void Load(string filename = "world.sav") =>
+            Load(GetIOProfile(), filename);
+
+        public void Load(IIOProfile profile, string filename = "world.sav")
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            
+            EventSink.InvokeWorldLoad();
+            
+            try
+            {
+                var worldDir = Path.Combine(profile.BasePath, "World");
+                Directory.CreateDirectory(worldDir);
+                var loadPath = profile.GetFullPath(Path.Combine("World", Path.GetFileNameWithoutExtension(filename)));
+                
+                if (!File.Exists(loadPath))
+                {
+                    Logging.Log($"[World] A?A??' Save file not found: {loadPath}", LogSeverity.Error);
+                    return;
+                }
+
+                var config = new ConfigFile();
+                var error = config.Load(loadPath);
+                if (error != Error.Ok)
+                {
+                    Logging.Log($"[World] A?A??' Failed to load: {error}", LogSeverity.Error);
+                    return;
+                }
+
+                // Load World's own state
+                LoadWorldState(config);
+
+                // TODO Phase 5: When managers are extracted, add:
+                // _entities.Load(config, "Entities");
+                // _components.Load(config, "Components");
+                // _archetypes.Load(config, "Archetypes");
+
+                // Load all system states
+                LoadAllSystemStates(config, profile);
+
+                sw.Stop();
+                Logging.Log($"\nA??,??o??s WORLD LOADED");
+                Logging.Log($"   Path: {loadPath}");
+                Logging.Log($"   Time: {sw.Elapsed.TotalMilliseconds:F2}ms");
+                Logging.Log($"   Entities: {EntityCount}, Systems: {_systems.Count}");
+                
+                EventSink.InvokeWorldLoaded();
+            }
+            catch (Exception ex)
+            {
+                Logging.Log($"[World] A?A??' Load failed with exception: {ex.Message}", LogSeverity.Error);
+                Logging.Log(ex.StackTrace ?? "(no stack trace)", LogSeverity.Error);
+            }
+        }
+        /// <summary>
+        /// Loads World's own state (not delegated to managers).
+        /// </summary>
+        private void LoadWorldState(ConfigFile config)
+        {
+            if (!config.HasSection("World"))
+            {
+                Logging.Log("[World] âš ï¸ No World section found in save file", LogSeverity.Error);
+                return;
+            }
+
+            // Load auto-save settings
+            AutoSaveEnabled = (bool)config.GetValue("World", "AutoSaveEnabled", false);
+            AutoSaveInterval = (float)config.GetValue("World", "AutoSaveInterval", 60f);
+
+            var savedEntityCount = (int)config.GetValue("World", "EntityCount", 0);
+            var savedArchetypeCount = (int)config.GetValue("World", "ArchetypeCount", 0);
+            var timestamp = (long)config.GetValue("World", "SaveTimestamp", 0);
+
+            // Restore the last save timestamp
+            if (timestamp > 0)
+            {
+                LastSaveTime = DateTimeOffset.FromUnixTimeSeconds(timestamp);
+            }
+
+            Logging.Log($"[World] Loaded world state from {DateTimeOffset.FromUnixTimeSeconds(timestamp):yyyy-MM-dd HH:mm:ss}");
+            Logging.Log($"[World]    Expected - Entities: {savedEntityCount}, Archetypes: {savedArchetypeCount}");
+        }
+
+        /// <summary>
+        /// Loads all system states by calling Deserialize() on each system.
+        /// </summary>
+        private void LoadAllSystemStates(ConfigFile config, IIOProfile profile)
+        {
+            var allSystems = _systems.GetAllSystems();
+            int statesLoaded = 0;
+
+            foreach (var system in allSystems)
+            {
+                // Load system settings first
+                system.LoadSettings();
+                
+                // Then call system's Deserialize() method to load game state
+                var relativePath = Path.Combine("World", "Systems", system.Name);
+                var context = new SystemLoadContext(profile, relativePath);
+                system.Deserialize(context);
+                statesLoaded++;
+            }
+
+            Logging.Log($"[World] ðŸ“‚ Loaded {statesLoaded} system states");
+        }
+
+        #endregion
+
+        #region Quick Save/Load
+
+        /// <summary>
+        /// Quick save to most recent save file.
+        /// </summary>
+        public void QuickSave() => Save("quicksave.sav");
+
+        /// <summary>
+        /// Quick load from most recent save file.
+        /// </summary>
+        public void QuickLoad() => Load("quicksave.sav");
+
+        #endregion
+    }
+}
+
+

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - UltraSim Portal</title>
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/UltraSim.Portal.styles.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="topbar">
+        <div class="shell nav-shell">
+            <a class="brand" asp-area="" asp-page="/Index">UltraSim Portal</a>
+            <nav class="main-nav">
+                <a asp-area="" asp-page="/Index">Home</a>
+                <a asp-area="" asp-page="/Servers/Index">Servers</a>
+                <a asp-area="" asp-page="/Forums/Index">Forums</a>
+            </nav>
+            <partial name="_LoginPartial" />
+        </div>
+    </header>
+
+    <main class="shell page-shell">
+        @RenderBody()
+    </main>
+
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

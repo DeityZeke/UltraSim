@@ -1,0 +1,45 @@
+@page
+@model UltraSim.Portal.Pages.Admin.Bans.ActionModel
+@{
+    ViewData["Title"] = "Host Ban Action";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>@Model.ActionLabel</h1>
+        <p>Apply a host-ban action with a required audit reason.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        <div class="claim-form">
+            <div>
+                <strong>@Model.Host</strong><br />
+                <span class="detail-muted">Host/IP ban target</span>
+            </div>
+
+            <form method="post">
+                <input type="hidden" asp-for="Host" />
+                <input type="hidden" asp-for="ActionName" />
+                <label>
+                    <span>Reason</span>
+                    <textarea asp-for="Reason" placeholder="Required audit reason"></textarea>
+                    <span asp-validation-for="Reason" class="text-danger"></span>
+                </label>
+
+                <div asp-validation-summary="ModelOnly" class="status-error"></div>
+
+                <div class="hero-actions">
+                    <button type="submit">@Model.ActionLabel</button>
+                    <a class="button-secondary" asp-page="/Admin/Bans/Index">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </section>
+</div>

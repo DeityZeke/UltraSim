@@ -1,0 +1,354 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/UI/MultiplayerMenuScreen.cs" id="1_script"]
+
+[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_item_list"]
+
+[node name="MultiplayerMenuScreen" type="Control"]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+ProviderLabelPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin/TabBandRow/ProviderLabel")
+SearchInputPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow/SearchInput")
+RegionInputPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow/RegionInput")
+LanguageInputPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow/LanguageInput")
+TrustFilterPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow/TrustFilter")
+PasswordFilterPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow/PasswordFilter")
+WhitelistFilterPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow/WhitelistFilter")
+ServerListPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ServerList")
+ServerDetailLabelPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/RightPanel/RightMargin/RightVBox/DetailText")
+StatusLabelPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentFooterRow/ListStatusLabel")
+JoinButtonPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow/RightButtons/JoinButton")
+BackButtonPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow/RightButtons/BackButton")
+DirectConnectButtonPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow/DirectConnectButton")
+ProviderPreviousButtonPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin/TabBandRow/PreviousProviderButton")
+ProviderNextButtonPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin/TabBandRow/NextProviderButton")
+RefreshButtonPath = NodePath("Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/RefreshButton")
+DirectConnectOverlayPath = NodePath("DirectConnectOverlay")
+DirectConnectHostInputPath = NodePath("DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/HostRow/HostInput")
+DirectConnectPortInputPath = NodePath("DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/PortRow/PortInput")
+DirectConnectStatusLabelPath = NodePath("DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/StatusLabel")
+DirectConnectConnectButtonPath = NodePath("DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/ButtonRow/ConnectButton")
+DirectConnectBackButtonPath = NodePath("DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/ButtonRow/BackButton")
+
+[node name="Center" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="RootPanel" type="PanelContainer" parent="Center"]
+custom_minimum_size = Vector2(1536, 864)
+layout_mode = 2
+
+[node name="OuterMargin" type="MarginContainer" parent="Center/RootPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 28
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 28
+theme_override_constants/margin_bottom = 24
+
+[node name="LayoutVBox" type="VBoxContainer" parent="Center/RootPanel/OuterMargin"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="ContentRow" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+size_flags_stretch_ratio = 2.0
+theme_override_constants/separation = 18
+
+[node name="LeftPanel" type="PanelContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 3.0
+
+[node name="LeftMargin" type="MarginContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="LeftVBox" type="VBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="ListHeaderRow" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="ListHeaderLabel" type="Label" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow"]
+layout_mode = 2
+text = "Server List"
+vertical_alignment = 1
+
+[node name="HeaderCenter" type="CenterContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TabBand" type="PanelContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter"]
+custom_minimum_size = Vector2(320, 40)
+layout_mode = 2
+
+[node name="TabBandMargin" type="MarginContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 6
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 6
+
+[node name="TabBandRow" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PreviousProviderButton" type="Button" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin/TabBandRow"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+text = "<"
+
+[node name="ProviderLabel" type="Label" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin/TabBandRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Official"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NextProviderButton" type="Button" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow/HeaderCenter/TabBand/TabBandMargin/TabBandRow"]
+custom_minimum_size = Vector2(42, 0)
+layout_mode = 2
+text = ">"
+
+[node name="RefreshButton" type="Button" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/ListHeaderRow"]
+custom_minimum_size = Vector2(108, 0)
+layout_mode = 2
+text = "Refresh"
+
+[node name="ListDivider" type="ColorRect" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox"]
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+color = Color(1, 1, 1, 0.95)
+
+[node name="FilterRow" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="SearchInput" type="LineEdit" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Search"
+
+[node name="RegionInput" type="LineEdit" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow"]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+placeholder_text = "Region"
+
+[node name="LanguageInput" type="LineEdit" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow"]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+placeholder_text = "Language"
+
+[node name="TrustFilter" type="OptionButton" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow"]
+custom_minimum_size = Vector2(132, 0)
+layout_mode = 2
+
+[node name="PasswordFilter" type="OptionButton" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow"]
+custom_minimum_size = Vector2(148, 0)
+layout_mode = 2
+
+[node name="WhitelistFilter" type="OptionButton" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox/FilterRow"]
+custom_minimum_size = Vector2(138, 0)
+layout_mode = 2
+
+[node name="ServerList" type="ItemList" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/LeftPanel/LeftMargin/LeftVBox"]
+custom_minimum_size = Vector2(0, 600)
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_styles/panel = SubResource("StyleBoxEmpty_item_list")
+select_mode = 0
+same_column_width = true
+fixed_column_width = 0
+
+[node name="RightPanel" type="PanelContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow"]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 1.0
+
+[node name="RightMargin" type="MarginContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/RightPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="RightVBox" type="VBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/RightPanel/RightMargin"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 12
+
+[node name="DetailHeaderLabel" type="Label" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/RightPanel/RightMargin/RightVBox"]
+layout_mode = 2
+text = "Server Details"
+
+[node name="DetailDivider" type="ColorRect" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/RightPanel/RightMargin/RightVBox"]
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+color = Color(1, 1, 1, 0.95)
+
+[node name="DetailText" type="Label" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentRow/RightPanel/RightMargin/RightVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+text = "Select a server to view detailed information."
+vertical_alignment = 0
+autowrap_mode = 3
+
+[node name="ContentFooterRow" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="ListStatusLabel" type="Label" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentFooterRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 3.0
+text = "Official: no servers found. manual connect available."
+autowrap_mode = 3
+
+[node name="FooterSpacer" type="Control" parent="Center/RootPanel/OuterMargin/LayoutVBox/ContentFooterRow"]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 1.0
+
+[node name="FooterDivider" type="ColorRect" parent="Center/RootPanel/OuterMargin/LayoutVBox"]
+custom_minimum_size = Vector2(0, 2)
+layout_mode = 2
+color = Color(1, 1, 1, 0.95)
+
+[node name="FooterButtonsRow" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox"]
+layout_mode = 2
+theme_override_constants/separation = 18
+
+[node name="DirectConnectButton" type="Button" parent="Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow"]
+custom_minimum_size = Vector2(200, 0)
+layout_mode = 2
+text = "Direct Connect"
+
+[node name="FooterButtonSpacer" type="Control" parent="Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RightButtons" type="HBoxContainer" parent="Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="JoinButton" type="Button" parent="Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow/RightButtons"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+disabled = true
+text = "Join"
+
+[node name="BackButton" type="Button" parent="Center/RootPanel/OuterMargin/LayoutVBox/FooterButtonsRow/RightButtons"]
+custom_minimum_size = Vector2(180, 0)
+layout_mode = 2
+text = "Back"
+
+[node name="DirectConnectOverlay" type="ColorRect" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.55)
+mouse_filter = 1
+
+[node name="DialogCenter" type="CenterContainer" parent="DirectConnectOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="DialogPanel" type="PanelContainer" parent="DirectConnectOverlay/DialogCenter"]
+custom_minimum_size = Vector2(480, 0)
+layout_mode = 2
+
+[node name="DialogMargin" type="MarginContainer" parent="DirectConnectOverlay/DialogCenter/DialogPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="DialogVBox" type="VBoxContainer" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="DialogTitle" type="Label" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox"]
+layout_mode = 2
+text = "Direct Connect"
+horizontal_alignment = 1
+
+[node name="HostRow" type="HBoxContainer" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="HostLabel" type="Label" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/HostRow"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "IP"
+
+[node name="HostInput" type="LineEdit" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/HostRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "127.0.0.1"
+placeholder_text = "host"
+
+[node name="PortRow" type="HBoxContainer" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PortLabel" type="Label" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/PortRow"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+text = "Port"
+
+[node name="PortInput" type="LineEdit" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/PortRow"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+text = "42042"
+placeholder_text = "port"
+
+[node name="StatusLabel" type="Label" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox"]
+layout_mode = 2
+text = "Enter an IP and port."
+autowrap_mode = 3
+
+[node name="ButtonRow" type="HBoxContainer" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox"]
+layout_mode = 2
+alignment = 2
+theme_override_constants/separation = 12
+
+[node name="ConnectButton" type="Button" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/ButtonRow"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Connect"
+
+[node name="BackButton" type="Button" parent="DirectConnectOverlay/DialogCenter/DialogPanel/DialogMargin/DialogVBox/ButtonRow"]
+custom_minimum_size = Vector2(160, 0)
+layout_mode = 2
+text = "Back"

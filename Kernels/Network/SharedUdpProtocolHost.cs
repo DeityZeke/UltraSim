@@ -25,10 +25,10 @@ public enum SharedUdpSocketIoMode : byte
 
 /// <summary>Fixed ownership and routing bounds for one shared UDP server socket.</summary>
 /// <remarks>
-/// The listener requests aggregate socket-buffer capacity equal to the admitted
-/// per-session server capacity, capped at the existing one-gibibyte socket-buffer
-/// limit. This consolidates ownership without silently reducing total admitted
-/// kernel buffering as connections are moved behind one socket.
+/// By default the listener requests aggregate socket-buffer capacity equal to
+/// admitted per-session server capacity. Explicit aggregate send/receive values
+/// decouple kernel buffering from maximum CCU when deployment evidence earns a
+/// smaller or larger shared budget.
 /// </remarks>
 public readonly record struct SharedUdpProtocolLimits(
     int MaximumSessions = 256,
@@ -36,7 +36,9 @@ public readonly record struct SharedUdpProtocolLimits(
     int MaximumInboundDatagramsPerPump = 4_096,
     SharedUdpSocketIoMode SocketIoMode = SharedUdpSocketIoMode.Scalar,
     int MaximumNativeSendBatchDatagrams = 32,
-    int MaximumNativeReceiveBatchDatagrams = 32)
+    int MaximumNativeReceiveBatchDatagrams = 32,
+    int AggregateSocketSendBufferBytes = 0,
+    int AggregateSocketReceiveBufferBytes = 0)
 {
     public static SharedUdpProtocolLimits Default => new();
 
@@ -55,6 +57,14 @@ public readonly record struct SharedUdpProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumNativeSendBatchDatagrams));
         if (MaximumNativeReceiveBatchDatagrams is < 2 or > 256)
             throw new ArgumentOutOfRangeException(nameof(MaximumNativeReceiveBatchDatagrams));
+        if (AggregateSocketSendBufferBytes != 0 &&
+            (AggregateSocketSendBufferBytes < udp.MaximumDatagramBytes ||
+             AggregateSocketSendBufferBytes > 1_073_741_824))
+            throw new ArgumentOutOfRangeException(nameof(AggregateSocketSendBufferBytes));
+        if (AggregateSocketReceiveBufferBytes != 0 &&
+            (AggregateSocketReceiveBufferBytes < udp.MaximumDatagramBytes ||
+             AggregateSocketReceiveBufferBytes > 1_073_741_824))
+            throw new ArgumentOutOfRangeException(nameof(AggregateSocketReceiveBufferBytes));
         _ = checked((long)MaximumSessions * MaximumQueuedDatagramsPerSession *
             udp.MaximumDatagramBytes);
     }
@@ -63,12 +73,14 @@ public readonly record struct SharedUdpProtocolLimits(
     {
         Validate(udp);
         const long maximumSocketBufferBytes = 1_073_741_824L;
-        int sendBytes = checked((int)Math.Min(
-            maximumSocketBufferBytes,
-            checked((long)udp.SocketSendBufferBytes * MaximumSessions)));
-        int receiveBytes = checked((int)Math.Min(
-            maximumSocketBufferBytes,
-            checked((long)udp.SocketReceiveBufferBytes * MaximumSessions)));
+        int sendBytes = AggregateSocketSendBufferBytes != 0
+            ? AggregateSocketSendBufferBytes
+            : checked((int)Math.Min(maximumSocketBufferBytes,
+                checked((long)udp.SocketSendBufferBytes * MaximumSessions)));
+        int receiveBytes = AggregateSocketReceiveBufferBytes != 0
+            ? AggregateSocketReceiveBufferBytes
+            : checked((int)Math.Min(maximumSocketBufferBytes,
+                checked((long)udp.SocketReceiveBufferBytes * MaximumSessions)));
         return udp with
         {
             SocketSendBufferBytes = sendBytes,
@@ -147,6 +159,8 @@ public readonly record struct SharedUdpListenerSnapshot(
     bool IsOpen,
     SocketError LastSocketError,
     long ReservedBytes,
+    long ConfiguredSocketBufferBytes,
+    long ActualSocketBufferBytes,
     SharedUdpReceiveCensusSnapshot ReceiveCensus);
 
 /// <summary>
@@ -195,7 +209,11 @@ public readonly record struct SharedUdpProtocolHostSnapshot(
     SharedUdpListenerSnapshot Listener,
     NetworkConnectionSnapshot Connections,
     long ConfiguredSocketBufferBytes,
-    long KnownReservedBytes);
+    long KnownReservedBytes,
+    long KnownServerReservedBytes,
+    long KnownClientReservedBytes,
+    long ConfiguredListenerSocketBufferBytes,
+    long ConfiguredClientSocketBufferBytes);
 
 /// <summary>
 /// One owner-thread UDP listener that routes a bounded set of secure protocol
@@ -249,9 +267,25 @@ public sealed class SharedUdpProtocolHost : IDisposable
         NetworkProtocolManifest? serverManifest = null)
         : this(protocolLimits, udpLimits, sharedLimits,
             StopwatchNetworkMonotonicClock.Instance, manifest, serverIdentity,
-            trustedServerPublicKey, serverManifest)
+            trustedServerPublicKey, serverManifest, allowSelfTrust: false)
     {
     }
+
+    /// <summary>
+    /// Creates a controlled loopback-only host with an ephemeral server identity
+    /// trusted by the in-process clients it creates. Production remote clients
+    /// must use an explicitly pinned identity instead.
+    /// </summary>
+    public static SharedUdpProtocolHost CreateSelfTrustedLoopback(
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        SharedUdpProtocolLimits sharedLimits,
+        NetworkProtocolManifest? manifest = null,
+        NetworkProtocolManifest? serverManifest = null) =>
+        new(protocolLimits, udpLimits, sharedLimits,
+            StopwatchNetworkMonotonicClock.Instance, manifest, serverIdentity: null,
+            trustedServerPublicKey: default, serverManifest: serverManifest,
+            allowSelfTrust: true);
 
     internal SharedUdpProtocolHost(
         NetworkProtocolLimits protocolLimits,
@@ -261,7 +295,8 @@ public sealed class SharedUdpProtocolHost : IDisposable
         NetworkProtocolManifest? manifest = null,
         NetworkServerIdentity? serverIdentity = null,
         ReadOnlyMemory<byte> trustedServerPublicKey = default,
-        NetworkProtocolManifest? serverManifest = null)
+        NetworkProtocolManifest? serverManifest = null,
+        bool allowSelfTrust = true)
     {
         ArgumentNullException.ThrowIfNull(clock);
         sharedLimits.Validate(udpLimits);
@@ -274,6 +309,13 @@ public sealed class SharedUdpProtocolHost : IDisposable
         _serverManifest = serverManifest ?? _clientManifest;
         _ownsIdentity = serverIdentity is null;
         _identity = serverIdentity ?? NetworkServerIdentity.CreateEphemeral();
+        if (trustedServerPublicKey.IsEmpty && !allowSelfTrust)
+        {
+            if (_ownsIdentity) _identity.Dispose();
+            throw new ArgumentException(
+                "A pinned server public key is required. Use CreateSelfTrustedLoopback only for controlled in-process topology.",
+                nameof(trustedServerPublicKey));
+        }
         _trustedServerPublicKey = trustedServerPublicKey.IsEmpty
             ? _identity.PublicKey.ToArray()
             : trustedServerPublicKey.ToArray();
@@ -433,24 +475,27 @@ public sealed class SharedUdpProtocolHost : IDisposable
     public SharedUdpProtocolHostSnapshot GetSnapshot()
     {
         EnsureOperational();
-        long reserved = checked(
+        long serverReserved = checked(
             _listener.ReservedBytes +
             _connections.GetSnapshot().ReservedBytes +
             (long)_sessions.Length * IntPtr.Size +
             (long)_sessionFree.Length * sizeof(int) +
             _trustedServerPublicKey.Length);
+        long clientReserved = 0;
         for (int index = 0; index < _sessions.Length; index++)
         {
             if (_sessions[index] is not SharedUdpProtocolSession current) continue;
-            reserved = checked(reserved + current.Client.GetSnapshot().ReservedBytes +
-                current.Server.GetSnapshot().ReservedBytes);
+            serverReserved = checked(serverReserved + current.Server.GetSnapshot().ReservedBytes);
+            clientReserved = checked(clientReserved + current.Client.GetSnapshot().ReservedBytes);
         }
-        long configuredSockets = checked(
-            (long)_sessionCount *
-                (_udpLimits.SocketSendBufferBytes + _udpLimits.SocketReceiveBufferBytes) +
+        long configuredClientSockets = checked((long)_sessionCount *
+            (_udpLimits.SocketSendBufferBytes + _udpLimits.SocketReceiveBufferBytes));
+        long configuredSockets = checked(configuredClientSockets +
             _listener.ConfiguredSocketBufferBytes);
         return new(_sessionCount, _sessions.Length, _listener.GetSnapshot(),
-            _connections.GetSnapshot(), configuredSockets, reserved);
+            _connections.GetSnapshot(), configuredSockets,
+            checked(serverReserved + clientReserved), serverReserved, clientReserved,
+            _listener.ConfiguredSocketBufferBytes, configuredClientSockets);
     }
 
     public void Dispose()
@@ -663,6 +708,7 @@ internal sealed class SharedUdpServerListener : IDisposable
     private readonly int _maximumQueuedDatagramsPerSession;
     private readonly int _maximumInboundDatagramsPerPump;
     private readonly long _configuredSocketBufferBytes;
+    private readonly long _actualSocketBufferBytes;
     private readonly byte[] _receiveScratch;
     private readonly SocketAddress _receivedAddress;
     private readonly SharedUdpServerEndpoint?[] _endpoints;
@@ -791,6 +837,7 @@ internal sealed class SharedUdpServerListener : IDisposable
             (long)listenerLimits.SocketSendBufferBytes +
             listenerLimits.SocketReceiveBufferBytes);
         _socket = UdpDatagramEndpoint.CreateSocket(listenerLimits);
+        _actualSocketBufferBytes = checked((long)_socket.SendBufferSize + _socket.ReceiveBufferSize);
         _socketDescriptor = _usesNativeSendBatching || _usesNativeReceiveBatching
             ? _socket.SafeHandle.DangerousGetHandle().ToInt32()
             : -1;
@@ -1241,6 +1288,7 @@ internal sealed class SharedUdpServerListener : IDisposable
             _receiveSystemCallTicks, _maximumSentDatagramBytes,
             _maximumReceivedDatagramBytes, _registered,
             _maximumQueued, true, _lastError, ReservedBytes,
+            _configuredSocketBufferBytes, _actualSocketBufferBytes,
             new SharedUdpReceiveCensusSnapshot(
                 _receivePumpCalls,
                 _receiveEmptyPumpCalls,

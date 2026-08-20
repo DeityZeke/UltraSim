@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://c78cb7qfcdcdp"]
+
+[ext_resource type="Script" uid="uid://bl7q6dmdxojgo" path="res://_OLD/GUMP_MENU_THING/Server/Network/NetworkServerNode.cs" id="1_thiw7"]
+
+[node name="Server" type="Node3D" unique_id=2086159964]
+script = ExtResource("1_thiw7")

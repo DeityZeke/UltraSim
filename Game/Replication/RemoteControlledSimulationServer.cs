@@ -153,6 +153,43 @@ public sealed class RemoteControlledSimulationServer : IRemoteGameProtocolHandle
         capture = _projection.CaptureAfterTick();
         if (!capture.Succeeded || !_runtime.TryCaptureClockSnapshot(out WorldClockSnapshot clock))
             return false;
+        return QueueCapturedOwnerState(in capture, in clock);
+    }
+
+    /// <summary>
+    /// Captures the global projection and clock once, then fans that immutable
+    /// result out to every supplied owner adapter. This is the required path when
+    /// more than one owner is published after the same authoritative step.
+    /// </summary>
+    public static bool CaptureAndQueueOwnerStates(
+        GameProjectionService projection,
+        ServerGameFacet runtime,
+        ReadOnlySpan<RemoteControlledSimulationServer> owners,
+        out GameProjectionCaptureResult capture)
+    {
+        ArgumentNullException.ThrowIfNull(projection);
+        ArgumentNullException.ThrowIfNull(runtime);
+        capture = projection.CaptureAfterTick();
+        if (!capture.Succeeded || !runtime.TryCaptureClockSnapshot(out WorldClockSnapshot clock))
+            return false;
+        bool queued = true;
+        for (int index = 0; index < owners.Length; index++)
+        {
+            RemoteControlledSimulationServer owner = owners[index] ??
+                throw new ArgumentException("Owner fanout cannot contain null adapters.", nameof(owners));
+            owner.EnsureOwnerThread();
+            if (!ReferenceEquals(owner._projection, projection) || !ReferenceEquals(owner._runtime, runtime))
+                throw new ArgumentException(
+                    "Every owner adapter must share the captured projection and Runtime.", nameof(owners));
+            queued &= owner.QueueCapturedOwnerState(in capture, in clock);
+        }
+        return queued;
+    }
+
+    private bool QueueCapturedOwnerState(
+        in GameProjectionCaptureResult capture,
+        in WorldClockSnapshot clock)
+    {
 
         if (_publishedStateEpoch != capture.Frame.StateEpoch)
         {

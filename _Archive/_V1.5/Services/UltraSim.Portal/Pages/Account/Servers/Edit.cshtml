@@ -1,0 +1,16 @@
+@page "{id:int}"
+@model UltraSim.Portal.Pages.Account.Servers.EditModel
+@{
+    ViewData["Title"] = "Edit Server";
+    Layout = "/Areas/Identity/Pages/Account/Manage/_Layout.cshtml";
+}
+
+<form method="post" class="claim-form">
+    <div asp-validation-summary="ModelOnly" class="status-error" data-valmsg-summary="true"></div>
+    <partial name="_ServerFormPartial" for="Input" />
+
+    <div class="hero-actions page-actions">
+        <button type="submit">Save Changes</button>
+        <a class="button-secondary" asp-page="/Account/Servers/Index">Cancel</a>
+    </div>
+</form>

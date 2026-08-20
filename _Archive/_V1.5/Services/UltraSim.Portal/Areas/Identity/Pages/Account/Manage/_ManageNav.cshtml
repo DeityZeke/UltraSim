@@ -1,0 +1,27 @@
+@{
+    string? currentPage = ViewContext.ActionDescriptor.RouteValues["page"];
+    string currentViewPath = ViewContext.HttpContext.Request.Path.Value ?? string.Empty;
+
+    string NavClass(string targetPage)
+    {
+        return string.Equals(currentPage, targetPage, StringComparison.OrdinalIgnoreCase)
+            ? "account-link active"
+            : "account-link";
+    }
+
+    string MyServersNavClass()
+    {
+        return currentViewPath.StartsWith("/Account/Servers", StringComparison.OrdinalIgnoreCase)
+            ? "account-link active"
+            : "account-link";
+    }
+}
+
+<nav class="account-nav-links">
+    <a class="@NavClass("/Account/Manage/Index")" asp-area="Identity" asp-page="/Account/Manage/Index">Profile</a>
+    <a class="@MyServersNavClass()" asp-page="/Account/Servers/Index" asp-area="">My Servers</a>
+    <a class="@NavClass("/Account/Manage/Email")" asp-area="Identity" asp-page="/Account/Manage/Email">Email</a>
+    <a class="@NavClass("/Account/Manage/ChangePassword")" asp-area="Identity" asp-page="/Account/Manage/ChangePassword">Password</a>
+    <a class="@NavClass("/Account/Manage/TwoFactorAuthentication")" asp-area="Identity" asp-page="/Account/Manage/TwoFactorAuthentication">Two-Factor Authentication</a>
+    <a class="@NavClass("/Account/Manage/PersonalData")" asp-area="Identity" asp-page="/Account/Manage/PersonalData">Personal Data</a>
+</nav>

@@ -1,0 +1,28 @@
+[gd_scene format=3 uid="uid://tku3hd12w3uk"]
+
+[ext_resource type="Script" uid="uid://bmhu33xr4ym8x" path="res://_OLD/GUMP_MENU_THING/Client/Scripts/GameManager.cs" id="1_ysj75"]
+[ext_resource type="PackedScene" uid="uid://pe7o7ee376j7" path="res://_OLD/GUMP_MENU_THING/Client/Scenes/login_menu.tscn" id="2_rkxef"]
+[ext_resource type="PackedScene" uid="uid://w46ocspvpfca" path="res://_OLD/GUMP_MENU_THING/Client/Scenes/character_selection_menu.tscn" id="3_lhopr"]
+[ext_resource type="PackedScene" uid="uid://s88jcuv6grg7" path="res://_OLD/GUMP_MENU_THING/Client/Scenes/character_creation_menu.tscn" id="4_pu34a"]
+
+[sub_resource type="PackedScene" id="PackedScene_rkxef"]
+
+[node name="Client" type="Node" unique_id=1372099300 node_paths=PackedStringArray("mainCanvas", "menuCanvas", "contextMenuCanvas")]
+script = ExtResource("1_ysj75")
+loginScreen = ExtResource("2_rkxef")
+characterSelectScreen = ExtResource("3_lhopr")
+characterCreationScreen = ExtResource("4_pu34a")
+gameScene = SubResource("PackedScene_rkxef")
+mainCanvas = NodePath("MainCanvas")
+menuCanvas = NodePath("Menus")
+contextMenuCanvas = NodePath("ContextMenus")
+
+[node name="World" type="Node3D" parent="." unique_id=288034449]
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=733445726]
+
+[node name="MainCanvas" type="CanvasLayer" parent="." unique_id=2096128339]
+
+[node name="Menus" type="CanvasLayer" parent="." unique_id=656184916]
+
+[node name="ContextMenus" type="CanvasLayer" parent="." unique_id=819561944]

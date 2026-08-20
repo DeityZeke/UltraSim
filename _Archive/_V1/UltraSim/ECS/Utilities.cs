@@ -1,0 +1,175 @@
+#nullable enable
+
+using Godot;
+using System;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using UltraSim.ECS.SIMD.Core;
+
+namespace UltraSim.ECS
+{
+    /// <summary>
+    /// Static utilities class containing common math functions and constants
+    /// used throughout the ECS system.
+    /// </summary>
+    public static class Utilities
+    {
+        // Math constants
+        public const float PI = 3.14159265359f;
+        public const float TWO_PI = 6.28318530718f;
+        public const float HALF_PI = 1.57079632679f;
+        private const float INV_TWO_PI = 1f / TWO_PI;
+
+        // Sine lookup table for performance optimization
+        private const int LOOKUP_SIZE = 1024;
+        public const float LOOKUP_SCALE = LOOKUP_SIZE / TWO_PI;
+        private const float RECIP_LOOKUP_SCALE = TWO_PI / LOOKUP_SIZE;
+        private static readonly float[] _sinLookup;
+
+        // Thread-local random for thread-safe random number generation
+        [ThreadStatic]
+        private static Random? _threadRandom;
+
+        /// <summary>
+        /// Static constructor to initialize the sine lookup table.
+        /// </summary>
+        static Utilities()
+        {
+            // Pre-compute sine lookup table using reciprocal to avoid division (OPTIMIZED)
+            _sinLookup = new float[LOOKUP_SIZE];
+            for (int i = 0; i < LOOKUP_SIZE; i++)
+            {
+                _sinLookup[i] = Mathf.Sin(i * RECIP_LOOKUP_SCALE);
+            }
+
+            // Initialize SIMD math operations with sine lookup table
+            MathOperations.Initialize(_sinLookup);
+        }
+
+        /// <summary>
+        /// Gets a thread-local Random instance for thread-safe random number generation.
+        /// Uses non-allocating seed based on TickCount and thread ID.
+        /// </summary>
+        private static Random ThreadRandom
+        {
+            get
+            {
+                if (_threadRandom == null)
+                {
+                    // Non-allocating seed (OPTIMIZED - replaces Guid.NewGuid())
+                    int seed = System.Environment.TickCount ^ Thread.CurrentThread.ManagedThreadId;
+                    _threadRandom = new Random(seed);
+                }
+                return _threadRandom;
+            }
+        }
+
+        /// <summary>
+        /// Fast inverse square root using Quake-style bit manipulation.
+        /// Useful for vector normalization and distance calculations.
+        /// </summary>
+        /// <param name="x">The number to calculate inverse square root for</param>
+        /// <returns>Approximate value of 1/sqrt(x)</returns>
+        public static float FastInvSqrt(float x)
+        {
+            float halfx = 0.5f * x;
+            int i = BitConverter.SingleToInt32Bits(x);
+            i = 0x5f3759df - (i >> 1);
+            float y = BitConverter.Int32BitsToSingle(i);
+            y = y * (1.5f - halfx * y * y);
+            return y;
+        }
+
+        /// <summary>
+        /// Generates a random point uniformly distributed within a sphere.
+        /// Uses spherical coordinates with proper uniform distribution.
+        /// </summary>
+        /// <param name="radius">The radius of the sphere</param>
+        /// <returns>A random Vector3 point within the sphere</returns>
+        public static Vector3 RandomPointInSphere(float radius)
+        {
+            Random random = ThreadRandom;
+
+            float u = (float)random.NextDouble();
+            float v = (float)random.NextDouble();
+            float w = (float)random.NextDouble();
+
+            float theta = u * TWO_PI;
+            float phi = Mathf.Acos(2f * v - 1f);
+            // Use MathF.Pow for float cube-root (OPTIMIZED - avoids double precision)
+            float r = MathF.Pow(w, 1f / 3f) * radius;
+
+            float sinTheta = Mathf.Sin(theta);
+            float cosTheta = Mathf.Cos(theta);
+            float sinPhi = Mathf.Sin(phi);
+            float cosPhi = Mathf.Cos(phi);
+
+            float x = r * sinPhi * cosTheta;
+            float y = r * sinPhi * sinTheta;
+            float z = r * cosPhi;
+
+            return new Vector3(x, y, z);
+        }
+
+        /// <summary>
+        /// Fast sine lookup using pre-computed table.
+        /// Trades memory for speed with O(1) lookup time.
+        /// Handles negative angles and large angles robustly.
+        /// </summary>
+        /// <param name="angle">The angle in radians</param>
+        /// <returns>Approximate sine value</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float FastSin(float angle)
+        {
+            // Normalize to [0, TWO_PI) (OPTIMIZED - robust wrapping)
+            float a = angle % TWO_PI;
+            if (a < 0f) a += TWO_PI;
+
+            // Compute index with safety clamp
+            int idx = (int)(a * LOOKUP_SCALE);
+            if ((uint)idx >= LOOKUP_SIZE) idx &= (LOOKUP_SIZE - 1);
+
+            return _sinLookup[idx];
+        }
+
+        /// <summary>
+        /// Fast cosine lookup using pre-computed sine table.
+        /// Uses index offset by quarter-turn for better performance than sin(x + PI/2).
+        /// </summary>
+        /// <param name="angle">The angle in radians</param>
+        /// <returns>Approximate cosine value</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float FastCos(float angle)
+        {
+            // Normalize to [0, TWO_PI) (OPTIMIZED - robust wrapping)
+            float a = angle % TWO_PI;
+            if (a < 0f) a += TWO_PI;
+
+            // Use index offset by quarter-turn (OPTIMIZED - avoids extra multiply)
+            int idx = (int)(a * LOOKUP_SCALE) + (LOOKUP_SIZE >> 2);
+            idx &= (LOOKUP_SIZE - 1);
+
+            return _sinLookup[idx];
+        }
+
+        /// <summary>
+        /// Generates a random float between 0 and 1 using the thread-local Random.
+        /// </summary>
+        /// <returns>Random float in range [0, 1)</returns>
+        public static float RandomFloat()
+        {
+            return (float)ThreadRandom.NextDouble();
+        }
+
+        /// <summary>
+        /// Generates a random float between min and max using the thread-local Random.
+        /// </summary>
+        /// <param name="min">Minimum value (inclusive)</param>
+        /// <param name="max">Maximum value (exclusive)</param>
+        /// <returns>Random float in range [min, max)</returns>
+        public static float RandomRange(float min, float max)
+        {
+            return min + (float)ThreadRandom.NextDouble() * (max - min);
+        }
+    }
+}

@@ -4010,7 +4010,7 @@ sealed class Fixture : IDisposable
         {
             if (udp)
             {
-                True(UdpProtocolSession.TryCreate(
+                True(UdpProtocolSession.TryCreateSelfTrustedLoopback(
                     protocolLimits ?? NetworkProtocolLimits.Default,
                     new UdpProtocolLimits(512, 256 * 1024, 256 * 1024,
                         4_096, 30_000, 30_000, 5_000, 5_000),

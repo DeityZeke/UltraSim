@@ -26,6 +26,7 @@ internal static class N010SharedUdpListenerTests
     {
         Run("SharedUdpListenerRoutesIndependentSecureSessions", SharedUdpListenerRoutesIndependentSecureSessions);
         Run("SharedUdpListenerCapacityAndUnknownPathsAreBounded", SharedUdpListenerCapacityAndUnknownPathsAreBounded);
+        Run("SharedUdpTrustAndAggregateSocketBudgetsAreExplicit", SharedUdpTrustAndAggregateSocketBudgetsAreExplicit);
         Run("SharedUdpFailedHandshakeReleasesCapacity", SharedUdpFailedHandshakeReleasesCapacity);
         Run("SharedUdpSessionDrainDoesNotRetirePeerSession", SharedUdpSessionDrainDoesNotRetirePeerSession);
         Run("SharedUdpRetiredCapacityAdvancesGeneration", SharedUdpRetiredCapacityAdvancesGeneration);
@@ -38,6 +39,41 @@ internal static class N010SharedUdpListenerTests
         Run("SharedUdpNativeReceiveBatchPreservesIndependentDatagrams", SharedUdpNativeReceiveBatchPreservesIndependentDatagrams);
         Run("SharedUdpNativeReceiveBatchBackpressureRemainsPerSession", SharedUdpNativeReceiveBatchBackpressureRemainsPerSession);
         Run("WarmedSharedUdpNativeReceiveBatchAllocatesZero", WarmedSharedUdpNativeReceiveBatchAllocatesZero);
+    }
+
+    private static void SharedUdpTrustAndAggregateSocketBudgetsAreExplicit()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        bool rejectedUnpinned = false;
+        try
+        {
+            using var _ = new SharedUdpProtocolHost(
+                s_protocol, s_udp, new SharedUdpProtocolLimits(1, 4, 16),
+                s_manifest, identity);
+        }
+        catch (ArgumentException)
+        {
+            rejectedUnpinned = true;
+        }
+        True(rejectedUnpinned, "The ordinary host constructor silently self-trusted an identity.");
+
+        var shared = new SharedUdpProtocolLimits(
+            MaximumSessions: 2,
+            MaximumQueuedDatagramsPerSession: 4,
+            MaximumInboundDatagramsPerPump: 32,
+            AggregateSocketSendBufferBytes: 32 * 1024,
+            AggregateSocketReceiveBufferBytes: 64 * 1024);
+        using SharedUdpProtocolHost host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
+            s_protocol, s_udp, shared, s_manifest);
+        True(host.TryAddLoopbackSession(out _, out _));
+        SharedUdpProtocolHostSnapshot snapshot = host.GetSnapshot();
+        Equal(96L * 1024, snapshot.ConfiguredListenerSocketBufferBytes);
+        Equal(32L * 1024, snapshot.ConfiguredClientSocketBufferBytes);
+        Equal(128L * 1024, snapshot.ConfiguredSocketBufferBytes);
+        Equal(snapshot.KnownReservedBytes,
+            checked(snapshot.KnownServerReservedBytes + snapshot.KnownClientReservedBytes));
+        True(snapshot.KnownServerReservedBytes > 0 && snapshot.KnownClientReservedBytes > 0);
+        True(snapshot.Listener.ActualSocketBufferBytes > 0);
     }
 
     private static void SharedUdpListenerRoutesIndependentSecureSessions()
@@ -297,7 +333,7 @@ internal static class N010SharedUdpListenerTests
     private static void SharedUdpNativeSendBatchBackpressureIsPerDatagram()
     {
         if (!OperatingSystem.IsLinux()) return;
-        using var host = new SharedUdpProtocolHost(
+        using var host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
             s_protocol,
             s_udp,
             new SharedUdpProtocolLimits(
@@ -484,7 +520,7 @@ internal static class N010SharedUdpListenerTests
     private static void SharedUdpNativeReceiveBatchBackpressureRemainsPerSession()
     {
         if (!OperatingSystem.IsLinux()) return;
-        using var host = new SharedUdpProtocolHost(
+        using var host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
             s_protocol,
             s_udp,
             new SharedUdpProtocolLimits(
@@ -512,12 +548,13 @@ internal static class N010SharedUdpListenerTests
 
     private static SharedUdpProtocolHost CreateHost(
         int maximumSessions,
-        SharedUdpSocketIoMode mode = SharedUdpSocketIoMode.Scalar) => new(
-        s_protocol,
-        s_udp,
-        new SharedUdpProtocolLimits(
-            maximumSessions, 4, checked(maximumSessions * 16), mode, 32),
-        s_manifest);
+        SharedUdpSocketIoMode mode = SharedUdpSocketIoMode.Scalar) =>
+        SharedUdpProtocolHost.CreateSelfTrustedLoopback(
+            s_protocol,
+            s_udp,
+            new SharedUdpProtocolLimits(
+                maximumSessions, 4, checked(maximumSessions * 16), mode, 32),
+            s_manifest);
 
     private static void Drive(SharedUdpProtocolHost host, Func<bool> done)
     {

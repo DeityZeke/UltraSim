@@ -296,4 +296,10 @@ public readonly record struct GameInterestAttributionSnapshot(
     int MaximumBundleEstimatedBytes,
     ulong ApplicationAcknowledgements,
     ulong AcknowledgementRecordsExamined,
-    ulong AcknowledgementTicks);
+    ulong AcknowledgementTicks,
+    ulong ReadinessGateChecks,
+    ulong ReadinessDeadlineRecomputes,
+    ulong ReadinessRelationsExamined,
+    ulong ReadinessNoDataShortCircuits,
+    ulong ReadinessTierSkips,
+    ulong ReadinessRecomputeTicks);

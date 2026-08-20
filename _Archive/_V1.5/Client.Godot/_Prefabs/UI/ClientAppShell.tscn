@@ -1,0 +1,56 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/UI/ClientAppShell.cs" id="1_shell"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/StartMenuScreen.tscn" id="2_start"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/MultiplayerMenuScreen.tscn" id="3_multi"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/MessageMenuScreen.tscn" id="4_message"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/PauseMenuScreen.tscn" id="5_pause"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/SettingsMenuScreen.tscn" id="6_settings"]
+[ext_resource type="PackedScene" path="res://Client.Godot/_Prefabs/UI/SessionStatusScreen.tscn" id="7_status"]
+[ext_resource type="Script" path="res://Client.Godot/UI/MenuScreenHost.cs" id="8_host"]
+
+[node name="ClientAppShell" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_shell")
+RuntimeRootPath = NodePath("../../..")
+UiManagerPath = NodePath("../..")
+
+[node name="ScreenHost" type="Control" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("8_host")
+
+[node name="StartMenuScreen" parent="ScreenHost" instance=ExtResource("2_start")]
+ScreenId = &"start_menu"
+DefaultFocusPath = NodePath("Center/Panel/VBox/SinglePlayerButton")
+PresentationMode = 2
+
+[node name="MultiplayerMenuScreen" parent="ScreenHost" instance=ExtResource("3_multi")]
+ScreenId = &"multiplayer"
+DefaultFocusPath = NodePath("Center/Panel/VBox/HostInput")
+PresentationMode = 2
+
+[node name="SinglePlayerMessage" parent="ScreenHost" instance=ExtResource("4_message")]
+ScreenId = &"single_player_message"
+DefaultFocusPath = NodePath("Center/Panel/VBox/BackButton")
+PresentationMode = 2
+
+[node name="PauseMenuScreen" parent="ScreenHost" instance=ExtResource("5_pause")]
+ScreenId = &"pause"
+DefaultFocusPath = NodePath("Center/Panel/VBox/ResumeButton")
+PresentationMode = 1
+
+[node name="SettingsMenuScreen" parent="ScreenHost" instance=ExtResource("6_settings")]
+ScreenId = &"settings"
+DefaultFocusPath = NodePath("Center/Panel/VBox/BackButton")
+PresentationMode = 2
+
+[node name="SessionStatusScreen" parent="ScreenHost" instance=ExtResource("7_status")]
+ScreenId = &"session_status"
+DefaultFocusPath = NodePath("Center/Panel/VBox/ButtonRow/RetryButton")
+PresentationMode = 2

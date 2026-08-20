@@ -1,0 +1,43 @@
+@model UltraSim.Portal.Models.OwnerServerFormModel
+
+<label>
+    Display Name
+    <input asp-for="DisplayName" />
+    <span asp-validation-for="DisplayName"></span>
+</label>
+
+<label>
+    Description
+    <textarea asp-for="Description"></textarea>
+    <span asp-validation-for="Description"></span>
+</label>
+
+<label>
+    Target Host
+    <input asp-for="TargetHost" />
+    <span asp-validation-for="TargetHost"></span>
+</label>
+
+<label>
+    Target Port
+    <input asp-for="TargetPort" />
+    <span asp-validation-for="TargetPort"></span>
+</label>
+
+<label>
+    Website Url
+    <input asp-for="WebsiteUrl" />
+    <span asp-validation-for="WebsiteUrl"></span>
+</label>
+
+<label>
+    Discord Url
+    <input asp-for="DiscordUrl" />
+    <span asp-validation-for="DiscordUrl"></span>
+</label>
+
+<label>
+    Ownership Token
+    <input asp-for="OwnershipToken" type="password" />
+    <span asp-validation-for="OwnershipToken"></span>
+</label>

@@ -1,0 +1,134 @@
+@page "/forums/{sectionSlug}"
+@model UltraSim.Portal.Pages.Forums.SectionModel
+@{
+    ViewData["Title"] = Model.Section?.Title ?? "Forum Section";
+}
+
+@if (Model.Section is null)
+{
+    <div class="status-error">
+        <p>Forum section not found.</p>
+    </div>
+}
+else
+{
+    <section class="portal-header">
+        <p class="eyebrow">Forum section</p>
+        <h1>@Model.Section.Title</h1>
+        <p>@Model.Section.Description</p>
+        <div class="hero-actions">
+            <a class="button-secondary" asp-page="/Forums/Index">All Sections</a>
+            <a class="button-secondary" asp-page="/Forums/Search" asp-route-query="@Model.NormalizedSearch">Search Forums</a>
+            @if (Model.CanModerate)
+            {
+                <a class="button-secondary" asp-page="/Forums/Moderation" asp-route-sectionSlug="@Model.Section.Slug">Moderation</a>
+            }
+            @if (Model.CanCreateThread && !Model.Section.IsReadOnly)
+            {
+                <a class="button-primary" asp-page="/Forums/NewThread" asp-route-sectionSlug="@Model.Section.Slug">Start Thread</a>
+            }
+        </div>
+    </section>
+
+    <form method="get" class="server-filter forum-filter">
+        <label>
+            Search Threads
+            <input type="text" name="Search" value="@Model.NormalizedSearch" placeholder="Search by thread title" />
+        </label>
+        <input type="hidden" name="sectionSlug" value="@Model.Section.Slug" />
+        <button type="submit">Apply</button>
+        @if (!string.IsNullOrWhiteSpace(Model.NormalizedSearch))
+        {
+            <a class="button-secondary" asp-page="/Forums/Section" asp-route-sectionSlug="@Model.Section.Slug">Clear</a>
+        }
+    </form>
+
+    @if (Model.Threads.Count == 0)
+    {
+        <div class="status-empty">
+            <p>No threads yet.</p>
+        </div>
+    }
+    else
+    {
+        <section class="forum-thread-list">
+            @foreach (var thread in Model.Threads)
+            {
+                <article class="forum-thread-card">
+                    <div class="forum-thread-main">
+                        <div>
+                            <h2>
+                                <a asp-page="/Forums/Thread"
+                                   asp-route-sectionSlug="@Model.Section.Slug"
+                                   asp-route-threadId="@thread.Id">@thread.Title</a>
+                            </h2>
+                            <div class="forum-meta-row">
+                                <span>Started by @thread.AuthorName</span>
+                                @if (!string.IsNullOrWhiteSpace(thread.AuthorBadge))
+                                {
+                                    <span class="forum-role-badge @thread.AuthorBadgeCssClass">@thread.AuthorBadge</span>
+                                }
+                                <span>@thread.CreatedUtc.ToLocalTime().ToString("g")</span>
+                            </div>
+                        </div>
+                        <div class="forum-thread-flags">
+                            @if (thread.IsPinned)
+                            {
+                                <span class="detail-pill detail-pill-sm">Pinned</span>
+                            }
+                            @if (thread.IsLocked)
+                            {
+                                <span class="detail-pill detail-pill-sm">Locked</span>
+                            }
+                            @if (thread.IsHidden)
+                            {
+                                <span class="detail-pill detail-pill-sm">Hidden</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="forum-thread-meta-grid">
+                        <div>
+                            <span class="metric-label">Replies</span>
+                            <strong class="metric-value">@thread.ReplyCount</strong>
+                        </div>
+                        <div>
+                            <span class="metric-label">Last Post</span>
+                            <strong class="metric-value metric-value-compact">@thread.LastPosterName</strong>
+                            <div class="forum-meta-row">
+                                @if (!string.IsNullOrWhiteSpace(thread.LastPosterBadge))
+                                {
+                                    <span class="forum-role-badge @thread.LastPosterBadgeCssClass">@thread.LastPosterBadge</span>
+                                }
+                                <span>@thread.LastPostedUtc.ToLocalTime().ToString("g")</span>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+            }
+        </section>
+
+        @if (Model.TotalPages > 1)
+        {
+            <nav class="forum-pagination">
+                @if (Model.HasPreviousPage)
+                {
+                    <a class="button-secondary"
+                       asp-page="/Forums/Section"
+                       asp-route-sectionSlug="@Model.Section.Slug"
+                       asp-route-search="@Model.NormalizedSearch"
+                       asp-route-pageNumber="@(Model.PageNumber - 1)">Newer Threads</a>
+                }
+                <span class="detail-muted">Page @Model.PageNumber of @Model.TotalPages</span>
+                @if (Model.HasNextPage)
+                {
+                    <a class="button-secondary"
+                       asp-page="/Forums/Section"
+                       asp-route-sectionSlug="@Model.Section.Slug"
+                       asp-route-search="@Model.NormalizedSearch"
+                       asp-route-pageNumber="@(Model.PageNumber + 1)">Older Threads</a>
+                }
+            </nav>
+        }
+    }
+}

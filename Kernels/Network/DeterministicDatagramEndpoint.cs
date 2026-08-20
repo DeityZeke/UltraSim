@@ -30,6 +30,11 @@ internal static class DatagramSlotMetadata
 
 public enum DatagramSendStatus : byte
 {
+    /// <summary>
+    /// The endpoint accepted ownership of a copied datagram. A queued/batched
+    /// endpoint may not yet have submitted it to the operating-system socket;
+    /// this is a transport-admission result, not proof of wire delivery.
+    /// </summary>
     Accepted = 0,
     DroppedByImpairment = 1,
     CapacityExceeded = 2,

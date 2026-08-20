@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/_Prefabs/Mobiles/CharacterRoot.cs" id="1_2l8aa"]
+
+[node name="CharacterRoot" type="Node3D"]
+script = ExtResource("1_2l8aa")
+
+[node name="CollisionRoot" type="Node3D" parent="."]
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="Anchors" type="Node3D" parent="."]
+
+[node name="CameraPivot" type="Node3D" parent="Anchors"]
+
+[node name="NameplatePivot" type="Node3D" parent="Anchors"]
+
+[node name="EffectsRoot" type="Node3D" parent="Anchors"]

@@ -172,7 +172,11 @@ as required metrics for the workloads that own the semantics:
 
 P95 packet-fill distribution, GC pause duration, LOH/pinned pressure, and
 server-only CPU require targeted instrumentation rather than inference from the
-current combined process. They remain explicit N0.10 follow-ups. Worker/shard
+current combined process. Shared-listener artifacts now split known server/client
+reservation and configured listener/client socket buffers, and report the actual
+OS listener buffer size. That fixes memory-role accounting; it does **not** turn
+same-process server+client CPU into a pure server replay result. A packet-replay
+server benchmark remains an explicit follow-up. Worker/shard
 metrics remain inapplicable until a measured checkpoint actually adds workers.
 
 ## Running

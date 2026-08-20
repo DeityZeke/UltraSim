@@ -1,0 +1,262 @@
+@page
+@model UltraSim.Portal.Pages.Admin.Accounts.DetailModel
+@{
+    ViewData["Title"] = "Account Detail";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Account Detail</h1>
+        <p>Role, ownership, and recent audit history for a single platform account.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        @if (Model.TargetUser == null)
+        {
+            <div class="status-error">That account could not be found.</div>
+        }
+        else
+        {
+            <div class="claim-form">
+                <div class="metric-grid">
+                    <article class="metric-card">
+                        <span class="metric-label">Email</span>
+                        <strong class="metric-value">@(Model.TargetUser.Email ?? "-")</strong>
+                        <span class="metric-sub">Portal sign-in email</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Username</span>
+                        <strong class="metric-value">@(Model.TargetUser.UserName ?? "-")</strong>
+                        <span class="metric-sub">Identity username</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Display Name</span>
+                        <strong class="metric-value">@(Model.TargetUser.DisplayName ?? "-")</strong>
+                        <span class="metric-sub">Optional profile name</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Created</span>
+                        <strong class="metric-value">@Model.TargetUser.CreatedUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")Z</strong>
+                        <span class="metric-sub">Portal account creation time</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Last Active</span>
+                        <strong class="metric-value">@Model.TargetUser.LastActiveUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")Z</strong>
+                        <span class="metric-sub">Last observed portal activity</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Effective Role</span>
+                        <strong class="metric-value">@Model.EffectiveRole</strong>
+                        <span class="metric-sub">Resolved from role membership</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Protection</span>
+                        <strong class="metric-value">@(Model.TargetUser.IsPrimaryOwner ? "PrimaryOwner" : "Normal")</strong>
+                        <span class="metric-sub">Protected root-owner status</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Owned Claims</span>
+                        <strong class="metric-value">@Model.Claims.Count</strong>
+                        <span class="metric-sub">Portal-side claimed servers</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Forum Threads</span>
+                        <strong class="metric-value">@Model.ForumThreadCount</strong>
+                        <span class="metric-sub">Threads started by this account</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Hidden Threads</span>
+                        <strong class="metric-value">@Model.HiddenForumThreadCount</strong>
+                        <span class="metric-sub">Threads hidden by moderation</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Forum Posts</span>
+                        <strong class="metric-value">@Model.ForumPostCount</strong>
+                        <span class="metric-sub">Posts authored by this account</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Hidden Posts</span>
+                        <strong class="metric-value">@Model.HiddenForumPostCount</strong>
+                        <span class="metric-sub">Posts hidden by moderation</span>
+                    </article>
+                    <article class="metric-card">
+                        <span class="metric-label">Last Forum Activity</span>
+                        <strong class="metric-value">@(Model.LastForumActivityUtc?.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss") + "Z" ?? "-")</strong>
+                        <span class="metric-sub">Latest thread or post activity</span>
+                    </article>
+                </div>
+
+                <div class="hero-actions">
+                    <a class="button-secondary" asp-page="/Admin/Accounts/Index">Back to Accounts</a>
+                    <a asp-page="/Admin/Accounts/Edit" asp-route-id="@Model.TargetUser.Id">Manage Role</a>
+                </div>
+            </div>
+
+            <div class="server-table">
+                <h2>Owned Server Claims</h2>
+                @if (Model.Claims.Count == 0)
+                {
+                    <div class="status-empty">This account does not own any saved server claims.</div>
+                }
+                else
+                {
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Target</th>
+                                <th>Status</th>
+                                <th>Registry Id</th>
+                                <th>Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var claim in Model.Claims)
+                        {
+                            <tr>
+                                <td>@claim.DisplayName</td>
+                                <td>@claim.TargetHost:@claim.TargetPort</td>
+                                <td>@claim.Status</td>
+                                <td>@(claim.RequestedServerId ?? "-")</td>
+                                <td>@claim.UpdatedUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            <div class="server-table">
+                <h2>Recent Forum Threads</h2>
+                @if (Model.RecentForumThreads.Count == 0)
+                {
+                    <div class="status-empty">This account has not started any forum threads.</div>
+                }
+                else
+                {
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Thread</th>
+                                <th>Section</th>
+                                <th>Flags</th>
+                                <th>Created</th>
+                                <th>Last Activity</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var thread in Model.RecentForumThreads)
+                        {
+                            <tr>
+                                <td>
+                                    <a asp-page="/Forums/Thread"
+                                       asp-route-sectionSlug="@thread.SectionSlug"
+                                       asp-route-threadId="@thread.ThreadId">@thread.Title</a>
+                                </td>
+                                <td>@thread.SectionTitle</td>
+                                <td>
+                                    @if (thread.IsPinned)
+                                    {
+                                        <span class="detail-pill detail-pill-sm">Pinned</span>
+                                    }
+                                    @if (thread.IsLocked)
+                                    {
+                                        <span class="detail-pill detail-pill-sm">Locked</span>
+                                    }
+                                    @if (thread.IsHidden)
+                                    {
+                                        <span class="detail-pill detail-pill-sm">Hidden</span>
+                                    }
+                                </td>
+                                <td>@thread.CreatedUtc.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                                <td>@thread.LastPostedUtc.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            <div class="server-table">
+                <h2>Recent Forum Posts</h2>
+                @if (Model.RecentForumPosts.Count == 0)
+                {
+                    <div class="status-empty">This account has not authored any forum posts.</div>
+                }
+                else
+                {
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Thread</th>
+                                <th>Section</th>
+                                <th>State</th>
+                                <th>Updated</th>
+                                <th>Excerpt</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var post in Model.RecentForumPosts)
+                        {
+                            <tr>
+                                <td>
+                                    <a asp-page="/Forums/Thread"
+                                       asp-route-sectionSlug="@post.SectionSlug"
+                                       asp-route-threadId="@post.ThreadId">@post.ThreadTitle</a>
+                                </td>
+                                <td>@post.SectionTitle</td>
+                                <td>@(post.IsHidden ? "Hidden" : "Visible")</td>
+                                <td>@post.UpdatedUtc.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                                <td>@post.Preview</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+
+            <div class="server-table">
+                <h2>Recent Audit Activity</h2>
+                @if (Model.RecentAudit.Count == 0)
+                {
+                    <div class="status-empty">No recent audit records reference this account.</div>
+                }
+                else
+                {
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>Actor</th>
+                                <th>Action</th>
+                                <th>Target</th>
+                                <th>Result</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var record in Model.RecentAudit)
+                        {
+                            <tr>
+                                <td>@record.CreatedUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                                <td>@(record.ActorEmail ?? record.ActorUserId)</td>
+                                <td>@record.ActionType</td>
+                                <td>@record.TargetType:@record.TargetId</td>
+                                <td>@record.Result</td>
+                                <td>@record.Reason</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        }
+    </section>
+</div>

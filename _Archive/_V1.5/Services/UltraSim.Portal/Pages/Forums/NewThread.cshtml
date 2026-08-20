@@ -1,0 +1,41 @@
+@page "/forums/{sectionSlug}/new"
+@model UltraSim.Portal.Pages.Forums.NewThreadModel
+@{
+    ViewData["Title"] = Model.Section is null ? "New Thread" : $"New Thread - {Model.Section.Title}";
+}
+
+@if (Model.Section is null)
+{
+    <div class="status-error">
+        <p>Forum section not found.</p>
+    </div>
+}
+else
+{
+    <section class="portal-header">
+        <p class="eyebrow">Start discussion</p>
+        <h1>New Thread</h1>
+        <p>Posting in @Model.Section.Title.</p>
+    </section>
+
+    <form method="post" class="claim-form forum-form">
+        <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+
+        <label>
+            Title
+            <input asp-for="Input.Title" />
+            <span asp-validation-for="Input.Title" class="text-danger"></span>
+        </label>
+
+        <label>
+            Opening Post
+            <textarea asp-for="Input.Content"></textarea>
+            <span asp-validation-for="Input.Content" class="text-danger"></span>
+        </label>
+
+        <div class="hero-actions">
+            <button type="submit">Create Thread</button>
+            <a class="button-secondary" asp-page="/Forums/Section" asp-route-sectionSlug="@Model.Section.Slug">Cancel</a>
+        </div>
+    </form>
+}

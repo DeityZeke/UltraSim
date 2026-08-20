@@ -169,7 +169,23 @@ public sealed class UdpProtocolSession : IDisposable
         NetworkProtocolManifest? serverManifest = null) =>
         TryCreateCore(protocolLimits, udpLimits, StopwatchNetworkMonotonicClock.Instance,
             out session, out handshake, manifest, serverIdentity,
-            trustedServerPublicKey, serverManifest);
+            trustedServerPublicKey, serverManifest, allowSelfTrust: false);
+
+    /// <summary>
+    /// Creates a controlled in-process loopback pair and explicitly trusts the
+    /// server identity owned by that pair. This is test/benchmark topology, not
+    /// a production remote-client trust policy.
+    /// </summary>
+    public static bool TryCreateSelfTrustedLoopback(
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        out UdpProtocolSession? session,
+        out ProtocolHandshakeSnapshot handshake,
+        NetworkProtocolManifest? manifest = null,
+        NetworkProtocolManifest? serverManifest = null) =>
+        TryCreateCore(protocolLimits, udpLimits, StopwatchNetworkMonotonicClock.Instance,
+            out session, out handshake, manifest, serverIdentity: null,
+            trustedServerPublicKey: default, serverManifest: serverManifest, allowSelfTrust: true);
 
     internal static bool TryCreateForTesting(
         NetworkProtocolLimits protocolLimits,
@@ -182,7 +198,8 @@ public sealed class UdpProtocolSession : IDisposable
         ReadOnlyMemory<byte> trustedServerPublicKey = default,
         NetworkProtocolManifest? serverManifest = null) =>
         TryCreateCore(protocolLimits, udpLimits, clock, out session, out handshake,
-            manifest, serverIdentity, trustedServerPublicKey, serverManifest);
+            manifest, serverIdentity, trustedServerPublicKey, serverManifest,
+            allowSelfTrust: true);
 
     private static bool TryCreateCore(
         NetworkProtocolLimits protocolLimits,
@@ -193,7 +210,8 @@ public sealed class UdpProtocolSession : IDisposable
         NetworkProtocolManifest? manifest,
         NetworkServerIdentity? serverIdentity,
         ReadOnlyMemory<byte> trustedServerPublicKey,
-        NetworkProtocolManifest? serverManifest)
+        NetworkProtocolManifest? serverManifest,
+        bool allowSelfTrust)
     {
         ArgumentNullException.ThrowIfNull(clock);
         udpLimits.Validate();
@@ -204,7 +222,16 @@ public sealed class UdpProtocolSession : IDisposable
         bool ownsIdentity = serverIdentity is null;
         serverIdentity ??= NetworkServerIdentity.CreateEphemeral();
         if (trustedServerPublicKey.IsEmpty)
+        {
+            if (!allowSelfTrust)
+            {
+                if (ownsIdentity) serverIdentity.Dispose();
+                session = null;
+                handshake = default;
+                return false;
+            }
             trustedServerPublicKey = serverIdentity.PublicKey.ToArray();
+        }
 
         UdpDatagramEndpoint? client = null;
         UdpDatagramEndpoint? server = null;

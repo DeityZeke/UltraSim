@@ -1,0 +1,106 @@
+@page
+@model UltraSim.Portal.Pages.Admin.AuditModel
+@{
+    ViewData["Title"] = "Admin Audit";
+}
+
+<div class="portal-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>Audit Log</h1>
+        <p>Append-only record of role changes, listing moderation, and forum moderation actions.</p>
+    </div>
+</div>
+
+<div class="admin-shell">
+    <aside class="admin-nav">
+        <partial name="/Pages/Admin/_AdminNav.cshtml" />
+    </aside>
+
+    <section class="admin-content">
+        <form method="get" class="server-filter">
+            <label>
+                <span>Search</span>
+                <input asp-for="Search" placeholder="Actor, target, reason, details" />
+            </label>
+
+            <label>
+                <span>Action</span>
+                <select asp-for="ActionType">
+                    <option value="">All actions</option>
+                    @foreach (string actionType in Model.AvailableActionTypes)
+                    {
+                        <option value="@actionType">@actionType</option>
+                    }
+                </select>
+            </label>
+
+            <label>
+                <span>Result</span>
+                <select asp-for="Result">
+                    <option value="">All results</option>
+                    @foreach (string result in Model.AvailableResults)
+                    {
+                        <option value="@result">@result</option>
+                    }
+                </select>
+            </label>
+
+            <label>
+                <span>Target</span>
+                <select asp-for="TargetType">
+                    <option value="">All targets</option>
+                    @foreach (string targetType in Model.AvailableTargetTypes)
+                    {
+                        <option value="@targetType">@targetType</option>
+                    }
+                </select>
+            </label>
+
+            <label class="checkbox-field">
+                <input asp-for="ForumOnly" />
+                <span>Forum only</span>
+            </label>
+
+            <button type="submit">Apply Filters</button>
+            <a class="button-secondary" asp-page="/Admin/Audit">Clear</a>
+        </form>
+
+        @if (Model.Records.Count == 0)
+        {
+            <div class="status-empty">No audit records matched the current filters.</div>
+        }
+        else
+        {
+            <div class="server-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Timestamp</th>
+                            <th>Actor</th>
+                            <th>Role</th>
+                            <th>Action</th>
+                            <th>Target</th>
+                            <th>Result</th>
+                            <th>Reason</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var record in Model.Records)
+                    {
+                        <tr>
+                            <td>@record.CreatedUtc.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss")Z</td>
+                            <td>@(record.ActorEmail ?? record.ActorUserId)</td>
+                            <td>@record.ActorRole</td>
+                            <td>@record.ActionType</td>
+                            <td>@record.TargetType:@record.TargetId</td>
+                            <td>@record.Result</td>
+                            <td>@record.Reason</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>

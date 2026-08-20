@@ -359,7 +359,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             SocketIoMode: socketIoMode,
             MaximumNativeSendBatchDatagrams: 32,
             MaximumNativeReceiveBatchDatagrams: 32);
-        _host = new SharedUdpProtocolHost(
+        _host = SharedUdpProtocolHost.CreateSelfTrustedLoopback(
             _protocolLimits, s_udpLimits, sharedLimits,
             UltraSim.Game.Protocol.UltraSimGameProtocol.Manifest);
         _bots = new ReplicationBot[profile.Clients];
@@ -461,13 +461,21 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         double deadline = 1000d / TickHz;
         int misses = _tickMilliseconds.Count(value => value > deadline);
         int longestMiss = LongestMissStreak(_tickMilliseconds, deadline);
-        long applicationAdapterBytes = 0;
+        long serverApplicationAdapterBytes = 0;
+        long clientApplicationAdapterBytes = 0;
         for (int index = 0; index < _bots.Length; index++)
-            applicationAdapterBytes = checked(applicationAdapterBytes +
-                _bots[index].WorldServer.GetSnapshot().ReservedBytes +
+        {
+            serverApplicationAdapterBytes = checked(serverApplicationAdapterBytes +
+                _bots[index].WorldServer.GetSnapshot().ReservedBytes);
+            clientApplicationAdapterBytes = checked(clientApplicationAdapterBytes +
                 _bots[index].WorldClient.GetSnapshot().ReservedBytes);
-        long knownReserved = checked(hostAfter.KnownReservedBytes + interestAfter.ReservedBytes +
-            _projection.GetSnapshot().ReservedBytes + applicationAdapterBytes);
+        }
+        long knownServerReserved = checked(hostAfter.KnownServerReservedBytes +
+            interestAfter.ReservedBytes + projectionAfter.ReservedBytes +
+            serverApplicationAdapterBytes);
+        long knownClientReserved = checked(hostAfter.KnownClientReservedBytes +
+            clientApplicationAdapterBytes);
+        long knownReserved = checked(knownServerReserved + knownClientReserved);
 
         ulong relationsCopied = interestAfter.SemanticRecordCopies - interestBefore.SemanticRecordCopies;
         ulong semanticBytes = interestAfter.SemanticBytesCopied - interestBefore.SemanticBytesCopied;
@@ -551,6 +559,8 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             networkAfter.Compactions - networkBefore.Compactions,
             compactionBytes,
             knownReserved,
+            knownServerReserved,
+            knownClientReserved,
             peakHeap,
             peakWorking,
             peakPrivate,
@@ -1701,6 +1711,8 @@ internal sealed record ReplicationWorkloadResult(
     ulong RetainedPayloadCompactions,
     ulong RetainedPayloadCompactionBytesMoved,
     long KnownReservedBytes,
+    long KnownServerReservedBytes,
+    long KnownClientReservedBytes,
     long PeakManagedHeapBytes,
     long PeakWorkingSetBytes,
     long PeakPrivateBytes,

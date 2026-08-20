@@ -94,6 +94,8 @@ public readonly record struct NetworkProtocolLimits(
             (long)NetworkLaneContracts.Count * MaximumMessageBytes +
             (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
             (long)SentPacketCapacity * NetworkSentPacketMetadata.EstimatedBytes +
+            NetworkSentPacketIndexMetadata.EstimateBytes(
+                SentPacketCapacity, MaximumReliableMessages, MaximumFragmentsPerMessage) +
             (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
             (long)MaximumIndependentUnreliableMessages *
                 (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
@@ -130,6 +132,8 @@ public readonly record struct NetworkProtocolLimits(
             layout.ReassemblyOffsets[^1] +
             (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
             (long)SentPacketCapacity * NetworkSentPacketMetadata.EstimatedBytes +
+            NetworkSentPacketIndexMetadata.EstimateBytes(
+                SentPacketCapacity, MaximumReliableMessages, MaximumFragmentsPerMessage) +
             (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
             (long)MaximumIndependentUnreliableMessages *
                 (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
@@ -199,6 +203,22 @@ internal readonly record struct NetworkPayloadReservationLayout(
 internal static class NetworkSentPacketMetadata
 {
     internal const int EstimatedBytes = 32;
+}
+
+internal static class NetworkSentPacketIndexMetadata
+{
+    internal static long EstimateBytes(
+        int sentPacketCapacity,
+        int maximumReliableMessages,
+        int maximumFragmentsPerMessage)
+    {
+        int mapCapacity = checked((int)System.Numerics.BitOperations.RoundUpToPowerOf2(
+            checked((uint)sentPacketCapacity * 2U)));
+        return checked(
+            (long)sentPacketCapacity * sizeof(int) +
+            (long)maximumReliableMessages * maximumFragmentsPerMessage * sizeof(int) +
+            (long)mapCapacity * (sizeof(ulong) + sizeof(int)));
+    }
 }
 
 internal static class NetworkOutgoingMessageMetadata

@@ -1,0 +1,21 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Client.Godot/_Prefabs/Camera/OrbitFollowCameraRig.cs" id="1_85h1e"]
+
+[node name="OrbitFollowCameraRig" type="Node3D"]
+script = ExtResource("1_85h1e")
+PitchDegrees = -12.0
+ArmLength = 3.0
+FollowOffset = Vector3(0, 0.3, 0)
+CameraFovDegrees = 65.0
+
+[node name="YawPivot" type="Node3D" parent="."]
+
+[node name="PitchPivot" type="Node3D" parent="YawPivot"]
+
+[node name="SpringArm3D" type="SpringArm3D" parent="YawPivot/PitchPivot"]
+spring_length = 3.0
+
+[node name="Camera3D" type="Camera3D" parent="YawPivot/PitchPivot/SpringArm3D"]
+current = true
+fov = 65.0

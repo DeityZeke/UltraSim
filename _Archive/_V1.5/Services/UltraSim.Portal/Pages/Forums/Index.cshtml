@@ -1,0 +1,79 @@
+@page "/forums"
+@model UltraSim.Portal.Pages.Forums.IndexModel
+@{
+    ViewData["Title"] = "Forums";
+}
+
+<section class="portal-header">
+    <p class="eyebrow">Platform forums</p>
+    <h1>Forums</h1>
+    <p>
+        Platform discussion belongs here instead of inside listing comments. Use the sections below for
+        support, operations, architecture, and broader community discussion.
+    </p>
+    @if (Model.CanModerate)
+    {
+        <div class="hero-actions">
+            <a class="button-secondary" asp-page="/Forums/Search">Search Forums</a>
+            <a class="button-secondary" asp-page="/Forums/Moderation">Moderation Dashboard</a>
+        </div>
+    }
+    else
+    {
+        <div class="hero-actions">
+            <a class="button-secondary" asp-page="/Forums/Search">Search Forums</a>
+        </div>
+    }
+</section>
+
+<section class="forum-section-grid">
+    @foreach (var forumSection in Model.Sections)
+    {
+        <article class="forum-section-card">
+            <div class="forum-section-card-main">
+                <div>
+                    <h2><a asp-page="/Forums/Section" asp-route-sectionSlug="@forumSection.Slug">@forumSection.Title</a></h2>
+                    <p class="detail-muted">@forumSection.Description</p>
+                </div>
+                <a class="button-secondary" asp-page="/Forums/Section" asp-route-sectionSlug="@forumSection.Slug">Open Section</a>
+            </div>
+
+            <div class="forum-section-stats">
+                <div class="forum-section-stat">
+                    <span class="metric-label">Threads</span>
+                    <strong class="metric-value">@forumSection.ThreadCount</strong>
+                </div>
+                <div class="forum-section-stat">
+                    <span class="metric-label">Posts</span>
+                    <strong class="metric-value">@forumSection.PostCount</strong>
+                </div>
+                <div class="forum-section-stat forum-section-latest">
+                    <span class="metric-label">Latest Activity</span>
+                    @if (forumSection.LatestThreadId.HasValue)
+                    {
+                        <div class="forum-latest-activity">
+                            <a asp-page="/Forums/Thread"
+                               asp-route-sectionSlug="@forumSection.Slug"
+                               asp-route-threadId="@forumSection.LatestThreadId.Value">@forumSection.LatestThreadTitle</a>
+                            <div class="forum-meta-row">
+                                <span>@forumSection.LatestAuthorName</span>
+                                @if (!string.IsNullOrWhiteSpace(forumSection.LatestAuthorBadge))
+                                {
+                                    <span class="forum-role-badge @forumSection.LatestAuthorBadgeCssClass">@forumSection.LatestAuthorBadge</span>
+                                }
+                                @if (forumSection.LatestPostedUtc.HasValue)
+                                {
+                                    <span>@forumSection.LatestPostedUtc.Value.ToLocalTime().ToString("g")</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="detail-muted">No threads yet.</span>
+                    }
+                </div>
+            </div>
+        </article>
+    }
+</section>
