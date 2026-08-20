@@ -1,12 +1,12 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. Revised 2026-08-19 from the accepted Network N0 baseline, the later spatial-seam design decisions, and the V1/transitional spatial-publication archaeology.
+Status: active forward plan. T0.0 implementation complete and stopped for checkpoint review on 2026-08-19; T0.1 has not started. Revised from the accepted Network N0 baseline, the later spatial-seam design decisions, and the V1/transitional spatial-publication archaeology.
 Network N0 is accepted and frozen as the current remote-authority reference. T0 is the next major implementation milestone. Network N1 is deliberately deferred until T0 has proved the world/spatial/publication contracts that N1 can consume.
 T0 is not merely a terrain renderer. It establishes the spatial substrate for the persistent world: deterministic integer coordinates, a canonical coarse spatial partition, packed terrain and statics, incremental dynamic membership, chunk-associated public publication state, bounded dirty history, local streaming, Godot rendering, and the seams required by persistence and later replication profiles.
 The motivating observation is measured rather than speculative. Network V3 Dense-400 is efficient once recipient/entity relationships are established, while sparse movement is limited by changing and retiering those relationships. The rejected N0.11 exact-AOI experiment removed 31.55% of 4K maintained relations and 40.36% of WorldState records, yet doubled interest-update p95 because precise recipient/entity membership reconciliation cost more than the coherent work it removed.
 T0 therefore introduces a maintained coarse spatial index so entity spatial work is paid once when authoritative spatial state changes instead of being rediscovered independently by every observer. The game profile uses 16 m spatial chunks, but terrain, publication, AOI subscriptions, client semantic residency, rendering, physics, navigation, and other domains keep private representations and private local slot identities. They may share only canonical spatial identity/geometry where useful.
 The independent Spatial seam is a **contract/read vocabulary, not a data-moving intermediary**. It must not become an event bus, mailbox, publication thread, generic chunk framework, or mandatory dependency of otherwise independent kernels. Concrete bridges may query optimized game/world spatial and publication stores directly, including borrowed spans/read views, when that is the correct hot path.
-Recent archaeology of the V1-to-V2 transition reinforces the intended hot-path shape: movement/component writes may occur several times inside one authority step, but component-scoped dirty capture deduplicates the entity, a barrier/stage completion establishes that the final authoritative value is readable, and Spatial consumes that entity once. The old event-like mechanism is therefore retained only as a **completion/readiness semantic**, not as a per-movement message bus. T0.5 must preserve that property without relying on destructive-drain ordering between consumers.
+Recent archaeology of the V1-to-V2 transition reinforces the intended hot-path shape: movement/component writes may occur several times inside one authority step, but component-scoped dirty capture deduplicates the entity, a barrier/stage completion establishes that the final authoritative value is readable, and Spatial consumes that entity once. The old event-like mechanism is therefore retained only as a **completion/readiness semantic**, not as a per-movement message bus. T0.1 must preserve that property without relying on destructive-drain ordering between consumers.
 The first complete Terrain milestone is **T0 — Chunk-Native Playable World**:
 
 > Start the existing authoritative Runtime and game composition, enter a deterministic persistent world, move across spatial chunk boundaries, stream packed terrain and UO-like statics into Godot, enter a small building, interact with dynamic world objects, mutate authoritative/persistent state, retire or rebuild the local projection, and reproduce the same visible world without making renderer nodes, network relations, compatibility-seam objects, or subsystem-local slots authoritative.
@@ -66,6 +66,10 @@ NO AUTHORITATIVE FLOAT POSITION IS REQUIRED.
 
 NEGATIVE COORDINATES HAVE ONE CANONICAL FLOOR-DIVISION RULE.
 
+GLOBAL X/Z RECONSTRUCTION IS CHECKED INT64; DISTANCE DELTAS AND SQUARED SUMS PROMOTE TO INT128 BEFORE SUBTRACTION.
+
+FLOAT IMPORT REJECTS NONFINITE/OUT-OF-PROFILE VALUES AND QUANTIZES NEAREST MILLIMETER, MIDPOINT AWAY FROM ZERO.
+
 PUBLICATION MEANS COMMITTING A REVISION/ROOT/VISIBLE STATE; IT DOES NOT MEAN COPYING A GIANT SNAPSHOT EVERY TICK.
 
 ONE PUBLICATION CHUNK OWNS ONE CURRENT PACKED VIEW OF ITS PUBLIC SPATIAL STATE.
@@ -102,6 +106,8 @@ LOAD/PREPARE MAY BE ASYNCHRONOUS.
 
 AUTHORITY/SPATIAL/PUBLICATION COMMIT IS OWNER-BOUND AND TRANSACTIONAL.
 
+CANONICAL SPATIAL MAINTENANCE RUNS AFTER THE COMPLETE ECS GRAPH AND POST-GRAPH STRUCTURAL BARRIER, ONCE PER AUTHORITATIVE STEP.
+
 AUTHORITATIVE STRUCTURAL MUTATION HAS ONE SANCTIONED COMMIT/SINK PATH; HOT-PATH CONVENIENCE MAY NOT BYPASS IT.
 
 MULTIPLE WRITES TO ONE SPATIAL COMPONENT WITHIN ONE COMMITTED STEP COALESCE TO ONE CHANGED-ENTITY OBSERVATION OF THE FINAL VALUE.
@@ -122,10 +128,14 @@ RUNTIME MEMORY IS BOUNDED.
 
 CAPACITY FAILURE IS EXPLICIT.
 
+DERIVED SPATIAL MEMBERSHIP CAPACITY IS GUARANTEED FROM THE ADMITTED ECS ENTITY CAPACITY; ROUTINE MOVEMENT DOES NOT FAIL AFTER POSITION COMMITS.
+
+CURRENT PUBLIC STATE MAY COMMIT EVEN WHEN BOUNDED HISTORY INVALIDATES; HISTORY PRESSURE REQUIRES A SNAPSHOT AND NEVER BLOCKS AUTHORITY.
+
 NO HOT-PATH OBJECT GRAPH IS CREATED PER CELL, STATIC, ENTITY, CHUNK SUBSCRIPTION, OR RECIPIENT.
 ```
 
-These rules survive changes to mesh generation, file compression, renderer, network codec, future publication aggregation, world size, and eventual server partitioning. The fixed 16 m / 0.5 m / 0.1 m / 1 mm game profile may be reopened only by concrete evidence that it fails a required correctness, capacity, or whole-pipeline performance gate; it is no longer a routine T0.1 search parameter.
+These rules survive changes to mesh generation, file compression, renderer, network codec, future publication aggregation, world size, and eventual server partitioning. The fixed 16 m / 0.5 m / 0.1 m / 1 mm game profile may be reopened only by concrete evidence that it fails a required correctness, capacity, or whole-pipeline performance gate; it is no longer a routine T0.2 search parameter.
 
 ## Terminology
 
@@ -322,7 +332,7 @@ Game/World
     Spatial/
         fixed game profile
         optimized WorldPosition / WorldLocalPosition
-        WorldSpatialIndex (T0.5)
+        WorldSpatialIndex (T0.1)
     Terrain/
         world-pack format + validated reader
         TerrainChunk storage
@@ -360,6 +370,27 @@ _Benchmarks/UltraSim.Game.WorldBenchmarks
 If a new Spatial contracts assembly is not compatible with current repository/project rules, preserve the same dependency-neutral boundary in the smallest repository-consistent form and document the deviation. Do not solve project layout uncertainty by putting spatial contracts inside Network.
 Network does not own world spatial membership or publication storage. Persistence does not own it. Godot does not own it. `Spatial.Contracts` does not own it. Bridges translate or directly read immutable/committed typed outputs according to their domain.
 
+The implementation order follows actual dependencies; an early gate may not
+require disposable scaffolding from a later checkpoint:
+
+```
+T0.0   Spatial contracts + coordinate/value machine
+T0.1   authoritative WorldPosition + WorldSpatialIndex
+T0.2   terrain profile validation + height encoding
+T0.3   sectioned WorldPack container + terrain source
+T0.4   authoritative terrain query + deterministic mesh payload
+T0.5   frozen statics + Multi/property compilation
+T0.6   ChunkPublicationStore + bounded history
+T0.7   interest/subscription oracle
+T0.8   client residency + production Godot renderer/streaming
+T0.9   persistence + mutable overlay
+T0.10  playable whole-pipeline acceptance
+```
+
+T0.4 proves a payload, not a renderer. T0.5 proves packed compilation, not live
+streaming. T0.8 is the first production Godot/streaming gate, and T0.10 owns final
+whole-pipeline validation of the fixed 16 m geometry.
+
 ## T0.0 — executable contracts before terrain content
 
 T0.0 proves the dependency shape and coordinate/value machine before terrain files, resident stores, publication machinery, or rendering. **Stop at this gate.**
@@ -392,15 +423,18 @@ Requirements:
 
 ### T0.0B — fixed game world spatial profile
 
-The concrete game/world layer also owns the values that are not generic Spatial seam vocabulary:
+The concrete game/world layer owns values that are not generic Spatial seam
+vocabulary. T0.0 freezes only the coordinate/profile values it can prove:
 
 ```
 WorldLocalPosition
 WorldPosition / WorldLocation
 TerrainCellCoord
-PublicationRevision
-WorldPackFingerprint
 ```
+
+`WorldPackFingerprint` arrives with the T0.3 container and publication epoch/
+identity/revision values arrive with T0.6. They remain game/world values but are
+not fabricated at T0.0 merely to reserve names.
 
 These may use the shared spatial identity/geometry values, but they are game/world contracts rather than reasons to enlarge `Spatial.Contracts`.
 The concrete game world freezes these inputs:
@@ -428,6 +462,20 @@ LocalZMillimeters uint16   // canonical 0..15,999
 ```
 
 `SpatialSpaceId` may be stored separately from hot per-entity positions when one world/facet is implied by authority. Multiple future facets do not justify inflating every hot row before they exist.
+The complete admitted X/Z domain is therefore:
+
+```
+SpatialChunkCoord.X/Z       int32
+game local X/Z              uint16, canonical 0..15,999
+reconstructed global X/Z    int64
+game authoritative Y        int32 millimeters
+distance delta/squared sum  Int128
+```
+
+Geometry edge/quantum values are positive `int32`. Reconstruction uses checked
+`Int64` arithmetic. Distance code promotes each operand to `Int128` **before**
+subtraction; subtraction of two otherwise legal `Int64` values may itself
+overflow `Int64`.
 World calculations use integer millimeters or explicitly defined terrain height units. Godot converts to float only at presentation boundaries and may rebase a render origin without changing authority.
 The placement grid and terrain grid never constrain dynamic entity positions:
 
@@ -438,7 +486,12 @@ dynamic position           1 mm
 ```
 
 An item authored at `4.2 m, 7.7 m` may later become dynamic at `4.237 m, 7.684 m`. A character can stand anywhere on the 1 mm lattice over a terrain cell.
-If a floating source value is imported, conversion must use one explicit deterministic quantization rule. The intended semantic is nearest millimeter (for example `12.0357283 m -> 12.036 m`), with a documented midpoint rule and symmetric negative-coordinate tests. Do not let C# truncation toward zero define world semantics accidentally.
+If a floating source value is imported, reject NaN, either infinity, scaled
+overflow, X/Z outside the representable world profile, and Y outside `int32`.
+Conversion is round-to-nearest millimeter with midpoint **away from zero**
+(`12.0357283 m -> 12.036 m`, `-0.0005 m -> -1 mm`). Never clamp or saturate
+invalid authority input, and never let C# truncation toward zero define world
+semantics accidentally.
 
 ### T0.0C — correctness tests
 
@@ -452,7 +505,10 @@ Permanent tests must cover at minimum:
 - large positive and negative chunk coordinates;
 - local -> global -> local round trips;
 - checked 64-bit intermediates for reconstruction and bounds;
+- `Int128` promotion before distance subtraction and squared accumulation;
 - overflow/rejection before mutation;
+- NaN/infinity/scaled-overflow/out-of-profile float import rejection;
+- positive and negative midpoint-away-from-zero float quantization;
 - canonical `SpatialChunkKey` ordering;
 - deterministic hash/equality;
 - no alias between space identity and chunk coordinate identity;
@@ -501,9 +557,227 @@ no terrain file format, resident index, publication store, renderer, or N1 work 
 
 Do not proceed into T0.1 without a new checkpoint/review.
 
-## T0.1 — validate the fixed terrain profile and choose height encoding
+**T0.0 implementation checkpoint (2026-08-19): complete and stopped for review.**
+`Kernels/Spatial` now owns only the dependency-neutral values/math above;
+`Game/World` owns the fixed profile and 16-byte `WorldPosition`. Fifteen permanent
+tests pass in checked Debug and Release, including 100,000 deterministic wide
+round trips, signed boundary/corner cases, `Int128` distance, float rejection,
+and warmed 0 B allocation. The 31×500,000-operation Release observation records:
 
-T0.1 no longer chooses among 16/32/64 m chunk sizes. The game spatial profile is already fixed at 16 m with 0.5 m terrain cells. T0.1 validates the consequences of that geometry and chooses the remaining physical terrain encoding decisions, especially terrain height representation.
+```
+normalize global -> chunk/local       7.556 ns mean / 7.600 ns p95 / 0 B
+reconstruct global position           3.421 ns mean / 3.443 ns p95 / 0 B
+chunk key hash + order                5.765 ns mean / 5.803 ns p95 / 0 B
+chunk bounds + distance + overlap    55.695 ns mean / 56.517 ns p95 / 0 B
+terrain cell from local               2.869 ns mean / 2.896 ns p95 / 0 B
+```
+
+The immutable machine-readable evidence is
+[`terrain-t0.0-spatial-contracts-2026-08-19.json`](../../_Benchmarks/Baselines/terrain-t0.0-spatial-contracts-2026-08-19.json).
+No T0.1 index/component/lifecycle integration or later Terrain machinery is part
+of this checkpoint.
+
+## T0.1 — authoritative position and maintained dynamic membership
+
+T0.1 immediately follows the independent value seam and introduces the concrete coarse spatial acceleration structure the game has been missing. It has no dependency on terrain packs, statics, publication, Network, or Godot. Dynamic actors/items remain authoritative ECS entities.
+Do **not** implement one universal `WorldChunkStore` that owns terrain, publication, AOI, and rendering. Compose separate bounded stores keyed by the same `SpatialChunkKey` where appropriate:
+
+```
+GameWorldState
+    TerrainChunkStore          immutable/prepared terrain + frozen statics
+    WorldSpatialIndex         coarse dynamic home-chunk membership
+    ChunkPublicationStore     T0.6 public projection/history
+```
+
+T0.1 itself focuses on `WorldSpatialIndex`. Publication mechanics are T0.6.
+The game owns one persistable ECS component wrapper rather than making the generic
+Spatial value an ECS type:
+
+```csharp
+WorldPosition
+    // game/world value; no ECS interface
+
+WorldPositionComponent : IComponent<WorldPositionComponent>
+    WorldPosition Value
+```
+
+`WorldPositionComponent` is canonical authority for every dynamic entity that
+physically occupies world space. Its presence is sufficient to opt into coarse
+spatial membership; do not add a redundant spatial tag. Inventory-contained,
+accounting, and other abstract entities need not carry it. Public visibility is
+a separate later projection policy: Position does not imply inclusion in a broad
+public chunk page.
+The spatial index is bounded and data-oriented:
+
+```
+WorldSpatialIndex
+    fixed chunk metadata slots
+    bounded SpatialChunkKey -> spatial-index-slot lookup
+    free-slot stack/ring
+    one private home/membership record per admitted ECS entity slot
+    entity-index -> generation-validated home record
+    explicit ReservedBytes / high-water diagnostics
+```
+
+The reverse map is a private optimization of this game-owned store, never part of
+`Spatial.Contracts`. A home record is relinked when its entity moves; it is not
+allocated again:
+
+```
+HomeRecord[EntityCapacity]
+    EntityGeneration
+    SpatialChunkSlot
+    Previous/NextMembershipLink (or equivalent)
+    Flags
+```
+
+The chunk table admits at least the theoretical maximum number of occupied
+dynamic chunks: no more than the number of spatial entities, therefore no more
+than ECS entity capacity. Empty chunk slots return to the free pool. Generation
+construction rejects inconsistent limits. If guaranteed insertion later fails,
+that is a terminal invariant/configuration fault—not a routine movement result
+and not a reason to roll back an already committed Position.
+
+Avoid:
+
+- object-per-chunk graphs on the hot path;
+- `Dictionary<Chunk, List<Entity>>`;
+- per-entity heap nodes;
+- allocation on ordinary movement;
+- a generic spatial event bus;
+- a queue that another subsystem must wait on merely to read committed state;
+- persisting spatial-index slot numbers.
+
+A small managed dictionary may be acceptable as an initial **cold resident-key map** if its scale is explicit and movement does not allocate/mutate it proportionally. If lookup cost appears in profiles, replace it with a fixed open-addressed table. Do not build a custom hash table before measurement simply for aesthetic purity.
+
+### Incremental ECS integration
+
+Spatial must consume ECS change tracking/lifecycle facts, not ask the ECS to rediscover all spatial entities every tick.
+The required semantic is **one unique entity per relevant committed change set, with the final authoritative component value read after the producing stage/barrier**. If one entity is moved/corrected several times before the barrier, Spatial must not process several movement messages; it observes that the position component changed and reads the final committed position once.
+
+The preferred source is the current ECS's already-accepted **independent changed-row/cursor machinery** if it provides the required exact component observation and lifetime semantics; do not build a second tracker merely to give Spatial a differently named API. Where a barrier-scoped view is the natural surface, the conceptual shape is:
+
+```
+Movement / physics / gameplay writes Position
+        -> Position dirty capture deduplicates Entity identity
+        -> complete ECS graph and post-graph structural barrier finish
+        -> CommittedChangeView<Position> becomes readable
+        -> WorldSpatialIndex processes each unique changed entity once
+```
+
+Canonical maintenance is deliberately **not** the existing in-graph
+`SystemStage.SpatialIndex`. Later Combat, AI, WorldSim, teleports, corrections,
+or Cleanup may legitimately write Position, and structural mutation is not final
+until the post-graph barrier. The frozen one-step sequence is:
+
+```
+EcsWorld.Tick(step)
+    -> complete Input..Cleanup system graph
+    -> complete post-graph structural barrier
+    -> return
+
+game/world post-step commit
+    -> consume final Position + lifecycle changes
+    -> commit WorldSpatialIndex
+    -> T0.6 later commits publication
+
+Clock.AdvanceSimulationTick()
+```
+
+This executes after **every** authoritative `TickSimulationStep()`, including
+each step of a host call that catches up through several fixed steps. The stage
+named `SpatialIndex` may later earn a separate in-graph broadphase for Perception;
+it is not canonical full-step membership truth.
+
+The change view is a **read contract**, not a queue of copied positions. ECS remains the source of current Position. A V1-style completion event/hook is acceptable only as the control-flow signal that the view is ready; it should not allocate or carry one event per movement.
+
+If current ECS dirty APIs are destructive-drain-only and multiple legitimate consumers need the same barrier change set, do not encode correctness as:
+
+```
+Spatial must CopyDirty before Network/Persistence DrainDirty
+```
+
+Prefer existing independent changed-row cursors/views when they already allow several consumers to observe the same logical changes at different cadences without destructively draining one another. Otherwise provide a bounded multi-reader barrier view/epoch, give one owner responsibility for deriving all downstream facts from one read, or introduce another equally explicit bounded ownership scheme. The exact API is implementation-time, but **consumer ordering around one destructive dirty set is not the contract**. A cursor/epoch used for Spatial advances only after the corresponding spatial/publication operation has committed successfully; failure may not acknowledge away unapplied changes. Lifecycle create/destroy/add/remove facts need an equally explicit incremental source; do not infer every lifecycle transition by rescanning the whole world.
+
+Lifecycle retention is required by every runtime profile that enables Spatial,
+including Local; it is no longer a Network-only reservation. The initial existing
+4,096-entity game profile should reserve 8,192 lifecycle records, while larger
+profiles declare evidence-backed values explicitly. A cursor overrun remains a
+recoverable `ResyncRequired` fact:
+
+```
+stop derived commit
+    -> invalidate/discard derived Spatial candidate
+    -> full-scan current committed WorldPositionComponent truth
+    -> rebuild complete WorldSpatialIndex privately
+    -> T0.6 also rebuilds publication and advances its epoch
+    -> only after success capture fresh lifecycle/Position cursors "from now"
+    -> atomically publish rebuilt derived state
+```
+
+This exceptional scan is allowed at the owner step boundary. Failure leaves the
+previous committed derived root intact when possible; inability to represent the
+admitted authoritative world faults generation preparation/operation explicitly.
+
+Structural authority remains barriered. Existing component-value writes may remain direct when the scheduler/owner contract makes them safe and they participate in dirty capture; do not create a second structural mutation path for Spatial as a performance shortcut.
+
+Conceptual owner-barrier flow:
+
+```
+ECS committed spatial/lifecycle changes
+    position changed
+    entity created/destroyed
+    spatial component added/removed
+            |
+            v
+WorldSpatialIndex update once per changed entity
+```
+
+For each changed spatial entity:
+
+```
+same canonical home chunk
+    membership topology does not change
+    retain current spatial membership row/slot
+    T0.6 may still update the public transform row
+
+crossed chunk boundary
+    unlink/relink the existing generation-validated membership record
+    create destination chunk metadata only from guaranteed chunk capacity
+    release source chunk metadata if it becomes empty
+    expose one canonical migration fact to publication/composition
+
+created spatial entity
+    insert into canonical home chunk
+
+removed/destroyed/nonspatial entity
+    remove from prior home chunk
+```
+
+This is the core scaling rule:
+
+> Pay the entity's coarse spatial membership cost once when its authoritative location changes, rather than rediscovering candidate membership independently for every observer.
+
+If 100,000 entities exist and only 8,000 positions changed, spatial examines the changed set rather than scanning 100,000. If only 300 of those cross a 16 m boundary, only those 300 require source/destination membership mutation; the remaining position changes do not churn coarse membership. If one of those 8,000 entities was written ten times before commit, it still contributes one changed-entity entry and one final-position read.
+Spatial membership is derived, not authority. Restore/generation replacement may rebuild the complete index from staged committed ECS truth. A spatial-index slot never appears in persistence, publication identity, network protocol, or renderer state.
+One dynamic entity has one canonical home chunk based on normalized position. Visual bounds may overlap neighboring chunks, but authoritative coarse membership does not duplicate merely because a model is large. Special large-world objects earn a separate coverage/index mechanism when needed.
+
+### Committed read boundary
+
+The index may expose a concrete owner-safe/borrowed committed read view for game systems that need coarse membership or chunk lookup. The exact API is implementation-time, but it must not require:
+
+```
+Spatial DTO allocation
+-> compatibility queue
+-> consumer DTO allocation
+```
+
+Consumers must obey explicit lifetime/ownership rules and may not retain spans/references beyond the committed view's valid generation/barrier lifetime.
+**T0.1 gate:** millions of deterministic same-chunk moves and boundary crossings preserve exact membership, zero duplicate/lost entities, zero warmed owner-thread allocation, successful rebuild after generation replacement/lifecycle overrun, explicit failure-during-rebuild behavior, create/move/destroy and Position remove/re-add/index-reuse regressions, no proportional full-ECS scan on ordinary ticks, repeated same-entity writes within one barrier coalesce to one spatial maintenance observation of the final value, no correctness dependency on destructive dirty-drain ordering between consumers, and a measured direct committed read path.
+
+## T0.2 — validate the fixed terrain profile and choose height encoding
+
+T0.2 no longer chooses among 16/32/64 m chunk sizes. The game spatial profile is already fixed at 16 m with 0.5 m terrain cells. T0.2 validates the consequences of that geometry and chooses the remaining physical terrain encoding decisions, especially terrain height representation.
 T0 uses a 2D heightfield surface plus statics, closer to UO than a voxel world. The terrain surface is not represented as one ECS entity per tile.
 The baseline layout is two dense planes per 16 m `TerrainChunk`:
 
@@ -541,21 +815,19 @@ A 16-bit height plane is preferred only if its range/resolution can be stated as
 Run representative deterministic content through the accepted 16 m / 0.5 m profile and record:
 
 - terrain bytes/chunk and directory overhead;
-- frozen-static count distribution and worst chunk;
-- dynamic home-membership count distribution and worst chunk;
-- chunk crossings per moving entity per second;
-- R0/Near/Far chunk subscription counts;
-- false-positive public entities delivered by whole-chunk admission;
-- mesh build time and emitted triangles;
-- Godot resident RID/draw/batch counts;
-- world-pack random read size/count;
-- spatial-index, dynamic-page, and dirty-history reserved bytes;
-- high-water values for a dense town/property profile.
+- representative authored-source height/material distributions;
+- candidate height quantum/range error and rejection cases;
+- shared-edge duplication cost and exact-equality requirements;
+- theoretical terrain vertex/cell/triangle bounds;
+- malformed/out-of-range source rejection and compiler scratch high-water.
 
-The point is to verify that the chosen geometry produces healthy whole-pipeline behavior and to size capacities. Do **not** rerun a 16/32/64 m search by default. Reopen chunk edge or 0.5 m cell size only if concrete evidence shows a correctness/capacity/performance failure that cannot be solved more locally, and document the rejection/evidence explicitly.
-**T0.1 gate:** the fixed 16 m chunk edge, 0.5 m terrain cell, 1 mm dynamic quantum, selected terrain height encoding/quantum, maximum supported local coordinates, and resulting capacity evidence are written into the world-format contract and benchmark artifact.
+This checkpoint validates the physical terrain encoding it can actually observe;
+it does not claim publication, AOI, streaming, or Godot evidence before those
+systems exist. Final whole-pipeline validation of the fixed geometry belongs to
+T0.10. Do **not** rerun a 16/32/64 m search by default. Reopen chunk edge or 0.5 m cell size only if concrete evidence shows a correctness/capacity/performance failure that cannot be solved more locally, and document the rejection/evidence explicitly.
+**T0.2 gate:** the fixed 16 m chunk edge, 0.5 m terrain cell, 1 mm dynamic quantum, selected terrain height encoding/quantum, maximum supported local coordinates, and resulting representation evidence are written into the world-format contract and benchmark artifact.
 
-## T0.2 — immutable `WorldPack` and terrain source
+## T0.3 — immutable `WorldPack` and terrain source
 
 Authoring data and runtime data are separate. T0 first compiles/generates a small
 deterministic authored world into one canonical runtime pack.
@@ -565,44 +837,40 @@ container:
 ```
 
 WorldPackHeader
-
     magic
-
-    format version
-
+    container version
     SpatialSpaceId
-
     chunk/cell geometry
-
     content/schema fingerprint
-
     chunk count
-
-    directory location/length
+    chunk-directory offset/length
+    section-directory offset/length
 
 ChunkDirectory[]               canonical sorted keys
-
     SpatialChunkKey
+    section references / counts
 
-    section offset/length
+SectionDirectory[]
+    section kind
+    section schema version
+    offset
+    length
+    count
+    hash/check
 
-    section hash/check
+T0.3 required sections
+    TerrainMaterials/v1
+    TerrainHeights/v1
 
-    terrain/static counts
-
-    optional layer offsets
-
-Chunk sections
-
-    terrain material plane
-
-    terrain height lattice
-
-    frozen static placements
-
-    Multi fragments / layer metadata
+later sections using the same container
+    FrozenStatics/v1           introduced by T0.5
+    MultiFragments/v1          introduced by T0.5
 
 ```
+
+T0.3 freezes the **sectioned container**, not the later static/Multi row schema.
+Do not finalize a future record layout merely so the first terrain-only pack can
+write an empty section with a misleading permanent version.
 
 The first format should be uncompressed unless I/O measurement proves compression
 is needed. Compression complicates random access, corruption boundaries, scratch
@@ -618,7 +886,7 @@ Validation happens before publication:
 
 - per-section capacities;
 
-- material/prefab IDs resolve through compiled content;
+- structural numeric IDs are well formed and within declared pack bounds;
 
 - shared terrain edges agree;
 
@@ -630,14 +898,35 @@ Validation happens before publication:
 
 A `WorldPack` is immutable after publication. Runtime mutable state is an overlay,
 not an in-place rewrite of mapped/base bytes.
+`Game/World` owns structural validation only: offsets/lengths, section versions,
+hashes, geometry, ordering, duplicate identities, local ranges, and shared-edge
+consistency. It must not depend on `Game/Composition`.
+
+During private generation preparation, Composition supplies a cold
+`WorldContentBinding` compiled from `GameContent`: pack material/static/prefab IDs
+to validated compact runtime definitions/handles. The pack content fingerprint
+must match. Resolution occurs once before candidate publication; hot world queries
+use the bound numeric tables rather than callbacks into Composition:
+
+```
+Game/World  -X-> Game/Composition
+
+Game/Composition
+    -> Game/World
+    -> GameContent
+    -> builds WorldContentBinding
+```
+
+Shared low-level numeric game identities, if needed, belong in `Game/Contracts`
+rather than creating a reverse Composition dependency.
 Initial loading may use ordinary bounded file reads. `MemoryMappedFile`, direct
 `RandomAccess`, explicit pread/io\_uring, compression, and async read batching are
 later measured backend choices, not T0 assumptions.
-**T0.2 gate:** deterministic build produces byte-identical packs; malformed packs
+**T0.3 gate:** deterministic build produces byte-identical packs; malformed packs
 reject transactionally; random chunk read has bounded scratch/allocation; one pack
 reopens and hashes identically across supported platforms.
 
-## T0.3 — terrain queries and deterministic mesh generation
+## T0.4 — terrain queries and deterministic mesh generation
 
 Server/gameplay code must not depend on a Godot collision mesh to know the ground.
 The world layer provides deterministic integer queries directly over chunk data:
@@ -655,6 +944,27 @@ QueryStaticBounds(aabb, destination)
 T0 does not need a general physics engine. It needs enough authoritative ground
 and static occupancy information to move a character through the cabin slice.
 
+The terrain surface is two deterministic planar triangles per 500 mm cell—not a
+bilinear four-vertex height function. The diagonal is selected from **global**
+terrain-cell parity:
+
+```
+(globalCellX XOR globalCellZ) even: NW -> SE
+odd:                                NE -> SW
+```
+
+Authoritative height sampling, generated render mesh, and generated collision
+payload use the same triangle. Sampling performs triangle-plane/barycentric
+interpolation with checked integer intermediates and signed nearest division,
+ties away from zero; it never relies on C# truncation. Exact +500 mm cell edges
+and +16,000 mm chunk edges belong to the next half-open cell/chunk.
+
+The duplicated 33×33 border values in adjacent immutable chunks represent one
+global terrain-vertex identity. Pack compilation requires bit-exact shared base
+vertices. T0.9 mutable height overlays are keyed by global terrain-vertex
+coordinate and invalidate every adjacent chunk representation containing that
+vertex, rather than mutating two independent border copies.
+
 ### Mesh contract
 
 Mesh generation consumes an immutable terrain chunk snapshot and emits a bounded
@@ -663,7 +973,8 @@ Requirements:
 
 - shared chunk edges produce bit-identical world-space seam positions;
 
-- normals/tangents use a deterministic border contract;
+- normals/tangents and triangle diagonals use the same deterministic global
+  border/surface contract as authoritative sampling;
 
 - no crack appears if adjacent chunks become resident in either order;
 
@@ -680,10 +991,11 @@ Requirements:
 If greedy merging costs more CPU than the vertex/triangle reduction earns for
 real content, retain the simpler mesh. The benchmark records both mesh build time
 and Godot render cost; triangle count alone is not an acceptance metric.
-**T0.3 gate:** seam torture tests, deterministic mesh hash, bounded output, warmed
-mesh-build allocation profile, and a visible multi-chunk terrain window in Godot.
+**T0.4 gate:** seam torture tests, deterministic mesh-payload hash, bounded output,
+and a warmed mesh-build allocation profile. Live Godot rendering/streaming is not
+required until T0.8.
 
-## T0.4 — UO-like statics, properties, and `Multi`
+## T0.5 — UO-like statics, properties, and `Multi`
 
 Terrain and non-simulated world decoration must not become one ECS entity per
 placement merely to render or stream it.
@@ -702,7 +1014,7 @@ height/Y
 
 orientation/variant
 
-optional stable static-instance identity
+required stable WorldStaticId
 
 optional render/collision flags that are truly instance-varying
 
@@ -710,6 +1022,10 @@ optional render/collision flags that are truly instance-varying
 
 The exact field widths are chosen from content limits. Content IDs remain numeric;
 Godot resource paths/text names are presentation metadata, never server hot data.
+`WorldStaticId` is a 64-bit identity unique within the
+`(WorldPackFingerprint, SpatialSpaceId)` domain. Durable removal/replacement
+overlays refer to that ID plus the required pack fingerprint. Renderer instance
+indices may map back to it but never become authority.
 Authoring/building tools may snap placements to the 100 mm grid, but the runtime format must not infer that all world objects are permanently restricted to that lattice. Dynamic or physically moved objects use the 1 mm authoritative position quantum.
 Placements in an immutable pack use a CSR-style layout: one chunk directory row
 stores `StaticOffset + StaticCount` into packed global/static section arrays. Do
@@ -724,6 +1040,8 @@ Authoring keeps the logical Multi intact. Runtime compilation may split its froz
 render/collision pieces into the `WorldChunk`s they overlap so each chunk can load
 independently. Every fragment retains the logical Multi/instance identity needed
 for inspection, rebuilding, or future editing.
+That `MultiInstanceId` is stable in the same pack/world domain; chunk-fragment and
+packed row slots are not its identity.
 This enables the desired building split:
 
 ```
@@ -747,10 +1065,12 @@ state changes. A chest's frozen body may eventually be batched visually while it
 interaction/inventory identity remains authoritative elsewhere. Do not erase game
 identity merely to earn a render batch.
 
-### Godot static batching
+### Render-ready static batching contract (production implementation at T0.8)
 
-Do not create one `MeshInstance3D` node per static. The client groups compatible
-placements by render key and uses `RenderingServer`/`MultiMesh` or combined meshes.
+T0.5 compiles deterministic compatible render groups; T0.8 consumes them in the
+production renderer. Do not create one `MeshInstance3D` node per static. The
+client groups compatible placements by render key and uses
+`RenderingServer`/`MultiMesh` or combined meshes.
 Important distinction:
 
 - one `MultiMesh` repeats one mesh with many transforms;
@@ -771,139 +1091,45 @@ The asset pipeline should preserve reuse tricks such as statuettes/clockwork
 figures using the same creature mesh at another scale/animation state. That is a
 content/render decision built on numeric prefab identity, not a special terrain
 entity type.
-**T0.4 gate:** a cabin/property crosses chunk boundaries, streams correctly from
-all directions, uses no node-per-static representation, and preserves logical
-Multi identity through chunk compilation.
+**T0.5 gate:** a cabin/property compiles deterministically across chunk boundaries,
+uses packed/CSR-style static and Multi-fragment representation, preserves stable
+logical identities, and emits bounded render-ready grouping evidence. Production
+streaming and the no-node-per-static Godot proof arrive at T0.8.
 
-## T0.5 — resident world stores and dynamic entity membership
-
-T0.5 introduces the concrete coarse spatial acceleration structure the game has been missing. Dynamic actors/items remain authoritative ECS entities.
-Do **not** implement one universal `WorldChunkStore` that owns terrain, publication, AOI, and rendering. Compose separate bounded stores keyed by the same `SpatialChunkKey` where appropriate:
-
-```
-GameWorldState
-    TerrainChunkStore          immutable/prepared terrain + frozen statics
-    WorldSpatialIndex         coarse dynamic home-chunk membership
-    ChunkPublicationStore     T0.6 public projection/history
-```
-
-T0.5 itself focuses on `WorldSpatialIndex`. Publication mechanics are T0.6.
-The spatial index is bounded and data-oriented:
-
-```
-WorldSpatialIndex
-    fixed chunk metadata slots
-    bounded SpatialChunkKey -> spatial-index-slot lookup
-    free-slot stack/ring
-    packed home-membership storage
-    entity -> current home mapping sufficient for incremental updates/rebuild
-    explicit ReservedBytes / high-water diagnostics
-```
-
-Avoid:
-
-- object-per-chunk graphs on the hot path;
-- `Dictionary<Chunk, List<Entity>>`;
-- per-entity heap nodes;
-- allocation on ordinary movement;
-- a generic spatial event bus;
-- a queue that another subsystem must wait on merely to read committed state;
-- persisting spatial-index slot numbers.
-
-A small managed dictionary may be acceptable as an initial **cold resident-key map** if its scale is explicit and movement does not allocate/mutate it proportionally. If lookup cost appears in profiles, replace it with a fixed open-addressed table. Do not build a custom hash table before measurement simply for aesthetic purity.
-
-### Incremental ECS integration
-
-Spatial must consume ECS change tracking/lifecycle facts, not ask the ECS to rediscover all spatial entities every tick.
-The required semantic is **one unique entity per relevant committed change set, with the final authoritative component value read after the producing stage/barrier**. If one entity is moved/corrected several times before the barrier, Spatial must not process several movement messages; it observes that the position component changed and reads the final committed position once.
-
-The preferred source is the current ECS's already-accepted **independent changed-row/cursor machinery** if it provides the required exact component observation and lifetime semantics; do not build a second tracker merely to give Spatial a differently named API. Where a barrier-scoped view is the natural surface, the conceptual shape is:
-
-```
-Movement / physics / gameplay writes Position
-        -> Position dirty capture deduplicates Entity identity
-        -> producing stage/barrier completes
-        -> CommittedChangeView<Position> becomes readable
-        -> WorldSpatialIndex processes each unique changed entity once
-```
-
-The change view is a **read contract**, not a queue of copied positions. ECS remains the source of current Position. A V1-style completion event/hook is acceptable only as the control-flow signal that the view is ready; it should not allocate or carry one event per movement.
-
-If current ECS dirty APIs are destructive-drain-only and multiple legitimate consumers need the same barrier change set, do not encode correctness as:
-
-```
-Spatial must CopyDirty before Network/Persistence DrainDirty
-```
-
-Prefer existing independent changed-row cursors/views when they already allow several consumers to observe the same logical changes at different cadences without destructively draining one another. Otherwise provide a bounded multi-reader barrier view/epoch, give one owner responsibility for deriving all downstream facts from one read, or introduce another equally explicit bounded ownership scheme. The exact API is implementation-time, but **consumer ordering around one destructive dirty set is not the contract**. A cursor/epoch used for Spatial advances only after the corresponding spatial/publication operation has committed successfully; capacity/preflight failure may not acknowledge away unapplied changes. Lifecycle create/destroy/add/remove facts need an equally explicit incremental source when T0.5 requires them; do not infer every lifecycle transition by rescanning the whole world.
-
-Structural authority remains barriered. Existing component-value writes may remain direct when the scheduler/owner contract makes them safe and they participate in dirty capture; do not create a second structural mutation path for Spatial as a performance shortcut.
-
-Conceptual owner-barrier flow:
-
-```
-ECS committed spatial/lifecycle changes
-    position changed
-    entity created/destroyed
-    spatial component added/removed
-            |
-            v
-WorldSpatialIndex update once per changed entity
-```
-
-For each changed spatial entity:
-
-```
-same canonical home chunk
-    membership topology does not change
-    retain current spatial membership row/slot
-    T0.6 may still update the public transform row
-
-crossed chunk boundary
-    preflight destination capacity
-    remove source membership
-    add destination membership
-    expose one canonical migration fact to publication/composition
-
-created spatial entity
-    insert into canonical home chunk
-
-removed/destroyed/nonspatial entity
-    remove from prior home chunk
-```
-
-This is the core scaling rule:
-
-> Pay the entity's coarse spatial membership cost once when its authoritative location changes, rather than rediscovering candidate membership independently for every observer.
-
-If 100,000 entities exist and only 8,000 positions changed, spatial examines the changed set rather than scanning 100,000. If only 300 of those cross a 16 m boundary, only those 300 require source/destination membership mutation; the remaining position changes do not churn coarse membership. If one of those 8,000 entities was written ten times before commit, it still contributes one changed-entity entry and one final-position read.
-Membership update must be transactional across source/destination capacity. A failed destination preflight may not remove the source first.
-Spatial membership is derived, not authority. Restore/generation replacement may rebuild the complete index from staged committed ECS truth. A spatial-index slot never appears in persistence, publication identity, network protocol, or renderer state.
-One dynamic entity has one canonical home chunk based on normalized position. Visual bounds may overlap neighboring chunks, but authoritative coarse membership does not duplicate merely because a model is large. Special large-world objects earn a separate coverage/index mechanism when needed.
-
-### Committed read boundary
-
-The index may expose a concrete owner-safe/borrowed committed read view for game systems that need coarse membership or chunk lookup. The exact API is implementation-time, but it must not require:
-
-```
-Spatial DTO allocation
--> compatibility queue
--> consumer DTO allocation
-```
-
-Consumers must obey explicit lifetime/ownership rules and may not retain spans/references beyond the committed view's valid generation/barrier lifetime.
-**T0.5 gate:** millions of deterministic same-chunk moves and boundary crossings preserve exact membership, zero duplicate/lost entities, explicit capacity failure, zero warmed owner-thread allocation, successful rebuild after generation replacement, no proportional full-ECS scan on ordinary ticks, repeated same-entity writes within one barrier coalesce to one spatial maintenance observation, no correctness dependency on destructive dirty-drain ordering between consumers, and a measured direct committed read path.
 
 ## T0.6 — packed chunk publication and bounded dirty history
 
 T0.6 builds the game-owned public semantic projection that later replication profiles may consume. It is **not** part of `Spatial.Contracts` and it is not Network-owned.
 `ChunkPublicationStore` is separate mutable storage keyed by `SpatialChunkKey`. Each resident publication chunk owns **one current packed public view** of its dynamic public state plus bounded revision/history metadata.
+Inclusion is controlled by an explicit game-owned public-projection eligibility
+contract. It is not inferred merely from `WorldPositionComponent` or exclusively
+from prefab type.
+Publication has its own identities:
+
+```
+PublicationEpoch            ulong, nonzero
+
+WorldPublicEntityId
+    Index                    uint
+    Generation               uint, nonzero
+
+EntityPublicVersion         ulong, nonzero monotonic within epoch/identity
+ChunkPublicationRevision    ulong, nonzero chunk-local monotonic
+```
+
+`WorldPublicEntityId` is stable across chunk movement for one public lifetime in
+one `PublicationEpoch`. It is not ECS identity, durable identity, Network's
+`ReplicationEntityId`, or a row slot. A private ECS-index mapping is allowed.
+Generation replacement and any in-generation full publication rebuild that makes
+old cursors/identities incomparable advance `PublicationEpoch`. Exhaustion never
+wraps silently; establish a new epoch or fault before wrap.
 The initial row schema should be the smallest public locomotion/world vertical, for example numeric identity/lifetime, prefab/presentation identity, chunk-local transform, and minimal public simulation flags. It is game-owned projection data, not a serialization of arbitrary ECS components.
 Store it SoA-first where fields are commonly traversed independently:
 
 ```
-EntityIndex[]
-EntityGeneration[]
+WorldPublicEntityIndex[]
+WorldPublicEntityGeneration[]
+EntityPublicVersion[]
 PrefabId[]
 LocalXMillimeters[]
 LocalZMillimeters[]
@@ -1022,9 +1248,41 @@ The exact journal encoding is a measured T0.6 decision. Candidate designs includ
 Reject any design that needs a per-recipient dirty structure inside the publication chunk. Recipients own cursors later; the publication store owns current state/history once.
 Non-coalescible gameplay facts remain Event semantics. Do not put attacks, chat, sounds-that-must-occur, inventory transactions, or other ordered facts into a latest-state dirty ring merely because the ring exists.
 
+One dirty commit larger than the fixed history representation does **not** reject
+the new current public page. If revision 10 commits an oversized change:
+
+```
+CurrentRevision = 11
+HistoryFloor     = 11
+dirty ring       = reset/empty
+HistoryInvalidations++
+```
+
+Consumers below 11 receive `SnapshotRequired`; a consumer at 11 is current, and
+a later small 11→12 commit may again be retained normally. Never keep an
+incomplete suffix while claiming the commit is reconstructable. Failure to
+represent current packed state is a configuration/invariant fault; failure to
+retain deltas is ordinary bounded-cache pressure and never blocks world authority.
+Record invalidation count and largest dirty commit.
+
 ### Cross-chunk migration ordering
 
-A dynamic entity migration updates two coarse/publication addresses but preserves one canonical global identity/generation. Source removal and destination insertion/publication must have an ordering/floor contract strong enough that a delayed source fact cannot erase or resurrect newer destination state.
+A dynamic entity migration updates two coarse/publication addresses but preserves
+one `WorldPublicEntityId`. Chunk revisions are deliberately incomparable, so
+`EntityPublicVersion` supplies cross-chunk order. From canonical version 40:
+
+```
+source Chunk A: remove  E @ entity version 41
+target Chunk B: present E @ entity version 42
+canonical current version = 42
+```
+
+The client retains the highest entity-public version observed per public identity.
+A delayed A/41 may clean an obsolete source page, but cannot erase/supersede B/42.
+Transient rows in both chunk-local pages are acceptable under reorder; the
+canonical/presentation resolver selects the highest version. Destruction or
+becoming non-public consumes the next version so delayed older presents cannot
+resurrect the identity.
 
 ### Snapshot atomicity
 
@@ -1035,6 +1293,19 @@ A snapshot contains a complete current public scope for that publication chunk a
 
 AOI becomes a query over canonical 16 m world-spatial chunk AABBs. The **world spatial system answers which chunks overlap an interest shape; it does not own observer/subscription state.**
 A recipient/observer has an authoritative spatial anchor. The query returns a small canonical set of `SpatialChunkKey`s plus a relative cadence tier. It does not ask each chunk which members are within radius X.
+The first game profile uses circular X/Z interest measured by exact point-to-AABB
+squared distance, with radius contact included. Hysteresis belongs to consumer
+subscription reconciliation—not `WorldSpatialIndex`:
+
+```
+Immediate / R0    enter <=   5,000 mm    leave >   5,500 mm
+Near              enter <=  96,000 mm    leave >  96,500 mm
+Far               enter <= 192,000 mm    leave > 192,500 mm
+```
+
+Promotion tests the smaller tier's enter radius; demotion waits until its leave
+radius is exceeded. Each key appears exactly once at its nearest retained tier,
+in canonical `SpatialChunkKey` order. Hash iteration order is never semantic.
 
 ### Ring 0
 
@@ -1079,10 +1350,30 @@ A future Network N1 subscription may have an equivalent shape, but that record b
 New subscription -> snapshot. Existing subscription -> delta query. History miss -> snapshot. Leaving scope -> retire the consumer's semantic/presentation chunk without mutating server world state.
 This is the chunk equivalent of OfflineDirect: it proves semantics without packet noise and without forcing Network into the world implementation.
 
+All first bounded authoritative query APIs are complete-or-explicit:
+
+```
+Success
+    Count = complete result count
+
+DestinationTooSmall
+    Count = 0
+    RequiredCount = exact complete count
+    destination contents are unspecified and unusable
+
+InvalidInput
+    no output/mutation
+```
+
+An under-capacity call may finish a count pass to report `RequiredCount`; it is an
+exceptional sizing path. Static collision/admission queries must never return a
+silent partial result. A separate visitor/resumable cursor may be earned later by
+measurement rather than making the initial API ambiguously partial.
+
 ### Domain-specific spatial refinements remain private
 
 The canonical world partition being 16 m does not force every subsystem to use 16 m internal regions forever. A renderer may later batch four world chunks into a 32 m render region; navigation may use smaller tiles; physics may use finer broadphase cells. Those are private domain accelerators related by geometry/key mapping, not reasons to mutate the canonical world partition.
-**T0.7 gate:** boundary/corner movement changes only the expected consumer chunk subscriptions, same-home-chunk movement creates no coarse membership churn, tier changes do not rewrite member state, world chunks contain no watcher lists, and local snapshot/delta application converges exactly.
+**T0.7 gate:** boundary/corner movement and 1 mm radius-boundary oscillation change only the expected hysteretic consumer chunk subscriptions, output is unique/canonically ordered, under-capacity queries report exact complete requirements without partial authority results, same-home-chunk movement creates no coarse membership churn, tier changes do not rewrite member state, world chunks contain no watcher lists, and local snapshot/delta application converges exactly.
 
 ## T0.8 — client resident cache and Godot world renderer
 
@@ -1144,6 +1435,42 @@ save data references its world-pack/content fingerprint.
 Dynamic entities remain in existing ECS persistence. After restore, the chunk
 membership/publication index is rebuilt from staged ECS truth before the candidate
 `GameGenerationState` publishes.
+T0.9 initially adds one `WorldSaveSetParticipant` beside ECS, Accounting, and
+WorldClock. Its artifact contains approximately:
+
+```
+required WorldPackFingerprint
+world/profile/schema version
+SpatialSpaceId / durable world identity
+mutable-overlay schema version
+changed terrain/static/Multi overlay records
+```
+
+Immutable pack bytes are not saved. Fresh-host composition resolves the exact
+fingerprint through its configured pack catalog. Missing pack, fingerprint,
+geometry, schema, or content-binding mismatch fails private preparation; restore
+never substitutes whichever pack happens to be installed.
+
+Restore order is one owned candidate transaction:
+
+```
+resolve + validate immutable WorldPack
+    -> restore staged ECS + clock/accounting
+    -> apply durable overlay privately
+    -> rebuild other derived game state
+    -> rebuild WorldSpatialIndex from final staged Position truth
+    -> rebuild ChunkPublicationStore when enabled
+    -> capture fresh derived cursors / PublicationEpoch
+    -> construct complete GameWorldState
+    -> construct GameGenerationState
+    -> atomically publish the whole generation
+```
+
+Upgrade the current lightweight staging record to an explicit owned staging
+aggregate before this composition grows. Failed preparation disposes every
+candidate-owned ECS/world-pack/overlay/spatial/publication/inventory/accounting
+resource exactly once. `GameGenerationState` gains `GameWorldState` as one coherent
+owned member rather than publishing world roots independently.
 Runtime streaming state is never persisted:
 
 ```
@@ -1396,23 +1723,23 @@ If one town chunk exceeds an admitted dynamic/static/publication capacity, repor
 
 ## Concurrency and ownership
 
-Authority-facing world mutation is owner-thread/barrier-bound. The spatial seam does not introduce another asynchronous scheduler/mailbox stage. A scheduler may still name an explicit `SpatialIndex`/post-movement stage or fire one barrier-complete/readiness callback; that is control-flow ordering, not per-movement data transport.
+Authority-facing world mutation is owner-thread/barrier-bound. The spatial seam does not introduce another asynchronous scheduler/mailbox stage. Canonical maintenance occurs at the game-owned post-ECS-step boundary after the complete graph and structural barrier. A scheduler may still name an in-graph `SpatialIndex` stage for a narrower broadphase or fire one barrier-complete/readiness callback; neither replaces final-step membership and neither carries per-movement data.
 
 The sanctioned-path rule from the earlier V1 rewrite applies here: a hot path may not bypass an established mutation/commit boundary merely because direct access is faster. If a sanctioned path is too expensive, optimize the path rather than creating a second authoritative writer.
 
 The intended hot order is:
 
 ```
-ECS systems execute
-    -> direct component writes are finalized under scheduler ownership; structural work commits at the authority barrier
+ECS complete Input..Cleanup system graph
+    -> direct component writes are finalized under scheduler ownership; structural work commits at the post-graph authority barrier
     -> component-scoped changed identities are deduplicated/merged
     -> expose one committed barrier change view / equivalent owned change set
     -> consume changed position/lifecycle/public facts once
-    -> preflight spatial/publication destination capacity
-    -> update WorldSpatialIndex
+    -> relink pre-reserved WorldSpatialIndex membership/home records
     -> update/stage ChunkPublicationStore current rows + dirty facts
     -> commit publication revisions / committed read root
     -> gameplay / replication bridge / local client may borrow committed read views
+    -> advance authoritative clock tick
 ```
 
 This ordering is a semantic requirement, not an artificial wait. A consumer cannot safely read half-mutated authoritative state anyway.
@@ -1440,6 +1767,13 @@ T0 builds the world/spatial/publication semantics needed to evaluate an addition
 - `ChunkPublicationStore` receives no Network/session dependency;
 - Game/Replication may later depend on both Network and concrete world/publication code and use direct read APIs;
 - benchmark evidence compares T0 spatial/publication maintenance to N0 relation maintenance only as attribution, not by mixing unfinished implementations.
+
+N0 remains an adapter to its accepted narrower coordinate profile. Its
+`ReplicationSpatialPoint` stores signed `int32` global X/Z millimeters. The
+EntityRelation bridge converts canonical `WorldPosition` through checked global
+reconstruction. A position outside N0's representable point range is explicitly
+unrepresentable by that profile; it is never truncated or clamped, and frozen N0
+is not widened merely because the canonical world address space is larger.
 
 The permanent replication profile model is:
 
@@ -1562,7 +1896,8 @@ T0 is accepted only when:
 - repeated same-entity movement writes within one barrier produce one downstream spatial maintenance observation of the final authoritative value;
 - no spatial/publication correctness depends on one consumer copying dirty state before another consumer destructively drains it;
 - same-home-chunk movement performs no coarse membership topology rebuild;
-- source/destination chunk crossing is transactional and bounded;
+- source/destination crossing relinks one pre-reserved generation-validated
+  membership record and cannot fail as routine movement after Position commits;
 - each publication chunk has one current packed public view and bounded history;
 - publication commit means revision/root visibility, not a per-tick compatibility-copy pipeline;
 - committed publication can be read/encoded through a measured zero/near-zero-copy concrete path with explicit lifetime rules;
@@ -1588,8 +1923,11 @@ These require measurements or real content rather than premature commitment:
 - exact physical project/package name for the tiny Spatial contracts boundary if repository conventions constrain it;
 - whether any shared spatial query interface is ever justified beyond values/math (do not add one until multiple concrete consumers earn it);
 - managed arrays versus aligned unmanaged slabs for spatial/publication hot storage;
-- exact coarse membership row layout and entity->home reverse mapping;
-- exact ECS changed-row cursor/barrier-view/lifecycle-observation integration; reuse existing independent cursor machinery where it already satisfies the semantics rather than creating a duplicate tracker;
+- exact membership-link/occupied-chunk lookup representation inside the frozen
+  entity-capacity-sized generation-validated home-record model;
+- exact ECS changed-row cursor/barrier-view/lifecycle-observation API; the
+  post-complete-graph per-authority-step commit and rebuild-on-overrun semantics
+  are already frozen;
 - dirty-history encoding and dedup strategy;
 - whether prepared semantic publication bodies are eager, lazy, cohort-cached, or omitted based on evidence;
 - whether snapshot encoding is cached per revision or built from the current packed page on demand;
@@ -1617,9 +1955,16 @@ game WorldChunk edge       16.0 m
 game terrain cell           0.5 m
 game placement snap         0.1 m policy
 game dynamic quantum        1 mm
+global reconstruction       checked Int64
+distance arithmetic         Int128 before subtraction
+float import                nearest millimeter, midpoint away from zero
 Spatial contracts are storage-free/dependency-neutral
 Network kernel does not require Spatial
 systems share spatial identity/geometry, not mutable chunk storage
+canonical Spatial commit is post-complete-ECS-graph per simulation step
+terrain is one deterministic parity-diagonal triangle surface
+publication identity is game-owned and cross-chunk ordered by EntityPublicVersion
+history pressure invalidates deltas but never rejects current public state
 ```
 
 These decisions may change mechanism. They may not weaken the frozen contracts above without explicit evidence and documentation.

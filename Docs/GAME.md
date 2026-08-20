@@ -74,6 +74,18 @@ authority and atomically applies only complete baselines/frames.
 See [Game replication](../Game/Replication/README.md) for the current executable
 contract and [Network V3](Plans/NETWORK.md) for the remaining protocol work.
 
+## World position
+
+Terrain T0.0 adds the game-owned [`WorldPosition`](../Game/World/README.md) value
+over the dependency-neutral [Spatial contracts](../Kernels/Spatial/README.md).
+The game profile uses signed 32-bit 16 m chunk X/Z, canonical `0..15,999` local
+millimeters, signed 32-bit Y, 500 mm terrain cells, and a separate 100 mm authoring
+snap. Dynamic position remains free on the 1 mm lattice.
+
+This checkpoint contains no world store, ECS position component, terrain pack,
+publication, or renderer. T0.1 introduces the persisted component wrapper and
+maintained game-owned `WorldSpatialIndex` only after the T0.0 stop review.
+
 ## Simulation rules
 
 Scheduled work selected by component topology uses generated chunk systems.

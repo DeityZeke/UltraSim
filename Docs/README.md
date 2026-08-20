@@ -21,6 +21,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   capture/history, authoritative ingress, WorldState/Events, and the accepted N0
   replication contracts.
+- [Spatial contracts](../Kernels/Spatial/README.md) — dependency-neutral integer
+  spatial identity, geometry, bounds, and canonical math.
+- [Game world](../Game/World/README.md) — the fixed 16 m / 0.5 m / 0.1 m / 1 mm
+  world-position profile accepted at T0.0.
 
 ## ECS
 
@@ -56,7 +60,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Terrain / World T0](Plans/TERRAIN.md) is the active major implementation plan.
-  It builds the world-spatial substrate first: chunk identity and compact data,
+  T0.0 has accepted the value/coordinate seam and stopped for review. It next
+  builds the maintained world-spatial index, followed by compact terrain data,
   terrain/statics/Multi streaming, dynamic membership, shared packed publication,
   bounded dirty history, client rendering, persistence seams, and one playable
   cabin vertical.

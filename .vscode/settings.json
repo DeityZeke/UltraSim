@@ -1,4 +1,5 @@
 {
     "dotnet.preferCSharpExtension": true,
-    "godotTools.editorPath.godot4": "/mnt/data/Programs/Godot v4.7.1 Mono/Godot_v4.7.1-stable_mono_linux.x86_64"
+    "godotTools.editorPath.godot4": "/mnt/data/Programs/Godot v4.7.1 Mono/Godot_v4.7.1-stable_mono_linux.x86_64",
+    "godotTools.editorPath.godot3": "/mnt/data/Programs/Godot v4.7.1 Mono/Godot_v4.7.1-stable_mono_linux.x86_64"
 }

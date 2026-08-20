@@ -32,7 +32,7 @@ RUNTIME / BRIDGES / ORCHESTRATION
     authority lifecycle, persistence, hosting, client projection
              |
 KERNELS
-    ECS and neutral UI mechanisms
+    ECS, Network, UI, and dependency-neutral Spatial mechanisms/contracts
 ```
 
 Dependencies point downward or sideways through narrow semantic contracts.
@@ -97,12 +97,15 @@ derived/application indexes when their ownership and scale are explicit.
   protocol/security/reliability/transport mechanisms, and deterministic evidence
   controls.
 - `Kernels/UI`: neutral view/model/action protocol.
+- `Kernels/Spatial`: dependency-neutral integer spatial values, explicit
+  geometry/bounds, floor normalization, and checked wide-distance math. It owns
+  no world storage, membership, AOI, publication, or threads.
 - `Server/Runtime`, `Server/Hosting`, `Server/Persistence`: authority,
   deployment, and durable save-set mechanics.
 - `Client/Core`, `Client/Network`, `Client/_Godot`: retained projection, remote
   delivery, and rendering.
-- `Game/*`: concrete content, state, policy, authoritative workflows, and
-  replication composition.
+- `Game/*`: concrete content, state, policy, authoritative workflows, the fixed
+  game-world position profile, and replication composition.
 - `_Tests`, `_Benchmarks`, `_Tools`: executable evidence and repository gates.
 - `_Archive/_V2`: frozen historical/reference implementation, compiled only by
   explicit comparison projects. The rest of `_Archive` is likewise outside the
@@ -112,9 +115,11 @@ Network N0 is accepted as the current remote-authority reference, including
 bounded long-lived WorldState recovery and the measured dense/sparse evidence.
 Its final sparse experiments showed that steady-state replication scales much
 better than continuously mutating precise recipient/entity interest topology.
-The active major milestone is therefore [Terrain / World T0](Plans/TERRAIN.md):
-build a deterministic chunk-native world substrate with packed terrain/statics,
-derived dynamic membership, revisioned chunk publication, bounded dirty history,
-local streaming, and Godot rendering. [Network N1](Plans/NETWORK.md) is deferred
+The active major milestone is therefore [Terrain / World T0](Plans/TERRAIN.md).
+T0.0 has accepted the dependency-neutral Spatial seam plus the 16-byte game-world
+position/profile and stopped before runtime membership. T0.1 next builds the
+game-owned maintained index, followed by packed terrain/statics, revisioned chunk
+publication, bounded dirty history, local streaming, and Godot rendering.
+[Network N1](Plans/NETWORK.md) is deferred
 until T0 proves those chunk/publication contracts, then will test recipient-to-
 chunk subscription/cursor replication against the frozen N0 relation graph.

@@ -1,0 +1,74 @@
+{
+  "Workload": "terrain-t0.0-spatial-contracts-v1",
+  "TimestampUtc": "2026-08-20T04:57:28.8465247+00:00",
+  "RuntimeVersion": "8.0.29",
+  "FrameworkDescription": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "DotnetTieredCompilation": "0",
+  "DotnetReadyToRun": "0",
+  "Warmups": 5,
+  "Iterations": 31,
+  "OperationsPerIteration": 500000,
+  "Profile": {
+    "UnitsPerMeter": 1000,
+    "WorldChunkEdgeUnits": 16000,
+    "TerrainCellEdgeUnits": 500,
+    "PlacementSnapUnits": 100,
+    "PositionQuantumUnits": 1,
+    "MinimumGlobalAxisUnits": -34359738368000,
+    "MaximumGlobalAxisUnits": 34359738367999,
+    "SpatialChunkKeyBytes": 16,
+    "WorldPositionBytes": 16
+  },
+  "Scenarios": [
+    {
+      "Name": "normalize-global-to-chunk-local",
+      "MeanNanosecondsPerOperation": 7.555603225806452,
+      "P50NanosecondsPerOperation": 7.551032,
+      "P95NanosecondsPerOperation": 7.599952,
+      "MaximumNanosecondsPerOperation": 7.660452,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 83179732393416132
+    },
+    {
+      "Name": "reconstruct-global-position",
+      "MeanNanosecondsPerOperation": 3.421413741935484,
+      "P50NanosecondsPerOperation": 3.419628,
+      "P95NanosecondsPerOperation": 3.44331,
+      "MaximumNanosecondsPerOperation": 3.45003,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 18014749148790471616
+    },
+    {
+      "Name": "chunk-key-hash-order",
+      "MeanNanosecondsPerOperation": 5.764556580645161,
+      "P50NanosecondsPerOperation": 5.76429,
+      "P95NanosecondsPerOperation": 5.802728,
+      "MaximumNanosecondsPerOperation": 5.820468,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 38616528938042340
+    },
+    {
+      "Name": "chunk-bounds-distance-overlap",
+      "MeanNanosecondsPerOperation": 55.69455161290323,
+      "P50NanosecondsPerOperation": 55.57925,
+      "P95NanosecondsPerOperation": 56.517442,
+      "MaximumNanosecondsPerOperation": 56.747102,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 495706953564
+    },
+    {
+      "Name": "terrain-cell-from-local",
+      "MeanNanosecondsPerOperation": 2.869145677419355,
+      "P50NanosecondsPerOperation": 2.871636,
+      "P95NanosecondsPerOperation": 2.895914,
+      "MaximumNanosecondsPerOperation": 2.898276,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 71686895040
+    }
+  ]
+}
