@@ -163,12 +163,18 @@ client presentation chain is:
 ```text
 absolute authoritative world / SpatialChunkKey
         -> bounded client semantic residency
-        -> X/Z sliding render window with signed relative offsets
+        -> engine-neutral ClientPresentationWindow desired operations
+        -> thin concrete-engine admission bridge
         -> private pooled Godot render slots
         -> engine frustum/occlusion
 ```
 
 The semantic handle, relative window offset, and private render slot never alias.
+The window radius, candidate construction, Enter/Move/Exit diff, reversal, and
+reset policy live in Client Core. Godot owns only native admission/realization;
+a second engine consumes the same bounded operation semantics without cloning
+the window state machine. The plan/admit/commit boundary preserves transactional
+desired membership when a concrete backend rejects work.
 Player-local subtraction happens in integer millimeters before float conversion;
 camera orientation does not mutate semantic residency or resource lifetime.
 The pack remains extensible to future sparse structural surfaces; world topology

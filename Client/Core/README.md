@@ -40,3 +40,20 @@ frozen production view distance.
 current request/subscription attempt. The cache fences semantic-handle generation
 and publication epoch; same-epoch transport request ordering belongs to the
 future N1 bridge rather than Client Core.
+
+`ClientPresentationWindow` owns the engine-neutral desired structural window.
+It converts canonical player movement plus resident semantic handles into bounded
+`Enter`, `Move`, and `Exit` operations. Planning is explicitly two-phase: a
+concrete backend admits the whole operation set, then Core commits the opaque
+plan; rejection cancels it without advancing desired membership. Same-center,
+crossing, reversal, and reset semantics therefore are not reimplemented by each
+engine. Native resources, realized presentation, frame budgets, visibility, and
+public-layer refresh remain backend-owned.
+
+The Client Core test suite includes a Godot-free recording backend that exercises
+rejection atomicity, local movement, cardinal/diagonal crossings, a second move
+while earlier realization is notionally pending, reversal, reset, and bounded
+desired membership. This is a portability seam, not a renderer interface or mod
+API. Raw gameplay input normalization remains deliberately unfrozen: T0.10's
+first real playable movement consumer must earn the neutral sample/action shape
+between engine events and common game/network intent.

@@ -27,7 +27,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
   world-position profile and accepted T0.0–T0.7 authority/publication/interest
   contracts.
 - [Client Core](../Client/Core/README.md) — retained engine-neutral UI and
-  production semantic-world projections.
+  production semantic-world projections plus transactional presentation-window
+  planning.
 - [Godot client adapter](../Client/_Godot/README.md) — native UI/world
   presentation, bounded render residency, grouping, and floating origin.
 
@@ -78,9 +79,11 @@ reports live in git history. Accepted measurements live in immutable JSON under
   accepted explicit public eligibility and bounded observer-independent chunk
   publication; T0.7 accepted exact interest and the packet-free convergence
   oracle. T0.8 accepted the distinct production client semantic cache and bounded
-  native Godot render owner. T0.9 now implements exact-pack durable overlay
-  staging/persistence and is stopped for review. The next implementation gate is
-  the small playable woods/cabin vertical.
+  native Godot render owner. The window candidate/diff/reset state machine now
+  lives in Client Core behind a plan/admit/commit seam, leaving Godot with native
+  realization only. T0.9 implements exact-pack durable overlay
+  staging/persistence plus that portability hardening and is stopped for review.
+  The next implementation gate is the small playable woods/cabin vertical.
 - [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
   N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0
   sparse relation graph: snapshot on first interest, query bounded dirty history

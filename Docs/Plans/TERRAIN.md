@@ -2,8 +2,9 @@
 
 Status: active forward plan. T0.0 through T0.8 are accepted/frozen as of
 2026-08-21 after the final presentation-ownership and movement hardening. T0.9
-implementation is complete and stopped for checkpoint review; it is not yet
-accepted/frozen. T0.10 and Network N1 have not started.
+implementation plus client-portability hardening is complete and stopped for
+checkpoint review; it is not yet accepted/frozen. T0.10 and Network N1 have not
+started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -2460,15 +2461,17 @@ RenderChunk / render region
 
 Semantic residency and render visibility are different facts. A semantic chunk may be resident while its render region is not visible this frame. Render regions may later aggregate/subdivide canonical world chunks when measurement earns it.
 
-T0.8's concrete presentation coordinator is a two-dimensional X/Z sliding
-window. Its discrete center follows the player's canonical home chunk immediately;
+The accepted presentation coordinator is a two-dimensional X/Z sliding window.
+Its desired-membership policy now lives in Client Core; a thin concrete-engine
+bridge admits the resulting operations. Its discrete center follows the player's
+canonical home chunk immediately;
 it does not reproduce V1's delayed recenter or vertical render grid. The active
 mapping keeps four independent identities:
 
 ```text
 SpatialChunkKey                 absolute world identity
 ClientSemanticChunkHandle      client semantic slot/lifetime
-RenderWindowOffset             signed player-relative chunk coordinate
+ClientPresentationOffset      signed player-relative chunk coordinate
 private Godot render slot      reusable presentation resource identity
 ```
 
@@ -2699,7 +2702,7 @@ motion. Relative X/Z and per-chunk-relative Y are subtracted as integers before
 Godot float conversion. Equal relative scenes at the world origin and near both
 signed X/Z extremes therefore produce equal small presentation coordinates.
 
-Window transitions are deterministic `Entered`, `RetainedMoved`, and `Exited`
+Window transitions are deterministic `Enter`, `Move`, and `Exit`
 diffs. Retained chunks keep semantic handles and private render slots where
 possible; exits retire/reset presentation resources and return only the private
 slot. A stale semantic-handle generation cannot mutate its replacement's slot.
@@ -3335,6 +3338,54 @@ T0.10 and Network N1 remain unstarted. Private edit sessions, leases, property,
 construction, overlay history/compaction, and client patch-file distribution are
 still documented future consumers rather than implementations.
 
+### T0.9 client-portability hardening stop — 2026-08-21
+
+The accepted T0.8 presentation semantics are now factored at their actual engine
+boundary without reopening their behavior:
+
+```text
+Client Core
+    ClientPresentationWindow
+        canonical center + resident semantic handles
+        candidate construction
+        same-center fast path
+        Enter / Move / Exit diff
+        reversal and reset desired-state semantics
+        transactional plan / commit / cancel
+
+concrete engine bridge
+        preflight/admit complete operation plan
+
+GodotWorldRenderer
+        native queues, resources, slots, frame budgets, visibility
+```
+
+The Core planner advances desired membership only after a backend accepts the
+complete bounded operation set. Backend rejection cancels the opaque plan and
+preserves the last committed desired window. Godot no longer owns radius math,
+candidate generation, semantic-handle diffing, or teleport/reset policy;
+`GodotSlidingRenderWindow` is a thin engine-thread admission bridge. Native
+coalescing and realized presentation remain Godot-private because their resource
+and frame-budget choices need not match another engine.
+
+The ordinary Client Core suite now contains a Godot-free recording backend. It
+proves rejection atomicity, a zero-operation same-center fast path, cardinal and
+diagonal diffs, a second crossing while earlier realization remains notionally
+pending, reversal, reset/fast-travel retirement, stale plan rejection, exact
+binding convergence, and a maximum nine desired chunks for the radius-1/zero-
+spare fixture. The existing native Godot adversarial scene remains green with the
+same topology and bounded-resource metrics.
+
+This hardening deliberately does not invent raw gameplay input contracts. The
+active client currently has downstream game/network intent but no concrete
+playable world-input consumer from which to derive deadzone, held/pressed,
+sampling, focus, or action semantics. T0.10's playable movement must establish a
+small engine-neutral input sample/action boundary between raw Godot events and
+shared client/game intent. Physical bindings, cursor capture, device discovery,
+and engine action maps remain concrete-engine concerns.
+
+T0.10 and Network N1 remain unstarted after this portability stop.
+
 ## T0.10 — playable woods/cabin vertical and acceptance
 
 Build a deliberately small real world rather than another isolated microbenchmark.
@@ -3387,6 +3438,10 @@ Acceptance flow:
 10. restore a durable save and reproduce the same world state.
 
 This is not a UI milestone. Add only enough UI to exercise the world action.
+The first playable movement path also freezes the smallest evidence-backed
+engine-neutral input sample/action seam. Godot translates raw device/input-map
+events into that seam; normalization, intent sequencing, and OfflineDirect/remote
+command formation must not be duplicated inside a future engine adapter.
 
 ### T0 performance/evidence matrix
 

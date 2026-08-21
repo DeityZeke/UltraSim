@@ -490,13 +490,13 @@ internal static class ClientWorldSemanticCacheTests
             WorldPublicStateFlags.Visible,
             new ChunkPublicationRevision(version));
 
-    private static BoundWorldPack CreateWorld()
+    internal static BoundWorldPack CreateWorld()
     {
         var builder = new WorldPackBuilder(
-            Space, Content, new WorldPackLimits(2 * 1024 * 1024, 9, 8, 8, 4, 8));
-        for (int z = -1; z <= 1; z++)
+            Space, Content, new WorldPackLimits(2 * 1024 * 1024, 25, 8, 8, 4, 8));
+        for (int z = -2; z <= 2; z++)
         {
-            for (int x = -1; x <= 1; x++)
+            for (int x = -2; x <= 2; x++)
             {
                 ushort[] materials = new ushort[TerrainChunkFormat.MaterialCellCount];
                 Array.Fill(materials, checked((ushort)(((x + z) & 1) + 1)));
@@ -533,7 +533,7 @@ internal static class ClientWorldSemanticCacheTests
         position.YMillimeters + half,
         position.GlobalZMillimeters + half);
 
-    private static SpatialChunkKey Key(int x, int z) => new(Space, x, z);
+    internal static SpatialChunkKey Key(int x, int z) => new(Space, x, z);
 
     private static void True(bool condition)
     {

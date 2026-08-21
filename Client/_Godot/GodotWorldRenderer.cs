@@ -121,7 +121,7 @@ public readonly record struct GodotWorldRendererSnapshot(
 public readonly record struct GodotWorldRenderChunkDiagnostics(
     ClientSemanticChunkHandle SemanticHandle,
     int PrivateRenderSlot,
-    RenderWindowOffset WindowOffset,
+    ClientPresentationOffset WindowOffset,
     int YAnchorMillimeters,
     float RootLocalX,
     float RootLocalY,
@@ -154,7 +154,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly ClientSemanticChunkHandle[] _retireQueue;
     private readonly bool[] _desiredVisible;
     private readonly bool[] _desiredResident;
-    private readonly RenderWindowOffset[] _desiredWindowOffsets;
+    private readonly ClientPresentationOffset[] _desiredWindowOffsets;
     private readonly TerrainBaseMeshVertex[] _terrainVertices =
         new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
     private readonly ushort[] _terrainIndices = new ushort[TerrainChunkFormat.TriangleIndexCount];
@@ -218,7 +218,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _retireQueue = new ClientSemanticChunkHandle[cache.Limits.MaximumResidentChunks];
         _desiredVisible = new bool[cache.Limits.MaximumResidentChunks];
         _desiredResident = new bool[cache.Limits.MaximumResidentChunks];
-        _desiredWindowOffsets = new RenderWindowOffset[cache.Limits.MaximumResidentChunks];
+        _desiredWindowOffsets = new ClientPresentationOffset[cache.Limits.MaximumResidentChunks];
         _fallbackStaticMesh = new BoxMesh { Size = Vector3.One };
         _fallbackPublicMesh = new BoxMesh { Size = new Vector3(0.6f, 1.8f, 0.6f) };
         Root = new Node3D { Name = "UltraSimWorld" };
@@ -248,16 +248,16 @@ public sealed class GodotWorldRenderer : IDisposable
             return false;
         }
         return TryEnterPresentationCore(
-            handle, new RenderWindowOffset((int)offsetX, (int)offsetZ), visible, out error);
+            handle, new ClientPresentationOffset((int)offsetX, (int)offsetZ), visible, out error);
     }
 
     private bool TryEnterPresentationCore(ClientSemanticChunkHandle handle,
-        RenderWindowOffset windowOffset,
+        ClientPresentationOffset windowOffset,
         bool visible, out GodotWorldRenderQueueError error)
         => TryEnterPresentationCore(handle, windowOffset, visible, validateGroups: true, out error);
 
     private bool TryEnterPresentationCore(ClientSemanticChunkHandle handle,
-        RenderWindowOffset windowOffset,
+        ClientPresentationOffset windowOffset,
         bool visible,
         bool validateGroups,
         out GodotWorldRenderQueueError error)
@@ -416,7 +416,7 @@ public sealed class GodotWorldRenderer : IDisposable
     }
 
     /// <summary>Moves one retained presentation binding without changing semantic identity.</summary>
-    public bool TrySetWindowOffset(ClientSemanticChunkHandle handle, RenderWindowOffset offset)
+    public bool TrySetWindowOffset(ClientSemanticChunkHandle handle, ClientPresentationOffset offset)
     {
         EnsureOwner();
         ThrowIfDisposed();
@@ -429,7 +429,7 @@ public sealed class GodotWorldRenderer : IDisposable
 
     private bool TryMovePresentation(
         ClientSemanticChunkHandle handle,
-        RenderWindowOffset offset)
+        ClientPresentationOffset offset)
     {
         if (!TryGetSemanticIndex(handle, out int semanticIndex) ||
             !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) ||
@@ -497,7 +497,7 @@ public sealed class GodotWorldRenderer : IDisposable
                     _retireQueue[(_retireHead + offset) % _retireQueue.Length];
                 if (!TryFindRenderSlot(handle, out int renderSlot)) continue;
                 RenderChunk chunk = _renderChunks[renderSlot]!;
-                if (!TryGetRelativeOffset(chunk.Key, origin.Chunk, out RenderWindowOffset relative))
+                if (!TryGetRelativeOffset(chunk.Key, origin.Chunk, out ClientPresentationOffset relative))
                 {
                     SetVisible(chunk, false);
                     continue;
@@ -515,7 +515,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 if (centerChanged && !windowOffsetsAlreadyUpdated)
                 {
                     if (!TryGetRelativeOffset(chunk.Key, origin.Chunk,
-                        out RenderWindowOffset relative))
+                        out ClientPresentationOffset relative))
                         throw new InvalidOperationException(
                             "A rendered chunk is outside relative offset range.");
                     chunk.WindowOffset = relative;
@@ -582,7 +582,7 @@ public sealed class GodotWorldRenderer : IDisposable
     }
 
     internal bool TryQueueWindowTransition(
-        ReadOnlySpan<RenderWindowChange> changes,
+        ReadOnlySpan<ClientPresentationChange> changes,
         bool hideExits,
         out GodotWorldRenderQueueError error)
     {
@@ -590,8 +590,8 @@ public sealed class GodotWorldRenderer : IDisposable
         ThrowIfDisposed();
         for (int index = 0; index < changes.Length; index++)
         {
-            RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.Entered)
+            ClientPresentationChange change = changes[index];
+            if (change.Kind == ClientPresentationChangeKind.Enter)
             {
                 if (!_cache.TryGetResidentView(change.Handle, out ClientSemanticChunkView semantic))
                 {
@@ -604,7 +604,7 @@ public sealed class GodotWorldRenderer : IDisposable
                     return false;
                 }
             }
-            else if (change.Kind == RenderWindowChangeKind.RetainedMoved &&
+            else if (change.Kind == ClientPresentationChangeKind.Move &&
                 (!_cache.TryGetInfo(change.Handle, out ClientSemanticChunkInfo info) ||
                     info.State != ClientSemanticChunkState.Resident ||
                     !TryFindRenderSlot(change.Handle, out _) &&
@@ -614,7 +614,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 error = GodotWorldRenderQueueError.InvalidHandle;
                 return false;
             }
-            else if (change.Kind == RenderWindowChangeKind.Exited &&
+            else if (change.Kind == ClientPresentationChangeKind.Exit &&
                 !TryFindRenderSlot(change.Handle, out _) &&
                 !Contains(_buildQueue, _buildHead, _buildCount, change.Handle) &&
                 !Contains(_retireQueue, _retireHead, _retireCount, change.Handle))
@@ -625,14 +625,14 @@ public sealed class GodotWorldRenderer : IDisposable
         }
         for (int index = 0; index < changes.Length; index++)
         {
-            RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.Exited &&
+            ClientPresentationChange change = changes[index];
+            if (change.Kind == ClientPresentationChangeKind.Exit &&
                 !TryQueueRetire(change.Handle, out error)) return false;
         }
         for (int index = 0; index < changes.Length; index++)
         {
-            RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.RetainedMoved &&
+            ClientPresentationChange change = changes[index];
+            if (change.Kind == ClientPresentationChangeKind.Move &&
                 !TryMovePresentation(change.Handle, change.CurrentOffset))
             {
                 error = GodotWorldRenderQueueError.InvalidHandle;
@@ -641,8 +641,8 @@ public sealed class GodotWorldRenderer : IDisposable
         }
         for (int index = 0; index < changes.Length; index++)
         {
-            RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.Entered &&
+            ClientPresentationChange change = changes[index];
+            if (change.Kind == ClientPresentationChangeKind.Enter &&
                 !TryEnterPresentationCore(change.Handle, change.CurrentOffset, true,
                     validateGroups: false, out error)) return false;
         }
@@ -745,7 +745,7 @@ public sealed class GodotWorldRenderer : IDisposable
     }
 
     private RenderChunk CreateRenderChunk(ClientSemanticChunkHandle handle,
-        ClientSemanticChunkView semantic, RenderWindowOffset windowOffset)
+        ClientSemanticChunkView semantic, ClientPresentationOffset windowOffset)
     {
         var root = new Node3D { Name = $"Chunk_{semantic.Info.Key.Coord.X}_{semantic.Info.Key.Coord.Z}" };
         var structural = new Node3D { Name = "Structural" };
@@ -988,7 +988,7 @@ public sealed class GodotWorldRenderer : IDisposable
 
     private void SetWindowOffset(
         RenderChunk chunk,
-        RenderWindowOffset offset,
+        ClientPresentationOffset offset,
         bool countWindowMove = true)
     {
         if (chunk.WindowOffset == offset) return;
@@ -1151,7 +1151,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private static bool TryGetRelativeOffset(
         SpatialChunkKey key,
         SpatialChunkCoord center,
-        out RenderWindowOffset offset)
+        out ClientPresentationOffset offset)
     {
         long x = checked((long)key.Coord.X - center.X);
         long z = checked((long)key.Coord.Z - center.Z);
@@ -1160,7 +1160,7 @@ public sealed class GodotWorldRenderer : IDisposable
             offset = default;
             return false;
         }
-        offset = new RenderWindowOffset((int)x, (int)z);
+        offset = new ClientPresentationOffset((int)x, (int)z);
         return true;
     }
 
@@ -1180,7 +1180,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private sealed class RenderChunk
     {
         internal RenderChunk(ClientSemanticChunkHandle handle, SpatialChunkKey key,
-            ClientSemanticHash semanticHash, RenderWindowOffset windowOffset,
+            ClientSemanticHash semanticHash, ClientPresentationOffset windowOffset,
             Node3D root, Node3D structuralRoot,
             Node3D publicRoot, ArrayMesh terrainMesh, int yAnchorMillimeters,
             float firstTerrainLocalY, float firstStaticLocalY, float firstPublicLocalY,
@@ -1208,7 +1208,7 @@ public sealed class GodotWorldRenderer : IDisposable
         internal ClientSemanticChunkHandle Handle { get; }
         internal SpatialChunkKey Key { get; }
         internal ClientSemanticHash SemanticHash { get; set; }
-        internal RenderWindowOffset WindowOffset { get; set; }
+        internal ClientPresentationOffset WindowOffset { get; set; }
         internal Node3D Root { get; }
         internal Node3D StructuralRoot { get; }
         internal Node3D PublicRoot { get; set; }

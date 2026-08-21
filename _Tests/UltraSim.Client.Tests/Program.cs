@@ -24,6 +24,7 @@ var tests = new (string Name, Action Body)[]
     ("ClientRetainedDefinitionsAndViewsAreBounded", ClientRetainedDefinitionsAndViewsAreBounded),
     ("ClientPerformanceBaselinesAreCaptured", ClientPerformanceBaselinesAreCaptured),
     ("ClientWorldSemanticCacheProductionContracts", ClientWorldSemanticCacheTests.Run),
+    ("ClientPresentationWindowIsEngineNeutralAndTransactional", ClientPresentationWindowTests.Run),
 };
 
 foreach ((string name, Action body) in tests)

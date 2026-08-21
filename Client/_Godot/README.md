@@ -22,18 +22,24 @@ public layer; it never enters presentation, changes visibility/offsets, or
 cancels retirement. A late public update for an outgoing chunk is therefore
 discarded as presentation work while its semantic truth remains in Client Core.
 
-`GodotSlidingRenderWindow` is the concrete X/Z presentation coordinator. Its
-discrete center follows the player's canonical home chunk immediately, while
-the common renderer root tracks `-playerLocalX/-playerLocalZ`. A one-chunk slide
-therefore retains the overlap, moves its signed `RenderWindowOffset`s, retires
-only the outgoing strip, and admits only the incoming strip. It never changes
-absolute `SpatialChunkKey`, `ClientSemanticChunkHandle`, publication cursor, or
-semantic hash. These four identities remain independent:
+Client Core's `ClientPresentationWindow` is the X/Z desired-membership
+coordinator. `GodotSlidingRenderWindow` is now only the thin transactional bridge:
+it asks Core for a complete operation plan, admits that plan to the Godot
+renderer, then commits or cancels it. Godot does not recalculate the radius,
+candidate set, semantic-handle diff, reversal, or reset policy.
+
+The Core window's discrete center follows the player's canonical home chunk
+immediately, while the common Godot renderer root tracks
+`-playerLocalX/-playerLocalZ`. A one-chunk slide therefore retains the overlap,
+moves its signed `ClientPresentationOffset`s, retires only the outgoing strip,
+and admits only the incoming strip. It never changes absolute `SpatialChunkKey`,
+`ClientSemanticChunkHandle`, publication cursor, or semantic hash. These four
+identities remain independent:
 
 ```text
 absolute SpatialChunkKey
 client semantic handle/lifetime
-transient signed RenderWindowOffset
+transient signed ClientPresentationOffset
 private reusable Godot render slot
 ```
 

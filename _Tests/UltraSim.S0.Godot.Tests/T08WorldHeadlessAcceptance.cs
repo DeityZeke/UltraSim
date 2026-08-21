@@ -389,21 +389,21 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             GodotWorldRendererLimits.ForStructuralWindow(1, 5, 4));
         var window = new GodotSlidingRenderWindow(cache, renderer, 1);
         var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
-        var changes = new RenderWindowChange[18];
+        var changes = new ClientPresentationChange[18];
         ClientSemanticChunkHandle firstRetired = default;
 
-        SlidingRenderWindowTransition initial = Track(new WorldPosition(0, 0, 0, 0, 0));
+        ClientPresentationWindowTransition initial = Track(new WorldPosition(0, 0, 0, 0, 0));
         Expect(initial.ActiveChunks == 9 && initial.Entered == 9 &&
             initial.Retained == 0 && initial.Exited == 0,
             "Initial centered render window was not a complete 3x3 square.");
 
         GodotWorldRendererSnapshot beforeLocalMovement = renderer.GetSnapshot();
-        SlidingRenderWindowSnapshot beforeLocalWindow = window.GetSnapshot();
+        ClientPresentationWindowSnapshot beforeLocalWindow = window.GetSnapshot();
         ClientWorldSemanticCacheSnapshot beforeLocalCache = cache.GetSnapshot();
         for (ushort local = 1; local <= 100; local++)
             _ = Track(new WorldPosition(0, 0, local, checked((ushort)(local * 2)), 0));
         GodotWorldRendererSnapshot afterLocalMovement = renderer.GetSnapshot();
-        SlidingRenderWindowSnapshot afterLocalWindow = window.GetSnapshot();
+        ClientPresentationWindowSnapshot afterLocalWindow = window.GetSnapshot();
         ClientWorldSemanticCacheSnapshot afterLocalCache = cache.GetSnapshot();
         Expect(afterLocalMovement.ChunkRootTransformWrites ==
             beforeLocalMovement.ChunkRootTransformWrites &&
@@ -431,13 +431,13 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(renderer.TryGetChunkDiagnostics(retainedHandle,
             out GodotWorldRenderChunkDiagnostics retainedRenderBefore),
             "Retained render binding diagnostics were unavailable.");
-        SlidingRenderWindowTransition cardinal = Track(new WorldPosition(1, 0, 0, 0, 0));
+        ClientPresentationWindowTransition cardinal = Track(new WorldPosition(1, 0, 0, 0, 0));
         ClientSemanticChunkInfo retainedAfter = Info(retainedHandle);
         Expect(renderer.TryGetChunkDiagnostics(retainedHandle,
             out GodotWorldRenderChunkDiagnostics retainedRenderAfter),
             "Moved retained render binding diagnostics were unavailable.");
         Expect(cardinal.Entered == 3 && cardinal.Retained == 6 &&
-            cardinal.RetainedMoved == 6 && cardinal.Exited == 3,
+            cardinal.Moved == 6 && cardinal.Exited == 3,
             "A cardinal one-chunk shift did not replace exactly one strip.");
         Expect(renderer.GetSnapshot().WindowMoves == 6 &&
             renderer.GetSnapshot().FreeRenderSlots == 5,
@@ -447,7 +447,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             retainedBefore.PublicationCursor == retainedAfter.PublicationCursor,
             "Pure presentation sliding changed retained semantic lineage.");
         Expect(retainedRenderBefore.PrivateRenderSlot == retainedRenderAfter.PrivateRenderSlot &&
-            retainedRenderAfter.WindowOffset == new RenderWindowOffset(-1, 0),
+            retainedRenderAfter.WindowOffset == new ClientPresentationOffset(-1, 0),
             "Retained chunk did not keep its private render slot while changing relative offset.");
 
         _ = Track(new WorldPosition(0, 0, 0, 0, 0));
@@ -457,9 +457,9 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         _ = Track(new WorldPosition(0, 0, 0, 0, 0));
         _ = Track(new WorldPosition(0, -1, 0, 0, 0));
         _ = Track(new WorldPosition(0, 0, 0, 0, 0));
-        SlidingRenderWindowTransition diagonal = Track(new WorldPosition(1, 1, 0, 0, 0));
+        ClientPresentationWindowTransition diagonal = Track(new WorldPosition(1, 1, 0, 0, 0));
         Expect(diagonal.Entered == 5 && diagonal.Retained == 4 &&
-            diagonal.RetainedMoved == 4 && diagonal.Exited == 5,
+            diagonal.Moved == 4 && diagonal.Exited == 5,
             "A diagonal one-chunk shift did not replace two fringe strips minus their overlap.");
 
         _ = Track(new WorldPosition(0, 0, 15_999, 0, 0));
@@ -478,7 +478,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             "The 15,999 -> 0 canonical boundary introduced a presentation jump.");
 
         ClientSemanticHash hashBeforeCamera = cache.GetSnapshot().WorldSemanticHash;
-        SlidingRenderWindowSnapshot windowBeforeCamera = window.GetSnapshot();
+        ClientPresentationWindowSnapshot windowBeforeCamera = window.GetSnapshot();
         GodotWorldRendererSnapshot rendererBeforeCamera = renderer.GetSnapshot();
         var camera = new Camera3D();
         AddChild(camera);
@@ -498,7 +498,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
                 "Long traversal escaped bounded render residency.");
         }
         Expect(firstRetired.IsValid &&
-            !renderer.TrySetWindowOffset(firstRetired, new RenderWindowOffset(0, 0)),
+            !renderer.TrySetWindowOffset(firstRetired, new ClientPresentationOffset(0, 0)),
             "A stale render binding affected a replacement slot after long traversal.");
 
         var originPlayer = new WorldPosition(0, 0, 12_345, 6_789, 0);
@@ -542,16 +542,16 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             $"radius16_active=1089 radius16_spare=65 " +
             $"radius16_semantic_reserved_bytes={radius16Cache.GetSnapshot().ReservedBytes}");
 
-        RenderWindowBinding[] bindings = new RenderWindowBinding[9];
+        ClientPresentationBinding[] bindings = new ClientPresentationBinding[9];
         Expect(window.TryCopyBindings(bindings, out int bindingCount, out _) && bindingCount == 9,
             "Final sliding-window bindings were incomplete.");
-        foreach (RenderWindowBinding binding in bindings)
+        foreach (ClientPresentationBinding binding in bindings)
         {
             Expect(renderer.TryQueueRetire(binding.SemanticHandle, out _),
                 "Final render-window retirement did not queue.");
         }
         renderer.ProcessFrame(new GodotWorldFrameBudget(0, 9));
-        foreach (RenderWindowBinding binding in bindings)
+        foreach (ClientPresentationBinding binding in bindings)
         {
             Expect(cache.BeginRetire(binding.SemanticHandle) &&
                 cache.CompleteRetire(binding.SemanticHandle),
@@ -560,12 +560,12 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(renderer.GetSnapshot().ActiveRenderChunks == 0,
             "Sliding window left presentation resources active.");
 
-        SlidingRenderWindowTransition Track(WorldPosition player)
+        ClientPresentationWindowTransition Track(WorldPosition player)
         {
             Prepare(player.Chunk);
             Expect(window.TryTrackPlayer(
-                    player, changes, out SlidingRenderWindowTransition transition,
-                    out int required, out SlidingRenderWindowError windowError,
+                    player, changes, out ClientPresentationWindowTransition transition,
+                    out int required, out ClientPresentationWindowError windowError,
                     out GodotWorldRenderQueueError rendererError),
                 $"Render-window transition failed: {windowError}/{rendererError}, required {required}.");
             while (renderer.GetSnapshot().PendingBuilds != 0 ||
@@ -573,7 +573,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
                 renderer.ProcessFrame(new GodotWorldFrameBudget(18, 18));
             for (int index = 0; index < required; index++)
             {
-                if (changes[index].Kind != RenderWindowChangeKind.Exited) continue;
+                if (changes[index].Kind != ClientPresentationChangeKind.Exit) continue;
                 ClientSemanticChunkHandle handle = changes[index].Handle;
                 if (!firstRetired.IsValid) firstRetired = handle;
                 Expect(cache.BeginRetire(handle) && cache.CompleteRetire(handle),
@@ -619,7 +619,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             this, cache, GodotWorldRendererLimits.ForStructuralWindow(1, 5, 4));
         var window = new GodotSlidingRenderWindow(cache, renderer, 1);
         var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
-        var changes = new RenderWindowChange[18];
+        var changes = new ClientPresentationChange[18];
         var obsoleteEntering = new ClientSemanticChunkHandle[3];
         int maximumActiveRenderChunks = 0;
 
@@ -650,13 +650,13 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             retainedBefore.PublicationCursor == retainedAfter.PublicationCursor,
             "Rapid presentation transitions changed retained semantic lineage.");
 
-        SlidingRenderWindowTransition forward =
+        ClientPresentationWindowTransition forward =
             QueueTrack(new WorldPosition(3, 0, 0, 0, 0));
         Expect(forward.Entered == 3, "Forward pending fringe was not queued.");
         int obsoleteCount = 0;
         for (int index = 0; index < 18; index++)
         {
-            if (changes[index].Kind != RenderWindowChangeKind.Entered) continue;
+            if (changes[index].Kind != ClientPresentationChangeKind.Enter) continue;
             obsoleteEntering[obsoleteCount++] = changes[index].Handle;
         }
         Expect(obsoleteCount == 3, "Forward pending fringe handles were incomplete.");
@@ -675,8 +675,8 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             "Teleport setup did not retain pending entering work.");
         Expect(window.TryResetForJump(
                 new WorldPosition(20, 0, 0, 0, 0), changes,
-                out SlidingRenderWindowTransition reset, out int resetRequired,
-                out SlidingRenderWindowError resetError,
+                out ClientPresentationWindowTransition reset, out int resetRequired,
+                out ClientPresentationWindowError resetError,
                 out GodotWorldRenderQueueError resetRendererError),
             $"No-overlap reset failed: {resetError}/{resetRendererError}.");
         Expect(reset.ActiveChunks == 0 && reset.Exited == 9 && resetRequired == 9 &&
@@ -717,12 +717,12 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             $"{window.GetSnapshot().ResetTransitions} max_active_render_chunks=" +
             $"{maximumActiveRenderChunks} capacity={renderer.Limits.MaximumRenderChunks}");
 
-        SlidingRenderWindowTransition QueueTrack(WorldPosition player)
+        ClientPresentationWindowTransition QueueTrack(WorldPosition player)
         {
             Prepare(player.Chunk);
             Expect(window.TryTrackPlayer(
-                    player, changes, out SlidingRenderWindowTransition transition,
-                    out int required, out SlidingRenderWindowError windowError,
+                    player, changes, out ClientPresentationWindowTransition transition,
+                    out int required, out ClientPresentationWindowError windowError,
                     out GodotWorldRenderQueueError rendererError),
                 $"Pending render-window transition failed: {windowError}/{rendererError}, " +
                 $"required {required}.");
@@ -763,7 +763,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
 
         void AssertDesiredRendered()
         {
-            var bindings = new RenderWindowBinding[9];
+            var bindings = new ClientPresentationBinding[9];
             Expect(window.TryCopyBindings(bindings, out int count, out _) && count == 9,
                 "Desired window bindings were incomplete.");
             for (int index = 0; index < count; index++)
@@ -802,7 +802,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             this, cache, new GodotWorldRendererLimits(9, 4));
         var window = new GodotSlidingRenderWindow(cache, renderer, 1);
         var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
-        var changes = new RenderWindowChange[18];
+        var changes = new ClientPresentationChange[18];
 
         Track(0);
         Drain();
@@ -852,7 +852,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
                 }
             }
             Expect(window.TryTrackPlayer(new WorldPosition(centerX, 0, 0, 0, 0), changes,
-                out _, out _, out SlidingRenderWindowError error,
+                out _, out _, out ClientPresentationWindowError error,
                 out GodotWorldRenderQueueError rendererError),
                 $"Zero-spare transition failed: {error}/{rendererError}.");
         }
@@ -881,20 +881,20 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             this, cache, GodotWorldRendererLimits.ForStructuralWindow(radius, spare, 4));
         var window = new GodotSlidingRenderWindow(cache, renderer, radius);
         var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
-        var changes = new RenderWindowChange[active * 2];
+        var changes = new ClientPresentationChange[active * 2];
 
         Prepare(new SpatialChunkCoord(0, 0));
-        SlidingRenderWindowTransition initial = Track(new WorldPosition(0, 0, 0, 0, 0));
+        ClientPresentationWindowTransition initial = Track(new WorldPosition(0, 0, 0, 0, 0));
         Expect(initial.Entered == active && initial.ActiveChunks == active,
             "Larger-radius initial window was incomplete.");
         Drain(renderer, active, active);
 
-        SlidingRenderWindowSnapshot beforeSame = window.GetSnapshot();
+        ClientPresentationWindowSnapshot beforeSame = window.GetSnapshot();
         ClientWorldSemanticCacheSnapshot cacheBeforeSame = cache.GetSnapshot();
         GodotWorldRendererSnapshot rendererBeforeSame = renderer.GetSnapshot();
         for (ushort local = 1; local <= 100; local++)
             _ = Track(new WorldPosition(0, 0, local, local, local));
-        SlidingRenderWindowSnapshot afterSame = window.GetSnapshot();
+        ClientPresentationWindowSnapshot afterSame = window.GetSnapshot();
         ClientWorldSemanticCacheSnapshot cacheAfterSame = cache.GetSnapshot();
         GodotWorldRendererSnapshot rendererAfterSame = renderer.GetSnapshot();
         Expect(afterSame.SameCenterFastPaths == beforeSame.SameCenterFastPaths + 100 &&
@@ -908,11 +908,11 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             "Larger-radius same-center movement did not remain constant-work.");
 
         Prepare(new SpatialChunkCoord(1, 0));
-        SlidingRenderWindowSnapshot beforeCardinal = window.GetSnapshot();
+        ClientPresentationWindowSnapshot beforeCardinal = window.GetSnapshot();
         ClientWorldSemanticCacheSnapshot cacheBeforeCardinal = cache.GetSnapshot();
         GodotWorldRendererSnapshot rendererBeforeCardinal = renderer.GetSnapshot();
-        SlidingRenderWindowTransition cardinal = Track(new WorldPosition(1, 0, 0, 0, 100));
-        SlidingRenderWindowSnapshot afterCardinal = window.GetSnapshot();
+        ClientPresentationWindowTransition cardinal = Track(new WorldPosition(1, 0, 0, 0, 100));
+        ClientPresentationWindowSnapshot afterCardinal = window.GetSnapshot();
         ClientWorldSemanticCacheSnapshot cacheAfterCardinal = cache.GetSnapshot();
         GodotWorldRendererSnapshot rendererAfterCardinal = renderer.GetSnapshot();
         Expect(cardinal.Entered == 9 && cardinal.Retained == 72 && cardinal.Exited == 9 &&
@@ -937,7 +937,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
 
         Prepare(new SpatialChunkCoord(2, 1));
         GodotWorldRendererSnapshot beforeDiagonal = renderer.GetSnapshot();
-        SlidingRenderWindowTransition diagonal = Track(new WorldPosition(2, 1, 0, 0, 100));
+        ClientPresentationWindowTransition diagonal = Track(new WorldPosition(2, 1, 0, 0, 100));
         GodotWorldRendererSnapshot afterDiagonal = renderer.GetSnapshot();
         Expect(diagonal.Entered == spare && diagonal.Retained == 64 && diagonal.Exited == spare &&
             afterDiagonal.GroupValidationCalls - beforeDiagonal.GroupValidationCalls == spare,
@@ -964,11 +964,11 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             $"cancelled_builds={renderer.GetSnapshot().CancelledBuilds} " +
             $"cancelled_retires={renderer.GetSnapshot().CancelledRetirements}");
 
-        SlidingRenderWindowTransition Track(WorldPosition player)
+        ClientPresentationWindowTransition Track(WorldPosition player)
         {
             Expect(window.TryTrackPlayer(
-                    player, changes, out SlidingRenderWindowTransition transition,
-                    out int required, out SlidingRenderWindowError error,
+                    player, changes, out ClientPresentationWindowTransition transition,
+                    out int required, out ClientPresentationWindowError error,
                     out GodotWorldRenderQueueError rendererError),
                 $"Larger-radius transition failed: {error}/{rendererError}, required {required}.");
             return transition;
@@ -1001,7 +1001,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         using var renderer = new GodotWorldRenderer(
             this, cache, new GodotWorldRendererLimits(active, 4));
         var window = new GodotSlidingRenderWindow(cache, renderer, radius);
-        var changes = new RenderWindowChange[active * 2];
+        var changes = new ClientPresentationChange[active * 2];
         Prepare(0);
         Track(0);
         Drain(renderer, active, active);
@@ -1034,7 +1034,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         void Track(int centerX)
         {
             Expect(window.TryTrackPlayer(new WorldPosition(centerX, 0, 0, 0, 0), changes,
-                out _, out _, out SlidingRenderWindowError error,
+                out _, out _, out ClientPresentationWindowError error,
                 out GodotWorldRenderQueueError rendererError),
                 $"Larger-radius zero-spare transition failed: {error}/{rendererError}.");
         }

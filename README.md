@@ -108,11 +108,14 @@ toward the latest desired center, and provides a bounded retire/reuse reset for
 fast travel. The final review pass separates public refresh from window ownership,
 adds indexed structural-key lookup and a true same-center fast path, makes
 continuous Y movement common-root-only, and includes terrain surfaces in render
-group admission. T0.8 is accepted/frozen. T0.9 now implements the exact immutable
+group admission. A post-acceptance portability pass moves desired-window
+candidate/diff/reset policy into a transactional engine-neutral Client Core
+planner; the Godot class is now only its native admission bridge. T0.8 is
+accepted/frozen. T0.9 now implements the exact immutable
 pack plus bounded complete terrain/static/Multi overlay view, per-chunk structural
 revision/hash identity, and the fourth `worldview` save-set participant. Its
-implementation is stopped for checkpoint review; T0.10 and Network N1 remain
-later work.
+implementation plus client-portability hardening is stopped for checkpoint
+review; T0.10 and Network N1 remain later work.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
