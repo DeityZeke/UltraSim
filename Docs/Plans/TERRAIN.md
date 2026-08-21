@@ -1,9 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.5 are accepted/frozen as of
-2026-08-20 after T0.5 query-contract and orientation hardening. T0.6
-implementation is complete and stopped for checkpoint review; it is not yet
-accepted/frozen and T0.7 has not started.
+Status: active forward plan. T0.0 through T0.6 are accepted/frozen as of
+2026-08-21 after T0.6 publication-lineage hardening. T0.7 implementation is
+complete and stopped for checkpoint review; it is not yet accepted/frozen and
+T0.8 has not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -2117,9 +2117,10 @@ resurrect the identity.
 A snapshot contains a complete current public scope for that publication chunk at one revision. Apply stages and validates before replacing the client's corresponding semantic chunk page. A delayed pre-snapshot delta cannot resurrect state older than the committed snapshot floor. T0 proves this locally before N1 has a packet format.
 **T0.6 gate:** deterministic snapshot/delta oracle, history wrap -> snapshot fallback, slot-reuse/tombstone tests, cross-chunk migration ordering tests, warmed zero-allocation publication/query, direct-read encoding/copy benchmark, eager-vs-on-demand prepared-publication evidence including wasted-work/cache-hit accounting, and bounded memory independent of observer lifetime.
 
-### T0.6 implementation stop — 2026-08-20
+### T0.6 acceptance record — 2026-08-21
 
-T0.6 is implemented and stopped for checkpoint review. It does not begin T0.7.
+T0.6 is accepted/frozen after checkpoint hardening. The accepted implementation
+does not depend on T0.7 consumer state.
 The implementation adds an explicit persisted `WorldPublicComponent`; Position
 or prefab provenance alone never opts an entity into broad public projection.
 `GameWorldState` consumes Position, public-component, and lifecycle changes at
@@ -2301,6 +2302,81 @@ measurement rather than making the initial API ambiguously partial.
 
 The canonical world partition being 16 m does not force every subsystem to use 16 m internal regions forever. A renderer may later batch four world chunks into a 32 m render region; navigation may use smaller tiles; physics may use finer broadphase cells. Those are private domain accelerators related by geometry/key mapping, not reasons to mutate the canonical world partition.
 **T0.7 gate:** boundary/corner movement and 1 mm radius-boundary oscillation change only the expected hysteretic consumer chunk subscriptions, output is unique/canonically ordered, under-capacity queries report exact complete requirements without partial authority results, same-home-chunk movement creates no coarse membership churn, tier changes do not rewrite member state, world chunks contain no watcher lists, and local snapshot/delta application converges exactly.
+
+Here "no coarse membership churn" means authoritative entity membership in
+`WorldSpatialIndex` remains unchanged while the observer moves within its home
+chunk. The exact circular fringe may legitimately add, remove, or retier a small
+number of consumer subscriptions after movement exceeds the applicable
+hysteresis band; that is consumer topology, not world membership.
+
+### T0.7 implementation stop — 2026-08-21
+
+T0.7 is implemented and stopped for checkpoint review. It does not begin T0.8,
+Godot residency/rendering, or Network N1.
+
+`ChunkInterestQuery` is a stateless game-world query over canonical 16 m chunk
+AABBs. It consumes a sorted previous subscription set only to apply
+consumer-owned hysteresis, then emits each key once at its nearest retained tier
+in canonical order. Radius contact is included, including contact with the
+maximum face of a half-open ownership chunk. The normal path writes during one
+complete count pass; an undersized destination publishes `Count = 0` and the
+exact `RequiredCount`, making any provisional destination contents explicitly
+unusable. Invalid profiles, spaces, or noncanonical previous sets produce no
+output. A fixed 4,096-candidate guard bounds malformed/custom profiles; the
+first game profile examines fewer than 1,000 candidates.
+
+`LocalChunkStreamingOracle` is the packet-free semantic consumer. Its fixed
+arrays own only recipient-local subscriptions, deterministic cadence phase,
+generation-validated `ClientSemanticChunkSlot`, publication cursor/knowledge,
+and a private semantic projection. New interest snapshots, retained interest
+queries deltas at the selected cadence, history loss snapshots again, and leave
+retires only local semantic state. A changed `PublicationEpoch` resets old local
+generation/version floors before taking replacement snapshots. Snapshot and
+delta batches apply to a private fixed-capacity candidate and swap live only
+after complete application. `ChunkAbsent` establishes empty knowledge without
+retaining a delta cursor; an already-empty absent result avoids copying the
+candidate while preserving that semantic rule.
+
+The `1/2/4` Immediate/Near/Far step cadence used by this local fixture is an
+explicit T0.7 evidence profile, not the frozen Network N1 scheduling policy.
+Tier/phase/cursor state remains consumer-owned. Neither `WorldSpatialIndex` nor
+`ChunkPublicationStore` gained watcher lists, recipient IDs, Network messages,
+or per-observer histories/pages.
+
+The permanent T0.0–T0.7 suite now contains 67 tests. New gates cover middle,
+edge, corner, negative-coordinate and exact-contact geometry; 1 mm enter/leave
+hysteresis; unique canonical output; exact capacity failure and invalid-input
+transactionality; a 2,000-operation reference-model anchor churn; stable local
+slots; snapshot, delta, history fallback, cross-chunk movement, publication
+epoch replacement, leave/reset convergence; and 0 B warmed query/no-change
+streaming allocation.
+
+The synthetic 64-public-entity local fixture produces 497 centered
+subscriptions: 1 Immediate, 136 Near, and 360 Far. The selected boundary and
+corner observations produce 503/2 Immediate and 488/4 Immediate respectively.
+With tiered compilation and ReadyToRun disabled, all warmed observations allocate
+0 B:
+
+```text
+exact query, no prior subscription          34.582 us mean / 35.106 us p95
+exact query, retained hysteresis             37.081 us mean / 37.783 us p95
+1 mm boundary oscillation                    36.799 us mean / 36.991 us p95
+canonical chunk-boundary crossing            38.148 us mean / 38.443 us p95
+local streaming, no semantic change          65.522 us mean / 65.628 us p95
+local streaming, one public update           66.934 us mean / 67.057 us p95
+local streaming, forced history fallback     68.572 us mean / 68.757 us p95
+```
+
+The 1,024-subscription/128-public-slot oracle reserves 237,056 bytes; its source
+publication store reserves 139,776 bytes. This is one local semantic-oracle
+observation over about 500 subscriptions, not a per-server-client memory policy
+or an N1 fanout/packet benchmark. N1 may earn replication-owned reverse
+tier/phase subscriber indexes rather than polling one such oracle independently
+per remote client. T0.8 owns the real bounded client resident cache and Godot
+resources.
+
+The immutable evidence is
+[`terrain-t0.7-chunk-interest-local-oracle-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-2026-08-21.json).
 
 ## T0.8 — client resident cache and Godot world renderer
 

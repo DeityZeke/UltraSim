@@ -88,6 +88,18 @@ var tests = new (string Name, Action Body)[]
     ("PublicationCapacityMustAddressEcsSlots", PublicationCapacityMustAddressEcsSlots),
     ("PublicationStoreMatchesReferenceModelUnderBoundedChurn",
         PublicationStoreMatchesReferenceModelUnderBoundedChurn),
+    ("ChunkInterestBoundaryCornerAndCanonicalOrderingAreExact",
+        ChunkInterestBoundaryCornerAndCanonicalOrderingAreExact),
+    ("ChunkInterestHysteresisResistsOneMillimeterOscillation",
+        ChunkInterestHysteresisResistsOneMillimeterOscillation),
+    ("ChunkInterestCapacityAndInvalidInputAreExplicit",
+        ChunkInterestCapacityAndInvalidInputAreExplicit),
+    ("ChunkInterestMatchesReferenceModelUnderBoundedChurn",
+        ChunkInterestMatchesReferenceModelUnderBoundedChurn),
+    ("LocalChunkStreamingOracleConvergesSnapshotsDeltasAndFallbacks",
+        LocalChunkStreamingOracleConvergesSnapshotsDeltasAndFallbacks),
+    ("ChunkInterestAndLocalNoChangeStreamingAllocateZero",
+        ChunkInterestAndLocalNoChangeStreamingAllocateZero),
 };
 
 foreach ((string name, Action body) in tests)
@@ -96,7 +108,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.6 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.7 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -2309,6 +2321,9 @@ static void PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree
         Equal(ChunkPublicationReadStatus.Snapshot,
             fixture.State.Publications.TryCopySnapshot(key, records, out batch));
         True(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, bytes, out _));
+        True(fixture.State.Publications.TryGetCommittedView(key, out ChunkPublicationView warmView));
+        foreach (ChunkPublicationPageView page in warmView)
+            True(page.Count > 0);
     }
     long beforeAllocation = GC.GetAllocatedBytesForCurrentThread();
     ulong checksum = 0;
@@ -2975,6 +2990,453 @@ static void SynchronizePublicationConsumer(
         Equal(actor.Descriptor.Flags, record.StateFlags);
     }
     Equal(expected, byPrefab.Count);
+}
+
+static void ChunkInterestBoundaryCornerAndCanonicalOrderingAreExact()
+{
+    var destination = new ChunkInterestEntry[1_024];
+    ChunkInterestProfile profile = GameChunkInterestProfile.Default;
+    SpatialSpaceId space = GameWorldState.DefaultSpace;
+
+    WorldPosition middle = new(0, 0, 8_000, 8_000, 0);
+    Equal(ChunkInterestQueryStatus.Success,
+        ChunkInterestQuery.TryQuery(space, middle, profile, [], destination, out int middleCount,
+            out int middleRequired));
+    Equal(middleCount, middleRequired);
+    Equal(1, CountTier(destination.AsSpan(0, middleCount), ChunkInterestTier.Immediate));
+    AssertCanonicalInterest(destination.AsSpan(0, middleCount));
+
+    WorldPosition boundary = new(0, 0, 12_000, 8_000, 0);
+    Equal(ChunkInterestQueryStatus.Success,
+        ChunkInterestQuery.TryQuery(space, boundary, profile, [], destination, out int boundaryCount, out _));
+    Equal(2, CountTier(destination.AsSpan(0, boundaryCount), ChunkInterestTier.Immediate));
+    True(FindInterest(destination.AsSpan(0, boundaryCount), new SpatialChunkKey(space, 0, 0), out _) >= 0);
+    True(FindInterest(destination.AsSpan(0, boundaryCount), new SpatialChunkKey(space, 1, 0), out _) >= 0);
+
+    WorldPosition sameTopology = new(0, 0, 15_900, 8_000, 0);
+    var later = new ChunkInterestEntry[1_024];
+    Equal(ChunkInterestQueryStatus.Success,
+        ChunkInterestQuery.TryQuery(space, sameTopology, profile, destination.AsSpan(0, boundaryCount), later,
+            out int laterCount, out _));
+    Equal(2, CountTier(later.AsSpan(0, laterCount), ChunkInterestTier.Immediate));
+    True(FindInterest(later.AsSpan(0, laterCount), new SpatialChunkKey(space, 0, 0), out
+        ChunkInterestEntry retainedHome) >= 0);
+    Equal(ChunkInterestTier.Immediate, retainedHome.Tier);
+    True(FindInterest(later.AsSpan(0, laterCount), new SpatialChunkKey(space, 1, 0), out
+        ChunkInterestEntry retainedNeighbor) >= 0);
+    Equal(ChunkInterestTier.Immediate, retainedNeighbor.Tier);
+
+    WorldPosition corner = new(0, 0, 15_999, 15_999, 0);
+    Equal(ChunkInterestQueryStatus.Success,
+        ChunkInterestQuery.TryQuery(space, corner, profile, [], destination, out int cornerCount, out _));
+    Equal(4, CountTier(destination.AsSpan(0, cornerCount), ChunkInterestTier.Immediate));
+    True(FindInterest(destination.AsSpan(0, cornerCount), new SpatialChunkKey(space, 0, 0), out _) >= 0);
+    True(FindInterest(destination.AsSpan(0, cornerCount), new SpatialChunkKey(space, 0, 1), out _) >= 0);
+    True(FindInterest(destination.AsSpan(0, cornerCount), new SpatialChunkKey(space, 1, 0), out _) >= 0);
+    True(FindInterest(destination.AsSpan(0, cornerCount), new SpatialChunkKey(space, 1, 1), out _) >= 0);
+    AssertCanonicalInterest(destination.AsSpan(0, cornerCount));
+
+    WorldPosition negativeCorner = new(-1, -1, 15_999, 15_999, 0);
+    Equal(ChunkInterestQueryStatus.Success,
+        ChunkInterestQuery.TryQuery(space, negativeCorner, profile, [], destination, out int negativeCount, out _));
+    Equal(4, CountTier(destination.AsSpan(0, negativeCount), ChunkInterestTier.Immediate));
+    True(FindInterest(destination.AsSpan(0, negativeCount), new SpatialChunkKey(space, -1, -1), out _) >= 0);
+    True(FindInterest(destination.AsSpan(0, negativeCount), new SpatialChunkKey(space, 0, 0), out _) >= 0);
+    AssertCanonicalInterest(destination.AsSpan(0, negativeCount));
+}
+
+static void ChunkInterestHysteresisResistsOneMillimeterOscillation()
+{
+    var current = new ChunkInterestEntry[1_024];
+    var next = new ChunkInterestEntry[1_024];
+    SpatialSpaceId space = GameWorldState.DefaultSpace;
+    ChunkInterestProfile profile = GameChunkInterestProfile.Default;
+    SpatialChunkKey immediateTarget = new(space, 1, 0);
+
+    QueryInterest(new WorldPosition(0, 0, 11_000, 8_000, 0), [], current, out int count);
+    Equal(ChunkInterestTier.Immediate, InterestTier(current.AsSpan(0, count), immediateTarget));
+    QueryInterest(new WorldPosition(0, 0, 10_999, 8_000, 0), current.AsSpan(0, count), next, out int nextCount);
+    Equal(ChunkInterestTier.Immediate, InterestTier(next.AsSpan(0, nextCount), immediateTarget));
+    Swap(ref current, ref next, ref count, nextCount);
+    QueryInterest(new WorldPosition(0, 0, 10_500, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Immediate, InterestTier(next.AsSpan(0, nextCount), immediateTarget));
+    Swap(ref current, ref next, ref count, nextCount);
+    QueryInterest(new WorldPosition(0, 0, 10_499, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Near, InterestTier(next.AsSpan(0, nextCount), immediateTarget));
+    Swap(ref current, ref next, ref count, nextCount);
+    QueryInterest(new WorldPosition(0, 0, 10_500, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Near, InterestTier(next.AsSpan(0, nextCount), immediateTarget));
+    Swap(ref current, ref next, ref count, nextCount);
+    QueryInterest(new WorldPosition(0, 0, 11_000, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Immediate, InterestTier(next.AsSpan(0, nextCount), immediateTarget));
+
+    SpatialChunkKey nearTarget = new(space, 6, 0);
+    QueryInterest(new WorldPosition(0, 0, 0, 8_000, 0), [], current, out count);
+    Equal(ChunkInterestTier.Near, InterestTier(current.AsSpan(0, count), nearTarget));
+    QueryInterest(new WorldPosition(-1, 0, 15_999, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Near, InterestTier(next.AsSpan(0, nextCount), nearTarget));
+    Swap(ref current, ref next, ref count, nextCount);
+    QueryInterest(new WorldPosition(-1, 0, 15_500, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Near, InterestTier(next.AsSpan(0, nextCount), nearTarget));
+    Swap(ref current, ref next, ref count, nextCount);
+    QueryInterest(new WorldPosition(-1, 0, 15_499, 8_000, 0), current.AsSpan(0, count), next, out nextCount);
+    Equal(ChunkInterestTier.Far, InterestTier(next.AsSpan(0, nextCount), nearTarget));
+
+    void QueryInterest(
+        in WorldPosition anchor,
+        ReadOnlySpan<ChunkInterestEntry> previous,
+        Span<ChunkInterestEntry> output,
+        out int resultCount)
+    {
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(space, anchor, profile, previous, output, out resultCount, out int required));
+        Equal(resultCount, required);
+    }
+}
+
+static void ChunkInterestCapacityAndInvalidInputAreExplicit()
+{
+    SpatialSpaceId space = GameWorldState.DefaultSpace;
+    WorldPosition anchor = new(0, 0, 8_000, 8_000, 0);
+    var complete = new ChunkInterestEntry[1_024];
+    Equal(ChunkInterestQueryStatus.Success,
+        ChunkInterestQuery.TryQuery(space, anchor, GameChunkInterestProfile.Default, [], complete,
+            out int fullCount, out int fullRequired));
+    Equal(fullCount, fullRequired);
+    var sentinel = new ChunkInterestEntry(new SpatialChunkKey(space, 77, 88), ChunkInterestTier.Far);
+    var small = Enumerable.Repeat(sentinel, fullCount - 1).ToArray();
+    Equal(ChunkInterestQueryStatus.DestinationTooSmall,
+        ChunkInterestQuery.TryQuery(space, anchor, GameChunkInterestProfile.Default, [], small,
+            out int count, out int required));
+    Equal(0, count);
+    Equal(fullCount, required);
+    // A sizing failure makes the destination explicitly unusable; no partial count is published.
+
+    ChunkInterestEntry[] invalidPrevious =
+    [
+        new(new SpatialChunkKey(space, 0, 0), ChunkInterestTier.Immediate),
+        new(new SpatialChunkKey(space, 0, 0), ChunkInterestTier.Near),
+    ];
+    var untouched = Enumerable.Repeat(sentinel, 4).ToArray();
+    Equal(ChunkInterestQueryStatus.InvalidInput,
+        ChunkInterestQuery.TryQuery(space, anchor, GameChunkInterestProfile.Default, invalidPrevious, untouched,
+            out count, out required));
+    Equal(0, count);
+    Equal(0, required);
+    True(untouched.All(value => value == sentinel));
+    Equal(ChunkInterestQueryStatus.InvalidInput,
+        ChunkInterestQuery.TryQuery(default, anchor, GameChunkInterestProfile.Default, [], untouched,
+            out count, out required));
+
+    var source = new ChunkPublicationStore(PublicationEpoch.Create(), new ChunkPublicationLimits(1, 2, 1, 1));
+    var constrained = new LocalChunkStreamingOracle(
+        new LocalChunkStreamingLimits(8, 1),
+        GameChunkInterestProfile.Default,
+        LocalChunkStreamingCadence.EvidenceProfile);
+    Equal(LocalChunkStreamingStatus.SubscriptionCapacityExceeded,
+        constrained.Synchronize(source, space, anchor, 0, out int oracleRequired));
+    True(oracleRequired > 8);
+    Equal(0, constrained.GetSnapshot().SubscriptionCount);
+    Equal(0, constrained.GetSnapshot().ResidentRecordCount);
+}
+
+static void ChunkInterestMatchesReferenceModelUnderBoundedChurn()
+{
+    const int operations = 2_000;
+    SpatialSpaceId space = GameWorldState.DefaultSpace;
+    ChunkInterestProfile profile = GameChunkInterestProfile.Default;
+    var current = new ChunkInterestEntry[1_024];
+    var next = new ChunkInterestEntry[1_024];
+    int currentCount = 0;
+    long x = 8_000;
+    long z = 8_000;
+    var random = new Random(0x70_07_2026);
+    for (int operation = 0; operation < operations; operation++)
+    {
+        if (operation % 211 == 0)
+        {
+            x = random.Next(-12, 13) * (long)GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                random.Next(0, GameWorldSpatialProfile.WorldChunkEdgeUnits);
+            z = random.Next(-12, 13) * (long)GameWorldSpatialProfile.WorldChunkEdgeUnits +
+                random.Next(0, GameWorldSpatialProfile.WorldChunkEdgeUnits);
+        }
+        else
+        {
+            x += random.Next(-600, 601);
+            z += random.Next(-600, 601);
+        }
+        True(WorldPosition.TryFromGlobalMillimeters(x, 0, z, out WorldPosition anchor));
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(space, anchor, profile, current.AsSpan(0, currentCount), next,
+                out int nextCount, out int required));
+        Equal(nextCount, required);
+        AssertCanonicalInterest(next.AsSpan(0, nextCount));
+
+        var previous = new Dictionary<SpatialChunkKey, ChunkInterestTier>();
+        for (int index = 0; index < currentCount; index++)
+            previous.Add(current[index].Key, current[index].Tier);
+        var expected = new List<ChunkInterestEntry>();
+        int homeX = anchor.Chunk.X;
+        int homeZ = anchor.Chunk.Z;
+        for (int chunkX = homeX - 14; chunkX <= homeX + 14; chunkX++)
+        {
+            for (int chunkZ = homeZ - 14; chunkZ <= homeZ + 14; chunkZ++)
+            {
+                var key = new SpatialChunkKey(space, chunkX, chunkZ);
+                previous.TryGetValue(key, out ChunkInterestTier prior);
+                Int128 squared = GameWorldSpatialProfile.ChunkGeometry.GetBounds(key.Coord)
+                    .SquaredDistanceTo(anchor.GlobalXMillimeters, anchor.GlobalZMillimeters);
+                ChunkInterestTier? tier = ReferenceInterestTier(squared, prior, profile);
+                if (tier.HasValue) expected.Add(new ChunkInterestEntry(key, tier.Value));
+            }
+        }
+        expected.Sort(static (left, right) => left.Key.CompareTo(right.Key));
+        Equal(expected.Count, nextCount);
+        for (int index = 0; index < nextCount; index++) Equal(expected[index], next[index]);
+        (current, next) = (next, current);
+        currentCount = nextCount;
+    }
+}
+
+static ChunkInterestTier? ReferenceInterestTier(
+    Int128 distanceSquared,
+    ChunkInterestTier previous,
+    in ChunkInterestProfile profile)
+{
+    static bool Within(Int128 squared, int radius)
+    {
+        Int128 wide = radius;
+        return squared <= wide * wide;
+    }
+    if (previous == ChunkInterestTier.Immediate)
+    {
+        if (Within(distanceSquared, profile.ImmediateLeaveRadiusMillimeters)) return ChunkInterestTier.Immediate;
+        if (Within(distanceSquared, profile.NearLeaveRadiusMillimeters)) return ChunkInterestTier.Near;
+        if (Within(distanceSquared, profile.FarLeaveRadiusMillimeters)) return ChunkInterestTier.Far;
+        return null;
+    }
+    if (previous == ChunkInterestTier.Near)
+    {
+        if (Within(distanceSquared, profile.ImmediateEnterRadiusMillimeters)) return ChunkInterestTier.Immediate;
+        if (Within(distanceSquared, profile.NearLeaveRadiusMillimeters)) return ChunkInterestTier.Near;
+        if (Within(distanceSquared, profile.FarLeaveRadiusMillimeters)) return ChunkInterestTier.Far;
+        return null;
+    }
+    if (previous == ChunkInterestTier.Far)
+    {
+        if (Within(distanceSquared, profile.ImmediateEnterRadiusMillimeters)) return ChunkInterestTier.Immediate;
+        if (Within(distanceSquared, profile.NearEnterRadiusMillimeters)) return ChunkInterestTier.Near;
+        if (Within(distanceSquared, profile.FarLeaveRadiusMillimeters)) return ChunkInterestTier.Far;
+        return null;
+    }
+    if (Within(distanceSquared, profile.ImmediateEnterRadiusMillimeters)) return ChunkInterestTier.Immediate;
+    if (Within(distanceSquared, profile.NearEnterRadiusMillimeters)) return ChunkInterestTier.Near;
+    if (Within(distanceSquared, profile.FarEnterRadiusMillimeters)) return ChunkInterestTier.Far;
+    return null;
+}
+
+static void LocalChunkStreamingOracleConvergesSnapshotsDeltasAndFallbacks()
+{
+    var publicationLimits = new ChunkPublicationLimits(32, 64, 8, 2);
+    using var fixture = new RawSpatialFixture(64, 32, publicationLimits: publicationLimits);
+    var descriptor = new WorldPublicDescriptor(71, WorldYaw.Zero, WorldPublicStateFlags.Visible);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity entity));
+    True(fixture.World.TryWrite(entity, fixture.RawPositionLookup,
+        new WorldPositionComponent(new WorldPosition(0, 0, 1_000, 1_000, 10))));
+    True(fixture.World.TryWrite(entity, fixture.RawPublicLookup, new WorldPublicComponent(descriptor)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    var oracle = new LocalChunkStreamingOracle(
+        new LocalChunkStreamingLimits(1_024, 32),
+        GameChunkInterestProfile.Default,
+        LocalChunkStreamingCadence.EvidenceProfile);
+    WorldPosition anchor = new(0, 0, 8_000, 8_000, 0);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 0, out int required));
+    True(required > 100);
+    AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+    LocalChunkSubscription initialHome = FindSubscription(oracle.Subscriptions,
+        new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0));
+    True(initialHome.Cursor.IsValid);
+    ClientSemanticChunkSlot stableSlot = initialHome.ResidentSlot;
+
+    descriptor = descriptor with { Orientation = WorldYaw.QuarterTurn };
+    True(fixture.World.TryWrite(entity, fixture.RawPublicLookup, new WorldPublicComponent(descriptor)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 1, out _));
+    AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+    Equal(stableSlot, FindSubscription(oracle.Subscriptions,
+        new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0)).ResidentSlot);
+
+    // More dirty facts than the two-entry history can retain force the oracle through snapshot recovery.
+    for (int step = 0; step < 3; step++)
+    {
+        descriptor = descriptor with { Orientation = new WorldYaw(checked((ushort)(20_000 + step))) };
+        True(fixture.World.TryWrite(entity, fixture.RawPublicLookup, new WorldPublicComponent(descriptor)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+    }
+    ulong fallbacksBefore = oracle.GetSnapshot().SnapshotFallbacks;
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 2, out _));
+    True(oracle.GetSnapshot().SnapshotFallbacks > fallbacksBefore);
+    AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+
+    True(fixture.State.TrySetPosition(fixture.World, entity,
+        new WorldPosition(1, 0, 2_000, 1_000, 11)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 3, out _));
+    AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+
+    PublicationEpoch oldEpoch = oracle.GetSnapshot().SourceEpoch;
+    fixture.State.Rebuild(fixture.World);
+    True(fixture.State.Publications.Epoch != oldEpoch);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 4, out _));
+    Equal(fixture.State.Publications.Epoch, oracle.GetSnapshot().SourceEpoch);
+    AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+
+    WorldPosition remoteAnchor = new(100, 0, 8_000, 8_000, 0);
+    ChunkPublicationStoreSnapshot beforeLeave = fixture.State.Publications.GetSnapshot();
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, remoteAnchor, 5, out _));
+    Equal(0, oracle.GetSnapshot().ResidentRecordCount);
+    ChunkPublicationStoreSnapshot afterLeave = fixture.State.Publications.GetSnapshot();
+    Equal(beforeLeave.PublicEntityCount, afterLeave.PublicEntityCount);
+    Equal(beforeLeave.CommitCount, afterLeave.CommitCount);
+    Equal(beforeLeave.PublishedChunkRevisions, afterLeave.PublishedChunkRevisions);
+}
+
+static void ChunkInterestAndLocalNoChangeStreamingAllocateZero()
+{
+    using var fixture = new RawSpatialFixture(64, 32);
+    var oracle = new LocalChunkStreamingOracle(
+        new LocalChunkStreamingLimits(1_024, 32),
+        GameChunkInterestProfile.Default,
+        LocalChunkStreamingCadence.EvidenceProfile);
+    WorldPosition anchor = new(0, 0, 8_000, 8_000, 0);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 0, out _));
+    var previous = new ChunkInterestEntry[1_024];
+    var destination = new ChunkInterestEntry[1_024];
+    for (int index = 0; index < oracle.Subscriptions.Length; index++)
+        previous[index] = oracle.Subscriptions[index].Interest;
+    int previousCount = oracle.Subscriptions.Length;
+
+    for (int warmup = 0; warmup < 32; warmup++)
+    {
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(GameWorldState.DefaultSpace, anchor, GameChunkInterestProfile.Default,
+                previous.AsSpan(0, previousCount), destination, out _, out _));
+        Equal(LocalChunkStreamingStatus.Synchronized,
+            oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor,
+                checked((ulong)warmup + 1), out _));
+    }
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int iteration = 0; iteration < 1_000; iteration++)
+    {
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(GameWorldState.DefaultSpace, anchor, GameChunkInterestProfile.Default,
+                previous.AsSpan(0, previousCount), destination, out int count, out int required));
+        Equal(count, required);
+        Equal(LocalChunkStreamingStatus.Synchronized,
+            oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor,
+                checked((ulong)iteration + 100), out _));
+    }
+    Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
+
+static int CountTier(ReadOnlySpan<ChunkInterestEntry> entries, ChunkInterestTier tier)
+{
+    int count = 0;
+    for (int index = 0; index < entries.Length; index++)
+        if (entries[index].Tier == tier) count++;
+    return count;
+}
+
+static void AssertCanonicalInterest(ReadOnlySpan<ChunkInterestEntry> entries)
+{
+    for (int index = 0; index < entries.Length; index++)
+    {
+        True(entries[index].IsValid);
+        if (index != 0) True(entries[index - 1].Key.CompareTo(entries[index].Key) < 0);
+    }
+}
+
+static int FindInterest(
+    ReadOnlySpan<ChunkInterestEntry> entries,
+    SpatialChunkKey key,
+    out ChunkInterestEntry entry)
+{
+    for (int index = 0; index < entries.Length; index++)
+    {
+        if (entries[index].Key != key) continue;
+        entry = entries[index];
+        return index;
+    }
+    entry = default;
+    return -1;
+}
+
+static ChunkInterestTier InterestTier(ReadOnlySpan<ChunkInterestEntry> entries, SpatialChunkKey key)
+{
+    True(FindInterest(entries, key, out ChunkInterestEntry entry) >= 0);
+    return entry.Tier;
+}
+
+static void Swap(
+    ref ChunkInterestEntry[] current,
+    ref ChunkInterestEntry[] next,
+    ref int currentCount,
+    int nextCount)
+{
+    (current, next) = (next, current);
+    currentCount = nextCount;
+}
+
+static LocalChunkSubscription FindSubscription(
+    ReadOnlySpan<LocalChunkSubscription> subscriptions,
+    SpatialChunkKey key)
+{
+    for (int index = 0; index < subscriptions.Length; index++)
+        if (subscriptions[index].Interest.Key == key) return subscriptions[index];
+    throw new InvalidOperationException($"Subscription {key} was not found.");
+}
+
+static void AssertOracleMatchesInterestedPublication(
+    ChunkPublicationStore source,
+    LocalChunkStreamingOracle oracle)
+{
+    var expected = new Dictionary<uint, LocalChunkSemanticRecord>();
+    var rows = new WorldPublicRecord[source.Limits.MaximumPublicEntities];
+    foreach (LocalChunkSubscription subscription in oracle.Subscriptions)
+    {
+        ChunkPublicationReadStatus status = source.TryCopySnapshot(subscription.Interest.Key, rows,
+            out ChunkPublicationBatch batch);
+        if (status == ChunkPublicationReadStatus.ChunkAbsent) continue;
+        Equal(ChunkPublicationReadStatus.Snapshot, status);
+        for (int index = 0; index < batch.Count; index++)
+        {
+            WorldPublicRecord record = rows[index];
+            if (expected.TryGetValue(record.Id.Index, out LocalChunkSemanticRecord retained) &&
+                retained.Record.Id.Generation > record.Id.Generation)
+                continue;
+            expected[record.Id.Index] = new LocalChunkSemanticRecord(subscription.Interest.Key, record);
+        }
+    }
+    var actual = new LocalChunkSemanticRecord[source.Limits.MaximumPublicEntities];
+    True(oracle.TryCopyResidentRecords(actual, out int count, out int required));
+    Equal(expected.Count, required);
+    Equal(expected.Count, count);
+    for (int index = 0; index < count; index++)
+    {
+        True(expected.TryGetValue(actual[index].Record.Id.Index, out LocalChunkSemanticRecord record));
+        Equal(record, actual[index]);
+    }
 }
 
 static void ClearPublicationConsumerKey(

@@ -6,6 +6,8 @@ adds authoritative ECS position and generation-owned dynamic membership; T0.2–
 add the dense base terrain, immutable pack, base queries/mesh payload, and packed
 frozen-static/static-Multi content. T0.6 adds explicit dynamic public eligibility,
 packed per-chunk current state, and bounded observer-independent dirty history.
+T0.7 adds exact chunk-interest rings and a bounded packet-free local streaming
+oracle over that publication state.
 
 The frozen first profile is:
 
@@ -122,6 +124,28 @@ update, 575 ns for a crossing, 203 ns to iterate prepared 128-row pages, 3.85 us
 to copy a canonical 128-row snapshot, and 4.80 us to copy plus encode it. A cold
 100,000-slot construction reserves 123,810,048 bytes. See the
 [current T0.6 hardening evidence](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-hardening-2026-08-20.json).
+
+## Chunk interest and local semantic streaming
+
+`ChunkInterestQuery` intersects the first game's exact circular X/Z profile with
+canonical 16 m chunk AABBs. Previous canonically sorted entries supply only
+consumer-owned enter/leave hysteresis. Output is unique and key-ordered, each
+chunk receives one nearest tier, radius contact is included, and undersized
+destinations return an exact complete requirement with `Count = 0`.
+
+The packet-free `LocalChunkStreamingOracle` owns fixed recipient-local
+subscription/cadence/cursor state plus a private semantic projection. First
+interest snapshots; retained interest queries bounded deltas; history loss
+snapshots; leave clears only local state. Complete batches apply to a private
+candidate before swapping live, and a new `PublicationEpoch` resets old local
+identity/version floors. World chunks and publication pages retain no watcher
+or recipient state.
+
+The current `1/2/4` cadence is a local evidence profile, not an N1 protocol
+constant. The 64-entity fixture selects 497 centered subscriptions and measures
+about 34.6 us for a fresh exact query, 37.1 us with retained hysteresis, and
+65.5 us for a no-change local synchronization, all at 0 B warmed allocation.
+See the [T0.7 evidence](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-2026-08-21.json).
 
 ## Terrain foundation format
 
