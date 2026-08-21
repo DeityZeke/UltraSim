@@ -11,7 +11,8 @@ public enum GamePlayerActions : ushort
 
 /// <summary>
 /// One sequenced, normalized player command shared by OfflineDirect and future remote formation.
-/// Movement axes use signed Q15: 32767 is full positive input and -32767 is full negative input.
+/// Movement axes use signed Q15 desired velocity: 32767 is full positive intent and -32767 is
+/// full negative intent. Authoritative execution integrates that intent using its fixed delta.
 /// </summary>
 public readonly record struct GamePlayerCommand(
     ulong Sequence,

@@ -101,4 +101,7 @@ Godot InputMap actions (`move_left/right/forward/back`, `interact`, and
 `primary_action`) plus viewport focus and emits `ClientWorldInputSample`.
 Normalization, focus suppression, held/pressed interpretation, command
 quantization, and sequencing live in Client Core; another engine supplies only
-its own physical capture and action-map policy.
+its own physical capture and action-map policy. The native T0.10 acceptance now
+injects declared Godot action state through this adapter and follows the result
+through real game authority, `ChunkPublicationStore`, the production semantic
+cache/window, and Godot public-layer refresh.

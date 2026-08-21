@@ -66,4 +66,7 @@ quantization, and monotonic command sequencing. The resulting
 device IDs, cursor mode, Godot event, or transport state. Physical bindings,
 mouse capture, controller discovery, and engine action maps remain adapter work.
 This is deliberately the smallest proven movement/interact boundary rather than
-a general input framework or compatibility API.
+a general input framework or compatibility API. Refocus restores held movement
+immediately but only seeds the held-action baseline; a key held across focus loss
+cannot manufacture a fresh edge-triggered interaction until released and pressed
+again.

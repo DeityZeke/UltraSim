@@ -1,8 +1,12 @@
 using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
+using UltraSim.ECS;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Input;
 using UltraSim.Game.World;
+using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 
 public partial class T010PlayableWorldAcceptance : Node3D
@@ -12,6 +16,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
         try
         {
             RunAcceptance();
+            RunJoinedInputAuthorityAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
@@ -20,6 +25,195 @@ public partial class T010PlayableWorldAcceptance : Node3D
             GD.PushError($"T0.10 GODOT PLAYABLE WORLD ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private void RunJoinedInputAuthorityAcceptance()
+    {
+        GodotWorldInputMap map = GodotWorldInputMap.Default;
+        Expect(InputMap.HasAction(map.MoveLeft) && InputMap.HasAction(map.MoveRight) &&
+            InputMap.HasAction(map.MoveForward) && InputMap.HasAction(map.MoveBackward) &&
+            InputMap.HasAction(map.Interact) && InputMap.HasAction(map.Primary),
+            "The native project does not declare the playable InputMap contract.");
+
+        WorldPack pack = GamePlayableWorld.CreateWorldPack();
+        BoundWorldPack bound = BindPlayablePack(pack);
+        var composition = new UltraSimGameComposition(
+            new UltraSim.Game.Inventory.InventoryLimits(32, 128, 32),
+            baseWorldPack: pack);
+        var options = new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(
+                128,
+                new PersistenceIdentityOptions(new PersistentWorldId(0x80_3010))),
+            WorldClockOptions.Default);
+        using var runtime = new ServerRuntime(composition, options);
+        runtime.Initialize();
+        runtime.Start();
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(new ParticipantId(3010));
+        Expect(entered.IsEntered, "The joined native actor could not enter authority.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+            "The joined native world could not populate.");
+        runtime.Tick();
+
+        var cache = new ClientWorldSemanticCache(
+            bound,
+            new ClientWorldSemanticCacheLimits(14, 16, 16, 16, 64));
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (_, _, game) =>
+            {
+                StageAuthoritativeWindow(game.WorldState.Publications, cache,
+                    GamePlayableWorld.PlayerStart.Chunk);
+                return true;
+            }, out bool staged) && staged,
+            "The joined native cache did not consume authoritative publication snapshots.");
+
+        using var renderer = new GodotWorldRenderer(
+            this,
+            cache,
+            GodotWorldRendererLimits.ForStructuralWindow(1, 5, 16));
+        var window = new GodotSlidingRenderWindow(cache, renderer, 1);
+        var changes = new ClientPresentationChange[18];
+        Expect(window.TryTrackPlayer(
+            GamePlayableWorld.PlayerStart,
+            changes,
+            out _, out _, out _, out _),
+            "The joined native presentation window could not initialize.");
+        _ = Drain(renderer);
+
+        var sequencer = new ClientWorldInputSequencer();
+        try
+        {
+            Input.ActionPress(map.MoveRight, 1f);
+            Input.ActionPress(map.Interact, 1f);
+            ClientWorldInputSample sample = GodotWorldInput.Capture(map, windowHasFocus: true);
+            Expect(sequencer.TryCreateCommand(sample, out GamePlayerCommand command),
+                "Godot input did not form the shared player command.");
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayerCommandResult>(
+                (world, _, game) =>
+                {
+                    game.WorldActions.ApplyPlayerCommand(
+                        world,
+                        game.WorldState,
+                        entities.Player,
+                        command,
+                        runtime.SimulationFrequencyHz,
+                        entities.CabinDoor,
+                        out GamePlayerCommandResult result);
+                    return result;
+                }, out GamePlayerCommandResult authority) && authority.WasAdmitted &&
+                authority.Movement == GameWorldActionStatus.Accepted &&
+                authority.Interaction == GameWorldActionStatus.Accepted,
+                "Godot input did not reach composed movement/interaction authority.");
+        }
+        finally
+        {
+            Input.ActionRelease(map.MoveRight);
+            Input.ActionRelease(map.Interact);
+        }
+        runtime.Tick();
+
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
+            (world, _, game) =>
+            {
+                Expect(game.WorldActions.TryReadCabinDoor(world, entities.CabinDoor, out bool open) && open,
+                    "The joined native door authority did not open.");
+                Expect(game.WorldState.TryReadPosition(world, entities.Player, out WorldPosition position),
+                    "The joined native player position was missing.");
+                RefreshAuthoritativeChunk(game.WorldState.Publications, cache,
+                    GamePlayableWorld.PlayerStart.ToChunkKey(GameWorldState.DefaultSpace));
+                RefreshAuthoritativeChunk(game.WorldState.Publications, cache,
+                    GamePlayableWorld.DoorPosition.ToChunkKey(GameWorldState.DefaultSpace));
+                return position;
+            }, out WorldPosition moved),
+            "The joined native authority/publication refresh failed.");
+        Expect(moved.GlobalXMillimeters ==
+            GamePlayableWorld.PlayerStart.GlobalXMillimeters + 100,
+            "The joined native 60 Hz movement did not integrate to 100 mm.");
+
+        SpatialChunkKey playerKey = GamePlayableWorld.PlayerStart.ToChunkKey(GameWorldState.DefaultSpace);
+        SpatialChunkKey doorKey = GamePlayableWorld.DoorPosition.ToChunkKey(GameWorldState.DefaultSpace);
+        Expect(cache.TryGetResidentHandle(playerKey, out ClientSemanticChunkHandle playerHandle) &&
+            cache.TryGetResidentHandle(doorKey, out ClientSemanticChunkHandle doorHandle) &&
+            renderer.TryQueuePublicRefresh(playerHandle, out _) &&
+            renderer.TryQueuePublicRefresh(doorHandle, out _),
+            "The joined native public presentation refresh did not queue.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(2, 0));
+        Expect(window.TryTrackPlayer(moved, changes, out _, out _, out _, out _),
+            "The joined native player position did not reach presentation.");
+        GodotWorldRendererSnapshot snapshot = renderer.GetSnapshot();
+        Expect(snapshot.PublicRefreshes == 2 && snapshot.ActiveRenderChunks == 9,
+            "The joined native renderer did not realize authoritative public updates.");
+
+        GD.Print(
+            $"T0.10 JOINED INPUT METRICS commands={sequencer.Snapshot().CommandsProduced} " +
+            $"player_x_mm={moved.GlobalXMillimeters} public_refreshes={snapshot.PublicRefreshes} " +
+            $"active_chunks={snapshot.ActiveRenderChunks}");
+    }
+
+    private static BoundWorldPack BindPlayablePack(WorldPack pack)
+    {
+        var binding = new WorldContentBinding(
+            GameContent.WorldFingerprint,
+            [
+                GameTerrainMaterialIds.Water,
+                GameTerrainMaterialIds.Sand,
+                GameTerrainMaterialIds.Grass,
+                GameTerrainMaterialIds.Rock,
+                GameTerrainMaterialIds.Snow,
+            ],
+            [
+                GameWorldStaticDefinitionIds.Tree,
+                GameWorldStaticDefinitionIds.Rock,
+                GameWorldStaticDefinitionIds.CabinWall,
+                GameWorldStaticDefinitionIds.CabinRoof,
+                GameWorldStaticDefinitionIds.Shelf,
+                GameWorldStaticDefinitionIds.Book,
+            ]);
+        Expect(pack.TryBind(binding, out BoundWorldPack? bound, out _),
+            "The authored playable pack did not bind to game content.");
+        return bound!;
+    }
+
+    private static void StageAuthoritativeWindow(
+        ChunkPublicationStore publications,
+        ClientWorldSemanticCache cache,
+        SpatialChunkCoord center)
+    {
+        Span<WorldPublicRecord> rows = stackalloc WorldPublicRecord[16];
+        for (int z = center.Z - 1; z <= center.Z + 1; z++)
+        {
+            for (int x = center.X - 1; x <= center.X + 1; x++)
+            {
+                SpatialChunkKey key = Key(x, z);
+                Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _),
+                    $"The authoritative native chunk {key} could not be requested.");
+                ChunkPublicationReadStatus status = publications.TryCopySnapshot(
+                    key, rows, out ChunkPublicationBatch batch);
+                bool staged = status == ChunkPublicationReadStatus.Snapshot
+                    ? cache.TryStageFromBaseWorld(handle, rows[..batch.Count], batch.Cursor, out _)
+                    : status == ChunkPublicationReadStatus.ChunkAbsent &&
+                        cache.TryStageFromBaseWorld(handle, [], default, out _);
+                Expect(staged && cache.TryPublish(handle, out _),
+                    $"The authoritative native chunk {key} could not publish locally.");
+            }
+        }
+    }
+
+    private static void RefreshAuthoritativeChunk(
+        ChunkPublicationStore publications,
+        ClientWorldSemanticCache cache,
+        SpatialChunkKey key)
+    {
+        Expect(cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle),
+            $"The authoritative native refresh key {key} was not resident.");
+        Span<WorldPublicRecord> rows = stackalloc WorldPublicRecord[16];
+        ChunkPublicationReadStatus status = publications.TryCopySnapshot(
+            key, rows, out ChunkPublicationBatch batch);
+        Expect(status == ChunkPublicationReadStatus.Snapshot &&
+            cache.TryApplySnapshot(handle, batch, rows[..batch.Count], out _),
+            $"The authoritative native refresh for {key} failed.");
     }
 
     private void RunAcceptance()

@@ -2,6 +2,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Input;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.World;
+using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 
 namespace UltraSim.Game.Composition;
@@ -24,14 +25,27 @@ public readonly record struct GamePlayableWorldEntities(
 /// <summary>Concrete authoritative action outcomes for the first playable vertical.</summary>
 public enum GameWorldActionStatus : byte
 {
-    Accepted = 0,
+    NotRequested = 0,
+    Accepted,
     InvalidCommand,
     StaleCommand,
     MissingActor,
     MissingTarget,
+    UnauthorizedContainer,
     OutOfRange,
     OutsidePreparedWorld,
     InvariantViolation,
+}
+
+/// <summary>Admission and independently composed effects of one player command.</summary>
+public readonly record struct GamePlayerCommandResult(
+    GameWorldActionStatus Admission,
+    GameWorldActionStatus Movement,
+    GameWorldActionStatus Interaction,
+    WorldPosition Position,
+    bool DoorIsOpen)
+{
+    public bool WasAdmitted => Admission == GameWorldActionStatus.Accepted;
 }
 
 /// <summary>
@@ -40,7 +54,7 @@ public enum GameWorldActionStatus : byte
 /// </summary>
 public sealed class GameWorldActions
 {
-    public const int FullInputStepMillimeters = 100;
+    public const int FullInputSpeedMillimetersPerSecond = 6_000;
     public const int InteractionRangeMillimeters = 2_500;
 
     private readonly WorldId _worldId;
@@ -48,6 +62,8 @@ public sealed class GameWorldActions
     private readonly ComponentLookup<GameCabinDoorState> _door;
     private readonly ulong[] _lastSequences;
     private readonly uint[] _sequenceGenerations;
+    private readonly long[] _movementRemainderX;
+    private readonly long[] _movementRemainderZ;
 
     internal GameWorldActions(EcsWorld world)
     {
@@ -57,63 +73,122 @@ public sealed class GameWorldActions
         _door = world.PrepareLookup<GameCabinDoorState>();
         _lastSequences = new ulong[world.Options.EntityCapacity.MaximumEntities];
         _sequenceGenerations = new uint[_lastSequences.Length];
+        _movementRemainderX = new long[_lastSequences.Length];
+        _movementRemainderZ = new long[_lastSequences.Length];
     }
 
-    public GameWorldActionStatus ApplyMovement(
+    /// <summary>Known fixed backing reserved for actor sequence and movement-integration state.</summary>
+    public long ReservedBytes => checked((long)_lastSequences.Length *
+        (sizeof(ulong) + sizeof(uint) + sizeof(long) + sizeof(long)));
+
+    /// <summary>
+    /// Admits one actor command exactly once, then composes its movement and interaction effects.
+    /// Movement axes are desired velocity and integrate against the authoritative fixed cadence.
+    /// </summary>
+    public GameWorldActionStatus ApplyPlayerCommand(
         EcsWorld world,
         GameWorldState worldState,
         Entity actor,
         in GamePlayerCommand command,
-        out WorldPosition position)
+        int authoritativeSimulationFrequencyHz,
+        Entity interactionTarget,
+        out GamePlayerCommandResult result)
     {
         EnsureWorld(world, worldState);
-        position = default;
-        if (!command.IsValid) return GameWorldActionStatus.InvalidCommand;
+        result = default;
+        if (!command.IsValid ||
+            !WorldClockOptions.IsSupportedSimulationFrequency(authoritativeSimulationFrequencyHz))
+        {
+            result = result with { Admission = GameWorldActionStatus.InvalidCommand };
+            return GameWorldActionStatus.InvalidCommand;
+        }
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
             !worldState.TryReadPosition(world, actor, out WorldPosition current))
+        {
+            result = result with { Admission = GameWorldActionStatus.MissingActor };
             return GameWorldActionStatus.MissingActor;
+        }
 
         if (!SequenceIsFresh(actor, command.Sequence))
+        {
+            result = result with { Admission = GameWorldActionStatus.StaleCommand, Position = current };
             return GameWorldActionStatus.StaleCommand;
+        }
 
-        int deltaX = ScaleAxis(command.MoveX);
-        int deltaZ = ScaleAxis(command.MoveZ);
-        long nextX = checked(current.GlobalXMillimeters + deltaX);
-        long nextZ = checked(current.GlobalZMillimeters + deltaZ);
-        if (!WorldPosition.TryFromGlobalMillimeters(
-                nextX, current.YMillimeters, nextZ, out WorldPosition candidate) ||
-            !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY) ||
-            !WorldPosition.TryFromGlobalMillimeters(nextX, terrainY, nextZ, out position))
-            return GameWorldActionStatus.OutsidePreparedWorld;
-        if (!worldState.TrySetPosition(world, actor, position))
-            return GameWorldActionStatus.InvariantViolation;
-
+        // Admission is the replay boundary. A fresh command is consumed before
+        // any effect is interpreted, including effects that later reject.
         CommitSequence(actor, command.Sequence);
+
+        GameWorldActionStatus movement = GameWorldActionStatus.NotRequested;
+        WorldPosition position = current;
+        if (command.MoveX != 0 || command.MoveZ != 0)
+        {
+            int index = checked((int)actor.Index);
+            int deltaX = IntegrateAxis(
+                command.MoveX,
+                authoritativeSimulationFrequencyHz,
+                ref _movementRemainderX[index]);
+            int deltaZ = IntegrateAxis(
+                command.MoveZ,
+                authoritativeSimulationFrequencyHz,
+                ref _movementRemainderZ[index]);
+            long nextX = checked(current.GlobalXMillimeters + deltaX);
+            long nextZ = checked(current.GlobalZMillimeters + deltaZ);
+            if (!WorldPosition.TryFromGlobalMillimeters(
+                    nextX, current.YMillimeters, nextZ, out WorldPosition candidate) ||
+                !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY) ||
+                !WorldPosition.TryFromGlobalMillimeters(nextX, terrainY, nextZ, out position))
+            {
+                movement = GameWorldActionStatus.OutsidePreparedWorld;
+                position = current;
+            }
+            else if (!worldState.TrySetPosition(world, actor, position))
+            {
+                movement = GameWorldActionStatus.InvariantViolation;
+                position = current;
+            }
+            else
+            {
+                movement = GameWorldActionStatus.Accepted;
+            }
+        }
+
+        GameWorldActionStatus interaction = GameWorldActionStatus.NotRequested;
+        bool doorIsOpen = false;
+        if ((command.PressedActions & GamePlayerActions.Interact) != 0)
+        {
+            interaction = ToggleCabinDoorCore(
+                world, worldState, actor, interactionTarget, out doorIsOpen);
+        }
+
+        result = new GamePlayerCommandResult(
+            GameWorldActionStatus.Accepted,
+            movement,
+            interaction,
+            position,
+            doorIsOpen);
         return GameWorldActionStatus.Accepted;
     }
 
-    public GameWorldActionStatus ToggleCabinDoor(
+    private GameWorldActionStatus ToggleCabinDoorCore(
         EcsWorld world,
         GameWorldState worldState,
         Entity actor,
         Entity door,
-        in GamePlayerCommand command,
         out bool isOpen)
     {
-        EnsureWorld(world, worldState);
         isOpen = false;
-        if (!command.IsValid ||
-            (command.PressedActions & GamePlayerActions.Interact) == 0)
-            return GameWorldActionStatus.InvalidCommand;
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
             !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
             return GameWorldActionStatus.MissingActor;
-        if (!SequenceIsFresh(actor, command.Sequence))
-            return GameWorldActionStatus.StaleCommand;
         if (!world.IsAlive(door) || !world.TryRead(door, _door, out GameCabinDoorState state) ||
             !worldState.TryReadPosition(world, door, out WorldPosition doorPosition) ||
             !worldState.TryReadPublic(world, door, out WorldPublicDescriptor descriptor))
             return GameWorldActionStatus.MissingTarget;
+        if (state.IsOpen is not (0 or 1) ||
+            descriptor.PrefabId != GameWorldPublicPrefabIds.CabinDoor ||
+            descriptor.Orientation != DoorOrientation(state.IsOpen != 0))
+            return GameWorldActionStatus.InvariantViolation;
         if (!WithinInteractionRange(actorPosition, doorPosition))
             return GameWorldActionStatus.OutOfRange;
 
@@ -127,7 +202,6 @@ public sealed class GameWorldActions
             return GameWorldActionStatus.InvariantViolation;
         if (!worldState.TrySetPublic(world, door, nextDescriptor))
             throw new InvalidOperationException("A validated cabin door lost its public component.");
-        CommitSequence(actor, command.Sequence);
         return GameWorldActionStatus.Accepted;
     }
 
@@ -162,23 +236,46 @@ public sealed class GameWorldActions
             !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
             return GameWorldActionStatus.MissingActor;
         if (!world.IsAlive(destination) ||
-            !worldState.TryReadPosition(world, destination, out WorldPosition destinationPosition))
+            !inventory.TryGetContainerDefinition(world, source, out _) ||
+            !inventory.TryGetContainerDefinition(world, destination, out _))
             return GameWorldActionStatus.MissingTarget;
-        if (!WithinInteractionRange(actorPosition, destinationPosition))
-            return GameWorldActionStatus.OutOfRange;
+        if (!IsAuthorizedContainer(world, worldState, inventory, actor, actorPosition, source) ||
+            !IsAuthorizedContainer(world, worldState, inventory, actor, actorPosition, destination))
+            return GameWorldActionStatus.UnauthorizedContainer;
         mutation = inventory.Move(world, item, source, destination);
         return mutation.Accepted
             ? GameWorldActionStatus.Accepted
             : GameWorldActionStatus.InvariantViolation;
     }
 
-    private static int ScaleAxis(short value)
+    internal void ValidateRestoredDoorConsistency(EcsWorld world, GameWorldState worldState)
     {
-        long numerator = checked((long)value * FullInputStepMillimeters);
-        long magnitude = Math.Abs(numerator);
-        long rounded = (magnitude + GamePlayerCommand.MaximumAxisMagnitude / 2) /
-            GamePlayerCommand.MaximumAxisMagnitude;
-        return checked((int)(numerator < 0 ? -rounded : rounded));
+        EnsureWorld(world, worldState);
+        for (uint index = 0; index < (uint)_lastSequences.Length; index++)
+        {
+            if (!world.TryGetEntity(index, out Entity entity) ||
+                !world.TryRead(entity, _door, out GameCabinDoorState state))
+                continue;
+            if (state.IsOpen is not (0 or 1) ||
+                !worldState.TryReadPublic(world, entity, out WorldPublicDescriptor descriptor) ||
+                descriptor.PrefabId != GameWorldPublicPrefabIds.CabinDoor ||
+                descriptor.Orientation != DoorOrientation(state.IsOpen != 0))
+            {
+                throw new InvalidOperationException(
+                    $"Cabin door {entity} has contradictory persisted/public state.");
+            }
+        }
+    }
+
+    private static int IntegrateAxis(short value, int frequencyHz, ref long remainder)
+    {
+        long stepQuanta = WorldClockOptions.WorldTimeQuantaPerSecond / frequencyHz;
+        long denominator = checked(
+            (long)GamePlayerCommand.MaximumAxisMagnitude * WorldClockOptions.WorldTimeQuantaPerSecond);
+        Int128 numerator = (Int128)value * FullInputSpeedMillimetersPerSecond * stepQuanta + remainder;
+        Int128 delta = numerator / denominator;
+        remainder = checked((long)(numerator % denominator));
+        return checked((int)delta);
     }
 
     private static bool WithinInteractionRange(in WorldPosition first, in WorldPosition second)
@@ -199,8 +296,30 @@ public sealed class GameWorldActions
     private void CommitSequence(Entity actor, ulong sequence)
     {
         int index = checked((int)actor.Index);
+        if (_sequenceGenerations[index] != actor.Generation)
+        {
+            _movementRemainderX[index] = 0;
+            _movementRemainderZ[index] = 0;
+        }
         _sequenceGenerations[index] = actor.Generation;
         _lastSequences[index] = sequence;
+    }
+
+    private static WorldYaw DoorOrientation(bool isOpen) =>
+        isOpen ? WorldYaw.QuarterTurn : WorldYaw.Zero;
+
+    private static bool IsAuthorizedContainer(
+        EcsWorld world,
+        GameWorldState worldState,
+        InventoryGenerationState inventory,
+        Entity actor,
+        in WorldPosition actorPosition,
+        Entity container)
+    {
+        if (inventory.TryGetContainerOwner(world, container, out Entity owner))
+            return owner == actor;
+        return worldState.TryReadPosition(world, container, out WorldPosition position) &&
+            WithinInteractionRange(actorPosition, position);
     }
 
     private void EnsureWorld(EcsWorld world, GameWorldState worldState)

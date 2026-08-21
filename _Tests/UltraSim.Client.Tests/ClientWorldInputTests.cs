@@ -43,8 +43,12 @@ static class ClientWorldInputTests
         Assert.Equal((short)0, unfocused.MoveZ);
         Assert.Equal(GamePlayerActions.None, unfocused.HeldActions);
         Assert.True(sequencer.TryCreateCommand(held, out GamePlayerCommand refocused));
-        Assert.Equal(GamePlayerActions.Interact, refocused.PressedActions);
-        Assert.True(refocused.IsValid);
+        Assert.Equal(GamePlayerActions.Interact, refocused.HeldActions);
+        Assert.Equal(GamePlayerActions.None, refocused.PressedActions);
+        Assert.True(sequencer.TryCreateCommand(held with { HeldActions = GamePlayerActions.None }, out _));
+        Assert.True(sequencer.TryCreateCommand(held, out GamePlayerCommand pressedAfterRelease));
+        Assert.Equal(GamePlayerActions.Interact, pressedAfterRelease.PressedActions);
+        Assert.True(pressedAfterRelease.IsValid);
     }
 
     private static void InvalidSamplesAndCrossThreadUseFailClosed()

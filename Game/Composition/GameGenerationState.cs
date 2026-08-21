@@ -86,6 +86,7 @@ public sealed class GameGenerationState :
     void IServerGenerationStepParticipant.InitializeGeneration(EcsWorld world)
     {
         WorldState.Initialize(world);
+        WorldActions.ValidateRestoredDoorConsistency(world, WorldState);
     }
 
     void IServerGenerationStepParticipant.CommitAfterEcsStep(EcsWorld world) =>

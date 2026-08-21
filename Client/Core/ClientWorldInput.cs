@@ -33,6 +33,7 @@ public sealed class ClientWorldInputSequencer
     private ulong _commandsProduced;
     private GamePlayerActions _lastHeld;
     private bool _lastFocused;
+    private bool _hasSample;
 
     public ClientWorldInputSequencer(ulong firstSequence = 1)
     {
@@ -53,7 +54,12 @@ public sealed class ClientWorldInputSequencer
         }
 
         GamePlayerActions held = sample.HasFocus ? sample.HeldActions : GamePlayerActions.None;
-        GamePlayerActions pressed = held & ~_lastHeld;
+        // Initial focus may report an already-held key as the first edge, but a
+        // refocus must only seed the held baseline. Otherwise alt-tab/focus
+        // restoration can manufacture an interaction without a fresh press.
+        GamePlayerActions pressed = _hasSample && !_lastFocused && sample.HasFocus
+            ? GamePlayerActions.None
+            : held & ~_lastHeld;
         NormalizeAxes(
             sample.HasFocus ? sample.MoveX : 0,
             sample.HasFocus ? sample.MoveZ : 0,
@@ -65,6 +71,7 @@ public sealed class ClientWorldInputSequencer
         _commandsProduced = checked(_commandsProduced + 1);
         _lastHeld = held;
         _lastFocused = sample.HasFocus;
+        _hasSample = true;
         return true;
     }
 

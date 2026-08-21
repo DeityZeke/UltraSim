@@ -3589,6 +3589,79 @@ against representative content. Network N1, live structural transfer, remote
 request lineage, editor/housing workflows, and autonomous NPC behavior remain
 unstarted.
 
+### T0.10 playable-semantic hardening stop — 2026-08-21
+
+Review of the first joined vertical found three game-level contracts that had to
+be corrected before the wider performance matrix could produce acceptance
+evidence. The original implementation-stop artifact above remains immutable and
+historical; this hardening stop supersedes its movement, command-admission, and
+interaction-authority semantics.
+
+`GamePlayerCommand` movement axes are now desired velocity rather than distance
+per command. Authoritative execution integrates the Q15 intent at 6,000 mm/s
+against the current fixed simulation cadence, with bounded generation-owned
+integer remainder state. One authoritative second of full-right input at 20,
+60, and 120 Hz now ends at the exact same canonical X/Z position: X = 19,500 mm,
+Z = 12,000 mm in the playable fixture. This proves the first movement behavior
+obeys `Tick is identity; Delta is time; Frequency determines Delta` rather than
+changing speed with command/tick rate.
+
+Sequence freshness is now a whole-command admission boundary:
+
+```text
+fresh GamePlayerCommand
+    -> validate and consume actor sequence once
+    -> apply movement intent, if present
+    -> apply pressed interaction, if present
+    -> report the effects independently
+```
+
+One command can therefore move and interact. An admitted interaction that is
+currently out of range remains consumed, so retransmitting that exact sequence
+after circumstances change cannot acquire new meaning. Actor-generation reuse
+resets both the sequence and fixed-point movement residue.
+
+Container movement now authorizes both endpoints. An endpoint is usable only
+when it is owned by the acting character or is an unowned positioned world
+container within the 2,500 mm interaction range. This supports backpack-to-chest
+and chest-to-backpack while rejecting remote and foreign-owned source or
+destination containers; topology and capacity validation remain Inventory's
+responsibility.
+
+Focus restoration now resumes held movement immediately but does not synthesize
+a pressed interaction edge for an action held across focus loss. A fresh
+edge-triggered action requires release and press after focus returns.
+
+The cabin door's persisted `GameCabinDoorState` and public prefab/orientation are
+one checked invariant. Normal authority writes them together. Private generation
+initialization rejects a contradictory restored candidate before publication,
+leaving the active generation intact.
+
+The native headless acceptance now closes the previously bypassed input seam:
+
+```text
+declared Godot InputMap actions
+    -> GodotWorldInput
+    -> ClientWorldInputSequencer
+    -> GamePlayerCommand
+    -> ServerRuntime / GameWorldActions
+    -> real ChunkPublicationStore snapshots
+    -> ClientWorldSemanticCache
+    -> ClientPresentationWindow
+    -> GodotWorldRenderer public refresh
+```
+
+The joined observation admits one combined move/interact command, moves the
+player from X = 13,500 mm to 13,600 mm at 60 Hz, opens the real authoritative
+door, refreshes two publication chunks, and retains the bounded nine-chunk
+presentation window. It is a headless seam-closure acceptance, not yet a
+user-facing interactive demo or warmed renderer performance result.
+
+The immutable hardening evidence artifact is
+[`terrain-t0.10-playable-vertical-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-playable-vertical-hardening-2026-08-21.json).
+T0.10 remains active. The broad performance matrix and Network N1 still have not
+started.
+
 ### T0 performance/evidence matrix
 
 Every accepted benchmark records exact world geometry/profile, chunk edge, cell

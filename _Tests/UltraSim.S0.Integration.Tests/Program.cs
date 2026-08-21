@@ -18,11 +18,13 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v1";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v2";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
+Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
+Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
 Run("AccountlessAdmissionAndPersistence", AccountlessRoundTrip, results);
 Run("AuthoritativeClockRoundTripsAcrossHostCadences", AuthoritativeClockRoundTripsAcrossHostCadences, results);
@@ -76,32 +78,74 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
 
         var input = new ClientWorldInputSequencer();
         Expect(input.TryCreateCommand(new ClientWorldInputSample(
-            0, 0, GamePlayerActions.Interact, true), out GamePlayerCommand openDoor),
+            1, 0, GamePlayerActions.Interact, true), out GamePlayerCommand openDoor),
             "The door input command could not be formed.");
-        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
-            (world, generationId, game) => game.WorldActions.ToggleCabinDoor(
-                world, game.WorldState,
-                ResolveInWorld(world, entities.PlayerId),
-                ResolveInWorld(world, entities.CabinDoorId),
-                openDoor,
-                out _),
-            out GameWorldActionStatus doorStatus) && doorStatus == GameWorldActionStatus.Accepted,
-            "The authoritative cabin door did not open.");
-        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
-            (world, generationId, game) => game.WorldActions.ToggleCabinDoor(
-                world, game.WorldState,
-                ResolveInWorld(world, entities.PlayerId),
-                ResolveInWorld(world, entities.CabinDoorId),
-                openDoor,
-                out _),
-            out GameWorldActionStatus duplicateDoorStatus) &&
-            duplicateDoorStatus == GameWorldActionStatus.StaleCommand,
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayerCommandResult>(
+            (world, generationId, game) =>
+            {
+                _ = game.WorldActions.ApplyPlayerCommand(
+                    world, game.WorldState,
+                    ResolveInWorld(world, entities.PlayerId),
+                    openDoor,
+                    runtime.SimulationFrequencyHz,
+                    ResolveInWorld(world, entities.CabinDoorId),
+                    out GamePlayerCommandResult commandResult);
+                return commandResult;
+            },
+            out GamePlayerCommandResult doorResult) && doorResult.WasAdmitted &&
+            doorResult.Movement == GameWorldActionStatus.Accepted &&
+            doorResult.Interaction == GameWorldActionStatus.Accepted && doorResult.DoorIsOpen,
+            "One composed move+interact command did not move the actor and open the door.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayerCommandResult>(
+            (world, generationId, game) =>
+            {
+                _ = game.WorldActions.ApplyPlayerCommand(
+                    world, game.WorldState,
+                    ResolveInWorld(world, entities.PlayerId),
+                    openDoor,
+                    runtime.SimulationFrequencyHz,
+                    ResolveInWorld(world, entities.CabinDoorId),
+                    out GamePlayerCommandResult commandResult);
+                return commandResult;
+            },
+            out GamePlayerCommandResult duplicateDoorResult) &&
+            duplicateDoorResult.Admission == GameWorldActionStatus.StaleCommand,
             "A duplicate interaction command was not fenced by its actor sequence.");
+
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.None, true), out _),
+            "The interaction release sample could not be formed.");
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.Interact, true), out GamePlayerCommand outOfRange),
+            "The out-of-range interaction sample could not be formed.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, generationId, game) =>
+            {
+                Entity player = ResolveInWorld(world, entities.PlayerId);
+                Entity door = ResolveInWorld(world, entities.CabinDoorId);
+                Expect(game.WorldState.TryReadPosition(world, player, out WorldPosition savedPosition),
+                    "The player position was unavailable for replay fencing.");
+                Expect(game.WorldState.TrySetPosition(world, player, GamePlayableWorld.AnimalPosition),
+                    "The replay-fencing actor could not move out of range.");
+                GameWorldActionStatus first = game.WorldActions.ApplyPlayerCommand(
+                    world, game.WorldState, player, outOfRange,
+                    runtime.SimulationFrequencyHz, door, out GamePlayerCommandResult firstResult);
+                Expect(game.WorldState.TrySetPosition(world, player, savedPosition),
+                    "The replay-fencing actor position could not be restored.");
+                GameWorldActionStatus replay = game.WorldActions.ApplyPlayerCommand(
+                    world, game.WorldState, player, outOfRange,
+                    runtime.SimulationFrequencyHz, door, out _);
+                return first == GameWorldActionStatus.Accepted &&
+                    firstResult.Interaction == GameWorldActionStatus.OutOfRange &&
+                    replay == GameWorldActionStatus.StaleCommand;
+            }, out bool replayFenced) && replayFenced,
+            "A rejected admitted interaction acquired new meaning when replayed.");
         host.Tick();
 
         const int movementCommands = 45;
         var movementTicks = new double[movementCommands];
-        var offline = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId);
+        var offline = new PlayableOfflineDirectLink(
+            runtime.Game, entities.PlayerId, runtime.SimulationFrequencyHz);
         int chunkCrossings = 0;
         SpatialChunkCoord previousChunk = playerPosition.Chunk;
         long movementAllocated = 0;
@@ -138,6 +182,35 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
                 out _),
             out GameWorldActionStatus chestStatus) && chestStatus == GameWorldActionStatus.Accepted,
             "The nearby cabin-chest transfer was rejected.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, generationId, game) =>
+            {
+                Entity player = ResolveInWorld(world, entities.PlayerId);
+                Entity bread = ResolveInWorld(world, entities.BreadId);
+                Entity backpack = ResolveInWorld(world, entities.BackpackId);
+                Entity chest = ResolveInWorld(world, entities.CabinChestId);
+                Expect(game.WorldState.TryReadPosition(world, chest, out WorldPosition chestPosition),
+                    "The chest position was missing for authorization evidence.");
+                Expect(WorldPosition.TryFromGlobalMillimeters(
+                    32_000, chestPosition.YMillimeters, 12_000, out WorldPosition remotePosition) &&
+                    game.WorldState.TrySetPosition(world, chest, remotePosition),
+                    "The chest could not be staged remotely for authorization evidence.");
+                GameWorldActionStatus rejected = game.WorldActions.MoveItemToNearbyContainer(
+                    world, game.WorldState, game.Inventory,
+                    player, bread, chest, backpack, out _);
+                Expect(game.WorldState.TrySetPosition(world, chest, chestPosition),
+                    "The chest position could not be restored after authorization evidence.");
+                GameWorldActionStatus take = game.WorldActions.MoveItemToNearbyContainer(
+                    world, game.WorldState, game.Inventory,
+                    player, bread, chest, backpack, out _);
+                GameWorldActionStatus replace = game.WorldActions.MoveItemToNearbyContainer(
+                    world, game.WorldState, game.Inventory,
+                    player, bread, backpack, chest, out _);
+                return rejected == GameWorldActionStatus.UnauthorizedContainer &&
+                    take == GameWorldActionStatus.Accepted &&
+                    replace == GameWorldActionStatus.Accepted;
+            }, out bool authorizationProved) && authorizationProved,
+            "Container authority did not validate both the source and destination.");
         host.Tick();
         RefreshPlayableProjection(runtime.Game, client);
 
@@ -185,16 +258,18 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
             (world, generationId, game) =>
             {
-                GameWorldActionStatus closed = game.WorldActions.ToggleCabinDoor(
+                GameWorldActionStatus closed = game.WorldActions.ApplyPlayerCommand(
                     world, game.WorldState,
-                    ResolveInWorld(world, entities.PlayerId),
-                    ResolveInWorld(world, entities.CabinDoorId), closeDoor, out _);
+                    ResolveInWorld(world, entities.PlayerId), closeDoor,
+                    runtime.SimulationFrequencyHz,
+                    ResolveInWorld(world, entities.CabinDoorId), out GamePlayerCommandResult closeResult);
                 InventoryMutationResult moved = game.Inventory.Move(
                     world,
                     ResolveInWorld(world, entities.BreadId),
                     ResolveInWorld(world, entities.CabinChestId),
                     ResolveInWorld(world, entities.BackpackId));
-                return closed == GameWorldActionStatus.Accepted && moved.Accepted;
+                return closed == GameWorldActionStatus.Accepted &&
+                    closeResult.Interaction == GameWorldActionStatus.Accepted && moved.Accepted;
             }, out bool diverged) && diverged,
             "The post-save playable world did not diverge.");
         host.Tick();
@@ -218,11 +293,13 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
 
         long identityIndexBytes = 0;
         long worldReservedBytes = 0;
+        long worldActionReservedBytes = 0;
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
             (_, _, game) =>
             {
                 identityIndexBytes = game.WorldState.BaseWorld!.StructuralIdentityIndexReservedBytes;
                 worldReservedBytes = game.WorldState.GetSnapshot().ReservedBytes;
+                worldActionReservedBytes = game.WorldActions.ReservedBytes;
                 return true;
             }, out bool measured) && measured,
             "T0.10 world memory evidence could not be captured.");
@@ -243,11 +320,13 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
             0,
             movementAllocated,
             "Preauthored 5x5 woods/cabin; OfflineDirect neutral input; one chunk crossing; " +
-            "door + spatially validated chest interaction; bounded 3x3 presentation; terrain mesh prep; " +
+            "composed movement/door command; two-endpoint-authorized chest interaction; " +
+            "bounded 3x3 presentation; terrain mesh prep; " +
             "projection retire/rebuild; four-artifact save/diverge/restore; accountless session invalidation.",
             pack.Length,
             identityIndexBytes,
             worldReservedBytes,
+            worldActionReservedBytes,
             clientSnapshot.ReservedBytes,
             clientSnapshot.ResidentChunks,
             windowSnapshot.ActiveChunks,
@@ -261,6 +340,111 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
     }
+}
+
+static TestMetrics PlayableMovementCadenceMatrix()
+{
+    int[] frequencies = [20, 60, 120];
+    var positions = new List<string>(frequencies.Length);
+    ulong commands = 0;
+    foreach (int frequency in frequencies)
+    {
+        WorldPack pack = GamePlayableWorld.CreateWorldPack();
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32),
+            baseWorldPack: pack);
+        using var host = new InternalHost(
+            composition,
+            RuntimeOptions(
+                new PersistenceIdentityOptions(new PersistentWorldId(checked((ulong)0x80_1000 + (ulong)frequency))),
+                frequencyHz: frequency));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(new ParticipantId(checked((ulong)frequency)));
+        Expect(entered.IsEntered, $"The {frequency} Hz cadence actor could not enter.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+            $"The {frequency} Hz cadence fixture could not populate.");
+        host.Tick();
+
+        var input = new ClientWorldInputSequencer();
+        var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, frequency);
+        for (int step = 0; step < frequency; step++)
+        {
+            Expect(input.TryCreateCommand(
+                new ClientWorldInputSample(1, 0, GamePlayerActions.None, true),
+                out GamePlayerCommand command) &&
+                link.ApplyMovement(command) == GameWorldActionStatus.Accepted,
+                $"The {frequency} Hz cadence rejected movement step {step}.");
+            host.Tick();
+        }
+        WorldPosition position = link.ReadPosition();
+        Expect(position.GlobalXMillimeters ==
+                GamePlayableWorld.PlayerStart.GlobalXMillimeters +
+                GameWorldActions.FullInputSpeedMillimetersPerSecond &&
+            position.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters,
+            $"One second of full input changed meaning at {frequency} Hz: {position}.");
+        positions.Add($"{frequency}:{position.GlobalXMillimeters}:{position.YMillimeters}:{position.GlobalZMillimeters}");
+        commands += input.Snapshot().CommandsProduced;
+    }
+
+    return new TestMetrics(
+        HashText(string.Join('|', positions)),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "One authoritative second of full-right movement at 20/60/120 Hz; exact final X/Z equality.",
+        InputCommands: commands);
+}
+
+static TestMetrics ContradictoryRestoredDoorFailsClosed()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var runtime = new ServerRuntime(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_2000))));
+    runtime.Initialize();
+    runtime.Start();
+
+    GameStaging staging = composition.CreateFresh(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(0x80_2000)));
+    ComponentLookup<GameCabinDoorState> doorLookup = staging.World.PrepareLookup<GameCabinDoorState>();
+    staging.World.Seal();
+    staging.World.Initialize();
+    staging.World.BeginRun();
+    Expect(staging.World.TryInstantiate(staging.Content.CabinDoor, out Entity door) &&
+        staging.WorldState.TrySetPosition(staging.World, door, GamePlayableWorld.DoorPosition) &&
+        staging.World.TryWrite(door, doorLookup, new GameCabinDoorState { IsOpen = 1 }),
+        "The contradictory private door candidate could not be prepared.");
+    var candidate = new GameGenerationState(
+        new AccountingStore(),
+        staging.Inventory,
+        staging.Content,
+        staging.WorldState,
+        staging.SimulationLookup,
+        staging.Replication,
+        staging.WorldActions);
+
+    bool rejected = false;
+    try
+    {
+        _ = runtime.Game.TryPublishPreparedGeneration(staging.World, candidate, out _);
+    }
+    catch (InvalidOperationException exception)
+    {
+        rejected = exception.Message.Contains("contradictory persisted/public state", StringComparison.Ordinal);
+    }
+    Expect(rejected && runtime.State == ServerRuntimeState.Running,
+        "A contradictory restored door was published or faulted the active generation.");
+
+    return new TestMetrics(
+        HashText("contradictory-door-rejected"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Private generation admission rejects persisted open state with closed public orientation.");
 }
 
 static TestMetrics AccountBackedRoundTrip()
@@ -1333,6 +1517,7 @@ sealed record TestMetrics(
     long WorldPackBytes = 0,
     long StructuralIdentityIndexBytes = 0,
     long WorldStateReservedBytes = 0,
+    long WorldActionReservedBytes = 0,
     long ClientSemanticReservedBytes = 0,
     int ClientResidentChunks = 0,
     int PresentationActiveChunks = 0,
@@ -1352,12 +1537,17 @@ sealed class PlayableOfflineDirectLink
     private readonly PersistentEntityId _playerId;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameWorldActionStatus> _apply;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, WorldPosition> _read;
+    private readonly int _simulationFrequencyHz;
     private GamePlayerCommand _command;
 
-    internal PlayableOfflineDirectLink(ServerGameFacet runtime, PersistentEntityId playerId)
+    internal PlayableOfflineDirectLink(
+        ServerGameFacet runtime,
+        PersistentEntityId playerId,
+        int simulationFrequencyHz)
     {
         _runtime = runtime;
         _playerId = playerId;
+        _simulationFrequencyHz = simulationFrequencyHz;
         _apply = ApplyCore;
         _read = ReadCore;
     }
@@ -1384,8 +1574,19 @@ sealed class PlayableOfflineDirectLink
     {
         if (!world.TryResolvePersistentEntity(_playerId, out Entity player))
             return GameWorldActionStatus.MissingActor;
-        return game.WorldActions.ApplyMovement(
-            world, game.WorldState, player, _command, out _);
+        return game.WorldActions.ApplyPlayerCommand(
+            world,
+            game.WorldState,
+            player,
+            _command,
+            _simulationFrequencyHz,
+            Entity.Null,
+            out GamePlayerCommandResult result) == GameWorldActionStatus.Accepted &&
+            result.Movement == GameWorldActionStatus.Accepted
+            ? GameWorldActionStatus.Accepted
+            : result.Admission != GameWorldActionStatus.Accepted
+                ? result.Admission
+                : result.Movement;
     }
 
     private WorldPosition ReadCore(

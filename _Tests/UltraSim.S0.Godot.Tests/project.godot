@@ -11,6 +11,33 @@ window/size/viewport_height=600
 [dotnet]
 project/assembly_name="UltraSim.S0.Godot.Tests"
 
+[input]
+
+move_left={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":65,"unicode":97)]
+}
+move_right={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":68,"unicode":100)]
+}
+move_forward={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":87,"unicode":119)]
+}
+move_backward={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":83,"unicode":115)]
+}
+interact={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":69,"unicode":101)]
+}
+primary_action={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"physical_keycode":32,"unicode":32)]
+}
+
 [rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
