@@ -7,7 +7,9 @@ add the dense base terrain, immutable pack, base queries/mesh payload, and packe
 frozen-static/static-Multi content. T0.6 adds explicit dynamic public eligibility,
 packed per-chunk current state, and bounded observer-independent dirty history.
 T0.7 adds exact chunk-interest rings and a bounded packet-free local streaming
-oracle over that publication state.
+oracle over that publication state. It is accepted as a reference consumer;
+T0.8's production client cache is separately owned under `Client/Core` and does
+not make the oracle part of client storage.
 
 The frozen first profile is:
 

@@ -96,8 +96,11 @@ render groups, and bounded exact static-bounds queries. T0.6 accepted the
 explicit dynamic-public component, generation-owned packed chunk publication,
 bounded dirty history, canonical snapshot/delta reads, and direct committed SoA
 views. T0.7 now implements exact hysteretic chunk-interest rings and a bounded
-packet-free local snapshot/delta streaming oracle; it is stopped for review.
-The real client resident/Godot gate and Network N1 remain later work.
+packet-free local snapshot/delta streaming oracle and is accepted/frozen after
+consumer hardening. T0.8 now implements the one bounded production client
+semantic world cache plus an independently budgeted Godot terrain/grouped-
+instance renderer; it is stopped for checkpoint review. Persistence/mutable-
+overlay T0.9 and Network N1 remain later work.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

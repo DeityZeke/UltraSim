@@ -1,9 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.6 are accepted/frozen as of
-2026-08-21 after T0.6 publication-lineage hardening. T0.7 implementation and
-focused consumer hardening are complete and stopped for checkpoint review; it
-is not yet accepted/frozen and T0.8 has not started.
+Status: active forward plan. T0.0 through T0.7 are accepted/frozen as of
+2026-08-21 after T0.7 consumer hardening. T0.8 implementation is complete and
+stopped for checkpoint review; it is not yet accepted/frozen and T0.9 has not
+started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -2309,10 +2309,10 @@ chunk. The exact circular fringe may legitimately add, remove, or retier a small
 number of consumer subscriptions after movement exceeds the applicable
 hysteresis band; that is consumer topology, not world membership.
 
-### T0.7 implementation/hardening stop — 2026-08-21
+### T0.7 accepted/frozen after hardening — 2026-08-21
 
-T0.7 is implemented and stopped for checkpoint review. It does not begin T0.8,
-Godot residency/rendering, or Network N1.
+T0.7 is accepted/frozen after its focused consumer hardening. It did not begin
+T0.8, Godot residency/rendering, or Network N1.
 
 `ChunkInterestQuery` is a stateless game-world query over canonical 16 m chunk
 AABBs. It consumes a sorted previous subscription set only to apply
@@ -2466,6 +2466,98 @@ The client may maintain an origin chunk and render everything relative to it so 
 
 Mesh/static preparation may run on workers over immutable prepared semantic data. Godot resource publication occurs on the permitted engine thread/boundary. Work is budgeted so crossing a spatial boundary cannot synchronously build an unbounded number of meshes in one frame.
 **T0.8 gate:** bounded walk through a multi-chunk world with repeated enter/leave, separate semantic/render residency proven, no resource leaks, no node explosion, deterministic client semantic hashes, and recorded mesh/build/upload/frame-time tails.
+
+### T0.8 implementation stop — 2026-08-21
+
+T0.8 is implemented and stopped for checkpoint review. It does not begin T0.9,
+mutable terrain overlays, Network N1, physics, navigation, or production content.
+
+`ClientWorldSemanticCache` is the one production client semantic store. It does
+not wrap or retain `LocalChunkStreamingOracle`. Its capacity is stated in client
+resident chunks, per-chunk static/Multi/public rows, and retained public identity
+floors; none are derived from the server's ECS/public slot address space. The
+owner-thread state machine is now concrete:
+
+```text
+Absent -> Requested -> Staged -> Resident -> Retiring -> Absent
+```
+
+Requested pages copy immutable terrain, frozen statics, and static-Multi
+fragments from one bound `WorldPack`; publication snapshots/deltas contribute
+dynamic public records. Staging is complete-or-fail. Publishing installs one
+generation-validated client-local chunk handle and deterministic semantic hash.
+Retirement returns the local slot only after presentation has retired its
+resources, and reuse increments the handle generation.
+
+Public application retains the T0.7 oracle's accepted semantic rules without
+its server-sized double-buffered arrays. One bounded client knowledge table
+tracks the highest Generation/EntityPublicVersion per public Index. Higher
+generation globally supersedes older chunk pages; delayed older state cannot
+resurrect it. Equal generation/version is idempotent only for the exact same
+operation, key, and record. Contradictions fail closed. Publication cursors are
+chunk-bound, a source-epoch change requires an explicit cache reset, and a
+`ChunkAbsent` result clears only the addressed resident public page while
+retaining stale-delivery floors. Immutable base terrain/statics remain resident.
+
+`GodotWorldRenderer` is a separate engine-thread presentation owner. It has its
+own bounded build/retire queues and per-frame budget. One render chunk currently
+owns one terrain `MeshInstance3D`, plus one `MultiMeshInstance3D` per compatible
+frozen-static/static-Multi group and visible public-prefab group. It does not
+create a node per terrain cell, static, Multi piece, or public entity. Asset
+resolution is a narrow optional Godot-side seam; missing test assets use bounded
+fallback meshes. A semantic chunk may be resident without a render chunk, and a
+render chunk may be retained while hidden.
+
+Terrain preparation consumes the accepted neighbor-aware base mesh payload and
+creates one Godot mesh with material surfaces. The current internal arrays and
+Godot resource packing remain presentation implementation, not WorldPack,
+Game.Contracts, Network, persistence, mod, or renderer compatibility ABI.
+Static render keys remain preparation hints: the Godot adapter filters
+non-renderable rows and may later coalesce/subdivide groups from measured asset
+compatibility.
+
+`WorldRenderOrigin` rebases horizontal chunk origin plus presentation Y. Rebase
+updates render-root transforms only; it leaves `WorldPosition`, chunk keys,
+publication cursors, identities, resident semantic bytes, and semantic hashes
+unchanged. Godot creation and retirement occur only during `ProcessFrame` and
+respect the supplied build/retire counts; no ready work waits merely to form a
+larger batch.
+
+The permanent Client Core regression covers request/stage/publish/retire,
+transactional capacity rejection, slot-generation reuse, request-order-
+independent world hashes, immutable terrain/static/Multi copying, cross-chunk
+public movement, delayed stale state, contradictory equal versions, generation
+supersession, `ChunkAbsent`, and explicit publication-epoch replacement. The
+native Godot headless gate performs three complete forward/reverse passes through
+an eight-chunk world. It proves a three-chunk semantic window can have only one
+render build completed under budget, keeps one resident render chunk hidden,
+rebases without changing the semantic hash, groups eight statics per chunk into
+one node, and retires to zero chunk resources/nodes beyond the renderer root.
+
+The Release, tiering-disabled semantic-cache observation is
+[`terrain-t0.8-client-semantic-cache-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-client-semantic-cache-2026-08-21.json):
+
+```text
+32-resident world semantic hash                 0.303 us mean / 0.363 us p95
+borrow 32 resident semantic pages               0.948 us mean / 0.963 us p95
+request + stage + publish + retire one chunk   13.415 us mean / 13.511 us p95
+apply one public delta                           4.890 us mean / 4.923 us p95
+```
+
+All four warmed paths allocate 0 B. The 32-chunk evidence profile reserves
+256,580 bytes. The intentionally broad default profile reserves 11,087,108
+bytes for up to 512 resident chunks; this is client-local prepared semantic
+capacity, not server-per-connection memory and not a production budget selected
+by the small fixture.
+
+The separate native observation is
+[`terrain-t0.8-godot-world-streaming-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-godot-world-streaming-2026-08-21.json).
+In the headless Debug/Mono gate, 34 builds (including one dynamic-public rebuild)
+and 33 retirements produce a 2.946 ms mesh/resource-build p95 and 2.907 ms
+budgeted-frame p95; maxima of 23.640 ms and 24.682 ms include first-use
+JIT/resource cost. Scene-tree replace/commit is 440.85 us p95 in this short run.
+These figures prove bounded native ownership and expose cold tails; they are not
+GPU frame/render-quality or Release exported-game performance claims.
 
 ## T0.9 — persistence and mutable-world seam
 

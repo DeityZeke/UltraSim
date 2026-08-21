@@ -24,7 +24,12 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Spatial contracts](../Kernels/Spatial/README.md) — dependency-neutral integer
   spatial identity, geometry, bounds, and canonical math.
 - [Game world](../Game/World/README.md) — the fixed 16 m / 0.5 m / 0.1 m / 1 mm
-  world-position profile accepted at T0.0.
+  world-position profile and accepted T0.0–T0.7 authority/publication/interest
+  contracts.
+- [Client Core](../Client/Core/README.md) — retained engine-neutral UI and
+  production semantic-world projections.
+- [Godot client adapter](../Client/_Godot/README.md) — native UI/world
+  presentation, bounded render residency, grouping, and floating origin.
 
 ## ECS
 
@@ -70,10 +75,11 @@ reports live in git history. Accepted measurements live in immutable JSON under
   current-world query ownership, and four-way seam hardening. T0.5 accepted
   optional packed statics/Multi sections, stable cross-chunk logical identities,
   deterministic render grouping, and bounded exact static-bounds queries. T0.6
-  now implements explicit public eligibility, one packed current publication per
-  chunk, bounded observer-independent dirty history, and canonical snapshot/delta
-  reads; it is stopped for review. The plan next proceeds to local interest/
-  streaming, client rendering, persistence seams, and one playable cabin vertical.
+  accepted explicit public eligibility and bounded observer-independent chunk
+  publication; T0.7 accepted exact interest and the packet-free convergence
+  oracle. T0.8 now implements the distinct production client semantic cache and
+  bounded native Godot render owner and is stopped for review. The plan next
+  proceeds to persistence/mutable-overlay seams and one playable cabin vertical.
 - [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
   N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0
   sparse relation graph: snapshot on first interest, query bounded dirty history

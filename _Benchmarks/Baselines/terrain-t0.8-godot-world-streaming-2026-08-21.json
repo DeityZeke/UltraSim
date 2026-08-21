@@ -1,0 +1,42 @@
+{
+  "schema": "terrain-t0.8-godot-world-streaming-v1",
+  "captured_at_local": "2026-08-21",
+  "engine": "Godot 4.7.1 Mono headless",
+  "managed_configuration": "Debug",
+  "scope": "synthetic 8-chunk local WorldPack walk; native Godot resource/node acceptance, not visual GPU or production-content evidence",
+  "fixture": {
+    "world_chunks": 8,
+    "resident_window_chunks": 3,
+    "frozen_statics_per_chunk": 8,
+    "public_records_per_chunk": 1,
+    "terrain_cells_per_chunk": 1024,
+    "forward_reverse_cycles": 3,
+    "maximum_builds_per_frame": 1,
+    "maximum_retirements_per_frame": 1
+  },
+  "result": {
+    "completed_builds": 34,
+    "completed_retirements": 33,
+    "rebases": 1,
+    "mesh_and_resource_build_p95_microseconds": 2945.814,
+    "mesh_and_resource_build_maximum_microseconds": 23640.047,
+    "scene_resource_commit_p95_microseconds": 440.846,
+    "scene_resource_commit_maximum_microseconds": 1492.796,
+    "budgeted_frame_p95_microseconds": 2906.684,
+    "budgeted_frame_maximum_microseconds": 24682.298,
+    "semantic_cache_reserved_bytes": 47288,
+    "final_active_render_chunks": 0,
+    "final_active_nodes_before_renderer_disposal": 1,
+    "final_active_resources": 0
+  },
+  "interpretation": {
+    "semantic_and_render_residency_are_separate": true,
+    "visibility_is_separate_from_render_residency": true,
+    "one_node_per_terrain_cell": false,
+    "one_node_per_frozen_static": false,
+    "origin_rebase_changed_semantic_hash": false,
+    "dynamic_public_delta_rebuilt_one_render_chunk": true,
+    "resource_or_node_leak_observed": false,
+    "cold_jit_or_first_resource_cost_included_in_maximum": true
+  }
+}

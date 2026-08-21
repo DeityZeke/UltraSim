@@ -1,0 +1,67 @@
+{
+  "Schema": "terrain-t0.8-client-semantic-cache-v1",
+  "CapturedAtUtc": "2026-08-21T14:22:44.1493889+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "Operations": 10000,
+  "Shape": {
+    "Scope": "synthetic production-client semantic residency; no Network N1 and no Godot resource cost",
+    "WorldChunks": 64,
+    "ResidentChunks": 32,
+    "ResidentFixtureReservedBytes": 256580,
+    "DefaultLimitsReservedBytes": 11087108,
+    "HandleBytes": 8,
+    "InfoBytes": 96
+  },
+  "Timings": [
+    {
+      "Name": "resident-world-hash-32",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 302.5755523809524,
+      "P50NanosecondsPerOperation": 292.0684,
+      "P95NanosecondsPerOperation": 363.3358,
+      "MaximumNanosecondsPerOperation": 429.2901,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 9615853703140080928
+    },
+    {
+      "Name": "borrow-resident-pages-32",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 947.8674809523809,
+      "P50NanosecondsPerOperation": 938.1965,
+      "P95NanosecondsPerOperation": 963.0903,
+      "MaximumNanosecondsPerOperation": 1122.0259,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 12480000
+    },
+    {
+      "Name": "request-stage-publish-retire",
+      "Operations": 1000,
+      "MeanNanosecondsPerOperation": 13414.912285714283,
+      "P50NanosecondsPerOperation": 13404.319,
+      "P95NanosecondsPerOperation": 13510.828,
+      "MaximumNanosecondsPerOperation": 13521.488,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 8588785857095023263
+    },
+    {
+      "Name": "one-public-delta",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4889.948285714286,
+      "P50NanosecondsPerOperation": 4892.6268,
+      "P95NanosecondsPerOperation": 4922.8286,
+      "MaximumNanosecondsPerOperation": 4950.4613,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 17908023708679570717
+    }
+  ]
+}

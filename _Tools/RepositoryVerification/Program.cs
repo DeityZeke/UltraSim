@@ -60,6 +60,12 @@ foreach (string configuration in configurations)
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://S08HeadlessAcceptance.tscn",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "_Tests/UltraSim.S0.Godot.Tests",
+            "--scene", "res://T08WorldHeadlessAcceptance.tscn",
+        ]);
     }
 }
 
@@ -86,7 +92,11 @@ static void VerifyArchitecture(string root)
         ["Server/Hosting/UltraSim.Server.Hosting.csproj"] =
             ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
-            ["Kernels/UI/UltraSim.UI.csproj"],
+        [
+            "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/Spatial/UltraSim.Spatial.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
+        ],
         ["Client/Network/UltraSim.Client.Network.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",
@@ -95,7 +105,11 @@ static void VerifyArchitecture(string root)
             "Kernels/UI/UltraSim.UI.csproj",
         ],
         ["Client/_Godot/UltraSim.Client.Godot.csproj"] =
-            ["Client/Core/UltraSim.Client.Core.csproj"],
+        [
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/Spatial/UltraSim.Spatial.csproj",
+        ],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Game/Contracts/UltraSim.Game.Contracts.csproj"] =
@@ -228,6 +242,8 @@ static void VerifyDocumentation(string root)
         "Kernels/ECS/PERSISTENCE.md",
         "Kernels/Network/README.md",
         "Kernels/Spatial/README.md",
+        "Client/Core/README.md",
+        "Client/_Godot/README.md",
         "Game/World/README.md",
         "Game/Replication/README.md",
         "_Benchmarks/README.md",
@@ -252,7 +268,8 @@ static void VerifyDocumentation(string root)
         [
             "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
             "Docs/Plans/NETWORK.md", "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
-            "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Game/World/README.md",
+            "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
+            "Client/_Godot/README.md", "Game/World/README.md",
             "Game/Replication/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =

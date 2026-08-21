@@ -23,6 +23,7 @@ var tests = new (string Name, Action Body)[]
     ("ClosedInstanceIdsDoNotPermitActionAba", ClosedInstanceIdsDoNotPermitActionAba),
     ("ClientRetainedDefinitionsAndViewsAreBounded", ClientRetainedDefinitionsAndViewsAreBounded),
     ("ClientPerformanceBaselinesAreCaptured", ClientPerformanceBaselinesAreCaptured),
+    ("ClientWorldSemanticCacheProductionContracts", ClientWorldSemanticCacheTests.Run),
 };
 
 foreach ((string name, Action body) in tests)
@@ -31,7 +32,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Client S0.4 tests passed.");
+Console.WriteLine($"All {tests.Length} Client Core tests passed.");
 
 static void ColdAndHotOpenUseExactDefinitionCache()
 {

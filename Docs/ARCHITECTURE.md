@@ -37,8 +37,10 @@ KERNELS
 
 Dependencies point downward or sideways through narrow semantic contracts.
 Kernels do not reference Server, Client, or Game. Server Runtime depends on ECS,
-not Game. Client Core depends on the neutral UI kernel, not Game or Server. Game
-Composition is the concrete place where game-owned domains meet.
+not Game. Client Core owns retained client projections: UI depends on the neutral
+UI kernel, while the concrete world projection consumes immutable/semantic
+`Game/World` values without receiving ECS or Server authority. Game Composition
+is the concrete place where authoritative game-owned domains meet.
 
 The repository verifier freezes the exact active project-reference graph. A new
 reference is an architecture decision, not a convenience edit.
@@ -133,6 +135,12 @@ borrowed chunk views, deterministic compatible render groups, definition binding
 and bounded exact 3D static overlap now remain above the dependency-neutral
 Spatial kernel. Static-Multi placement is frozen-world data, not one ECS entity
 per piece and not a moving-aggregate contract.
+T0.6 and T0.7 add observer-independent dynamic chunk publication plus the exact
+packet-free interest/convergence oracle. T0.8 now implements the distinct
+production client semantic cache and bounded Godot render owner: client capacity
+is resident-scope-shaped rather than server-address-space-shaped, semantic and
+render residency are independent, statics/public rows are grouped rather than
+node-shaped, and floating-origin changes remain presentation-only.
 The pack remains extensible to future sparse structural surfaces; world topology
 is not restricted to one heightfield surface per X/Z.
 Future `WorldRegion`, property, property-unit, Multi, terrain, and edit-lease
@@ -141,8 +149,7 @@ metadata rather than chunk partitions or ECS entities by default, and concrete
 policy domains may resolve different members of the bounded region set applying
 at one location instead of relying on one universal winning region. T0 preserves
 this seam without implementing a region/property framework.
-Revisioned publication, bounded dirty history, local streaming, and Godot
-rendering remain later Terrain gates.
+Persistence and mutable-world overlay staging remain the next Terrain gate.
 [Network N1](Plans/NETWORK.md) is deferred
 until T0 proves those chunk/publication contracts, then will test recipient-to-
 chunk subscription/cursor replication against the frozen N0 relation graph.
