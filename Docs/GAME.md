@@ -103,7 +103,11 @@ artifact; authoritative gameplay queries route through generation-owned
 `GameWorldState`. T0.9 fills that seam with a concrete `WorldPreparedView`: the
 exact bound pack plus one immutable bounded durable overlay of complete changed-
 chunk terrain/static/Multi replacements. Gameplay still asks `GameWorldState`;
-no generic terrain/provider registry was introduced.
+no generic terrain/provider registry was introduced. Client semantic staging and
+engine-neutral terrain mesh preparation consume the same prepared view. A fresh
+mutation-free overlay remains revision 0, canonical no-ops do not advance content
+lineage, and ordinary overlay identity validation uses cold bound-pack indexes
+rather than rescanning the immutable world.
 
 ## Simulation rules
 

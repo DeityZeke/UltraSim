@@ -189,6 +189,10 @@ T0.9 now adds a concrete exact-pack-plus-overlay `WorldPreparedView` and a fourt
 `worldview` save-set participant. Immutable pack bytes remain content; bounded
 complete terrain/static/Multi replacements carry independent structural
 revision/hash identity and restore privately before whole-generation publication.
+Prepared client mesh generation resolves that same view. Cold pack binding owns
+compact immutable structural identity lookup, allowing ordinary overlay
+validation to scale with retained replacements rather than the entire base pack;
+complete logical Multi-root replacement remains intentionally global.
 Runtime slots, publication cursors/history, client residency, and Godot resources
 remain derived and absent from the artifact.
 [Network N1](Plans/NETWORK.md) is deferred

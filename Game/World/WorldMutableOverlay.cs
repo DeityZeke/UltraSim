@@ -21,7 +21,10 @@ public readonly record struct WorldChunkContentRevision(ulong Value) : IComparab
     public int CompareTo(WorldChunkContentRevision other) => Value.CompareTo(other.Value);
 }
 
-/// <summary>SHA-256 identity of one complete effective changed-chunk replacement.</summary>
+/// <summary>
+/// SHA-256 identity of one complete effective changed-chunk replacement beneath its exact
+/// <see cref="WorldMutableOverlay.BaseWorldFingerprint"/>.
+/// </summary>
 [StructLayout(LayoutKind.Sequential, Size = 32)]
 public readonly struct WorldChunkContentHash : IEquatable<WorldChunkContentHash>
 {
@@ -210,6 +213,13 @@ public sealed class WorldMutableOverlay
     internal ReadOnlySpan<ChunkReplacement> Chunks => _chunks;
     internal ReadOnlySpan<WorldMultiInstanceRecord> MultiInstances => _multiInstances;
 
+    internal bool TryGetChunkReplacement(SpatialChunkKey key, out ChunkReplacement? replacement)
+    {
+        int index = FindChunk(key);
+        replacement = index < 0 ? null : _chunks[index];
+        return index >= 0;
+    }
+
     private int FindChunk(SpatialChunkKey key)
     {
         int low = 0;
@@ -276,6 +286,8 @@ public sealed class WorldMutableOverlayBuilder
         if (prior is not null &&
             (prior.BaseWorldFingerprint != baseWorld.Fingerprint || prior.Space != baseWorld.Space))
             throw new ArgumentException("The prior overlay belongs to a different immutable base world.", nameof(prior));
+        if (prior is not null && !FitsLimits(prior, _limits))
+            throw new ArgumentException("The prior overlay exceeds the selected overlay limits.", nameof(prior));
         _prior = prior;
         if (prior is not null)
         {
@@ -311,9 +323,17 @@ public sealed class WorldMutableOverlayBuilder
                 heightBytes.AsSpan(TerrainChunkFormat.HeightPlaneBaseBytes + index * sizeof(ushort)),
                 heights[index].Units);
         MutableChunk mutable = Mutable(key);
-        mutable.TerrainMaterials = materialBytes;
-        mutable.TerrainHeights = heightBytes;
-        mutable.Dirty = true;
+        if (TerrainMatchesBase(key, materialBytes, heightBytes))
+        {
+            mutable.TerrainMaterials = null;
+            mutable.TerrainHeights = null;
+        }
+        else
+        {
+            mutable.TerrainMaterials = materialBytes;
+            mutable.TerrainHeights = heightBytes;
+        }
+        Normalize(key, mutable);
         return true;
     }
 
@@ -336,8 +356,8 @@ public sealed class WorldMutableOverlayBuilder
         for (int index = 1; index < owned.Length; index++)
             if (owned[index - 1].Id == owned[index].Id) return false;
         MutableChunk mutable = Mutable(key);
-        mutable.FrozenStatics = owned;
-        mutable.Dirty = true;
+        mutable.FrozenStatics = FrozenStaticsMatchBase(key, owned) ? null : owned;
+        Normalize(key, mutable);
         return true;
     }
 
@@ -361,8 +381,8 @@ public sealed class WorldMutableOverlayBuilder
             if (owned[index - 1].MultiId == owned[index].MultiId &&
                 owned[index - 1].PieceId == owned[index].PieceId) return false;
         MutableChunk mutable = Mutable(key);
-        mutable.MultiFragments = owned;
-        mutable.Dirty = true;
+        mutable.MultiFragments = MultiFragmentsMatchBase(key, owned) ? null : owned;
+        Normalize(key, mutable);
         return true;
     }
 
@@ -379,8 +399,8 @@ public sealed class WorldMutableOverlayBuilder
                 index != 0 && owned[index - 1].Id == owned[index].Id)
                 return false;
         }
-        _multiInstances = owned;
-        _multiInstancesDirty = true;
+        _multiInstances = MultiInstancesMatchBase(owned) ? null : owned;
+        _multiInstancesDirty = !MultiInstancesMatchPrior();
         return true;
     }
 
@@ -414,12 +434,11 @@ public sealed class WorldMutableOverlayBuilder
                 mutable.TerrainMaterials, mutable.TerrainHeights,
                 mutable.FrozenStatics, mutable.MultiFragments);
         }
-        bool changed = _prior is null || _multiInstancesDirty || _chunks.Values.Any(static chunk => chunk.Dirty);
-        WorldOverlayRevision overlayRevision = !changed && _prior is not null
-            ? _prior.Revision
-            : _prior is null || !_prior.Revision.IsValid
-                ? new WorldOverlayRevision(1)
-                : new WorldOverlayRevision(checked(_prior.Revision.Value + 1));
+        bool changed = HasChangesFromPrior();
+        ulong priorRevision = _prior?.Revision.Value ?? 0;
+        WorldOverlayRevision overlayRevision = changed
+            ? new WorldOverlayRevision(checked(priorRevision + 1))
+            : _prior?.Revision ?? default;
         var candidate = new WorldMutableOverlay(
             _baseWorld.Fingerprint, _baseWorld.Space, overlayRevision, _limits,
             replacements, _multiInstances);
@@ -433,6 +452,16 @@ public sealed class WorldMutableOverlayBuilder
         if (!_chunks.TryGetValue(key, out MutableChunk? chunk))
             _chunks.Add(key, chunk = new MutableChunk(key));
         return chunk;
+    }
+
+    private void Normalize(SpatialChunkKey key, MutableChunk chunk)
+    {
+        if (!chunk.HasReplacement)
+        {
+            _chunks.Remove(key);
+            return;
+        }
+        chunk.Dirty = !MatchesPrior(chunk);
     }
 
     private bool IsBaseChunk(SpatialChunkKey key) =>
@@ -476,69 +505,184 @@ public sealed class WorldMutableOverlayBuilder
         return _baseWorld.TryGetBaseTerrain(key, out view);
     }
 
-    private bool ValidateEffectiveIdentities()
+    private bool TerrainMatchesBase(
+        SpatialChunkKey key,
+        ReadOnlySpan<byte> materials,
+        ReadOnlySpan<byte> heights)
     {
-        var statics = new HashSet<WorldStaticId>();
-        var pieces = new HashSet<(MultiInstanceId, MultiPieceId)>();
-        var pieceCounts = new Dictionary<MultiInstanceId, int>();
-        for (int chunkIndex = 0; chunkIndex < _baseWorld.ChunkCount; chunkIndex++)
-        {
-            if (!_baseWorld.TryGetChunkKey(chunkIndex, out SpatialChunkKey key)) return false;
-            if (_chunks.TryGetValue(key, out MutableChunk? changed) && changed.FrozenStatics is not null)
-            {
-                foreach (WorldFrozenStaticRecord record in changed.FrozenStatics)
-                    if (!statics.Add(record.Id)) return false;
-            }
-            else if (_baseWorld.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView frozen))
-            {
-                for (int index = 0; index < frozen.Count; index++)
-                    if (!statics.Add(frozen.GetRecord(index).Id)) return false;
-            }
-
-            if (_chunks.TryGetValue(key, out changed) && changed.MultiFragments is not null)
-            {
-                foreach (WorldMultiFragmentRecord record in changed.MultiFragments)
-                    if (!AddPiece(record)) return false;
-            }
-            else if (_baseWorld.TryGetMultiFragments(key, out WorldMultiFragmentChunkView fragments))
-            {
-                for (int index = 0; index < fragments.Count; index++)
-                    if (!AddPiece(fragments.GetRecord(index))) return false;
-            }
-        }
-
-        ReadOnlySpan<WorldMultiInstanceRecord> roots = _multiInstances is not null
-            ? _multiInstances
-            : GetBaseMultiInstances();
-        if (roots.Length != pieceCounts.Count && (roots.Length != 0 || pieceCounts.Count != 0)) return false;
-        foreach (WorldMultiInstanceRecord root in roots)
-            if (!pieceCounts.TryGetValue(root.Id, out int count) || count != root.PieceCount) return false;
+        if (!_baseWorld.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain)) return false;
+        if (BinaryPrimitives.ReadInt32LittleEndian(heights) != terrain.HeightBase.Millimeters) return false;
+        for (int index = 0; index < TerrainChunkFormat.MaterialCellCount; index++)
+            if (BinaryPrimitives.ReadUInt16LittleEndian(materials[(index * sizeof(ushort))..]) !=
+                terrain.GetMaterial(index)) return false;
+        for (int index = 0; index < TerrainChunkFormat.HeightVertexCount; index++)
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                    heights[(TerrainChunkFormat.HeightPlaneBaseBytes + index * sizeof(ushort))..]) !=
+                terrain.GetHeightOffset(index).Units) return false;
         return true;
-
-        bool AddPiece(WorldMultiFragmentRecord record)
-        {
-            if (!pieces.Add((record.MultiId, record.PieceId))) return false;
-            pieceCounts.TryGetValue(record.MultiId, out int count);
-            pieceCounts[record.MultiId] = checked(count + 1);
-            return true;
-        }
     }
 
-    private WorldMultiInstanceRecord[] GetBaseMultiInstances()
+    private bool FrozenStaticsMatchBase(
+        SpatialChunkKey key,
+        ReadOnlySpan<WorldFrozenStaticRecord> records)
     {
-        var roots = new WorldMultiInstanceRecord[_baseWorld.MultiInstanceCount];
-        for (int index = 0; index < roots.Length; index++)
-            if (!_baseWorld.TryGetMultiInstanceAt(index, out roots[index]))
-                throw new InvalidOperationException("The validated base pack lost a Multi root.");
-        return roots;
+        if (!_baseWorld.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView current))
+            return records.IsEmpty;
+        if (current.Count != records.Length) return false;
+        for (int index = 0; index < records.Length; index++)
+            if (current.GetRecord(index) != records[index]) return false;
+        return true;
+    }
+
+    private bool MultiFragmentsMatchBase(
+        SpatialChunkKey key,
+        ReadOnlySpan<WorldMultiFragmentRecord> records)
+    {
+        if (!_baseWorld.TryGetMultiFragments(key, out WorldMultiFragmentChunkView current))
+            return records.IsEmpty;
+        if (current.Count != records.Length) return false;
+        for (int index = 0; index < records.Length; index++)
+            if (current.GetRecord(index) != records[index]) return false;
+        return true;
+    }
+
+    private bool MultiInstancesMatchBase(ReadOnlySpan<WorldMultiInstanceRecord> records)
+    {
+        if (records.Length != _baseWorld.MultiInstanceCount) return false;
+        for (int index = 0; index < records.Length; index++)
+            if (!_baseWorld.TryGetMultiInstanceAt(index, out WorldMultiInstanceRecord current) ||
+                current != records[index]) return false;
+        return true;
+    }
+
+    private bool MultiInstancesMatchPrior()
+    {
+        bool priorReplaces = _prior?.ReplacesMultiInstances == true;
+        if ((_multiInstances is not null) != priorReplaces) return false;
+        return _multiInstances is null || _multiInstances.AsSpan().SequenceEqual(_prior!.MultiInstances);
+    }
+
+    private bool ReplacesFrozenStatics(SpatialChunkKey key) =>
+        _chunks.TryGetValue(key, out MutableChunk? chunk) && chunk.FrozenStatics is not null;
+
+    private bool ReplacesMultiFragments(SpatialChunkKey key) =>
+        _chunks.TryGetValue(key, out MutableChunk? chunk) && chunk.MultiFragments is not null;
+
+    private bool HasChangesFromPrior()
+    {
+        int priorChunkCount = _prior?.ChangedChunkCount ?? 0;
+        if (_chunks.Count != priorChunkCount || _multiInstancesDirty) return true;
+        foreach (MutableChunk chunk in _chunks.Values)
+            if (!MatchesPrior(chunk)) return true;
+        return false;
+    }
+
+    private bool MatchesPrior(MutableChunk chunk)
+    {
+        WorldMutableOverlay.ChunkReplacement? prior = FindPrior(chunk.Key);
+        return prior is not null &&
+            NullableBytesEqual(chunk.TerrainMaterials, prior.TerrainMaterials) &&
+            NullableBytesEqual(chunk.TerrainHeights, prior.TerrainHeights) &&
+            NullableRecordsEqual(chunk.FrozenStatics, prior.FrozenStatics) &&
+            NullableRecordsEqual(chunk.MultiFragments, prior.MultiFragments);
+    }
+
+    private static bool NullableBytesEqual(byte[]? left, byte[]? right) =>
+        left is null ? right is null : right is not null && left.AsSpan().SequenceEqual(right);
+
+    private static bool NullableRecordsEqual<T>(T[]? left, T[]? right) where T : IEquatable<T> =>
+        left is null ? right is null : right is not null && left.AsSpan().SequenceEqual(right);
+
+    private static bool FitsLimits(WorldMutableOverlay overlay, WorldMutableOverlayLimits limits)
+    {
+        if (overlay.ChangedChunkCount > limits.MaximumChangedChunks ||
+            overlay.ReplacementMultiInstanceCount > limits.MaximumMultiInstances ||
+            overlay.ReservedBytes > limits.MaximumRetainedBytes) return false;
+        foreach (WorldMutableOverlay.ChunkReplacement chunk in overlay.Chunks)
+            if ((chunk.FrozenStatics?.Length ?? 0) > limits.MaximumStaticsPerChunk ||
+                (chunk.MultiFragments?.Length ?? 0) > limits.MaximumMultiFragmentsPerChunk)
+                return false;
+        return true;
+    }
+
+    private bool ValidateEffectiveIdentities()
+    {
+        var replacementStatics = new HashSet<WorldStaticId>();
+        var replacementPieces = new HashSet<(MultiInstanceId, MultiPieceId)>();
+        var pieceDeltas = new Dictionary<MultiInstanceId, int>();
+        foreach ((SpatialChunkKey key, MutableChunk changed) in _chunks)
+        {
+            if (changed.FrozenStatics is not null)
+            {
+                foreach (WorldFrozenStaticRecord record in changed.FrozenStatics)
+                {
+                    if (!replacementStatics.Add(record.Id)) return false;
+                    if (_baseWorld.TryGetStaticOwner(record.Id, out SpatialChunkKey owner) &&
+                        owner != key && !ReplacesFrozenStatics(owner))
+                        return false;
+                }
+            }
+
+            if (changed.MultiFragments is not null)
+            {
+                if (_baseWorld.TryGetMultiFragments(key, out WorldMultiFragmentChunkView baseFragments))
+                    for (int index = 0; index < baseFragments.Count; index++)
+                        Adjust(baseFragments.GetRecord(index).MultiId, -1);
+                foreach (WorldMultiFragmentRecord record in changed.MultiFragments)
+                {
+                    if (!replacementPieces.Add((record.MultiId, record.PieceId))) return false;
+                    if (_baseWorld.TryGetMultiPieceOwner(record.MultiId, record.PieceId,
+                            out SpatialChunkKey owner) && owner != key && !ReplacesMultiFragments(owner))
+                        return false;
+                    Adjust(record.MultiId, 1);
+                }
+            }
+        }
+
+        if (_multiInstances is null)
+        {
+            foreach ((MultiInstanceId id, int delta) in pieceDeltas)
+                if (!_baseWorld.TryGetMultiInstance(id, out _) || delta != 0) return false;
+            return true;
+        }
+
+        var replacementRoots = new HashSet<MultiInstanceId>(_multiInstances.Length);
+        foreach (WorldMultiInstanceRecord root in _multiInstances)
+        {
+            replacementRoots.Add(root.Id);
+            int baseCount = _baseWorld.TryGetMultiInstance(root.Id, out WorldMultiInstanceRecord baseRoot)
+                ? baseRoot.PieceCount
+                : 0;
+            pieceDeltas.TryGetValue(root.Id, out int delta);
+            if (checked(baseCount + delta) != root.PieceCount) return false;
+        }
+        // Replacing the complete root set is deliberately the one global structural transaction.
+        // It must prove that no unchanged base Multi with surviving pieces was orphaned.
+        for (int index = 0; index < _baseWorld.MultiInstanceCount; index++)
+        {
+            if (!_baseWorld.TryGetMultiInstanceAt(index, out WorldMultiInstanceRecord root)) return false;
+            pieceDeltas.TryGetValue(root.Id, out int delta);
+            if (checked(root.PieceCount + delta) > 0 && !replacementRoots.Contains(root.Id)) return false;
+        }
+        foreach ((MultiInstanceId id, int delta) in pieceDeltas)
+        {
+            int baseCount = _baseWorld.TryGetMultiInstance(id, out WorldMultiInstanceRecord root)
+                ? root.PieceCount
+                : 0;
+            if (checked(baseCount + delta) > 0 && !replacementRoots.Contains(id)) return false;
+        }
+        return true;
+
+        void Adjust(MultiInstanceId id, int amount)
+        {
+            pieceDeltas.TryGetValue(id, out int count);
+            pieceDeltas[id] = checked(count + amount);
+        }
     }
 
     private WorldMutableOverlay.ChunkReplacement? FindPrior(SpatialChunkKey key)
     {
-        if (_prior is null) return null;
-        foreach (WorldMutableOverlay.ChunkReplacement chunk in _prior.Chunks)
-            if (chunk.Key == key) return chunk;
-        return null;
+        return _prior is not null && _prior.TryGetChunkReplacement(key, out var chunk) ? chunk : null;
     }
 
     private static WorldChunkContentHash Hash(MutableChunk chunk)

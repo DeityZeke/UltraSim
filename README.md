@@ -114,8 +114,11 @@ planner; the Godot class is now only its native admission bridge. T0.8 is
 accepted/frozen. T0.9 now implements the exact immutable
 pack plus bounded complete terrain/static/Multi overlay view, per-chunk structural
 revision/hash identity, and the fourth `worldview` save-set participant. Its
-implementation plus client-portability hardening is stopped for checkpoint
-review; T0.10 and Network N1 remain later work.
+implementation plus client-portability/invariant hardening is stopped for
+checkpoint review. Prepared client meshes now honor overlays; empty/no-op overlay
+lineage is save/restore-closed; and ordinary identity validation uses cold
+bound-pack indexes rather than rescanning the immutable world. T0.10 and Network
+N1 remain later work.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

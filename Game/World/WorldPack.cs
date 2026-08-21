@@ -874,6 +874,10 @@ public sealed class WorldPack
             error = WorldPackBindingError.ContentMismatch;
             return false;
         }
+        var staticOwners = new BoundWorldPack.StaticIdentityOwner[FrozenStaticCount];
+        var pieceOwners = new BoundWorldPack.MultiPieceIdentityOwner[MultiFragmentCount];
+        int staticOwnerCount = 0;
+        int pieceOwnerCount = 0;
         for (int chunk = 0; chunk < _metadata.ChunkCount; chunk++)
         {
             SpatialChunkKey key = WorldPackCodec.ReadChunkKey(_bytes, _metadata.ChunkDirectoryOffset, chunk);
@@ -891,26 +895,39 @@ public sealed class WorldPack
             {
                 for (int index = 0; index < statics.Count; index++)
                 {
-                    if (!binding.ContainsStaticDefinition(statics.GetRecord(index).DefinitionId))
+                    WorldFrozenStaticRecord record = statics.GetRecord(index);
+                    if (!binding.ContainsStaticDefinition(record.DefinitionId))
                     {
                         error = WorldPackBindingError.UnknownStaticDefinition;
                         return false;
                     }
+                    staticOwners[staticOwnerCount++] = new BoundWorldPack.StaticIdentityOwner(record.Id, chunk);
                 }
             }
             if (TryGetMultiFragments(key, out WorldMultiFragmentChunkView fragments))
             {
                 for (int index = 0; index < fragments.Count; index++)
                 {
-                    if (!binding.ContainsStaticDefinition(fragments.GetRecord(index).DefinitionId))
+                    WorldMultiFragmentRecord record = fragments.GetRecord(index);
+                    if (!binding.ContainsStaticDefinition(record.DefinitionId))
                     {
                         error = WorldPackBindingError.UnknownStaticDefinition;
                         return false;
                     }
+                    pieceOwners[pieceOwnerCount++] = new BoundWorldPack.MultiPieceIdentityOwner(
+                        record.MultiId, record.PieceId, chunk);
                 }
             }
         }
-        bound = new BoundWorldPack(this, binding);
+        if (staticOwnerCount != staticOwners.Length || pieceOwnerCount != pieceOwners.Length)
+            throw new InvalidOperationException("Validated WorldPack structural counts changed during binding.");
+        Array.Sort(staticOwners, static (left, right) => left.Id.CompareTo(right.Id));
+        Array.Sort(pieceOwners, static (left, right) =>
+        {
+            int multi = left.MultiId.CompareTo(right.MultiId);
+            return multi != 0 ? multi : left.PieceId.CompareTo(right.PieceId);
+        });
+        bound = new BoundWorldPack(this, binding, staticOwners, pieceOwners);
         error = WorldPackBindingError.None;
         return true;
     }
@@ -931,10 +948,19 @@ public sealed class WorldPack
 /// <summary>Immutable WorldPack proven compatible with one concrete game-content binding.</summary>
 public sealed class BoundWorldPack
 {
-    internal BoundWorldPack(WorldPack pack, WorldContentBinding binding)
+    private readonly StaticIdentityOwner[] _staticOwners;
+    private readonly MultiPieceIdentityOwner[] _pieceOwners;
+
+    internal BoundWorldPack(
+        WorldPack pack,
+        WorldContentBinding binding,
+        StaticIdentityOwner[] staticOwners,
+        MultiPieceIdentityOwner[] pieceOwners)
     {
         Pack = pack;
         Content = binding;
+        _staticOwners = staticOwners;
+        _pieceOwners = pieceOwners;
     }
 
     public WorldPack Pack { get; }
@@ -945,6 +971,9 @@ public sealed class BoundWorldPack
     public int FrozenStaticCount => Pack.FrozenStaticCount;
     public int MultiInstanceCount => Pack.MultiInstanceCount;
     public int MultiFragmentCount => Pack.MultiFragmentCount;
+    public long StructuralIdentityIndexReservedBytes =>
+        checked((long)_staticOwners.Length * Marshal.SizeOf<StaticIdentityOwner>() +
+            (long)_pieceOwners.Length * Marshal.SizeOf<MultiPieceIdentityOwner>());
 
     public bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView view) =>
         Pack.TryGetBaseTerrain(key, out view);
@@ -962,6 +991,60 @@ public sealed class BoundWorldPack
 
     public bool TryGetMultiInstanceAt(int index, out WorldMultiInstanceRecord instance) =>
         Pack.TryGetMultiInstanceAt(index, out instance);
+
+    /// <summary>
+    /// Finds the immutable home of one validated static identity without rescanning the pack.
+    /// This cold binding index supports changed-set-proportional overlay validation.
+    /// </summary>
+    internal bool TryGetStaticOwner(WorldStaticId id, out SpatialChunkKey key)
+    {
+        int low = 0;
+        int high = _staticOwners.Length - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            int order = _staticOwners[middle].Id.CompareTo(id);
+            if (order == 0)
+            {
+                return Pack.TryGetChunkKey(_staticOwners[middle].ChunkIndex, out key);
+            }
+            if (order < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        key = default;
+        return false;
+    }
+
+    /// <summary>Finds the immutable home of one validated logical Multi piece.</summary>
+    internal bool TryGetMultiPieceOwner(
+        MultiInstanceId multiId,
+        MultiPieceId pieceId,
+        out SpatialChunkKey key)
+    {
+        int low = 0;
+        int high = _pieceOwners.Length - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            ref readonly MultiPieceIdentityOwner candidate = ref _pieceOwners[middle];
+            int order = candidate.MultiId.CompareTo(multiId);
+            if (order == 0) order = candidate.PieceId.CompareTo(pieceId);
+            if (order == 0)
+            {
+                return Pack.TryGetChunkKey(candidate.ChunkIndex, out key);
+            }
+            if (order < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        key = default;
+        return false;
+    }
+
+    internal readonly record struct StaticIdentityOwner(WorldStaticId Id, int ChunkIndex);
+    internal readonly record struct MultiPieceIdentityOwner(
+        MultiInstanceId MultiId,
+        MultiPieceId PieceId,
+        int ChunkIndex);
 }
 
 /// <summary>Borrowed immutable view of one dense base-terrain chunk.</summary>

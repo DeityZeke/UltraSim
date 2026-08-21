@@ -13,13 +13,17 @@ int warmups = ReadInt(args, "--warmups=", 3);
 int samples = ReadInt(args, "--samples=", 15);
 int reads = ReadInt(args, "--reads=", 1_000_000);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/terrain-t0.9-world-overlay-local.json"));
+    AppContext.BaseDirectory, "../../../../results/terrain-t0.9-world-overlay-hardening-local.json"));
 if (warmups < 1 || samples < 5 || reads < 1) throw new ArgumentOutOfRangeException(nameof(args));
 
 using var fixture = new OverlayFixture(gridEdge: 16, changedEdge: 8);
+using var smallBaseScaling = new OverlayFixture(gridEdge: 16, changedEdge: 1);
+using var largeBaseScaling = new OverlayFixture(gridEdge: 64, changedEdge: 1);
 Timing[] timings =
 [
     Measure("build-64-chunk-overlay", warmups, samples, 1, fixture.BuildOverlay),
+    Measure("build-1-chunk-overlay-256-base", warmups, samples, 1, smallBaseScaling.BuildOverlay),
+    Measure("build-1-chunk-overlay-4096-base", warmups, samples, 1, largeBaseScaling.BuildOverlay),
     Measure("encode-worldview-artifact", warmups, samples, 1, fixture.EncodeArtifact),
     Measure("prepare-resolve-validate-worldview", warmups, samples, 1, fixture.PrepareArtifact),
     Measure("overlay-first-terrain-read", warmups, samples, reads, fixture.ReadPreparedWorld),
@@ -29,7 +33,7 @@ if (timings[^1].MaximumAllocatedBytes != 0)
 
 var report = new
 {
-    schema = "terrain-t0.9-world-overlay-v1",
+    schema = "terrain-t0.9-world-overlay-hardening-v2",
     captured_at_local = DateTimeOffset.Now.ToString("yyyy-MM-dd"),
     runtime = Environment.Version.ToString(),
     framework = RuntimeInformation.FrameworkDescription,
@@ -49,6 +53,14 @@ var report = new
         worldview_artifact_bytes = fixture.Artifact.Length,
         exact_pack_fingerprint = fixture.Bound.Fingerprint.ToString(),
         replacement_hashes_valid = fixture.HashCount == fixture.ChangedChunkCount,
+        immutable_structural_identity_index_bytes = fixture.Bound.StructuralIdentityIndexReservedBytes,
+        scaling_base_chunks = new[] { smallBaseScaling.BaseChunkCount, largeBaseScaling.BaseChunkCount },
+        scaling_changed_chunks = 1,
+        scaling_identity_index_bytes = new[]
+        {
+            smallBaseScaling.Bound.StructuralIdentityIndexReservedBytes,
+            largeBaseScaling.Bound.StructuralIdentityIndexReservedBytes,
+        },
     },
     acceptance = new
     {
@@ -56,6 +68,8 @@ var report = new
         exact_pack_resolution_required = true,
         terrain_and_static_replacements_restored = true,
         warmed_overlay_first_reads_allocate_zero = true,
+        ordinary_identity_validation_scales_with_retained_replacements_not_base_world = true,
+        complete_multi_root_replacement_remains_an_explicit_global_transaction = true,
     },
     timings,
 };
@@ -114,12 +128,16 @@ sealed class OverlayFixture : IDisposable
 
     internal OverlayFixture(int gridEdge, int changedEdge)
     {
+        GridEdge = gridEdge;
         BaseChunkCount = checked(gridEdge * gridEdge);
         ChangedChunkCount = checked(changedEdge * changedEdge);
+        int maximumPackBytes = Math.Max(8 * 1024 * 1024,
+            checked(BaseChunkCount * 5_000 + 1024 * 1024));
         var packBuilder = new WorldPackBuilder(
             GameWorldState.DefaultSpace,
             Content,
-            new WorldPackLimits(8 * 1024 * 1024, BaseChunkCount, 8));
+            new WorldPackLimits(maximumPackBytes, BaseChunkCount, 8,
+                maximumFrozenStatics: BaseChunkCount));
         var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
         Array.Fill(materials, (ushort)1);
         var absolute = new int[TerrainChunkFormat.HeightVertexCount];
@@ -129,10 +147,23 @@ sealed class OverlayFixture : IDisposable
             throw new InvalidOperationException("Flat terrain did not encode.");
         for (int z = 0; z < gridEdge; z++)
             for (int x = 0; x < gridEdge; x++)
+            {
                 if (!packBuilder.TryAddBaseTerrain(
                         new SpatialChunkKey(GameWorldState.DefaultSpace, x, z),
                         materials, heightBase, offsets, out _))
                     throw new InvalidOperationException("Base terrain admission failed.");
+                var position = new WorldPosition(x, z, 2_000, 2_000, 0);
+                if (!packBuilder.TryAddFrozenStatic(new WorldFrozenStaticSource(
+                        new WorldStaticId(checked((ulong)(z * gridEdge + x + 1))),
+                        new WorldStaticDefinitionId(1), position, WorldYaw.Zero, 0,
+                        WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
+                        new WorldStaticBounds(
+                            position.GlobalXMillimeters - 100, -100,
+                            position.GlobalZMillimeters - 100,
+                            position.GlobalXMillimeters + 100, 100,
+                            position.GlobalZMillimeters + 100)), out _))
+                    throw new InvalidOperationException("Base static admission failed.");
+            }
         if (!packBuilder.TryBuild(out WorldPackArtifact? artifact, out _) || artifact is null ||
             !artifact.Open().TryBind(Binding, out BoundWorldPack? bound, out _) || bound is null)
             throw new InvalidOperationException("Benchmark base world did not bind.");
@@ -159,6 +190,7 @@ sealed class OverlayFixture : IDisposable
     }
 
     internal int BaseChunkCount { get; }
+    internal int GridEdge { get; }
     internal int ChangedChunkCount { get; }
     internal int HashCount { get; }
     internal BoundWorldPack Bound { get; }
@@ -244,7 +276,7 @@ sealed class OverlayFixture : IDisposable
                 WorldFrozenStaticRecord[] statics =
                 [
                     new WorldFrozenStaticRecord(
-                        new WorldStaticId(checked((ulong)(z * changedEdge + x + 1))),
+                        new WorldStaticId(checked((ulong)(z * GridEdge + x + 1))),
                         new WorldStaticDefinitionId(1), position, WorldYaw.Zero, 0,
                         WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
                         new WorldStaticBounds(

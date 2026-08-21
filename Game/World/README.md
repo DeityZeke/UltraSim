@@ -375,10 +375,23 @@ separate monotonic generation revision.
 content identities, exact terrain seams, q5 height planes, one-chunk static
 bounds halos, globally unique static/piece identity, root residency, piece
 totals, and configured count/byte bounds before exposing immutable arrays.
+Compact sorted immutable identity-owner indexes are built once during
+`BoundWorldPack` content binding, so ordinary overlay validation is shaped by
+retained replacement content rather than every immutable chunk/row. Complete
+Multi-root replacement remains an explicit global transaction because it must
+prove that no surviving base Multi is orphaned.
 `GameWorldState.TryPublishOverlay` accepts only the next revision and swaps the
 complete `WorldPreparedView` on its owner thread. It does not mutate pack bytes,
 dynamic publication history, Spatial membership, client residency, or renderer
 state.
+
+A mutation-free fresh builder produces the canonical revision-0 empty overlay.
+Canonical replacements identical to the base or prior generation do not invent
+content revisions. Removing the final prior replacement may still publish a
+valid next overlay revision with zero retained rows, and that state is preserved
+by save/restore. Selected limits must bound inherited prior content as well as
+new replacement calls. A chunk replacement hash is scoped beneath the exact base
+pack fingerprint.
 
 The prepared view is also a persistence and future-replication seam, not a
 generic provider framework. The current save artifact references the exact pack

@@ -112,6 +112,10 @@ var tests = new (string Name, Action Body)[]
         ChunkInterestAndLocalNoChangeStreamingAllocateZero),
     ("MutableWorldOverlayPublishesCompleteTerrainAndStaticReplacements",
         MutableWorldOverlayPublishesCompleteTerrainAndStaticReplacements),
+    ("EmptyAndIdenticalOverlayTransactionsRemainCanonicalAndRestorable",
+        EmptyAndIdenticalOverlayTransactionsRemainCanonicalAndRestorable),
+    ("MultiOverlayRootsFragmentsAndPersistenceRoundTrip",
+        MultiOverlayRootsFragmentsAndPersistenceRoundTrip),
     ("WorldViewArtifactIsCanonicalBoundedAndFailClosed",
         WorldViewArtifactIsCanonicalBoundedAndFailClosed),
     ("PreparedWorldSaveRestoresExactPackAndOverlayAtomically",
@@ -1277,6 +1281,152 @@ static void MutableWorldOverlayPublishesCompleteTerrainAndStaticReplacements()
         WorldStaticFlags.Renderable, oversizedBounds);
     var invalidPlacement = new WorldMutableOverlayBuilder(bound);
     False(invalidPlacement.TryReplaceFrozenStatics(key, [invalidStatic]));
+}
+
+static void EmptyAndIdenticalOverlayTransactionsRemainCanonicalAndRestorable()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(
+        reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    True(pack.TryBind(CreateGameWorldBinding(), out BoundWorldPack? maybeBound, out _));
+    BoundWorldPack bound = maybeBound!;
+    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+
+    var emptyBuilder = new WorldMutableOverlayBuilder(bound);
+    True(emptyBuilder.TryBuild(out WorldMutableOverlay? empty));
+    Equal(default(WorldOverlayRevision), empty!.Revision);
+    Equal(0, empty.ChangedChunkCount);
+    False(empty.ReplacesMultiInstances);
+
+    using var world = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var state = new GameWorldState(world, bound);
+    False(state.TryPublishOverlay(empty));
+
+    WorldMutableOverlay first = CreateReplacementOverlay(
+        bound, key, GameTerrainMaterialIds.Snow, new WorldStaticId(9_201));
+    True(state.TryPublishOverlay(first));
+    True(first.TryGetChunkRevision(key, out WorldChunkContentRevision firstChunkRevision,
+        out WorldChunkContentHash firstHash));
+
+    WorldMutableOverlay identical = CreateReplacementOverlay(
+        bound, key, GameTerrainMaterialIds.Snow, new WorldStaticId(9_201), first);
+    Equal(first.Revision, identical.Revision);
+    True(identical.TryGetChunkRevision(key, out WorldChunkContentRevision identicalChunkRevision,
+        out WorldChunkContentHash identicalHash));
+    Equal(firstChunkRevision, identicalChunkRevision);
+    Equal(firstHash, identicalHash);
+    False(state.TryPublishOverlay(identical));
+
+    Throws<ArgumentException>(() => _ = new WorldMutableOverlayBuilder(
+        bound,
+        new WorldMutableOverlayLimits(4_096, 0, 2_048, 262_144, 256L * 1024 * 1024),
+        first));
+
+    True(bound.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain));
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    terrain.CopyMaterials(materials);
+    for (int index = 0; index < offsets.Length; index++) offsets[index] = terrain.GetHeightOffset(index);
+    True(bound.TryGetFrozenStatics(key, out WorldFrozenStaticChunkView frozen));
+    var baseStatics = new WorldFrozenStaticRecord[frozen.Count];
+    for (int index = 0; index < baseStatics.Length; index++) baseStatics[index] = frozen.GetRecord(index);
+
+    var resetBuilder = new WorldMutableOverlayBuilder(bound, prior: first);
+    True(resetBuilder.TryReplaceTerrain(key, materials, terrain.HeightBase, offsets));
+    True(resetBuilder.TryReplaceFrozenStatics(key, baseStatics));
+    True(resetBuilder.TryBuild(out WorldMutableOverlay? reset));
+    Equal(2UL, reset!.Revision.Value);
+    Equal(0, reset.ChangedChunkCount);
+    True(state.TryPublishOverlay(reset));
+
+    var participant = new WorldSaveSetParticipant(
+        state, new PersistentWorldId(0x70_0901), new WorldPersistenceOptions(1_000_000));
+    byte[] artifact = EncodeWorldView(participant, 9);
+    var restore = new WorldSaveSetParticipant(
+        fingerprint => fingerprint == bound.Fingerprint ? bound : null,
+        new WorldPersistenceOptions(1_000_000));
+    using IPreparedLoadParticipant prepared = restore.Prepare(artifact, new SaveSetContext(9, 0));
+    prepared.Resolve(EmptyPersistentResolver.Instance);
+    prepared.Validate();
+    var restored = (PreparedWorldParticipant)prepared;
+    Equal(2UL, restored.Overlay!.Revision.Value);
+    Equal(0, restored.Overlay.ChangedChunkCount);
+}
+
+static void MultiOverlayRootsFragmentsAndPersistenceRoundTrip()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(
+        reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    True(pack.TryBind(CreateGameWorldBinding(), out BoundWorldPack? maybeBound, out _));
+    BoundWorldPack bound = maybeBound!;
+    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+    True(bound.TryGetMultiFragments(key, out WorldMultiFragmentChunkView baseFragments));
+    var fragments = new WorldMultiFragmentRecord[baseFragments.Count + 1];
+    for (int index = 0; index < baseFragments.Count; index++)
+    {
+        WorldMultiFragmentRecord record = baseFragments.GetRecord(index);
+        if (record.MultiId == new MultiInstanceId(700) && record.PieceId == new MultiPieceId(3))
+        {
+            var moved = new WorldPosition(0, 0, 750, 900, 2_000);
+            record = record with { Position = moved, Bounds = BoundsAround(moved, 400) };
+        }
+        fragments[index] = record;
+    }
+    var addedPosition = new WorldPosition(0, 0, 3_000, 3_000, 500);
+    var added = new WorldMultiFragmentRecord(
+        new MultiInstanceId(800), new MultiPieceId(1),
+        new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Book),
+        addedPosition, WorldYaw.QuarterTurn, 2,
+        WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
+        BoundsAround(addedPosition, 150));
+    fragments[^1] = added;
+
+    var roots = new WorldMultiInstanceRecord[bound.MultiInstanceCount + 1];
+    for (int index = 0; index < bound.MultiInstanceCount; index++)
+        True(bound.TryGetMultiInstanceAt(index, out roots[index]));
+    roots[^1] = new WorldMultiInstanceRecord(
+        new MultiInstanceId(800), addedPosition, WorldYaw.QuarterTurn, 1);
+
+    var builder = new WorldMutableOverlayBuilder(bound);
+    True(builder.TryReplaceMultiFragments(key, fragments));
+    True(builder.TryReplaceMultiInstances(roots));
+    True(builder.TryBuild(out WorldMutableOverlay? maybeOverlay));
+    WorldMutableOverlay overlay = maybeOverlay!;
+    Equal(1UL, overlay.Revision.Value);
+    True(overlay.ReplacesMultiInstances);
+    var preparedView = new WorldPreparedView(bound, overlay);
+    True(preparedView.TryGetMultiFragments(key, out WorldMultiFragmentChunkView effective));
+    Equal(fragments.Length, effective.Count);
+    True(preparedView.TryGetMultiInstance(new MultiInstanceId(800), out WorldMultiInstanceRecord addedRoot));
+    Equal(1, addedRoot.PieceCount);
+
+    var duplicateBuilder = new WorldMutableOverlayBuilder(bound);
+    False(duplicateBuilder.TryReplaceMultiFragments(key, [added, added]));
+
+    WorldMultiInstanceRecord[] wrongRoots = (WorldMultiInstanceRecord[])roots.Clone();
+    wrongRoots[^1] = wrongRoots[^1] with { PieceCount = 2 };
+    var wrongCountBuilder = new WorldMutableOverlayBuilder(bound);
+    True(wrongCountBuilder.TryReplaceMultiFragments(key, fragments));
+    True(wrongCountBuilder.TryReplaceMultiInstances(wrongRoots));
+    False(wrongCountBuilder.TryBuild(out _));
+
+    using var world = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var state = new GameWorldState(world, bound);
+    True(state.TryPublishOverlay(overlay));
+    var participant = new WorldSaveSetParticipant(
+        state, new PersistentWorldId(0x70_0902), new WorldPersistenceOptions(1_000_000));
+    byte[] artifact = EncodeWorldView(participant, 10);
+    var restore = new WorldSaveSetParticipant(
+        fingerprint => fingerprint == bound.Fingerprint ? bound : null,
+        new WorldPersistenceOptions(1_000_000));
+    using IPreparedLoadParticipant restoredParticipant = restore.Prepare(artifact, new SaveSetContext(10, 0));
+    restoredParticipant.Resolve(EmptyPersistentResolver.Instance);
+    restoredParticipant.Validate();
+    var restored = (PreparedWorldParticipant)restoredParticipant;
+    var restoredView = new WorldPreparedView(bound, restored.Overlay);
+    True(restoredView.TryGetMultiFragments(key, out WorldMultiFragmentChunkView restoredFragments));
+    Equal(fragments.Length, restoredFragments.Count);
+    True(restoredView.TryGetMultiInstance(new MultiInstanceId(800), out WorldMultiInstanceRecord restoredRoot));
+    Equal(addedRoot, restoredRoot);
 }
 
 static void WorldViewArtifactIsCanonicalBoundedAndFailClosed()

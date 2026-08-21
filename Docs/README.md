@@ -83,6 +83,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
   lives in Client Core behind a plan/admit/commit seam, leaving Godot with native
   realization only. T0.9 implements exact-pack durable overlay
   staging/persistence plus that portability hardening and is stopped for review.
+  Its invariant hardening makes prepared terrain meshes overlay-aware, closes
+  empty/no-op overlay save/restore lineage, proves Multi replacement persistence,
+  and makes ordinary identity validation proportional to retained changes rather
+  than immutable-world size.
   The next implementation gate is the small playable woods/cabin vertical.
 - [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
   N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0

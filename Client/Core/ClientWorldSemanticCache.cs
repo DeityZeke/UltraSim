@@ -682,8 +682,8 @@ public sealed class ClientWorldSemanticCache
 
     /// <summary>
     /// Builds the current resident chunk's engine-neutral terrain payload through the client-world
-    /// ownership boundary. T0.8 resolves the immutable base pack; later client overlay state may
-    /// change that private resolution without changing presentation callers.
+    /// ownership boundary. Mesh preparation resolves the same prepared base-plus-overlay world
+    /// used to stage the resident structural page.
     /// </summary>
     public bool TryBuildResidentTerrainMesh(
         ClientSemanticChunkHandle handle,
@@ -709,7 +709,7 @@ public sealed class ClientWorldSemanticCache
             meshError = TerrainBaseMeshBuildError.None;
             return false;
         }
-        if (!_baseWorld.TryBuildBaseTerrainMesh(
+        if (!_preparedWorld.TryBuildBaseTerrainMesh(
                 _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError))
         {
             semanticError = ClientSemanticChunkError.None;

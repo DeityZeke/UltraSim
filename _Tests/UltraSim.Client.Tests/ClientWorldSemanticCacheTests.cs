@@ -29,6 +29,8 @@ internal static class ClientWorldSemanticCacheTests
         terrain.CopyMaterials(materials);
         for (int index = 0; index < offsets.Length; index++) offsets[index] = terrain.GetHeightOffset(index);
         materials[0] = materials[0] == 1 ? (ushort)2 : (ushort)1;
+        int changedVertex = TerrainChunkFormat.GetHeightIndex(new TerrainVertexCoord(16, 16));
+        offsets[changedVertex] = new TerrainHeightOffset(checked((ushort)(offsets[changedVertex].Units + 1)));
         var builder = new WorldMutableOverlayBuilder(world);
         True(builder.TryReplaceTerrain(key, materials, terrain.HeightBase, offsets));
         True(builder.TryBuild(out WorldMutableOverlay? overlay));
@@ -45,6 +47,16 @@ internal static class ClientWorldSemanticCacheTests
         True(changedInfo.StructuralContentHash.IsValid);
         True(cache.TryGetResidentView(changed, out ClientSemanticChunkView changedView));
         Equal(materials[0], changedView.TerrainMaterials[0]);
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var triangleMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+        True(cache.TryBuildResidentTerrainMesh(changed, vertices, indices, triangleMaterials,
+            out _, out ClientSemanticChunkError semanticError, out TerrainBaseMeshBuildError meshError));
+        Equal(ClientSemanticChunkError.None, semanticError);
+        Equal(TerrainBaseMeshBuildError.None, meshError);
+        Equal(terrain.GetAbsoluteHeightMillimeters(changedVertex) +
+            TerrainChunkFormat.HeightQuantumMillimeters, vertices[changedVertex].AbsoluteYMillimeters);
+        Equal(materials[0], triangleMaterials[0]);
 
         ClientSemanticChunkHandle unchanged = Publish(cache, Key(1, 0), epoch, 1, []);
         ClientSemanticChunkInfo unchangedInfo = Info(cache, unchanged);

@@ -3319,7 +3319,7 @@ game-world staging shell, rebuilds Inventory/Spatial/publication derived state,
 then publishes one `GameGenerationState`. A missing pack or malformed overlay
 leaves the active generation unchanged.
 
-The permanent 74-test world suite includes complete terrain/static replacement,
+The implementation-stop 74-test world suite includes complete terrain/static replacement,
 monotonic overlay publication, save/diverge/restore, exact-pack rejection, and
 atomic non-publication. Existing persistence/inventory suites prove the fourth
 participant composes with ECS, Accounting, clock, and derived-state rebuild.
@@ -3337,6 +3337,59 @@ claims.
 T0.10 and Network N1 remain unstarted. Private edit sessions, leases, property,
 construction, overlay history/compaction, and client patch-file distribution are
 still documented future consumers rather than implementations.
+
+### T0.9 invariant hardening stop — 2026-08-21
+
+The checkpoint review found and closed two publish/save/presentation closure
+faults before T0.9 acceptance:
+
+- Client terrain mesh preparation now resolves `WorldPreparedView`, including
+  the prepared neighbor halo used for exact seam frames. A replacement height
+  and material can no longer appear in the resident semantic page while Godot
+  builds immutable-pack terrain.
+- A fresh builder with no structural mutation returns the canonical revision-0
+  empty overlay, which `GameWorldState` correctly refuses as a new publication.
+  Identical canonical replacements retain their prior overlay/chunk revisions
+  and hashes. Removing the final prior replacement is a real next overlay
+  revision with zero retained replacement rows; that valid authoritative state
+  now round-trips through `worldview` save/restore.
+
+Ordinary overlay identity validation no longer reconstructs identity sets by
+walking the entire immutable world. `BoundWorldPack` creates compact sorted
+static-owner and Multi-piece-owner indexes once during cold content binding,
+while definitions and structural rows are already being validated. An ordinary
+overlay build scans retained replacement content and uses bounded binary lookups
+to detect collisions with unshadowed immutable rows. Multi piece-count deltas
+are calculated only for fragment-replaced chunks. Replacing the **complete**
+logical Multi-root set remains an explicitly global structural transaction and
+therefore also proves that no surviving base Multi was orphaned; an ordinary
+one-chunk edit does not pay that cost.
+
+Canonical replacement methods collapse content identical to the immutable base
+back to base fallthrough. A builder created with a prior overlay rejects limits
+that cannot bound every inherited chunk/root/byte replacement. One
+`WorldChunkContentHash` identifies replacement content only beneath the exact
+`BaseWorldFingerprint`; it is not a freestanding cross-pack content identity.
+
+The current 76-test world suite adds empty/no-op/reset publication and persistence
+closure, inherited-limit rejection, and a complete Multi fragment/root
+replacement round trip. The Multi evidence moves an existing fragment, adds a
+new logical Multi and root, saves/restores the view, and rejects duplicate pieces
+and incorrect root piece totals. Client Core additionally builds an
+engine-neutral terrain mesh from changed prepared height/material data.
+
+The appended synthetic evidence is
+[`terrain-t0.9-world-overlay-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.9-world-overlay-hardening-2026-08-21.json).
+For the same one-chunk mutation, mean build cost is about 76.6 us over a
+256-chunk immutable pack and 78.5 us over a 4,096-chunk pack, with identical
+25,104-byte cold allocation. The immutable identity indexes are 4,096 B and
+65,536 B respectively. This supports the intended changed-set cost shape; it is
+synthetic cold-transaction evidence, not an authored-content or tick-path claim.
+The revised 256-base/64-changed fixture records about 3.54 ms mean / 3.64 ms p95
+build time, 2.84 ms restore-validation p95, and 39.81 ns p95 / 0 B prepared
+terrain-material reads.
+
+T0.9 remains stopped for checkpoint review. T0.10 and Network N1 have not begun.
 
 ### T0.9 client-portability hardening stop — 2026-08-21
 

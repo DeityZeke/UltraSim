@@ -154,7 +154,7 @@ public sealed class WorldSaveSetParticipant : ISaveSetParticipant
         if (!replacesRoots && rootCount != 0)
             throw new PersistenceValidationException("The current-world Multi-root replacement flag is inconsistent.");
         bool hasOverlay = chunkCount != 0 || replacesRoots;
-        if (hasOverlay != overlayRevision.IsValid)
+        if (hasOverlay && !overlayRevision.IsValid)
             throw new PersistenceValidationException("The current-world overlay revision is inconsistent.");
 
         var chunks = new WorldMutableOverlay.ChunkReplacement[chunkCount];

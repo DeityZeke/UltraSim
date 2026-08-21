@@ -186,6 +186,37 @@ public static class BaseTerrainSurface
         out TerrainBaseMeshBuildError error)
     {
         ArgumentNullException.ThrowIfNull(world);
+        return TryBuildBaseTerrainMesh(new TerrainMeshSource(world), key, vertices, indices,
+            triangleMaterials, out summary, out error);
+    }
+
+    /// <summary>
+    /// Emits one complete prepared base-terrain mesh, including durable terrain replacements and
+    /// the bounded prepared neighbor halo needed for exact border frames.
+    /// </summary>
+    public static bool TryBuildBaseTerrainMesh(
+        this WorldPreparedView world,
+        SpatialChunkKey key,
+        Span<TerrainBaseMeshVertex> vertices,
+        Span<ushort> indices,
+        Span<ushort> triangleMaterials,
+        out TerrainBaseMeshSummary summary,
+        out TerrainBaseMeshBuildError error)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        return TryBuildBaseTerrainMesh(new TerrainMeshSource(world), key, vertices, indices,
+            triangleMaterials, out summary, out error);
+    }
+
+    private static bool TryBuildBaseTerrainMesh(
+        in TerrainMeshSource world,
+        SpatialChunkKey key,
+        Span<TerrainBaseMeshVertex> vertices,
+        Span<ushort> indices,
+        Span<ushort> triangleMaterials,
+        out TerrainBaseMeshSummary summary,
+        out TerrainBaseMeshBuildError error)
+    {
         summary = default;
         if (vertices.Length < TerrainChunkFormat.HeightVertexCount ||
             indices.Length < TerrainChunkFormat.TriangleIndexCount ||
@@ -315,7 +346,7 @@ public static class BaseTerrainSurface
     }
 
     private static TerrainVertexFrame CalculateVertexFrame(
-        BoundWorldPack world,
+        in TerrainMeshSource world,
         SpatialChunkKey key,
         byte localVertexX,
         byte localVertexZ)
@@ -364,7 +395,7 @@ public static class BaseTerrainSurface
     }
 
     private static bool TryGetGlobalCell(
-        BoundWorldPack world,
+        in TerrainMeshSource world,
         long globalCellX,
         long globalCellZ,
         out WorldTerrainChunkView terrain,
@@ -384,6 +415,33 @@ public static class BaseTerrainSurface
         localCellZ = checked((byte)(globalCellZ - chunkZ * TerrainChunkFormat.MaterialCellEdge));
         return world.TryGetBaseTerrain(new SpatialChunkKey(world.Space, checked((int)chunkX), checked((int)chunkZ)),
             out terrain);
+    }
+
+    private readonly struct TerrainMeshSource
+    {
+        private readonly BoundWorldPack? _baseWorld;
+        private readonly WorldPreparedView? _preparedWorld;
+
+        internal TerrainMeshSource(BoundWorldPack world)
+        {
+            _baseWorld = world;
+            _preparedWorld = null;
+            Space = world.Space;
+        }
+
+        internal TerrainMeshSource(WorldPreparedView world)
+        {
+            _baseWorld = null;
+            _preparedWorld = world;
+            Space = world.Space;
+        }
+
+        internal SpatialSpaceId Space { get; }
+
+        internal bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView terrain) =>
+            _preparedWorld is not null
+                ? _preparedWorld.TryGetBaseTerrain(key, out terrain)
+                : _baseWorld!.TryGetBaseTerrain(key, out terrain);
     }
 
     private static long FloorDivide(long value, int positiveDivisor)

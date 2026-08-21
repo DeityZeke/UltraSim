@@ -1,0 +1,102 @@
+{
+  "schema": "terrain-t0.9-world-overlay-hardening-v2",
+  "captured_at_local": "2026-08-21",
+  "runtime": "8.0.29",
+  "framework": ".NET 8.0.29",
+  "os": "CachyOS",
+  "architecture": "X64",
+  "processors": 16,
+  "server_gc": false,
+  "stopwatch_frequency": 1000000000,
+  "scope": "synthetic cold prepared-world overlay/persistence mechanics; not terrain editing, N1 transfer, authored content, or tick-path evidence",
+  "fixture": {
+    "base_chunks": 256,
+    "changed_chunks": 64,
+    "statics_per_changed_chunk": 1,
+    "overlay_revision": 1,
+    "overlay_reserved_bytes": 281472,
+    "worldview_artifact_bytes": 280160,
+    "exact_pack_fingerprint": "567485323E9087115460207A023FD566250DC707A84DE7BCAF6618EB08073589",
+    "replacement_hashes_valid": true,
+    "immutable_structural_identity_index_bytes": 4096,
+    "scaling_base_chunks": [
+      256,
+      4096
+    ],
+    "scaling_changed_chunks": 1,
+    "scaling_identity_index_bytes": [
+      4096,
+      65536
+    ]
+  },
+  "acceptance": {
+    "immutable_pack_bytes_saved": false,
+    "exact_pack_resolution_required": true,
+    "terrain_and_static_replacements_restored": true,
+    "warmed_overlay_first_reads_allocate_zero": true,
+    "ordinary_identity_validation_scales_with_retained_replacements_not_base_world": true,
+    "complete_multi_root_replacement_remains_an_explicit_global_transaction": true
+  },
+  "timings": [
+    {
+      "Name": "build-64-chunk-overlay",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 3543866.8666666667,
+      "P50NanosecondsPerOperation": 3529087,
+      "P95NanosecondsPerOperation": 3642915,
+      "MaximumNanosecondsPerOperation": 3642915,
+      "MaximumAllocatedBytes": 1286536,
+      "Checksum": 5066514
+    },
+    {
+      "Name": "build-1-chunk-overlay-256-base",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 76619.8,
+      "P50NanosecondsPerOperation": 75239,
+      "P95NanosecondsPerOperation": 88249,
+      "MaximumNanosecondsPerOperation": 88249,
+      "MaximumAllocatedBytes": 25104,
+      "Checksum": 79182
+    },
+    {
+      "Name": "build-1-chunk-overlay-4096-base",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 78515.33333333333,
+      "P50NanosecondsPerOperation": 76279,
+      "P95NanosecondsPerOperation": 92109,
+      "MaximumNanosecondsPerOperation": 92109,
+      "MaximumAllocatedBytes": 25104,
+      "Checksum": 79182
+    },
+    {
+      "Name": "encode-worldview-artifact",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 50356.2,
+      "P50NanosecondsPerOperation": 50070,
+      "P95NanosecondsPerOperation": 53149,
+      "MaximumNanosecondsPerOperation": 53149,
+      "MaximumAllocatedBytes": 842952,
+      "Checksum": 5044410
+    },
+    {
+      "Name": "prepare-resolve-validate-worldview",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 2809580.4,
+      "P50NanosecondsPerOperation": 2808423,
+      "P95NanosecondsPerOperation": 2842253,
+      "MaximumNanosecondsPerOperation": 2842253,
+      "MaximumAllocatedBytes": 1837592,
+      "Checksum": 1170
+    },
+    {
+      "Name": "overlay-first-terrain-read",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 38.9143872,
+      "P50NanosecondsPerOperation": 38.830487,
+      "P95NanosecondsPerOperation": 39.809948,
+      "MaximumNanosecondsPerOperation": 39.809948,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 22500288
+    }
+  ]
+}
