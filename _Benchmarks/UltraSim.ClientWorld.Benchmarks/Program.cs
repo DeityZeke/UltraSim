@@ -17,18 +17,31 @@ BoundWorldPack world = Fixture.CreateWorld();
 var resident = new ResidentFixture(world);
 var lifecycle = new LifecycleFixture(world);
 var delta = new DeltaFixture(world);
+DeltaScaleFixture[] scale =
+[
+    new(world, 1, 1),
+    new(world, 32, 1),
+    new(world, 128, 1),
+    new(world, 512, 1),
+    new(world, 512, 2),
+];
 Timing[] timings =
 [
     Measure("resident-world-hash-32", warmups, samples, operations, resident.Hash),
     Measure("borrow-resident-pages-32", warmups, samples, operations, resident.Borrow),
     Measure("request-stage-publish-retire", warmups, samples, Math.Max(1, operations / 10), lifecycle.Run),
     Measure("one-public-delta", warmups, samples, operations, delta.Run),
+    Measure("one-public-delta-resident-1", warmups, samples, operations, scale[0].Run),
+    Measure("one-public-delta-resident-32", warmups, samples, operations, scale[1].Run),
+    Measure("one-public-delta-resident-128", warmups, samples, operations, scale[2].Run),
+    Measure("one-public-delta-resident-512", warmups, samples, operations, scale[3].Run),
+    Measure("one-public-delta-resident-512-near-full-knowledge", warmups, samples, operations, scale[4].Run),
 ];
 if (timings.Any(value => value.MaximumAllocatedBytes != 0))
     throw new InvalidOperationException("A warmed T0.8 semantic-cache path allocated.");
 
 var report = new Report(
-    "terrain-t0.8-client-semantic-cache-v1",
+    "terrain-t0.8-client-semantic-cache-hardening-v2",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -212,6 +225,78 @@ sealed class DeltaFixture
         new ChunkPublicationRevision(version));
 }
 
+sealed class DeltaScaleFixture
+{
+    private readonly ClientWorldSemanticCache _cache;
+    private readonly ClientSemanticChunkHandle _target;
+    private readonly SpatialChunkKey _key;
+    private readonly PublicationEpoch _epoch;
+    private readonly WorldPublicEntityId _identity;
+    private readonly uint _prefab;
+    private readonly WorldPublicDeltaRecord[] _delta = new WorldPublicDeltaRecord[1];
+    private ulong _revision = 1;
+
+    internal DeltaScaleFixture(BoundWorldPack world, int residents, int identitiesPerChunk)
+    {
+        _cache = new ClientWorldSemanticCache(world,
+            new(residents, 4, 0, identitiesPerChunk,
+                checked(residents * identitiesPerChunk)));
+        _epoch = PublicationEpoch.Create();
+        ClientSemanticChunkHandle target = default;
+        for (int chunk = 0; chunk < residents; chunk++)
+        {
+            SpatialChunkKey key = Fixture.Key(chunk);
+            var records = new WorldPublicRecord[identitiesPerChunk];
+            for (int row = 0; row < records.Length; row++)
+            {
+                uint index = checked((uint)(chunk * identitiesPerChunk + row + 1));
+                records[row] = Record(key, new WorldPublicEntityId(index, 1), 1,
+                    checked((uint)(row + 1)));
+            }
+            Fixture.Require(_cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            Fixture.Require(_cache.TryStageFromBaseWorld(handle, records,
+                new ChunkPublicationCursor(_epoch, key, new ChunkPublicationRevision(1)), out _));
+            Fixture.Require(_cache.TryPublish(handle, out _));
+            if (chunk == residents - 1) target = handle;
+        }
+        _target = target;
+        _key = Fixture.Key(residents - 1);
+        _identity = new WorldPublicEntityId(
+            checked((uint)(residents * identitiesPerChunk)), 1);
+        _prefab = checked((uint)identitiesPerChunk);
+    }
+
+    internal ulong Run(int operations)
+    {
+        ulong checksum = 0;
+        for (int index = 0; index < operations; index++)
+        {
+            ulong revision = ++_revision;
+            WorldPublicRecord record = Record(_key, _identity, revision, _prefab);
+            _delta[0] = new WorldPublicDeltaRecord(
+                WorldPublicOperation.Present, WorldPublicFieldMask.Transform,
+                record.Id, record.EntityPublicVersion, record);
+            var batch = new ChunkPublicationBatch(
+                ChunkPublicationReadStatus.Delta, _key,
+                new ChunkPublicationCursor(_epoch, _key, new ChunkPublicationRevision(revision)),
+                new ChunkPublicationRevision(1), 1, 1);
+            Fixture.Require(_cache.TryApplyDelta(_target, batch, _delta, out _));
+            Fixture.Require(_cache.TryGetInfo(_target, out ClientSemanticChunkInfo info));
+            checksum = unchecked(checksum + info.SemanticHash.Low);
+        }
+        return checksum;
+    }
+
+    private static WorldPublicRecord Record(SpatialChunkKey key, WorldPublicEntityId id,
+        ulong version, uint prefab) => new(
+            id, version, prefab,
+            new WorldPosition(key.Coord.X, key.Coord.Z,
+                checked((ushort)(version % GameWorldSpatialProfile.WorldChunkEdgeUnits)),
+                checked((ushort)(id.Index % GameWorldSpatialProfile.WorldChunkEdgeUnits)), 750),
+            WorldYaw.Zero, WorldPublicStateFlags.Visible,
+            new ChunkPublicationRevision(version));
+}
+
 static class Fixture
 {
     private static readonly SpatialSpaceId Space = new(808);
@@ -220,8 +305,8 @@ static class Fixture
     internal static BoundWorldPack CreateWorld()
     {
         var builder = new WorldPackBuilder(
-            Space, Content, new WorldPackLimits(16 * 1024 * 1024, 64, 8, 64, 0, 0));
-        for (int index = 0; index < 64; index++)
+            Space, Content, new WorldPackLimits(16 * 1024 * 1024, 512, 8, 512, 0, 0));
+        for (int index = 0; index < 512; index++)
         {
             ushort[] materials = new ushort[TerrainChunkFormat.MaterialCellCount];
             Array.Fill(materials, checked((ushort)(index % 2 + 1)));

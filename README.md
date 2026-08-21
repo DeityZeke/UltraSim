@@ -99,7 +99,11 @@ views. T0.7 now implements exact hysteretic chunk-interest rings and a bounded
 packet-free local snapshot/delta streaming oracle and is accepted/frozen after
 consumer hardening. T0.8 now implements the one bounded production client
 semantic world cache plus an independently budgeted Godot terrain/grouped-
-instance renderer; it is stopped for checkpoint review. Persistence/mutable-
+instance renderer. Its hardening pass now separates immutable structural builds
+from dynamic public refresh, maps semantic handles onto independent private
+render slots, validates snapshot lineage canonically, and uses integer-relative
+vertical anchors before float conversion. It remains stopped for checkpoint
+review. Persistence/mutable-
 overlay T0.9 and Network N1 remain later work.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.

@@ -133,6 +133,7 @@ public sealed class ClientWorldSemanticCache
     private readonly int[] _freeSlots;
     private readonly int[] _sortScratch;
     private readonly bool[] _affectedScratch;
+    private readonly int[] _affectedSlots;
     private readonly ushort[] _materials;
     private readonly int[] _heights;
     private readonly WorldFrozenStaticRecord[] _frozenStatics;
@@ -145,6 +146,7 @@ public sealed class ClientWorldSemanticCache
     private readonly WorldPublicRecord[] _publicScratch;
     private readonly WorldPublicDeltaRecord[] _acceptedDeltaScratch;
     private readonly KnowledgeEntry[] _knowledge;
+    private readonly int[] _knowledgeBuckets;
     private int _freeSlotCount;
     private int _knownIdentityCount;
     private PublicationEpoch _publicationEpoch;
@@ -152,6 +154,7 @@ public sealed class ClientWorldSemanticCache
     private ulong _appliedSnapshots;
     private ulong _appliedDeltas;
     private ulong _retiredChunks;
+    private int _affectedCount;
 
     public ClientWorldSemanticCache(
         BoundWorldPack baseWorld,
@@ -165,6 +168,7 @@ public sealed class ClientWorldSemanticCache
         _freeSlots = new int[limits.MaximumResidentChunks];
         _sortScratch = new int[limits.MaximumResidentChunks];
         _affectedScratch = new bool[limits.MaximumResidentChunks];
+        _affectedSlots = new int[limits.MaximumResidentChunks];
         _materials = new ushort[checked(limits.MaximumResidentChunks * TerrainChunkFormat.MaterialCellCount)];
         _heights = new int[checked(limits.MaximumResidentChunks * TerrainChunkFormat.HeightVertexCount)];
         _frozenStatics = new WorldFrozenStaticRecord[
@@ -180,6 +184,7 @@ public sealed class ClientWorldSemanticCache
         _publicScratch = new WorldPublicRecord[limits.MaximumPublicRecordsPerChunk];
         _acceptedDeltaScratch = new WorldPublicDeltaRecord[limits.MaximumPublicRecordsPerChunk];
         _knowledge = new KnowledgeEntry[limits.MaximumKnownPublicIdentities];
+        _knowledgeBuckets = new int[KnowledgeBucketCapacity(limits.MaximumKnownPublicIdentities)];
         for (int index = 0; index < _freeSlots.Length; index++)
             _freeSlots[index] = _freeSlots.Length - index - 1;
         _freeSlotCount = _freeSlots.Length;
@@ -277,12 +282,16 @@ public sealed class ClientWorldSemanticCache
             error = ClientSemanticChunkError.PublicRecordCapacityExceeded;
             return false;
         }
-        if (!CursorIsAdmissible(state.Key, publicationCursor))
+        if (!CursorIsAdmissible(state.Key, publicationCursor) ||
+            !publicationCursor.IsValid && !publicSnapshot.IsEmpty)
         {
-            error = ClientSemanticChunkError.StalePublication;
+            error = publicationCursor.IsValid
+                ? ClientSemanticChunkError.StalePublication
+                : ClientSemanticChunkError.InvalidPublication;
             return false;
         }
-        if (!TryPrepareSnapshot(state.Key, publicSnapshot, out int publicCount, out error))
+        if (!TryPrepareSnapshot(
+                state.Key, publicSnapshot, publicationCursor.Revision, out int publicCount, out error))
             return false;
 
         terrain.CopyMaterials(_materialScratch);
@@ -332,15 +341,17 @@ public sealed class ClientWorldSemanticCache
             return false;
         }
         ReadOnlySpan<WorldPublicRecord> rows = PublicSpan(slot)[..state.PublicRecordCount];
-        if (!TryPrepareSnapshot(state.Key, rows, out int preparedCount, out error)) return false;
+        if (!TryPrepareSnapshot(
+                state.Key, rows, state.PublicationCursor.Revision, out int preparedCount, out error))
+            return false;
         _publicScratch.AsSpan(0, preparedCount).CopyTo(PublicSpan(slot));
         state.PublicRecordCount = preparedCount;
         rows = PublicSpan(slot)[..preparedCount];
 
-        Array.Clear(_affectedScratch);
-        for (int index = 0; index < rows.Length; index++)
-            CommitKnowledge(WorldPublicOperation.Present, state.Key, rows[index], _affectedScratch);
         state.State = ClientSemanticChunkState.Resident;
+        ResetAffected();
+        for (int index = 0; index < rows.Length; index++)
+            CommitKnowledge(WorldPublicOperation.Present, state.Key, rows[index], slot);
         _publishedChunks++;
         RecomputeAffectedHashes(slot);
         error = ClientSemanticChunkError.None;
@@ -358,6 +369,7 @@ public sealed class ClientWorldSemanticCache
         ref ChunkSlot state = ref _slots[slot];
         if (batch.Status != ChunkPublicationReadStatus.Snapshot || batch.Key != state.Key ||
             batch.Count != records.Length ||
+            !batch.Cursor.IsValid ||
             !CursorIsAdmissible(state.Key, batch.Cursor))
         {
             error = ClientSemanticChunkError.InvalidPublication;
@@ -375,11 +387,27 @@ public sealed class ClientWorldSemanticCache
             error = ClientSemanticChunkError.PublicRecordCapacityExceeded;
             return false;
         }
-        if (!TryPrepareSnapshot(state.Key, records, out int preparedCount, out error)) return false;
+        if (!TryPrepareSnapshot(
+                state.Key, records, batch.Cursor.Revision, out int preparedCount, out error))
+            return false;
 
-        Array.Clear(_affectedScratch);
+        if (state.PublicationCursor.IsValid &&
+            state.PublicationCursor.Revision == batch.Cursor.Revision)
+        {
+            if (!PublicSpan(slot)[..state.PublicRecordCount]
+                    .SequenceEqual(_publicScratch.AsSpan(0, preparedCount)))
+            {
+                error = ClientSemanticChunkError.ContradictoryPublication;
+                return false;
+            }
+            error = ClientSemanticChunkError.None;
+            return true;
+        }
+
+        DetachKnowledgeLocations(slot);
+        ResetAffected();
         for (int index = 0; index < preparedCount; index++)
-            CommitKnowledge(WorldPublicOperation.Present, state.Key, _publicScratch[index], _affectedScratch);
+            CommitKnowledge(WorldPublicOperation.Present, state.Key, _publicScratch[index], slot);
         _publicScratch.AsSpan(0, preparedCount).CopyTo(PublicSpan(slot));
         state.PublicRecordCount = preparedCount;
         state.PublicationCursor = batch.Cursor;
@@ -422,7 +450,7 @@ public sealed class ClientWorldSemanticCache
         for (int index = 0; index < deltas.Length; index++)
         {
             WorldPublicDeltaRecord delta = deltas[index];
-            if (!TryValidateDelta(state.Key, delta, out error) ||
+            if (!TryValidateDelta(state.Key, batch.Cursor.Revision, delta, out error) ||
                 hasPrior && delta.Id.Index <= priorIndex)
             {
                 if (error == ClientSemanticChunkError.None)
@@ -464,7 +492,7 @@ public sealed class ClientWorldSemanticCache
         }
         SortPublicRecords(_publicScratch.AsSpan(0, scratchCount));
 
-        Array.Clear(_affectedScratch);
+        ResetAffected();
         for (int index = 0; index < acceptedCount; index++)
         {
             WorldPublicDeltaRecord delta = _acceptedDeltaScratch[index];
@@ -472,7 +500,7 @@ public sealed class ClientWorldSemanticCache
                 delta.Operation == WorldPublicOperation.Present
                     ? delta.Current
                     : new WorldPublicRecord(delta.Id, delta.EntityPublicVersion, 0, default, default, default, default),
-                _affectedScratch);
+                slot);
         }
         _publicScratch.AsSpan(0, scratchCount).CopyTo(PublicSpan(slot));
         state.PublicRecordCount = scratchCount;
@@ -489,6 +517,9 @@ public sealed class ClientWorldSemanticCache
         in ChunkPublicationBatch batch,
         out ClientSemanticChunkError error)
     {
+        // The caller must already have established that this response belongs to the current
+        // request/subscription attempt. The semantic cache fences handle generation and
+        // publication epoch; same-epoch transport request ordering belongs to the bridge.
         EnsureOwner();
         if (!TryResolveResident(handle, out int slot, out error)) return false;
         ref ChunkSlot state = ref _slots[slot];
@@ -506,6 +537,7 @@ public sealed class ClientWorldSemanticCache
             return false;
         }
 
+        DetachKnowledgeLocations(slot);
         state.PublicRecordCount = 0;
         state.PublicationCursor = default;
         if (!_publicationEpoch.IsValid) _publicationEpoch = sourceEpoch;
@@ -522,6 +554,7 @@ public sealed class ClientWorldSemanticCache
         if (_publicationEpoch == epoch) return;
         _publicationEpoch = epoch;
         Array.Clear(_knowledge);
+        Array.Clear(_knowledgeBuckets);
         _knownIdentityCount = 0;
         for (int slot = 0; slot < _slots.Length; slot++)
         {
@@ -539,6 +572,7 @@ public sealed class ClientWorldSemanticCache
         if (!TryResolve(handle, out int slot)) return false;
         ref ChunkSlot state = ref _slots[slot];
         if (state.State is ClientSemanticChunkState.Absent or ClientSemanticChunkState.Retiring) return false;
+        DetachKnowledgeLocations(slot);
         state.State = ClientSemanticChunkState.Retiring;
         return true;
     }
@@ -692,6 +726,7 @@ public sealed class ClientWorldSemanticCache
     private bool TryPrepareSnapshot(
         SpatialChunkKey key,
         ReadOnlySpan<WorldPublicRecord> records,
+        ChunkPublicationRevision maximumRevision,
         out int preparedCount,
         out ClientSemanticChunkError error)
     {
@@ -707,8 +742,8 @@ public sealed class ClientWorldSemanticCache
         for (int index = 0; index < records.Length; index++)
         {
             WorldPublicRecord record = records[index];
-            if (!record.Id.IsValid || record.EntityPublicVersion == 0 || record.PrefabId == 0 ||
-                record.Position.Chunk != key.Coord || hasPrior && record.Id.Index <= priorIndex)
+            if (!IsCanonicalPresent(record, key, maximumRevision) ||
+                hasPrior && record.Id.Index <= priorIndex)
             {
                 error = ClientSemanticChunkError.InvalidPublication;
                 return false;
@@ -738,16 +773,19 @@ public sealed class ClientWorldSemanticCache
 
     private static bool TryValidateDelta(
         SpatialChunkKey key,
+        ChunkPublicationRevision maximumRevision,
         in WorldPublicDeltaRecord delta,
         out ClientSemanticChunkError error)
     {
         if (!delta.Id.IsValid || delta.EntityPublicVersion == 0 ||
+            (delta.Fields & ~WorldPublicFieldMask.Complete) != 0 ||
             delta.Operation is not (WorldPublicOperation.Present or WorldPublicOperation.Remove) ||
             delta.Operation == WorldPublicOperation.Present &&
             (delta.Current.Id != delta.Id ||
              delta.Current.EntityPublicVersion != delta.EntityPublicVersion ||
-             delta.Current.PrefabId == 0 ||
-             delta.Current.Position.Chunk != key.Coord))
+             !IsCanonicalPresent(delta.Current, key, maximumRevision)) ||
+            delta.Operation == WorldPublicOperation.Remove &&
+            (delta.Fields != WorldPublicFieldMask.None || delta.Current != default))
         {
             error = ClientSemanticChunkError.InvalidPublication;
             return false;
@@ -755,6 +793,19 @@ public sealed class ClientWorldSemanticCache
         error = ClientSemanticChunkError.None;
         return true;
     }
+
+    private static bool IsCanonicalPresent(
+        in WorldPublicRecord record,
+        SpatialChunkKey key,
+        ChunkPublicationRevision maximumRevision) =>
+        record.Id.IsValid &&
+        record.EntityPublicVersion != 0 &&
+        record.PrefabId != 0 &&
+        record.Position.Chunk == key.Coord &&
+        (record.StateFlags & ~WorldPublicStateFlags.Visible) == 0 &&
+        record.LastChangedRevision.IsValid &&
+        maximumRevision.IsValid &&
+        record.LastChangedRevision.Value <= maximumRevision.Value;
 
     private KnowledgeDecision CompareKnowledge(
         WorldPublicOperation operation,
@@ -788,25 +839,49 @@ public sealed class ClientWorldSemanticCache
         WorldPublicOperation operation,
         SpatialChunkKey key,
         in WorldPublicRecord record,
-        bool[] affected)
+        int targetSlot)
     {
         int knowledge = FindKnowledge(record.Id.Index);
         if (knowledge < 0)
         {
             knowledge = FindFreeKnowledge();
             _knownIdentityCount++;
+            InsertKnowledge(record.Id.Index, knowledge);
         }
-        for (int slot = 0; slot < _slots.Length; slot++)
+        if (_knowledge[knowledge].Used &&
+            TryResolve(_knowledge[knowledge].ResidentHandle, out int priorSlot) &&
+            _slots[priorSlot].State == ClientSemanticChunkState.Resident)
         {
-            if (_slots[slot].State != ClientSemanticChunkState.Resident) continue;
-            int row = FindPublic(PublicSpan(slot)[.._slots[slot].PublicRecordCount], record.Id.Index);
-            if (row < 0) continue;
-            RemovePublicAt(slot, row);
-            affected[slot] = true;
+            int row = FindPublic(
+                PublicSpan(priorSlot)[.._slots[priorSlot].PublicRecordCount], record.Id.Index);
+            if (row >= 0)
+            {
+                RemovePublicAt(priorSlot, row);
+                MarkAffected(priorSlot);
+            }
         }
+        ClientSemanticChunkHandle residentHandle = default;
+        if (operation == WorldPublicOperation.Present &&
+            _slots[targetSlot].State == ClientSemanticChunkState.Resident &&
+            _slots[targetSlot].Key == key)
+            residentHandle = Handle(targetSlot);
         _knowledge[knowledge] = new KnowledgeEntry(
             true, record.Id.Index, record.Id.Generation, record.EntityPublicVersion,
-            operation, key, operation == WorldPublicOperation.Present ? record : default);
+            operation, key, operation == WorldPublicOperation.Present ? record : default,
+            residentHandle);
+    }
+
+    private void DetachKnowledgeLocations(int slot)
+    {
+        ClientSemanticChunkHandle handle = Handle(slot);
+        ReadOnlySpan<WorldPublicRecord> records =
+            PublicSpan(slot)[.._slots[slot].PublicRecordCount];
+        for (int row = 0; row < records.Length; row++)
+        {
+            int knowledge = FindKnowledge(records[row].Id.Index);
+            if (knowledge >= 0 && _knowledge[knowledge].ResidentHandle == handle)
+                _knowledge[knowledge] = _knowledge[knowledge] with { ResidentHandle = default };
+        }
     }
 
     private int FindFreeKnowledge()
@@ -818,9 +893,42 @@ public sealed class ClientWorldSemanticCache
 
     private int FindKnowledge(uint publicIndex)
     {
-        for (int index = 0; index < _knowledge.Length; index++)
-            if (_knowledge[index].Used && _knowledge[index].Index == publicIndex) return index;
+        int mask = _knowledgeBuckets.Length - 1;
+        int bucket = unchecked((int)(publicIndex * 2_654_435_761U)) & mask;
+        for (int probe = 0; probe < _knowledgeBuckets.Length; probe++)
+        {
+            int entry = _knowledgeBuckets[bucket];
+            if (entry == 0) return -1;
+            int knowledge = entry - 1;
+            if (_knowledge[knowledge].Used && _knowledge[knowledge].Index == publicIndex)
+                return knowledge;
+            bucket = (bucket + 1) & mask;
+        }
         return -1;
+    }
+
+    private void InsertKnowledge(uint publicIndex, int knowledge)
+    {
+        int mask = _knowledgeBuckets.Length - 1;
+        int bucket = unchecked((int)(publicIndex * 2_654_435_761U)) & mask;
+        for (int probe = 0; probe < _knowledgeBuckets.Length; probe++)
+        {
+            if (_knowledgeBuckets[bucket] == 0)
+            {
+                _knowledgeBuckets[bucket] = knowledge + 1;
+                return;
+            }
+            bucket = (bucket + 1) & mask;
+        }
+        throw new InvalidOperationException("The bounded client knowledge index is full.");
+    }
+
+    private static int KnowledgeBucketCapacity(int entries)
+    {
+        int required = checked(entries * 2);
+        int capacity = 1;
+        while (capacity < required) capacity = checked(capacity << 1);
+        return capacity;
     }
 
     private void RemovePublicAt(int slot, int row)
@@ -834,11 +942,29 @@ public sealed class ClientWorldSemanticCache
 
     private void RecomputeAffectedHashes(int primary)
     {
-        _affectedScratch[primary] = true;
-        for (int slot = 0; slot < _slots.Length; slot++)
-            if (_affectedScratch[slot] &&
-                _slots[slot].State is ClientSemanticChunkState.Staged or ClientSemanticChunkState.Resident)
+        MarkAffected(primary);
+        for (int index = 0; index < _affectedCount; index++)
+        {
+            int slot = _affectedSlots[index];
+            if (_slots[slot].State is ClientSemanticChunkState.Staged or ClientSemanticChunkState.Resident)
                 _slots[slot].SemanticHash = ComputeChunkHash(slot);
+            _affectedScratch[slot] = false;
+        }
+        _affectedCount = 0;
+    }
+
+    private void MarkAffected(int slot)
+    {
+        if (_affectedScratch[slot]) return;
+        _affectedScratch[slot] = true;
+        _affectedSlots[_affectedCount++] = slot;
+    }
+
+    private void ResetAffected()
+    {
+        for (int index = 0; index < _affectedCount; index++)
+            _affectedScratch[_affectedSlots[index]] = false;
+        _affectedCount = 0;
     }
 
     private ClientSemanticHash ComputeChunkHash(int slot)
@@ -1039,7 +1165,7 @@ public sealed class ClientWorldSemanticCache
 
     private long CalculateReservedBytes() => checked(
         (long)_slots.Length * Unsafe.SizeOf<ChunkSlot>() +
-        (long)(_freeSlots.Length + _sortScratch.Length) * sizeof(int) +
+        (long)(_freeSlots.Length + _sortScratch.Length + _affectedSlots.Length) * sizeof(int) +
         _affectedScratch.Length * sizeof(bool) +
         (long)_materials.Length * sizeof(ushort) +
         (long)_heights.Length * sizeof(int) +
@@ -1052,7 +1178,8 @@ public sealed class ClientWorldSemanticCache
         (long)_multiFragmentScratch.Length * Unsafe.SizeOf<WorldMultiFragmentRecord>() +
         (long)_publicScratch.Length * Unsafe.SizeOf<WorldPublicRecord>() +
         (long)_acceptedDeltaScratch.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
-        (long)_knowledge.Length * Unsafe.SizeOf<KnowledgeEntry>());
+        (long)_knowledge.Length * Unsafe.SizeOf<KnowledgeEntry>() +
+        (long)_knowledgeBuckets.Length * sizeof(int));
 
     private void EnsureOwner()
     {
@@ -1086,7 +1213,8 @@ public sealed class ClientWorldSemanticCache
         ulong Version,
         WorldPublicOperation Operation,
         SpatialChunkKey Key,
-        WorldPublicRecord Current);
+        WorldPublicRecord Current,
+        ClientSemanticChunkHandle ResidentHandle);
 
     private enum KnowledgeDecision : byte
     {

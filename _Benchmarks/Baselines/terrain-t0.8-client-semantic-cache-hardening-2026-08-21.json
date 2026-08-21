@@ -1,0 +1,117 @@
+{
+  "Schema": "terrain-t0.8-client-semantic-cache-hardening-v2",
+  "CapturedAtUtc": "2026-08-21T15:16:46.2838776+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "Operations": 10000,
+  "Shape": {
+    "Scope": "synthetic production-client semantic residency; no Network N1 and no Godot resource cost",
+    "WorldChunks": 512,
+    "ResidentChunks": 32,
+    "ResidentFixtureReservedBytes": 258756,
+    "DefaultLimitsReservedBytes": 11154692,
+    "HandleBytes": 8,
+    "InfoBytes": 96
+  },
+  "Timings": [
+    {
+      "Name": "resident-world-hash-32",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 288.3364238095238,
+      "P50NanosecondsPerOperation": 288.5682,
+      "P95NanosecondsPerOperation": 291.7632,
+      "MaximumNanosecondsPerOperation": 292.2481,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 9615853703140080928
+    },
+    {
+      "Name": "borrow-resident-pages-32",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 943.7421476190476,
+      "P50NanosecondsPerOperation": 943.9648,
+      "P95NanosecondsPerOperation": 955.7657,
+      "MaximumNanosecondsPerOperation": 961.9575,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 12480000
+    },
+    {
+      "Name": "request-stage-publish-retire",
+      "Operations": 1000,
+      "MeanNanosecondsPerOperation": 13317.410571428572,
+      "P50NanosecondsPerOperation": 13312.45,
+      "P95NanosecondsPerOperation": 13458.428,
+      "MaximumNanosecondsPerOperation": 13464.538,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 8588785857095023263
+    },
+    {
+      "Name": "one-public-delta",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4864.396480952381,
+      "P50NanosecondsPerOperation": 4848.6426,
+      "P95NanosecondsPerOperation": 4963.7785,
+      "MaximumNanosecondsPerOperation": 5018.8319,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 17908023708679570717
+    },
+    {
+      "Name": "one-public-delta-resident-1",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4849.774161904761,
+      "P50NanosecondsPerOperation": 4823.4048,
+      "P95NanosecondsPerOperation": 4933.6807,
+      "MaximumNanosecondsPerOperation": 4947.3106,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 141278607456833190
+    },
+    {
+      "Name": "one-public-delta-resident-32",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4807.485195238095,
+      "P50NanosecondsPerOperation": 4799.4241,
+      "P95NanosecondsPerOperation": 4860.1024,
+      "MaximumNanosecondsPerOperation": 4862.4994,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 2583071585869181539
+    },
+    {
+      "Name": "one-public-delta-resident-128",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4876.427771428571,
+      "P50NanosecondsPerOperation": 4874.2073,
+      "P95NanosecondsPerOperation": 4928.5448,
+      "MaximumNanosecondsPerOperation": 4935.0797,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 15645596659615401682
+    },
+    {
+      "Name": "one-public-delta-resident-512",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4902.781919047619,
+      "P50NanosecondsPerOperation": 4913.6949,
+      "P95NanosecondsPerOperation": 4929.0878,
+      "MaximumNanosecondsPerOperation": 5000.5041,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 182750897771487360
+    },
+    {
+      "Name": "one-public-delta-resident-512-near-full-knowledge",
+      "Operations": 10000,
+      "MeanNanosecondsPerOperation": 4831.343804761903,
+      "P50NanosecondsPerOperation": 4830.2078,
+      "P95NanosecondsPerOperation": 4838.2327,
+      "MaximumNanosecondsPerOperation": 4861.3464,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 15138514874482647861
+    }
+  ]
+}

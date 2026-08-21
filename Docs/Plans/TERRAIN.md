@@ -2559,6 +2559,83 @@ JIT/resource cost. Scene-tree replace/commit is 440.85 us p95 in this short run.
 These figures prove bounded native ownership and expose cold tails; they are not
 GPU frame/render-quality or Release exported-game performance claims.
 
+### T0.8 hardening stop — 2026-08-21
+
+The implementation-stop artifacts above remain immutable historical evidence.
+The checkpoint review found no ownership redesign, but it did reject several
+behaviors as freeze contracts. This hardening pass corrects them without starting
+T0.9.
+
+An actual publication snapshot now requires a valid epoch/key/revision cursor.
+Only an empty initial base-world stage may omit publication lineage. Snapshot
+records reject unknown state flags, invalid change revisions, and change revisions
+beyond the batch cursor. For one resident key, an equal cursor revision is
+idempotent only when the complete page remaining after normal global supersession
+filtering is identical; a different page at the same revision is contradictory,
+not a last-writer-wins replacement. `ChunkAbsent` remains an authoritative empty
+semantic result, but its caller must first validate that the response belongs to
+the current request/subscription attempt. Same-epoch request ordering is an N1
+bridge responsibility.
+
+The production cache retains one bounded open-addressed public-Index lookup. Each
+knowledge row may point to the exact current client semantic handle holding that
+identity, and changed hashes are recomputed from a bounded touched-slot list.
+These are private cache mechanics, not public identity or a general identity
+service. They remove scans across every resident chunk/knowledge row while
+preserving generation/version rules and zero warmed allocation. A deterministic
+5,000-operation model oracle now exercises request/stage/publish/retire/reuse,
+snapshots, deltas, equal-revision conflict, public-generation supersession, epoch
+reset, absent/resident changes, and capacity failure.
+
+Godot presentation no longer interprets `ClientSemanticChunkHandle.Index` as a
+render-array index. A semantic-handle association addresses every admitted client
+semantic slot, while separate private render slots enforce
+`MaximumRenderChunks` as concurrent presentation capacity. A high-index semantic
+slot can therefore occupy private render slot zero after capacity becomes free.
+Expected render/group pressure is named and rejected before constructing native
+resources.
+
+For one T0.8 semantic-handle lifetime, base terrain, frozen statics, and static
+Multi fragments are immutable. A semantic-hash change on that same handle now
+rebuilds only the public layer; the structural node and terrain resource retain
+identity. T0.9 must later earn explicit structural-overlay revision/hash semantics
+rather than routing mutable structure through this public-refresh rule.
+
+Each render chunk chooses the prepared terrain minimum as an integer Y anchor.
+Terrain vertices, static transforms, and public transforms subtract that anchor
+before converting to float; the root applies `anchor - renderOriginY`. Rebase
+still changes roots only. The native regression at absolute Y 2,000,000,000 mm
+preserves independently observable 5 mm static and 10 mm public offsets.
+
+The Release/tiering-disabled hardening evidence is
+[`terrain-t0.8-client-semantic-cache-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-client-semantic-cache-hardening-2026-08-21.json):
+
+```text
+public delta, 1 resident                         4.850 us mean / 4.934 us p95
+public delta, 32 residents                       4.807 us mean / 4.860 us p95
+public delta, 128 residents                      4.876 us mean / 4.929 us p95
+public delta, 512 residents                      4.903 us mean / 4.929 us p95
+public delta, 512 / near-full identity knowledge 4.831 us mean / 4.838 us p95
+```
+
+All observations allocate 0 B when warm. The result is deliberately reported as
+a scaling matrix: client public application no longer bends with server-scale
+identity address space or resident-chunk count in this admitted workload.
+
+The separate native hardening evidence is
+[`terrain-t0.8-godot-world-streaming-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-godot-world-streaming-hardening-2026-08-21.json).
+It uses four terrain materials, twelve heterogeneous frozen statics, two Multi
+fragments, and three public prefab groups per chunk over ten forward/reverse
+cycles. The observed 103 full builds have a 3.209 ms p95; 32 public-only
+refreshes have a 28.070 us p95. The 24.194 ms maximum still includes Debug/Mono
+first-use effects. Renderer bookkeeping returns to its root-only/zero-resource
+state. Godot's headless performance monitors stayed at one resource and zero
+render-buffer bytes throughout, so they provide a stable but inert series in this
+environment—not stronger proof of immediate native reclamation. Exported/rendered
+GPU evidence remains a later gate.
+
+T0.8 remains stopped for checkpoint re-review. T0.9 has not started.
+
 ## T0.9 — persistence and mutable-world seam
 
 The immutable base `WorldPack` is content, not a gigantic save snapshot. Durable

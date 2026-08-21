@@ -1,0 +1,61 @@
+{
+  "schema": "terrain-t0.8-godot-world-streaming-hardening-v2",
+  "captured_at_local": "2026-08-21",
+  "engine": "Godot 4.7.1 Mono headless",
+  "managed_configuration": "Debug",
+  "scope": "synthetic heterogeneous 8-chunk local WorldPack churn; native Godot ownership and presentation-hardening evidence, not visual GPU or production-content evidence",
+  "fixture": {
+    "world_chunks": 8,
+    "resident_window_chunks": 3,
+    "terrain_materials_per_chunk": 4,
+    "frozen_statics_per_chunk": 12,
+    "multi_fragments_per_chunk": 2,
+    "public_records_per_chunk": 3,
+    "forward_reverse_cycles": 10,
+    "public_only_refreshes": 32,
+    "maximum_builds_per_frame": 1,
+    "maximum_retirements_per_frame": 1
+  },
+  "result": {
+    "completed_full_builds": 103,
+    "completed_public_refreshes": 32,
+    "completed_retirements": 103,
+    "rebases": 1,
+    "full_mesh_build_p95_microseconds": 3209.128,
+    "full_mesh_or_public_work_maximum_microseconds": 24194.453,
+    "public_refresh_p95_microseconds": 28.070,
+    "scene_resource_commit_p95_microseconds": 7.010,
+    "scene_resource_commit_maximum_microseconds": 1220.498,
+    "budgeted_frame_p95_microseconds": 2999.660,
+    "budgeted_frame_maximum_microseconds": 24985.235,
+    "semantic_cache_reserved_bytes": 51400,
+    "native_resource_monitor_baseline": 1,
+    "native_resource_monitor_peak": 1,
+    "native_resource_monitor_after_disposal": 1,
+    "render_buffer_monitor_baseline_bytes": 0,
+    "render_buffer_monitor_peak_bytes": 0,
+    "render_buffer_monitor_after_disposal_bytes": 0,
+    "final_active_render_chunks": 0,
+    "final_active_nodes_before_renderer_disposal": 1,
+    "final_active_resources": 0
+  },
+  "hardening": {
+    "public_refresh_preserved_structural_node_identity": true,
+    "public_refresh_preserved_terrain_resource_identity": true,
+    "semantic_slot_index_is_render_slot_index": false,
+    "high_semantic_slot_rendered_with_one_private_render_slot": true,
+    "render_capacity_rejected_before_construction": true,
+    "group_capacity_rejected_before_construction": true,
+    "high_elevation_integer_y_anchor_preserved_5mm_and_10mm_offsets": true,
+    "resource_or_node_leak_observed_by_renderer_bookkeeping": false,
+    "headless_native_resource_monitor_exposed_per_fixture_resource_changes": false,
+    "cold_jit_or_first_resource_cost_included_in_maximum": true
+  },
+  "interpretation": {
+    "public_only_refresh_is_not_a_full_chunk_rebuild": true,
+    "semantic_render_and_visibility_residency_are_separate": true,
+    "native_monitor_series_was_stable_but_inert_in_headless_mode": true,
+    "native_monitor_result_is_not_proof_of_immediate_resource_reclamation": true,
+    "debug_headless_tails_are_not_exported_game_or_gpu_claims": true
+  }
+}

@@ -10,6 +10,13 @@ space. It copies immutable base terrain/statics/Multi fragments from a bound
 `WorldPack`, then transactionally applies chunk-bound publication
 snapshot/delta semantics. Client-local handles are generation fenced; public
 generation/version knowledge is global across resident chunk pages.
+Actual snapshots require valid chunk-bound cursors; a default cursor is admitted
+only for an empty initial base stage. Equal revision is idempotent only when the
+post-supersession semantic page is identical. Known state flags and change
+revisions are validated before mutation. A bounded public-index lookup, resident-
+location hint, and touched-slot list keep public application shaped by changed
+client-resident state rather than a scan of all resident chunks or all retained
+identity knowledge.
 
 The cache contains no ECS entities, server mutable storage, connections,
 packets, Godot nodes, RIDs, or resources. Borrowed chunk views remain valid only
@@ -18,3 +25,8 @@ also routes through this client-world boundary; T0.8 resolves immutable base
 content, while a later client overlay can change that private resolution without
 changing presentation callers. Rendering and visibility are independently owned
 by the engine adapter.
+
+`TryApplyChunkAbsent` assumes its local/remote bridge already validated the
+current request/subscription attempt. The cache fences semantic-handle generation
+and publication epoch; same-epoch transport request ordering belongs to the
+future N1 bridge rather than Client Core.

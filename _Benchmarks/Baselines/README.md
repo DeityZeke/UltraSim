@@ -124,12 +124,17 @@ Useful current anchors can be located by their embedded workload or filename:
   stop observation;
 - `terrain-t0.8-client-semantic-cache-*` — Release/tiering-disabled production
   client semantic-cache lifecycle, borrowed reads, hashing, delta application,
-  allocation, and client-resident reservation evidence. It excludes Network N1
-  and Godot resource cost;
+  allocation, and client-resident reservation evidence. The `hardening` artifact
+  adds the 1/32/128/512-resident and near-full-knowledge matrix after bounded
+  identity/location indexing removed population-shaped public-apply scans. It
+  excludes Network N1 and Godot resource cost;
 - `terrain-t0.8-godot-world-streaming-*` — native Godot headless bounded-walk
   evidence for independent semantic/render/visibility state, grouped nodes,
   floating-origin presentation, frame work budgets, and complete resource
-  retirement. Its Debug first-use tails are not exported-game/GPU claims;
+  retirement. The `hardening` artifact adds heterogeneous terrain/static/Multi/
+  public content, public-only refresh, independent private render slots, expected
+  capacity rejection, extreme-Y precision, longer churn, and native monitor
+  observations. Its Debug first-use tails are not exported-game/GPU claims;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

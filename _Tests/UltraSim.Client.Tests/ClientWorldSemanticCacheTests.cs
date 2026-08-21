@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using UltraSim.Client.Core;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
@@ -13,7 +14,9 @@ internal static class ClientWorldSemanticCacheTests
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
         PublicationKnowledgeIsGlobalAndFenced(world);
+        SnapshotLineageAndCanonicality(world);
         PublicationEpochReplacementIsExplicit(world);
+        DeterministicClientCacheChurnMatchesReference(world);
     }
 
     private static void LifecycleAndDeterministicHash(BoundWorldPack world)
@@ -82,7 +85,10 @@ internal static class ClientWorldSemanticCacheTests
         True(cache.TryApplyDelta(handleA, DeltaBatch(a, epoch, 2, 1), [removeA], out _));
         Equal(0, PublicCount(cache, handleA));
 
-        WorldPublicRecord b3 = Public(5, 1, 3, b, 400);
+        WorldPublicRecord b3 = Public(5, 1, 3, b, 400) with
+        {
+            LastChangedRevision = new ChunkPublicationRevision(2),
+        };
         WorldPublicDeltaRecord presentB = new(
             WorldPublicOperation.Present, WorldPublicFieldMask.Complete,
             b3.Id, b3.EntityPublicVersion, b3);
@@ -150,6 +156,243 @@ internal static class ClientWorldSemanticCacheTests
         True(cache.TryApplySnapshot(handle, batch, [replacement], out _));
         Equal(newEpoch, cache.GetSnapshot().PublicationEpoch);
         Equal(replacement, Resident(cache, handle).PublicRecords[0]);
+    }
+
+    private static void SnapshotLineageAndCanonicality(BoundWorldPack world)
+    {
+        var cache = new ClientWorldSemanticCache(world, new(2, 2, 2, 4, 8));
+        SpatialChunkKey key = Key(0, 0);
+        PublicationEpoch epoch = PublicationEpoch.Create();
+        WorldPublicRecord canonical = Public(8, 1, 5, key, 700);
+        ClientSemanticChunkHandle handle = Publish(cache, key, epoch, 5, [canonical]);
+        ClientSemanticHash before = Info(cache, handle).SemanticHash;
+        var equal = new ChunkPublicationBatch(
+            ChunkPublicationReadStatus.Snapshot, key,
+            new ChunkPublicationCursor(epoch, key, new ChunkPublicationRevision(5)),
+            new ChunkPublicationRevision(1), 1, 1);
+        True(cache.TryApplySnapshot(handle, equal, [canonical], out _));
+        Equal(before, Info(cache, handle).SemanticHash);
+
+        var contradictory = equal with { Count = 0 };
+        False(cache.TryApplySnapshot(handle, contradictory, [], out ClientSemanticChunkError conflict));
+        Equal(ClientSemanticChunkError.ContradictoryPublication, conflict);
+        Equal(canonical, Resident(cache, handle).PublicRecords[0]);
+
+        var missingCursor = equal with { Cursor = default };
+        False(cache.TryApplySnapshot(handle, missingCursor, [canonical], out ClientSemanticChunkError missing));
+        Equal(ClientSemanticChunkError.InvalidPublication, missing);
+
+        SpatialChunkKey second = Key(1, 0);
+        True(cache.TryRequest(second, out ClientSemanticChunkHandle staged, out _));
+        WorldPublicRecord secondRecord = Public(9, 1, 1, second, 800);
+        False(cache.TryStageFromBaseWorld(staged, [secondRecord], default,
+            out ClientSemanticChunkError stagedMissing));
+        Equal(ClientSemanticChunkError.InvalidPublication, stagedMissing);
+
+        var next = equal with
+        {
+            Cursor = new ChunkPublicationCursor(epoch, key, new ChunkPublicationRevision(6)),
+        };
+        WorldPublicRecord unknownFlags = canonical with
+        {
+            EntityPublicVersion = 6,
+            StateFlags = (WorldPublicStateFlags)0x8000,
+            LastChangedRevision = new ChunkPublicationRevision(6),
+        };
+        False(cache.TryApplySnapshot(handle, next, [unknownFlags], out ClientSemanticChunkError flags));
+        Equal(ClientSemanticChunkError.InvalidPublication, flags);
+        WorldPublicRecord zeroRevision = unknownFlags with
+        {
+            StateFlags = WorldPublicStateFlags.Visible,
+            LastChangedRevision = default,
+        };
+        False(cache.TryApplySnapshot(handle, next, [zeroRevision], out ClientSemanticChunkError zero));
+        Equal(ClientSemanticChunkError.InvalidPublication, zero);
+        WorldPublicRecord futureRevision = zeroRevision with
+        {
+            LastChangedRevision = new ChunkPublicationRevision(7),
+        };
+        False(cache.TryApplySnapshot(handle, next, [futureRevision], out ClientSemanticChunkError future));
+        Equal(ClientSemanticChunkError.InvalidPublication, future);
+        Equal(before, Info(cache, handle).SemanticHash);
+    }
+
+    private static void DeterministicClientCacheChurnMatchesReference(BoundWorldPack world)
+    {
+        const int operations = 5_000;
+        var cache = new ClientWorldSemanticCache(world, new(4, 2, 2, 4, 64));
+        var handles = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
+        var expected = new Dictionary<SpatialChunkKey, List<WorldPublicRecord>>();
+        var revisions = new Dictionary<SpatialChunkKey, ulong>();
+        var versions = new ulong[64];
+        Array.Fill(versions, 1UL);
+        PublicationEpoch epoch = PublicationEpoch.Create();
+        uint random = 0x7A08_2026;
+        uint sharedGeneration = 1;
+
+        Admit(Key(-1, 0));
+        Admit(Key(0, 0));
+        Admit(Key(1, 0));
+        Admit(Key(-1, 1));
+        for (int operation = 0; operation < operations; operation++)
+        {
+            random = unchecked(random * 1_664_525U + 1_013_904_223U);
+            SpatialChunkKey key = handles.Keys.Order().ElementAt((int)(random % (uint)handles.Count));
+            ClientSemanticChunkHandle handle = handles[key];
+            switch (operation % 8)
+            {
+                case 0:
+                case 1:
+                {
+                    uint identityIndex = checked((uint)((key.Coord.X + 1) * 3 + key.Coord.Z + 2));
+                    ulong version = ++versions[identityIndex];
+                    WorldPublicRecord record = Public(identityIndex, 1, version, key,
+                        checked((ushort)(500 + version % 4_000)));
+                    ApplyPresent(key, handle, record);
+                    break;
+                }
+                case 2:
+                {
+                    if (!Info(cache, handle).PublicationCursor.IsValid) break;
+                    WorldPublicRecord[] rows = expected[key].OrderBy(value => value.Id).ToArray();
+                    ChunkPublicationCursor cursor = Info(cache, handle).PublicationCursor;
+                    var batch = new ChunkPublicationBatch(
+                        ChunkPublicationReadStatus.Snapshot, key, cursor,
+                        new ChunkPublicationRevision(1), rows.Length, rows.Length);
+                    True(cache.TryApplySnapshot(handle, batch, rows, out _));
+                    if (rows.Length != 0)
+                    {
+                        ClientSemanticHash before = Info(cache, handle).SemanticHash;
+                        WorldPublicRecord[] conflict = (WorldPublicRecord[])rows.Clone();
+                        conflict[0] = conflict[0] with { PrefabId = conflict[0].PrefabId + 1 };
+                        False(cache.TryApplySnapshot(handle, batch, conflict,
+                            out ClientSemanticChunkError contradiction));
+                        Equal(ClientSemanticChunkError.ContradictoryPublication, contradiction);
+                        Equal(before, Info(cache, handle).SemanticHash);
+                    }
+                    break;
+                }
+                case 3:
+                {
+                    var absent = new ChunkPublicationBatch(
+                        ChunkPublicationReadStatus.ChunkAbsent, key, default, default, 0, 0);
+                    True(cache.TryApplyChunkAbsent(handle, epoch, absent, out _));
+                    expected[key].Clear();
+                    revisions[key] = 0;
+                    break;
+                }
+                case 4:
+                {
+                    WorldPublicRecord shared = Public(60, ++sharedGeneration, 1, key,
+                        checked((ushort)(1_000 + sharedGeneration % 5_000)));
+                    ApplyPresent(key, handle, shared);
+                    foreach (List<WorldPublicRecord> page in expected.Values)
+                        page.RemoveAll(value => value.Id.Index == shared.Id.Index && value.Id != shared.Id);
+                    break;
+                }
+                case 5:
+                {
+                    True(cache.BeginRetire(handle));
+                    True(cache.CompleteRetire(handle));
+                    handles.Remove(key);
+                    expected.Remove(key);
+                    revisions.Remove(key);
+                    for (int candidate = -1; candidate <= 1; candidate++)
+                    {
+                        for (int z = -1; z <= 1; z++)
+                        {
+                            SpatialChunkKey replacement = Key(candidate, z);
+                            if (!handles.ContainsKey(replacement))
+                            {
+                                Admit(replacement);
+                                candidate = 2;
+                                break;
+                            }
+                        }
+                    }
+                    False(cache.TryGetInfo(handle, out _));
+                    break;
+                }
+                case 6:
+                {
+                    SpatialChunkKey unavailable = Key(1, 1);
+                    if (handles.ContainsKey(unavailable)) unavailable = Key(-1, -1);
+                    if (!handles.ContainsKey(unavailable))
+                    {
+                        ClientSemanticHash before = cache.GetSnapshot().WorldSemanticHash;
+                        False(cache.TryRequest(unavailable, out _, out ClientSemanticChunkError capacity));
+                        Equal(ClientSemanticChunkError.CapacityExceeded, capacity);
+                        Equal(before, cache.GetSnapshot().WorldSemanticHash);
+                    }
+                    break;
+                }
+                case 7:
+                    if (operation != 0 && operation % 127 == 0)
+                    {
+                        epoch = PublicationEpoch.Create();
+                        cache.ResetPublicationEpoch(epoch);
+                        foreach (SpatialChunkKey resident in handles.Keys.ToArray())
+                        {
+                            expected[resident].Clear();
+                            revisions[resident] = 0;
+                        }
+                    }
+                    break;
+            }
+            AssertReference();
+        }
+
+        void Admit(SpatialChunkKey key)
+        {
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            True(cache.TryStageFromBaseWorld(handle, [], default, out _));
+            True(cache.TryPublish(handle, out _));
+            handles.Add(key, handle);
+            expected.Add(key, []);
+            revisions.Add(key, 0);
+        }
+
+        void ApplyPresent(
+            SpatialChunkKey key,
+            ClientSemanticChunkHandle handle,
+            WorldPublicRecord record)
+        {
+            ulong revision = ++revisions[key];
+            record = record with { LastChangedRevision = new ChunkPublicationRevision(revision) };
+            foreach (List<WorldPublicRecord> retained in expected.Values)
+                retained.RemoveAll(value => value.Id.Index == record.Id.Index);
+            List<WorldPublicRecord> page = expected[key];
+            page.Add(record);
+            page.Sort((left, right) => left.Id.CompareTo(right.Id));
+            ClientSemanticChunkInfo info = Info(cache, handle);
+            if (!info.PublicationCursor.IsValid)
+            {
+                var batch = new ChunkPublicationBatch(
+                    ChunkPublicationReadStatus.Snapshot, key,
+                    new ChunkPublicationCursor(epoch, key, new ChunkPublicationRevision(revision)),
+                    new ChunkPublicationRevision(revision), page.Count, page.Count);
+                True(cache.TryApplySnapshot(handle, batch, CollectionsMarshal.AsSpan(page), out _));
+            }
+            else
+            {
+                var delta = new WorldPublicDeltaRecord(
+                    WorldPublicOperation.Present, WorldPublicFieldMask.Complete,
+                    record.Id, record.EntityPublicVersion, record);
+                True(cache.TryApplyDelta(handle, DeltaBatch(key, epoch, revision, 1), [delta], out _));
+            }
+        }
+
+        void AssertReference()
+        {
+            Equal(handles.Count, cache.GetSnapshot().ResidentChunks);
+            foreach ((SpatialChunkKey key, ClientSemanticChunkHandle handle) in handles)
+            {
+                True(cache.TryGetResidentView(handle, out ClientSemanticChunkView view));
+                WorldPublicRecord[] rows = expected[key].OrderBy(value => value.Id).ToArray();
+                Equal(rows.Length, view.PublicRecords.Length);
+                for (int row = 0; row < rows.Length; row++) Equal(rows[row], view.PublicRecords[row]);
+            }
+        }
     }
 
     private static ClientSemanticChunkHandle Publish(

@@ -170,6 +170,16 @@ measures about 35.2 us for a fresh exact query, 37.4 us with retained hysteresis
 and 67.8 us for a no-change local synchronization, all at 0 B warmed allocation.
 See the [T0.7 hardening evidence](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-hardening-2026-08-21.json).
 
+T0.8's production cache consumes these publication semantics without retaining
+this oracle. Real snapshots require a valid chunk-bound cursor; equal revision
+requires an identical post-supersession page. A default cursor is reserved for
+empty initial immutable-base staging. `ChunkAbsent` application assumes the
+supplying bridge already validated its current request lineage; world publication
+still gains no observers/watchers and Client Core gains no Network sequencing.
+The renderer separately maps client semantic handles onto private presentation
+slots and refreshes dynamic public groups without rebuilding immutable terrain or
+frozen structure.
+
 ## Terrain foundation format
 
 T0.2 freezes the physical terrain planes without introducing a loader or mutable
