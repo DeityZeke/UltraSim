@@ -50,6 +50,9 @@ public readonly record struct SlidingRenderWindowSnapshot(
     ulong RetainedChunks,
     ulong ExitedChunks,
     ulong ResetTransitions,
+    ulong SameCenterFastPaths,
+    ulong CandidateKeyLookups,
+    ulong CandidateComparisons,
     long ReservedBytes);
 
 public readonly record struct RenderWindowBinding(
@@ -80,6 +83,9 @@ public sealed class GodotSlidingRenderWindow
     private ulong _retained;
     private ulong _exited;
     private ulong _resets;
+    private ulong _sameCenterFastPaths;
+    private ulong _candidateKeyLookups;
+    private ulong _candidateComparisons;
 
     public GodotSlidingRenderWindow(
         ClientWorldSemanticCache cache,
@@ -138,6 +144,21 @@ public sealed class GodotSlidingRenderWindow
     {
         EnsureOwner();
         SpatialChunkKey center = player.ToChunkKey(_space);
+        if (_activeCount != 0 && center == _center)
+        {
+            transition = new SlidingRenderWindowTransition(
+                center, _activeCount, 0, _activeCount, 0, 0);
+            required = 0;
+            rendererError = GodotWorldRenderQueueError.None;
+            _renderer.SetRenderOriginFromWindow(new WorldRenderOrigin(
+                player.Chunk,
+                player.YMillimeters,
+                player.Local.XMillimeters,
+                player.Local.ZMillimeters));
+            _sameCenterFastPaths++;
+            error = SlidingRenderWindowError.None;
+            return true;
+        }
         int candidateCount = FillCandidate(center, out error);
         if (candidateCount < 0)
         {
@@ -284,7 +305,8 @@ public sealed class GodotSlidingRenderWindow
             (long)_changeScratch.Length * Marshal.SizeOf<RenderWindowChange>());
         return new SlidingRenderWindowSnapshot(
             _center, _radius, _activeCount, _transitions,
-            _entered, _retained, _exited, _resets, reserved);
+            _entered, _retained, _exited, _resets, _sameCenterFastPaths,
+            _candidateKeyLookups, _candidateComparisons, reserved);
     }
 
     private int FillCandidate(SpatialChunkKey center, out SlidingRenderWindowError error)
@@ -304,6 +326,7 @@ public sealed class GodotSlidingRenderWindow
             for (long z = minimumZ; z <= maximumZ; z++)
             {
                 var key = new SpatialChunkKey(_space, checked((int)x), checked((int)z));
+                _candidateKeyLookups++;
                 if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
                 {
                     error = SlidingRenderWindowError.MissingSemanticChunk;
@@ -337,6 +360,7 @@ public sealed class GodotSlidingRenderWindow
         int changeCount = 0;
         while (oldIndex < _activeCount || newIndex < candidateCount)
         {
+            _candidateComparisons++;
             if (oldIndex == _activeCount)
             {
                 AddEntered(_candidate[newIndex++]);

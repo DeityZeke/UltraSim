@@ -2752,9 +2752,10 @@ not a generic streaming scheduler.
 
 Continuous same-chunk LocalX/LocalZ movement now changes exactly one common
 render root. It does not iterate active render chunks. A center crossing updates
-the retained desired offsets and only any still-visible retirement fringe; an
-authoritative Y-origin change may still update every active chunk root because
-their relative Y genuinely changes.
+the retained desired offsets and only any still-visible retirement fringe. The
+evidence at this historical stop proves zero per-chunk Godot writes; the later
+acceptance hardening below removes the remaining same-center semantic scan and
+adds the corresponding two-level vertical-anchor path.
 
 The appended immutable evidence is
 [`terrain-t0.8-sliding-render-window-final-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-sliding-render-window-final-hardening-2026-08-21.json).
@@ -2778,6 +2779,92 @@ teleport, all queues converged, and final presentation returned to zero active
 chunks. The ordinary heterogeneous native observation in the same run recorded
 3.180 ms full-build p95, 25.080 us public-refresh p95, and 3.003 ms frame p95;
 these remain Debug/headless evidence rather than exported GPU performance.
+
+### T0.8 acceptance hardening stop — 2026-08-21
+
+The final review found one real ownership collision: the former resident queue
+operation both entered presentation and requested a public refresh. A public
+update arriving for an outgoing chunk could therefore cancel its window-owned
+retirement and strand an incoming build at zero spare. The operations are now
+mechanically separate:
+
+```text
+TryEnterPresentation / retained move / retire
+    presentation-window ownership
+    may reverse retirement
+
+TryQueuePublicRefresh
+    semantic-change notification only
+    cannot enter presentation
+    cannot change visibility or offset
+    cannot cancel retirement
+```
+
+The zero-spare R=1 adversarial regression applies a public snapshot to an
+outgoing chunk while three retirements and three incoming builds are pending.
+The refresh is discarded as presentation work, all three retirements remain,
+and the target window converges without a capacity rejection.
+
+Same-center tracking now returns before candidate fill, key lookup, merge/diff,
+copy, or group validation. Continuous LocalX/LocalZ and in-envelope Y motion
+therefore update one common root and nothing proportional to window area. Actual
+crossings resolve candidate keys through a client-owned fixed-capacity
+open-addressed `SpatialChunkKey -> semantic slot` index. The index includes
+generation-fenced slot reuse/tombstones in the existing 5,000-operation client
+cache oracle and reports lookup/probe counts. Retained presentation movement
+changes only its offset; it no longer runs semantic group admission twice.
+
+Vertical presentation uses a discrete integer anchor plus a continuous common-
+root offset:
+
+```text
+chunk root Y = chunk terrain anchor - vertical render anchor
+common root Y = -(player Y - vertical render anchor)
+```
+
+Ordinary slope, stair, jump, fall, or flight movement inside the current 256 m
+precision envelope writes one root. Leaving that envelope installs a new integer
+anchor and performs one bounded all-chunk rebase. The high-elevation regression
+at 2,000,000,000 mm preserves its 5/10 mm local differences, observes no chunk-
+root write for a 100 m move, then exactly one chunk-root write for the discrete
+300 m rebase.
+
+`MaximumGroupsPerChunk` now includes distinct terrain material surfaces as well
+as frozen-static, Multi-fragment, and visible public-prefab groups. A hostile
+five-material terrain chunk under a four-group limit rejects before constructing
+any Godot resource. This is one total presentation-pressure budget; it does not
+make material identity a renderer API.
+
+The appended immutable evidence is
+[`terrain-t0.8-acceptance-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-acceptance-hardening-2026-08-21.json).
+In addition to the R=1 interleavings, a native R=4 matrix (`81` active, `17`
+seamless diagonal spare) records:
+
+```text
+100 same-center moves
+    candidate lookups / cache probes / group validations      0 / 0 / 0
+
+cardinal crossing
+    enter / retain / exit                                     9 / 72 / 9
+    key lookups / probes                                      81 / 104
+    group validations                                         9
+
+diagonal crossing
+    enter / retain / exit                                     17 / 64 / 17
+
+second crossing then reversal while pending
+    cancelled builds / retirements                            9 / 9
+    convergence at 4 builds + 4 retires/frame                 3 frames
+
+zero-spare R=4 cardinal control
+    9 out / 9 in, 3 builds + 3 retires/frame                  3 frames
+    capacity rejections                                       0
+```
+
+The R=16 evidence remains a cold capacity shape, now 7,585,182 reserved semantic
+bytes after charging the bounded key index. No R=16 hot-performance claim is
+made. The R=4 matrix is the larger executed transition profile; future accepted
+view-distance/content settings still require production GPU/content evidence.
 
 T0.8 still uses grouped public-prefab presentation rather than implementing rich
 animated actor tiers. The forward client hypothesis is `Rich`, `Batched`,

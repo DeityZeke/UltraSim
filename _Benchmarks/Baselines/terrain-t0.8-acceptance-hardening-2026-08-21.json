@@ -1,0 +1,75 @@
+{
+  "schema": "terrain-t0.8-acceptance-hardening-v1",
+  "captured_at_local": "2026-08-21",
+  "engine": "Godot 4.7.1 Mono headless",
+  "managed_configuration": "Debug",
+  "scope": "synthetic T0.8 refresh/residency ownership, same-center and indexed-crossing work, vertical common-root anchoring, total group admission, and R=4 transition evidence; not GPU/view-distance or production-content evidence",
+  "ownership_hardening": {
+    "public_refresh_can_enter_presentation": false,
+    "public_refresh_can_cancel_retirement": false,
+    "outgoing_public_update_with_zero_spare_converged": true,
+    "incoming_builds": 3,
+    "outgoing_retirements_preserved": 3,
+    "capacity_rejections": 0
+  },
+  "same_center": {
+    "radius_1_movements": 100,
+    "radius_4_movements": 100,
+    "candidate_key_lookups": 0,
+    "semantic_cache_key_probes": 0,
+    "group_validation_calls": 0,
+    "chunk_root_transform_writes": 0
+  },
+  "vertical_origin": {
+    "continuous_movements": 100,
+    "continuous_distance_millimeters": 100000,
+    "continuous_chunk_root_transform_writes": 0,
+    "vertical_rebase_threshold_millimeters": 256000,
+    "discrete_rebase_distance_millimeters": 300000,
+    "discrete_rebase_chunk_root_transform_writes": 1,
+    "absolute_height_fixture_millimeters": 2000000000,
+    "millimeter_scale_local_differences_preserved": true
+  },
+  "terrain_group_admission": {
+    "configured_maximum_groups": 4,
+    "distinct_terrain_material_surfaces": 5,
+    "rejected_before_native_construction": true,
+    "active_resources_after_rejection": 0
+  },
+  "radius_4_matrix": {
+    "active_chunks": 81,
+    "seamless_diagonal_spare": 17,
+    "cardinal_entered": 9,
+    "cardinal_retained": 72,
+    "cardinal_exited": 9,
+    "cardinal_key_lookups": 81,
+    "cardinal_key_probes": 104,
+    "cardinal_group_validations": 9,
+    "diagonal_entered": 17,
+    "diagonal_retained": 64,
+    "diagonal_exited": 17,
+    "cancelled_pending_builds_on_reversal": 9,
+    "cancelled_pending_retirements_on_reversal": 9,
+    "pending_convergence_frames_at_4_plus_4_budget": 3,
+    "diagonal_convergence_frames_at_4_plus_4_budget": 5,
+    "zero_spare_cardinal_convergence_frames_at_3_plus_3_budget": 3,
+    "zero_spare_capacity_rejections": 0
+  },
+  "capacity": {
+    "radius_16_active_chunks": 1089,
+    "radius_16_seamless_diagonal_spare": 65,
+    "radius_16_minimal_semantic_profile_reserved_bytes": 7585182,
+    "radius_16_classification": "cold capacity shape only"
+  },
+  "native_observation": {
+    "heterogeneous_full_build_p95_microseconds": 3040.982,
+    "heterogeneous_public_refresh_p95_microseconds": 40.330,
+    "heterogeneous_frame_p95_microseconds": 2923.182,
+    "note": "Debug/Mono headless observation from the same run; not an exported GPU performance claim"
+  },
+  "scope_discipline": {
+    "t0_9_started": false,
+    "network_n1_started": false,
+    "generic_streaming_scheduler_added": false
+  }
+}

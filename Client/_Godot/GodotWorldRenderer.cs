@@ -13,6 +13,10 @@ public interface IGodotWorldAssetResolver
     Material? ResolveTerrainMaterial(ushort materialId);
 }
 
+/// <param name="MaximumRenderChunks">Maximum concurrently realized presentation chunks.</param>
+/// <param name="MaximumGroupsPerChunk">
+/// Total admitted terrain surfaces plus static, Multi-fragment, and public prefab groups.
+/// </param>
 public readonly record struct GodotWorldRendererLimits(int MaximumRenderChunks, int MaximumGroupsPerChunk)
 {
     public static GodotWorldRendererLimits Default => new(256, 128);
@@ -96,6 +100,8 @@ public readonly record struct GodotWorldRendererSnapshot(
     ulong CancelledBuilds,
     ulong CancelledRetirements,
     ulong ChunkRootTransformWrites,
+    ulong GroupValidationCalls,
+    ulong VerticalRebases,
     long LastMeshBuildTicks,
     long MaximumMeshBuildTicks,
     long LastResourceCommitTicks,
@@ -135,6 +141,7 @@ public readonly record struct GodotWorldRenderChunkDiagnostics(
 public sealed class GodotWorldRenderer : IDisposable
 {
     private const float MillimetersToMeters = 0.001f;
+    private const int VerticalRebaseThresholdMillimeters = 256_000;
 
     private readonly int _ownerThreadId = System.Environment.CurrentManagedThreadId;
     private readonly ClientWorldSemanticCache _cache;
@@ -146,6 +153,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly RenderWorkItem[] _buildQueue;
     private readonly ClientSemanticChunkHandle[] _retireQueue;
     private readonly bool[] _desiredVisible;
+    private readonly bool[] _desiredResident;
     private readonly RenderWindowOffset[] _desiredWindowOffsets;
     private readonly TerrainBaseMeshVertex[] _terrainVertices =
         new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
@@ -174,6 +182,8 @@ public sealed class GodotWorldRenderer : IDisposable
     private ulong _cancelledBuilds;
     private ulong _cancelledRetirements;
     private ulong _chunkRootTransformWrites;
+    private ulong _groupValidationCalls;
+    private ulong _verticalRebases;
     private long _lastMeshBuildTicks;
     private long _maximumMeshBuildTicks;
     private long _lastResourceCommitTicks;
@@ -181,6 +191,8 @@ public sealed class GodotWorldRenderer : IDisposable
     private long _lastFrameTicks;
     private long _maximumFrameTicks;
     private bool _disposed;
+    private bool _verticalAnchorInitialized = true;
+    private int _verticalAnchorMillimeters;
 
     public GodotWorldRenderer(Node3D host, ClientWorldSemanticCache cache,
         GodotWorldRendererLimits limits = default, IGodotWorldAssetResolver? assets = null)
@@ -205,6 +217,7 @@ public sealed class GodotWorldRenderer : IDisposable
         _buildQueue = new RenderWorkItem[cache.Limits.MaximumResidentChunks];
         _retireQueue = new ClientSemanticChunkHandle[cache.Limits.MaximumResidentChunks];
         _desiredVisible = new bool[cache.Limits.MaximumResidentChunks];
+        _desiredResident = new bool[cache.Limits.MaximumResidentChunks];
         _desiredWindowOffsets = new RenderWindowOffset[cache.Limits.MaximumResidentChunks];
         _fallbackStaticMesh = new BoxMesh { Size = Vector3.One };
         _fallbackPublicMesh = new BoxMesh { Size = new Vector3(0.6f, 1.8f, 0.6f) };
@@ -216,7 +229,7 @@ public sealed class GodotWorldRenderer : IDisposable
     public Node3D Root { get; }
     public GodotWorldRendererLimits Limits => _limits;
 
-    public bool TryQueueResident(ClientSemanticChunkHandle handle, bool visible,
+    public bool TryEnterPresentation(ClientSemanticChunkHandle handle, bool visible,
         out GodotWorldRenderQueueError error)
     {
         EnsureOwner();
@@ -234,12 +247,20 @@ public sealed class GodotWorldRenderer : IDisposable
             error = GodotWorldRenderQueueError.InvalidHandle;
             return false;
         }
-        return TryQueueResident(
+        return TryEnterPresentationCore(
             handle, new RenderWindowOffset((int)offsetX, (int)offsetZ), visible, out error);
     }
 
-    public bool TryQueueResident(ClientSemanticChunkHandle handle, RenderWindowOffset windowOffset,
+    private bool TryEnterPresentationCore(ClientSemanticChunkHandle handle,
+        RenderWindowOffset windowOffset,
         bool visible, out GodotWorldRenderQueueError error)
+        => TryEnterPresentationCore(handle, windowOffset, visible, validateGroups: true, out error);
+
+    private bool TryEnterPresentationCore(ClientSemanticChunkHandle handle,
+        RenderWindowOffset windowOffset,
+        bool visible,
+        bool validateGroups,
+        out GodotWorldRenderQueueError error)
     {
         EnsureOwner();
         ThrowIfDisposed();
@@ -253,18 +274,37 @@ public sealed class GodotWorldRenderer : IDisposable
             error = GodotWorldRenderQueueError.SemanticChunkNotResident;
             return false;
         }
-        if (!GroupsFit(semantic))
+        if (validateGroups && !GroupsFit(semantic))
         {
             _groupCapacityRejections++;
             error = GodotWorldRenderQueueError.GroupCapacityExceeded;
             return false;
         }
 
+        bool hasCurrent = TryFindRenderSlot(handle, out int renderSlot);
+        bool hasPendingBuild = Contains(_buildQueue, _buildHead, _buildCount, handle);
+        bool hasPendingRetirement = Contains(_retireQueue, _retireHead, _retireCount, handle);
+        RenderWorkKind kind = hasCurrent ? RenderWorkKind.PublicRefresh : RenderWorkKind.FullBuild;
+        bool replacesStaleAssociation = !hasCurrent && TryFindAnyAssociation(semanticIndex, out _);
+        if (!hasPendingBuild && kind == RenderWorkKind.FullBuild && !replacesStaleAssociation &&
+            _activeChunks - (_retireCount - (hasPendingRetirement ? 1 : 0)) +
+                CountPendingNewBuilds() >= _limits.MaximumRenderChunks)
+        {
+            _renderCapacityRejections++;
+            error = GodotWorldRenderQueueError.RenderCapacityExceeded;
+            return false;
+        }
+        if (!hasPendingBuild && _buildCount == _buildQueue.Length)
+        {
+            error = GodotWorldRenderQueueError.QueueCapacityExceeded;
+            return false;
+        }
+
+        _desiredResident[semanticIndex] = true;
         _desiredVisible[semanticIndex] = visible;
         _desiredWindowOffsets[semanticIndex] = windowOffset;
         if (RemoveQueued(_retireQueue, ref _retireHead, ref _retireCount, handle))
             _cancelledRetirements++;
-        bool hasCurrent = TryFindRenderSlot(handle, out int renderSlot);
         if (hasCurrent)
         {
             RenderChunk current = _renderChunks[renderSlot]!;
@@ -276,27 +316,61 @@ public sealed class GodotWorldRenderer : IDisposable
                 return true;
             }
         }
-        if (Contains(_buildQueue, _buildHead, _buildCount, handle))
+        if (hasPendingBuild)
         {
             error = GodotWorldRenderQueueError.None;
             return true;
         }
-        RenderWorkKind kind = hasCurrent ? RenderWorkKind.PublicRefresh : RenderWorkKind.FullBuild;
-        bool replacesStaleAssociation = !hasCurrent && TryFindAnyAssociation(semanticIndex, out _);
-        if (kind == RenderWorkKind.FullBuild && !replacesStaleAssociation &&
-            _activeChunks - _retireCount + CountPendingNewBuilds() >=
-                _limits.MaximumRenderChunks)
+        Enqueue(_buildQueue, ref _buildHead, ref _buildCount, new RenderWorkItem(handle, kind));
+        error = GodotWorldRenderQueueError.None;
+        return true;
+    }
+
+    /// <summary>
+    /// Queues public-layer work only for presentation already desired by the window owner. This
+    /// operation never enters residency, changes visibility/offset, or cancels retirement.
+    /// </summary>
+    public bool TryQueuePublicRefresh(
+        ClientSemanticChunkHandle handle,
+        out GodotWorldRenderQueueError error)
+    {
+        EnsureOwner();
+        ThrowIfDisposed();
+        if (!TryGetSemanticIndex(handle, out int semanticIndex))
         {
-            _renderCapacityRejections++;
-            error = GodotWorldRenderQueueError.RenderCapacityExceeded;
+            error = GodotWorldRenderQueueError.InvalidHandle;
             return false;
+        }
+        if (!_cache.TryGetResidentView(handle, out ClientSemanticChunkView semantic))
+        {
+            error = GodotWorldRenderQueueError.SemanticChunkNotResident;
+            return false;
+        }
+        if (!_desiredResident[semanticIndex])
+        {
+            error = GodotWorldRenderQueueError.None;
+            return true;
+        }
+        if (!GroupsFit(semantic))
+        {
+            _groupCapacityRejections++;
+            error = GodotWorldRenderQueueError.GroupCapacityExceeded;
+            return false;
+        }
+        if (Contains(_buildQueue, _buildHead, _buildCount, handle) ||
+            !TryFindRenderSlot(handle, out int renderSlot) ||
+            _renderChunks[renderSlot]!.SemanticHash == semantic.Info.SemanticHash)
+        {
+            error = GodotWorldRenderQueueError.None;
+            return true;
         }
         if (_buildCount == _buildQueue.Length)
         {
             error = GodotWorldRenderQueueError.QueueCapacityExceeded;
             return false;
         }
-        Enqueue(_buildQueue, ref _buildHead, ref _buildCount, new RenderWorkItem(handle, kind));
+        Enqueue(_buildQueue, ref _buildHead, ref _buildCount,
+            new RenderWorkItem(handle, RenderWorkKind.PublicRefresh));
         error = GodotWorldRenderQueueError.None;
         return true;
     }
@@ -310,6 +384,7 @@ public sealed class GodotWorldRenderer : IDisposable
             error = GodotWorldRenderQueueError.InvalidHandle;
             return false;
         }
+        _desiredResident[semanticIndex] = false;
         _desiredVisible[semanticIndex] = false;
         if (RemoveQueued(_buildQueue, ref _buildHead, ref _buildCount, handle))
             _cancelledBuilds++;
@@ -352,6 +427,32 @@ public sealed class GodotWorldRenderer : IDisposable
         return true;
     }
 
+    private bool TryMovePresentation(
+        ClientSemanticChunkHandle handle,
+        RenderWindowOffset offset)
+    {
+        if (!TryGetSemanticIndex(handle, out int semanticIndex) ||
+            !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) ||
+            info.State != ClientSemanticChunkState.Resident)
+            return false;
+        bool rendered = TryFindRenderSlot(handle, out int renderSlot);
+        bool pendingBuild = Contains(_buildQueue, _buildHead, _buildCount, handle);
+        bool pendingRetire = Contains(_retireQueue, _retireHead, _retireCount, handle);
+        if (!rendered && !pendingBuild && !pendingRetire) return false;
+        _desiredResident[semanticIndex] = true;
+        _desiredVisible[semanticIndex] = true;
+        _desiredWindowOffsets[semanticIndex] = offset;
+        if (RemoveQueued(_retireQueue, ref _retireHead, ref _retireCount, handle))
+            _cancelledRetirements++;
+        if (rendered)
+        {
+            RenderChunk chunk = _renderChunks[renderSlot]!;
+            SetWindowOffset(chunk, offset);
+            SetVisible(chunk, true);
+        }
+        return true;
+    }
+
     public void SetRenderOrigin(WorldRenderOrigin origin)
         => SetRenderOriginCore(origin, windowOffsetsAlreadyUpdated: false,
             rebasePendingRetirements: true);
@@ -372,11 +473,20 @@ public sealed class GodotWorldRenderer : IDisposable
         if (!origin.IsCanonical) throw new ArgumentOutOfRangeException(nameof(origin));
         if (_origin == origin) return;
         bool centerChanged = _origin.Chunk != origin.Chunk;
-        bool yChanged = _origin.YMillimeters != origin.YMillimeters;
+        bool verticalRebase = !_verticalAnchorInitialized ||
+            Math.Abs(checked((long)origin.YMillimeters - _verticalAnchorMillimeters)) >
+                VerticalRebaseThresholdMillimeters;
+        if (verticalRebase)
+        {
+            _verticalAnchorMillimeters = origin.YMillimeters;
+            _verticalAnchorInitialized = true;
+            _verticalRebases++;
+        }
         _origin = origin;
         Root.Position = new Vector3(
             -origin.LocalXMillimeters * MillimetersToMeters,
-            0,
+            -checked((long)origin.YMillimeters - _verticalAnchorMillimeters) *
+                MillimetersToMeters,
             -origin.LocalZMillimeters * MillimetersToMeters);
 
         if (centerChanged && windowOffsetsAlreadyUpdated && rebasePendingRetirements)
@@ -397,7 +507,7 @@ public sealed class GodotWorldRenderer : IDisposable
             }
         }
 
-        if ((centerChanged && !windowOffsetsAlreadyUpdated) || yChanged)
+        if ((centerChanged && !windowOffsetsAlreadyUpdated) || verticalRebase)
         {
             for (int index = 0; index < _renderChunks.Length; index++)
             {
@@ -465,7 +575,8 @@ public sealed class GodotWorldRenderer : IDisposable
             _activeNodes, _activeResources, _completedBuilds, _completedRetirements,
             _rebuilds, _publicRefreshes, _renderCapacityRejections, _groupCapacityRejections,
             _rebases, _windowMoves, _cancelledBuilds, _cancelledRetirements,
-            _chunkRootTransformWrites, _lastMeshBuildTicks, _maximumMeshBuildTicks,
+            _chunkRootTransformWrites, _groupValidationCalls, _verticalRebases,
+            _lastMeshBuildTicks, _maximumMeshBuildTicks,
             _lastResourceCommitTicks, _maximumResourceCommitTicks,
             _lastFrameTicks, _maximumFrameTicks);
     }
@@ -480,8 +591,7 @@ public sealed class GodotWorldRenderer : IDisposable
         for (int index = 0; index < changes.Length; index++)
         {
             RenderWindowChange change = changes[index];
-            if (change.Kind is RenderWindowChangeKind.Entered or
-                RenderWindowChangeKind.RetainedMoved)
+            if (change.Kind == RenderWindowChangeKind.Entered)
             {
                 if (!_cache.TryGetResidentView(change.Handle, out ClientSemanticChunkView semantic))
                 {
@@ -493,6 +603,16 @@ public sealed class GodotWorldRenderer : IDisposable
                     error = GodotWorldRenderQueueError.GroupCapacityExceeded;
                     return false;
                 }
+            }
+            else if (change.Kind == RenderWindowChangeKind.RetainedMoved &&
+                (!_cache.TryGetInfo(change.Handle, out ClientSemanticChunkInfo info) ||
+                    info.State != ClientSemanticChunkState.Resident ||
+                    !TryFindRenderSlot(change.Handle, out _) &&
+                    !Contains(_buildQueue, _buildHead, _buildCount, change.Handle) &&
+                    !Contains(_retireQueue, _retireHead, _retireCount, change.Handle)))
+            {
+                error = GodotWorldRenderQueueError.InvalidHandle;
+                return false;
             }
             else if (change.Kind == RenderWindowChangeKind.Exited &&
                 !TryFindRenderSlot(change.Handle, out _) &&
@@ -512,9 +632,19 @@ public sealed class GodotWorldRenderer : IDisposable
         for (int index = 0; index < changes.Length; index++)
         {
             RenderWindowChange change = changes[index];
-            if (change.Kind is (RenderWindowChangeKind.Entered or
-                RenderWindowChangeKind.RetainedMoved) &&
-                !TryQueueResident(change.Handle, change.CurrentOffset, true, out error)) return false;
+            if (change.Kind == RenderWindowChangeKind.RetainedMoved &&
+                !TryMovePresentation(change.Handle, change.CurrentOffset))
+            {
+                error = GodotWorldRenderQueueError.InvalidHandle;
+                return false;
+            }
+        }
+        for (int index = 0; index < changes.Length; index++)
+        {
+            RenderWindowChange change = changes[index];
+            if (change.Kind == RenderWindowChangeKind.Entered &&
+                !TryEnterPresentationCore(change.Handle, change.CurrentOffset, true,
+                    validateGroups: false, out error)) return false;
         }
         if (hideExits)
         {
@@ -779,7 +909,22 @@ public sealed class GodotWorldRenderer : IDisposable
 
     private bool GroupsFit(ClientSemanticChunkView semantic)
     {
+        _groupValidationCalls++;
         int groups = 0;
+        for (int index = 0; index < semantic.TerrainMaterials.Length; index++)
+        {
+            ushort material = semantic.TerrainMaterials[index];
+            bool prior = false;
+            for (int scan = 0; scan < index; scan++)
+            {
+                if (semantic.TerrainMaterials[scan] == material)
+                {
+                    prior = true;
+                    break;
+                }
+            }
+            if (!prior) groups++;
+        }
         for (int index = 0; index < semantic.FrozenStatics.Length; index++)
         {
             WorldFrozenStaticRecord record = semantic.FrozenStatics[index];
@@ -821,7 +966,8 @@ public sealed class GodotWorldRenderer : IDisposable
         chunk.Root.Position = new Vector3(
             checked((long)chunk.WindowOffset.X * GameWorldSpatialProfile.WorldChunkEdgeUnits) *
                 MillimetersToMeters,
-            checked((long)chunk.YAnchorMillimeters - _origin.YMillimeters) * MillimetersToMeters,
+            checked((long)chunk.YAnchorMillimeters - _verticalAnchorMillimeters) *
+                MillimetersToMeters,
             checked((long)chunk.WindowOffset.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits) *
                 MillimetersToMeters);
         _chunkRootTransformWrites++;

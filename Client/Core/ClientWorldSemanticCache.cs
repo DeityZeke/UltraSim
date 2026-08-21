@@ -114,6 +114,8 @@ public readonly record struct ClientWorldSemanticCacheSnapshot(
     ulong AppliedSnapshots,
     ulong AppliedDeltas,
     ulong RetiredChunks,
+    ulong ChunkKeyLookups,
+    ulong ChunkKeyProbes,
     ClientSemanticHash WorldSemanticHash,
     long ReservedBytes);
 
@@ -147,6 +149,7 @@ public readonly ref struct ClientSemanticChunkView
 /// <summary>
 /// One owner-bound, fixed-capacity production client semantic world cache. Immutable base content,
 /// publication knowledge, and client-local slots remain distinct from both server storage and Godot.
+/// A private bounded key index resolves resident/requested chunks without scanning slot capacity.
 /// </summary>
 public sealed class ClientWorldSemanticCache
 {
@@ -171,6 +174,7 @@ public sealed class ClientWorldSemanticCache
     private readonly WorldPublicDeltaRecord[] _acceptedDeltaScratch;
     private readonly KnowledgeEntry[] _knowledge;
     private readonly int[] _knowledgeBuckets;
+    private readonly int[] _chunkKeyBuckets;
     private int _freeSlotCount;
     private int _knownIdentityCount;
     private PublicationEpoch _publicationEpoch;
@@ -178,6 +182,8 @@ public sealed class ClientWorldSemanticCache
     private ulong _appliedSnapshots;
     private ulong _appliedDeltas;
     private ulong _retiredChunks;
+    private ulong _chunkKeyLookups;
+    private ulong _chunkKeyProbes;
     private int _affectedCount;
 
     public ClientWorldSemanticCache(
@@ -209,6 +215,7 @@ public sealed class ClientWorldSemanticCache
         _acceptedDeltaScratch = new WorldPublicDeltaRecord[limits.MaximumPublicRecordsPerChunk];
         _knowledge = new KnowledgeEntry[limits.MaximumKnownPublicIdentities];
         _knowledgeBuckets = new int[KnowledgeBucketCapacity(limits.MaximumKnownPublicIdentities)];
+        _chunkKeyBuckets = new int[KnowledgeBucketCapacity(limits.MaximumResidentChunks)];
         for (int index = 0; index < _freeSlots.Length; index++)
             _freeSlots[index] = _freeSlots.Length - index - 1;
         _freeSlotCount = _freeSlots.Length;
@@ -253,6 +260,7 @@ public sealed class ClientWorldSemanticCache
             ? throw new InvalidOperationException("The client semantic chunk generation is exhausted.")
             : _slots[slot].Generation + 1;
         _slots[slot] = new ChunkSlot(key, generation, ClientSemanticChunkState.Requested);
+        InsertChunkKey(key, slot);
         handle = new ClientSemanticChunkHandle(checked((uint)slot), generation);
         error = ClientSemanticChunkError.None;
         return true;
@@ -607,6 +615,7 @@ public sealed class ClientWorldSemanticCache
         if (!TryResolve(handle, out int slot) || _slots[slot].State != ClientSemanticChunkState.Retiring)
             return false;
         uint generation = _slots[slot].Generation;
+        RemoveChunkKey(_slots[slot].Key, slot);
         _slots[slot] = default;
         _slots[slot].Generation = generation;
         _freeSlots[_freeSlotCount++] = slot;
@@ -743,6 +752,8 @@ public sealed class ClientWorldSemanticCache
             _appliedSnapshots,
             _appliedDeltas,
             _retiredChunks,
+            _chunkKeyLookups,
+            _chunkKeyProbes,
             ComputeWorldHash(),
             CalculateReservedBytes());
     }
@@ -1155,10 +1166,75 @@ public sealed class ClientWorldSemanticCache
 
     private int FindSlot(SpatialChunkKey key)
     {
-        for (int slot = 0; slot < _slots.Length; slot++)
-            if (_slots[slot].State != ClientSemanticChunkState.Absent && _slots[slot].Key == key)
-                return slot;
+        _chunkKeyLookups++;
+        int mask = _chunkKeyBuckets.Length - 1;
+        int bucket = ChunkKeyBucket(key, mask);
+        for (int probe = 0; probe < _chunkKeyBuckets.Length; probe++)
+        {
+            _chunkKeyProbes++;
+            int entry = _chunkKeyBuckets[bucket];
+            if (entry == 0) return -1;
+            if (entry > 0)
+            {
+                int slot = entry - 1;
+                if (_slots[slot].State != ClientSemanticChunkState.Absent &&
+                    _slots[slot].Key == key)
+                    return slot;
+            }
+            bucket = (bucket + 1) & mask;
+        }
         return -1;
+    }
+
+    private void InsertChunkKey(SpatialChunkKey key, int slot)
+    {
+        int mask = _chunkKeyBuckets.Length - 1;
+        int bucket = ChunkKeyBucket(key, mask);
+        int tombstone = -1;
+        for (int probe = 0; probe < _chunkKeyBuckets.Length; probe++)
+        {
+            int entry = _chunkKeyBuckets[bucket];
+            if (entry == 0)
+            {
+                _chunkKeyBuckets[tombstone >= 0 ? tombstone : bucket] = slot + 1;
+                return;
+            }
+            if (entry < 0 && tombstone < 0) tombstone = bucket;
+            bucket = (bucket + 1) & mask;
+        }
+        if (tombstone >= 0)
+        {
+            _chunkKeyBuckets[tombstone] = slot + 1;
+            return;
+        }
+        throw new InvalidOperationException("The bounded client chunk-key index is full.");
+    }
+
+    private void RemoveChunkKey(SpatialChunkKey key, int slot)
+    {
+        int mask = _chunkKeyBuckets.Length - 1;
+        int bucket = ChunkKeyBucket(key, mask);
+        for (int probe = 0; probe < _chunkKeyBuckets.Length; probe++)
+        {
+            int entry = _chunkKeyBuckets[bucket];
+            if (entry == 0) break;
+            if (entry == slot + 1)
+            {
+                _chunkKeyBuckets[bucket] = -1;
+                return;
+            }
+            bucket = (bucket + 1) & mask;
+        }
+        throw new InvalidOperationException("The client chunk-key index lost an admitted slot.");
+    }
+
+    private static int ChunkKeyBucket(SpatialChunkKey key, int mask)
+    {
+        uint hash = unchecked((uint)key.GetHashCode());
+        hash ^= hash >> 16;
+        hash = unchecked(hash * 2_246_822_519U);
+        hash ^= hash >> 13;
+        return unchecked((int)hash) & mask;
     }
 
     private ClientSemanticChunkHandle Handle(int slot) =>
@@ -1203,7 +1279,7 @@ public sealed class ClientWorldSemanticCache
         (long)_publicScratch.Length * Unsafe.SizeOf<WorldPublicRecord>() +
         (long)_acceptedDeltaScratch.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
         (long)_knowledge.Length * Unsafe.SizeOf<KnowledgeEntry>() +
-        (long)_knowledgeBuckets.Length * sizeof(int));
+        (long)(_knowledgeBuckets.Length + _chunkKeyBuckets.Length) * sizeof(int));
 
     private void EnsureOwner()
     {

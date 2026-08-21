@@ -70,7 +70,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         GodotWorldRendererSnapshot beforeRefresh = renderer.GetSnapshot();
         Expect(renderer.TryGetChunkDiagnostics(updatedHandle, out GodotWorldRenderChunkDiagnostics beforeIdentity),
             "Updated render chunk diagnostics were unavailable.");
-        Expect(renderer.TryQueueResident(updatedHandle, visible: true, out _),
+        Expect(renderer.TryQueuePublicRefresh(updatedHandle, out _),
             "Updated render chunk did not queue.");
         Process(new GodotWorldFrameBudget(1, 0));
         GodotWorldRendererSnapshot afterRefresh = renderer.GetSnapshot();
@@ -98,7 +98,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
                 new ChunkPublicationRevision(1), 1, 1);
             Expect(cache.TryApplyDelta(updatedHandle, batch, [delta], out _),
                 "Repeated public refresh delta did not apply.");
-            Expect(renderer.TryQueueResident(updatedHandle, true, out _),
+            Expect(renderer.TryQueuePublicRefresh(updatedHandle, out _),
                 "Repeated public refresh did not queue.");
             Process(new GodotWorldFrameBudget(1, 0));
         }
@@ -140,6 +140,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         HighElevationPrecisionRegression();
         SlidingRenderWindowRegressions();
         SlidingRenderWindowPendingWorkRegressions();
+        LargerRadiusSlidingWindowMatrix();
         renderer.Dispose();
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -190,7 +191,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
                     "Semantic staging failed.");
                 Expect(cache.TryPublish(handle, out _), "Semantic publication failed.");
                 resident.Add(x, handle);
-                Expect(renderer.TryQueueResident(handle, visible: x != start + 2, out _),
+                Expect(renderer.TryEnterPresentation(handle, visible: x != start + 2, out _),
                     "Render build did not queue.");
             }
         }
@@ -217,7 +218,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
                 "Walk semantic staging failed.");
             Expect(cache.TryPublish(handle, out _), "Walk semantic publication failed.");
             resident.Add(entering, handle);
-            Expect(renderer.TryQueueResident(handle, visible: entering != start + 2, out _),
+            Expect(renderer.TryEnterPresentation(handle, visible: entering != start + 2, out _),
                 "Walk render build did not queue.");
             Process(new GodotWorldFrameBudget(1, 0));
             DrainRenderer();
@@ -289,14 +290,14 @@ public partial class T08WorldHeadlessAcceptance : Node3D
 
         using (var renderer = new GodotWorldRenderer(this, cache, new GodotWorldRendererLimits(1, 16)))
         {
-            Expect(renderer.TryQueueResident(handles[0], true, out _), "First private render slot did not queue.");
+            Expect(renderer.TryEnterPresentation(handles[0], true, out _), "First private render slot did not queue.");
             renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
-            Expect(!renderer.TryQueueResident(handles[3], true, out GodotWorldRenderQueueError capacity) &&
+            Expect(!renderer.TryEnterPresentation(handles[3], true, out GodotWorldRenderQueueError capacity) &&
                 capacity == GodotWorldRenderQueueError.RenderCapacityExceeded,
                 "Concurrent render capacity was not enforced independently.");
             Expect(renderer.TryQueueRetire(handles[0], out _), "Private render slot did not retire.");
             renderer.ProcessFrame(new GodotWorldFrameBudget(0, 1));
-            Expect(renderer.TryQueueResident(handles[3], true, out _),
+            Expect(renderer.TryEnterPresentation(handles[3], true, out _),
                 "A high-index semantic handle could not use a free private render slot.");
             renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
             Expect(renderer.IsRendered(handles[3]), "High-index semantic handle was not rendered.");
@@ -306,12 +307,29 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         }
 
         using var constrained = new GodotWorldRenderer(this, cache, new GodotWorldRendererLimits(1, 1));
-        Expect(!constrained.TryQueueResident(handles[3], true, out GodotWorldRenderQueueError groups) &&
+        Expect(!constrained.TryEnterPresentation(handles[3], true, out GodotWorldRenderQueueError groups) &&
             groups == GodotWorldRenderQueueError.GroupCapacityExceeded,
             "Expected group-capacity pressure was not rejected before construction.");
         Expect(constrained.GetSnapshot().ActiveResources == 0 &&
             constrained.GetSnapshot().GroupCapacityRejections == 1,
             "Group-capacity rejection created Godot resources or was not accounted.");
+
+        BoundWorldPack diverseTerrain = CreateMaterialDiverseWorld(5);
+        var terrainCache = new ClientWorldSemanticCache(
+            diverseTerrain, new ClientWorldSemanticCacheLimits(1, 0, 0, 1, 1));
+        SpatialChunkKey terrainKey = Key(0, 0);
+        Expect(terrainCache.TryRequest(terrainKey, out ClientSemanticChunkHandle terrainHandle, out _) &&
+            terrainCache.TryStageFromBaseWorld(terrainHandle, [], default, out _) &&
+            terrainCache.TryPublish(terrainHandle, out _),
+            "Material-diversity fixture did not become semantically resident.");
+        using var terrainConstrained = new GodotWorldRenderer(
+            this, terrainCache, new GodotWorldRendererLimits(1, 4));
+        Expect(!terrainConstrained.TryEnterPresentation(
+                terrainHandle, true, out GodotWorldRenderQueueError terrainGroups) &&
+            terrainGroups == GodotWorldRenderQueueError.GroupCapacityExceeded &&
+            terrainConstrained.GetSnapshot().ActiveResources == 0 &&
+            terrainConstrained.GetSnapshot().CompletedBuilds == 0,
+            "Five terrain surfaces bypassed the four-group preconstruction budget.");
     }
 
     private void HighElevationPrecisionRegression()
@@ -333,7 +351,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(cache.TryPublish(handle, out _), "High-elevation publication failed.");
         using var renderer = new GodotWorldRenderer(this, cache, new GodotWorldRendererLimits(1, 4));
         renderer.SetRenderOrigin(new WorldRenderOrigin(key.Coord, baseHeight));
-        Expect(renderer.TryQueueResident(handle, true, out _), "High-elevation render did not queue.");
+        Expect(renderer.TryEnterPresentation(handle, true, out _), "High-elevation render did not queue.");
         renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
         Expect(renderer.TryGetChunkDiagnostics(handle, out GodotWorldRenderChunkDiagnostics diagnostic),
             "High-elevation diagnostics were unavailable.");
@@ -343,6 +361,16 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             MathF.Abs(diagnostic.FirstStaticLocalY - 0.005f) < 0.000001f &&
             MathF.Abs(diagnostic.FirstPublicLocalY - 0.010f) < 0.000001f,
             "Integer-relative Y conversion lost millimetre-scale differences at high elevation.");
+        ulong beforeContinuousY = renderer.GetSnapshot().ChunkRootTransformWrites;
+        renderer.SetRenderOrigin(new WorldRenderOrigin(key.Coord, baseHeight + 100_000));
+        Expect(renderer.GetSnapshot().ChunkRootTransformWrites == beforeContinuousY &&
+            MathF.Abs(renderer.Root.Position.Y + 100.0f) < 0.0001f,
+            "High-elevation continuous Y movement did not remain common-root-only.");
+        renderer.SetRenderOrigin(new WorldRenderOrigin(key.Coord, baseHeight + 300_000));
+        Expect(renderer.GetSnapshot().ChunkRootTransformWrites == beforeContinuousY + 1 &&
+            renderer.GetSnapshot().VerticalRebases == 2 &&
+            MathF.Abs(renderer.Root.Position.Y) < 0.0001f,
+            "Crossing the bounded vertical envelope did not perform one discrete rebase.");
     }
 
     private void SlidingRenderWindowRegressions()
@@ -370,14 +398,33 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             "Initial centered render window was not a complete 3x3 square.");
 
         GodotWorldRendererSnapshot beforeLocalMovement = renderer.GetSnapshot();
+        SlidingRenderWindowSnapshot beforeLocalWindow = window.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot beforeLocalCache = cache.GetSnapshot();
         for (ushort local = 1; local <= 100; local++)
             _ = Track(new WorldPosition(0, 0, local, checked((ushort)(local * 2)), 0));
         GodotWorldRendererSnapshot afterLocalMovement = renderer.GetSnapshot();
+        SlidingRenderWindowSnapshot afterLocalWindow = window.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot afterLocalCache = cache.GetSnapshot();
         Expect(afterLocalMovement.ChunkRootTransformWrites ==
             beforeLocalMovement.ChunkRootTransformWrites &&
+            afterLocalMovement.GroupValidationCalls == beforeLocalMovement.GroupValidationCalls &&
+            afterLocalWindow.CandidateKeyLookups == beforeLocalWindow.CandidateKeyLookups &&
+            afterLocalWindow.CandidateComparisons == beforeLocalWindow.CandidateComparisons &&
+            afterLocalWindow.SameCenterFastPaths == beforeLocalWindow.SameCenterFastPaths + 100 &&
+            afterLocalCache.ChunkKeyLookups == beforeLocalCache.ChunkKeyLookups &&
+            afterLocalCache.ChunkKeyProbes == beforeLocalCache.ChunkKeyProbes &&
             MathF.Abs(renderer.Root.Position.X + 0.100f) < 0.000001f &&
             MathF.Abs(renderer.Root.Position.Z + 0.200f) < 0.000001f,
-            "Same-chunk player movement touched per-chunk roots instead of only the common root.");
+            "Same-chunk movement performed window/cache/group work or touched per-chunk roots.");
+
+        ulong beforeVerticalWrites = renderer.GetSnapshot().ChunkRootTransformWrites;
+        for (int y = 1_000; y <= 100_000; y += 1_000)
+            _ = Track(new WorldPosition(0, 0, 100, 200, y));
+        Expect(renderer.GetSnapshot().ChunkRootTransformWrites == beforeVerticalWrites &&
+            MathF.Abs(renderer.Root.Position.Y + 100.0f) < 0.0001f,
+            $"Continuous vertical movement escaped the common root: writes " +
+            $"{beforeVerticalWrites}->{renderer.GetSnapshot().ChunkRootTransformWrites}, " +
+            $"rootY={renderer.Root.Position.Y}.");
 
         ClientSemanticChunkHandle retainedHandle = resident[Key(0, 0)];
         ClientSemanticChunkInfo retainedBefore = Info(retainedHandle);
@@ -488,7 +535,8 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             $"window_moves={renderer.GetSnapshot().WindowMoves} " +
             $"active_render_slots={renderer.GetSnapshot().ActiveRenderChunks} " +
             $"free_render_slots={renderer.GetSnapshot().FreeRenderSlots} " +
-            $"local_moves_without_chunk_root_writes=100 " +
+            $"local_moves_without_window_or_chunk_root_work=100 " +
+            $"vertical_moves_without_chunk_root_writes=100 " +
             $"chunk_root_transform_writes={renderer.GetSnapshot().ChunkRootTransformWrites} " +
             $"window_reserved_bytes={window.GetSnapshot().ReservedBytes} " +
             $"radius16_active=1089 radius16_spare=65 " +
@@ -762,6 +810,21 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(renderer.GetSnapshot().PendingBuilds == 3 &&
             renderer.GetSnapshot().PendingRetirements == 3,
             "Zero-spare renderer did not queue a bounded strip transition.");
+        ClientSemanticChunkHandle outgoing = resident[Key(-1, 0)];
+        PublicationEpoch epoch = PublicationEpoch.Create();
+        WorldPublicRecord outgoingUpdate = new(
+            new WorldPublicEntityId(1, 1), 1, 501,
+            new WorldPosition(-1, 0, 1_000, 1_000, 0),
+            WorldYaw.Zero, WorldPublicStateFlags.Visible, new ChunkPublicationRevision(1));
+        var outgoingBatch = new ChunkPublicationBatch(
+            ChunkPublicationReadStatus.Snapshot, Key(-1, 0),
+            new ChunkPublicationCursor(epoch, Key(-1, 0), new ChunkPublicationRevision(1)),
+            default, 1, 1);
+        Expect(cache.TryApplySnapshot(outgoing, outgoingBatch, [outgoingUpdate], out _) &&
+            renderer.TryQueuePublicRefresh(outgoing, out _) &&
+            renderer.GetSnapshot().PendingBuilds == 3 &&
+            renderer.GetSnapshot().PendingRetirements == 3,
+            "Public refresh on an outgoing chunk changed desired-window retirement ownership.");
         renderer.ProcessFrame(new GodotWorldFrameBudget(3, 3));
         Expect(renderer.GetSnapshot().ActiveRenderChunks == 9 &&
             renderer.GetSnapshot().PendingBuilds == 0 &&
@@ -806,6 +869,193 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         }
     }
 
+    private void LargerRadiusSlidingWindowMatrix()
+    {
+        const int radius = 4;
+        const int active = 81;
+        const int spare = 17;
+        BoundWorldPack world = CreateSlidingWorld();
+        var cache = new ClientWorldSemanticCache(
+            world, new ClientWorldSemanticCacheLimits(128, 0, 0, 1, 1));
+        using var renderer = new GodotWorldRenderer(
+            this, cache, GodotWorldRendererLimits.ForStructuralWindow(radius, spare, 4));
+        var window = new GodotSlidingRenderWindow(cache, renderer, radius);
+        var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
+        var changes = new RenderWindowChange[active * 2];
+
+        Prepare(new SpatialChunkCoord(0, 0));
+        SlidingRenderWindowTransition initial = Track(new WorldPosition(0, 0, 0, 0, 0));
+        Expect(initial.Entered == active && initial.ActiveChunks == active,
+            "Larger-radius initial window was incomplete.");
+        Drain(renderer, active, active);
+
+        SlidingRenderWindowSnapshot beforeSame = window.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot cacheBeforeSame = cache.GetSnapshot();
+        GodotWorldRendererSnapshot rendererBeforeSame = renderer.GetSnapshot();
+        for (ushort local = 1; local <= 100; local++)
+            _ = Track(new WorldPosition(0, 0, local, local, local));
+        SlidingRenderWindowSnapshot afterSame = window.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot cacheAfterSame = cache.GetSnapshot();
+        GodotWorldRendererSnapshot rendererAfterSame = renderer.GetSnapshot();
+        Expect(afterSame.SameCenterFastPaths == beforeSame.SameCenterFastPaths + 100 &&
+            afterSame.CandidateKeyLookups == beforeSame.CandidateKeyLookups &&
+            afterSame.CandidateComparisons == beforeSame.CandidateComparisons &&
+            cacheAfterSame.ChunkKeyLookups == cacheBeforeSame.ChunkKeyLookups &&
+            cacheAfterSame.ChunkKeyProbes == cacheBeforeSame.ChunkKeyProbes &&
+            rendererAfterSame.GroupValidationCalls == rendererBeforeSame.GroupValidationCalls &&
+            rendererAfterSame.ChunkRootTransformWrites ==
+                rendererBeforeSame.ChunkRootTransformWrites,
+            "Larger-radius same-center movement did not remain constant-work.");
+
+        Prepare(new SpatialChunkCoord(1, 0));
+        SlidingRenderWindowSnapshot beforeCardinal = window.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot cacheBeforeCardinal = cache.GetSnapshot();
+        GodotWorldRendererSnapshot rendererBeforeCardinal = renderer.GetSnapshot();
+        SlidingRenderWindowTransition cardinal = Track(new WorldPosition(1, 0, 0, 0, 100));
+        SlidingRenderWindowSnapshot afterCardinal = window.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot cacheAfterCardinal = cache.GetSnapshot();
+        GodotWorldRendererSnapshot rendererAfterCardinal = renderer.GetSnapshot();
+        Expect(cardinal.Entered == 9 && cardinal.Retained == 72 && cardinal.Exited == 9 &&
+            afterCardinal.CandidateKeyLookups - beforeCardinal.CandidateKeyLookups == active &&
+            cacheAfterCardinal.ChunkKeyLookups - cacheBeforeCardinal.ChunkKeyLookups == active &&
+            rendererAfterCardinal.GroupValidationCalls -
+                rendererBeforeCardinal.GroupValidationCalls == 9,
+            "Larger-radius cardinal transition did not limit lookup/group work to its shape.");
+
+        Prepare(new SpatialChunkCoord(2, 0));
+        _ = Track(new WorldPosition(2, 0, 0, 0, 100));
+        Expect(renderer.GetSnapshot().PendingBuilds == 18 &&
+            renderer.GetSnapshot().PendingRetirements == 18,
+            "Larger-radius second pending crossing did not coalesce.");
+        ulong cancelledBuilds = renderer.GetSnapshot().CancelledBuilds;
+        ulong cancelledRetirements = renderer.GetSnapshot().CancelledRetirements;
+        _ = Track(new WorldPosition(1, 0, 0, 0, 100));
+        Expect(renderer.GetSnapshot().CancelledBuilds == cancelledBuilds + 9 &&
+            renderer.GetSnapshot().CancelledRetirements == cancelledRetirements + 9,
+            "Larger-radius reversal did not cancel the obsolete strip work.");
+        int pendingConvergenceFrames = Drain(renderer, 4, 4);
+
+        Prepare(new SpatialChunkCoord(2, 1));
+        GodotWorldRendererSnapshot beforeDiagonal = renderer.GetSnapshot();
+        SlidingRenderWindowTransition diagonal = Track(new WorldPosition(2, 1, 0, 0, 100));
+        GodotWorldRendererSnapshot afterDiagonal = renderer.GetSnapshot();
+        Expect(diagonal.Entered == spare && diagonal.Retained == 64 && diagonal.Exited == spare &&
+            afterDiagonal.GroupValidationCalls - beforeDiagonal.GroupValidationCalls == spare,
+            "Larger-radius diagonal transition did not match its exact fringe shape.");
+        int diagonalConvergenceFrames = Drain(renderer, 4, 4);
+        Expect(renderer.GetSnapshot().ActiveRenderChunks == active &&
+            renderer.GetSnapshot().ActiveRenderChunks <= renderer.Limits.MaximumRenderChunks,
+            "Larger-radius presentation did not converge within bounded capacity.");
+
+        LowerSpareLargerRadius(world);
+        ulong cardinalLookups = cacheAfterCardinal.ChunkKeyLookups -
+            cacheBeforeCardinal.ChunkKeyLookups;
+        ulong cardinalProbes = cacheAfterCardinal.ChunkKeyProbes -
+            cacheBeforeCardinal.ChunkKeyProbes;
+        GD.Print(
+            $"T0.8 WINDOW R4 METRICS active={active} spare={spare} " +
+            $"same_center_fast_paths=100 same_center_candidate_lookups=0 " +
+            $"same_center_cache_probes=0 same_center_group_validations=0 " +
+            $"cardinal_entered=9 cardinal_retained=72 cardinal_key_lookups={cardinalLookups} " +
+            $"cardinal_key_probes={cardinalProbes} cardinal_group_validations=9 " +
+            $"diagonal_entered=17 diagonal_retained=64 " +
+            $"pending_convergence_frames={pendingConvergenceFrames} " +
+            $"diagonal_convergence_frames={diagonalConvergenceFrames} " +
+            $"cancelled_builds={renderer.GetSnapshot().CancelledBuilds} " +
+            $"cancelled_retires={renderer.GetSnapshot().CancelledRetirements}");
+
+        SlidingRenderWindowTransition Track(WorldPosition player)
+        {
+            Expect(window.TryTrackPlayer(
+                    player, changes, out SlidingRenderWindowTransition transition,
+                    out int required, out SlidingRenderWindowError error,
+                    out GodotWorldRenderQueueError rendererError),
+                $"Larger-radius transition failed: {error}/{rendererError}, required {required}.");
+            return transition;
+        }
+
+        void Prepare(SpatialChunkCoord center)
+        {
+            for (int x = center.X - radius; x <= center.X + radius; x++)
+            {
+                for (int z = center.Z - radius; z <= center.Z + radius; z++)
+                {
+                    SpatialChunkKey key = Key(x, z);
+                    if (resident.ContainsKey(key)) continue;
+                    Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _) &&
+                        cache.TryStageFromBaseWorld(handle, [], default, out _) &&
+                        cache.TryPublish(handle, out _),
+                        "Larger-radius semantic preparation failed.");
+                    resident.Add(key, handle);
+                }
+            }
+        }
+    }
+
+    private void LowerSpareLargerRadius(BoundWorldPack world)
+    {
+        const int radius = 4;
+        const int active = 81;
+        var cache = new ClientWorldSemanticCache(
+            world, new ClientWorldSemanticCacheLimits(96, 0, 0, 1, 1));
+        using var renderer = new GodotWorldRenderer(
+            this, cache, new GodotWorldRendererLimits(active, 4));
+        var window = new GodotSlidingRenderWindow(cache, renderer, radius);
+        var changes = new RenderWindowChange[active * 2];
+        Prepare(0);
+        Track(0);
+        Drain(renderer, active, active);
+        Prepare(1);
+        Track(1);
+        Expect(renderer.GetSnapshot().PendingBuilds == 9 &&
+            renderer.GetSnapshot().PendingRetirements == 9,
+            "Larger-radius zero-spare control did not queue one cardinal strip.");
+        int frames = Drain(renderer, 3, 3);
+        Expect(frames == 3 && renderer.GetSnapshot().ActiveRenderChunks == active &&
+            renderer.GetSnapshot().RenderCapacityRejections == 0,
+            "Larger-radius zero-spare control did not retire-then-build in bounded frames.");
+
+        void Prepare(int centerX)
+        {
+            for (int x = centerX - radius; x <= centerX + radius; x++)
+            {
+                for (int z = -radius; z <= radius; z++)
+                {
+                    SpatialChunkKey key = Key(x, z);
+                    if (cache.TryGetResidentHandle(key, out _)) continue;
+                    Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _) &&
+                        cache.TryStageFromBaseWorld(handle, [], default, out _) &&
+                        cache.TryPublish(handle, out _),
+                        "Larger-radius zero-spare semantic preparation failed.");
+                }
+            }
+        }
+
+        void Track(int centerX)
+        {
+            Expect(window.TryTrackPlayer(new WorldPosition(centerX, 0, 0, 0, 0), changes,
+                out _, out _, out SlidingRenderWindowError error,
+                out GodotWorldRenderQueueError rendererError),
+                $"Larger-radius zero-spare transition failed: {error}/{rendererError}.");
+        }
+    }
+
+    private static int Drain(
+        GodotWorldRenderer renderer,
+        int maximumBuilds,
+        int maximumRetirements)
+    {
+        int frames = 0;
+        while (renderer.GetSnapshot().PendingBuilds != 0 ||
+            renderer.GetSnapshot().PendingRetirements != 0)
+        {
+            renderer.ProcessFrame(new GodotWorldFrameBudget(maximumBuilds, maximumRetirements));
+            if (++frames > 1_024)
+                throw new InvalidOperationException("Presentation work did not converge.");
+        }
+        return frames;
+    }
+
     private static BoundWorldPack CreateHighWorld(int baseHeight)
     {
         SpatialChunkKey key = new(Space, -2, 3);
@@ -830,12 +1080,36 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         return bound!;
     }
 
+    private static BoundWorldPack CreateMaterialDiverseWorld(int distinctMaterials)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(distinctMaterials);
+        var builder = new WorldPackBuilder(
+            Space, Content, new WorldPackLimits(512 * 1024, 1, distinctMaterials, 0, 0, 0));
+        ushort[] materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+        for (int index = 0; index < materials.Length; index++)
+            materials[index] = checked((ushort)(index % distinctMaterials + 1));
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase),
+            "Material-diversity terrain base was invalid.");
+        Expect(builder.TryAddBaseTerrain(Key(0, 0), materials, heightBase, offsets, out _),
+            "Material-diversity terrain could not be added.");
+        Expect(builder.TryBuild(out WorldPackArtifact? artifact, out _),
+            "Material-diversity WorldPack build failed.");
+        ushort[] admitted = new ushort[distinctMaterials];
+        for (int index = 0; index < admitted.Length; index++)
+            admitted[index] = checked((ushort)(index + 1));
+        WorldPack pack = artifact!.Open();
+        Expect(pack.TryBind(new WorldContentBinding(Content, admitted, []),
+            out BoundWorldPack? bound, out _), "Material-diversity WorldPack binding failed.");
+        return bound!;
+    }
+
     private static BoundWorldPack CreateSlidingWorld()
     {
-        const int minimumX = -3;
+        const int minimumX = -5;
         const int maximumX = 21;
-        const int minimumZ = -2;
-        const int maximumZ = 2;
+        const int minimumZ = -5;
+        const int maximumZ = 5;
         const int chunkCount = (maximumX - minimumX + 1) * (maximumZ - minimumZ + 1);
         var builder = new WorldPackBuilder(
             Space, Content, new WorldPackLimits(4 * 1024 * 1024, chunkCount, 2, 0, 0, 0));

@@ -11,6 +11,16 @@ does not rebuild terrain or statics. Terrain cells and static instances do not
 gain scene-tree identity. Semantic residency, private render-slot residency, and
 visibility are separate states and their slot indices/capacities do not alias.
 Expected render/group pressure is rejected before native construction.
+`MaximumGroupsPerChunk` counts terrain material surfaces together with static,
+Multi-fragment, and public-prefab groups; terrain cannot bypass the configured
+presentation-pressure bound.
+
+Presentation membership and semantic refresh are separate operations.
+`TryEnterPresentation` is residency-owner work and may reverse a pending
+retirement. `TryQueuePublicRefresh` only refreshes an already desired/rendered
+public layer; it never enters presentation, changes visibility/offsets, or
+cancels retirement. A late public update for an outgoing chunk is therefore
+discarded as presentation work while its semantic truth remains in Client Core.
 
 `GodotSlidingRenderWindow` is the concrete X/Z presentation coordinator. Its
 discrete center follows the player's canonical home chunk immediately, while
@@ -46,6 +56,13 @@ retires/reuses the old slots under budget, and permits the target semantics to b
 prepared without reserving two complete windows. Temporary incomplete
 presentation during that reset is intentional.
 
+Same-center tracking returns before candidate reconstruction/diff. The client
+semantic cache resolves actual crossing candidates through a private bounded
+open-addressed `SpatialChunkKey` index, so lookup cost follows queried entries
+rather than entries multiplied by semantic-slot capacity. Retained offset moves
+do not revalidate semantic render groups; only incoming or semantically changed
+presentation does.
+
 Every render chunk chooses an integer terrain-height Y anchor. Terrain, static,
 and public Y positions subtract that anchor before float conversion; the root
 then applies anchor-minus-render-origin. Horizontal and vertical rebases therefore
@@ -56,7 +73,11 @@ Crossing local `15,999 -> 0` therefore remains a continuous 1 mm move even near
 the signed world-coordinate limits. Same-chunk LocalX/LocalZ movement writes only
 the common root; it does not scan or rewrite every render-chunk root. Chunk roots
 change for discrete window movement, Y-origin movement, construction, or
-retirement—not for ordinary continuous horizontal player motion.
+retirement—not for ordinary continuous horizontal player motion. Y uses the same
+two-level scheme: a discrete integer vertical anchor on chunk roots plus a small
+continuous player offset on the common root. Ordinary slope/jump/fall movement
+therefore changes one root; crossing the current 256 m precision envelope performs
+one bounded all-chunk vertical rebase.
 
 Camera orientation is not a semantic, residency, dirty, or resource-lifetime
 event. Resources remain alive for render-window lifetime and Godot's ordinary

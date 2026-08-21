@@ -105,7 +105,10 @@ render slots, validates snapshot lineage canonically, and uses integer-relative
 vertical anchors before float conversion. Final sliding-window hardening makes
 same-chunk X/Z movement common-root-only, coalesces rapid/reversed transitions
 toward the latest desired center, and provides a bounded retire/reuse reset for
-fast travel. It remains stopped for checkpoint review. Persistence/mutable-
+fast travel. The final review pass separates public refresh from window ownership,
+adds indexed structural-key lookup and a true same-center fast path, makes
+continuous Y movement common-root-only, and includes terrain surfaces in render
+group admission. It remains stopped for checkpoint review. Persistence/mutable-
 overlay T0.9 and Network N1 remain later work.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.

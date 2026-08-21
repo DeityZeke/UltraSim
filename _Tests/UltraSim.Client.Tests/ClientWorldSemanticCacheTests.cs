@@ -387,11 +387,14 @@ internal static class ClientWorldSemanticCacheTests
             Equal(handles.Count, cache.GetSnapshot().ResidentChunks);
             foreach ((SpatialChunkKey key, ClientSemanticChunkHandle handle) in handles)
             {
+                True(cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle indexed));
+                Equal(handle, indexed);
                 True(cache.TryGetResidentView(handle, out ClientSemanticChunkView view));
                 WorldPublicRecord[] rows = expected[key].OrderBy(value => value.Id).ToArray();
                 Equal(rows.Length, view.PublicRecords.Length);
                 for (int row = 0; row < rows.Length; row++) Equal(rows[row], view.PublicRecords[row]);
             }
+            False(cache.TryGetResidentHandle(Key(99, 99), out _));
         }
     }
 
