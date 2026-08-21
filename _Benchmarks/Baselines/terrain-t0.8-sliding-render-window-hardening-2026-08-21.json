@@ -1,0 +1,51 @@
+{
+  "schema": "terrain-t0.8-sliding-render-window-hardening-v1",
+  "captured_at_local": "2026-08-21",
+  "engine": "Godot 4.7.1 Mono headless",
+  "managed_configuration": "Debug",
+  "scope": "synthetic T0.8 X/Z sliding-window correctness, bounded slot reuse, integer-relative coordinate, and cold R=16 reservation evidence; not GPU/view-distance or production-content evidence",
+  "fixture": {
+    "evidence_render_radius_chunks": 1,
+    "active_window_chunks": 9,
+    "spare_semantic_and_render_slots": 5,
+    "long_walk_final_center_chunk_x": 20,
+    "window_transitions": 31,
+    "window_moves": 176,
+    "r16_active_chunks": 1089,
+    "r16_diagonal_fringe_spares": 65
+  },
+  "result": {
+    "initial_entered": 9,
+    "cardinal_entered": 3,
+    "cardinal_retained": 6,
+    "cardinal_exited": 3,
+    "diagonal_entered": 5,
+    "diagonal_retained": 4,
+    "diagonal_exited": 5,
+    "final_active_render_slots": 9,
+    "final_free_render_slots": 5,
+    "window_reserved_bytes": 1440,
+    "r16_minimal_semantic_profile_reserved_bytes": 7568798,
+    "r16_cardinal_retained_chunks": 1056,
+    "r16_diagonal_retained_chunks": 1024
+  },
+  "hardening": {
+    "absolute_chunk_semantic_handle_relative_offset_and_render_slot_are_independent": true,
+    "retained_chunk_preserves_semantic_handle_hash_and_cursor": true,
+    "retained_chunk_preserves_private_render_slot_while_offset_changes": true,
+    "long_walk_reuses_bounded_private_render_slots": true,
+    "stale_render_binding_rejected_after_slot_reuse": true,
+    "player_boundary_15999_to_0_is_continuous_to_one_millimeter": true,
+    "equivalent_origin_and_extreme_world_scenes_have_equal_small_relative_coordinates": true,
+    "camera_rotation_causes_no_semantic_window_or_resource_lifetime_change": true,
+    "presentation_slide_does_not_change_publication_cursor_or_semantic_hash": true,
+    "vertical_integer_anchor_regression_remains_green": true
+  },
+  "interpretation": {
+    "view_radius_is_client_structural_presentation_policy_not_dynamic_public_interest": true,
+    "r16_reservation_uses_zero_static_multi_rows_and_one_public_row_per_chunk": true,
+    "r16_reserved_bytes_is_a_cold_shape_observation_not_an_accepted_default": true,
+    "camera_facing_is_delegated_to_godot_culling_not_window_lifecycle": true,
+    "network_n1_or_mutable_structural_cache_was_not_implemented": true
+  }
+}

@@ -1,9 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
 Status: active forward plan. T0.0 through T0.7 are accepted/frozen as of
-2026-08-21 after T0.7 consumer hardening. T0.8 implementation is complete and
-stopped for checkpoint review; it is not yet accepted/frozen and T0.9 has not
-started.
+2026-08-21 after T0.7 consumer hardening. T0.8 implementation plus semantic,
+renderer, and sliding-window hardening is complete and stopped for checkpoint
+review; it is not yet accepted/frozen, and T0.9/Network N1 have not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -117,6 +117,17 @@ RING 0 IS A LOCAL CHUNK SET, NOT AN ENTITY-BY-ENTITY IMMEDIATE SET.
 
 CLIENT PRESENTATION MAY CULL MORE PRECISELY THAN SERVER CHUNK ADMISSION.
 
+WORLD VIEW DISTANCE, STRUCTURAL FRESHNESS INTEREST, DYNAMIC PUBLIC INTEREST, AND
+ENTITY PRESENTATION QUALITY ARE DISTINCT POLICIES.
+
+CAMERA ORIENTATION IS NOT A SEMANTIC, RESIDENCY, OR RESOURCE-LIFETIME EVENT.
+
+FRUSTUM VISIBILITY MUST NOT MAKE OTHERWISE UNCHANGED PRESENTATION DATA DIRTY.
+
+CLIENT WORLD-VIEW DISTANCE DOES NOT GUARANTEE STRUCTURAL FRESHNESS.
+
+A DISTANT STALE STRUCTURAL CACHE IS PREFERABLE TO GLOBAL STRUCTURAL-MUTATION FANOUT.
+
 PRIVATE OR SECRET STATE NEVER ENTERS A BROADLY SHARED PUBLIC CHUNK PAGE.
 
 STATIC VISUAL SCALE DOES NOT REQUIRE ONE NODE PER STATIC.
@@ -161,6 +172,11 @@ CHEAPER REPRESENTATION.
 UNFREEZE IS NOT UNDO. HARDEN IS NOT FREEZE.
 
 STRUCTURE-DESIGN VISIBILITY AND CONSTRUCTION REALIZATION ARE SEPARATE POLICIES.
+
+PUBLIC-LIVE CONSTRUCTION DOES NOT REQUIRE RECOMPILING THE DURABLE STRUCTURAL
+CHUNK CACHE ON EACH PLACEMENT.
+
+COMPILED STRUCTURAL GEOMETRY AND MUTABLE STRUCTURE GAMEPLAY STATE MAY COEXIST.
 
 TERRAIN MODIFICATION REMAINS PRIVATE/ATOMIC EVEN WHEN STRUCTURE CONSTRUCTION IS
 PUBLIC/LIVE.
@@ -2444,6 +2460,25 @@ RenderChunk / render region
 
 Semantic residency and render visibility are different facts. A semantic chunk may be resident while its render region is not visible this frame. Render regions may later aggregate/subdivide canonical world chunks when measurement earns it.
 
+T0.8's concrete presentation coordinator is a two-dimensional X/Z sliding
+window. Its discrete center follows the player's canonical home chunk immediately;
+it does not reproduce V1's delayed recenter or vertical render grid. The active
+mapping keeps four independent identities:
+
+```text
+SpatialChunkKey                 absolute world identity
+ClientSemanticChunkHandle      client semantic slot/lifetime
+RenderWindowOffset             signed player-relative chunk coordinate
+private Godot render slot      reusable presentation resource identity
+```
+
+For radius `R`, the structural window contains at most `(2R+1)^2` addressable
+chunks plus an explicit bounded fringe/spare profile. A cardinal move retains
+all but one strip; a diagonal move replaces two strips minus their overlap. The
+current `512` semantic and `256` render defaults remain generic limits, not
+accepted production view-distance settings. A future user setting is world/view
+distance; internal pool/group/identity limits remain implementation profiles.
+
 ### Godot terrain
 
 Use a small number of renderer objects per resident render region/chunk, preferably direct `RenderingServer` resources where that materially reduces scene-tree overhead. Do not instantiate one node per terrain cell.
@@ -2460,7 +2495,21 @@ The renderer owns a mapping from render instance/pick result back to logical wor
 
 ### Floating render origin
 
-The client may maintain an origin chunk and render everything relative to it so Godot floats stay numerically small. Rebase updates presentation transforms/RIDs; it never changes authoritative `WorldPosition`, `SpatialChunkKey`, publication revision, persistent identity, or network meaning.
+The client maintains a discrete origin chunk plus continuous player-local X/Z
+and integer Y origin so Godot floats stay numerically small. Horizontal positions
+evaluate `relativeChunk * 16000 + objectLocal - playerLocal` in integer
+millimeters before float conversion. One common root carries
+`-playerLocalX/-playerLocalZ`; chunk roots normally change only at a canonical
+chunk crossing. Per-chunk integer Y anchors similarly subtract absolute height
+before conversion. Rebase updates presentation transforms/RIDs; it never changes
+authoritative `WorldPosition`, `SpatialChunkKey`, publication revision,
+persistent identity, or network meaning.
+
+Camera orientation is not a semantic, residency, dirtiness, representation, or
+resource-lifetime event. Render-window membership retains resources through a
+camera swing, while Godot's ordinary frustum/geometry culling decides what is
+drawn. Static `MultiMesh` grouping remains spatially local to a render chunk plus
+compatible key rather than one world-wide group.
 
 ### Streaming budget
 
@@ -2634,7 +2683,143 @@ render-buffer bytes throughout, so they provide a stable but inert series in thi
 environment—not stronger proof of immediate native reclamation. Exported/rendered
 GPU evidence remains a later gate.
 
-T0.8 remains stopped for checkpoint re-review. T0.9 has not started.
+### T0.8 sliding-window architecture hardening stop — 2026-08-21
+
+V1 archaeology recovered one useful presentation primitive without recovering
+its obsolete vertical grid, recenter delay, frustum-dirty loop, or identity
+coupling. `GodotSlidingRenderWindow` now maps absolute X/Z chunk keys onto signed
+player-relative offsets. Incoming chunks must already have structural semantics
+resident; presentation does not grant public-subscription entitlement. The
+renderer owns a separate generation-fenced private slot pool.
+
+The discrete center follows a canonical player chunk crossing immediately. A
+common root carries continuous negative player-local X/Z, so the transition from
+local `15,999` to the next chunk's local `0` remains one millimeter of visual
+motion. Relative X/Z and per-chunk-relative Y are subtracted as integers before
+Godot float conversion. Equal relative scenes at the world origin and near both
+signed X/Z extremes therefore produce equal small presentation coordinates.
+
+Window transitions are deterministic `Entered`, `RetainedMoved`, and `Exited`
+diffs. Retained chunks keep semantic handles and private render slots where
+possible; exits retire/reset presentation resources and return only the private
+slot. A stale semantic-handle generation cannot mutate its replacement's slot.
+Camera rotation is deliberately absent from this state machine.
+
+The appended immutable evidence is
+[`terrain-t0.8-sliding-render-window-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-sliding-render-window-hardening-2026-08-21.json).
+The native radius-1 fixture observes:
+
+```text
+initial                         9 enter
+cardinal one-chunk slide       3 enter / 6 retain / 3 exit
+diagonal one-chunk slide       5 enter / 4 retain / 5 exit
+long walk                     31 transitions, 9 active + 5 free/spare slots
+window bookkeeping             1,440 reserved bytes
+```
+
+Pure slides preserve retained semantic hashes/cursors, pure camera rotation
+changes no semantic/window/renderer-lifetime snapshot, and final retirement
+returns to zero active render chunks. An R=16 cold shape has `33 x 33 = 1,089`
+active chunks; 65 spare slots admit a complete one-step diagonal fringe. A
+minimal structural semantic profile for those 1,154 slots reserves 7,568,798
+bytes. That profile intentionally admits no statics/Multi rows and only one
+public row per chunk, so it is a capacity-shape observation—not an accepted
+view-distance default or production memory forecast.
+
+T0.8 still uses grouped public-prefab presentation rather than implementing rich
+animated actor tiers. The forward client hypothesis is `Rich`, `Batched`,
+`Reduced`, or `Absent` presentation, with nearby interactive actors likely rich
+and farther supplied actors spatially batched. Those are private client states,
+not T0.7 interest tiers or public APIs. Camera visibility may become one stable,
+hysteretic prioritization input only if a measured bounded rich-object budget
+needs it; merely turning around must not churn every actor's representation.
+
+#### Forward structural-streaming and construction model (documented, not implemented)
+
+The next checkpoints and N1 must preserve four independently owned scopes:
+
+```text
+World View Radius
+    client-controlled structural presentation extent
+
+Structural Freshness Interest
+    server/game-owned mutable-map reconciliation policy
+
+Public Entity Interest
+    server/game-owned dynamic public state/cadence policy
+
+Entity Presentation Distance/Quality
+    optional client-only reduction of already supplied public state
+```
+
+A client semantic chunk can therefore be useful with immutable terrain, frozen
+statics, static Multi fragments, and zero public records. A large graphics/view
+radius does not request arbitrary farther actors and does not promise that every
+distant mutable structure is current. Outside structural-freshness interest, a
+client may render a verified immutable `WorldPack` baseline plus its last known
+durable structural replacement. A stale distant building that reconciles on
+approach is an intentional bounded tradeoff; global structural-mutation fanout is
+not.
+
+Future compiled mutable structural chunks conceptually need:
+
+```text
+SpatialChunkKey
+StructuralRevision / generation
+deterministic compiled ContentHash
+```
+
+Revision provides cheap lineage; hash verifies exact deterministic content. A
+verified replacement becomes durable client cache data layered over the immutable
+pack, not session-only public state. Exact storage, wire format, ACKs, and cache
+files remain unfrozen.
+
+Two reconciliation paths are named without freezing N1 messages:
+
+```text
+Approach reconciliation
+    server advertises current key -> revision/hash in freshness scope
+    client compares durable cache
+    matching content sends no payload
+    only missing/mismatched replacements transfer
+
+Immediate reconciliation
+    validate a complete authoritative structural mutation
+    compile every affected chunk privately
+    atomically publish revisions/hashes
+    advance recipients already inside structural-freshness interest
+    coalesce superseded intermediate complete generations where safe
+```
+
+The future structural store owns compiled state/revision/hash and no watchers.
+Replication owns recipient freshness/subscriber indexes. Structural freshness is
+likely farther than live individual actors so buildings arrive before occupants,
+but exact radii/hysteresis require evidence and never come from the graphics
+slider. Dynamic actor publication and structural publication remain two concrete
+domains sharing `SpatialChunkKey`, not a speculative generic chunk provider.
+
+Public-live construction initially commits validated mutable structure state and
+notifies nearby observers. It does **not** recompile a complete durable structural
+chunk for each wall, floor, beam, damage, or repair operation. The first real
+construction workload must choose ECS entities, packed piece rows, or a hybrid.
+Stable/completed geometry may later lower into a compiled structural generation
+without deleting its semantic identity:
+
+```text
+PublicLive mutable realization
+        -> Harden/lower
+compiled walls/floors/roof/beams
+        + retained live door/container/ownership/health/edit state
+```
+
+Geometry compilation and mutable gameplay state may coexist. State changes that
+do not alter compiled geometry do not advance structural generations.
+`PrivateDraft`, immediate `PublicLive`, and staged `ConstructionProject` remain
+separate orchestration workflows over shared validated world semantics; none is
+implemented by this T0.8 hardening.
+
+T0.8 remains stopped for checkpoint re-review. T0.9 and Network N1 have not
+started.
 
 ## T0.9 — persistence and mutable-world seam
 

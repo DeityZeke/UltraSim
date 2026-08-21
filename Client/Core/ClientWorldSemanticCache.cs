@@ -54,6 +54,30 @@ public readonly record struct ClientWorldSemanticCacheLimits(
 {
     public static ClientWorldSemanticCacheLimits Default => new(512, 64, 64, 64, 4_096);
 
+    /// <summary>
+    /// Derives structural semantic residency from a square client view radius plus bounded fringe
+    /// preparation. Dynamic public-interest extent remains a separate server/game policy.
+    /// </summary>
+    public static ClientWorldSemanticCacheLimits ForStructuralViewRadius(
+        int renderRadiusChunks,
+        int spareResidentChunks,
+        int maximumFrozenStaticsPerChunk = 64,
+        int maximumMultiFragmentsPerChunk = 64,
+        int maximumPublicRecordsPerChunk = 64,
+        int maximumKnownPublicIdentities = 4_096)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(renderRadiusChunks);
+        ArgumentOutOfRangeException.ThrowIfNegative(spareResidentChunks);
+        int diameter = checked(renderRadiusChunks * 2 + 1);
+        int active = checked(diameter * diameter);
+        return new ClientWorldSemanticCacheLimits(
+            checked(active + spareResidentChunks),
+            maximumFrozenStaticsPerChunk,
+            maximumMultiFragmentsPerChunk,
+            maximumPublicRecordsPerChunk,
+            maximumKnownPublicIdentities);
+    }
+
     internal void Validate()
     {
         if (MaximumResidentChunks <= 0 || MaximumFrozenStaticsPerChunk < 0 ||

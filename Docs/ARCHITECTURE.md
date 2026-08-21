@@ -140,7 +140,20 @@ packet-free interest/convergence oracle. T0.8 now implements the distinct
 production client semantic cache and bounded Godot render owner: client capacity
 is resident-scope-shaped rather than server-address-space-shaped, semantic and
 render residency are independent, statics/public rows are grouped rather than
-node-shaped, and floating-origin changes remain presentation-only.
+node-shaped, and floating-origin changes remain presentation-only. Its concrete
+client presentation chain is:
+
+```text
+absolute authoritative world / SpatialChunkKey
+        -> bounded client semantic residency
+        -> X/Z sliding render window with signed relative offsets
+        -> private pooled Godot render slots
+        -> engine frustum/occlusion
+```
+
+The semantic handle, relative window offset, and private render slot never alias.
+Player-local subtraction happens in integer millimeters before float conversion;
+camera orientation does not mutate semantic residency or resource lifetime.
 The pack remains extensible to future sparse structural surfaces; world topology
 is not restricted to one heightfield surface per X/Z.
 Future `WorldRegion`, property, property-unit, Multi, terrain, and edit-lease

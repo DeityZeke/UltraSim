@@ -134,7 +134,11 @@ Useful current anchors can be located by their embedded workload or filename:
   retirement. The `hardening` artifact adds heterogeneous terrain/static/Multi/
   public content, public-only refresh, independent private render slots, expected
   capacity rejection, extreme-Y precision, longer churn, and native monitor
-  observations. Its Debug first-use tails are not exported-game/GPU claims;
+  observations. The separate `sliding-render-window-hardening` artifact proves
+  X/Z strip diffs, long-walk private-slot reuse, player-local integer rebasing,
+  camera no-op behavior, and a cold R=16 capacity shape. Its Debug first-use
+  tails and minimal R=16 row profile are not exported-game/GPU or production
+  view-distance claims;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

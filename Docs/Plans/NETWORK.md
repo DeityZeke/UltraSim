@@ -257,6 +257,11 @@ false-positive rows can lose overall.
 
 The client is free to cull by exact camera distance, view frustum, occlusion, LOD,
 interior visibility, or render budget. Camera state must not become authorization.
+Client world/view distance controls structural presentation capacity only; it
+does not enlarge the server/game-owned R0/Near/Far dynamic-public entitlement.
+Structural freshness reconciliation may use a different, likely farther policy,
+but N1 must earn and freeze that policy independently rather than reading a
+graphics slider as replication authority.
 
 ## Chunk snapshot semantics
 

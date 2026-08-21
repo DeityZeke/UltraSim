@@ -180,6 +180,13 @@ The renderer separately maps client semantic handles onto private presentation
 slots and refreshes dynamic public groups without rebuilding immutable terrain or
 frozen structure.
 
+The T0.7 `Immediate/Near/Far` radii remain game/server public-state admission and
+freshness policy. They are not terrain draw distance, a graphics setting, or a
+client render-window radius. A client structural window may retain immutable
+terrain/statics well beyond dynamic public interest, or render less public state
+than supplied, without changing authority. Camera facing is presentation-only
+and never feeds this interest query as authorization.
+
 ## Terrain foundation format
 
 T0.2 freezes the physical terrain planes without introducing a loader or mutable

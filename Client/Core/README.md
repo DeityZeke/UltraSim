@@ -26,6 +26,15 @@ content, while a later client overlay can change that private resolution without
 changing presentation callers. Rendering and visibility are independently owned
 by the engine adapter.
 
+Structural semantic residency, dynamic public subscription, and current camera
+visibility are independent facts. A structurally resident chunk may contain the
+verified immutable terrain/static/Multi baseline and zero public records. The
+client's world/view radius may therefore shape structural cache capacity without
+expanding the server/game-owned public-entity interest entitlement. The
+`ForStructuralViewRadius` helper only derives a bounded client capacity profile;
+it does not create Network or AOI policy, and the old `512` default is not a
+frozen production view distance.
+
 `TryApplyChunkAbsent` assumes its local/remote bridge already validated the
 current request/subscription attempt. The cache fences semantic-handle generation
 and publication epoch; same-epoch transport request ordering belongs to the
