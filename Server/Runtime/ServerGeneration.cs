@@ -8,14 +8,15 @@ namespace UltraSim.Server.Runtime;
 /// <remarks>
 /// Runtime knows only the ordering contract: initialization occurs while a
 /// candidate is private, and step maintenance occurs after the ECS graph and
-/// structural barrier but before authoritative clock advancement. Domain state
-/// remains owned by the game generation.
+/// structural barrier but before authoritative clock advancement. Runtime also
+/// supplies the exact fixed simulation delta for that step; domain state and
+/// interpretation remain owned by the game generation.
 /// </remarks>
 public interface IServerGenerationStepParticipant
 {
     void InitializeGeneration(EcsWorld world);
 
-    void CommitAfterEcsStep(EcsWorld world);
+    void CommitAfterEcsStep(EcsWorld world, in SimulationStepDelta delta);
 }
 
 /// <summary>
@@ -79,7 +80,10 @@ internal sealed class ServerGeneration
     {
         EcsWorld.Tick(Clock.FixedStepSeconds);
         if (GameState is IServerGenerationStepParticipant participant)
-            participant.CommitAfterEcsStep(EcsWorld);
+        {
+            var delta = new SimulationStepDelta(Clock.SimulationFrequencyHz);
+            participant.CommitAfterEcsStep(EcsWorld, delta);
+        }
         Clock.AdvanceSimulationTick();
     }
 

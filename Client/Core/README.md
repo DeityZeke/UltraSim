@@ -61,7 +61,9 @@ T0.10 adds the first engine-neutral playable input seam. A concrete engine
 captures raw axes, action-map state, and focus into `ClientWorldInputSample`.
 `ClientWorldInputSequencer` then owns finite-value validation, focus suppression,
 unit-circle movement normalization, held-to-pressed edge detection, Q15 command
-quantization, and monotonic command sequencing. The resulting
+quantization, explicit control-session epoch identity, and monotonic command
+sequencing. Quantization is rechecked against the discrete Q15 unit circle so a
+rounded diagonal cannot become an invalid over-unit command. The resulting
 `GamePlayerCommand` is shared game/client intent; it contains no key names,
 device IDs, cursor mode, Godot event, or transport state. Physical bindings,
 mouse capture, controller discovery, and engine action maps remain adapter work.
@@ -69,4 +71,6 @@ This is deliberately the smallest proven movement/interact boundary rather than
 a general input framework or compatibility API. Refocus restores held movement
 immediately but only seeds the held-action baseline; a key held across focus loss
 cannot manufacture a fresh edge-triggered interaction until released and pressed
-again.
+again. Its movement axes are a complete world-space Direct state: a nonzero
+state remains authoritative until superseded, while zero/zero stops it. Command
+sampling frequency therefore does not define movement speed.

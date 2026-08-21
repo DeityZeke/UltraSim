@@ -17,6 +17,7 @@ public readonly record struct ClientWorldInputSample(
 }
 
 public readonly record struct ClientWorldInputSnapshot(
+    GameControlSessionEpoch ControlSession,
     ulong CommandsProduced,
     ulong LastSequence,
     GamePlayerActions LastHeldActions,
@@ -29,6 +30,7 @@ public readonly record struct ClientWorldInputSnapshot(
 public sealed class ClientWorldInputSequencer
 {
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private readonly GameControlSessionEpoch _controlSession;
     private ulong _nextSequence;
     private ulong _commandsProduced;
     private GamePlayerActions _lastHeld;
@@ -36,11 +38,23 @@ public sealed class ClientWorldInputSequencer
     private bool _hasSample;
 
     public ClientWorldInputSequencer(ulong firstSequence = 1)
+        : this(GameControlSessionEpoch.Create(), firstSequence)
     {
+    }
+
+    public ClientWorldInputSequencer(
+        GameControlSessionEpoch controlSession,
+        ulong firstSequence = 1)
+    {
+        if (!controlSession.IsValid)
+            throw new ArgumentException("A valid control-session epoch is required.", nameof(controlSession));
         if (firstSequence == 0)
             throw new ArgumentOutOfRangeException(nameof(firstSequence));
+        _controlSession = controlSession;
         _nextSequence = firstSequence;
     }
+
+    public GameControlSessionEpoch ControlSession => _controlSession;
 
     public bool TryCreateCommand(
         in ClientWorldInputSample sample,
@@ -66,7 +80,8 @@ public sealed class ClientWorldInputSequencer
             out short moveX,
             out short moveZ);
 
-        command = new GamePlayerCommand(_nextSequence, moveX, moveZ, held, pressed);
+        command = new GamePlayerCommand(
+            _controlSession, _nextSequence, moveX, moveZ, held, pressed);
         _nextSequence = unchecked(_nextSequence + 1);
         _commandsProduced = checked(_commandsProduced + 1);
         _lastHeld = held;
@@ -79,6 +94,7 @@ public sealed class ClientWorldInputSequencer
     {
         EnsureOwner();
         return new ClientWorldInputSnapshot(
+            _controlSession,
             _commandsProduced,
             _commandsProduced == 0 ? 0 : unchecked(_nextSequence - 1),
             _lastHeld,
@@ -99,6 +115,22 @@ public sealed class ClientWorldInputSequencer
 
         moveX = QuantizeAxis(x);
         moveZ = QuantizeAxis(z);
+        ClampToQuantizedUnitCircle(ref moveX, ref moveZ);
+    }
+
+    private static void ClampToQuantizedUnitCircle(ref short x, ref short z)
+    {
+        long maximumSquared =
+            (long)GamePlayerCommand.MaximumAxisMagnitude * GamePlayerCommand.MaximumAxisMagnitude;
+        while ((long)x * x + (long)z * z > maximumSquared)
+        {
+            int absoluteX = Math.Abs((int)x);
+            int absoluteZ = Math.Abs((int)z);
+            if (absoluteX >= absoluteZ)
+                x = checked((short)(x - Math.Sign(x)));
+            if (absoluteZ >= absoluteX)
+                z = checked((short)(z - Math.Sign(z)));
+        }
     }
 
     private static short QuantizeAxis(double value)

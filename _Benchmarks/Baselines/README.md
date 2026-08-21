@@ -139,6 +139,12 @@ Useful current anchors can be located by their embedded workload or filename:
   camera no-op behavior, and a cold R=16 capacity shape. Its Debug first-use
   tails and minimal R=16 row profile are not exported-game/GPU or production
   view-distance claims;
+- `terrain-t0.10-retained-direct-*` — the first persistent Direct-locomotion
+  checkpoint: exact 20/60/120 Hz fixed-step meaning from one retained start
+  command per run, zero-state stop, discrete Q15 unit-vector validation, and
+  control-session epoch/replay fencing. It preserves the joined native seam but
+  is not Destination, camera/control-profile, launchable-client, broad-matrix,
+  or N1 evidence;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

@@ -83,6 +83,11 @@ public partial class T010PlayableWorldAcceptance : Node3D
         _ = Drain(renderer);
 
         var sequencer = new ClientWorldInputSequencer();
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, _, game) => game.WorldActions.BeginControlSession(
+                world, entities.Player, sequencer.ControlSession),
+            out GameWorldActionStatus controlBound) && controlBound == GameWorldActionStatus.Accepted,
+            "The joined native control session could not bind to the actor.");
         try
         {
             Input.ActionPress(map.MoveRight, 1f);
@@ -98,12 +103,11 @@ public partial class T010PlayableWorldAcceptance : Node3D
                         game.WorldState,
                         entities.Player,
                         command,
-                        runtime.SimulationFrequencyHz,
                         entities.CabinDoor,
                         out GamePlayerCommandResult result);
                     return result;
                 }, out GamePlayerCommandResult authority) && authority.WasAdmitted &&
-                authority.Movement == GameWorldActionStatus.Accepted &&
+                authority.Locomotion == GameWorldActionStatus.Accepted &&
                 authority.Interaction == GameWorldActionStatus.Accepted,
                 "Godot input did not reach composed movement/interaction authority.");
         }

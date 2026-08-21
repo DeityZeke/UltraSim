@@ -18,12 +18,13 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v2";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v3";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
+Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
 Run("AccountlessAdmissionAndPersistence", AccountlessRoundTrip, results);
@@ -77,6 +78,8 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
         Expect(initialProjection.Length != 0, "The initial client projection was empty.");
 
         var input = new ClientWorldInputSequencer();
+        var offline = new PlayableOfflineDirectLink(
+            runtime.Game, entities.PlayerId, input.ControlSession);
         Expect(input.TryCreateCommand(new ClientWorldInputSample(
             1, 0, GamePlayerActions.Interact, true), out GamePlayerCommand openDoor),
             "The door input command could not be formed.");
@@ -87,15 +90,19 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
                     world, game.WorldState,
                     ResolveInWorld(world, entities.PlayerId),
                     openDoor,
-                    runtime.SimulationFrequencyHz,
                     ResolveInWorld(world, entities.CabinDoorId),
                     out GamePlayerCommandResult commandResult);
                 return commandResult;
             },
             out GamePlayerCommandResult doorResult) && doorResult.WasAdmitted &&
-            doorResult.Movement == GameWorldActionStatus.Accepted &&
+            doorResult.Locomotion == GameWorldActionStatus.Accepted &&
             doorResult.Interaction == GameWorldActionStatus.Accepted && doorResult.DoorIsOpen,
-            "One composed move+interact command did not move the actor and open the door.");
+            "One composed move+interact command did not retain Direct intent and open the door.");
+        host.Tick();
+        playerPosition = offline.ReadPosition();
+        Expect(playerPosition.GlobalXMillimeters ==
+            GamePlayableWorld.PlayerStart.GlobalXMillimeters + 100,
+            "The retained Direct intent did not integrate on the authoritative step.");
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayerCommandResult>(
             (world, generationId, game) =>
             {
@@ -103,7 +110,6 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
                     world, game.WorldState,
                     ResolveInWorld(world, entities.PlayerId),
                     openDoor,
-                    runtime.SimulationFrequencyHz,
                     ResolveInWorld(world, entities.CabinDoorId),
                     out GamePlayerCommandResult commandResult);
                 return commandResult;
@@ -129,12 +135,12 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
                     "The replay-fencing actor could not move out of range.");
                 GameWorldActionStatus first = game.WorldActions.ApplyPlayerCommand(
                     world, game.WorldState, player, outOfRange,
-                    runtime.SimulationFrequencyHz, door, out GamePlayerCommandResult firstResult);
+                    door, out GamePlayerCommandResult firstResult);
                 Expect(game.WorldState.TrySetPosition(world, player, savedPosition),
                     "The replay-fencing actor position could not be restored.");
                 GameWorldActionStatus replay = game.WorldActions.ApplyPlayerCommand(
                     world, game.WorldState, player, outOfRange,
-                    runtime.SimulationFrequencyHz, door, out _);
+                    door, out _);
                 return first == GameWorldActionStatus.Accepted &&
                     firstResult.Interaction == GameWorldActionStatus.OutOfRange &&
                     replay == GameWorldActionStatus.StaleCommand;
@@ -142,22 +148,19 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
             "A rejected admitted interaction acquired new meaning when replayed.");
         host.Tick();
 
-        const int movementCommands = 45;
-        var movementTicks = new double[movementCommands];
-        var offline = new PlayableOfflineDirectLink(
-            runtime.Game, entities.PlayerId, runtime.SimulationFrequencyHz);
+        const int movementSteps = 45;
+        var movementTicks = new double[movementSteps];
         int chunkCrossings = 0;
         SpatialChunkCoord previousChunk = playerPosition.Chunk;
         long movementAllocated = 0;
-        for (int step = 0; step < movementCommands; step++)
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            1, 0, GamePlayerActions.None, true), out GamePlayerCommand retainedDirect) &&
+            offline.ApplyMovement(retainedDirect) == GameWorldActionStatus.Accepted,
+            "The retained Direct command could not be admitted.");
+        for (int step = 0; step < movementSteps; step++)
         {
-            Expect(input.TryCreateCommand(new ClientWorldInputSample(
-                1, 0, GamePlayerActions.None, true), out GamePlayerCommand command),
-                "A movement command could not be formed.");
             long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             long started = Stopwatch.GetTimestamp();
-            Expect(offline.ApplyMovement(command) == GameWorldActionStatus.Accepted,
-                "Authoritative movement was rejected.");
             host.Tick();
             movementTicks[step] = ToNanoseconds(Stopwatch.GetTimestamp() - started);
             movementAllocated += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
@@ -171,6 +174,14 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
         }
         Expect(chunkCrossings == 1 && playerPosition.Chunk.X == 1,
             "The playable path did not cross exactly one world chunk boundary.");
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.None, true), out GamePlayerCommand stopDirect) &&
+            offline.ApplyMovement(stopDirect) == GameWorldActionStatus.Accepted,
+            "Direct release did not admit the complete stopped state.");
+        WorldPosition stoppedAt = offline.ReadPosition();
+        host.Tick();
+        Expect(offline.ReadPosition() == stoppedAt,
+            "The actor continued moving after Direct intent was released.");
 
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
             (world, generationId, game) => game.WorldActions.MoveItemToNearbyContainer(
@@ -261,7 +272,6 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
                 GameWorldActionStatus closed = game.WorldActions.ApplyPlayerCommand(
                     world, game.WorldState,
                     ResolveInWorld(world, entities.PlayerId), closeDoor,
-                    runtime.SimulationFrequencyHz,
                     ResolveInWorld(world, entities.CabinDoorId), out GamePlayerCommandResult closeResult);
                 InventoryMutationResult moved = game.Inventory.Move(
                     world,
@@ -319,7 +329,8 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
             Percentile(movementTicks, 0.95),
             0,
             movementAllocated,
-            "Preauthored 5x5 woods/cabin; OfflineDirect neutral input; one chunk crossing; " +
+            "Preauthored 5x5 woods/cabin; retained OfflineDirect world-space Direct input; " +
+            "one chunk crossing; " +
             "composed movement/door command; two-endpoint-authorized chest interaction; " +
             "bounded 3x3 presentation; terrain mesh prep; " +
             "projection retire/rebuild; four-artifact save/diverge/restore; accountless session invalidation.",
@@ -370,22 +381,28 @@ static TestMetrics PlayableMovementCadenceMatrix()
         host.Tick();
 
         var input = new ClientWorldInputSequencer();
-        var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, frequency);
+        var link = new PlayableOfflineDirectLink(
+            runtime.Game, entities.PlayerId, input.ControlSession);
+        Expect(input.TryCreateCommand(
+            new ClientWorldInputSample(1, 0, GamePlayerActions.None, true),
+            out GamePlayerCommand command) &&
+            link.ApplyMovement(command) == GameWorldActionStatus.Accepted,
+            $"The {frequency} Hz cadence rejected retained Direct intent.");
         for (int step = 0; step < frequency; step++)
-        {
-            Expect(input.TryCreateCommand(
-                new ClientWorldInputSample(1, 0, GamePlayerActions.None, true),
-                out GamePlayerCommand command) &&
-                link.ApplyMovement(command) == GameWorldActionStatus.Accepted,
-                $"The {frequency} Hz cadence rejected movement step {step}.");
             host.Tick();
-        }
         WorldPosition position = link.ReadPosition();
         Expect(position.GlobalXMillimeters ==
                 GamePlayableWorld.PlayerStart.GlobalXMillimeters +
                 GameWorldActions.FullInputSpeedMillimetersPerSecond &&
             position.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters,
             $"One second of full input changed meaning at {frequency} Hz: {position}.");
+        Expect(input.TryCreateCommand(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true),
+            out GamePlayerCommand stop) && link.ApplyMovement(stop) == GameWorldActionStatus.Accepted,
+            $"The {frequency} Hz cadence rejected Direct stop.");
+        host.Tick();
+        Expect(link.ReadPosition() == position,
+            $"The {frequency} Hz actor continued after Direct stop.");
         positions.Add($"{frequency}:{position.GlobalXMillimeters}:{position.YMillimeters}:{position.GlobalZMillimeters}");
         commands += input.Snapshot().CommandsProduced;
     }
@@ -393,7 +410,7 @@ static TestMetrics PlayableMovementCadenceMatrix()
     return new TestMetrics(
         HashText(string.Join('|', positions)),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        "One authoritative second of full-right movement at 20/60/120 Hz; exact final X/Z equality.",
+        "One retained Direct command over one authoritative second at 20/60/120 Hz; exact final X/Z equality and release-stop.",
         InputCommands: commands);
 }
 
@@ -445,6 +462,104 @@ static TestMetrics ContradictoryRestoredDoorFailsClosed()
         HashText("contradictory-door-rejected"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "Private generation admission rejects persisted open state with closed public orientation.");
+}
+
+static TestMetrics ControlSessionLineageFencesRetainedDirect()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1800))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(1800));
+    Expect(entered.IsEntered, "The control-lineage actor could not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+        (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+        out GamePlayableWorldEntities entities),
+        "The control-lineage fixture could not populate.");
+    host.Tick();
+
+    var first = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, first.ControlSession);
+    Expect(first.TryCreateCommand(
+        new ClientWorldInputSample(1, 0, GamePlayerActions.None, true),
+        out GamePlayerCommand retained) && link.ApplyMovement(retained) == GameWorldActionStatus.Accepted,
+        "The first Direct lineage was not admitted.");
+    host.Tick();
+    WorldPosition afterFirst = link.ReadPosition();
+
+    var invalid = new GamePlayerCommand(
+        first.ControlSession,
+        2,
+        short.MaxValue,
+        short.MaxValue,
+        GamePlayerActions.None,
+        GamePlayerActions.None);
+    Expect(!invalid.IsValid && link.ApplyMovement(invalid) == GameWorldActionStatus.InvalidCommand,
+        "Authority admitted a Direct vector outside the Q15 unit circle.");
+    host.Tick();
+    WorldPosition afterRejected = link.ReadPosition();
+    Expect(afterRejected.GlobalXMillimeters == afterFirst.GlobalXMillimeters + 100,
+        "Rejected malformed input replaced the last admitted Direct state.");
+
+    var replacement = new ClientWorldInputSequencer();
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+        (world, _, game) => game.WorldActions.BeginControlSession(
+            world, ResolveInWorld(world, entities.PlayerId), replacement.ControlSession),
+        out GameWorldActionStatus rebound) && rebound == GameWorldActionStatus.Accepted,
+        "The replacement control lineage could not bind.");
+    host.Tick();
+    WorldPosition afterRebind = link.ReadPosition();
+    Expect(afterRebind == afterRejected,
+        "Replacing the control lineage did not terminate retained Direct movement.");
+
+    var stale = new GamePlayerCommand(
+        first.ControlSession,
+        2,
+        GamePlayerCommand.MaximumAxisMagnitude,
+        0,
+        GamePlayerActions.None,
+        GamePlayerActions.None);
+    Expect(link.ApplyMovement(stale) == GameWorldActionStatus.StaleControlSession,
+        "A command from the replaced control lineage was admitted.");
+    host.Tick();
+    Expect(link.ReadPosition() == afterRebind,
+        "A stale control lineage restarted locomotion.");
+
+    Expect(replacement.TryCreateCommand(
+        new ClientWorldInputSample(1, 0, GamePlayerActions.None, true),
+        out GamePlayerCommand current) && link.ApplyMovement(current) == GameWorldActionStatus.Accepted,
+        "The replacement lineage could not admit Direct intent.");
+    host.Tick();
+    WorldPosition afterReplacement = link.ReadPosition();
+    Expect(afterReplacement.GlobalXMillimeters == afterRebind.GlobalXMillimeters + 100,
+        "The replacement lineage did not move on the authoritative step.");
+
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+        (world, _, game) => game.WorldActions.BeginControlSession(
+            world, ResolveInWorld(world, entities.PlayerId), replacement.ControlSession),
+        out GameWorldActionStatus idempotent) && idempotent == GameWorldActionStatus.Accepted &&
+        link.ApplyMovement(current) == GameWorldActionStatus.StaleCommand,
+        "Idempotent control binding reset the admitted sequence floor.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+        (world, _, game) => game.WorldActions.EndControlSession(
+            world, ResolveInWorld(world, entities.PlayerId), replacement.ControlSession),
+        out GameWorldActionStatus ended) && ended == GameWorldActionStatus.Accepted,
+        "The current control lineage could not end.");
+    host.Tick();
+    Expect(link.ReadPosition() == afterReplacement,
+        "Ending control did not terminate retained Direct movement.");
+
+    return new TestMetrics(
+        HashText($"{afterFirst}|{afterRejected}|{afterRebind}|{afterReplacement}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Malformed Direct rejected without replacement; rebind/end stop retained state; stale epochs reject; idempotent bind preserves sequence floor.",
+        InputCommands: first.Snapshot().CommandsProduced + replacement.Snapshot().CommandsProduced);
 }
 
 static TestMetrics AccountBackedRoundTrip()
@@ -1536,20 +1651,27 @@ sealed class PlayableOfflineDirectLink
     private readonly ServerGameFacet _runtime;
     private readonly PersistentEntityId _playerId;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameWorldActionStatus> _apply;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameWorldActionStatus> _begin;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, WorldPosition> _read;
-    private readonly int _simulationFrequencyHz;
+    private readonly GameControlSessionEpoch _controlSession;
     private GamePlayerCommand _command;
 
     internal PlayableOfflineDirectLink(
         ServerGameFacet runtime,
         PersistentEntityId playerId,
-        int simulationFrequencyHz)
+        GameControlSessionEpoch controlSession)
     {
         _runtime = runtime;
         _playerId = playerId;
-        _simulationFrequencyHz = simulationFrequencyHz;
+        _controlSession = controlSession;
         _apply = ApplyCore;
+        _begin = BeginCore;
         _read = ReadCore;
+        if (!_runtime.TryUseActiveGeneration(_begin, out GameWorldActionStatus status) ||
+            status != GameWorldActionStatus.Accepted)
+        {
+            throw new InvalidOperationException($"OfflineDirect control binding failed: {status}.");
+        }
     }
 
     internal GameWorldActionStatus ApplyMovement(in GamePlayerCommand command)
@@ -1579,14 +1701,23 @@ sealed class PlayableOfflineDirectLink
             game.WorldState,
             player,
             _command,
-            _simulationFrequencyHz,
             Entity.Null,
             out GamePlayerCommandResult result) == GameWorldActionStatus.Accepted &&
-            result.Movement == GameWorldActionStatus.Accepted
+            result.Locomotion == GameWorldActionStatus.Accepted
             ? GameWorldActionStatus.Accepted
             : result.Admission != GameWorldActionStatus.Accepted
                 ? result.Admission
-                : result.Movement;
+                : result.Locomotion;
+    }
+
+    private GameWorldActionStatus BeginCore(
+        EcsWorld world,
+        ulong generationId,
+        IGameGenerationStateProvider game)
+    {
+        if (!world.TryResolvePersistentEntity(_playerId, out Entity player))
+            return GameWorldActionStatus.MissingActor;
+        return game.WorldActions.BeginControlSession(world, player, _controlSession);
     }
 
     private WorldPosition ReadCore(

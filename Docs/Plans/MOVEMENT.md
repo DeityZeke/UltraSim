@@ -715,6 +715,58 @@ but both should converge to the same neutral world-space intents.
 
 The profiles therefore double as portability evidence.
 
+## T0.10 retained Direct implementation boundary — 2026-08-21
+
+The first authority checkpoint now implements the Direct half of the neutral
+locomotion model. It deliberately stops before `Destination` and before the
+launchable `OrbitCommand` client.
+
+`GamePlayerCommand` carries:
+
+```text
+GameControlSessionEpoch
+monotonic sequence within that epoch
+complete world-space Direct Q15 X/Z state
+held/pressed adjacent action state
+```
+
+Client Core normalizes and quantizes Direct input, then ensures the discrete Q15
+vector remains inside the unit circle. Game validates the same bound before
+admission. A trusted authority route must bind the exact control epoch to the
+actor before commands can be admitted; replacing or ending that binding clears
+retained Direct state immediately. Repeating the same bind is idempotent and
+does not reset the accepted sequence floor. The epoch and sequence floor are
+generation/session state and are not persisted as world history.
+Sequence exhaustion fails closed; continuing control requires a newly bound
+epoch rather than wrapping the sequence inside the old lineage.
+
+A nonzero Direct command replaces the actor's retained current direction and
+magnitude. Zero/zero is the complete stopped state. Command arrival does not
+write `WorldPosition`. Runtime supplies an exact `SimulationStepDelta` after the
+ECS graph/barrier; game locomotion integrates every active Direct actor once,
+then `GameWorldState` commits Spatial/publication truth. One Direct command can
+therefore drive many steps, and a rejected malformed or stale command cannot
+replace it.
+
+Permanent evidence covers:
+
+- one retained command for one authoritative second at 20/60/120 Hz, with exact
+  equal final X/Z;
+- explicit zero-state release and control-session end stopping on the next
+  step without drift;
+- over-unit Q15 rejection without replacing the last good Direct state;
+- epoch replacement cancelling old movement and rejecting stale-epoch commands;
+- idempotent rebinding preserving the sequence replay fence;
+- one command composing retained Direct intent with a pressed door interaction.
+
+Still unfrozen/unimplemented at this boundary:
+
+- gait vocabulary beyond the current fixed game speed;
+- `Destination` representation, latching, arrival, and cancellation;
+- camera-basis conversion/control profiles;
+- pointer gesture interpretation;
+- the human-launchable Godot client.
+
 ## T0.10 real-client requirement
 
 T0.10 must stop manufacturing the entire playable path only from tests.

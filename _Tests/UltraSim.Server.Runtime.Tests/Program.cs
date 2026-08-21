@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("SuccessfulReplacementPublishesOneCoherentRoot", SuccessfulReplacementPublishesOneCoherentRoot),
     ("GenerationOwnedGameStatePublishesAndRetiresAtomically", GenerationOwnedGameStatePublishesAndRetiresAtomically),
     ("PublicationFailureIsTerminalAfterRootSwap", PublicationFailureIsTerminalAfterRootSwap),
+    ("SimulationStepDeltaUsesExactHostCadence", SimulationStepDeltaUsesExactHostCadence),
     ("FixedWorldClockIsDeterministicAndSnapshotRestores", FixedWorldClockIsDeterministicAndSnapshotRestores),
     ("MaximumWorldTimeRateUsesOverflowSafeFixedPointDecomposition", MaximumWorldTimeRateUsesOverflowSafeFixedPointDecomposition),
     ("PlaybackChangesHostReachTimeNotTickMeaning", PlaybackChangesHostReachTimeNotTickMeaning),
@@ -450,6 +451,22 @@ static void FixedWorldClockIsDeterministicAndSnapshotRestores()
     restoredClock.RestorePersistent(persistent);
     Assert.Equal(persistent, restoredClock.PersistentState);
     Assert.Equal(WorldClockOptions.DefaultPlaybackRate, restoredClock.Snapshot.PlaybackRate);
+}
+
+static void SimulationStepDeltaUsesExactHostCadence()
+{
+    Assert.False(default(SimulationStepDelta).IsValid);
+
+    foreach (int frequency in new[] { 20, 60, 120 })
+    {
+        var delta = new SimulationStepDelta(frequency);
+        Assert.True(delta.IsValid);
+        Assert.Equal(frequency, delta.SimulationFrequencyHz);
+        Assert.Equal(WorldClockOptions.WorldTimeQuantaPerSecond / frequency, delta.Quanta);
+        Assert.Near(1d / frequency, delta.Seconds, 1e-15);
+    }
+
+    Assert.Throws<ArgumentOutOfRangeException>(() => _ = new SimulationStepDelta(11));
 }
 
 static void CadenceMatrixPreservesElapsedSimulationMeaning()

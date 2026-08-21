@@ -89,8 +89,13 @@ public sealed class GameGenerationState :
         WorldActions.ValidateRestoredDoorConsistency(world, WorldState);
     }
 
-    void IServerGenerationStepParticipant.CommitAfterEcsStep(EcsWorld world) =>
+    void IServerGenerationStepParticipant.CommitAfterEcsStep(
+        EcsWorld world,
+        in SimulationStepDelta delta)
+    {
+        WorldActions.CommitLocomotionAfterEcsStep(world, WorldState, delta);
         WorldState.CommitAfterEcsStep(world);
+    }
 
     public void Dispose()
     {

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using UltraSim.ECS;
 using UltraSim.Game.Input;
 using UltraSim.Game.Inventory;
@@ -29,6 +30,7 @@ public enum GameWorldActionStatus : byte
     Accepted,
     InvalidCommand,
     StaleCommand,
+    StaleControlSession,
     MissingActor,
     MissingTarget,
     UnauthorizedContainer,
@@ -40,7 +42,7 @@ public enum GameWorldActionStatus : byte
 /// <summary>Admission and independently composed effects of one player command.</summary>
 public readonly record struct GamePlayerCommandResult(
     GameWorldActionStatus Admission,
-    GameWorldActionStatus Movement,
+    GameWorldActionStatus Locomotion,
     GameWorldActionStatus Interaction,
     WorldPosition Position,
     bool DoorIsOpen)
@@ -60,10 +62,16 @@ public sealed class GameWorldActions
     private readonly WorldId _worldId;
     private readonly ComponentLookup<GameCharacter> _character;
     private readonly ComponentLookup<GameCabinDoorState> _door;
+    private readonly ulong[] _controlEpochs;
     private readonly ulong[] _lastSequences;
-    private readonly uint[] _sequenceGenerations;
+    private readonly uint[] _controlGenerations;
+    private readonly short[] _directX;
+    private readonly short[] _directZ;
     private readonly long[] _movementRemainderX;
     private readonly long[] _movementRemainderZ;
+    private readonly Entity[] _activeDirect;
+    private readonly int[] _activeDirectPositions;
+    private int _activeDirectCount;
 
     internal GameWorldActions(EcsWorld world)
     {
@@ -71,33 +79,89 @@ public sealed class GameWorldActions
         _worldId = world.Id;
         _character = world.PrepareLookup<GameCharacter>();
         _door = world.PrepareLookup<GameCabinDoorState>();
+        _controlEpochs = new ulong[world.Options.EntityCapacity.MaximumEntities];
         _lastSequences = new ulong[world.Options.EntityCapacity.MaximumEntities];
-        _sequenceGenerations = new uint[_lastSequences.Length];
+        _controlGenerations = new uint[_lastSequences.Length];
+        _directX = new short[_lastSequences.Length];
+        _directZ = new short[_lastSequences.Length];
         _movementRemainderX = new long[_lastSequences.Length];
         _movementRemainderZ = new long[_lastSequences.Length];
+        _activeDirect = new Entity[_lastSequences.Length];
+        _activeDirectPositions = new int[_lastSequences.Length];
     }
 
-    /// <summary>Known fixed backing reserved for actor sequence and movement-integration state.</summary>
+    /// <summary>Known fixed backing reserved for control lineage and retained Direct locomotion.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
-        (sizeof(ulong) + sizeof(uint) + sizeof(long) + sizeof(long)));
+        ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
+         (sizeof(long) * 2) + Unsafe.SizeOf<Entity>() + sizeof(int)));
+
+    public int ActiveDirectCount => _activeDirectCount;
 
     /// <summary>
-    /// Admits one actor command exactly once, then composes its movement and interaction effects.
-    /// Movement axes are desired velocity and integrate against the authoritative fixed cadence.
+    /// Establishes or replaces the trusted operational control lineage for one actor. Replacing a
+    /// lineage clears retained locomotion before a command from the new session can be admitted.
+    /// </summary>
+    public GameWorldActionStatus BeginControlSession(
+        EcsWorld world,
+        Entity actor,
+        GameControlSessionEpoch epoch)
+    {
+        EnsureWorld(world);
+        if (!epoch.IsValid)
+            return GameWorldActionStatus.InvalidCommand;
+        if (!world.IsAlive(actor) || !world.Has(actor, _character))
+            return GameWorldActionStatus.MissingActor;
+
+        int index = checked((int)actor.Index);
+        if (_controlGenerations[index] == actor.Generation &&
+            _controlEpochs[index] == epoch.Value)
+            return GameWorldActionStatus.Accepted;
+
+        ClearDirect(index);
+        _controlGenerations[index] = actor.Generation;
+        _controlEpochs[index] = epoch.Value;
+        _lastSequences[index] = 0;
+        return GameWorldActionStatus.Accepted;
+    }
+
+    /// <summary>Ends only the matching control lineage and immediately clears retained Direct intent.</summary>
+    public GameWorldActionStatus EndControlSession(
+        EcsWorld world,
+        Entity actor,
+        GameControlSessionEpoch epoch)
+    {
+        EnsureWorld(world);
+        if (!epoch.IsValid)
+            return GameWorldActionStatus.InvalidCommand;
+        if (!world.IsAlive(actor) || !world.Has(actor, _character))
+            return GameWorldActionStatus.MissingActor;
+
+        int index = checked((int)actor.Index);
+        if (_controlGenerations[index] != actor.Generation ||
+            _controlEpochs[index] != epoch.Value)
+            return GameWorldActionStatus.StaleControlSession;
+
+        ClearDirect(index);
+        _controlEpochs[index] = 0;
+        _lastSequences[index] = 0;
+        return GameWorldActionStatus.Accepted;
+    }
+
+    /// <summary>
+    /// Admits one actor command exactly once, then composes its retained Direct intent and action
+    /// effects. Position changes occur during authoritative fixed-step maintenance, not on arrival.
     /// </summary>
     public GameWorldActionStatus ApplyPlayerCommand(
         EcsWorld world,
         GameWorldState worldState,
         Entity actor,
         in GamePlayerCommand command,
-        int authoritativeSimulationFrequencyHz,
         Entity interactionTarget,
         out GamePlayerCommandResult result)
     {
         EnsureWorld(world, worldState);
         result = default;
-        if (!command.IsValid ||
-            !WorldClockOptions.IsSupportedSimulationFrequency(authoritativeSimulationFrequencyHz))
+        if (!command.IsValid)
         {
             result = result with { Admission = GameWorldActionStatus.InvalidCommand };
             return GameWorldActionStatus.InvalidCommand;
@@ -107,6 +171,18 @@ public sealed class GameWorldActions
         {
             result = result with { Admission = GameWorldActionStatus.MissingActor };
             return GameWorldActionStatus.MissingActor;
+        }
+
+        int index = checked((int)actor.Index);
+        if (_controlGenerations[index] != actor.Generation ||
+            _controlEpochs[index] != command.ControlSession.Value)
+        {
+            result = result with
+            {
+                Admission = GameWorldActionStatus.StaleControlSession,
+                Position = current,
+            };
+            return GameWorldActionStatus.StaleControlSession;
         }
 
         if (!SequenceIsFresh(actor, command.Sequence))
@@ -119,39 +195,7 @@ public sealed class GameWorldActions
         // any effect is interpreted, including effects that later reject.
         CommitSequence(actor, command.Sequence);
 
-        GameWorldActionStatus movement = GameWorldActionStatus.NotRequested;
-        WorldPosition position = current;
-        if (command.MoveX != 0 || command.MoveZ != 0)
-        {
-            int index = checked((int)actor.Index);
-            int deltaX = IntegrateAxis(
-                command.MoveX,
-                authoritativeSimulationFrequencyHz,
-                ref _movementRemainderX[index]);
-            int deltaZ = IntegrateAxis(
-                command.MoveZ,
-                authoritativeSimulationFrequencyHz,
-                ref _movementRemainderZ[index]);
-            long nextX = checked(current.GlobalXMillimeters + deltaX);
-            long nextZ = checked(current.GlobalZMillimeters + deltaZ);
-            if (!WorldPosition.TryFromGlobalMillimeters(
-                    nextX, current.YMillimeters, nextZ, out WorldPosition candidate) ||
-                !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY) ||
-                !WorldPosition.TryFromGlobalMillimeters(nextX, terrainY, nextZ, out position))
-            {
-                movement = GameWorldActionStatus.OutsidePreparedWorld;
-                position = current;
-            }
-            else if (!worldState.TrySetPosition(world, actor, position))
-            {
-                movement = GameWorldActionStatus.InvariantViolation;
-                position = current;
-            }
-            else
-            {
-                movement = GameWorldActionStatus.Accepted;
-            }
-        }
+        SetDirect(actor, command.MoveX, command.MoveZ);
 
         GameWorldActionStatus interaction = GameWorldActionStatus.NotRequested;
         bool doorIsOpen = false;
@@ -163,11 +207,66 @@ public sealed class GameWorldActions
 
         result = new GamePlayerCommandResult(
             GameWorldActionStatus.Accepted,
-            movement,
+            GameWorldActionStatus.Accepted,
             interaction,
-            position,
+            current,
             doorIsOpen);
         return GameWorldActionStatus.Accepted;
+    }
+
+    /// <summary>
+    /// Integrates every retained Direct intent exactly once for the authoritative fixed step.
+    /// This runs after the ECS graph/barrier and before canonical Spatial/publication maintenance.
+    /// </summary>
+    internal void CommitLocomotionAfterEcsStep(
+        EcsWorld world,
+        GameWorldState worldState,
+        in SimulationStepDelta delta)
+    {
+        EnsureWorld(world, worldState);
+        if (!delta.IsValid)
+            throw new ArgumentException("A valid authoritative fixed-step delta is required.", nameof(delta));
+
+        int active = 0;
+        while (active < _activeDirectCount)
+        {
+            Entity actor = _activeDirect[active];
+            int index = checked((int)actor.Index);
+            if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+                _controlGenerations[index] != actor.Generation ||
+                _controlEpochs[index] == 0 ||
+                !worldState.TryReadPosition(world, actor, out WorldPosition current))
+            {
+                ClearDirect(index);
+                continue;
+            }
+
+            int deltaX = IntegrateAxis(_directX[index], delta.Quanta, ref _movementRemainderX[index]);
+            int deltaZ = IntegrateAxis(_directZ[index], delta.Quanta, ref _movementRemainderZ[index]);
+            if (deltaX == 0 && deltaZ == 0)
+            {
+                active++;
+                continue;
+            }
+
+            long nextX = checked(current.GlobalXMillimeters + deltaX);
+            long nextZ = checked(current.GlobalZMillimeters + deltaZ);
+            if (!WorldPosition.TryFromGlobalMillimeters(
+                    nextX, current.YMillimeters, nextZ, out WorldPosition candidate) ||
+                !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY) ||
+                !WorldPosition.TryFromGlobalMillimeters(nextX, terrainY, nextZ, out WorldPosition position))
+            {
+                // Direct remains current state while this step is blocked by prepared-world bounds.
+                active++;
+                continue;
+            }
+            if (!worldState.TrySetPosition(world, actor, position))
+            {
+                throw new InvalidOperationException(
+                    "A validated controlled actor lost its authoritative Position during locomotion.");
+            }
+            active++;
+        }
     }
 
     private GameWorldActionStatus ToggleCabinDoorCore(
@@ -267,9 +366,8 @@ public sealed class GameWorldActions
         }
     }
 
-    private static int IntegrateAxis(short value, int frequencyHz, ref long remainder)
+    private static int IntegrateAxis(short value, long stepQuanta, ref long remainder)
     {
-        long stepQuanta = WorldClockOptions.WorldTimeQuantaPerSecond / frequencyHz;
         long denominator = checked(
             (long)GamePlayerCommand.MaximumAxisMagnitude * WorldClockOptions.WorldTimeQuantaPerSecond);
         Int128 numerator = (Int128)value * FullInputSpeedMillimetersPerSecond * stepQuanta + remainder;
@@ -290,19 +388,56 @@ public sealed class GameWorldActions
     private bool SequenceIsFresh(Entity actor, ulong sequence)
     {
         int index = checked((int)actor.Index);
-        return _sequenceGenerations[index] != actor.Generation || sequence > _lastSequences[index];
+        return sequence > _lastSequences[index];
     }
 
     private void CommitSequence(Entity actor, ulong sequence)
     {
         int index = checked((int)actor.Index);
-        if (_sequenceGenerations[index] != actor.Generation)
-        {
-            _movementRemainderX[index] = 0;
-            _movementRemainderZ[index] = 0;
-        }
-        _sequenceGenerations[index] = actor.Generation;
         _lastSequences[index] = sequence;
+    }
+
+    private void SetDirect(Entity actor, short x, short z)
+    {
+        int index = checked((int)actor.Index);
+        _directX[index] = x;
+        _directZ[index] = z;
+        if (x == 0 && z == 0)
+        {
+            ClearDirect(index);
+            return;
+        }
+
+        if (_activeDirectPositions[index] != 0)
+            return;
+        if (_activeDirectCount >= _activeDirect.Length)
+            throw new InvalidOperationException("The bounded Direct-locomotion set exhausted unexpectedly.");
+        _activeDirect[_activeDirectCount] = actor;
+        _activeDirectPositions[index] = checked(_activeDirectCount + 1);
+        _activeDirectCount++;
+    }
+
+    private void ClearDirect(int index)
+    {
+        int encoded = _activeDirectPositions[index];
+        if (encoded != 0)
+        {
+            int slot = encoded - 1;
+            int last = --_activeDirectCount;
+            if (slot != last)
+            {
+                Entity donor = _activeDirect[last];
+                _activeDirect[slot] = donor;
+                _activeDirectPositions[checked((int)donor.Index)] = checked(slot + 1);
+            }
+            _activeDirect[last] = Entity.Null;
+            _activeDirectPositions[index] = 0;
+        }
+
+        _directX[index] = 0;
+        _directZ[index] = 0;
+        _movementRemainderX[index] = 0;
+        _movementRemainderZ[index] = 0;
     }
 
     private static WorldYaw DoorOrientation(bool isOpen) =>

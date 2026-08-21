@@ -112,6 +112,44 @@ public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
     }
 }
 
+/// <summary>
+/// Exact fixed simulation-time delta supplied to game-owned post-step maintenance.
+/// </summary>
+/// <remarks>
+/// This is host cadence, not accelerated durable world time. Runtime constructs the value from the
+/// active generation clock so game behavior cannot derive elapsed time from command arrival rate.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct SimulationStepDelta : IEquatable<SimulationStepDelta>
+{
+    public SimulationStepDelta(int simulationFrequencyHz)
+    {
+        if (!WorldClockOptions.IsSupportedSimulationFrequency(simulationFrequencyHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(simulationFrequencyHz),
+                simulationFrequencyHz,
+                "The simulation frequency is outside the exact fixed-time domain.");
+        }
+
+        SimulationFrequencyHz = simulationFrequencyHz;
+        Quanta = WorldClockOptions.WorldTimeQuantaPerSecond / simulationFrequencyHz;
+    }
+
+    public int SimulationFrequencyHz { get; }
+    public long Quanta { get; }
+    public double Seconds => (double)Quanta / WorldClockOptions.WorldTimeQuantaPerSecond;
+    public bool IsValid => WorldClockOptions.IsSupportedSimulationFrequency(SimulationFrequencyHz) &&
+        Quanta == WorldClockOptions.WorldTimeQuantaPerSecond / SimulationFrequencyHz;
+
+    public bool Equals(SimulationStepDelta other) =>
+        SimulationFrequencyHz == other.SimulationFrequencyHz && Quanta == other.Quanta;
+    public override bool Equals(object? obj) => obj is SimulationStepDelta other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(SimulationFrequencyHz, Quanta);
+    public static bool operator ==(SimulationStepDelta left, SimulationStepDelta right) => left.Equals(right);
+    public static bool operator !=(SimulationStepDelta left, SimulationStepDelta right) => !left.Equals(right);
+}
+
 /// <summary>Diagnostic snapshot of a generation's authoritative clock plus host playback.</summary>
 /// <remarks>
 /// This diagnostic snapshot also includes host playback. Durable game saves

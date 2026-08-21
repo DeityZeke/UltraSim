@@ -3662,6 +3662,97 @@ The immutable hardening evidence artifact is
 T0.10 remains active. The broad performance matrix and Network N1 still have not
 started.
 
+### T0.10 launchable-client and movement-profile amendment — 2026-08-21
+
+This work remains inside T0.10. The milestone is already the playable
+woods/cabin vertical; giving “make the vertical genuinely playable” a separate
+T0.11 name would split one acceptance gate without introducing a new
+architectural domain. T0.10 now closes in this order:
+
+```text
+first integrated vertical
+    -> movement/control semantic hardening
+    -> launchable OrbitCommand client
+    -> minimal ThirdPersonDirect and IndependentMoveLook proofs
+    -> representative performance/evidence matrix
+    -> T0.10 / T0 acceptance and freeze
+    -> Network N1
+```
+
+The detailed camera/control/locomotion contract is
+[`MOVEMENT.md`](MOVEMENT.md). Its governing boundary is:
+
+```text
+engine camera/input
+    -> Client Core control profile
+    -> world-space locomotion/look/action intent
+    -> one game command admission boundary
+    -> authoritative Delta-integrated locomotion
+    -> WorldPosition / publication
+    -> client projection / presentation
+```
+
+Camera and physical gesture policy are Client concerns, not Game, Network,
+persistence, Spatial, or world authority. The primary client profile is
+`OrbitCommand`: orbit/zoom, single-click selection without implicit movement,
+hold-to-Direct steering, release-stop, RMB/Escape cancel without creating a
+destination, double-click `Destination`, and optional camera-relative WASD.
+`ThirdPersonDirect` and `IndependentMoveLook` remain deliberately crude
+portability canaries. Game receives only world-space semantic intent and must
+not know profile identity, camera yaw, Godot input names, or screen coordinates.
+
+The launchable-client gate must use configured actions in an actual
+`Client/_Godot` application, actual OfflineDirect authority, real publication,
+the production client semantic cache/window, and the Godot renderer. The
+configured InputMap in the Godot **test** project proves only the joined
+headless acceptance; it does not configure the launchable application.
+
+The human flow must cover orbit/zoom, select-without-moving, hold/release/cancel
+steering, double-click destination, WASD Direct, bounded chunk crossing,
+door/chest interaction, one inventory/world mutation, projection refresh, and
+save/diverge/restore. Production navigation, camera collision, combat,
+animation polish, remapping/settings UI, final art, N1, and editor/housing are
+explicit non-requirements.
+
+### T0.10 retained Direct/control-lineage implementation stop — 2026-08-21
+
+The first movement checkpoint from the amendment is implemented and stopped
+before launchable-client work. It supersedes the semantic-hardening artifact's
+remaining command-arrival movement behavior.
+
+Direct is now complete retained current state. A trusted authority binding
+establishes a `GameControlSessionEpoch`; `GamePlayerCommand` carries that epoch
+plus its monotonically increasing sequence. Commands from another epoch reject,
+idempotent rebinding does not reset the sequence floor, and replacing/ending the
+binding clears Direct movement. This lineage is operational generation/session
+state, not persisted world history.
+Sequence exhaustion fails closed and requires a fresh bound epoch; it never
+wraps into an old lineage.
+
+Client Core emits a canonical signed-Q15 vector inside the discrete unit circle.
+Game validates the same unit-vector bound. A nonzero admitted command replaces
+the retained world-space Direct direction/magnitude; zero/zero is the complete
+stopped state. Invalid, replayed, and stale-epoch commands cannot replace the
+last accepted state.
+
+Runtime now supplies an exact `SimulationStepDelta` to game-owned post-ECS-step
+maintenance. `GameWorldActions` integrates the bounded active Direct set once
+per authoritative step at 6,000 mm/s, before `GameWorldState` reconciles Spatial
+and publication. Command arrival itself no longer mutates `WorldPosition`.
+
+One retained Direct command over one authoritative second ends at exactly
+X = 19,500 mm / Z = 12,000 mm at 20, 60, and 120 Hz. Only six commands are used
+across the entire cadence matrix: start and stop for each cadence. Release,
+control-session replacement, and control-session end all stop without another
+movement step. An over-unit Q15 command rejects without disturbing the retained
+valid state. The joined native scene still proves one combined Direct + door
+command reaches real authority/publication/presentation.
+
+The immutable evidence artifact is
+[`terrain-t0.10-retained-direct-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-retained-direct-2026-08-21.json).
+`Destination`, camera/control profiles, the launchable `Client/_Godot`
+application, the broad matrix, and N1 have not started. T0.10 remains active.
+
 ### T0 performance/evidence matrix
 
 Every accepted benchmark records exact world geometry/profile, chunk edge, cell

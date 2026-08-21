@@ -17,8 +17,10 @@ static class ClientWorldInputTests
             new ClientWorldInputSample(1, 1, GamePlayerActions.None, true),
             out GamePlayerCommand diagonal));
         Assert.Equal((ulong)41, diagonal.Sequence);
+        Assert.Equal(sequencer.ControlSession, diagonal.ControlSession);
         Assert.Equal(diagonal.MoveX, diagonal.MoveZ);
         Assert.True(diagonal.MoveX is >= 23_169 and <= 23_171);
+        Assert.True(diagonal.IsValid);
 
         Assert.True(sequencer.TryCreateCommand(
             new ClientWorldInputSample(-4, 0, GamePlayerActions.None, true),
@@ -26,6 +28,24 @@ static class ClientWorldInputTests
         Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, clamped.MoveX);
         Assert.Equal((short)0, clamped.MoveZ);
         Assert.Equal((ulong)42, clamped.Sequence);
+        Assert.Equal(sequencer.ControlSession, sequencer.Snapshot().ControlSession);
+
+        var replacement = new ClientWorldInputSequencer();
+        Assert.True(sequencer.ControlSession != replacement.ControlSession);
+        Assert.False(new GamePlayerCommand(
+            sequencer.ControlSession,
+            43,
+            short.MaxValue,
+            short.MaxValue,
+            GamePlayerActions.None,
+            GamePlayerActions.None).IsValid);
+
+        var exhausted = new ClientWorldInputSequencer(
+            new GameControlSessionEpoch(0xF00D), ulong.MaxValue);
+        Assert.True(exhausted.TryCreateCommand(default, out GamePlayerCommand final));
+        Assert.Equal(ulong.MaxValue, final.Sequence);
+        Assert.False(exhausted.TryCreateCommand(default, out _));
+        Assert.Equal(ulong.MaxValue, exhausted.Snapshot().LastSequence);
     }
 
     private static void FocusAndActionEdgesAreCommonClientSemantics()
