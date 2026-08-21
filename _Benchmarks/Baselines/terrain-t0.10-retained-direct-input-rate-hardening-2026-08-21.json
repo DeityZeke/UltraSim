@@ -1,0 +1,56 @@
+{
+  "schema": "terrain-t0.10-retained-direct-input-rate-hardening-v1",
+  "captured_at_local": "2026-08-21",
+  "runtime": "8.0.29",
+  "framework": ".NET 8.0.29",
+  "os": "CachyOS",
+  "architecture": "X64",
+  "processors": 16,
+  "checkpoint": "additive retained-Direct input-delivery-rate evidence; T0.10 remains active",
+  "supplements": "terrain-t0.10-retained-direct-2026-08-21.json",
+  "scope": "fixed-authority input-delivery-rate invariance and latest-admitted-state-before-step semantics; no implementation change, Destination, control profile, launchable client, broad performance matrix, or N1",
+  "workload": "ultrasim-t0.10-integrated-acceptance-v4",
+  "authority_frequency_hz": 60,
+  "duration_seconds_each": 1,
+  "input_delivery_cases": [
+    {
+      "delivery_frequency_hz": 20,
+      "commands": 20,
+      "delivery_shape": "one east Direct state every three authority steps",
+      "final_x_millimeters": 19500,
+      "final_z_millimeters": 12000
+    },
+    {
+      "delivery_frequency_hz": 60,
+      "commands": 60,
+      "delivery_shape": "one east Direct state before every authority step",
+      "final_x_millimeters": 19500,
+      "final_z_millimeters": 12000
+    },
+    {
+      "delivery_frequency_hz": 120,
+      "commands": 120,
+      "delivery_shape": "two Direct states before every authority step; first step sends west then east, remaining steps send east twice",
+      "final_x_millimeters": 19500,
+      "final_z_millimeters": 12000
+    }
+  ],
+  "commands_total": 200,
+  "canonical_hash": "912D8C32FF870B8BA6E2EB5E228363794472455BAEA8B5A05296B7D489C7D1E6",
+  "acceptance": {
+    "input_delivery_rate_does_not_change_movement_distance": true,
+    "multiple_admitted_writes_before_one_step_integrate_once": true,
+    "latest_admitted_direct_state_wins": true,
+    "west_then_east_integrates_east": true
+  },
+  "control_epoch_scope": {
+    "process_local_factory_sufficient_for_offline_direct": true,
+    "process_local_factory_sufficient_for_local_launchable_client": true,
+    "remote_n1_may_trust_arbitrary_client_counter_for_uniqueness": false,
+    "remote_requirement": "server/session authority must establish the epoch or otherwise prove uniqueness within the live authority control lineage"
+  },
+  "deferred_measurements": [
+    "decide whether collision-blocked fractional remainder follows desired or realized displacement when collision resolution exists",
+    "record GameWorldActions reservation at representative large ECS capacity in the broad T0.10 matrix"
+  ]
+}

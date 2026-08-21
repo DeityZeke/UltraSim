@@ -18,12 +18,13 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v3";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v4";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
+Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
@@ -411,6 +412,89 @@ static TestMetrics PlayableMovementCadenceMatrix()
         HashText(string.Join('|', positions)),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "One retained Direct command over one authoritative second at 20/60/120 Hz; exact final X/Z equality and release-stop.",
+        InputCommands: commands);
+}
+
+static TestMetrics PlayableMovementDeliveryRateMatrix()
+{
+    int[] deliveryRates = [20, 60, 120];
+    var positions = new List<string>(deliveryRates.Length);
+    ulong commands = 0;
+    foreach (int deliveryRate in deliveryRates)
+    {
+        WorldPack pack = GamePlayableWorld.CreateWorldPack();
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32),
+            baseWorldPack: pack);
+        using var host = new InternalHost(
+            composition,
+            RuntimeOptions(
+                new PersistenceIdentityOptions(new PersistentWorldId(
+                    checked((ulong)0x80_1100 + (ulong)deliveryRate))),
+                frequencyHz: 60));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(
+            new ParticipantId(checked((ulong)0x1100 + (ulong)deliveryRate)));
+        Expect(entered.IsEntered, $"The {deliveryRate} Hz delivery actor could not enter.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+            $"The {deliveryRate} Hz delivery fixture could not populate.");
+        host.Tick();
+
+        var input = new ClientWorldInputSequencer();
+        var link = new PlayableOfflineDirectLink(
+            runtime.Game, entities.PlayerId, input.ControlSession);
+        for (int step = 0; step < 60; step++)
+        {
+            if (deliveryRate == 20)
+            {
+                if (step % 3 == 0)
+                    SendDirect(1);
+            }
+            else if (deliveryRate == 60)
+            {
+                SendDirect(1);
+            }
+            else
+            {
+                // Prove latest-before-step semantics explicitly on the first step:
+                // west is fully superseded by east, and authority integrates only east once.
+                SendDirect(step == 0 ? -1 : 1);
+                SendDirect(1);
+            }
+            host.Tick();
+        }
+
+        WorldPosition position = link.ReadPosition();
+        Expect(position.GlobalXMillimeters ==
+                GamePlayableWorld.PlayerStart.GlobalXMillimeters +
+                GameWorldActions.FullInputSpeedMillimetersPerSecond &&
+            position.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters,
+            $"Input delivery rate changed one second of movement at {deliveryRate} Hz: {position}.");
+        ulong produced = input.Snapshot().CommandsProduced;
+        Expect(produced == (ulong)deliveryRate,
+            $"The {deliveryRate} Hz delivery case produced {produced} commands.");
+        commands += produced;
+        positions.Add(
+            $"{deliveryRate}:{position.GlobalXMillimeters}:{position.YMillimeters}:{position.GlobalZMillimeters}:{produced}");
+
+        void SendDirect(float x)
+        {
+            Expect(input.TryCreateCommand(
+                    new ClientWorldInputSample(x, 0, GamePlayerActions.None, true),
+                    out GamePlayerCommand command) &&
+                link.ApplyMovement(command) == GameWorldActionStatus.Accepted,
+                $"The {deliveryRate} Hz delivery case rejected Direct state.");
+        }
+    }
+
+    return new TestMetrics(
+        HashText(string.Join('|', positions)),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Fixed 60 Hz authority with identical Direct delivered at 20/60/120 Hz; west then east before one step proves latest-state integration exactly once.",
         InputCommands: commands);
 }
 

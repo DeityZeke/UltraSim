@@ -3748,8 +3748,22 @@ movement step. An over-unit Q15 command rejects without disturbing the retained
 valid state. The joined native scene still proves one combined Direct + door
 command reaches real authority/publication/presentation.
 
+A supplementary fixed-authority gate holds authority at 60 Hz while delivering
+Direct at 20, 60, and 120 Hz. All three cases again end at exactly X = 19,500 mm
+/ Z = 12,000 mm after one second. The 120 Hz case sends `west`, then `east`,
+before the first authority step and proves only the latest admitted state is
+integrated, exactly once. This separates authority-cadence invariance from input-
+delivery-rate invariance.
+
+The process-local epoch factory is sufficient for OfflineDirect and this future
+local launchable client. N1 must establish remote control epochs through trusted
+session/connection authority (or an equivalent uniqueness proof); the server
+must not trust client-process counters to remain unique across restarts.
+
 The immutable evidence artifact is
 [`terrain-t0.10-retained-direct-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-retained-direct-2026-08-21.json).
+The additive input-rate/latest-state evidence is
+[`terrain-t0.10-retained-direct-input-rate-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-retained-direct-input-rate-hardening-2026-08-21.json).
 `Destination`, camera/control profiles, the launchable `Client/_Godot`
 application, the broad matrix, and N1 have not started. T0.10 remains active.
 
@@ -3758,6 +3772,10 @@ application, the broad matrix, and N1 have not started. T0.10 remains active.
 Every accepted benchmark records exact world geometry/profile, chunk edge, cell
 size, resident counts, dynamic/static density, authority cadence, allocation
 scope, and canonical state hashes.
+The broad matrix must also record `GameWorldActions.ReservedBytes` at a
+representative large ECS capacity. The current entity-addressed control arrays
+are intentionally simple and bounded; only measured large-world pressure may
+earn a denser sparse-control representation.
 Required profiles:
 
 ```

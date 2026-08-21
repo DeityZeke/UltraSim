@@ -740,6 +740,13 @@ generation/session state and are not persisted as world history.
 Sequence exhaustion fails closed; continuing control requires a newly bound
 epoch rather than wrapping the sequence inside the old lineage.
 
+`GameControlSessionEpoch.Create()` is only process-local identity generation for
+OfflineDirect and the launchable local client. A future N1 route must establish
+the epoch through trusted live session/connection authority, or otherwise prove
+uniqueness within that authority's control lineage. A remote server must not
+assume an arbitrary client-generated `ulong` remains unique across client
+process restarts.
+
 A nonzero Direct command replaces the actor's retained current direction and
 magnitude. Zero/zero is the complete stopped state. Command arrival does not
 write `WorldPosition`. Runtime supplies an exact `SimulationStepDelta` after the
@@ -752,6 +759,10 @@ Permanent evidence covers:
 
 - one retained command for one authoritative second at 20/60/120 Hz, with exact
   equal final X/Z;
+- fixed 60 Hz authority receiving the same Direct state at 20/60/120 Hz, again
+  with exact equal final X/Z;
+- `west`, then `east`, before one fixed step integrating east exactly once and
+  proving latest-admitted-state semantics;
 - explicit zero-state release and control-session end stopping on the next
   step without drift;
 - over-unit Q15 rejection without replacing the last good Direct state;
@@ -766,6 +777,13 @@ Still unfrozen/unimplemented at this boundary:
 - camera-basis conversion/control profiles;
 - pointer gesture interpretation;
 - the human-launchable Godot client.
+
+The current integer remainder represents integrated desired displacement: it is
+advanced before an outside-prepared-world step is rejected. That distinction is
+irrelevant to this no-collision vertical. A future collision-resolution
+checkpoint must deliberately choose whether fractional remainder follows desired
+or successfully realized displacement rather than inheriting the behavior by
+accident.
 
 ## T0.10 real-client requirement
 
