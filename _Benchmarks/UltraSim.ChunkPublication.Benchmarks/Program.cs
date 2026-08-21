@@ -12,7 +12,7 @@ int samples = ReadInt(args, "--samples=", 21);
 int commits = ReadInt(args, "--commits=", 100_000);
 int reads = ReadInt(args, "--reads=", 50_000);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/terrain-t0.6-chunk-publication-local.json"));
+    AppContext.BaseDirectory, "../../../../results/terrain-t0.6-chunk-publication-hardening-local.json"));
 if (warmups < 1 || samples < 5 || commits < 1 || reads < 1)
     throw new ArgumentOutOfRangeException(nameof(args));
 
@@ -39,8 +39,10 @@ if (timings.Any(timing => timing.MaximumAllocatedBytes != 0))
 
 PublicationPolicyEvidence policyEvidence = policy.EvaluatePolicy();
 ChunkPublicationStoreSnapshot packedSnapshot = packed.State.Publications.GetSnapshot();
+const int largeCapacityEntities = 100_000;
+long largeCapacityReservedBytes = MeasureLargeCapacityReservation(largeCapacityEntities);
 var report = new PublicationReport(
-    "terrain-t0.6-chunk-publication-v1",
+    "terrain-t0.6-chunk-publication-hardening-v2",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -63,6 +65,8 @@ var report = new PublicationReport(
         packed.MaximumRowsPerChunk,
         packedSnapshot.ReservedBytes,
         packedSnapshot.HistoryEntryCapacity,
+        largeCapacityEntities,
+        largeCapacityReservedBytes,
         Marshal.SizeOf<WorldPublicComponent>(),
         Marshal.SizeOf<WorldPublicEntityId>(),
         Marshal.SizeOf<PublicationEpoch>(),
@@ -77,6 +81,8 @@ File.WriteAllText(output, JsonSerializer.Serialize(report, new JsonSerializerOpt
     Environment.NewLine);
 Console.WriteLine($"packed_entities={packed.Population}, packed_chunks={packed.ChunkCount}, " +
     $"max_rows_per_chunk={packed.MaximumRowsPerChunk}, reserved_bytes={packedSnapshot.ReservedBytes}");
+Console.WriteLine($"large_capacity_entities={largeCapacityEntities}, " +
+    $"large_capacity_reserved_bytes={largeCapacityReservedBytes}");
 Console.WriteLine($"policy_sparse: eager={policyEvidence.SparseEagerConstructions}, " +
     $"eager_wasted={policyEvidence.SparseEagerWastedConstructions}, " +
     $"on_demand={policyEvidence.SparseOnDemandConstructions}, " +
@@ -121,6 +127,13 @@ static PublicationTiming Measure(
 
 static int PercentileIndex(int count, double percentile) =>
     Math.Clamp((int)Math.Ceiling(count * percentile) - 1, 0, count - 1);
+static long MeasureLargeCapacityReservation(int entityCapacity)
+{
+    var store = new ChunkPublicationStore(
+        PublicationEpoch.Create(),
+        ChunkPublicationLimits.ForEntityCapacity(entityCapacity));
+    return store.GetSnapshot().ReservedBytes;
+}
 static int ReadInt(string[] values, string prefix, int fallback) =>
     int.TryParse(values.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?
         [prefix.Length..], out int parsed) ? parsed : fallback;
@@ -399,6 +412,8 @@ sealed record PublicationProfileEvidence(
     int MaximumRowsPerChunk,
     long StoreReservedBytes,
     int HistoryEntryCapacity,
+    int LargeCapacityAdmittedEntities,
+    long LargeCapacityReservedBytes,
     int WorldPublicComponentBytes,
     int WorldPublicEntityIdBytes,
     int PublicationEpochBytes,

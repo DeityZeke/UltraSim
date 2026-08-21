@@ -106,6 +106,10 @@ public enum ChunkPublicationReadStatus : byte
     Delta = 2,
     NoChanges = 3,
     SnapshotRequired = 4,
+    /// <summary>
+    /// The authoritative snapshot is empty because this key has no resident publication metadata.
+    /// Consumers clear the retained page and retain no cursor until a later snapshot publishes the key.
+    /// </summary>
     ChunkAbsent = 5,
     DestinationTooSmall = 6,
     FutureCursor = 7,
@@ -177,11 +181,14 @@ public readonly record struct WorldPublicDeltaRecord(
     ulong EntityPublicVersion,
     WorldPublicRecord Current);
 
+/// <summary>A revision cursor bound to exactly one publication epoch and spatial chunk key.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 32)]
 public readonly record struct ChunkPublicationCursor(
     PublicationEpoch Epoch,
+    SpatialChunkKey Key,
     ChunkPublicationRevision Revision)
 {
-    public bool IsValid => Epoch.IsValid && Revision.IsValid;
+    public bool IsValid => Epoch.IsValid && Key.Space.IsValid && Revision.IsValid;
 }
 
 public readonly record struct ChunkPublicationBatch(
@@ -189,7 +196,6 @@ public readonly record struct ChunkPublicationBatch(
     SpatialChunkKey Key,
     ChunkPublicationCursor Cursor,
     ChunkPublicationRevision HistoryFloor,
-    ulong AuthorityTick,
     int Count,
     int Required);
 
@@ -329,7 +335,6 @@ public sealed class ChunkPublicationStore
 
     public bool TryCommit(
         ReadOnlySpan<WorldPublicChange> changes,
-        ulong authorityTick,
         out ChunkPublicationCommitError error)
     {
         EnsureOwner();
@@ -354,10 +359,12 @@ public sealed class ChunkPublicationStore
         for (int index = 0; index < affectedCount; index++)
         {
             int chunk = GetOrCreateChunk(_affectedKeys[index]);
+            bool beginsIncarnation = _chunks[chunk].Revision == 0;
             ulong revision = ++_revisionSequence;
             _affectedRevisions[index] = revision;
             _chunks[chunk].Revision = revision;
-            _chunks[chunk].AuthorityTick = authorityTick;
+            if (beginsIncarnation)
+                _chunks[chunk].HistoryFloor = revision;
             _publishedChunkRevisions++;
         }
 
@@ -395,7 +402,6 @@ public sealed class ChunkPublicationStore
             Epoch,
             new ChunkPublicationRevision(chunk.Revision),
             chunk.HistoryFloor == 0 ? default : new ChunkPublicationRevision(chunk.HistoryFloor),
-            chunk.AuthorityTick,
             chunk.EntityCount,
             chunk.HeadPage,
             _limits.RowsPerPage,
@@ -423,7 +429,7 @@ public sealed class ChunkPublicationStore
         if (!TryFindChunk(key, out int chunkSlot))
         {
             batch = new ChunkPublicationBatch(
-                ChunkPublicationReadStatus.ChunkAbsent, key, default, default, 0, 0, 0);
+                ChunkPublicationReadStatus.ChunkAbsent, key, default, default, 0, 0);
             return ChunkPublicationReadStatus.ChunkAbsent;
         }
         ref readonly ChunkRecord chunk = ref _chunks[chunkSlot];
@@ -454,11 +460,12 @@ public sealed class ChunkPublicationStore
         out ChunkPublicationBatch batch)
     {
         EnsureOwner();
-        if (!cursor.IsValid || cursor.Epoch != Epoch || !TryFindChunk(key, out int chunkSlot))
+        if (!cursor.IsValid || cursor.Epoch != Epoch || cursor.Key != key ||
+            !TryFindChunk(key, out int chunkSlot))
         {
             _snapshotFallbacks++;
             batch = new ChunkPublicationBatch(
-                ChunkPublicationReadStatus.SnapshotRequired, key, default, default, 0, 0, 0);
+                ChunkPublicationReadStatus.SnapshotRequired, key, default, default, 0, 0);
             return ChunkPublicationReadStatus.SnapshotRequired;
         }
 
@@ -1223,9 +1230,8 @@ public sealed class ChunkPublicationStore
         int required) => new(
             status,
             key,
-            new ChunkPublicationCursor(Epoch, new ChunkPublicationRevision(chunk.Revision)),
+            new ChunkPublicationCursor(Epoch, key, new ChunkPublicationRevision(chunk.Revision)),
             chunk.HistoryFloor == 0 ? default : new ChunkPublicationRevision(chunk.HistoryFloor),
-            chunk.AuthorityTick,
             count,
             required);
 
@@ -1503,7 +1509,6 @@ public sealed class ChunkPublicationStore
         internal int EntityCount;
         internal ulong Revision;
         internal ulong HistoryFloor;
-        internal ulong AuthorityTick;
         internal ulong EmptySinceCommit;
         internal int HistoryHead;
         internal int HistoryTail;
@@ -1616,7 +1621,6 @@ public readonly ref struct ChunkPublicationView
         PublicationEpoch epoch,
         ChunkPublicationRevision revision,
         ChunkPublicationRevision historyFloor,
-        ulong authorityTick,
         int count,
         int headPage,
         int rowsPerPage,
@@ -1637,7 +1641,6 @@ public readonly ref struct ChunkPublicationView
         Epoch = epoch;
         Revision = revision;
         HistoryFloor = historyFloor;
-        AuthorityTick = authorityTick;
         Count = count;
         _headPage = headPage;
         _rowsPerPage = rowsPerPage;
@@ -1659,7 +1662,6 @@ public readonly ref struct ChunkPublicationView
     public PublicationEpoch Epoch { get; }
     public ChunkPublicationRevision Revision { get; }
     public ChunkPublicationRevision HistoryFloor { get; }
-    public ulong AuthorityTick { get; }
     public int Count { get; }
     public Enumerator GetEnumerator() => new(this);
 
@@ -1706,7 +1708,7 @@ public readonly ref struct ChunkPublicationView
 /// </summary>
 public static class ChunkPublicationSemanticCodec
 {
-    public const int HeaderBytes = 56;
+    public const int HeaderBytes = 48;
     public const int RecordBytes = 40;
 
     public static int MeasureSnapshot(int recordCount)
@@ -1723,7 +1725,8 @@ public static class ChunkPublicationSemanticCodec
     {
         written = 0;
         if (batch.Status != ChunkPublicationReadStatus.Snapshot ||
-            !batch.Cursor.IsValid || !batch.Key.Space.IsValid || batch.Count != records.Length)
+            !batch.Cursor.IsValid || batch.Cursor.Key != batch.Key ||
+            !batch.Key.Space.IsValid || batch.Count != records.Length)
             return false;
         for (int index = 0; index < records.Length; index++)
         {
@@ -1739,6 +1742,7 @@ public static class ChunkPublicationSemanticCodec
 
         int required = MeasureSnapshot(records.Length);
         if (destination.Length < required) return false;
+        if (MemoryMarshal.AsBytes(records).Overlaps(destination)) return false;
         Span<byte> staged = destination[..required];
         staged.Clear();
         BinaryPrimitives.WriteUInt32LittleEndian(staged, 0x3142_5043U); // CPB1
@@ -1747,9 +1751,8 @@ public static class ChunkPublicationSemanticCodec
         BinaryPrimitives.WriteInt32LittleEndian(staged[24..], batch.Key.Coord.X);
         BinaryPrimitives.WriteInt32LittleEndian(staged[28..], batch.Key.Coord.Z);
         BinaryPrimitives.WriteUInt64LittleEndian(staged[32..], batch.Cursor.Revision.Value);
-        BinaryPrimitives.WriteUInt64LittleEndian(staged[40..], batch.AuthorityTick);
-        BinaryPrimitives.WriteInt32LittleEndian(staged[48..], records.Length);
-        BinaryPrimitives.WriteInt32LittleEndian(staged[52..], RecordBytes);
+        BinaryPrimitives.WriteInt32LittleEndian(staged[40..], records.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(staged[44..], RecordBytes);
         int offset = HeaderBytes;
         for (int index = 0; index < records.Length; index++)
         {

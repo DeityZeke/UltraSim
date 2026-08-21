@@ -2037,6 +2037,26 @@ cursor older than retained history floor
     -> SnapshotRequired
 ```
 
+`ChunkPublicationCursor` is self-identifying: it binds `PublicationEpoch`,
+`SpatialChunkKey`, and the chunk-local revision. Revisions from different chunks
+are incomparable, and a cursor presented for another key always requests a
+snapshot rather than participating in numeric revision comparison. If bounded
+metadata pressure evicts an empty chunk, a later recreation starts with its
+first new global revision as `HistoryFloor`; cursors from the evicted incarnation
+therefore cannot observe a partial new delta.
+
+Snapshot recovery defines absence explicitly:
+
+```text
+SnapshotRequired
+    -> request complete snapshot
+
+snapshot returns ChunkAbsent
+    -> authoritative semantic result is empty
+    -> clear the retained page for that key
+    -> retain no delta cursor until the key is published again
+```
+
 History is a fixed ring. It never grows because a recipient is slow.
 
 ### Dirty-history semantics
@@ -2081,10 +2101,14 @@ target Chunk B: present E @ entity version 42
 canonical current version = 42
 ```
 
-The client retains the highest entity-public version observed per public identity.
-A delayed A/41 may clean an obsolete source page, but cannot erase/supersede B/42.
-Transient rows in both chunk-local pages are acceptable under reorder; the
-canonical/presentation resolver selects the highest version. Destruction or
+The client compares the two lifetime domains in order. For the same public Index,
+a higher Generation supersedes every lower Generation, including rows retained
+in another chunk page. For the same Index and Generation, a higher
+`EntityPublicVersion` supersedes lower versions. A delayed A/41 may clean an
+obsolete source page, but cannot erase/supersede B/42. A new-generation Present
+may subsume the prior generation's coalesced Remove. Transient rows in multiple
+chunk-local pages are acceptable under reorder; the canonical/presentation
+resolver applies the generation-then-version rule globally. Destruction or
 becoming non-public consumes the next version so delayed older presents cannot
 resurrect the identity.
 
@@ -2123,35 +2147,53 @@ replacement. Oversized dirty commits publish current state, clear incomplete
 history, advance the affected floors, and increment invalidation diagnostics
 rather than rejecting authority.
 
-The permanent T0.0–T0.6 world suite contains 57 tests. T0.6 coverage proves:
+The hardened permanent T0.0–T0.6 world suite contains 61 tests. T0.6 coverage
+proves:
 
 - explicit public eligibility and final-value observation after ten same-step
   writes;
 - Snapshot / NoChanges / coalesced Delta behavior and exact field masks;
 - source remove before target present, stable movement identity/version order,
-  generation-fenced ECS-slot reuse, and retained empty-source tombstones;
+  generation-fenced ECS-slot reuse, global cross-page generation supersession,
+  and retained empty-source tombstones;
+- chunk-bound cursor rejection, empty-chunk eviction/recreation floors, and
+  authoritative `ChunkAbsent` reset semantics;
 - history overflow -> `SnapshotRequired` while the new packed current state
   remains available;
-- transactional canonical encoding, direct committed page iteration, and 0 B
+- overlap-safe transactional canonical encoding, direct committed page
+  iteration, and 0 B
   across 100,000 combined update/snapshot/encode/read cycles.
+- a deterministic 20,000-operation reference-model oracle spanning lifecycle
+  reuse, eligibility changes, repeated writes, moves, descriptor changes,
+  history pressure, metadata eviction, stale cursors, and client convergence;
+- failed rebuild retains both the old spatial index and publication
+  store/epoch/current semantics.
+
+T0.6 intentionally carries no simulation tick in its batch or semantic body.
+`GameWorldState`'s commit count is generation-local and is not
+`WorldClock.SimulationTick`; no current consumer has earned a host-neutral time
+anchor or a Game/World dependency on Server.Runtime.
 
 The accepted-candidate synthetic benchmark uses a 1,024-entity fixture with
 eight publication chunks and 128 public rows in the measured chunk. With tiered
 compilation and ReadyToRun disabled, all warmed observations allocate 0 B:
 
 ```text
-post-step observation, no change       82.367 ns mean /   82.847 ns p95
-public update, same chunk             408.980 ns mean /  411.232 ns p95
-public migration, cross chunk         599.374 ns mean /  602.387 ns p95
-update + one-record delta copy         534.172 ns mean /  535.857 ns p95
-iterate prepared pages, 128 rows       207.366 ns mean /  208.547 ns p95
-copy canonical snapshot, 128 rows        3.870 us mean /    3.920 us p95
-copy + encode snapshot, 128 rows         4.862 us mean /    4.906 us p95
+post-step observation, no change       83.159 ns mean /   83.505 ns p95
+public update, same chunk             404.388 ns mean /  405.089 ns p95
+public migration, cross chunk         574.739 ns mean /  576.659 ns p95
+update + one-record delta copy         539.126 ns mean /  541.484 ns p95
+iterate prepared pages, 128 rows       203.482 ns mean /  204.322 ns p95
+copy canonical snapshot, 128 rows        3.850 us mean /    3.860 us p95
+copy + encode snapshot, 128 rows         4.796 us mean /    4.845 us p95
 ```
 
-The store reserves 1,352,640 bytes for that 1,032-slot admitted profile,
+The hardened store reserves 1,336,128 bytes for that 1,032-slot admitted profile,
 including current pages, identity maps, query/planning scratch, and bounded
-history. This is deterministic reserved payload, not per-observer memory.
+history. A separate cold construction at 100,000 admitted ECS/publication slots
+records 123,810,048 bytes (about 1.153 GiB per million admitted slots by linear
+extrapolation). This is deterministic reserved payload, not per-observer memory;
+the observation records the cost without selecting a different representation.
 
 The policy census dirties 256 chunks. Under 256 requests concentrated on 64
 unique chunks, unconditional eager construction builds 256 bodies and wastes
@@ -2161,11 +2203,16 @@ opportunities. Under two full passes over all chunks, both policies construct
 T0.6 therefore selects **on-demand recipient-independent semantic construction
 over always-current prepared pages**, with no intentional wait. It does not add
 a retained production byte cache before T0.7/N1 supplies a real consumer and
-retention policy. It also does not add Network framing, MTU, reliability,
+retention policy. This request-distribution census rejects unconditional eager
+serialization without claiming that a future Ring-0-aware cache or hybrid policy
+must lose once real consumers exist. It also does not add Network framing, MTU, reliability,
 connection, encryption, or recipient state.
 
-The immutable machine-readable observation is
+The original implementation-stop observation remains immutable at
 [`terrain-t0.6-chunk-publication-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-2026-08-20.json).
+The current cursor/lineage/codec/capacity-hardened observation is
+[`terrain-t0.6-chunk-publication-hardening-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-hardening-2026-08-20.json);
+it supplements rather than rewrites the historical candidate.
 The fixture is synthetic public locomotion state, not production content,
 client streaming, Network N1, or Godot evidence.
 

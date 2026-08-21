@@ -65,6 +65,11 @@ public sealed class GameWorldState : IDisposable
             throw new ArgumentException("Spatial-enabled worlds require retained ECS lifecycle history.", nameof(world));
         _worldId = world.Id;
         _entityCapacity = world.Options.EntityCapacity.MaximumEntities;
+        ChunkPublicationLimits limits = publicationLimits ?? ChunkPublicationLimits.ForEntityCapacity(_entityCapacity);
+        if (limits.MaximumPublicEntities < _entityCapacity)
+            throw new ArgumentException(
+                "Publication capacity must address every admitted ECS entity slot.",
+                nameof(publicationLimits));
         _positionLookup = world.PrepareLookup<WorldPositionComponent>();
         _publicLookup = world.PrepareLookup<WorldPublicComponent>();
         _baseline = world.PrepareReadJob<WorldPositionComponent>();
@@ -80,7 +85,6 @@ public sealed class GameWorldState : IDisposable
         _stageStamps = new uint[_entityCapacity];
         _publicationChanges = new WorldPublicChange[_entityCapacity];
         Index = new WorldSpatialIndex(_entityCapacity);
-        ChunkPublicationLimits limits = publicationLimits ?? ChunkPublicationLimits.ForEntityCapacity(_entityCapacity);
         Publications = new ChunkPublicationStore(PublicationEpoch.Create(), limits);
         BaseWorld = baseWorld;
     }
@@ -193,10 +197,10 @@ public sealed class GameWorldState : IDisposable
     public void Rebuild(EcsWorld world)
     {
         EnsureWorld(world);
-        RebuildCore(world, checked((ulong)_commitCount));
+        RebuildCore(world);
     }
 
-    private void RebuildCore(EcsWorld world, ulong authorityTick)
+    private void RebuildCore(EcsWorld world)
     {
         var candidate = new WorldSpatialIndex(_entityCapacity);
         var candidatePublications = new ChunkPublicationStore(
@@ -213,7 +217,6 @@ public sealed class GameWorldState : IDisposable
         }
         if (!candidatePublications.TryCommit(
                 _publicationChanges.AsSpan(0, visitor.Count),
-                authorityTick,
                 out ChunkPublicationCommitError publicationError))
             throw new InvalidOperationException($"Public-world rebuild failed: {publicationError}.");
 
@@ -242,7 +245,7 @@ public sealed class GameWorldState : IDisposable
         if (lifecycle.Status == LifecycleReadStatus.ResyncRequired || lifecycle.RemainingCount != 0)
         {
             long recoveryCommit = checked(_commitCount + 1);
-            RebuildCore(world, checked((ulong)recoveryCommit));
+            RebuildCore(world);
             _commitCount = recoveryCommit;
             return;
         }
@@ -277,7 +280,7 @@ public sealed class GameWorldState : IDisposable
         }
         long nextCommit = checked(_commitCount + 1);
         if (!Publications.TryCommit(
-                _publicationChanges.AsSpan(0, count), checked((ulong)nextCommit),
+                _publicationChanges.AsSpan(0, count),
                 out ChunkPublicationCommitError publicationError))
             throw new InvalidOperationException($"Public-world commit failed: {publicationError}.");
         for (int index = 0; index < count; index++)

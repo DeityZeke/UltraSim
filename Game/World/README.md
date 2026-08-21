@@ -92,11 +92,21 @@ successive entity-public versions. Destruction/public-component removal emits a
 tombstone; ECS slot reuse advances the public generation.
 
 Snapshots and coalesced deltas write complete results into caller-owned spans.
-An old/future/foreign-epoch cursor requests a snapshot; no-change cursors produce
-no rows. History pressure never rejects a representable current page: an
+Each cursor binds its epoch, chunk key, and chunk-local revision. An old,
+wrong-key, future, foreign-epoch, or pre-recreation cursor requests a snapshot;
+no-change cursors produce no rows. A `ChunkAbsent` snapshot is authoritative
+empty state: consumers clear that page and retain no cursor. History pressure
+never rejects a representable current page: an
 oversized dirty commit advances the current revision/floor, clears incomplete
 history, and forces older consumers to snapshot. Observer cursors and watcher
 lists are deliberately absent.
+
+For one reusable public Index, a higher Generation globally supersedes lower
+generations across all chunk pages. Within one Index/Generation, the higher
+entity-public version wins. This permits a new-generation Present to coalesce an
+older generation's Remove without allowing delayed old state to survive. Batches
+carry no simulation tick: the game-world commit counter is generation-local and
+is not an authoritative clock.
 
 The cheapest local bridge can borrow committed read-only SoA pages until the
 next mutation/replacement. Canonical semantic bytes instead use the sorted
@@ -106,11 +116,12 @@ semantic construction over always-current pages: sparse demand avoided 192 of
 constructions either way. No retained encoded-body cache or Network packet
 format is introduced before a concrete consumer earns its lifetime policy.
 
-The 1,024-entity/8-chunk benchmark records 0 B warmed allocation, about 82 ns for
-an unchanged post-step observation, 409 ns for a same-chunk public update,
-599 ns for a crossing, 207 ns to iterate prepared 128-row pages, 3.87 us to copy
-a canonical 128-row snapshot, and 4.86 us to copy plus encode it. See the
-[immutable T0.6 evidence](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-2026-08-20.json).
+The hardened 1,024-entity/8-chunk benchmark records 0 B warmed allocation, about
+83 ns for an unchanged post-step observation, 404 ns for a same-chunk public
+update, 575 ns for a crossing, 203 ns to iterate prepared 128-row pages, 3.85 us
+to copy a canonical 128-row snapshot, and 4.80 us to copy plus encode it. A cold
+100,000-slot construction reserves 123,810,048 bytes. See the
+[current T0.6 hardening evidence](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-hardening-2026-08-20.json).
 
 ## Terrain foundation format
 

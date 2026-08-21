@@ -77,10 +77,17 @@ var tests = new (string Name, Action Body)[]
         PublicationSnapshotDeltaAndNoChangeSemanticsAreDeterministic),
     ("CrossChunkPublicationOrdersRemoveBeforePresentAndFencesReuse",
         CrossChunkPublicationOrdersRemoveBeforePresentAndFencesReuse),
+    ("PublicationCursorLineageAndChunkRecreationAreFenced",
+        PublicationCursorLineageAndChunkRecreationAreFenced),
+    ("PublicGenerationSupersessionIsGlobalAcrossChunkPages",
+        PublicGenerationSupersessionIsGlobalAcrossChunkPages),
     ("PublicationHistoryLossFallsBackWithoutRejectingCurrentState",
         PublicationHistoryLossFallsBackWithoutRejectingCurrentState),
     ("PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree",
         PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree),
+    ("PublicationCapacityMustAddressEcsSlots", PublicationCapacityMustAddressEcsSlots),
+    ("PublicationStoreMatchesReferenceModelUnderBoundedChurn",
+        PublicationStoreMatchesReferenceModelUnderBoundedChurn),
 };
 
 foreach ((string name, Action body) in tests)
@@ -1800,10 +1807,19 @@ static void AssertSpatialModel(
 static void FailedRebuildPreservesPublishedSpatialIndex()
 {
     using RawSpatialFixture fixture = new(lifecycleCapacity: 32);
-    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity entity));
     True(fixture.State.TrySetPosition(fixture.World, entity, new WorldPosition(1, 2, 3, 4, 5)));
+    True(fixture.State.TrySetPublic(fixture.World, entity,
+        new WorldPublicDescriptor(91, WorldYaw.QuarterTurn, WorldPublicStateFlags.Visible)));
     fixture.State.CommitAfterEcsStep(fixture.World);
     WorldSpatialIndex published = fixture.State.Index;
+    ChunkPublicationStore publications = fixture.State.Publications;
+    PublicationEpoch epoch = publications.Epoch;
+    SpatialChunkKey publicationKey =
+        new(GameWorldState.DefaultSpace, new SpatialChunkCoord(1, 2));
+    var beforeRows = new WorldPublicRecord[1];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        publications.TryCopySnapshot(publicationKey, beforeRows, out ChunkPublicationBatch before));
     True(fixture.World.TryWrite(entity, fixture.RawPositionLookup, new WorldPositionComponent
     {
         ChunkX = 9,
@@ -1814,8 +1830,15 @@ static void FailedRebuildPreservesPublishedSpatialIndex()
     }));
     Throws<InvalidOperationException>(() => fixture.State.Rebuild(fixture.World));
     True(ReferenceEquals(published, fixture.State.Index));
+    True(ReferenceEquals(publications, fixture.State.Publications));
+    Equal(epoch, fixture.State.Publications.Epoch);
     True(published.TryGetHome(entity, out SpatialChunkKey oldHome));
     Equal(new SpatialChunkCoord(1, 2), oldHome.Coord);
+    var afterRows = new WorldPublicRecord[1];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        publications.TryCopySnapshot(publicationKey, afterRows, out ChunkPublicationBatch after));
+    Equal(before.Cursor, after.Cursor);
+    True(beforeRows.AsSpan().SequenceEqual(afterRows));
 }
 
 static void GenerationReplacementPublishesFreshDerivedIndex()
@@ -2065,6 +2088,115 @@ static void CrossChunkPublicationOrdersRemoveBeforePresentAndFencesReuse()
     Equal(deltas[0].Id, oracle.Record.Id);
 }
 
+static void PublicationCursorLineageAndChunkRecreationAreFenced()
+{
+    Equal(32, Marshal.SizeOf<ChunkPublicationCursor>());
+    Equal(48, ChunkPublicationSemanticCodec.HeaderBytes);
+    var limits = new ChunkPublicationLimits(
+        MaximumPublicEntities: 2,
+        MaximumResidentChunks: 4,
+        RowsPerPage: 1,
+        HistoryEntryCapacity: 16);
+    using RawSpatialFixture fixture = new(
+        lifecycleCapacity: 32, entityCapacity: 2, publicationLimits: limits);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity entity));
+    var descriptor = new WorldPublicDescriptor(101, WorldYaw.Zero, WorldPublicStateFlags.Visible);
+    True(fixture.State.TrySetPosition(fixture.World, entity, new WorldPosition(0, 0, 1, 2, 3)));
+    True(fixture.State.TrySetPublic(fixture.World, entity, descriptor));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey originalKey = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(0, 0));
+    var rows = new WorldPublicRecord[1];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(
+            originalKey, rows, out ChunkPublicationBatch original));
+
+    for (int chunkX = 1; chunkX <= 4; chunkX++)
+    {
+        True(fixture.State.TrySetPosition(
+            fixture.World, entity, new WorldPosition(chunkX, 0, 1, 2, chunkX)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+    }
+
+    Equal(ChunkPublicationReadStatus.ChunkAbsent,
+        fixture.State.Publications.TryCopySnapshot(
+            originalKey, rows, out ChunkPublicationBatch absent));
+    Equal(ChunkPublicationReadStatus.ChunkAbsent, absent.Status);
+    False(absent.Cursor.IsValid);
+    Equal(0, absent.Count);
+
+    True(fixture.State.TrySetPosition(fixture.World, entity, new WorldPosition(0, 0, 7, 8, 9)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    var deltas = new WorldPublicDeltaRecord[1];
+    Equal(ChunkPublicationReadStatus.SnapshotRequired,
+        fixture.State.Publications.TryCopyDelta(originalKey, original.Cursor, deltas, out _));
+
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(
+            originalKey, rows, out ChunkPublicationBatch recreated));
+    True(recreated.HistoryFloor.IsValid);
+    True(recreated.HistoryFloor.Value > original.Cursor.Revision.Value);
+    Equal(recreated.Cursor.Revision, recreated.HistoryFloor);
+    Equal(ChunkPublicationReadStatus.NoChanges,
+        fixture.State.Publications.TryCopyDelta(originalKey, recreated.Cursor, deltas, out _));
+
+    SpatialChunkKey priorKey = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(4, 0));
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(priorKey, rows, out ChunkPublicationBatch prior));
+    Equal(0, prior.Count);
+    Equal(ChunkPublicationReadStatus.SnapshotRequired,
+        fixture.State.Publications.TryCopyDelta(originalKey, prior.Cursor, deltas, out _));
+}
+
+static void PublicGenerationSupersessionIsGlobalAcrossChunkPages()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 32, entityCapacity: 2);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity first));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(-1, 0, 1, 2, 3)));
+    True(fixture.State.TrySetPublic(fixture.World, first,
+        new WorldPublicDescriptor(111, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey oldKey = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(-1, 0));
+    var rows = new WorldPublicRecord[1];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(oldKey, rows, out _));
+    WorldPublicRecord oldPresent = rows[0];
+
+    True(fixture.World.TryDestroy(first));
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity replacement));
+    Equal(first.Index, replacement.Index);
+    True(replacement.Generation > first.Generation);
+    True(fixture.State.TrySetPosition(fixture.World, replacement, new WorldPosition(2, 0, 4, 5, 6)));
+    True(fixture.State.TrySetPublic(fixture.World, replacement,
+        new WorldPublicDescriptor(112, WorldYaw.HalfTurn, WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey newKey = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(2, 0));
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(newKey, rows, out _));
+    WorldPublicRecord newPresent = rows[0];
+    Equal(oldPresent.Id.Index, newPresent.Id.Index);
+    True(newPresent.Id.Generation > oldPresent.Id.Generation);
+
+    var pages = new Dictionary<uint, (SpatialChunkKey Key, WorldPublicRecord Record)>();
+    var floors = new Dictionary<uint, PublicationConsumerFloor>();
+    ApplyPublicationConsumerPresent(pages, floors, oldKey, oldPresent);
+    ApplyPublicationConsumerPresent(pages, floors, newKey, newPresent);
+    ApplyPublicationConsumerPresent(pages, floors, oldKey, oldPresent);
+    ApplyPublicationConsumerDelta(pages, floors, oldKey, new WorldPublicDeltaRecord(
+        WorldPublicOperation.Remove,
+        WorldPublicFieldMask.None,
+        oldPresent.Id,
+        checked(oldPresent.EntityPublicVersion + 1),
+        default));
+
+    Equal(1, pages.Count);
+    True(pages.TryGetValue(newPresent.Id.Index, out var retained));
+    Equal(newKey, retained.Key);
+    Equal(newPresent, retained.Record);
+}
+
 static void PublicationHistoryLossFallsBackWithoutRejectingCurrentState()
 {
     var limits = new ChunkPublicationLimits(
@@ -2158,6 +2290,17 @@ static void PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree
     True(repeated.AsSpan().IndexOfAnyExcept((byte)0x5A) < 0);
     (records[0], records[1]) = (records[1], records[0]);
 
+    int sourceBytes = checked(Marshal.SizeOf<WorldPublicRecord>() * records.Length);
+    var overlapping = new byte[Math.Max(bytes.Length, sourceBytes)];
+    Span<WorldPublicRecord> overlappingRecords =
+        MemoryMarshal.Cast<byte, WorldPublicRecord>(overlapping.AsSpan(0, sourceBytes));
+    records.CopyTo(overlappingRecords);
+    byte[] overlapBefore = overlapping.ToArray();
+    False(ChunkPublicationSemanticCodec.TryWriteSnapshot(
+        batch, overlappingRecords, overlapping, out rejected));
+    Equal(0, rejected);
+    True(overlapping.AsSpan().SequenceEqual(overlapBefore));
+
     for (int index = 0; index < 1_000; index++)
     {
         True(fixture.State.TrySetPosition(fixture.World, first,
@@ -2185,6 +2328,91 @@ static void PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree
     long allocated = GC.GetAllocatedBytesForCurrentThread() - beforeAllocation;
     Equal(0L, allocated);
     True(checksum != 0);
+}
+
+static void PublicationCapacityMustAddressEcsSlots()
+{
+    using var world = new EcsWorld(
+        GameSchema.CreateSchema(),
+        new EcsWorldOptions(
+            new EntityCapacity(8),
+            maximumArchetypes: 2,
+            maximumPreparedPlans: 8,
+            lifecycleRecordCapacity: 16));
+    var undersized = new ChunkPublicationLimits(
+        MaximumPublicEntities: 4,
+        MaximumResidentChunks: 8,
+        RowsPerPage: 2,
+        HistoryEntryCapacity: 8);
+    Throws<ArgumentException>(() => _ = new GameWorldState(world, publicationLimits: undersized));
+}
+
+static void PublicationStoreMatchesReferenceModelUnderBoundedChurn()
+{
+    const int entityCapacity = 8;
+    const int operations = 20_000;
+    var limits = new ChunkPublicationLimits(
+        MaximumPublicEntities: entityCapacity,
+        MaximumResidentChunks: entityCapacity * 2,
+        RowsPerPage: 2,
+        HistoryEntryCapacity: 6);
+    using RawSpatialFixture fixture = new(
+        lifecycleCapacity: 64,
+        entityCapacity: entityCapacity,
+        publicationLimits: limits);
+    var random = new Random(0x5EED_6006);
+    var actors = new PublicationChurnActor[entityCapacity];
+    var knownKeys = new HashSet<SpatialChunkKey>();
+    var cursors = new Dictionary<SpatialChunkKey, ChunkPublicationCursor>();
+    var consumer = new Dictionary<uint, (SpatialChunkKey Key, WorldPublicRecord Record)>();
+    var consumerFloors = new Dictionary<uint, PublicationConsumerFloor>();
+    var rows = new WorldPublicRecord[entityCapacity];
+    var deltas = new WorldPublicDeltaRecord[entityCapacity];
+    uint nextPrefab = 1_000;
+
+    for (int index = 0; index < 4; index++)
+        CreateChurnActor(fixture, actors, knownKeys, random, ref nextPrefab, makePublic: true);
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    AssertPublicationTruth(fixture.State.Publications, actors, knownKeys, rows);
+    SynchronizePublicationConsumer(
+        fixture.State.Publications, actors, knownKeys, cursors, consumer,
+        consumerFloors, rows, deltas, random);
+
+    for (int operation = 0; operation < operations; operation++)
+    {
+        int mutations = 1 + random.Next(3);
+        for (int mutation = 0; mutation < mutations; mutation++)
+            MutateChurnActor(fixture, actors, knownKeys, random, ref nextPrefab);
+
+        if (operation % 257 == 0)
+        {
+            for (int index = 0; index < actors.Length; index++)
+            {
+                ref PublicationChurnActor actor = ref actors[index];
+                if (!actor.Alive || !actor.Public) continue;
+                actor.Position = RandomChurnPosition(random, actor.Position, forceCrossChunk: true);
+                knownKeys.Add(actor.Position.ToChunkKey(GameWorldState.DefaultSpace));
+                True(fixture.State.TrySetPosition(fixture.World, actor.Entity, actor.Position));
+            }
+        }
+
+        fixture.State.CommitAfterEcsStep(fixture.World);
+        AssertPublicationTruth(fixture.State.Publications, actors, knownKeys, rows);
+        if (operation % 17 == 0)
+        {
+            SynchronizePublicationConsumer(
+                fixture.State.Publications, actors, knownKeys, cursors, consumer,
+                consumerFloors, rows, deltas, random);
+        }
+    }
+
+    SynchronizePublicationConsumer(
+        fixture.State.Publications, actors, knownKeys, cursors, consumer,
+        consumerFloors, rows, deltas, random);
+    ChunkPublicationStoreSnapshot snapshot = fixture.State.Publications.GetSnapshot();
+    True(snapshot.HistoryInvalidations > 0);
+    True(snapshot.SnapshotFallbacks > 0);
+    True(snapshot.LargestDirtyCommit > limits.HistoryEntryCapacity);
 }
 
 static void FloorDivisionOwnsNegativeBoundaries()
@@ -2435,6 +2663,375 @@ static void AssertPosition(
     Equal(globalZ, position.GlobalZMillimeters);
 }
 
+static bool CreateChurnActor(
+    RawSpatialFixture fixture,
+    PublicationChurnActor[] actors,
+    HashSet<SpatialChunkKey> knownKeys,
+    Random random,
+    ref uint nextPrefab,
+    bool makePublic)
+{
+    int free = FindChurnActor(actors, random, requireAlive: false);
+    if (free < 0) return false;
+    ArchetypeHandle archetype = makePublic
+        ? fixture.PublicSpatialArchetype
+        : fixture.SpatialArchetype;
+    True(fixture.World.TryCreate(archetype, out Entity entity));
+    ref PublicationChurnActor actor = ref actors[entity.Index];
+    actor.Entity = entity;
+    actor.Alive = true;
+    actor.Public = makePublic;
+    actor.Position = RandomChurnPosition(random, default, forceCrossChunk: true);
+    actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+    knownKeys.Add(actor.Position.ToChunkKey(GameWorldState.DefaultSpace));
+    True(fixture.State.TrySetPosition(fixture.World, entity, actor.Position));
+    if (makePublic)
+        True(fixture.State.TrySetPublic(fixture.World, entity, actor.Descriptor));
+    return true;
+}
+
+static void MutateChurnActor(
+    RawSpatialFixture fixture,
+    PublicationChurnActor[] actors,
+    HashSet<SpatialChunkKey> knownKeys,
+    Random random,
+    ref uint nextPrefab)
+{
+    int action = random.Next(7);
+    if (action == 0)
+    {
+        _ = CreateChurnActor(
+            fixture, actors, knownKeys, random, ref nextPrefab, random.Next(2) == 0);
+        return;
+    }
+
+    int index = FindChurnActor(actors, random, requireAlive: true);
+    if (index < 0)
+    {
+        _ = CreateChurnActor(fixture, actors, knownKeys, random, ref nextPrefab, makePublic: true);
+        return;
+    }
+
+    ref PublicationChurnActor actor = ref actors[index];
+    switch (action)
+    {
+        case 1:
+            True(fixture.World.TryDestroy(actor.Entity));
+            actor.Alive = false;
+            actor.Public = false;
+            break;
+        case 2:
+            if (actor.Public)
+            {
+                True(fixture.World.TryTransition(actor.Entity, fixture.RemovePublic));
+                actor.Public = false;
+            }
+            else
+            {
+                True(fixture.World.TryTransition(actor.Entity, fixture.AddPublic));
+                actor.Public = true;
+                actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+                True(fixture.State.TrySetPublic(fixture.World, actor.Entity, actor.Descriptor));
+            }
+            break;
+        case 3:
+        {
+            int writes = 1 + random.Next(5);
+            for (int write = 0; write < writes; write++)
+            {
+                actor.Position = RandomChurnPosition(
+                    random, actor.Position, forceCrossChunk: write == writes - 1 && random.Next(2) == 0);
+                knownKeys.Add(actor.Position.ToChunkKey(GameWorldState.DefaultSpace));
+                True(fixture.State.TrySetPosition(fixture.World, actor.Entity, actor.Position));
+            }
+            break;
+        }
+        case 4:
+            if (actor.Public)
+            {
+                int writes = 1 + random.Next(4);
+                for (int write = 0; write < writes; write++)
+                {
+                    actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+                    True(fixture.State.TrySetPublic(fixture.World, actor.Entity, actor.Descriptor));
+                }
+            }
+            break;
+        case 5:
+        {
+            Entity retired = actor.Entity;
+            True(fixture.World.TryDestroy(retired));
+            bool makePublic = random.Next(2) == 0;
+            True(fixture.World.TryCreate(
+                makePublic ? fixture.PublicSpatialArchetype : fixture.SpatialArchetype,
+                out Entity replacement));
+            Equal(retired.Index, replacement.Index);
+            True(replacement.Generation > retired.Generation);
+            actor.Entity = replacement;
+            actor.Alive = true;
+            actor.Public = makePublic;
+            actor.Position = RandomChurnPosition(random, default, forceCrossChunk: true);
+            actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+            knownKeys.Add(actor.Position.ToChunkKey(GameWorldState.DefaultSpace));
+            True(fixture.State.TrySetPosition(fixture.World, replacement, actor.Position));
+            if (makePublic)
+                True(fixture.State.TrySetPublic(fixture.World, replacement, actor.Descriptor));
+            break;
+        }
+        default:
+            actor.Position = RandomChurnPosition(random, actor.Position, forceCrossChunk: false);
+            knownKeys.Add(actor.Position.ToChunkKey(GameWorldState.DefaultSpace));
+            True(fixture.State.TrySetPosition(fixture.World, actor.Entity, actor.Position));
+            if (actor.Public)
+            {
+                actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+                True(fixture.State.TrySetPublic(fixture.World, actor.Entity, actor.Descriptor));
+            }
+            break;
+    }
+}
+
+static int FindChurnActor(PublicationChurnActor[] actors, Random random, bool requireAlive)
+{
+    int start = random.Next(actors.Length);
+    for (int offset = 0; offset < actors.Length; offset++)
+    {
+        int index = (start + offset) % actors.Length;
+        if (actors[index].Alive == requireAlive)
+            return index;
+    }
+    return -1;
+}
+
+static WorldPosition RandomChurnPosition(
+    Random random,
+    in WorldPosition previous,
+    bool forceCrossChunk)
+{
+    int chunkX;
+    int chunkZ;
+    bool hasPrevious = previous != default;
+    if (!forceCrossChunk && hasPrevious && random.Next(3) == 0)
+    {
+        chunkX = previous.Chunk.X;
+        chunkZ = previous.Chunk.Z;
+    }
+    else
+    {
+        do
+        {
+            chunkX = random.Next(-4, 5);
+            chunkZ = random.Next(-4, 5);
+        }
+        while (forceCrossChunk && hasPrevious &&
+               chunkX == previous.Chunk.X && chunkZ == previous.Chunk.Z);
+    }
+    return new WorldPosition(
+        chunkX,
+        chunkZ,
+        checked((ushort)random.Next(GameWorldSpatialProfile.WorldChunkEdgeUnits)),
+        checked((ushort)random.Next(GameWorldSpatialProfile.WorldChunkEdgeUnits)),
+        random.Next(-100_000, 100_001));
+}
+
+static WorldPublicDescriptor NextChurnDescriptor(Random random, ref uint nextPrefab)
+{
+    uint prefab = nextPrefab++;
+    if (prefab == 0) throw new InvalidOperationException("Churn prefab identity wrapped.");
+    return new WorldPublicDescriptor(
+        prefab,
+        new WorldYaw(checked((ushort)random.Next(ushort.MaxValue + 1))),
+        random.Next(2) == 0 ? WorldPublicStateFlags.None : WorldPublicStateFlags.Visible);
+}
+
+static void AssertPublicationTruth(
+    ChunkPublicationStore store,
+    PublicationChurnActor[] actors,
+    HashSet<SpatialChunkKey> knownKeys,
+    WorldPublicRecord[] rows)
+{
+    var actual = new Dictionary<uint, WorldPublicRecord>();
+    foreach (SpatialChunkKey key in knownKeys)
+    {
+        ChunkPublicationReadStatus status = store.TryCopySnapshot(key, rows, out ChunkPublicationBatch batch);
+        if (status == ChunkPublicationReadStatus.ChunkAbsent)
+            continue;
+        Equal(ChunkPublicationReadStatus.Snapshot, status);
+        Equal(key, batch.Cursor.Key);
+        for (int row = 0; row < batch.Count; row++)
+            True(actual.TryAdd(rows[row].PrefabId, rows[row]));
+    }
+
+    int expectedCount = 0;
+    for (int index = 0; index < actors.Length; index++)
+    {
+        ref PublicationChurnActor actor = ref actors[index];
+        if (!actor.Alive || !actor.Public)
+        {
+            actor.ObservedPublic = false;
+            continue;
+        }
+        expectedCount++;
+        True(actual.TryGetValue(actor.Descriptor.PrefabId, out WorldPublicRecord record));
+        Equal(actor.Position, record.Position);
+        Equal(actor.Descriptor.PrefabId, record.PrefabId);
+        Equal(actor.Descriptor.Orientation, record.Orientation);
+        Equal(actor.Descriptor.Flags, record.StateFlags);
+        True(record.LastChangedRevision.IsValid);
+        if (actor.ObservedPublic)
+        {
+            if (actor.LastObservedEntity == actor.Entity)
+            {
+                Equal(actor.LastObservedId, record.Id);
+            }
+            else
+            {
+                Equal(actor.LastObservedId.Index, record.Id.Index);
+                True(record.Id.Generation > actor.LastObservedId.Generation);
+            }
+        }
+        else if (actor.LastObservedId.IsValid && actor.LastObservedId.Index == record.Id.Index)
+        {
+            True(record.Id.Generation > actor.LastObservedId.Generation);
+        }
+        actor.LastObservedEntity = actor.Entity;
+        actor.LastObservedId = record.Id;
+        actor.ObservedPublic = true;
+    }
+    Equal(expectedCount, actual.Count);
+    Equal(expectedCount, store.GetSnapshot().PublicEntityCount);
+}
+
+static void SynchronizePublicationConsumer(
+    ChunkPublicationStore store,
+    PublicationChurnActor[] actors,
+    HashSet<SpatialChunkKey> knownKeys,
+    Dictionary<SpatialChunkKey, ChunkPublicationCursor> cursors,
+    Dictionary<uint, (SpatialChunkKey Key, WorldPublicRecord Record)> consumer,
+    Dictionary<uint, PublicationConsumerFloor> floors,
+    WorldPublicRecord[] rows,
+    WorldPublicDeltaRecord[] deltas,
+    Random random)
+{
+    SpatialChunkKey[] order = knownKeys.ToArray();
+    random.Shuffle(order);
+    if (cursors.Count >= 2)
+    {
+        KeyValuePair<SpatialChunkKey, ChunkPublicationCursor>[] retained = cursors.Take(2).ToArray();
+        if (retained[0].Key != retained[1].Key)
+        {
+            Equal(ChunkPublicationReadStatus.SnapshotRequired,
+                store.TryCopyDelta(retained[1].Key, retained[0].Value, deltas, out _));
+        }
+    }
+
+    foreach (SpatialChunkKey key in order)
+    {
+        ChunkPublicationReadStatus status;
+        ChunkPublicationBatch batch;
+        if (cursors.TryGetValue(key, out ChunkPublicationCursor cursor))
+        {
+            status = store.TryCopyDelta(key, cursor, deltas, out batch);
+            if (status == ChunkPublicationReadStatus.Delta)
+            {
+                for (int index = 0; index < batch.Count; index++)
+                    ApplyPublicationConsumerDelta(consumer, floors, key, deltas[index]);
+                cursors[key] = batch.Cursor;
+                continue;
+            }
+            if (status == ChunkPublicationReadStatus.NoChanges)
+            {
+                cursors[key] = batch.Cursor;
+                continue;
+            }
+            Equal(ChunkPublicationReadStatus.SnapshotRequired, status);
+        }
+
+        status = store.TryCopySnapshot(key, rows, out batch);
+        ClearPublicationConsumerKey(consumer, key);
+        if (status == ChunkPublicationReadStatus.ChunkAbsent)
+        {
+            cursors.Remove(key);
+            continue;
+        }
+        Equal(ChunkPublicationReadStatus.Snapshot, status);
+        for (int index = 0; index < batch.Count; index++)
+            ApplyPublicationConsumerPresent(consumer, floors, key, rows[index]);
+        cursors[key] = batch.Cursor;
+    }
+
+    var byPrefab = new Dictionary<uint, WorldPublicRecord>();
+    foreach ((_, WorldPublicRecord record) in consumer.Values)
+        True(byPrefab.TryAdd(record.PrefabId, record));
+    int expected = 0;
+    for (int index = 0; index < actors.Length; index++)
+    {
+        ref readonly PublicationChurnActor actor = ref actors[index];
+        if (!actor.Alive || !actor.Public) continue;
+        expected++;
+        True(byPrefab.TryGetValue(actor.Descriptor.PrefabId, out WorldPublicRecord record));
+        Equal(actor.Position, record.Position);
+        Equal(actor.Descriptor.Orientation, record.Orientation);
+        Equal(actor.Descriptor.Flags, record.StateFlags);
+    }
+    Equal(expected, byPrefab.Count);
+}
+
+static void ClearPublicationConsumerKey(
+    Dictionary<uint, (SpatialChunkKey Key, WorldPublicRecord Record)> consumer,
+    SpatialChunkKey key)
+{
+    uint[] stale = consumer
+        .Where(pair => pair.Value.Key == key)
+        .Select(static pair => pair.Key)
+        .ToArray();
+    for (int index = 0; index < stale.Length; index++)
+        consumer.Remove(stale[index]);
+}
+
+static void ApplyPublicationConsumerPresent(
+    Dictionary<uint, (SpatialChunkKey Key, WorldPublicRecord Record)> consumer,
+    Dictionary<uint, PublicationConsumerFloor> floors,
+    SpatialChunkKey key,
+    in WorldPublicRecord record) =>
+    ApplyPublicationConsumerDelta(consumer, floors, key, new WorldPublicDeltaRecord(
+        WorldPublicOperation.Present,
+        WorldPublicFieldMask.Complete,
+        record.Id,
+        record.EntityPublicVersion,
+        record));
+
+static void ApplyPublicationConsumerDelta(
+    Dictionary<uint, (SpatialChunkKey Key, WorldPublicRecord Record)> consumer,
+    Dictionary<uint, PublicationConsumerFloor> floors,
+    SpatialChunkKey key,
+    in WorldPublicDeltaRecord delta)
+{
+    if (floors.TryGetValue(delta.Id.Index, out PublicationConsumerFloor floor))
+    {
+        int generation = delta.Id.Generation.CompareTo(floor.Generation);
+        if (generation < 0 || generation == 0 && delta.EntityPublicVersion < floor.Version)
+            return;
+        if (generation == 0 && delta.EntityPublicVersion == floor.Version)
+        {
+            if (delta.Operation != floor.Operation) return;
+            if (delta.Operation == WorldPublicOperation.Remove) return;
+            if (consumer.TryGetValue(delta.Id.Index, out var retained))
+            {
+                Equal(key, retained.Key);
+                Equal(delta.Current, retained.Record);
+                return;
+            }
+        }
+    }
+
+    consumer.Remove(delta.Id.Index);
+    floors[delta.Id.Index] = new PublicationConsumerFloor(
+        delta.Id.Generation, delta.EntityPublicVersion, delta.Operation);
+    if (delta.Operation == WorldPublicOperation.Present)
+        consumer[delta.Id.Index] = (key, delta.Current);
+}
+
 static void ApplyPublicOracle(ref PublicOracleState state, in WorldPublicDeltaRecord delta)
 {
     int generation = delta.Id.Generation.CompareTo(state.Record.Id.Generation);
@@ -2488,6 +3085,23 @@ static class WorldPackTestProfile
     internal static SpatialSpaceId Space { get; } = new(901);
     internal static WorldContentFingerprint Content { get; } =
         new(0x1122_3344_5566_7788UL, 0x8877_6655_4433_2211UL);
+}
+
+readonly record struct PublicationConsumerFloor(
+    uint Generation,
+    ulong Version,
+    WorldPublicOperation Operation);
+
+struct PublicationChurnActor
+{
+    internal Entity Entity;
+    internal WorldPosition Position;
+    internal WorldPublicDescriptor Descriptor;
+    internal WorldPublicEntityId LastObservedId;
+    internal Entity LastObservedEntity;
+    internal bool Alive;
+    internal bool Public;
+    internal bool ObservedPublic;
 }
 
 struct PublicOracleState
