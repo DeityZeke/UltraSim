@@ -3764,8 +3764,32 @@ The immutable evidence artifact is
 [`terrain-t0.10-retained-direct-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-retained-direct-2026-08-21.json).
 The additive input-rate/latest-state evidence is
 [`terrain-t0.10-retained-direct-input-rate-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-retained-direct-input-rate-hardening-2026-08-21.json).
-`Destination`, camera/control profiles, the launchable `Client/_Godot`
-application, the broad matrix, and N1 have not started. T0.10 remains active.
+
+### T0.10 Destination implementation stop — 2026-08-21
+
+The command seam now distinguishes `Unchanged`, `Stop`, `Direct`, and
+`Destination`. Retained authority remains only `None`, `Direct`, or
+`Destination`; `Unchanged` means this command carries no locomotion mutation.
+This prevents ordinary action commands from cancelling latched travel.
+
+The first Destination path is intentionally a straight-line, terrain-following
+proof. Authority validates the endpoint against current prepared terrain,
+integrates game speed against exact fixed Delta, clamps exactly to the nominated
+global X/Z, and retires on arrival. It adds no pathfinding, navigation mesh,
+obstacle avoidance, crowd system, gait framework, or camera knowledge.
+
+One diagonal command reaches exactly X = 14,734 mm / Z = 12,777 mm at 20, 60,
+and 120 Hz, then remains stopped. Adversarial evidence proves action-only
+`Unchanged`, latest Destination before a tick, Direct/Stop/session cancellation,
+invalid-target preservation of prior state, and non-durable save/restore
+behavior. `GameWorldActions` known reservation in the restored 64-slot fixture
+is now 4,672 B after adding bounded Destination coordinates/state.
+
+The immutable evidence artifact is
+[`terrain-t0.10-destination-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-destination-2026-08-21.json).
+OrbitCommand/control profiles, pointer gestures, the launchable
+`Client/_Godot` application, the broad matrix, and N1 have not started. T0.10
+remains active.
 
 ### T0 performance/evidence matrix
 

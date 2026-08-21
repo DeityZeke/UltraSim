@@ -16,6 +16,19 @@ public readonly record struct ClientWorldInputSample(
         (HeldActions & ~GamePlayerCommand.KnownActions) == 0;
 }
 
+/// <summary>
+/// Engine-neutral control-profile output ready for sequencing. The profile decides whether this
+/// command leaves locomotion unchanged, stops it, or replaces it with Direct/Destination state.
+/// </summary>
+public readonly record struct ClientWorldCommandIntent(
+    GameLocomotionUpdate Locomotion,
+    GamePlayerActions HeldActions,
+    bool HasFocus)
+{
+    public bool IsValid => Locomotion.IsValid &&
+        (HeldActions & ~GamePlayerCommand.KnownActions) == 0;
+}
+
 public readonly record struct ClientWorldInputSnapshot(
     GameControlSessionEpoch ControlSession,
     ulong CommandsProduced,
@@ -67,25 +80,55 @@ public sealed class ClientWorldInputSequencer
             return false;
         }
 
-        GamePlayerActions held = sample.HasFocus ? sample.HeldActions : GamePlayerActions.None;
-        // Initial focus may report an already-held key as the first edge, but a
-        // refocus must only seed the held baseline. Otherwise alt-tab/focus
-        // restoration can manufacture an interaction without a fresh press.
-        GamePlayerActions pressed = _hasSample && !_lastFocused && sample.HasFocus
-            ? GamePlayerActions.None
-            : held & ~_lastHeld;
         NormalizeAxes(
             sample.HasFocus ? sample.MoveX : 0,
             sample.HasFocus ? sample.MoveZ : 0,
             out short moveX,
             out short moveZ);
+        GameLocomotionUpdate locomotion = moveX == 0 && moveZ == 0
+            ? GameLocomotionUpdate.Stop
+            : GameLocomotionUpdate.CreateDirect(moveX, moveZ);
+        return TryCreateCommandCore(
+            locomotion, sample.HeldActions, sample.HasFocus, out command);
+    }
+
+    public bool TryCreateSemanticCommand(
+        in ClientWorldCommandIntent intent,
+        out GamePlayerCommand command)
+    {
+        EnsureOwner();
+        if (!intent.IsValid || _nextSequence == 0)
+        {
+            command = default;
+            return false;
+        }
+        return TryCreateCommandCore(
+            intent.Locomotion, intent.HeldActions, intent.HasFocus, out command);
+    }
+
+    private bool TryCreateCommandCore(
+        in GameLocomotionUpdate requestedLocomotion,
+        GamePlayerActions requestedHeld,
+        bool hasFocus,
+        out GamePlayerCommand command)
+    {
+        GamePlayerActions held = hasFocus ? requestedHeld : GamePlayerActions.None;
+        GameLocomotionUpdate locomotion = hasFocus
+            ? requestedLocomotion
+            : GameLocomotionUpdate.Stop;
+        // Initial focus may report an already-held key as the first edge, but a
+        // refocus must only seed the held baseline. Otherwise alt-tab/focus
+        // restoration can manufacture an interaction without a fresh press.
+        GamePlayerActions pressed = _hasSample && !_lastFocused && hasFocus
+            ? GamePlayerActions.None
+            : held & ~_lastHeld;
 
         command = new GamePlayerCommand(
-            _controlSession, _nextSequence, moveX, moveZ, held, pressed);
+            _controlSession, _nextSequence, locomotion, held, pressed);
         _nextSequence = unchecked(_nextSequence + 1);
         _commandsProduced = checked(_commandsProduced + 1);
         _lastHeld = held;
-        _lastFocused = sample.HasFocus;
+        _lastFocused = hasFocus;
         _hasSample = true;
         return true;
     }

@@ -1,0 +1,72 @@
+{
+  "schema": "terrain-t0.10-destination-v1",
+  "captured_at_local": "2026-08-21",
+  "runtime": "8.0.29",
+  "framework": ".NET 8.0.29",
+  "os": "CachyOS",
+  "architecture": "X64",
+  "processors": 16,
+  "checkpoint": "minimal retained Destination authority implementation stop; T0.10 remains active",
+  "supersedes_command_vocabulary_in": "terrain-t0.10-retained-direct-2026-08-21.json",
+  "scope": "explicit locomotion mutation vocabulary and straight-line terrain-following Destination authority; not pathfinding, navmesh, obstacle avoidance, camera/control profiles, pointer gestures, launchable client, broad matrix, or N1",
+  "workload": "ultrasim-t0.10-integrated-acceptance-v5",
+  "command_vocabulary": {
+    "Unchanged": "no locomotion mutation in this command",
+    "Stop": "clear retained locomotion",
+    "Direct": "replace with complete world-space signed-Q15 state",
+    "Destination": "replace with canonical global X/Z",
+    "retained_authority_modes": ["None", "Direct", "Destination"]
+  },
+  "destination_authority": {
+    "speed_millimeters_per_second": 6000,
+    "endpoint_validated_against_prepared_terrain": true,
+    "fixed_delta_integrated": true,
+    "final_step_clamps_to_exact_target": true,
+    "arrival_retires_active_locomotion": true,
+    "prepared_route_gap_clears_impossible_destination": true,
+    "durable_save_state": false
+  },
+  "cadence_acceptance": {
+    "tested_authority_frequencies_hz": [20, 60, 120],
+    "commands_per_frequency": 1,
+    "initial_x_millimeters": 13500,
+    "initial_z_millimeters": 12000,
+    "destination_x_millimeters": 14734,
+    "destination_z_millimeters": 12777,
+    "final_x_millimeters_each_frequency": 14734,
+    "final_z_millimeters_each_frequency": 12777,
+    "active_locomotion_after_arrival": 0,
+    "post_arrival_drift": false,
+    "canonical_hash": "376F3FE12032B278F1A1CDE43E909BBB41068279E46E73D3D2403B33A640305B"
+  },
+  "composition_acceptance": {
+    "unchanged_action_preserves_destination": true,
+    "new_destination_replaces_old": true,
+    "destination_west_then_east_moves_east_once": true,
+    "direct_replaces_destination": true,
+    "stop_cancels_destination": true,
+    "control_session_replacement_cancels_destination": true,
+    "control_session_end_cancels_destination": true,
+    "invalid_destination_preserves_prior_valid_locomotion": true,
+    "commands": 17,
+    "canonical_hash": "248FDF44B5B37D101787E2A5A36B0E9E855A7DA10A571F4ADC332D08EDEEBBE0"
+  },
+  "persistence_acceptance": {
+    "latched_destination_present_before_save": true,
+    "restored_active_locomotion_count": 0,
+    "first_post_restore_tick_moves_actor": false,
+    "rule": "player Direct/Destination and control lineage are non-durable operational generation state"
+  },
+  "capacity_observation": {
+    "restored_fixture_ecs_slots": 64,
+    "game_world_actions_known_reserved_bytes": 4672,
+    "allocation_scope": "array payload accounting excludes managed array/object headers and alignment"
+  },
+  "remaining_t0_10_gates": [
+    "OrbitCommand camera and pointer-gesture policy",
+    "crude ThirdPersonDirect and IndependentMoveLook portability proofs",
+    "configured launchable Client/_Godot application and human cabin acceptance",
+    "broad authored-world/publication/streaming performance matrix",
+    "T0.10 acceptance and freeze"
+  ]
+}

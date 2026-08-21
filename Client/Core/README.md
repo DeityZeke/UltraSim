@@ -71,6 +71,13 @@ This is deliberately the smallest proven movement/interact boundary rather than
 a general input framework or compatibility API. Refocus restores held movement
 immediately but only seeds the held-action baseline; a key held across focus loss
 cannot manufacture a fresh edge-triggered interaction until released and pressed
-again. Its movement axes are a complete world-space Direct state: a nonzero
-state remains authoritative until superseded, while zero/zero stops it. Command
-sampling frequency therefore does not define movement speed.
+again.
+
+The Direct-era raw-sample overload remains a convenience producer: nonzero axes
+produce complete world-space `Direct`, while zero axes produce explicit `Stop`.
+Control profiles use `ClientWorldCommandIntent` and
+`TryCreateSemanticCommand` to select the accepted command vocabulary explicitly:
+`Unchanged`, `Stop`, `Direct`, or `Destination`. `Unchanged` lets an adjacent
+action command leave retained locomotion alone; it is not a retained authority
+mode. The sequencer owns fencing and action-edge formation, not camera/gesture
+policy. Command sampling frequency therefore does not define movement speed.

@@ -52,16 +52,65 @@ public enum GamePlayerActions : ushort
     Primary = 1 << 1,
 }
 
+/// <summary>Command-level mutation of the one retained authoritative locomotion state.</summary>
+public enum GameLocomotionUpdateKind : byte
+{
+    Unchanged = 0,
+    Stop,
+    Direct,
+    Destination,
+}
+
+/// <summary>
+/// Canonical engine-neutral locomotion update. <see cref="Unchanged"/> is command vocabulary,
+/// not a fourth retained locomotion mode.
+/// </summary>
+public readonly record struct GameLocomotionUpdate(
+    GameLocomotionUpdateKind Kind,
+    short DirectX,
+    short DirectZ,
+    long DestinationXMillimeters,
+    long DestinationZMillimeters)
+{
+    public static GameLocomotionUpdate Unchanged => default;
+    public static GameLocomotionUpdate Stop => new(GameLocomotionUpdateKind.Stop, 0, 0, 0, 0);
+
+    public static GameLocomotionUpdate CreateDirect(short x, short z) =>
+        new(GameLocomotionUpdateKind.Direct, x, z, 0, 0);
+
+    public static GameLocomotionUpdate CreateDestination(
+        long globalXMillimeters,
+        long globalZMillimeters) =>
+        new(GameLocomotionUpdateKind.Destination, 0, 0,
+            globalXMillimeters, globalZMillimeters);
+
+    public bool IsValid => Kind switch
+    {
+        GameLocomotionUpdateKind.Unchanged or GameLocomotionUpdateKind.Stop =>
+            DirectX == 0 && DirectZ == 0 &&
+            DestinationXMillimeters == 0 && DestinationZMillimeters == 0,
+        GameLocomotionUpdateKind.Direct =>
+            (DirectX != 0 || DirectZ != 0) &&
+            DirectX >= GamePlayerCommand.MinimumAxisMagnitude &&
+            DirectZ >= GamePlayerCommand.MinimumAxisMagnitude &&
+            (long)DirectX * DirectX + (long)DirectZ * DirectZ <=
+                (long)GamePlayerCommand.MaximumAxisMagnitude *
+                GamePlayerCommand.MaximumAxisMagnitude &&
+            DestinationXMillimeters == 0 && DestinationZMillimeters == 0,
+        GameLocomotionUpdateKind.Destination => DirectX == 0 && DirectZ == 0,
+        _ => false,
+    };
+}
+
 /// <summary>
 /// One sequenced, normalized player command shared by OfflineDirect and future remote formation.
-/// Movement axes are a complete, superseding world-space Direct intent in signed Q15. Their vector
-/// must remain inside the unit circle. Zero/zero means no current Direct locomotion request.
+/// Locomotion is an explicit command mutation: unchanged, stop, world-space signed-Q15 Direct, or
+/// canonical global-X/Z Destination. Adjacent actions do not implicitly mutate locomotion.
 /// </summary>
 public readonly record struct GamePlayerCommand(
     GameControlSessionEpoch ControlSession,
     ulong Sequence,
-    short MoveX,
-    short MoveZ,
+    GameLocomotionUpdate Locomotion,
     GamePlayerActions HeldActions,
     GamePlayerActions PressedActions)
 {
@@ -70,10 +119,7 @@ public readonly record struct GamePlayerCommand(
     public const GamePlayerActions KnownActions =
         GamePlayerActions.Interact | GamePlayerActions.Primary;
 
-    public bool IsValid => ControlSession.IsValid && Sequence != 0 &&
-        MoveX >= MinimumAxisMagnitude && MoveZ >= MinimumAxisMagnitude &&
-        (long)MoveX * MoveX + (long)MoveZ * MoveZ <=
-            (long)MaximumAxisMagnitude * MaximumAxisMagnitude &&
+    public bool IsValid => ControlSession.IsValid && Sequence != 0 && Locomotion.IsValid &&
         (HeldActions & ~KnownActions) == 0 &&
         (PressedActions & ~KnownActions) == 0 &&
         (PressedActions & ~HeldActions) == 0;

@@ -18,13 +18,15 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v4";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v5";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
+Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
+Run("LocomotionUpdatesComposeAndSupersede", LocomotionUpdateSemantics, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
@@ -226,6 +228,18 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
         host.Tick();
         RefreshPlayableProjection(runtime.Game, client);
 
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDestination(
+                        stoppedAt.GlobalXMillimeters + 1_000,
+                        stoppedAt.GlobalZMillimeters),
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand nonDurableDestination) &&
+            offline.ApplyCommand(nonDurableDestination).Locomotion == GameWorldActionStatus.Accepted &&
+            ReadActiveLocomotionCount(runtime.Game) == 1,
+            "The pre-save non-durable Destination could not be latched.");
+
         string preSaveCanonical = CapturePlayableCanonical(runtime.Game, entities);
         string preSaveProjection = CaptureProjectionCanonical(client);
         PlayableClientProjection rebuilt = BuildPlayableProjection(runtime.Game, playerPosition);
@@ -298,6 +312,11 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
             "The local accountless session retained a stale generation entity after restore.");
 
         WorldPosition restoredPosition = ReadWorldPosition(runtime.Game, entities.PlayerId);
+        Expect(ReadActiveLocomotionCount(runtime.Game) == 0,
+            "Restore retained non-durable player locomotion.");
+        host.Tick();
+        Expect(ReadWorldPosition(runtime.Game, entities.PlayerId) == restoredPosition,
+            "The restored actor resumed a non-durable Destination.");
         PlayableClientProjection restored = BuildPlayableProjection(runtime.Game, restoredPosition);
         Expect(CaptureProjectionCanonical(restored) == preSaveProjection,
             "The restored client-visible world differs from the saved client projection.");
@@ -498,6 +517,216 @@ static TestMetrics PlayableMovementDeliveryRateMatrix()
         InputCommands: commands);
 }
 
+static TestMetrics PlayableDestinationCadenceMatrix()
+{
+    int[] frequencies = [20, 60, 120];
+    var arrivals = new List<string>(frequencies.Length);
+    ulong commands = 0;
+    foreach (int frequency in frequencies)
+    {
+        WorldPack pack = GamePlayableWorld.CreateWorldPack();
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32),
+            baseWorldPack: pack);
+        using var host = new InternalHost(
+            composition,
+            RuntimeOptions(
+                new PersistenceIdentityOptions(new PersistentWorldId(
+                    checked((ulong)0x80_1200 + (ulong)frequency))),
+                frequencyHz: frequency));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(
+            new ParticipantId(checked((ulong)0x1200 + (ulong)frequency)));
+        Expect(entered.IsEntered, $"The {frequency} Hz Destination actor could not enter.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+            $"The {frequency} Hz Destination fixture could not populate.");
+        host.Tick();
+
+        long targetX = GamePlayableWorld.PlayerStart.GlobalXMillimeters + 1_234;
+        long targetZ = GamePlayableWorld.PlayerStart.GlobalZMillimeters + 777;
+        var input = new ClientWorldInputSequencer();
+        var link = new PlayableOfflineDirectLink(
+            runtime.Game, entities.PlayerId, input.ControlSession);
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDestination(targetX, targetZ),
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand destination),
+            $"The {frequency} Hz Destination command could not be formed.");
+        GamePlayerCommandResult admitted = link.ApplyCommand(destination);
+        Expect(admitted.WasAdmitted && admitted.Locomotion == GameWorldActionStatus.Accepted,
+            $"The {frequency} Hz Destination was not admitted.");
+
+        for (int step = 0; step < frequency; step++)
+            host.Tick();
+        WorldPosition arrived = link.ReadPosition();
+        Expect(arrived.GlobalXMillimeters == targetX && arrived.GlobalZMillimeters == targetZ,
+            $"The {frequency} Hz Destination did not clamp to the exact target: {arrived}.");
+        Expect(ReadActiveLocomotionCount(runtime.Game) == 0,
+            $"The {frequency} Hz completed Destination remained active.");
+        host.Tick();
+        Expect(link.ReadPosition() == arrived,
+            $"The {frequency} Hz completed Destination drifted after arrival.");
+        commands += input.Snapshot().CommandsProduced;
+        arrivals.Add($"{frequency}:{arrived}:{input.Snapshot().CommandsProduced}");
+    }
+
+    return new TestMetrics(
+        HashText(string.Join('|', arrivals)),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "One latched diagonal Destination command at 20/60/120 Hz; exact final clamp, automatic retirement, and no post-arrival drift.",
+        InputCommands: commands);
+}
+
+static TestMetrics LocomotionUpdateSemantics()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1300))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x1300));
+    Expect(entered.IsEntered, "The locomotion-update actor could not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+        (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+        out GamePlayableWorldEntities entities),
+        "The locomotion-update fixture could not populate.");
+    host.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    WorldPosition start = GamePlayableWorld.PlayerStart;
+
+    GamePlayerCommandResult destination = Send(
+        GameLocomotionUpdate.CreateDestination(
+            start.GlobalXMillimeters + 2_000,
+            start.GlobalZMillimeters));
+    Expect(destination.Locomotion == GameWorldActionStatus.Accepted,
+        "The action-composition Destination was rejected.");
+    host.Tick();
+    WorldPosition beforeAction = link.ReadPosition();
+    GamePlayerCommandResult actionOnly = Send(
+        GameLocomotionUpdate.Unchanged,
+        GamePlayerActions.Interact,
+        entities.CabinDoorId);
+    Expect(actionOnly.WasAdmitted &&
+        actionOnly.Locomotion == GameWorldActionStatus.NotRequested &&
+        actionOnly.Interaction == GameWorldActionStatus.Accepted,
+        "An action-only Unchanged command did not compose independently.");
+    host.Tick();
+    Expect(link.ReadPosition().GlobalXMillimeters == beforeAction.GlobalXMillimeters + 100 &&
+        ReadActiveLocomotionCount(runtime.Game) == 1,
+        "An action-only command cancelled or duplicated the active Destination.");
+
+    Reset();
+    _ = Send(GameLocomotionUpdate.CreateDestination(
+        start.GlobalXMillimeters - 1_000, start.GlobalZMillimeters));
+    _ = Send(GameLocomotionUpdate.CreateDestination(
+        start.GlobalXMillimeters + 1_000, start.GlobalZMillimeters));
+    host.Tick();
+    Expect(link.ReadPosition().GlobalXMillimeters == start.GlobalXMillimeters + 100,
+        "Destination west then east did not integrate the latest destination once.");
+
+    Reset();
+    _ = Send(GameLocomotionUpdate.CreateDestination(
+        start.GlobalXMillimeters + 1_000, start.GlobalZMillimeters));
+    _ = Send(GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MinimumAxisMagnitude, 0));
+    host.Tick();
+    Expect(link.ReadPosition().GlobalXMillimeters == start.GlobalXMillimeters - 100,
+        "Direct did not supersede the retained Destination.");
+
+    Reset();
+    _ = Send(GameLocomotionUpdate.CreateDestination(
+        start.GlobalXMillimeters + 1_000, start.GlobalZMillimeters));
+    _ = Send(GameLocomotionUpdate.Stop);
+    host.Tick();
+    Expect(link.ReadPosition() == start && ReadActiveLocomotionCount(runtime.Game) == 0,
+        "Explicit Stop did not cancel Destination.");
+
+    Reset();
+    _ = Send(GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0));
+    GamePlayerCommandResult invalidDestination = Send(
+        GameLocomotionUpdate.CreateDestination(long.MaxValue, long.MaxValue));
+    Expect(invalidDestination.WasAdmitted &&
+        invalidDestination.Locomotion == GameWorldActionStatus.OutsidePreparedWorld,
+        "The out-of-world Destination did not reject as an admitted effect.");
+    host.Tick();
+    Expect(link.ReadPosition().GlobalXMillimeters == start.GlobalXMillimeters + 100,
+        "A rejected Destination replaced the previous valid Direct state.");
+
+    Reset();
+    _ = Send(GameLocomotionUpdate.CreateDestination(
+        start.GlobalXMillimeters + 1_000, start.GlobalZMillimeters));
+    var replacement = new ClientWorldInputSequencer();
+    var replacementLink = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, replacement.ControlSession);
+    host.Tick();
+    Expect(replacementLink.ReadPosition() == start && ReadActiveLocomotionCount(runtime.Game) == 0,
+        "Control-session replacement did not cancel Destination.");
+    Expect(replacement.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDestination(
+                    start.GlobalXMillimeters + 1_000, start.GlobalZMillimeters),
+                GamePlayerActions.None,
+                true),
+            out GamePlayerCommand replacementDestination) &&
+        replacementLink.ApplyCommand(replacementDestination).Locomotion ==
+            GameWorldActionStatus.Accepted,
+        "The replacement session could not admit Destination.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+        (world, _, game) => game.WorldActions.EndControlSession(
+            world, ResolveInWorld(world, entities.PlayerId), replacement.ControlSession),
+        out GameWorldActionStatus ended) && ended == GameWorldActionStatus.Accepted,
+        "The Destination control session could not end.");
+    host.Tick();
+    Expect(replacementLink.ReadPosition() == start && ReadActiveLocomotionCount(runtime.Game) == 0,
+        "Ending the control session did not cancel Destination.");
+
+    return new TestMetrics(
+        HashText($"{beforeAction}|{link.ReadPosition()}|{input.Snapshot().CommandsProduced}|{replacement.Snapshot().CommandsProduced}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Unchanged action composition; Destination replacement/latest-state; Direct/Stop/session cancellation; invalid target preserves prior state.",
+        InputCommands: input.Snapshot().CommandsProduced + replacement.Snapshot().CommandsProduced);
+
+    GamePlayerCommandResult Send(
+        in GameLocomotionUpdate locomotion,
+        GamePlayerActions held = GamePlayerActions.None,
+        PersistentEntityId target = default)
+    {
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(locomotion, held, true),
+                out GamePlayerCommand command),
+            $"The {locomotion.Kind} semantic command could not be formed.");
+        return link.ApplyCommand(command, target);
+    }
+
+    void Reset()
+    {
+        GamePlayerCommandResult stopped = Send(GameLocomotionUpdate.Stop);
+        Expect(stopped.WasAdmitted && stopped.Locomotion == GameWorldActionStatus.Accepted,
+            "The locomotion fixture could not stop before reset.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) => game.WorldState.TrySetPosition(
+                world, ResolveInWorld(world, entities.PlayerId), start),
+            out bool reset) && reset,
+            "The locomotion fixture could not reset actor position.");
+        host.Tick();
+        Expect(link.ReadPosition() == start && ReadActiveLocomotionCount(runtime.Game) == 0,
+            "The locomotion fixture reset was not canonical.");
+    }
+}
+
 static TestMetrics ContradictoryRestoredDoorFailsClosed()
 {
     WorldPack pack = GamePlayableWorld.CreateWorldPack();
@@ -580,8 +809,12 @@ static TestMetrics ControlSessionLineageFencesRetainedDirect()
     var invalid = new GamePlayerCommand(
         first.ControlSession,
         2,
-        short.MaxValue,
-        short.MaxValue,
+        new GameLocomotionUpdate(
+            GameLocomotionUpdateKind.Direct,
+            short.MaxValue,
+            short.MaxValue,
+            0,
+            0),
         GamePlayerActions.None,
         GamePlayerActions.None);
     Expect(!invalid.IsValid && link.ApplyMovement(invalid) == GameWorldActionStatus.InvalidCommand,
@@ -605,8 +838,7 @@ static TestMetrics ControlSessionLineageFencesRetainedDirect()
     var stale = new GamePlayerCommand(
         first.ControlSession,
         2,
-        GamePlayerCommand.MaximumAxisMagnitude,
-        0,
+        GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
         GamePlayerActions.None,
         GamePlayerActions.None);
     Expect(link.ApplyMovement(stale) == GameWorldActionStatus.StaleControlSession,
@@ -1382,6 +1614,15 @@ static WorldPosition ReadWorldPosition(ServerGameFacet runtime, PersistentEntity
     return result;
 }
 
+static int ReadActiveLocomotionCount(ServerGameFacet runtime)
+{
+    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, int>(
+        (_, _, game) => game.WorldActions.ActiveLocomotionCount,
+        out int count),
+        "Active locomotion count read did not run.");
+    return count;
+}
+
 static FixtureKeys PopulateAccountBacked(ServerGameFacet runtime)
 {
     Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, FixtureKeys>(
@@ -1735,10 +1976,12 @@ sealed class PlayableOfflineDirectLink
     private readonly ServerGameFacet _runtime;
     private readonly PersistentEntityId _playerId;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameWorldActionStatus> _apply;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GamePlayerCommandResult> _applyCommand;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameWorldActionStatus> _begin;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, WorldPosition> _read;
     private readonly GameControlSessionEpoch _controlSession;
     private GamePlayerCommand _command;
+    private PersistentEntityId _interactionTarget;
 
     internal PlayableOfflineDirectLink(
         ServerGameFacet runtime,
@@ -1749,6 +1992,7 @@ sealed class PlayableOfflineDirectLink
         _playerId = playerId;
         _controlSession = controlSession;
         _apply = ApplyCore;
+        _applyCommand = ApplyCommandCore;
         _begin = BeginCore;
         _read = ReadCore;
         if (!_runtime.TryUseActiveGeneration(_begin, out GameWorldActionStatus status) ||
@@ -1764,6 +2008,17 @@ sealed class PlayableOfflineDirectLink
         if (!_runtime.TryUseActiveGeneration(_apply, out GameWorldActionStatus status))
             throw new InvalidOperationException("OfflineDirect movement had no active generation.");
         return status;
+    }
+
+    internal GamePlayerCommandResult ApplyCommand(
+        in GamePlayerCommand command,
+        PersistentEntityId interactionTarget = default)
+    {
+        _command = command;
+        _interactionTarget = interactionTarget;
+        if (!_runtime.TryUseActiveGeneration(_applyCommand, out GamePlayerCommandResult result))
+            throw new InvalidOperationException("OfflineDirect command had no active generation.");
+        return result;
     }
 
     internal WorldPosition ReadPosition()
@@ -1792,6 +2047,34 @@ sealed class PlayableOfflineDirectLink
             : result.Admission != GameWorldActionStatus.Accepted
                 ? result.Admission
                 : result.Locomotion;
+    }
+
+    private GamePlayerCommandResult ApplyCommandCore(
+        EcsWorld world,
+        ulong generationId,
+        IGameGenerationStateProvider game)
+    {
+        if (!world.TryResolvePersistentEntity(_playerId, out Entity player))
+            return new GamePlayerCommandResult(
+                GameWorldActionStatus.MissingActor,
+                GameWorldActionStatus.NotRequested,
+                GameWorldActionStatus.NotRequested,
+                default,
+                false);
+        Entity target = Entity.Null;
+        if (_interactionTarget.IsValid &&
+            !world.TryResolvePersistentEntity(_interactionTarget, out target))
+        {
+            target = Entity.Null;
+        }
+        _ = game.WorldActions.ApplyPlayerCommand(
+            world,
+            game.WorldState,
+            player,
+            _command,
+            target,
+            out GamePlayerCommandResult result);
+        return result;
     }
 
     private GameWorldActionStatus BeginCore(

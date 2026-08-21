@@ -6,6 +6,7 @@ static class ClientWorldInputTests
     internal static void Run()
     {
         NormalizesAndSequencesWithoutEnginePolicyLeakage();
+        SemanticLocomotionUpdatesRemainExplicit();
         FocusAndActionEdgesAreCommonClientSemantics();
         InvalidSamplesAndCrossThreadUseFailClosed();
     }
@@ -18,15 +19,16 @@ static class ClientWorldInputTests
             out GamePlayerCommand diagonal));
         Assert.Equal((ulong)41, diagonal.Sequence);
         Assert.Equal(sequencer.ControlSession, diagonal.ControlSession);
-        Assert.Equal(diagonal.MoveX, diagonal.MoveZ);
-        Assert.True(diagonal.MoveX is >= 23_169 and <= 23_171);
+        Assert.Equal(GameLocomotionUpdateKind.Direct, diagonal.Locomotion.Kind);
+        Assert.Equal(diagonal.Locomotion.DirectX, diagonal.Locomotion.DirectZ);
+        Assert.True(diagonal.Locomotion.DirectX is >= 23_169 and <= 23_171);
         Assert.True(diagonal.IsValid);
 
         Assert.True(sequencer.TryCreateCommand(
             new ClientWorldInputSample(-4, 0, GamePlayerActions.None, true),
             out GamePlayerCommand clamped));
-        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, clamped.MoveX);
-        Assert.Equal((short)0, clamped.MoveZ);
+        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, clamped.Locomotion.DirectX);
+        Assert.Equal((short)0, clamped.Locomotion.DirectZ);
         Assert.Equal((ulong)42, clamped.Sequence);
         Assert.Equal(sequencer.ControlSession, sequencer.Snapshot().ControlSession);
 
@@ -35,8 +37,12 @@ static class ClientWorldInputTests
         Assert.False(new GamePlayerCommand(
             sequencer.ControlSession,
             43,
-            short.MaxValue,
-            short.MaxValue,
+            new GameLocomotionUpdate(
+                GameLocomotionUpdateKind.Direct,
+                short.MaxValue,
+                short.MaxValue,
+                0,
+                0),
             GamePlayerActions.None,
             GamePlayerActions.None).IsValid);
 
@@ -46,6 +52,51 @@ static class ClientWorldInputTests
         Assert.Equal(ulong.MaxValue, final.Sequence);
         Assert.False(exhausted.TryCreateCommand(default, out _));
         Assert.Equal(ulong.MaxValue, exhausted.Snapshot().LastSequence);
+    }
+
+    private static void SemanticLocomotionUpdatesRemainExplicit()
+    {
+        var sequencer = new ClientWorldInputSequencer();
+        Assert.True(sequencer.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Unchanged,
+                GamePlayerActions.Interact,
+                true),
+            out GamePlayerCommand actionOnly));
+        Assert.Equal(GameLocomotionUpdateKind.Unchanged, actionOnly.Locomotion.Kind);
+        Assert.Equal(GamePlayerActions.Interact, actionOnly.PressedActions);
+
+        Assert.True(sequencer.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDestination(12_345, -67_890),
+                GamePlayerActions.None,
+                true),
+            out GamePlayerCommand destination));
+        Assert.Equal(GameLocomotionUpdateKind.Destination, destination.Locomotion.Kind);
+        Assert.Equal(12_345L, destination.Locomotion.DestinationXMillimeters);
+        Assert.Equal(-67_890L, destination.Locomotion.DestinationZMillimeters);
+
+        Assert.True(sequencer.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Unchanged,
+                GamePlayerActions.None,
+                false),
+            out GamePlayerCommand unfocused));
+        Assert.Equal(GameLocomotionUpdateKind.Stop, unfocused.Locomotion.Kind);
+        Assert.False(sequencer.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                new GameLocomotionUpdate(GameLocomotionUpdateKind.Direct, 0, 0, 0, 0),
+                GamePlayerActions.None,
+                true),
+            out _));
+        Assert.False(new GameLocomotionUpdate(
+            GameLocomotionUpdateKind.Unchanged, 1, 0, 0, 0).IsValid);
+        Assert.False(new GameLocomotionUpdate(
+            GameLocomotionUpdateKind.Stop, 0, 0, 1, 0).IsValid);
+        Assert.False(new GameLocomotionUpdate(
+            GameLocomotionUpdateKind.Destination, 1, 0, 1, 1).IsValid);
+        Assert.False(new GameLocomotionUpdate(
+            (GameLocomotionUpdateKind)byte.MaxValue, 0, 0, 0, 0).IsValid);
     }
 
     private static void FocusAndActionEdgesAreCommonClientSemantics()
@@ -59,8 +110,7 @@ static class ClientWorldInputTests
         Assert.Equal(GamePlayerActions.None, second.PressedActions);
 
         Assert.True(sequencer.TryCreateCommand(held with { HasFocus = false }, out GamePlayerCommand unfocused));
-        Assert.Equal((short)0, unfocused.MoveX);
-        Assert.Equal((short)0, unfocused.MoveZ);
+        Assert.Equal(GameLocomotionUpdateKind.Stop, unfocused.Locomotion.Kind);
         Assert.Equal(GamePlayerActions.None, unfocused.HeldActions);
         Assert.True(sequencer.TryCreateCommand(held, out GamePlayerCommand refocused));
         Assert.Equal(GamePlayerActions.Interact, refocused.HeldActions);

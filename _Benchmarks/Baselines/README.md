@@ -147,6 +147,12 @@ Useful current anchors can be located by their embedded workload or filename:
   latest-admitted-state-before-step behavior. It preserves the joined native
   seam but is not Destination, camera/control-profile, launchable-client,
   broad-matrix, or N1 evidence;
+- `terrain-t0.10-destination-*` — explicit command-level `Unchanged/Stop/Direct/
+  Destination` mutation semantics plus the first latched, exact-arrival,
+  straight-line terrain-following Destination authority. It proves cadence,
+  supersession, action composition, invalid-target preservation, session
+  cancellation, and non-durable restore behavior without claiming pathfinding,
+  control-profile, launchable-client, or N1 completion;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

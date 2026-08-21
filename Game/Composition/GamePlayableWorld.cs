@@ -56,6 +56,13 @@ public readonly record struct GamePlayerCommandResult(
 /// </summary>
 public sealed class GameWorldActions
 {
+    private enum RetainedLocomotionKind : byte
+    {
+        None = 0,
+        Direct,
+        Destination,
+    }
+
     public const int FullInputSpeedMillimetersPerSecond = 6_000;
     public const int InteractionRangeMillimeters = 2_500;
 
@@ -65,13 +72,16 @@ public sealed class GameWorldActions
     private readonly ulong[] _controlEpochs;
     private readonly ulong[] _lastSequences;
     private readonly uint[] _controlGenerations;
+    private readonly RetainedLocomotionKind[] _locomotionKinds;
     private readonly short[] _directX;
     private readonly short[] _directZ;
+    private readonly long[] _destinationX;
+    private readonly long[] _destinationZ;
     private readonly long[] _movementRemainderX;
     private readonly long[] _movementRemainderZ;
-    private readonly Entity[] _activeDirect;
-    private readonly int[] _activeDirectPositions;
-    private int _activeDirectCount;
+    private readonly Entity[] _activeLocomotion;
+    private readonly int[] _activeLocomotionPositions;
+    private int _activeLocomotionCount;
 
     internal GameWorldActions(EcsWorld world)
     {
@@ -82,20 +92,23 @@ public sealed class GameWorldActions
         _controlEpochs = new ulong[world.Options.EntityCapacity.MaximumEntities];
         _lastSequences = new ulong[world.Options.EntityCapacity.MaximumEntities];
         _controlGenerations = new uint[_lastSequences.Length];
+        _locomotionKinds = new RetainedLocomotionKind[_lastSequences.Length];
         _directX = new short[_lastSequences.Length];
         _directZ = new short[_lastSequences.Length];
+        _destinationX = new long[_lastSequences.Length];
+        _destinationZ = new long[_lastSequences.Length];
         _movementRemainderX = new long[_lastSequences.Length];
         _movementRemainderZ = new long[_lastSequences.Length];
-        _activeDirect = new Entity[_lastSequences.Length];
-        _activeDirectPositions = new int[_lastSequences.Length];
+        _activeLocomotion = new Entity[_lastSequences.Length];
+        _activeLocomotionPositions = new int[_lastSequences.Length];
     }
 
-    /// <summary>Known fixed backing reserved for control lineage and retained Direct locomotion.</summary>
+    /// <summary>Known fixed backing reserved for control lineage and retained locomotion.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
         ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
-         (sizeof(long) * 2) + Unsafe.SizeOf<Entity>() + sizeof(int)));
+         (sizeof(long) * 4) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)));
 
-    public int ActiveDirectCount => _activeDirectCount;
+    public int ActiveLocomotionCount => _activeLocomotionCount;
 
     /// <summary>
     /// Establishes or replaces the trusted operational control lineage for one actor. Replacing a
@@ -117,14 +130,14 @@ public sealed class GameWorldActions
             _controlEpochs[index] == epoch.Value)
             return GameWorldActionStatus.Accepted;
 
-        ClearDirect(index);
+        ClearLocomotion(index);
         _controlGenerations[index] = actor.Generation;
         _controlEpochs[index] = epoch.Value;
         _lastSequences[index] = 0;
         return GameWorldActionStatus.Accepted;
     }
 
-    /// <summary>Ends only the matching control lineage and immediately clears retained Direct intent.</summary>
+    /// <summary>Ends only the matching control lineage and immediately clears retained locomotion.</summary>
     public GameWorldActionStatus EndControlSession(
         EcsWorld world,
         Entity actor,
@@ -141,15 +154,15 @@ public sealed class GameWorldActions
             _controlEpochs[index] != epoch.Value)
             return GameWorldActionStatus.StaleControlSession;
 
-        ClearDirect(index);
+        ClearLocomotion(index);
         _controlEpochs[index] = 0;
         _lastSequences[index] = 0;
         return GameWorldActionStatus.Accepted;
     }
 
     /// <summary>
-    /// Admits one actor command exactly once, then composes its retained Direct intent and action
-    /// effects. Position changes occur during authoritative fixed-step maintenance, not on arrival.
+    /// Admits one actor command exactly once, then independently composes its locomotion mutation
+    /// and action effects. Position changes occur during fixed-step maintenance, not on arrival.
     /// </summary>
     public GameWorldActionStatus ApplyPlayerCommand(
         EcsWorld world,
@@ -195,7 +208,8 @@ public sealed class GameWorldActions
         // any effect is interpreted, including effects that later reject.
         CommitSequence(actor, command.Sequence);
 
-        SetDirect(actor, command.MoveX, command.MoveZ);
+        GameWorldActionStatus locomotion = ApplyLocomotionUpdate(
+            worldState, actor, current, command.Locomotion);
 
         GameWorldActionStatus interaction = GameWorldActionStatus.NotRequested;
         bool doorIsOpen = false;
@@ -207,15 +221,52 @@ public sealed class GameWorldActions
 
         result = new GamePlayerCommandResult(
             GameWorldActionStatus.Accepted,
-            GameWorldActionStatus.Accepted,
+            locomotion,
             interaction,
             current,
             doorIsOpen);
         return GameWorldActionStatus.Accepted;
     }
 
+    private GameWorldActionStatus ApplyLocomotionUpdate(
+        GameWorldState worldState,
+        Entity actor,
+        in WorldPosition current,
+        in GameLocomotionUpdate update)
+    {
+        int index = checked((int)actor.Index);
+        switch (update.Kind)
+        {
+            case GameLocomotionUpdateKind.Unchanged:
+                return GameWorldActionStatus.NotRequested;
+            case GameLocomotionUpdateKind.Stop:
+                ClearLocomotion(index);
+                return GameWorldActionStatus.Accepted;
+            case GameLocomotionUpdateKind.Direct:
+                SetDirect(actor, update.DirectX, update.DirectZ);
+                return GameWorldActionStatus.Accepted;
+            case GameLocomotionUpdateKind.Destination:
+                if (!WorldPosition.TryFromGlobalMillimeters(
+                        update.DestinationXMillimeters,
+                        current.YMillimeters,
+                        update.DestinationZMillimeters,
+                        out WorldPosition candidate) ||
+                    !worldState.TrySampleBaseTerrainHeight(candidate, out _))
+                {
+                    return GameWorldActionStatus.OutsidePreparedWorld;
+                }
+                SetDestination(
+                    actor,
+                    update.DestinationXMillimeters,
+                    update.DestinationZMillimeters);
+                return GameWorldActionStatus.Accepted;
+            default:
+                throw new InvalidOperationException("A validated locomotion update has an unknown kind.");
+        }
+    }
+
     /// <summary>
-    /// Integrates every retained Direct intent exactly once for the authoritative fixed step.
+    /// Integrates every retained Direct or Destination intent once for the authoritative fixed step.
     /// This runs after the ECS graph/barrier and before canonical Spatial/publication maintenance.
     /// </summary>
     internal void CommitLocomotionAfterEcsStep(
@@ -228,44 +279,144 @@ public sealed class GameWorldActions
             throw new ArgumentException("A valid authoritative fixed-step delta is required.", nameof(delta));
 
         int active = 0;
-        while (active < _activeDirectCount)
+        while (active < _activeLocomotionCount)
         {
-            Entity actor = _activeDirect[active];
+            Entity actor = _activeLocomotion[active];
             int index = checked((int)actor.Index);
             if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
                 _controlGenerations[index] != actor.Generation ||
                 _controlEpochs[index] == 0 ||
                 !worldState.TryReadPosition(world, actor, out WorldPosition current))
             {
-                ClearDirect(index);
+                ClearLocomotion(index);
                 continue;
             }
 
-            int deltaX = IntegrateAxis(_directX[index], delta.Quanta, ref _movementRemainderX[index]);
-            int deltaZ = IntegrateAxis(_directZ[index], delta.Quanta, ref _movementRemainderZ[index]);
+            bool retained = _locomotionKinds[index] switch
+            {
+                RetainedLocomotionKind.Direct =>
+                    IntegrateDirect(world, worldState, actor, index, current, delta.Quanta),
+                RetainedLocomotionKind.Destination =>
+                    IntegrateDestination(world, worldState, actor, index, current, delta.Quanta),
+                _ => throw new InvalidOperationException(
+                    "An active locomotion slot has no retained locomotion kind."),
+            };
+            if (retained)
+                active++;
+        }
+    }
+
+    private bool IntegrateDirect(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        int index,
+        in WorldPosition current,
+        long stepQuanta)
+    {
+        int deltaX = IntegrateAxis(_directX[index], stepQuanta, ref _movementRemainderX[index]);
+        int deltaZ = IntegrateAxis(_directZ[index], stepQuanta, ref _movementRemainderZ[index]);
+        if (deltaX == 0 && deltaZ == 0)
+            return true;
+
+        long nextX = checked(current.GlobalXMillimeters + deltaX);
+        long nextZ = checked(current.GlobalZMillimeters + deltaZ);
+        if (!TryResolveTerrainPosition(worldState, current.YMillimeters, nextX, nextZ, out WorldPosition position))
+        {
+            // Direct remains current while this step is blocked by prepared-world bounds.
+            return true;
+        }
+        SetAuthoritativePosition(world, worldState, actor, position);
+        return true;
+    }
+
+    private bool IntegrateDestination(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        int index,
+        in WorldPosition current,
+        long stepQuanta)
+    {
+        long dx = checked(_destinationX[index] - current.GlobalXMillimeters);
+        long dz = checked(_destinationZ[index] - current.GlobalZMillimeters);
+        if (dx == 0 && dz == 0)
+        {
+            ClearLocomotion(index);
+            return false;
+        }
+
+        int distance = IntegrateDistance(stepQuanta, ref _movementRemainderX[index]);
+        if (distance == 0)
+            return true;
+
+        Int128 squaredRemaining = (Int128)dx * dx + (Int128)dz * dz;
+        long nextX;
+        long nextZ;
+        bool reached = squaredRemaining <= (Int128)distance * distance;
+        if (reached)
+        {
+            nextX = _destinationX[index];
+            nextZ = _destinationZ[index];
+        }
+        else
+        {
+            long denominator = CeilingSquareRoot(squaredRemaining, dx, dz);
+            long deltaX = checked((long)((Int128)dx * distance / denominator));
+            long deltaZ = checked((long)((Int128)dz * distance / denominator));
             if (deltaX == 0 && deltaZ == 0)
             {
-                active++;
-                continue;
+                if (Int128.Abs((Int128)dx) >= Int128.Abs((Int128)dz))
+                    deltaX = Math.Sign(dx);
+                else
+                    deltaZ = Math.Sign(dz);
             }
+            nextX = checked(current.GlobalXMillimeters + deltaX);
+            nextZ = checked(current.GlobalZMillimeters + deltaZ);
+        }
 
-            long nextX = checked(current.GlobalXMillimeters + deltaX);
-            long nextZ = checked(current.GlobalZMillimeters + deltaZ);
-            if (!WorldPosition.TryFromGlobalMillimeters(
-                    nextX, current.YMillimeters, nextZ, out WorldPosition candidate) ||
-                !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY) ||
-                !WorldPosition.TryFromGlobalMillimeters(nextX, terrainY, nextZ, out WorldPosition position))
-            {
-                // Direct remains current state while this step is blocked by prepared-world bounds.
-                active++;
-                continue;
-            }
-            if (!worldState.TrySetPosition(world, actor, position))
-            {
-                throw new InvalidOperationException(
-                    "A validated controlled actor lost its authoritative Position during locomotion.");
-            }
-            active++;
+        if (!TryResolveTerrainPosition(worldState, current.YMillimeters, nextX, nextZ, out WorldPosition position))
+        {
+            // A previously admitted straight-line destination became impossible in prepared truth.
+            ClearLocomotion(index);
+            return false;
+        }
+        SetAuthoritativePosition(world, worldState, actor, position);
+        if (reached)
+        {
+            ClearLocomotion(index);
+            return false;
+        }
+        return true;
+    }
+
+    private static bool TryResolveTerrainPosition(
+        GameWorldState worldState,
+        int currentY,
+        long globalX,
+        long globalZ,
+        out WorldPosition position)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(
+                globalX, currentY, globalZ, out WorldPosition candidate) ||
+            !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY))
+        {
+            position = default;
+            return false;
+        }
+        return WorldPosition.TryFromGlobalMillimeters(globalX, terrainY, globalZ, out position);
+    }
+
+    private static void SetAuthoritativePosition(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in WorldPosition position)
+    {
+        if (!worldState.TrySetPosition(world, actor, position))
+        {
+            throw new InvalidOperationException(
+                "A validated controlled actor lost its authoritative Position during locomotion.");
         }
     }
 
@@ -376,6 +527,32 @@ public sealed class GameWorldActions
         return checked((int)delta);
     }
 
+    private static int IntegrateDistance(long stepQuanta, ref long remainder)
+    {
+        long denominator = WorldClockOptions.WorldTimeQuantaPerSecond;
+        Int128 numerator =
+            (Int128)FullInputSpeedMillimetersPerSecond * stepQuanta + remainder;
+        Int128 distance = numerator / denominator;
+        remainder = checked((long)(numerator % denominator));
+        return checked((int)distance);
+    }
+
+    private static long CeilingSquareRoot(Int128 squared, long dx, long dz)
+    {
+        long lower = checked((long)Int128.Max(
+            Int128.Abs((Int128)dx), Int128.Abs((Int128)dz)));
+        long upper = checked(lower + (lower / 2) + 1);
+        while (lower < upper)
+        {
+            long midpoint = lower + ((upper - lower) / 2);
+            if ((Int128)midpoint * midpoint >= squared)
+                upper = midpoint;
+            else
+                lower = midpoint + 1;
+        }
+        return lower;
+    }
+
     private static bool WithinInteractionRange(in WorldPosition first, in WorldPosition second)
     {
         Int128 dx = (Int128)first.GlobalXMillimeters - second.GlobalXMillimeters;
@@ -400,42 +577,60 @@ public sealed class GameWorldActions
     private void SetDirect(Entity actor, short x, short z)
     {
         int index = checked((int)actor.Index);
+        if (_locomotionKinds[index] != RetainedLocomotionKind.Direct)
+            ClearLocomotion(index);
+        _locomotionKinds[index] = RetainedLocomotionKind.Direct;
         _directX[index] = x;
         _directZ[index] = z;
-        if (x == 0 && z == 0)
-        {
-            ClearDirect(index);
-            return;
-        }
-
-        if (_activeDirectPositions[index] != 0)
-            return;
-        if (_activeDirectCount >= _activeDirect.Length)
-            throw new InvalidOperationException("The bounded Direct-locomotion set exhausted unexpectedly.");
-        _activeDirect[_activeDirectCount] = actor;
-        _activeDirectPositions[index] = checked(_activeDirectCount + 1);
-        _activeDirectCount++;
+        EnsureActive(actor, index);
     }
 
-    private void ClearDirect(int index)
+    private void SetDestination(Entity actor, long globalX, long globalZ)
     {
-        int encoded = _activeDirectPositions[index];
+        int index = checked((int)actor.Index);
+        if (_locomotionKinds[index] == RetainedLocomotionKind.Destination &&
+            _destinationX[index] == globalX && _destinationZ[index] == globalZ)
+            return;
+        ClearLocomotion(index);
+        _locomotionKinds[index] = RetainedLocomotionKind.Destination;
+        _destinationX[index] = globalX;
+        _destinationZ[index] = globalZ;
+        EnsureActive(actor, index);
+    }
+
+    private void EnsureActive(Entity actor, int index)
+    {
+        if (_activeLocomotionPositions[index] != 0)
+            return;
+        if (_activeLocomotionCount >= _activeLocomotion.Length)
+            throw new InvalidOperationException("The bounded locomotion set exhausted unexpectedly.");
+        _activeLocomotion[_activeLocomotionCount] = actor;
+        _activeLocomotionPositions[index] = checked(_activeLocomotionCount + 1);
+        _activeLocomotionCount++;
+    }
+
+    private void ClearLocomotion(int index)
+    {
+        int encoded = _activeLocomotionPositions[index];
         if (encoded != 0)
         {
             int slot = encoded - 1;
-            int last = --_activeDirectCount;
+            int last = --_activeLocomotionCount;
             if (slot != last)
             {
-                Entity donor = _activeDirect[last];
-                _activeDirect[slot] = donor;
-                _activeDirectPositions[checked((int)donor.Index)] = checked(slot + 1);
+                Entity donor = _activeLocomotion[last];
+                _activeLocomotion[slot] = donor;
+                _activeLocomotionPositions[checked((int)donor.Index)] = checked(slot + 1);
             }
-            _activeDirect[last] = Entity.Null;
-            _activeDirectPositions[index] = 0;
+            _activeLocomotion[last] = Entity.Null;
+            _activeLocomotionPositions[index] = 0;
         }
 
+        _locomotionKinds[index] = RetainedLocomotionKind.None;
         _directX[index] = 0;
         _directZ[index] = 0;
+        _destinationX[index] = 0;
+        _destinationZ[index] = 0;
         _movementRemainderX[index] = 0;
         _movementRemainderZ[index] = 0;
     }

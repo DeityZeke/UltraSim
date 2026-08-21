@@ -785,6 +785,64 @@ checkpoint must deliberately choose whether fractional remainder follows desired
 or successfully realized displacement rather than inheriting the behavior by
 accident.
 
+## T0.10 Destination implementation boundary — 2026-08-21
+
+The command/update vocabulary is now frozen for the first playable vertical:
+
+```text
+Unchanged
+    command does not mutate locomotion
+
+Stop
+    clear any retained locomotion
+
+Direct
+    replace retained locomotion with world-space signed-Q15 state
+
+Destination
+    replace retained locomotion with canonical global X/Z
+```
+
+`Unchanged` is not retained authority. `GameWorldActions` still owns exactly
+`None`, `Direct`, or `Destination` per controlled actor. This distinction lets
+an action-only command interact with a door while Destination travel continues.
+The Direct raw-input convenience path still maps zero axes to explicit `Stop`;
+future control profiles produce the semantic update directly before common
+sequencing.
+
+The first Destination implementation is deliberately straight-line and terrain-
+following. Authority validates that the nominated endpoint is representable and
+present in prepared terrain before replacing current locomotion. Every fixed
+step derives a direction toward the retained X/Z, advances by game speed times
+exact `SimulationStepDelta`, and clamps the final displacement to the exact
+target. Arrival retires the active slot. A prepared-world gap encountered after
+admission makes the simple route impossible and clears it.
+
+Rejected malformed or out-of-world destinations consume an otherwise fresh
+command but leave the previous valid locomotion state unchanged. Direct, Stop,
+control-session replacement, and control-session end all cancel Destination.
+Multiple admitted updates before one step remain latest-state-wins.
+
+Direct, Destination, control epoch, sequence floor, integration remainder, and
+active-locomotion membership are operational generation state. They are not
+durable save state. Restore/session replacement begins at `None`; durable NPC
+jobs/routes remain a later game-domain decision rather than an accidental
+property of player controls.
+
+Permanent evidence covers:
+
+- one diagonal Destination command reaching the exact same target at 20/60/120
+  Hz, retiring, and remaining stopped;
+- `Unchanged + Interact` preserving active Destination travel;
+- newer Destination, Direct, and Stop supersession;
+- `Destination west`, then `Destination east`, before one tick moving east once;
+- session replacement/end cancellation;
+- an out-of-world Destination rejecting without replacing valid Direct;
+- save/restore discarding a latched player Destination.
+
+No pathfinder, navmesh, obstacle avoidance, crowd steering, gait expansion,
+camera profile, or pointer gesture policy is implemented by this checkpoint.
+
 ## T0.10 real-client requirement
 
 T0.10 must stop manufacturing the entire playable path only from tests.
