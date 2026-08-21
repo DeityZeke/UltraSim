@@ -8,14 +8,33 @@ using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Composition;
 
-/// <summary>Private candidate world and derived content/index state prepared before generation publication.</summary>
-public readonly record struct GameStaging(
-    EcsWorld World,
-    InventoryGenerationState Inventory,
-    GameContent Content,
-    GameWorldState WorldState,
-    ComponentLookup<GameSimulationState> SimulationLookup,
-    GameReplicationBindings? Replication = null);
+/// <summary>Owned private candidate aggregate assembled before one generation publication.</summary>
+public sealed class GameStaging
+{
+    public GameStaging(
+        EcsWorld world,
+        InventoryGenerationState inventory,
+        GameContent content,
+        GameWorldState worldState,
+        ComponentLookup<GameSimulationState> simulationLookup,
+        GameReplicationBindings? replication = null)
+    {
+        World = world ?? throw new ArgumentNullException(nameof(world));
+        Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
+        Content = content ?? throw new ArgumentNullException(nameof(content));
+        WorldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        SimulationLookup = simulationLookup;
+        Replication = replication;
+    }
+
+    public EcsWorld World { get; }
+    public InventoryGenerationState Inventory { get; }
+    public GameContent Content { get; }
+    public GameWorldState WorldState { get; }
+    public ComponentLookup<GameSimulationState> SimulationLookup { get; }
+    public GameReplicationBindings? Replication { get; }
+
+}
 
 /// <summary>Concrete game composition owning one schema, content set, and generation-state root.</summary>
 public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEntityBinder
@@ -87,7 +106,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                CreateWorldState(world, content),
+                new GameWorldState(world),
                 simulation,
                 replication);
         }
@@ -138,6 +157,19 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
 
     public bool TryGetContent(EcsWorld world, out GameContent content) =>
         _contentByWorld.TryGetValue(world, out content!);
+
+    /// <summary>Resolves and binds only the exact configured immutable pack identity.</summary>
+    public bool TryResolveWorldPack(
+        WorldPackFingerprint fingerprint,
+        WorldContentBinding content,
+        out BoundWorldPack? bound)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        bound = null;
+        return fingerprint.IsValid && _baseWorldPack is not null &&
+            _baseWorldPack.Fingerprint == fingerprint &&
+            _baseWorldPack.TryBind(content, out bound, out _);
+    }
 
     public static EcsWorldOptions CreateWorldOptions(
         int entityCapacity = 4_096,

@@ -77,9 +77,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
   deterministic render grouping, and bounded exact static-bounds queries. T0.6
   accepted explicit public eligibility and bounded observer-independent chunk
   publication; T0.7 accepted exact interest and the packet-free convergence
-  oracle. T0.8 now implements the distinct production client semantic cache and
-  bounded native Godot render owner and is stopped for review. The plan next
-  proceeds to persistence/mutable-overlay seams and one playable cabin vertical.
+  oracle. T0.8 accepted the distinct production client semantic cache and bounded
+  native Godot render owner. T0.9 now implements exact-pack durable overlay
+  staging/persistence and is stopped for review. The next implementation gate is
+  the small playable woods/cabin vertical.
 - [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
   N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0
   sparse relation graph: snapshot on first interest, query bounded dirty history

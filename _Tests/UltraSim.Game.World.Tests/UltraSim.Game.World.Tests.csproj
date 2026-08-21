@@ -13,9 +13,11 @@
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
     <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../../Game/Inventory/UltraSim.Game.Inventory.csproj" />
+    <ProjectReference Include="../../Game/Persistence/UltraSim.Game.Persistence.csproj" />
     <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
     <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+    <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
   </ItemGroup>
 </Project>

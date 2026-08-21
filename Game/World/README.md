@@ -267,8 +267,8 @@ signed nearest integer division with midpoint away from zero. It is explicitly a
 base-heightfield query, not a future general multi-surface ground resolver.
 
 Gameplay/current-authority callers route the same operations through
-`GameWorldState`. Today those methods delegate to `BaseWorld`; T0.9 may resolve a
-durable replacement/overlay first without changing callers:
+`GameWorldState`. T0.9 resolves the immutable base plus a validated durable
+replacement overlay first without changing callers:
 
 ```text
 BoundWorldPack
@@ -340,9 +340,9 @@ bounded one-chunk halo. `TryQueryStaticBounds` expands the query's candidate
 chunk range by that halo, rejects work beyond the caller's explicit candidate
 budget, counts matches before writing, and therefore never partially publishes
 an undersized destination. Pure artifact queries live on `WorldPack`/
-`BoundWorldPack`; authoritative gameplay routes through `GameWorldState` so a
-future durable overlay can shadow or augment the immutable base without changing
-callers.
+`BoundWorldPack`; authoritative gameplay routes through `GameWorldState`, whose
+T0.9 prepared view can shadow complete terrain/static/Multi chunk content without
+changing callers.
 The halo is a compact v1 section representation limit, not a universal UltraSim
 object-size limit. Larger structures can use multiple pieces/statics or another
 later representation earned by a concrete workload. Stable Multi/piece identity
@@ -360,3 +360,29 @@ reads, render-group copies, a sparse exact query, and a 2x2-chunk dense query
 returning as many as 173 records all allocate 0 B. The overlap fixtures
 deliberately exercise the transactional halo scan and result-copy scaling; they
 are not collision-engine or production-content throughput claims.
+
+## Prepared mutable-world view
+
+T0.9 keeps `WorldPack` immutable and layers one `WorldMutableOverlay` over an
+exact `BoundWorldPack`. A changed chunk may completely replace its dense terrain,
+independent static rows, and/or static-Multi fragment rows; logical Multi roots
+may be replaced as one complete sorted set. Empty replacement arrays mean empty
+authority rather than base fallback. Every changed chunk has its own monotonic
+content revision and SHA-256 replacement hash, while the complete overlay has a
+separate monotonic generation revision.
+
+`WorldMutableOverlayBuilder` is cold transactional preparation. It validates
+content identities, exact terrain seams, q5 height planes, one-chunk static
+bounds halos, globally unique static/piece identity, root residency, piece
+totals, and configured count/byte bounds before exposing immutable arrays.
+`GameWorldState.TryPublishOverlay` accepts only the next revision and swaps the
+complete `WorldPreparedView` on its owner thread. It does not mutate pack bytes,
+dynamic publication history, Spatial membership, client residency, or renderer
+state.
+
+The prepared view is also a persistence and future-replication seam, not a
+generic provider framework. The current save artifact references the exact pack
+and carries complete overlay replacements. Client Core can stage from the same
+resolved view and retain structural revision/hash independently from dynamic
+public-entity publication cursors. Live changed-chunk delivery is deferred to
+Network N1.

@@ -11,12 +11,45 @@ internal static class ClientWorldSemanticCacheTests
     internal static void Run()
     {
         BoundWorldPack world = CreateWorld();
+        StructuralOverlayIdentityIsRetained(world);
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
         PublicationKnowledgeIsGlobalAndFenced(world);
         SnapshotLineageAndCanonicality(world);
         PublicationEpochReplacementIsExplicit(world);
         DeterministicClientCacheChurnMatchesReference(world);
+    }
+
+    private static void StructuralOverlayIdentityIsRetained(BoundWorldPack world)
+    {
+        SpatialChunkKey key = Key(0, 0);
+        True(world.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain));
+        var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        terrain.CopyMaterials(materials);
+        for (int index = 0; index < offsets.Length; index++) offsets[index] = terrain.GetHeightOffset(index);
+        materials[0] = materials[0] == 1 ? (ushort)2 : (ushort)1;
+        var builder = new WorldMutableOverlayBuilder(world);
+        True(builder.TryReplaceTerrain(key, materials, terrain.HeightBase, offsets));
+        True(builder.TryBuild(out WorldMutableOverlay? overlay));
+        True(overlay!.TryGetChunkRevision(
+            key, out WorldChunkContentRevision revision, out WorldChunkContentHash hash));
+
+        var cache = new ClientWorldSemanticCache(
+            new WorldPreparedView(world, overlay), new(2, 2, 2, 2, 4));
+        PublicationEpoch epoch = PublicationEpoch.Create();
+        ClientSemanticChunkHandle changed = Publish(cache, key, epoch, 1, []);
+        ClientSemanticChunkInfo changedInfo = Info(cache, changed);
+        Equal(revision, changedInfo.StructuralRevision);
+        Equal(hash, changedInfo.StructuralContentHash);
+        True(changedInfo.StructuralContentHash.IsValid);
+        True(cache.TryGetResidentView(changed, out ClientSemanticChunkView changedView));
+        Equal(materials[0], changedView.TerrainMaterials[0]);
+
+        ClientSemanticChunkHandle unchanged = Publish(cache, Key(1, 0), epoch, 1, []);
+        ClientSemanticChunkInfo unchangedInfo = Info(cache, unchanged);
+        Equal(default(WorldChunkContentRevision), unchangedInfo.StructuralRevision);
+        Equal(default(WorldChunkContentHash), unchangedInfo.StructuralContentHash);
     }
 
     private static void LifecycleAndDeterministicHash(BoundWorldPack world)

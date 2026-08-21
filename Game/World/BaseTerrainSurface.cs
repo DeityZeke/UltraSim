@@ -99,6 +99,30 @@ public static class BaseTerrainSurface
             return false;
         }
 
+        heightMillimeters = SampleHeight(terrain, location);
+        return true;
+    }
+
+    /// <summary>Samples the current prepared base plus durable replacement terrain.</summary>
+    public static bool TrySampleBaseTerrainHeight(
+        this WorldPreparedView world,
+        in WorldPosition location,
+        out int heightMillimeters)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
+        {
+            heightMillimeters = 0;
+            return false;
+        }
+
+        heightMillimeters = SampleHeight(terrain, location);
+        return true;
+    }
+
+    private static int SampleHeight(in WorldTerrainChunkView terrain, in WorldPosition location)
+    {
+
         TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);
         int localX = location.Local.XMillimeters - cell.X * GameWorldSpatialProfile.TerrainCellEdgeUnits;
         int localZ = location.Local.ZMillimeters - cell.Z * GameWorldSpatialProfile.TerrainCellEdgeUnits;
@@ -109,14 +133,30 @@ public static class BaseTerrainSurface
         long numerator = IsEvenParity(globalCellX, globalCellZ)
             ? SampleEvenNumerator(localX, localZ, northWest, northEast, southWest, southEast)
             : SampleOddNumerator(localX, localZ, northWest, northEast, southWest, southEast);
-        heightMillimeters = checked((int)DivideNearestAwayFromZero(
+        return checked((int)DivideNearestAwayFromZero(
             numerator, GameWorldSpatialProfile.TerrainCellEdgeUnits));
-        return true;
     }
 
     /// <summary>Resolves the bound numeric material of the base terrain cell beneath X/Z.</summary>
     public static bool TryResolveBaseTerrainMaterial(
         this BoundWorldPack world,
+        in WorldPosition location,
+        out ushort materialId)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
+        {
+            materialId = 0;
+            return false;
+        }
+        TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);
+        materialId = terrain.GetMaterial(TerrainChunkFormat.GetMaterialIndex(cell));
+        return true;
+    }
+
+    /// <summary>Resolves current prepared base plus durable replacement terrain material.</summary>
+    public static bool TryResolveBaseTerrainMaterial(
+        this WorldPreparedView world,
         in WorldPosition location,
         out ushort materialId)
     {

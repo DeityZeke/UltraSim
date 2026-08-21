@@ -1,0 +1,70 @@
+{
+  "schema": "terrain-t0.9-world-overlay-v1",
+  "captured_at_local": "2026-08-21",
+  "runtime": "8.0.29",
+  "framework": ".NET 8.0.29",
+  "os": "CachyOS",
+  "architecture": "X64",
+  "processors": 16,
+  "server_gc": false,
+  "stopwatch_frequency": 1000000000,
+  "scope": "synthetic cold prepared-world overlay/persistence mechanics; not terrain editing, N1 transfer, authored content, or tick-path evidence",
+  "fixture": {
+    "base_chunks": 256,
+    "changed_chunks": 64,
+    "statics_per_changed_chunk": 1,
+    "overlay_revision": 1,
+    "overlay_reserved_bytes": 281472,
+    "worldview_artifact_bytes": 280160,
+    "exact_pack_fingerprint": "D36926856DA5176A9EA4928C091F550AA7F41E66F99199E4B9023D697AAE3318",
+    "replacement_hashes_valid": true
+  },
+  "acceptance": {
+    "immutable_pack_bytes_saved": false,
+    "exact_pack_resolution_required": true,
+    "terrain_and_static_replacements_restored": true,
+    "warmed_overlay_first_reads_allocate_zero": true
+  },
+  "timings": [
+    {
+      "Name": "build-64-chunk-overlay",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 3537834.6,
+      "P50NanosecondsPerOperation": 3538095,
+      "P95NanosecondsPerOperation": 3577414,
+      "MaximumNanosecondsPerOperation": 3577414,
+      "MaximumAllocatedBytes": 1302792,
+      "Checksum": 5066514
+    },
+    {
+      "Name": "encode-worldview-artifact",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 55028.8,
+      "P50NanosecondsPerOperation": 50990,
+      "P95NanosecondsPerOperation": 96489,
+      "MaximumNanosecondsPerOperation": 96489,
+      "MaximumAllocatedBytes": 842952,
+      "Checksum": 5044410
+    },
+    {
+      "Name": "prepare-resolve-validate-worldview",
+      "OperationsPerSample": 1,
+      "MeanNanosecondsPerOperation": 2807987.4,
+      "P50NanosecondsPerOperation": 2805092,
+      "P95NanosecondsPerOperation": 2829922,
+      "MaximumNanosecondsPerOperation": 2829922,
+      "MaximumAllocatedBytes": 1853848,
+      "Checksum": 1170
+    },
+    {
+      "Name": "overlay-first-terrain-read",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 37.231595466666676,
+      "P50NanosecondsPerOperation": 37.249368,
+      "P95NanosecondsPerOperation": 37.378626,
+      "MaximumNanosecondsPerOperation": 37.378626,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 22500288
+    }
+  ]
+}

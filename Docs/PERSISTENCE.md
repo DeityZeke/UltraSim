@@ -65,8 +65,12 @@ fall back to the active generation. Limits cover artifacts and temporary memory
 before proportional allocation. Integrity, canonicality, sequence, schema, and
 capacity failures reject before publication.
 
-Game persistence combines ECS, Accounting, and the authoritative clock. It then
-rebuilds Inventory's derived index and constructs the complete
+Game persistence combines ECS, the exact prepared-world view, Accounting, and
+the authoritative clock. The `worldview` participant stores the required
+WorldPack/content identities plus bounded complete mutable overlay replacements;
+it never copies immutable pack bytes into every save. Restore resolves only the
+exact configured pack, validates the overlay privately, then rebuilds Inventory's
+derived index and constructs the complete
 `GameGenerationState`. Runtime publishes that prepared root only after the old
 generation lease has ended. Existing admission/UI sessions rebind by durable
 identity or detach; generation-local `Entity` values are never silently carried
@@ -80,6 +84,35 @@ same-version reinterpretation of wider bytes.
 
 Restore starts with clean change/lifecycle observation rather than fabricating a
 gameplay-wide creation storm.
+
+The game-world staging shell prepares ECS lookups before restore seals the
+candidate world. Exact pack/overlay resolution is installed into that unpublished
+shell afterward and before derived rebuild/publication. Missing pack identity,
+content mismatch, malformed replacement, or participant world-ID disagreement
+fails preparation and leaves active authority untouched. Client semantic slots,
+publication cursors/history, renderer state, and other runtime caches are never
+persisted.
+
+## Operational history and durable meaning
+
+Change journals, lifecycle rings, publication histories, and consumer cursors
+are bounded convergence mechanics. They may wrap; a current snapshot or derived
+rebuild replaces them. They are not a durable record of what happened in the
+game world.
+
+Durable provenance is persisted only when gameplay meaning requires it—for
+example a maker, founder, or responsible actor that cannot be reconstructed from
+current state. A terrain scar may be fully represented by its current durable
+overlay without retaining every edit operation. UltraSim does not derive
+historical gameplay claims from disposable dirty history and does not introduce
+a universal event log merely to preserve possible future lore.
+
+Regenerable data is omitted only when rebuilding it cannot change gameplay
+meaning. Render caches, grass blades, or procedural microvariation may be
+derived from an admitted seed and content version. A harvestable bush, cuttable
+tree, or other procedural-looking object becomes authoritative once identity or
+mutable gameplay state matters. Generator/content meaning changes follow the
+same explicit fingerprint/version discipline as other persisted content.
 
 ## Recovery
 

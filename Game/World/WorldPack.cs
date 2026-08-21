@@ -744,6 +744,18 @@ public sealed class WorldPack
         return true;
     }
 
+    /// <summary>Gets one canonical directory key by stable sorted pack index.</summary>
+    public bool TryGetChunkKey(int index, out SpatialChunkKey key)
+    {
+        if ((uint)index >= (uint)_metadata.ChunkCount)
+        {
+            key = default;
+            return false;
+        }
+        key = WorldPackCodec.ReadChunkKey(_bytes, _metadata.ChunkDirectoryOffset, index);
+        return true;
+    }
+
     public bool TryGetFrozenStatics(SpatialChunkKey key, out WorldFrozenStaticChunkView view)
     {
         if (!_metadata.FrozenStatics.IsPresent || key.Space != Space)
@@ -830,6 +842,23 @@ public sealed class WorldPack
         }
         instance = default;
         return false;
+    }
+
+    /// <summary>Gets one canonical logical Multi root by sorted section-local index.</summary>
+    public bool TryGetMultiInstanceAt(int index, out WorldMultiInstanceRecord instance)
+    {
+        if ((uint)index >= (uint)MultiInstanceCount || !_metadata.MultiFragments.IsPresent)
+        {
+            instance = default;
+            return false;
+        }
+        ReadOnlySpan<byte> payload = _bytes.AsSpan(
+            _metadata.MultiFragments.Offset, _metadata.MultiFragments.Length);
+        int instancesOffset = BinaryPrimitives.ReadInt32LittleEndian(payload[28..]);
+        instance = FrozenWorldStructureCodec.ReadMultiInstance(payload.Slice(
+            instancesOffset + index * FrozenWorldStructureFormat.MultiInstanceRowBytes,
+            FrozenWorldStructureFormat.MultiInstanceRowBytes));
+        return true;
     }
 
     /// <summary>Validates every structural material/static definition before generation admission.</summary>
@@ -920,6 +949,8 @@ public sealed class BoundWorldPack
     public bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView view) =>
         Pack.TryGetBaseTerrain(key, out view);
 
+    public bool TryGetChunkKey(int index, out SpatialChunkKey key) => Pack.TryGetChunkKey(index, out key);
+
     public bool TryGetFrozenStatics(SpatialChunkKey key, out WorldFrozenStaticChunkView view) =>
         Pack.TryGetFrozenStatics(key, out view);
 
@@ -928,6 +959,9 @@ public sealed class BoundWorldPack
 
     public bool TryGetMultiInstance(MultiInstanceId id, out WorldMultiInstanceRecord instance) =>
         Pack.TryGetMultiInstance(id, out instance);
+
+    public bool TryGetMultiInstanceAt(int index, out WorldMultiInstanceRecord instance) =>
+        Pack.TryGetMultiInstanceAt(index, out instance);
 }
 
 /// <summary>Borrowed immutable view of one dense base-terrain chunk.</summary>

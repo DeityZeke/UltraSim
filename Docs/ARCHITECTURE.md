@@ -81,6 +81,23 @@ its meaning at multiple fixed cadences. Per-step behavior is deliberate and
 documented. Fixed 60 Hz, 1x playback, with cadence adaptation disabled is the
 uncompromised performance baseline.
 
+Authoritative existence is independent from simulation activity, world
+residency, structural freshness, public interest, client semantic residency,
+and presentation. Simulation fidelity is game-domain policy rather than a
+Spatial or ECS-kernel tier. A reduced activity mode selects explicit
+domain-defined semantics and reconciliation; it is not permission to run the
+ordinary calculation on arbitrarily skipped ticks. The policy selecting a mode
+may be reconstructible, but every resulting authoritative state transition
+still commits through the owning domain.
+
+Scheduler cadence grants an execution opportunity. It does not define the
+semantic meaning of delayed persistent work. Persistent deadlines and temporal
+facts use authoritative world time, and each concrete domain defines what late
+execution means—for example elapsed-time integration, latest-state evaluation,
+bounded replay, completion, or expiry. Replaying every missed scheduler tick is
+never the default. Do not introduce a universal fidelity enum, due-work queue,
+or catch-up framework before concrete game domains prove a common contract.
+
 ## Boundedness and allocation
 
 World, scheduler, command, lifecycle, content, persistence, UI, Network, and
@@ -162,7 +179,12 @@ metadata rather than chunk partitions or ECS entities by default, and concrete
 policy domains may resolve different members of the bounded region set applying
 at one location instead of relying on one universal winning region. T0 preserves
 this seam without implementing a region/property framework.
-Persistence and mutable-world overlay staging remain the next Terrain gate.
+T0.9 now adds a concrete exact-pack-plus-overlay `WorldPreparedView` and a fourth
+`worldview` save-set participant. Immutable pack bytes remain content; bounded
+complete terrain/static/Multi replacements carry independent structural
+revision/hash identity and restore privately before whole-generation publication.
+Runtime slots, publication cursors/history, client residency, and Godot resources
+remain derived and absent from the artifact.
 [Network N1](Plans/NETWORK.md) is deferred
 until T0 proves those chunk/publication contracts, then will test recipient-to-
 chunk subscription/cursor replication against the frozen N0 relation graph.

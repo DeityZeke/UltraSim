@@ -4,7 +4,9 @@ using System.Security.Cryptography;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Persistence;
 using UltraSim.Game.World;
+using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 
@@ -108,6 +110,12 @@ var tests = new (string Name, Action Body)[]
         LocalChunkStreamingOracleMatchesReferenceModelUnderChurn),
     ("ChunkInterestAndLocalNoChangeStreamingAllocateZero",
         ChunkInterestAndLocalNoChangeStreamingAllocateZero),
+    ("MutableWorldOverlayPublishesCompleteTerrainAndStaticReplacements",
+        MutableWorldOverlayPublishesCompleteTerrainAndStaticReplacements),
+    ("WorldViewArtifactIsCanonicalBoundedAndFailClosed",
+        WorldViewArtifactIsCanonicalBoundedAndFailClosed),
+    ("PreparedWorldSaveRestoresExactPackAndOverlayAtomically",
+        PreparedWorldSaveRestoresExactPackAndOverlayAtomically),
 };
 
 foreach ((string name, Action body) in tests)
@@ -116,7 +124,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.7 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.9 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -1204,6 +1212,268 @@ static void BaseTerrainMeshFailuresAreTransactionalAndWarmedPathsAllocateZero()
     Equal(0L, allocated);
     True(checksum != 0);
 }
+
+static void MutableWorldOverlayPublishesCompleteTerrainAndStaticReplacements()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(
+        reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    WorldContentBinding binding = CreateGameWorldBinding();
+    True(pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError bindError));
+    Equal(WorldPackBindingError.None, bindError);
+    using var world = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var state = new GameWorldState(world, bound);
+    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+    var location = new WorldPosition(0, 0, 100, 100, 0);
+    True(state.TryResolveBaseTerrainMaterial(location, out ushort immutableMaterial));
+
+    ushort replacementMaterial = immutableMaterial == GameTerrainMaterialIds.Snow
+        ? GameTerrainMaterialIds.Rock
+        : GameTerrainMaterialIds.Snow;
+    WorldMutableOverlay first = CreateReplacementOverlay(
+        bound!, key, replacementMaterial, new WorldStaticId(9_001));
+    Equal(1UL, first.Revision.Value);
+    Equal(1, first.ChangedChunkCount);
+    True(state.TryPublishOverlay(first));
+    True(state.TryResolveBaseTerrainMaterial(location, out ushort currentMaterial));
+    Equal(replacementMaterial, currentMaterial);
+
+    var query = new WorldStaticBounds(900, -100, 900, 1_100, 100, 1_100);
+    var hits = new WorldStaticQueryHit[8];
+    True(state.TryQueryStaticBounds(query, 16, hits, out int count, out int required,
+        out WorldStaticQueryError queryError));
+    Equal(WorldStaticQueryError.None, queryError);
+    Equal(1, count);
+    Equal(1, required);
+    Equal(new WorldStaticId(9_001), hits[0].StaticId);
+
+    WorldMutableOverlay second = CreateReplacementOverlay(
+        bound!, key, GameTerrainMaterialIds.Grass, new WorldStaticId(9_002), first);
+    Equal(2UL, second.Revision.Value);
+    True(second.TryGetChunkRevision(key, out WorldChunkContentRevision chunkRevision, out _));
+    Equal(2UL, chunkRevision.Value);
+    True(state.TryPublishOverlay(second));
+    False(state.TryPublishOverlay(first));
+    Equal(2UL, state.GetSnapshot().OverlayRevision.Value);
+
+    True(bound!.TryGetBaseTerrain(key, out WorldTerrainChunkView baseTerrain));
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    baseTerrain.CopyMaterials(materials);
+    for (int index = 0; index < offsets.Length; index++) offsets[index] = baseTerrain.GetHeightOffset(index);
+    offsets[0] = new TerrainHeightOffset(checked((ushort)(offsets[0].Units + 1)));
+    var brokenSeam = new WorldMutableOverlayBuilder(bound);
+    True(brokenSeam.TryReplaceTerrain(key, materials, baseTerrain.HeightBase, offsets));
+    False(brokenSeam.TryBuild(out WorldMutableOverlay? broken));
+    Equal(null, broken);
+
+    var oversizedBounds = new WorldStaticBounds(
+        0, -1, 0,
+        GameWorldSpatialProfile.WorldChunkEdgeUnits * 3L, 1,
+        GameWorldSpatialProfile.WorldChunkEdgeUnits);
+    var invalidStatic = new WorldFrozenStaticRecord(
+        new WorldStaticId(99_999),
+        new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Tree),
+        new WorldPosition(0, 0, 1, 1, 0), WorldYaw.Zero, 0,
+        WorldStaticFlags.Renderable, oversizedBounds);
+    var invalidPlacement = new WorldMutableOverlayBuilder(bound);
+    False(invalidPlacement.TryReplaceFrozenStatics(key, [invalidStatic]));
+}
+
+static void WorldViewArtifactIsCanonicalBoundedAndFailClosed()
+{
+    WorldPack pack = CreateStructuredWorldPackArtifact(
+        reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    True(pack.TryBind(CreateGameWorldBinding(), out BoundWorldPack? bound, out _));
+    BoundWorldPack resolved = bound!;
+    using var world = new EcsWorld(GameSchema.CreateSchema(), UltraSimGameComposition.CreateWorldOptions(64));
+    using var state = new GameWorldState(world, resolved);
+    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+    True(state.TryPublishOverlay(CreateReplacementOverlay(
+        resolved, key, GameTerrainMaterialIds.Snow, new WorldStaticId(9_050))));
+    var participant = new WorldSaveSetParticipant(
+        state, new PersistentWorldId(0x7007), new WorldPersistenceOptions(1_000_000));
+    byte[] first = EncodeWorldView(participant, sequence: 7);
+    byte[] second = EncodeWorldView(participant, sequence: 7);
+    True(first.AsSpan().SequenceEqual(second));
+    True(first.Length < pack.Length);
+
+    var restore = new WorldSaveSetParticipant(
+        fingerprint => fingerprint == resolved.Fingerprint ? resolved : null,
+        new WorldPersistenceOptions(1_000_000));
+    using (IPreparedLoadParticipant prepared = restore.Prepare(first, new SaveSetContext(7, 0)))
+    {
+        prepared.Resolve(EmptyPersistentResolver.Instance);
+        prepared.Validate();
+        var preparedWorld = (PreparedWorldParticipant)prepared;
+        Equal(resolved.Fingerprint, preparedWorld.BaseWorld!.Fingerprint);
+        Equal(1UL, preparedWorld.Overlay!.Revision.Value);
+    }
+
+    byte[] corrupt = (byte[])first.Clone();
+    corrupt[^1] ^= 0x40;
+    Throws<PersistenceException>(() =>
+    {
+        using IPreparedLoadParticipant prepared = restore.Prepare(corrupt, new SaveSetContext(7, 0));
+        prepared.Resolve(EmptyPersistentResolver.Instance);
+        prepared.Validate();
+    });
+    Throws<PersistenceValidationException>(() =>
+        restore.Prepare(first.AsMemory(0, first.Length - 1), new SaveSetContext(7, 0)));
+}
+
+static byte[] EncodeWorldView(WorldSaveSetParticipant participant, ulong sequence)
+{
+    using ICapturedSaveSetParticipant captured = participant.Capture(new SaveSetContext(sequence, 0));
+    using var stream = new MemoryStream();
+    captured.WriteArtifact(stream);
+    return stream.ToArray();
+}
+
+static void PreparedWorldSaveRestoresExactPackAndOverlayAtomically()
+{
+    string root = Path.Combine(Path.GetTempPath(), $"ultrasim-t09-{Guid.NewGuid():N}");
+    WorldPack gamePack = CreateStructuredWorldPackArtifact(
+        reverse: true, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
+    var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x90_0001));
+    var composition = new UltraSimGameComposition(baseWorldPack: gamePack);
+    using var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(
+        UltraSimGameComposition.CreateWorldOptions(64, identity), WorldClockOptions.Default));
+    try
+    {
+        runtime.Initialize();
+        runtime.Start();
+        var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+        True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((_, _, game) =>
+        {
+            BoundWorldPack bound = game.WorldState.BaseWorld!;
+            WorldMutableOverlay overlay = CreateReplacementOverlay(
+                bound, key, GameTerrainMaterialIds.Snow, new WorldStaticId(9_101));
+            True(game.WorldState.TryPublishOverlay(overlay));
+            return true;
+        }, out bool installed));
+        True(installed);
+
+        var persistence = new GameRuntimePersistence(
+            runtime.Game,
+            composition,
+            TerrainRestoreOptions(),
+            new SaveSetCoordinator(root));
+        GameSaveResult saved = persistence.TrySave(new SaveSetContext(1, 1_800_000_000_000),
+            static capture => capture());
+        if (!saved.Succeeded)
+            throw new InvalidOperationException("T0.9 current-world save failed.", saved.Failure);
+        Equal(4, saved.Manifest!.Artifacts.Length);
+        True(saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "worldview"));
+
+        True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((_, _, game) =>
+        {
+            WorldMutableOverlay divergent = CreateReplacementOverlay(
+                game.WorldState.BaseWorld!, key, GameTerrainMaterialIds.Rock,
+                new WorldStaticId(9_102), game.WorldState.Overlay);
+            True(game.WorldState.TryPublishOverlay(divergent));
+            return true;
+        }, out bool diverged));
+        True(diverged);
+
+        GameLoadResult loaded = persistence.TryLoad();
+        if (!loaded.Succeeded)
+            throw new InvalidOperationException("T0.9 prepared-world load failed.", loaded.Failure);
+        True(runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>((world, _, game) =>
+        {
+            Equal(identity.WorldId, world.PersistentWorldId);
+            Equal(gamePack.Fingerprint, game.WorldState.BaseWorld!.Fingerprint);
+            Equal(1UL, game.WorldState.Overlay!.Revision.Value);
+            var location = new WorldPosition(0, 0, 100, 100, 0);
+            True(game.WorldState.TryResolveBaseTerrainMaterial(location, out ushort material));
+            Equal(GameTerrainMaterialIds.Snow, material);
+            var bounds = new WorldStaticBounds(900, -100, 900, 1_100, 100, 1_100);
+            var hits = new WorldStaticQueryHit[4];
+            True(game.WorldState.TryQueryStaticBounds(bounds, 16, hits,
+                out int count, out int required, out WorldStaticQueryError error));
+            Equal(WorldStaticQueryError.None, error);
+            Equal(1, count);
+            Equal(1, required);
+            Equal(new WorldStaticId(9_101), hits[0].StaticId);
+            return true;
+        }, out bool restored));
+        True(restored);
+
+        var missingComposition = new UltraSimGameComposition();
+        using var missingRuntime = new ServerRuntime(missingComposition, new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(64, identity), WorldClockOptions.Default));
+        missingRuntime.Initialize();
+        missingRuntime.Start();
+        ulong missingGeneration = missingRuntime.ActiveGenerationId;
+        var missingPersistence = new GameRuntimePersistence(
+            missingRuntime.Game,
+            missingComposition,
+            TerrainRestoreOptions(),
+            new SaveSetCoordinator(root));
+        GameLoadResult missing = missingPersistence.TryLoad();
+        False(missing.Succeeded);
+        True(missing.Failure is PersistenceCompatibilityException or IOException);
+        Equal(missingGeneration, missingRuntime.ActiveGenerationId);
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static WorldMutableOverlay CreateReplacementOverlay(
+    BoundWorldPack baseWorld,
+    SpatialChunkKey key,
+    ushort material,
+    WorldStaticId staticId,
+    WorldMutableOverlay? prior = null)
+{
+    True(baseWorld.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain));
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    terrain.CopyMaterials(materials);
+    for (int index = 0; index < offsets.Length; index++) offsets[index] = terrain.GetHeightOffset(index);
+    materials[0] = material;
+    var position = new WorldPosition(key.Coord.X, key.Coord.Z, 1_000, 1_000, 0);
+    WorldFrozenStaticRecord[] statics =
+    [
+        new WorldFrozenStaticRecord(
+            staticId,
+            new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Tree),
+            position,
+            WorldYaw.Zero,
+            0,
+            WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
+            BoundsAround(position, 200)),
+    ];
+    var builder = new WorldMutableOverlayBuilder(baseWorld, prior: prior);
+    True(builder.TryReplaceTerrain(key, materials, terrain.HeightBase, offsets));
+    True(builder.TryReplaceFrozenStatics(key, statics));
+    True(builder.TryBuild(out WorldMutableOverlay? overlay));
+    True(overlay is not null);
+    return overlay!;
+}
+
+static WorldContentBinding CreateGameWorldBinding() => new(
+    GameContent.WorldFingerprint,
+    [
+        GameTerrainMaterialIds.Water,
+        GameTerrainMaterialIds.Sand,
+        GameTerrainMaterialIds.Grass,
+        GameTerrainMaterialIds.Rock,
+        GameTerrainMaterialIds.Snow,
+    ],
+    [
+        GameWorldStaticDefinitionIds.Tree,
+        GameWorldStaticDefinitionIds.Rock,
+        GameWorldStaticDefinitionIds.CabinWall,
+        GameWorldStaticDefinitionIds.CabinRoof,
+        GameWorldStaticDefinitionIds.Shelf,
+        GameWorldStaticDefinitionIds.Book,
+    ]);
+
+static PersistenceRestoreOptions TerrainRestoreOptions() => new(
+    new PersistenceLimits(2_000_000, 256, 64, 64, 256, 2_000_000, 2_000_000),
+    ChunkLayoutOptions.KiB16);
 
 static BoundWorldPack CreateBoundTerrainWorld(
     int minimumChunkX,
@@ -3755,6 +4025,16 @@ static class WorldPackTestProfile
     internal static SpatialSpaceId Space { get; } = new(901);
     internal static WorldContentFingerprint Content { get; } =
         new(0x1122_3344_5566_7788UL, 0x8877_6655_4433_2211UL);
+}
+
+sealed class EmptyPersistentResolver : IExternalPersistentEntityResolver
+{
+    internal static readonly EmptyPersistentResolver Instance = new();
+    public bool TryResolve(PersistentEntityKey key, out object? value)
+    {
+        value = null;
+        return false;
+    }
 }
 
 readonly record struct PublicationConsumerFloor(

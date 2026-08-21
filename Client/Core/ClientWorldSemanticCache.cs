@@ -96,6 +96,8 @@ public readonly record struct ClientSemanticChunkInfo(
     SpatialChunkKey Key,
     ClientSemanticChunkHandle Handle,
     ClientSemanticChunkState State,
+    WorldChunkContentRevision StructuralRevision,
+    WorldChunkContentHash StructuralContentHash,
     ChunkPublicationCursor PublicationCursor,
     int FrozenStaticCount,
     int MultiFragmentCount,
@@ -104,6 +106,7 @@ public readonly record struct ClientSemanticChunkInfo(
 
 public readonly record struct ClientWorldSemanticCacheSnapshot(
     WorldPackFingerprint BaseWorldFingerprint,
+    WorldOverlayRevision OverlayRevision,
     PublicationEpoch PublicationEpoch,
     int RequestedChunks,
     int StagedChunks,
@@ -155,6 +158,7 @@ public sealed class ClientWorldSemanticCache
 {
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly BoundWorldPack _baseWorld;
+    private readonly WorldPreparedView _preparedWorld;
     private readonly ClientWorldSemanticCacheLimits _limits;
     private readonly ChunkSlot[] _slots;
     private readonly int[] _freeSlots;
@@ -189,8 +193,14 @@ public sealed class ClientWorldSemanticCache
     public ClientWorldSemanticCache(
         BoundWorldPack baseWorld,
         ClientWorldSemanticCacheLimits limits = default)
+        : this(new WorldPreparedView(baseWorld), limits) { }
+
+    public ClientWorldSemanticCache(
+        WorldPreparedView preparedWorld,
+        ClientWorldSemanticCacheLimits limits = default)
     {
-        _baseWorld = baseWorld ?? throw new ArgumentNullException(nameof(baseWorld));
+        _preparedWorld = preparedWorld ?? throw new ArgumentNullException(nameof(preparedWorld));
+        _baseWorld = preparedWorld.BaseWorld;
         if (limits == default) limits = ClientWorldSemanticCacheLimits.Default;
         limits.Validate();
         _limits = limits;
@@ -223,6 +233,7 @@ public sealed class ClientWorldSemanticCache
 
     public ClientWorldSemanticCacheLimits Limits => _limits;
     public BoundWorldPack BaseWorld => _baseWorld;
+    public WorldPreparedView PreparedWorld => _preparedWorld;
 
     public bool TryRequest(
         SpatialChunkKey key,
@@ -284,13 +295,13 @@ public sealed class ClientWorldSemanticCache
             error = ClientSemanticChunkError.InvalidState;
             return false;
         }
-        if (!_baseWorld.TryGetBaseTerrain(state.Key, out WorldTerrainChunkView terrain))
+        if (!_preparedWorld.TryGetBaseTerrain(state.Key, out WorldTerrainChunkView terrain))
         {
             error = ClientSemanticChunkError.MissingTerrain;
             return false;
         }
         int frozenCount = 0;
-        if (_baseWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView frozenView))
+        if (_preparedWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView frozenView))
         {
             frozenCount = frozenView.Count;
             if (frozenCount > _frozenStaticScratch.Length)
@@ -300,7 +311,7 @@ public sealed class ClientWorldSemanticCache
             }
         }
         int multiCount = 0;
-        if (_baseWorld.TryGetMultiFragments(state.Key, out WorldMultiFragmentChunkView multiView))
+        if (_preparedWorld.TryGetMultiFragments(state.Key, out WorldMultiFragmentChunkView multiView))
         {
             multiCount = multiView.Count;
             if (multiCount > _multiFragmentScratch.Length)
@@ -330,13 +341,13 @@ public sealed class ClientWorldSemanticCache
         terrain.CopyAbsoluteHeights(_heightScratch);
         if (frozenCount != 0)
         {
-            _baseWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView stagedFrozen);
+            _preparedWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView stagedFrozen);
             for (int index = 0; index < frozenCount; index++)
                 _frozenStaticScratch[index] = stagedFrozen.GetRecord(index);
         }
         if (multiCount != 0)
         {
-            _baseWorld.TryGetMultiFragments(state.Key, out WorldMultiFragmentChunkView stagedMulti);
+            _preparedWorld.TryGetMultiFragments(state.Key, out WorldMultiFragmentChunkView stagedMulti);
             for (int index = 0; index < multiCount; index++)
                 _multiFragmentScratch[index] = stagedMulti.GetRecord(index);
         }
@@ -348,6 +359,8 @@ public sealed class ClientWorldSemanticCache
         state.FrozenStaticCount = frozenCount;
         state.MultiFragmentCount = multiCount;
         state.PublicRecordCount = publicCount;
+        _preparedWorld.TryGetReplacementIdentity(
+            state.Key, out state.StructuralRevision, out state.StructuralContentHash);
         state.PublicationCursor = publicationCursor;
         AdmitCursorEpoch(publicationCursor);
         state.State = ClientSemanticChunkState.Staged;
@@ -742,6 +755,7 @@ public sealed class ClientWorldSemanticCache
         }
         return new ClientWorldSemanticCacheSnapshot(
             _baseWorld.Fingerprint,
+            _preparedWorld.Overlay.Revision,
             _publicationEpoch,
             requested,
             staged,
@@ -1244,7 +1258,8 @@ public sealed class ClientWorldSemanticCache
     {
         ref readonly ChunkSlot state = ref _slots[slot];
         return new ClientSemanticChunkInfo(
-            state.Key, Handle(slot), state.State, state.PublicationCursor,
+            state.Key, Handle(slot), state.State,
+            state.StructuralRevision, state.StructuralContentHash, state.PublicationCursor,
             state.FrozenStaticCount, state.MultiFragmentCount, state.PublicRecordCount,
             state.SemanticHash);
     }
@@ -1299,6 +1314,8 @@ public sealed class ClientWorldSemanticCache
         internal SpatialChunkKey Key;
         internal uint Generation;
         internal ClientSemanticChunkState State;
+        internal WorldChunkContentRevision StructuralRevision;
+        internal WorldChunkContentHash StructuralContentHash;
         internal ChunkPublicationCursor PublicationCursor;
         internal int FrozenStaticCount;
         internal int MultiFragmentCount;

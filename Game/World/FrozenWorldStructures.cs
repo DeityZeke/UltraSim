@@ -269,20 +269,31 @@ public readonly record struct WorldMultiInstanceRecord(
 public readonly ref struct WorldFrozenStaticChunkView
 {
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly ReadOnlySpan<WorldFrozenStaticRecord> _records;
 
     internal WorldFrozenStaticChunkView(SpatialChunkKey key, ReadOnlySpan<byte> rows)
     {
         Key = key;
         _rows = rows;
+        _records = default;
+    }
+
+    internal WorldFrozenStaticChunkView(SpatialChunkKey key, ReadOnlySpan<WorldFrozenStaticRecord> records)
+    {
+        Key = key;
+        _rows = default;
+        _records = records;
     }
 
     public SpatialChunkKey Key { get; }
-    public int Count => _rows.Length / FrozenWorldStructureFormat.StaticRowBytes;
+    public int Count => !_records.IsEmpty
+        ? _records.Length
+        : _rows.Length / FrozenWorldStructureFormat.StaticRowBytes;
 
     public WorldFrozenStaticRecord GetRecord(int index)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
-        return FrozenWorldStructureCodec.ReadStaticRecord(
+        return !_records.IsEmpty ? _records[index] : FrozenWorldStructureCodec.ReadStaticRecord(
             _rows.Slice(index * FrozenWorldStructureFormat.StaticRowBytes,
                 FrozenWorldStructureFormat.StaticRowBytes), Key);
     }
@@ -326,20 +337,31 @@ public readonly ref struct WorldFrozenStaticChunkView
 public readonly ref struct WorldMultiFragmentChunkView
 {
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly ReadOnlySpan<WorldMultiFragmentRecord> _records;
 
     internal WorldMultiFragmentChunkView(SpatialChunkKey key, ReadOnlySpan<byte> rows)
     {
         Key = key;
         _rows = rows;
+        _records = default;
+    }
+
+    internal WorldMultiFragmentChunkView(SpatialChunkKey key, ReadOnlySpan<WorldMultiFragmentRecord> records)
+    {
+        Key = key;
+        _rows = default;
+        _records = records;
     }
 
     public SpatialChunkKey Key { get; }
-    public int Count => _rows.Length / FrozenWorldStructureFormat.MultiFragmentRowBytes;
+    public int Count => !_records.IsEmpty
+        ? _records.Length
+        : _rows.Length / FrozenWorldStructureFormat.MultiFragmentRowBytes;
 
     public WorldMultiFragmentRecord GetRecord(int index)
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
-        return FrozenWorldStructureCodec.ReadMultiFragment(
+        return !_records.IsEmpty ? _records[index] : FrozenWorldStructureCodec.ReadMultiFragment(
             _rows.Slice(index * FrozenWorldStructureFormat.MultiFragmentRowBytes,
                 FrozenWorldStructureFormat.MultiFragmentRowBytes), Key);
     }

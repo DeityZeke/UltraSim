@@ -12,6 +12,8 @@ public readonly record struct GameWorldStateSnapshot(
     long LifecycleFactsObserved,
     long ChangedRowsObserved,
     long ReconciledEntities,
+    WorldOverlayRevision OverlayRevision,
+    int ChangedOverlayChunks,
     WorldSpatialIndexSnapshot Index,
     ChunkPublicationStoreSnapshot Publication,
     long ReservedBytes);
@@ -24,6 +26,7 @@ public sealed class GameWorldState : IDisposable
     public static readonly SpatialSpaceId DefaultSpace = new(1);
 
     private readonly WorldId _worldId;
+    private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly int _entityCapacity;
     private readonly ComponentLookup<WorldPositionComponent> _positionLookup;
     private readonly ComponentLookup<WorldPublicComponent> _publicLookup;
@@ -52,7 +55,8 @@ public sealed class GameWorldState : IDisposable
     public GameWorldState(
         EcsWorld world,
         BoundWorldPack? baseWorld = null,
-        ChunkPublicationLimits? publicationLimits = null)
+        ChunkPublicationLimits? publicationLimits = null,
+        WorldMutableOverlay? overlay = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         if (baseWorld is not null && baseWorld.Space != DefaultSpace)
@@ -61,6 +65,8 @@ public sealed class GameWorldState : IDisposable
                 $"The base WorldPack belongs to {baseWorld.Space}; this game generation requires {DefaultSpace}.",
                 nameof(baseWorld));
         }
+        if (baseWorld is null && overlay is not null)
+            throw new ArgumentException("A mutable overlay requires an exact immutable base world.", nameof(overlay));
         if (world.Options.LifecycleRecordCapacity <= 0)
             throw new ArgumentException("Spatial-enabled worlds require retained ECS lifecycle history.", nameof(world));
         _worldId = world.Id;
@@ -87,45 +93,78 @@ public sealed class GameWorldState : IDisposable
         Index = new WorldSpatialIndex(_entityCapacity);
         Publications = new ChunkPublicationStore(PublicationEpoch.Create(), limits);
         BaseWorld = baseWorld;
+        PreparedWorld = baseWorld is null ? null : new WorldPreparedView(baseWorld, overlay);
     }
 
     public WorldId WorldId => _worldId;
     public WorldSpatialIndex Index { get; private set; }
     public ChunkPublicationStore Publications { get; private set; }
-    public BoundWorldPack? BaseWorld { get; }
+    public BoundWorldPack? BaseWorld { get; private set; }
+    public WorldPreparedView? PreparedWorld { get; private set; }
+    public WorldMutableOverlay? Overlay => PreparedWorld?.Overlay;
+
+    /// <summary>Installs the fully resolved current-world view into an unpublished staging shell.</summary>
+    public bool TryInstallPreparedWorld(BoundWorldPack? baseWorld, WorldMutableOverlay? overlay)
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_initialized || BaseWorld is not null || PreparedWorld is not null ||
+            baseWorld is null && overlay is not null ||
+            baseWorld is not null && baseWorld.Space != DefaultSpace ||
+            overlay is not null &&
+                (overlay.BaseWorldFingerprint != baseWorld!.Fingerprint || overlay.Space != baseWorld.Space))
+            return false;
+        BaseWorld = baseWorld;
+        PreparedWorld = baseWorld is null ? null : new WorldPreparedView(baseWorld, overlay);
+        return true;
+    }
+
+    /// <summary>Atomically publishes one fully validated durable replacement overlay generation.</summary>
+    public bool TryPublishOverlay(WorldMutableOverlay candidate)
+    {
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(candidate);
+        if (BaseWorld is null || candidate.BaseWorldFingerprint != BaseWorld.Fingerprint ||
+            candidate.Space != BaseWorld.Space)
+            return false;
+        ulong current = Overlay?.Revision.Value ?? 0;
+        if (!candidate.Revision.IsValid || candidate.Revision.Value != checked(current + 1))
+            return false;
+        PreparedWorld = new WorldPreparedView(BaseWorld, candidate);
+        return true;
+    }
 
     /// <summary>
-    /// Samples the authoritative current base terrain. T0.4 resolves the immutable base pack directly;
-    /// later durable replacements may shadow it behind this game-world route.
+    /// Samples authoritative current base terrain through the prepared base-plus-overlay view.
     /// </summary>
     public bool TrySampleBaseTerrainHeight(in WorldPosition location, out int heightMillimeters)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (BaseWorld is null)
+        if (PreparedWorld is null)
         {
             heightMillimeters = 0;
             return false;
         }
-        return BaseWorld.TrySampleBaseTerrainHeight(location, out heightMillimeters);
+        return PreparedWorld.TrySampleBaseTerrainHeight(location, out heightMillimeters);
     }
 
     /// <summary>
-    /// Resolves the authoritative current base-terrain material. T0.4 delegates to the immutable base pack.
+    /// Resolves authoritative current base-terrain material through the prepared base-plus-overlay view.
     /// </summary>
     public bool TryResolveBaseTerrainMaterial(in WorldPosition location, out ushort materialId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (BaseWorld is null)
+        if (PreparedWorld is null)
         {
             materialId = 0;
             return false;
         }
-        return BaseWorld.TryResolveBaseTerrainMaterial(location, out materialId);
+        return PreparedWorld.TryResolveBaseTerrainMaterial(location, out materialId);
     }
 
     /// <summary>
-    /// Queries authoritative current-world static geometry. Today this resolves the immutable base pack;
-    /// later durable overlays may shadow or augment it without changing gameplay callers.
+    /// Queries authoritative current-world static geometry through the prepared base-plus-overlay view.
     /// </summary>
     public bool TryQueryStaticBounds(
         in WorldStaticBounds bounds,
@@ -144,12 +183,12 @@ public sealed class GameWorldState : IDisposable
             error = WorldStaticQueryError.InvalidBounds;
             return false;
         }
-        if (BaseWorld is null)
+        if (PreparedWorld is null)
         {
             error = WorldStaticQueryError.None;
             return true;
         }
-        return BaseWorld.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
+        return PreparedWorld.TryQueryStaticBounds(bounds, maximumCandidateChunks, destination,
             out count, out required, out error);
     }
 
@@ -312,12 +351,21 @@ public sealed class GameWorldState : IDisposable
             _lifecycleFactsObserved,
             _changedRowsObserved,
             _reconciledEntities,
+            Overlay?.Revision ?? default,
+            Overlay?.ChangedChunkCount ?? 0,
             index,
             publication,
-            checked(scratch + index.ReservedBytes + publication.ReservedBytes));
+            checked(scratch + index.ReservedBytes + publication.ReservedBytes +
+                (Overlay?.ReservedBytes ?? 0)));
     }
 
     public void Dispose() => _disposed = true;
+
+    private void EnsureOwner()
+    {
+        if (Environment.CurrentManagedThreadId != _ownerThreadId)
+            throw new InvalidOperationException("Game world state belongs to a different owner thread.");
+    }
 
     private void ReconcileCurrent(EcsWorld world, WorldSpatialIndex index, uint entityIndex)
     {

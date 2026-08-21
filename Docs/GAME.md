@@ -100,8 +100,10 @@ watcher list lives in the store.
 T0.4 binds an optional immutable `WorldPack` to the same concrete game space and
 content meaning before generation publication. Pure pack queries describe that
 artifact; authoritative gameplay queries route through generation-owned
-`GameWorldState`, leaving one concrete place for future durable terrain
-replacements to shadow the base without introducing a generic provider.
+`GameWorldState`. T0.9 fills that seam with a concrete `WorldPreparedView`: the
+exact bound pack plus one immutable bounded durable overlay of complete changed-
+chunk terrain/static/Multi replacements. Gameplay still asks `GameWorldState`;
+no generic terrain/provider registry was introduced.
 
 ## Simulation rules
 
@@ -112,3 +114,35 @@ Structural mutation crosses the scheduler barrier.
 Per-time behavior is proved at multiple fixed cadences. Per-step behavior is
 explicit. Current S0 game logic is an integration substrate—not the final MMO
 simulation, terrain, physics, networking, or content/modding product.
+
+Simulation activity is a separate game-domain concern from authoritative
+existence, Spatial membership, replication interest, structural freshness, and
+client presentation. Combat, NPC schedules, crops, ecology, and economy need not
+share one fidelity vocabulary or reduced representation. Each concrete domain
+must define what reduced/dormant operation means and how it reconciles elapsed
+authoritative world time before it earns an implementation. Arbitrary scheduler
+tick skipping is not a simulation model.
+
+Temporal work likewise belongs to its domain. The authoritative facts may name
+an effective/due world time, while a reconstructible index identifies what is
+ready for service. Processing time, semantic due time, expiry, and preferred
+service cadence are not assumed to be the same. A recurring domain explicitly
+chooses whether its next deadline anchors to the prior due time or to current
+time so delayed execution cannot introduce accidental drift.
+
+Game semantics keep these categories distinct:
+
+```text
+state       current coalescible truth
+change      bounded notice to reread current truth
+fact        an occurrence that cannot be inferred from later state
+command     explicit authority-directed intent/control flow
+notice      consumer-facing presentation derived from state or facts
+```
+
+Fact meaning does not by itself select retention. Some owner-scoped facts need
+only bounded reliable delivery; selected provenance may be durable because
+gameplay depends on it. Commands never become an implicit global event bus, and
+events are not the primary control path. Concrete construction, crafting,
+employment, or resource-claim domains must exist before any shared project or
+reservation primitive is extracted.

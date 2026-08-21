@@ -150,11 +150,12 @@ static TestMetrics AccountBackedRoundTrip()
         long saveAllocated = GC.GetAllocatedBytesForCurrentThread() - saveAllocatedBefore;
         Expect(saved.Succeeded && saved.Manifest is not null,
             "The account-backed save generation was not accepted.");
-        Expect(saved.Manifest!.Artifacts.Length == 3 &&
+        Expect(saved.Manifest!.Artifacts.Length == 4 &&
             saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "world") &&
+            saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "worldview") &&
             saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "accounting") &&
             saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "clock"),
-            "The game save did not contain ECS, Accounting, and authoritative clock participants.");
+            "The game save did not contain ECS, current-world, Accounting, and authoritative clock participants.");
         Expect(captureCallTicks >= pauseTicks,
             "The capture-pause measurement exceeded the complete synchronous capture call.");
 

@@ -21,10 +21,11 @@ identity knowledge.
 The cache contains no ECS entities, server mutable storage, connections,
 packets, Godot nodes, RIDs, or resources. Borrowed chunk views remain valid only
 until the next cache mutation. Engine-neutral resident terrain mesh preparation
-also routes through this client-world boundary; T0.8 resolves immutable base
-content, while a later client overlay can change that private resolution without
-changing presentation callers. Rendering and visibility are independently owned
-by the engine adapter.
+also routes through this client-world boundary. T0.9 allows initial staging from
+an exact prepared base-plus-overlay view and retains changed-chunk structural
+revision/hash separately from dynamic publication cursor lineage. Live overlay
+transfer/reconciliation remains N1 work. Rendering and visibility are
+independently owned by the engine adapter.
 
 Structural semantic residency, dynamic public subscription, and current camera
 visibility are independent facts. A structurally resident chunk may contain the

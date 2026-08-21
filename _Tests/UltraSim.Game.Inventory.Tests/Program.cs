@@ -548,7 +548,7 @@ static void InventoryPersistsAndRebuildsAfterGenerationSwap()
     GameSaveResult save = fixture.Persistence.TrySave(new SaveSetContext(1, 1), static capture => capture());
     if (!save.Succeeded)
         throw new InvalidOperationException("The game save failed.", save.Failure);
-    Assert.Equal(3, save.Manifest!.Artifacts.Length);
+    Assert.Equal(4, save.Manifest!.Artifacts.Length);
     EcsWorld oldWorld = fixture.CurrentWorld;
     Assert.True(fixture.Use((world, _, game) => game.Inventory.Equip(
         world, fixture.Sword, fixture.Backpack, fixture.Character, InventoryEquipSlot.MainHand).Accepted));

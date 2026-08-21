@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/Persistence/UltraSim.Game.Persistence.csproj" />
+    <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
+    <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
+  </ItemGroup>
+</Project>

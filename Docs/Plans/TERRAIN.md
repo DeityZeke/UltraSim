@@ -1,9 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.7 are accepted/frozen as of
-2026-08-21 after T0.7 consumer hardening. T0.8 implementation plus semantic,
-renderer, and sliding-window hardening is complete and stopped for checkpoint
-review; it is not yet accepted/frozen, and T0.9/Network N1 have not started.
+Status: active forward plan. T0.0 through T0.8 are accepted/frozen as of
+2026-08-21 after the final presentation-ownership and movement hardening. T0.9
+implementation is complete and stopped for checkpoint review; it is not yet
+accepted/frozen. T0.10 and Network N1 have not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -2958,8 +2958,9 @@ do not alter compiled geometry do not advance structural generations.
 separate orchestration workflows over shared validated world semantics; none is
 implemented by this T0.8 hardening.
 
-T0.8 remains stopped for checkpoint re-review. T0.9 and Network N1 have not
-started.
+T0.8 is accepted/frozen after this hardening. Later overlay, construction, or N1
+work consumes its semantic/presentation ownership boundaries rather than
+reopening them.
 
 ## T0.9 — persistence and mutable-world seam
 
@@ -2968,15 +2969,17 @@ save data references its world-pack/content fingerprint.
 Dynamic entities remain in existing ECS persistence. After restore, the chunk
 membership/publication index is rebuilt from staged ECS truth before the candidate
 `GameGenerationState` publishes.
-T0.9 initially adds one `WorldSaveSetParticipant` beside ECS, Accounting, and
-WorldClock. Its artifact contains approximately:
+T0.9 adds one `WorldSaveSetParticipant` beside ECS, Accounting, and WorldClock.
+Its `worldview` artifact contains:
 
 ```
-required WorldPackFingerprint
-world/profile/schema version
+required WorldPackFingerprint + WorldContentFingerprint
+artifact/overlay schema version
 SpatialSpaceId / durable world identity
-mutable-overlay schema version
-changed terrain/static/Multi overlay records
+WorldOverlayRevision
+sorted changed-chunk key/revision/hash rows
+complete terrain/static/Multi replacement payloads
+optional complete logical Multi-root replacement
 ```
 
 Immutable pack bytes are not saved. Fresh-host composition resolves the exact
@@ -2987,14 +2990,16 @@ never substitutes whichever pack happens to be installed.
 Restore order is one owned candidate transaction:
 
 ```
-resolve + validate immutable WorldPack
+preflight every participant
+    -> create the game staging shell while ECS registration is open
     -> restore staged ECS + clock/accounting
-    -> apply durable overlay privately
+    -> resolve + validate the exact immutable WorldPack
+    -> validate/install the durable overlay privately
     -> rebuild other derived game state
     -> rebuild WorldSpatialIndex from final staged Position truth
     -> rebuild ChunkPublicationStore when enabled
     -> capture fresh derived cursors / PublicationEpoch
-    -> construct complete GameWorldState
+    -> complete the staged GameWorldState
     -> construct GameGenerationState
     -> atomically publish the whole generation
 ```
@@ -3264,6 +3269,71 @@ entities, derived chunk membership, and any implemented overlay mutation without
 persisting runtime slots.
 Private edit sessions, leases, housing, construction projects, client patch-cache
 distribution, and multi-user editor UI are explicitly not added to this gate.
+
+### T0.9 implementation stop — 2026-08-21
+
+T0.9 is implemented and stopped for checkpoint review. `WorldPreparedView` is
+the concrete immutable current-world view:
+
+```text
+exact BoundWorldPack
+    + immutable bounded WorldMutableOverlay
+    = authoritative prepared terrain/static/Multi view
+```
+
+Changed chunks carry independent monotonic `WorldChunkContentRevision` and
+SHA-256 `WorldChunkContentHash` identities. The overlay uses complete optional
+replacements: an empty static/fragment array therefore means authoritative
+absence rather than fallthrough. Terrain replacement preflights admitted
+materials, q5 height encoding, and exact neighbor seams. Static and Multi
+replacement validates content identity, home placement, the accepted one-chunk
+bounds halo, stable global identities, fragment piece totals, and root residency
+before publishing one immutable overlay generation. Base pack bytes are never
+mutated.
+
+`GameWorldState` now answers terrain/material/static queries through this
+prepared view and publishes only the next complete overlay revision on its owner
+thread. Pure `BoundWorldPack` queries continue to describe the immutable
+artifact. `ClientWorldSemanticCache` can stage directly from a prepared view and
+records the changed chunk's structural revision/hash separately from dynamic
+`ChunkPublicationCursor` lineage. T0.9 does not add live structural transfer or
+request sequencing; that remains N1 work.
+
+The save set now has four concrete participants:
+
+```text
+world        ECS durable entities/components
+worldview    exact pack/content identity + complete durable overlay
+accounting   durable game/account links
+clock        authoritative world time
+```
+
+The `worldview` artifact contains no immutable pack bytes, client slots,
+publication cursors/history, semantic-cache rows, render handles, meshes, or
+RIDs. Restore resolves only the exact configured fingerprint and content binding,
+validates/rebuilds the overlay privately, installs it into the pre-created
+game-world staging shell, rebuilds Inventory/Spatial/publication derived state,
+then publishes one `GameGenerationState`. A missing pack or malformed overlay
+leaves the active generation unchanged.
+
+The permanent 74-test world suite includes complete terrain/static replacement,
+monotonic overlay publication, save/diverge/restore, exact-pack rejection, and
+atomic non-publication. Existing persistence/inventory suites prove the fourth
+participant composes with ECS, Accounting, clock, and derived-state rebuild.
+
+The immutable synthetic evidence is
+[`terrain-t0.9-world-overlay-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.9-world-overlay-2026-08-21.json).
+Its 256-base/64-changed-chunk fixture records a 281,472-byte retained overlay and
+280,160-byte `worldview` artifact. Release observations are about 3.58 ms p95 to
+validate/build the 64 complete replacements, 96.5 us p95 to encode the artifact,
+2.83 ms p95 to parse/resolve/revalidate it, and 37.4 ns p95 / 0 B for an
+overlay-first terrain-material read. These are synthetic cold transaction/read
+mechanics, not terrain-editor, authored-content, N1 bandwidth, or tick-path
+claims.
+
+T0.10 and Network N1 remain unstarted. Private edit sessions, leases, property,
+construction, overlay history/compaction, and client patch-file distribution are
+still documented future consumers rather than implementations.
 
 ## T0.10 — playable woods/cabin vertical and acceptance
 

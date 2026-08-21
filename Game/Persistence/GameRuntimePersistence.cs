@@ -1,6 +1,7 @@
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Composition;
+using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 
@@ -29,6 +30,7 @@ public sealed class GameRuntimePersistence
     private readonly PersistenceRestoreOptions _restoreOptions;
     private readonly SaveSetCoordinator _coordinator;
     private readonly AccountingPersistenceOptions _accountingOptions;
+    private readonly WorldPersistenceOptions _worldOptions;
     private readonly Func<PersistenceRestoreRequirements, GameStaging>? _stagingOverride;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
 
@@ -38,13 +40,15 @@ public sealed class GameRuntimePersistence
         PersistenceRestoreOptions restoreOptions,
         SaveSetCoordinator coordinator,
         AccountingPersistenceOptions? accountingOptions = null,
-        Func<PersistenceRestoreRequirements, GameStaging>? stagingOverride = null)
+        Func<PersistenceRestoreRequirements, GameStaging>? stagingOverride = null,
+        WorldPersistenceOptions? worldOptions = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _composition = composition ?? throw new ArgumentNullException(nameof(composition));
         _restoreOptions = restoreOptions;
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _accountingOptions = accountingOptions ?? new AccountingPersistenceOptions();
+        _worldOptions = worldOptions ?? new WorldPersistenceOptions();
         _stagingOverride = stagingOverride;
     }
 
@@ -129,20 +133,40 @@ public sealed class GameRuntimePersistence
                     return value.World;
                 });
             var accountingParticipant = new AccountingSaveSetParticipant(_accountingOptions);
+            var worldParticipant = new WorldSaveSetParticipant(
+                fingerprint =>
+                {
+                    GameStaging built = staging ??
+                        throw new PersistenceValidationException(
+                            "The ECS participant did not prepare game content before current-world resolution.");
+                    return _composition.TryResolveWorldPack(fingerprint, built.Content.World, out BoundWorldPack? bound)
+                        ? bound
+                        : null;
+                },
+                _worldOptions);
             var clockParticipant = new WorldClockSaveSetParticipant();
             using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
-                [ecsParticipant, accountingParticipant, clockParticipant],
+                [ecsParticipant, worldParticipant, accountingParticipant, clockParticipant],
                 EmptyResolver.Instance,
                 recoveryMode);
             PreparedEcsWorldParticipant ecs = prepared.Participants.OfType<PreparedEcsWorldParticipant>().Single();
+            PreparedWorldParticipant preparedWorld = prepared.Participants.OfType<PreparedWorldParticipant>().Single();
             PreparedAccountingParticipant accounting = prepared.Participants.OfType<PreparedAccountingParticipant>().Single();
             PreparedWorldClockParticipant clock = prepared.Participants.OfType<PreparedWorldClockParticipant>().Single();
             stagedWorld = ecs.TakeWorld();
+            if (stagedWorld.PersistentWorldId != preparedWorld.DurableWorldId)
+                throw new PersistenceValidationException(
+                    "The restored ECS and current-world durable identities disagree.");
             if (stagedWorld.TickCount != clock.State.SimulationTick)
                 throw new PersistenceValidationException(
                     "The restored ECS scheduler tick disagrees with authoritative world-clock state.");
             GameStaging built = staging ??
                 throw new InvalidOperationException("The game staging factory did not produce state.");
+            if (!built.WorldState.TryInstallPreparedWorld(
+                    preparedWorld.BaseWorld,
+                    preparedWorld.Overlay))
+                throw new PersistenceValidationException(
+                    "The resolved current-world view could not be installed into the private staging generation.");
             built.Inventory.Rebuild(stagedWorld);
             stagedAccounting = accounting.TakeStore();
             candidate = new GameGenerationState(
@@ -214,8 +238,11 @@ public sealed class GameRuntimePersistence
                         world, _composition.PersistenceCatalog, _restoreOptions,
                         requirements => CreateStaging(requirements).World);
                     var accounting = new AccountingSaveSetParticipant(game.Accounting, _accountingOptions);
+                    var currentWorld = new WorldSaveSetParticipant(
+                        game.WorldState, world.PersistentWorldId, _worldOptions);
                     var clock = new WorldClockSaveSetParticipant(clockState);
-                    localCaptured = _coordinator.Capture([ecs, accounting, clock], saveContext, captureBoundary);
+                    localCaptured = _coordinator.Capture(
+                        [ecs, currentWorld, accounting, clock], saveContext, captureBoundary);
                     return true;
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
