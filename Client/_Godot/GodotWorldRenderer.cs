@@ -17,6 +17,16 @@ public readonly record struct GodotWorldRendererLimits(int MaximumRenderChunks, 
 {
     public static GodotWorldRendererLimits Default => new(256, 128);
 
+    /// <summary>
+    /// Spare slots required to build a complete one-chunk diagonal fringe before retiring the
+    /// old fringe. Smaller profiles remain valid and converge by retiring before building.
+    /// </summary>
+    public static int MinimumSeamlessDiagonalSpare(int renderRadiusChunks)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(renderRadiusChunks);
+        return checked(renderRadiusChunks * 4 + 1);
+    }
+
     /// <summary>Derives presentation capacity from an X/Z view radius and bounded spare slots.</summary>
     public static GodotWorldRendererLimits ForStructuralWindow(
         int renderRadiusChunks,
@@ -83,6 +93,9 @@ public readonly record struct GodotWorldRendererSnapshot(
     ulong GroupCapacityRejections,
     ulong Rebases,
     ulong WindowMoves,
+    ulong CancelledBuilds,
+    ulong CancelledRetirements,
+    ulong ChunkRootTransformWrites,
     long LastMeshBuildTicks,
     long MaximumMeshBuildTicks,
     long LastResourceCommitTicks,
@@ -158,6 +171,9 @@ public sealed class GodotWorldRenderer : IDisposable
     private ulong _groupCapacityRejections;
     private ulong _rebases;
     private ulong _windowMoves;
+    private ulong _cancelledBuilds;
+    private ulong _cancelledRetirements;
+    private ulong _chunkRootTransformWrites;
     private long _lastMeshBuildTicks;
     private long _maximumMeshBuildTicks;
     private long _lastResourceCommitTicks;
@@ -246,6 +262,8 @@ public sealed class GodotWorldRenderer : IDisposable
 
         _desiredVisible[semanticIndex] = visible;
         _desiredWindowOffsets[semanticIndex] = windowOffset;
+        if (RemoveQueued(_retireQueue, ref _retireHead, ref _retireCount, handle))
+            _cancelledRetirements++;
         bool hasCurrent = TryFindRenderSlot(handle, out int renderSlot);
         if (hasCurrent)
         {
@@ -266,7 +284,8 @@ public sealed class GodotWorldRenderer : IDisposable
         RenderWorkKind kind = hasCurrent ? RenderWorkKind.PublicRefresh : RenderWorkKind.FullBuild;
         bool replacesStaleAssociation = !hasCurrent && TryFindAnyAssociation(semanticIndex, out _);
         if (kind == RenderWorkKind.FullBuild && !replacesStaleAssociation &&
-            _activeChunks + CountPendingNewBuilds() >= _limits.MaximumRenderChunks)
+            _activeChunks - _retireCount + CountPendingNewBuilds() >=
+                _limits.MaximumRenderChunks)
         {
             _renderCapacityRejections++;
             error = GodotWorldRenderQueueError.RenderCapacityExceeded;
@@ -292,7 +311,8 @@ public sealed class GodotWorldRenderer : IDisposable
             return false;
         }
         _desiredVisible[semanticIndex] = false;
-        RemoveQueued(_buildQueue, ref _buildHead, ref _buildCount, handle);
+        if (RemoveQueued(_buildQueue, ref _buildHead, ref _buildCount, handle))
+            _cancelledBuilds++;
         if (!TryFindRenderSlot(handle, out _) ||
             Contains(_retireQueue, _retireHead, _retireCount, handle))
         {
@@ -333,30 +353,66 @@ public sealed class GodotWorldRenderer : IDisposable
     }
 
     public void SetRenderOrigin(WorldRenderOrigin origin)
+        => SetRenderOriginCore(origin, windowOffsetsAlreadyUpdated: false,
+            rebasePendingRetirements: true);
+
+    internal void SetRenderOriginFromWindow(
+        WorldRenderOrigin origin,
+        bool rebasePendingRetirements = true)
+        => SetRenderOriginCore(origin, windowOffsetsAlreadyUpdated: true,
+            rebasePendingRetirements);
+
+    private void SetRenderOriginCore(
+        WorldRenderOrigin origin,
+        bool windowOffsetsAlreadyUpdated,
+        bool rebasePendingRetirements)
     {
         EnsureOwner();
         ThrowIfDisposed();
         if (!origin.IsCanonical) throw new ArgumentOutOfRangeException(nameof(origin));
         if (_origin == origin) return;
         bool centerChanged = _origin.Chunk != origin.Chunk;
+        bool yChanged = _origin.YMillimeters != origin.YMillimeters;
         _origin = origin;
         Root.Position = new Vector3(
             -origin.LocalXMillimeters * MillimetersToMeters,
             0,
             -origin.LocalZMillimeters * MillimetersToMeters);
-        for (int index = 0; index < _renderChunks.Length; index++)
+
+        if (centerChanged && windowOffsetsAlreadyUpdated && rebasePendingRetirements)
         {
-            if (_renderChunks[index] is not { } chunk) continue;
-            if (centerChanged)
+            for (int offset = 0; offset < _retireCount; offset++)
             {
-                long x = checked((long)chunk.Key.Coord.X - origin.Chunk.X);
-                long z = checked((long)chunk.Key.Coord.Z - origin.Chunk.Z);
-                if (x is < int.MinValue or > int.MaxValue || z is < int.MinValue or > int.MaxValue)
-                    throw new InvalidOperationException("A rendered chunk is outside relative offset range.");
-                chunk.WindowOffset = new RenderWindowOffset((int)x, (int)z);
-                _desiredWindowOffsets[checked((int)chunk.Handle.Index)] = chunk.WindowOffset;
+                ClientSemanticChunkHandle handle =
+                    _retireQueue[(_retireHead + offset) % _retireQueue.Length];
+                if (!TryFindRenderSlot(handle, out int renderSlot)) continue;
+                RenderChunk chunk = _renderChunks[renderSlot]!;
+                if (!TryGetRelativeOffset(chunk.Key, origin.Chunk, out RenderWindowOffset relative))
+                {
+                    SetVisible(chunk, false);
+                    continue;
+                }
+                _desiredWindowOffsets[checked((int)handle.Index)] = relative;
+                SetWindowOffset(chunk, relative, countWindowMove: false);
             }
-            ApplyOrigin(chunk);
+        }
+
+        if ((centerChanged && !windowOffsetsAlreadyUpdated) || yChanged)
+        {
+            for (int index = 0; index < _renderChunks.Length; index++)
+            {
+                if (_renderChunks[index] is not { } chunk) continue;
+                if (centerChanged && !windowOffsetsAlreadyUpdated)
+                {
+                    if (!TryGetRelativeOffset(chunk.Key, origin.Chunk,
+                        out RenderWindowOffset relative))
+                        throw new InvalidOperationException(
+                            "A rendered chunk is outside relative offset range.");
+                    chunk.WindowOffset = relative;
+                    _desiredWindowOffsets[checked((int)chunk.Handle.Index)] = relative;
+                }
+                ApplyOrigin(chunk);
+            }
         }
         _rebases++;
     }
@@ -367,14 +423,11 @@ public sealed class GodotWorldRenderer : IDisposable
         ThrowIfDisposed();
         if (!budget.IsValid) throw new ArgumentOutOfRangeException(nameof(budget));
         long frameStart = Stopwatch.GetTimestamp();
+        int builds = 0;
+        while (builds < budget.MaximumBuilds && TryProcessNextBuild()) builds++;
         for (int count = 0; count < budget.MaximumRetirements && _retireCount != 0; count++)
             Retire(Dequeue(_retireQueue, ref _retireHead, ref _retireCount));
-        for (int count = 0; count < budget.MaximumBuilds && _buildCount != 0; count++)
-        {
-            RenderWorkItem work = Dequeue(_buildQueue, ref _buildHead, ref _buildCount);
-            if (work.Kind == RenderWorkKind.FullBuild) Build(work.Handle);
-            else RefreshPublic(work.Handle);
-        }
+        while (builds < budget.MaximumBuilds && TryProcessNextBuild()) builds++;
         _lastFrameTicks = Stopwatch.GetTimestamp() - frameStart;
         _maximumFrameTicks = Math.Max(_maximumFrameTicks, _lastFrameTicks);
     }
@@ -411,28 +464,24 @@ public sealed class GodotWorldRenderer : IDisposable
             _activeChunks, _freeRenderSlotCount, _visibleChunks, _buildCount, _retireCount,
             _activeNodes, _activeResources, _completedBuilds, _completedRetirements,
             _rebuilds, _publicRefreshes, _renderCapacityRejections, _groupCapacityRejections,
-            _rebases, _windowMoves, _lastMeshBuildTicks, _maximumMeshBuildTicks,
+            _rebases, _windowMoves, _cancelledBuilds, _cancelledRetirements,
+            _chunkRootTransformWrites, _lastMeshBuildTicks, _maximumMeshBuildTicks,
             _lastResourceCommitTicks, _maximumResourceCommitTicks,
             _lastFrameTicks, _maximumFrameTicks);
     }
 
     internal bool TryQueueWindowTransition(
         ReadOnlySpan<RenderWindowChange> changes,
+        bool hideExits,
         out GodotWorldRenderQueueError error)
     {
         EnsureOwner();
         ThrowIfDisposed();
-        if (_buildCount != 0 || _retireCount != 0)
-        {
-            error = GodotWorldRenderQueueError.QueueCapacityExceeded;
-            return false;
-        }
-
-        int entering = 0;
         for (int index = 0; index < changes.Length; index++)
         {
             RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.Entered)
+            if (change.Kind is RenderWindowChangeKind.Entered or
+                RenderWindowChangeKind.RetainedMoved)
             {
                 if (!_cache.TryGetResidentView(change.Handle, out ClientSemanticChunkView semantic))
                 {
@@ -444,22 +493,16 @@ public sealed class GodotWorldRenderer : IDisposable
                     error = GodotWorldRenderQueueError.GroupCapacityExceeded;
                     return false;
                 }
-                entering++;
             }
-            else if ((change.Kind is RenderWindowChangeKind.RetainedMoved or
-                RenderWindowChangeKind.Exited) &&
-                !TryFindRenderSlot(change.Handle, out _))
+            else if (change.Kind == RenderWindowChangeKind.Exited &&
+                !TryFindRenderSlot(change.Handle, out _) &&
+                !Contains(_buildQueue, _buildHead, _buildCount, change.Handle) &&
+                !Contains(_retireQueue, _retireHead, _retireCount, change.Handle))
             {
                 error = GodotWorldRenderQueueError.InvalidHandle;
                 return false;
             }
         }
-        if (_activeChunks + entering > _limits.MaximumRenderChunks)
-        {
-            error = GodotWorldRenderQueueError.RenderCapacityExceeded;
-            return false;
-        }
-
         for (int index = 0; index < changes.Length; index++)
         {
             RenderWindowChange change = changes[index];
@@ -469,18 +512,19 @@ public sealed class GodotWorldRenderer : IDisposable
         for (int index = 0; index < changes.Length; index++)
         {
             RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.RetainedMoved &&
-                !TrySetWindowOffset(change.Handle, change.CurrentOffset))
-            {
-                error = GodotWorldRenderQueueError.InvalidHandle;
-                return false;
-            }
-        }
-        for (int index = 0; index < changes.Length; index++)
-        {
-            RenderWindowChange change = changes[index];
-            if (change.Kind == RenderWindowChangeKind.Entered &&
+            if (change.Kind is (RenderWindowChangeKind.Entered or
+                RenderWindowChangeKind.RetainedMoved) &&
                 !TryQueueResident(change.Handle, change.CurrentOffset, true, out error)) return false;
+        }
+        if (hideExits)
+        {
+            for (int offset = 0; offset < _retireCount; offset++)
+            {
+                ClientSemanticChunkHandle handle =
+                    _retireQueue[(_retireHead + offset) % _retireQueue.Length];
+                if (TryFindRenderSlot(handle, out int renderSlot))
+                    SetVisible(_renderChunks[renderSlot]!, false);
+            }
         }
         error = GodotWorldRenderQueueError.None;
         return true;
@@ -780,14 +824,31 @@ public sealed class GodotWorldRenderer : IDisposable
             checked((long)chunk.YAnchorMillimeters - _origin.YMillimeters) * MillimetersToMeters,
             checked((long)chunk.WindowOffset.Z * GameWorldSpatialProfile.WorldChunkEdgeUnits) *
                 MillimetersToMeters);
+        _chunkRootTransformWrites++;
     }
 
-    private void SetWindowOffset(RenderChunk chunk, RenderWindowOffset offset)
+    private bool TryProcessNextBuild()
+    {
+        if (_buildCount == 0) return false;
+        RenderWorkItem work = _buildQueue[_buildHead];
+        bool needsFreeSlot = work.Kind == RenderWorkKind.FullBuild &&
+            !TryFindAnyAssociation(checked((int)work.Handle.Index), out _);
+        if (needsFreeSlot && _freeRenderSlotCount == 0) return false;
+        _ = Dequeue(_buildQueue, ref _buildHead, ref _buildCount);
+        if (work.Kind == RenderWorkKind.FullBuild) Build(work.Handle);
+        else RefreshPublic(work.Handle);
+        return true;
+    }
+
+    private void SetWindowOffset(
+        RenderChunk chunk,
+        RenderWindowOffset offset,
+        bool countWindowMove = true)
     {
         if (chunk.WindowOffset == offset) return;
         chunk.WindowOffset = offset;
         ApplyOrigin(chunk);
-        _windowMoves++;
+        if (countWindowMove) _windowMoves++;
     }
 
     private void Retire(ClientSemanticChunkHandle handle)
@@ -899,7 +960,7 @@ public sealed class GodotWorldRenderer : IDisposable
         return value;
     }
 
-    private static void RemoveQueued(RenderWorkItem[] queue, ref int head, ref int count,
+    private static bool RemoveQueued(RenderWorkItem[] queue, ref int head, ref int count,
         ClientSemanticChunkHandle handle)
     {
         int found = -1;
@@ -911,12 +972,50 @@ public sealed class GodotWorldRenderer : IDisposable
                 break;
             }
         }
-        if (found < 0) return;
+        if (found < 0) return false;
         for (int offset = found; offset < count - 1; offset++)
             queue[(head + offset) % queue.Length] = queue[(head + offset + 1) % queue.Length];
         queue[(head + count - 1) % queue.Length] = default;
         count--;
         if (count == 0) head = 0;
+        return true;
+    }
+
+    private static bool RemoveQueued(ClientSemanticChunkHandle[] queue, ref int head, ref int count,
+        ClientSemanticChunkHandle handle)
+    {
+        int found = -1;
+        for (int offset = 0; offset < count; offset++)
+        {
+            if (queue[(head + offset) % queue.Length] == handle)
+            {
+                found = offset;
+                break;
+            }
+        }
+        if (found < 0) return false;
+        for (int offset = found; offset < count - 1; offset++)
+            queue[(head + offset) % queue.Length] = queue[(head + offset + 1) % queue.Length];
+        queue[(head + count - 1) % queue.Length] = default;
+        count--;
+        if (count == 0) head = 0;
+        return true;
+    }
+
+    private static bool TryGetRelativeOffset(
+        SpatialChunkKey key,
+        SpatialChunkCoord center,
+        out RenderWindowOffset offset)
+    {
+        long x = checked((long)key.Coord.X - center.X);
+        long z = checked((long)key.Coord.Z - center.Z);
+        if (x is < int.MinValue or > int.MaxValue || z is < int.MinValue or > int.MaxValue)
+        {
+            offset = default;
+            return false;
+        }
+        offset = new RenderWindowOffset((int)x, (int)z);
+        return true;
     }
 
     private void EnsureOwner()

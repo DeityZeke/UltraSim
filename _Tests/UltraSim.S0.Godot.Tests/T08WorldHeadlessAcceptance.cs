@@ -139,6 +139,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         RendererCapacityAndIdentityRegressions(world);
         HighElevationPrecisionRegression();
         SlidingRenderWindowRegressions();
+        SlidingRenderWindowPendingWorkRegressions();
         renderer.Dispose();
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -368,6 +369,16 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             initial.Retained == 0 && initial.Exited == 0,
             "Initial centered render window was not a complete 3x3 square.");
 
+        GodotWorldRendererSnapshot beforeLocalMovement = renderer.GetSnapshot();
+        for (ushort local = 1; local <= 100; local++)
+            _ = Track(new WorldPosition(0, 0, local, checked((ushort)(local * 2)), 0));
+        GodotWorldRendererSnapshot afterLocalMovement = renderer.GetSnapshot();
+        Expect(afterLocalMovement.ChunkRootTransformWrites ==
+            beforeLocalMovement.ChunkRootTransformWrites &&
+            MathF.Abs(renderer.Root.Position.X + 0.100f) < 0.000001f &&
+            MathF.Abs(renderer.Root.Position.Z + 0.200f) < 0.000001f,
+            "Same-chunk player movement touched per-chunk roots instead of only the common root.");
+
         ClientSemanticChunkHandle retainedHandle = resident[Key(0, 0)];
         ClientSemanticChunkInfo retainedBefore = Info(retainedHandle);
         Expect(renderer.TryGetChunkDiagnostics(retainedHandle,
@@ -466,6 +477,8 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             GodotWorldRendererLimits.ForStructuralWindow(16, 65, 4);
         Expect(radius16Limits.MaximumResidentChunks == 1_154 &&
             radius16Renderer.MaximumRenderChunks == 1_154 &&
+            GodotWorldRendererLimits.MinimumSeamlessDiagonalSpare(1) == 5 &&
+            GodotWorldRendererLimits.MinimumSeamlessDiagonalSpare(16) == 65 &&
             33 * 33 - 33 == 1_056 && 33 * 33 - 65 == 1_024,
             "The R=16 active/spare and strip-retention profile was miscomputed.");
         GD.Print(
@@ -475,6 +488,8 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             $"window_moves={renderer.GetSnapshot().WindowMoves} " +
             $"active_render_slots={renderer.GetSnapshot().ActiveRenderChunks} " +
             $"free_render_slots={renderer.GetSnapshot().FreeRenderSlots} " +
+            $"local_moves_without_chunk_root_writes=100 " +
+            $"chunk_root_transform_writes={renderer.GetSnapshot().ChunkRootTransformWrites} " +
             $"window_reserved_bytes={window.GetSnapshot().ReservedBytes} " +
             $"radius16_active=1089 radius16_spare=65 " +
             $"radius16_semantic_reserved_bytes={radius16Cache.GetSnapshot().ReservedBytes}");
@@ -544,6 +559,250 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             Expect(cache.TryGetInfo(handle, out ClientSemanticChunkInfo info),
                 "Retained semantic info was unavailable.");
             return info;
+        }
+    }
+
+    private void SlidingRenderWindowPendingWorkRegressions()
+    {
+        BoundWorldPack world = CreateSlidingWorld();
+        var cache = new ClientWorldSemanticCache(world,
+            new ClientWorldSemanticCacheLimits(32, 0, 0, 1, 1));
+        using var renderer = new GodotWorldRenderer(
+            this, cache, GodotWorldRendererLimits.ForStructuralWindow(1, 5, 4));
+        var window = new GodotSlidingRenderWindow(cache, renderer, 1);
+        var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
+        var changes = new RenderWindowChange[18];
+        var obsoleteEntering = new ClientSemanticChunkHandle[3];
+        int maximumActiveRenderChunks = 0;
+
+        _ = QueueTrack(new WorldPosition(0, 0, 0, 0, 0));
+        Drain();
+        ClientSemanticChunkHandle retainedHandle = resident[Key(1, 0)];
+        ClientSemanticChunkInfo retainedBefore = Info(retainedHandle);
+
+        _ = QueueTrack(new WorldPosition(1, 0, 0, 0, 0));
+        Expect(renderer.GetSnapshot().PendingBuilds == 3 &&
+            renderer.GetSnapshot().PendingRetirements == 3,
+            "First undrained fringe did not remain bounded and pending.");
+        _ = QueueTrack(new WorldPosition(2, 0, 0, 0, 0));
+        Expect(renderer.GetSnapshot().PendingBuilds == 6 &&
+            renderer.GetSnapshot().PendingRetirements == 6,
+            "Second crossing did not coalesce with prior pending fringe work.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(5, 0));
+        maximumActiveRenderChunks = Math.Max(
+            maximumActiveRenderChunks, renderer.GetSnapshot().ActiveRenderChunks);
+        Expect(renderer.GetSnapshot().ActiveRenderChunks == 14 &&
+            renderer.GetSnapshot().ActiveRenderChunks <= renderer.Limits.MaximumRenderChunks,
+            "Available diagonal-fringe spare was not consumed before outgoing retirement.");
+        Drain();
+        AssertDesiredRendered();
+        ClientSemanticChunkInfo retainedAfter = Info(retainedHandle);
+        Expect(retainedBefore.Handle == retainedAfter.Handle &&
+            retainedBefore.SemanticHash == retainedAfter.SemanticHash &&
+            retainedBefore.PublicationCursor == retainedAfter.PublicationCursor,
+            "Rapid presentation transitions changed retained semantic lineage.");
+
+        SlidingRenderWindowTransition forward =
+            QueueTrack(new WorldPosition(3, 0, 0, 0, 0));
+        Expect(forward.Entered == 3, "Forward pending fringe was not queued.");
+        int obsoleteCount = 0;
+        for (int index = 0; index < 18; index++)
+        {
+            if (changes[index].Kind != RenderWindowChangeKind.Entered) continue;
+            obsoleteEntering[obsoleteCount++] = changes[index].Handle;
+        }
+        Expect(obsoleteCount == 3, "Forward pending fringe handles were incomplete.");
+        _ = QueueTrack(new WorldPosition(2, 0, 0, 0, 0));
+        Drain();
+        AssertDesiredRendered();
+        foreach (ClientSemanticChunkHandle handle in obsoleteEntering)
+            Expect(!renderer.IsRendered(handle),
+                "A cancelled entering fringe appeared after reversing direction.");
+        Expect(renderer.GetSnapshot().CancelledBuilds >= 3 &&
+            renderer.GetSnapshot().CancelledRetirements >= 3,
+            "Reverse movement did not cancel obsolete build/retire work.");
+
+        _ = QueueTrack(new WorldPosition(3, 0, 0, 0, 0));
+        Expect(renderer.GetSnapshot().PendingBuilds != 0,
+            "Teleport setup did not retain pending entering work.");
+        Expect(window.TryResetForJump(
+                new WorldPosition(20, 0, 0, 0, 0), changes,
+                out SlidingRenderWindowTransition reset, out int resetRequired,
+                out SlidingRenderWindowError resetError,
+                out GodotWorldRenderQueueError resetRendererError),
+            $"No-overlap reset failed: {resetError}/{resetRendererError}.");
+        Expect(reset.ActiveChunks == 0 && reset.Exited == 9 && resetRequired == 9 &&
+            window.GetSnapshot().CenterChunk == Key(20, 0) &&
+            window.GetSnapshot().ActiveChunks == 0,
+            "Teleport did not advance desired center while clearing the old desired window.");
+        Drain();
+        Expect(renderer.GetSnapshot().ActiveRenderChunks == 0 &&
+            renderer.GetSnapshot().PendingBuilds == 0 &&
+            renderer.GetSnapshot().PendingRetirements == 0,
+            "Teleport reset did not retire/cancel the prior realized and pending presentation.");
+        foreach (ClientSemanticChunkHandle handle in obsoleteEntering)
+            Expect(!renderer.IsRendered(handle),
+                "Obsolete pre-teleport work appeared after the reset target moved on.");
+
+        RetireAllSemantic();
+        _ = QueueTrack(new WorldPosition(20, 0, 0, 0, 0));
+        Drain();
+        AssertDesiredRendered();
+        Expect(renderer.GetSnapshot().ActiveRenderChunks == 9 &&
+            renderer.GetSnapshot().ActiveRenderChunks <= renderer.Limits.MaximumRenderChunks,
+            "No-overlap target did not converge within the original bounded capacity.");
+
+        Expect(window.TryResetForJump(
+                new WorldPosition(20, 0, 0, 0, 0), changes,
+                out _, out _, out _, out _),
+            "Final jump-reset retirement failed.");
+        Drain();
+        RetireAllSemantic();
+        Expect(renderer.GetSnapshot().ActiveRenderChunks == 0,
+            "Rapid-transition fixture leaked presentation resources.");
+
+        LowerSpareConverges(world);
+        GD.Print(
+            $"T0.8 WINDOW COALESCING METRICS cancelled_builds=" +
+            $"{renderer.GetSnapshot().CancelledBuilds} cancelled_retires=" +
+            $"{renderer.GetSnapshot().CancelledRetirements} resets=" +
+            $"{window.GetSnapshot().ResetTransitions} max_active_render_chunks=" +
+            $"{maximumActiveRenderChunks} capacity={renderer.Limits.MaximumRenderChunks}");
+
+        SlidingRenderWindowTransition QueueTrack(WorldPosition player)
+        {
+            Prepare(player.Chunk);
+            Expect(window.TryTrackPlayer(
+                    player, changes, out SlidingRenderWindowTransition transition,
+                    out int required, out SlidingRenderWindowError windowError,
+                    out GodotWorldRenderQueueError rendererError),
+                $"Pending render-window transition failed: {windowError}/{rendererError}, " +
+                $"required {required}.");
+            changes.AsSpan(required).Clear();
+            return transition;
+        }
+
+        void Prepare(SpatialChunkCoord center)
+        {
+            for (int x = center.X - 1; x <= center.X + 1; x++)
+            {
+                for (int z = center.Z - 1; z <= center.Z + 1; z++)
+                {
+                    SpatialChunkKey key = Key(x, z);
+                    if (resident.ContainsKey(key)) continue;
+                    Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _),
+                        "Pending fixture exhausted semantic preparation capacity.");
+                    Expect(cache.TryStageFromBaseWorld(handle, [], default, out _) &&
+                        cache.TryPublish(handle, out _),
+                        "Pending fixture could not publish prepared structural semantics.");
+                    resident.Add(key, handle);
+                }
+            }
+        }
+
+        void Drain()
+        {
+            int guard = 0;
+            while (renderer.GetSnapshot().PendingBuilds != 0 ||
+                renderer.GetSnapshot().PendingRetirements != 0)
+            {
+                renderer.ProcessFrame(new GodotWorldFrameBudget(1, 1));
+                maximumActiveRenderChunks = Math.Max(
+                    maximumActiveRenderChunks, renderer.GetSnapshot().ActiveRenderChunks);
+                Expect(++guard < 256, "Pending presentation work did not converge.");
+            }
+        }
+
+        void AssertDesiredRendered()
+        {
+            var bindings = new RenderWindowBinding[9];
+            Expect(window.TryCopyBindings(bindings, out int count, out _) && count == 9,
+                "Desired window bindings were incomplete.");
+            for (int index = 0; index < count; index++)
+                Expect(renderer.IsRendered(bindings[index].SemanticHandle),
+                    "The latest desired window did not converge to realized presentation.");
+        }
+
+        void RetireAllSemantic()
+        {
+            var infos = new ClientSemanticChunkInfo[32];
+            Expect(cache.TryCopyResidentInfo(infos, out int count, out _),
+                "Resident semantic inventory could not be copied.");
+            for (int index = 0; index < count; index++)
+            {
+                Expect(!renderer.IsRendered(infos[index].Handle) &&
+                    cache.BeginRetire(infos[index].Handle) &&
+                    cache.CompleteRetire(infos[index].Handle),
+                    "Obsolete semantic page could not retire after presentation release.");
+            }
+            resident.Clear();
+        }
+
+        ClientSemanticChunkInfo Info(ClientSemanticChunkHandle handle)
+        {
+            Expect(cache.TryGetInfo(handle, out ClientSemanticChunkInfo info),
+                "Rapid-transition retained semantic info was unavailable.");
+            return info;
+        }
+    }
+
+    private void LowerSpareConverges(BoundWorldPack world)
+    {
+        var cache = new ClientWorldSemanticCache(world,
+            new ClientWorldSemanticCacheLimits(14, 0, 0, 1, 1));
+        using var renderer = new GodotWorldRenderer(
+            this, cache, new GodotWorldRendererLimits(9, 4));
+        var window = new GodotSlidingRenderWindow(cache, renderer, 1);
+        var resident = new Dictionary<SpatialChunkKey, ClientSemanticChunkHandle>();
+        var changes = new RenderWindowChange[18];
+
+        Track(0);
+        Drain();
+        Track(1);
+        Expect(renderer.GetSnapshot().PendingBuilds == 3 &&
+            renderer.GetSnapshot().PendingRetirements == 3,
+            "Zero-spare renderer did not queue a bounded strip transition.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(3, 3));
+        Expect(renderer.GetSnapshot().ActiveRenderChunks == 9 &&
+            renderer.GetSnapshot().PendingBuilds == 0 &&
+            renderer.GetSnapshot().PendingRetirements == 0 &&
+            renderer.GetSnapshot().RenderCapacityRejections == 0,
+            "Below-seamless spare profile did not degrade to retire-then-build convergence.");
+
+        Expect(window.TryResetForJump(new WorldPosition(1, 0, 0, 0, 0), changes,
+            out _, out _, out _, out _), "Zero-spare cleanup reset failed.");
+        Drain();
+
+        void Track(int centerX)
+        {
+            for (int x = centerX - 1; x <= centerX + 1; x++)
+            {
+                for (int z = -1; z <= 1; z++)
+                {
+                    SpatialChunkKey key = Key(x, z);
+                    if (resident.ContainsKey(key)) continue;
+                    Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _) &&
+                        cache.TryStageFromBaseWorld(handle, [], default, out _) &&
+                        cache.TryPublish(handle, out _),
+                        "Zero-spare semantic fringe preparation failed.");
+                    resident.Add(key, handle);
+                }
+            }
+            Expect(window.TryTrackPlayer(new WorldPosition(centerX, 0, 0, 0, 0), changes,
+                out _, out _, out SlidingRenderWindowError error,
+                out GodotWorldRenderQueueError rendererError),
+                $"Zero-spare transition failed: {error}/{rendererError}.");
+        }
+
+        void Drain()
+        {
+            int guard = 0;
+            while (renderer.GetSnapshot().PendingBuilds != 0 ||
+                renderer.GetSnapshot().PendingRetirements != 0)
+            {
+                renderer.ProcessFrame(new GodotWorldFrameBudget(9, 9));
+                Expect(++guard < 32, "Zero-spare presentation did not converge.");
+            }
         }
     }
 

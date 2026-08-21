@@ -2726,6 +2726,59 @@ bytes. That profile intentionally admits no statics/Multi rows and only one
 public row per chunk, so it is a capacity-shape observation—not an accepted
 view-distance default or production memory forecast.
 
+### T0.8 final sliding-window hardening stop — 2026-08-21
+
+The desired structural window is now independent from realized Godot
+presentation. A new chunk crossing no longer requires empty build/retire queues.
+Transitions cancel obsolete pending builds, cancel retirements when movement
+reverses, retain current handles/slots where possible, and coalesce the bounded
+queues toward the latest desired center. Frame processing spends available spare
+slots on new fringe builds first, then retires outgoing presentation, then uses
+the released slots for remaining builds.
+
+For radius `R`, `4R+1` spare slots admit a complete one-step diagonal fringe
+before outgoing retirement (`5` at R=1 and `65` at R=16). That is a seamless-step
+profile, not a construction minimum. A smaller spare profile remains valid and
+converges by retiring before building; the native zero-spare R=1 regression
+finishes its three-out/three-in strip without a capacity rejection.
+
+`TryResetForJump` is the concrete no-overlap/fast-travel path. It advances the
+desired center immediately, cancels obsolete entering work, hides and retires
+the old realized presentation under the ordinary frame budget, and leaves the
+desired window temporarily incomplete. Once those semantic pages are released,
+the latest target can be prepared using the same bounded capacities. It does not
+require old-window plus new-window presentation or semantic capacity, and it is
+not a generic streaming scheduler.
+
+Continuous same-chunk LocalX/LocalZ movement now changes exactly one common
+render root. It does not iterate active render chunks. A center crossing updates
+the retained desired offsets and only any still-visible retirement fringe; an
+authoritative Y-origin change may still update every active chunk root because
+their relative Y genuinely changes.
+
+The appended immutable evidence is
+[`terrain-t0.8-sliding-render-window-final-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.8-sliding-render-window-final-hardening-2026-08-21.json).
+The Debug/Mono headless regressions observe:
+
+```text
+same-chunk LocalX/Z moves                         100
+additional render-chunk-root writes                0
+second crossing before first fringe drains      PASS
+reverse while entering/retiring work is pending PASS
+cancelled obsolete builds                          6
+cancelled obsolete retirements                     3
+no-overlap/reset transitions                       2
+maximum active private render slots               14 / 14
+zero-spare R=1 strip convergence                 PASS
+```
+
+The retained semantic handle/hash/publication cursor remained unchanged through
+rapid slides, cancelled entering handles never appeared after reversal or
+teleport, all queues converged, and final presentation returned to zero active
+chunks. The ordinary heterogeneous native observation in the same run recorded
+3.180 ms full-build p95, 25.080 us public-refresh p95, and 3.003 ms frame p95;
+these remain Debug/headless evidence rather than exported GPU performance.
+
 T0.8 still uses grouped public-prefab presentation rather than implementing rich
 animated actor tiers. The forward client hypothesis is `Rich`, `Batched`,
 `Reduced`, or `Absent` presentation, with nearby interactive actors likely rich

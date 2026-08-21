@@ -33,7 +33,18 @@ structural view distance, public interest, and current camera visibility have
 separate owners. `MaximumRenderChunks` is concurrent presentation capacity;
 `ForStructuralWindow(radius, spare)` derives a square active window plus bounded
 fringe slots rather than treating the former `256` default as a user-facing view
-distance.
+distance. `MinimumSeamlessDiagonalSpare(radius)` is `4R+1`: enough to construct
+one complete diagonal fringe before retiring the outgoing fringe. Smaller spare
+profiles remain valid and degrade to bounded retire-then-build convergence.
+
+Desired window membership is independent from realized Godot presentation.
+Crossings may arrive while prior build/retire work is pending; obsolete builds
+are cancelled, reverse movement cancels obsolete retirements, and the queues
+coalesce toward the newest desired center. `TryResetForJump` is the explicit
+fast-travel path: it advances the desired center, cancels obsolete entering work,
+retires/reuses the old slots under budget, and permits the target semantics to be
+prepared without reserving two complete windows. Temporary incomplete
+presentation during that reset is intentional.
 
 Every render chunk chooses an integer terrain-height Y anchor. Terrain, static,
 and public Y positions subtract that anchor before float conversion; the root
@@ -42,7 +53,10 @@ change roots only without first losing precision through large absolute floats.
 Horizontal relative position is likewise evaluated in integer millimeters as
 `relative chunk * 16000 + object local - player local` before float conversion.
 Crossing local `15,999 -> 0` therefore remains a continuous 1 mm move even near
-the signed world-coordinate limits.
+the signed world-coordinate limits. Same-chunk LocalX/LocalZ movement writes only
+the common root; it does not scan or rewrite every render-chunk root. Chunk roots
+change for discrete window movement, Y-origin movement, construction, or
+retirement—not for ordinary continuous horizontal player motion.
 
 Camera orientation is not a semantic, residency, dirty, or resource-lifetime
 event. Resources remain alive for render-window lifetime and Godot's ordinary

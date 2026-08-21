@@ -102,8 +102,10 @@ semantic world cache plus an independently budgeted Godot terrain/grouped-
 instance renderer. Its hardening pass now separates immutable structural builds
 from dynamic public refresh, maps semantic handles onto independent private
 render slots, validates snapshot lineage canonically, and uses integer-relative
-vertical anchors before float conversion. It remains stopped for checkpoint
-review. Persistence/mutable-
+vertical anchors before float conversion. Final sliding-window hardening makes
+same-chunk X/Z movement common-root-only, coalesces rapid/reversed transitions
+toward the latest desired center, and provides a bounded retire/reuse reset for
+fast travel. It remains stopped for checkpoint review. Persistence/mutable-
 overlay T0.9 and Network N1 remain later work.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.

@@ -49,6 +49,7 @@ public readonly record struct SlidingRenderWindowSnapshot(
     ulong EnteredChunks,
     ulong RetainedChunks,
     ulong ExitedChunks,
+    ulong ResetTransitions,
     long ReservedBytes);
 
 public readonly record struct RenderWindowBinding(
@@ -78,6 +79,7 @@ public sealed class GodotSlidingRenderWindow
     private ulong _entered;
     private ulong _retained;
     private ulong _exited;
+    private ulong _resets;
 
     public GodotSlidingRenderWindow(
         ClientWorldSemanticCache cache,
@@ -161,7 +163,8 @@ public sealed class GodotSlidingRenderWindow
             return false;
         }
         if (changeCount != 0 &&
-            !_renderer.TryQueueWindowTransition(_changeScratch.AsSpan(0, changeCount), out rendererError))
+            !_renderer.TryQueueWindowTransition(
+                _changeScratch.AsSpan(0, changeCount), hideExits: false, out rendererError))
         {
             error = SlidingRenderWindowError.RendererRejected;
             return false;
@@ -176,7 +179,7 @@ public sealed class GodotSlidingRenderWindow
         _activeCount = candidateCount;
         _center = center;
         _changeScratch.AsSpan(0, changeCount).CopyTo(changes);
-        _renderer.SetRenderOrigin(new WorldRenderOrigin(
+        _renderer.SetRenderOriginFromWindow(new WorldRenderOrigin(
             player.Chunk,
             player.YMillimeters,
             player.Local.XMillimeters,
@@ -188,6 +191,66 @@ public sealed class GodotSlidingRenderWindow
             _retained += checked((ulong)retained);
             _exited += checked((ulong)exited);
         }
+        error = SlidingRenderWindowError.None;
+        return true;
+    }
+
+    /// <summary>
+    /// Immediately advances the desired center while retiring the old desired window. This is the
+    /// bounded fast-travel path: callers may release retired semantic pages, prepare the newest
+    /// target, and then call <see cref="TryTrackPlayer"/> without reserving two complete windows.
+    /// Pending presentation work is coalesced away and no obsolete entering chunk may be built.
+    /// </summary>
+    public bool TryResetForJump(
+        in WorldPosition player,
+        Span<RenderWindowChange> changes,
+        out SlidingRenderWindowTransition transition,
+        out int required,
+        out SlidingRenderWindowError error,
+        out GodotWorldRenderQueueError rendererError)
+    {
+        EnsureOwner();
+        SpatialChunkKey center = player.ToChunkKey(_space);
+        required = _activeCount;
+        transition = new SlidingRenderWindowTransition(
+            center, 0, 0, 0, 0, _activeCount);
+        if (changes.Length < required)
+        {
+            error = SlidingRenderWindowError.DestinationTooSmall;
+            rendererError = GodotWorldRenderQueueError.None;
+            return false;
+        }
+
+        for (int index = 0; index < _activeCount; index++)
+        {
+            WindowEntry entry = _active[index];
+            _changeScratch[index] = new RenderWindowChange(
+                RenderWindowChangeKind.Exited,
+                entry.Key,
+                entry.Handle,
+                entry.Offset,
+                default);
+        }
+        if (required != 0 && !_renderer.TryQueueWindowTransition(
+            _changeScratch.AsSpan(0, required), hideExits: true, out rendererError))
+        {
+            error = SlidingRenderWindowError.RendererRejected;
+            return false;
+        }
+
+        _changeScratch.AsSpan(0, required).CopyTo(changes);
+        _active.AsSpan(0, _activeCount).Clear();
+        _activeCount = 0;
+        _center = center;
+        _renderer.SetRenderOriginFromWindow(new WorldRenderOrigin(
+            player.Chunk,
+            player.YMillimeters,
+            player.Local.XMillimeters,
+            player.Local.ZMillimeters), rebasePendingRetirements: false);
+        _transitions++;
+        _resets++;
+        _exited += checked((ulong)required);
+        rendererError = GodotWorldRenderQueueError.None;
         error = SlidingRenderWindowError.None;
         return true;
     }
@@ -221,7 +284,7 @@ public sealed class GodotSlidingRenderWindow
             (long)_changeScratch.Length * Marshal.SizeOf<RenderWindowChange>());
         return new SlidingRenderWindowSnapshot(
             _center, _radius, _activeCount, _transitions,
-            _entered, _retained, _exited, reserved);
+            _entered, _retained, _exited, _resets, reserved);
     }
 
     private int FillCandidate(SpatialChunkKey center, out SlidingRenderWindowError error)

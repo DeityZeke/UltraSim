@@ -1,0 +1,45 @@
+{
+  "schema": "terrain-t0.8-sliding-render-window-final-hardening-v1",
+  "captured_at_local": "2026-08-21",
+  "engine": "Godot 4.7.1 Mono headless",
+  "managed_configuration": "Debug",
+  "scope": "synthetic T0.8 common-root fast path, pending transition coalescing, reversal, bounded fast-travel reset, and lower-spare convergence evidence; not GPU/view-distance or production-content evidence",
+  "profile": {
+    "render_radius_chunks": 1,
+    "active_window_chunks": 9,
+    "seamless_diagonal_spare_slots": 5,
+    "maximum_render_chunks": 14,
+    "same_chunk_local_movements": 100,
+    "no_spare_control_maximum_render_chunks": 9,
+    "r16_seamless_diagonal_spare_slots": 65
+  },
+  "result": {
+    "same_chunk_local_movement_additional_chunk_root_writes": 0,
+    "second_crossing_before_prior_fringe_drained": "pass",
+    "reverse_direction_while_work_pending": "pass",
+    "cancelled_obsolete_builds": 6,
+    "cancelled_obsolete_retirements": 3,
+    "jump_reset_transitions": 2,
+    "maximum_active_render_chunks": 14,
+    "render_capacity": 14,
+    "no_overlap_target_converged_using_original_capacity": true,
+    "obsolete_entering_chunks_appeared": false,
+    "zero_spare_strip_transition_converged": true,
+    "zero_spare_capacity_rejections": 0,
+    "final_active_render_chunks": 0,
+    "heterogeneous_full_build_p95_microseconds": 3180.228,
+    "heterogeneous_public_refresh_p95_microseconds": 25.080,
+    "heterogeneous_frame_p95_microseconds": 3002.970
+  },
+  "invariants": {
+    "desired_window_is_independent_from_realized_presentation": true,
+    "latest_target_coalesces_pending_work": true,
+    "reverse_movement_cancels_obsolete_retirement": true,
+    "fast_travel_does_not_require_two_complete_render_windows": true,
+    "same_chunk_local_xz_updates_only_common_root": true,
+    "retained_semantic_hash_and_cursor_unchanged": true,
+    "private_render_slots_remain_bounded": true,
+    "smaller_than_seamless_spare_degrades_gracefully": true,
+    "network_n1_or_t0_9_was_not_started": true
+  }
+}
