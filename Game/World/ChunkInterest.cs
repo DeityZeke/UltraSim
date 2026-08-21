@@ -347,6 +347,10 @@ public sealed class LocalChunkStreamingOracle
         _candidateFloorOperations = new WorldPublicOperation[limits.MaximumPublicEntities];
     }
 
+    /// <summary>
+    /// Borrows the current subscription rows. The span is valid only until the next
+    /// <see cref="Synchronize"/> call on this oracle.
+    /// </summary>
     public ReadOnlySpan<LocalChunkSubscription> Subscriptions
     {
         get
@@ -421,6 +425,17 @@ public sealed class LocalChunkStreamingOracle
             _snapshotFallbacks,
             _cadenceDeferrals,
             CalculateReservedBytes());
+    }
+
+    /// <summary>Exercises the reference consumer's semantic admission rules without a transport.</summary>
+    internal void ApplySemanticDeltaForTesting(
+        SpatialChunkKey key,
+        in WorldPublicDeltaRecord delta)
+    {
+        EnsureOwner();
+        StageSemanticCandidate();
+        ApplyCandidateDelta(key, delta);
+        PublishSemanticCandidate();
     }
 
     private void PrepareSubscriptions(int desiredCount)
@@ -563,6 +578,13 @@ public sealed class LocalChunkStreamingOracle
         int index = checked((int)delta.Id.Index);
         if ((uint)index >= (uint)_candidatePresent.Length)
             throw new InvalidOperationException("Publication identity exceeds local semantic capacity.");
+        if (delta.Operation is not (WorldPublicOperation.Present or WorldPublicOperation.Remove))
+            throw new InvalidOperationException("The public operation is not recognized.");
+        if (delta.Operation == WorldPublicOperation.Present &&
+            (delta.Current.Id != delta.Id ||
+             delta.Current.EntityPublicVersion != delta.EntityPublicVersion ||
+             delta.Current.Position.Chunk != key.Coord))
+            throw new InvalidOperationException("The public Present operation is not self-consistent.");
         uint floorGeneration = _candidateFloorGenerations[index];
         ulong floorVersion = _candidateFloorVersions[index];
         if (delta.Id.Generation < floorGeneration ||
@@ -570,12 +592,15 @@ public sealed class LocalChunkStreamingOracle
             return;
         if (delta.Id.Generation == floorGeneration && delta.EntityPublicVersion == floorVersion)
         {
-            if (delta.Operation != _candidateFloorOperations[index] ||
-                delta.Operation == WorldPublicOperation.Remove)
+            if (delta.Operation != _candidateFloorOperations[index])
+                throw new InvalidOperationException(
+                    "One public identity version cannot describe contradictory operations.");
+            if (delta.Operation == WorldPublicOperation.Remove)
                 return;
-            if (_candidatePresent[index] && _candidateRecordKeys[index] == key &&
-                _candidateRecords[index] == delta.Current)
-                return;
+            if (_candidateRecordKeys[index] != key || _candidateRecords[index] != delta.Current)
+                throw new InvalidOperationException(
+                    "One public identity version cannot describe contradictory Present state.");
+            if (_candidatePresent[index]) return;
         }
 
         _candidatePresent[index] = false;

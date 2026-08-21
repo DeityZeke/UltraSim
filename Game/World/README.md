@@ -133,7 +133,8 @@ consumer-owned enter/leave hysteresis. Output is unique and key-ordered, each
 chunk receives one nearest tier, radius contact is included, and undersized
 destinations return an exact complete requirement with `Count = 0`.
 
-The packet-free `LocalChunkStreamingOracle` owns fixed recipient-local
+The packet-free `LocalChunkStreamingOracle` is a reference/convergence consumer.
+It owns fixed recipient-local
 subscription/cadence/cursor state plus a private semantic projection. First
 interest snapshots; retained interest queries bounded deltas; history loss
 snapshots; leave clears only local state. Complete batches apply to a private
@@ -141,11 +142,31 @@ candidate before swapping live, and a new `PublicationEpoch` resets old local
 identity/version floors. World chunks and publication pages retain no watcher
 or recipient state.
 
+The oracle's `MaximumPublicEntities`-sized live/candidate arrays are deliberately
+simple proof storage, not the T0.8 production client representation. T0.8 owns
+the one real bounded semantic resident cache and may reuse these proven
+application rules without stacking another cache over the oracle. The oracle,
+its evidence cadence/limits, present source location, and public CLR visibility
+are not Game.Contracts, framework, mod, or compatibility promises.
+
+For one public identity version, exact duplicates are idempotent. An equal
+generation/version with a different operation, key, or current record fails
+closed instead of becoming last-writer-wins. Resident semantic slots retain
+their generation while subscribed and advance it when a different key reuses
+the same local slot index. The `Subscriptions` span is borrowed only until the
+next synchronization.
+
 The current `1/2/4` cadence is a local evidence profile, not an N1 protocol
-constant. The 64-entity fixture selects 497 centered subscriptions and measures
-about 34.6 us for a fresh exact query, 37.1 us with retained hysteresis, and
-65.5 us for a no-change local synchronization, all at 0 B warmed allocation.
-See the [T0.7 evidence](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-2026-08-21.json).
+constant. Interested absent keys have no publication cursor, so this direct
+oracle probes them again at their due cadence to discover later residency. That
+explains the high `ChunkAbsentApplications` count; it does not require N1 to
+transmit repeated empty snapshots. A future replication-owned reverse subscriber
+index may notify recipients without adding watchers to world/publication state.
+
+The 64-entity fixture selects 497 centered subscriptions. The hardened run
+measures about 35.2 us for a fresh exact query, 37.4 us with retained hysteresis,
+and 67.8 us for a no-change local synchronization, all at 0 B warmed allocation.
+See the [T0.7 hardening evidence](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-hardening-2026-08-21.json).
 
 ## Terrain foundation format
 

@@ -96,8 +96,16 @@ var tests = new (string Name, Action Body)[]
         ChunkInterestCapacityAndInvalidInputAreExplicit),
     ("ChunkInterestMatchesReferenceModelUnderBoundedChurn",
         ChunkInterestMatchesReferenceModelUnderBoundedChurn),
+    ("ChunkInterestClipsAtWorldAddressExtremes",
+        ChunkInterestClipsAtWorldAddressExtremes),
     ("LocalChunkStreamingOracleConvergesSnapshotsDeltasAndFallbacks",
         LocalChunkStreamingOracleConvergesSnapshotsDeltasAndFallbacks),
+    ("LocalChunkSemanticSlotsFenceReuse",
+        LocalChunkSemanticSlotsFenceReuse),
+    ("LocalChunkSemanticApplicationRejectsContradictoryVersions",
+        LocalChunkSemanticApplicationRejectsContradictoryVersions),
+    ("LocalChunkStreamingOracleMatchesReferenceModelUnderChurn",
+        LocalChunkStreamingOracleMatchesReferenceModelUnderChurn),
     ("ChunkInterestAndLocalNoChangeStreamingAllocateZero",
         ChunkInterestAndLocalNoChangeStreamingAllocateZero),
 };
@@ -3198,6 +3206,32 @@ static void ChunkInterestMatchesReferenceModelUnderBoundedChurn()
     }
 }
 
+static void ChunkInterestClipsAtWorldAddressExtremes()
+{
+    SpatialSpaceId space = GameWorldState.DefaultSpace;
+    var destination = new ChunkInterestEntry[1_024];
+    WorldPosition[] anchors =
+    [
+        new(int.MinValue, int.MinValue, 0, 0, 0),
+        new(int.MaxValue, int.MaxValue,
+            checked((ushort)(GameWorldSpatialProfile.WorldChunkEdgeUnits - 1)),
+            checked((ushort)(GameWorldSpatialProfile.WorldChunkEdgeUnits - 1)), 0),
+    ];
+    foreach (WorldPosition anchor in anchors)
+    {
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(space, anchor, GameChunkInterestProfile.Default, [], destination,
+                out int count, out int required));
+        Equal(count, required);
+        True(count > 0);
+        AssertCanonicalInterest(destination.AsSpan(0, count));
+        SpatialChunkKey home = anchor.ToChunkKey(space);
+        True(FindInterest(destination.AsSpan(0, count), home, out _) >= 0);
+        for (int index = 0; index < count; index++)
+            Equal(space, destination[index].Key.Space);
+    }
+}
+
 static ChunkInterestTier? ReferenceInterestTier(
     Int128 distanceSquared,
     ChunkInterestTier previous,
@@ -3306,6 +3340,180 @@ static void LocalChunkStreamingOracleConvergesSnapshotsDeltasAndFallbacks()
     Equal(beforeLeave.PublicEntityCount, afterLeave.PublicEntityCount);
     Equal(beforeLeave.CommitCount, afterLeave.CommitCount);
     Equal(beforeLeave.PublishedChunkRevisions, afterLeave.PublishedChunkRevisions);
+}
+
+static void LocalChunkSemanticSlotsFenceReuse()
+{
+    var source = new ChunkPublicationStore(PublicationEpoch.Create(), new ChunkPublicationLimits(1, 2, 1, 1));
+    var oracle = new LocalChunkStreamingOracle(
+        new LocalChunkStreamingLimits(1, 1),
+        new ChunkInterestProfile(0, 0, 0, 0, 0, 0),
+        new LocalChunkStreamingCadence(1, 1, 1));
+
+    WorldPosition firstAnchor = new(0, 0, 8_000, 8_000, 0);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(source, GameWorldState.DefaultSpace, firstAnchor, 0, out int required));
+    Equal(1, required);
+    Equal(1, oracle.Subscriptions.Length);
+    ClientSemanticChunkSlot first = oracle.Subscriptions[0].ResidentSlot;
+    Equal(new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0), oracle.Subscriptions[0].Interest.Key);
+
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(source, GameWorldState.DefaultSpace, firstAnchor, 1, out _));
+    Equal(first, oracle.Subscriptions[0].ResidentSlot);
+
+    WorldPosition replacementAnchor = new(10, -7, 8_000, 8_000, 0);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(source, GameWorldState.DefaultSpace, replacementAnchor, 2, out required));
+    Equal(1, required);
+    ClientSemanticChunkSlot replacement = oracle.Subscriptions[0].ResidentSlot;
+    Equal(first.Index, replacement.Index);
+    True(replacement.Generation > first.Generation);
+    False(first == replacement);
+    Equal(new SpatialChunkKey(GameWorldState.DefaultSpace, 10, -7), oracle.Subscriptions[0].Interest.Key);
+}
+
+static void LocalChunkSemanticApplicationRejectsContradictoryVersions()
+{
+    var oracle = new LocalChunkStreamingOracle(
+        new LocalChunkStreamingLimits(1, 4),
+        new ChunkInterestProfile(0, 0, 0, 0, 0, 0),
+        new LocalChunkStreamingCadence(1, 1, 1));
+    SpatialChunkKey key = new(GameWorldState.DefaultSpace, 0, 0);
+    var id = new WorldPublicEntityId(2, 1);
+    var record = new WorldPublicRecord(
+        id,
+        7,
+        41,
+        new WorldPosition(0, 0, 1_000, 2_000, 3_000),
+        WorldYaw.QuarterTurn,
+        WorldPublicStateFlags.Visible,
+        new ChunkPublicationRevision(9));
+    var present = new WorldPublicDeltaRecord(
+        WorldPublicOperation.Present,
+        WorldPublicFieldMask.Complete,
+        id,
+        record.EntityPublicVersion,
+        record);
+    oracle.ApplySemanticDeltaForTesting(key, present);
+    oracle.ApplySemanticDeltaForTesting(key, present);
+
+    WorldPublicRecord conflictingRecord = record with { PrefabId = 42 };
+    Throws<InvalidOperationException>(() => oracle.ApplySemanticDeltaForTesting(key,
+        present with { Current = conflictingRecord }));
+    Throws<InvalidOperationException>(() => oracle.ApplySemanticDeltaForTesting(key,
+        present with { Operation = WorldPublicOperation.Remove }));
+    Throws<InvalidOperationException>(() => oracle.ApplySemanticDeltaForTesting(key,
+        present with { Current = record with { EntityPublicVersion = 8 } }));
+    SpatialChunkKey wrongKey = new(GameWorldState.DefaultSpace, 1, 0);
+    Throws<InvalidOperationException>(() => oracle.ApplySemanticDeltaForTesting(wrongKey, present));
+
+    var rows = new LocalChunkSemanticRecord[4];
+    True(oracle.TryCopyResidentRecords(rows, out int count, out int required));
+    Equal(1, count);
+    Equal(1, required);
+    Equal(new LocalChunkSemanticRecord(key, record), rows[0]);
+}
+
+static void LocalChunkStreamingOracleMatchesReferenceModelUnderChurn()
+{
+    const int operations = 5_000;
+    const int capacity = 32;
+    var limits = new ChunkPublicationLimits(capacity, capacity * 2, 8, 3);
+    using var fixture = new RawSpatialFixture(128, capacity, publicationLimits: limits);
+    var actors = new PublicationChurnActor[capacity];
+    var knownKeys = new HashSet<SpatialChunkKey>();
+    var random = new Random(0x70_07_570);
+    uint nextPrefab = 1;
+    for (int index = 0; index < 8; index++)
+        True(CreateChurnActor(fixture, actors, knownKeys, random, ref nextPrefab, makePublic: index % 2 == 0));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    var oracle = new LocalChunkStreamingOracle(
+        new LocalChunkStreamingLimits(1_024, capacity),
+        GameChunkInterestProfile.Default,
+        new LocalChunkStreamingCadence(1, 1, 1));
+    WorldPosition anchor = new(0, 0, 8_000, 8_000, 0);
+    Equal(LocalChunkStreamingStatus.Synchronized,
+        oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor, 0, out _));
+    AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+
+    for (int operation = 1; operation <= operations; operation++)
+    {
+        MutateChurnActor(fixture, actors, knownKeys, random, ref nextPrefab);
+        fixture.State.CommitAfterEcsStep(fixture.World);
+
+        if (operation % 73 == 0)
+        {
+            int publicActor = FindPublicChurnActor(actors, random);
+            if (publicActor < 0)
+            {
+                int existing = FindChurnActor(actors, random, requireAlive: true);
+                if (existing >= 0)
+                {
+                    ref PublicationChurnActor actor = ref actors[existing];
+                    True(fixture.World.TryTransition(actor.Entity, fixture.AddPublic));
+                    actor.Public = true;
+                    actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+                    True(fixture.State.TrySetPublic(fixture.World, actor.Entity, actor.Descriptor));
+                }
+                else
+                {
+                    True(CreateChurnActor(
+                        fixture, actors, knownKeys, random, ref nextPrefab, makePublic: true));
+                }
+                fixture.State.CommitAfterEcsStep(fixture.World);
+                publicActor = FindPublicChurnActor(actors, random);
+            }
+            True(publicActor >= 0);
+            for (int dirty = 0; dirty < 5; dirty++)
+            {
+                ref PublicationChurnActor actor = ref actors[publicActor];
+                actor.Descriptor = NextChurnDescriptor(random, ref nextPrefab);
+                True(fixture.State.TrySetPublic(fixture.World, actor.Entity, actor.Descriptor));
+                fixture.State.CommitAfterEcsStep(fixture.World);
+            }
+        }
+
+        if (operation % 401 == 0)
+            fixture.State.Rebuild(fixture.World);
+
+        if (operation % 97 == 0)
+        {
+            anchor = new WorldPosition(random.Next(-2, 3), random.Next(-2, 3),
+                checked((ushort)random.Next(GameWorldSpatialProfile.WorldChunkEdgeUnits)),
+                checked((ushort)random.Next(GameWorldSpatialProfile.WorldChunkEdgeUnits)), 0);
+        }
+        else
+        {
+            True(WorldPosition.TryFromGlobalMillimeters(
+                anchor.GlobalXMillimeters + random.Next(-900, 901),
+                0,
+                anchor.GlobalZMillimeters + random.Next(-900, 901),
+                out anchor));
+        }
+
+        Equal(LocalChunkStreamingStatus.Synchronized,
+            oracle.Synchronize(fixture.State.Publications, GameWorldState.DefaultSpace, anchor,
+                checked((ulong)operation), out _));
+        AssertOracleMatchesInterestedPublication(fixture.State.Publications, oracle);
+    }
+
+    LocalChunkStreamingSnapshot snapshot = oracle.GetSnapshot();
+    True(snapshot.SnapshotFallbacks > 0);
+    True(snapshot.ChunkAbsentApplications > 0);
+    Equal(fixture.State.Publications.Epoch, snapshot.SourceEpoch);
+}
+
+static int FindPublicChurnActor(PublicationChurnActor[] actors, Random random)
+{
+    int start = random.Next(actors.Length);
+    for (int offset = 0; offset < actors.Length; offset++)
+    {
+        int index = (start + offset) % actors.Length;
+        if (actors[index].Alive && actors[index].Public) return index;
+    }
+    return -1;
 }
 
 static void ChunkInterestAndLocalNoChangeStreamingAllocateZero()

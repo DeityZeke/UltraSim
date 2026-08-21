@@ -118,7 +118,10 @@ Useful current anchors can be located by their embedded workload or filename:
   selection with consumer-owned hysteresis, canonical complete capacity results,
   and fixed-capacity packet-free snapshot/delta/history-fallback convergence.
   The `1/2/4` cadence and roughly 500-key first-game scope are local evidence,
-  not the frozen N1 scheduler, server fanout, or Godot resident-cache policy;
+  not the frozen N1 scheduler, server fanout, or Godot resident-cache policy.
+  The `hardening` artifact preserves the later fail-closed semantic-admission
+  checks and is supplementary rather than a replacement for the implementation
+  stop observation;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

@@ -1,9 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
 Status: active forward plan. T0.0 through T0.6 are accepted/frozen as of
-2026-08-21 after T0.6 publication-lineage hardening. T0.7 implementation is
-complete and stopped for checkpoint review; it is not yet accepted/frozen and
-T0.8 has not started.
+2026-08-21 after T0.6 publication-lineage hardening. T0.7 implementation and
+focused consumer hardening are complete and stopped for checkpoint review; it
+is not yet accepted/frozen and T0.8 has not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -2309,7 +2309,7 @@ chunk. The exact circular fringe may legitimately add, remove, or retier a small
 number of consumer subscriptions after movement exceeds the applicable
 hysteresis band; that is consumer topology, not world membership.
 
-### T0.7 implementation stop — 2026-08-21
+### T0.7 implementation/hardening stop — 2026-08-21
 
 T0.7 is implemented and stopped for checkpoint review. It does not begin T0.8,
 Godot residency/rendering, or Network N1.
@@ -2337,19 +2337,30 @@ after complete application. `ChunkAbsent` establishes empty knowledge without
 retaining a delta cursor; an already-empty absent result avoids copying the
 candidate while preserving that semantic rule.
 
+This oracle is intentionally a reference/convergence implementation, not the
+T0.8 production client store. Its semantic and candidate arrays scale with the
+source public-identity address capacity and are copied for transactional proof.
+T0.8 owns the one real bounded client semantic resident cache; it may lift the
+proven snapshot/delta/generation rules without layering another client cache over
+the oracle. The oracle's current source location, CLR visibility, limits, and
+evidence cadence are not Game.Contracts, mod, framework, or compatibility APIs.
+The `Subscriptions` span is a borrow valid only until the next `Synchronize`.
+
 The `1/2/4` Immediate/Near/Far step cadence used by this local fixture is an
 explicit T0.7 evidence profile, not the frozen Network N1 scheduling policy.
 Tier/phase/cursor state remains consumer-owned. Neither `WorldSpatialIndex` nor
 `ChunkPublicationStore` gained watcher lists, recipient IDs, Network messages,
 or per-observer histories/pages.
 
-The permanent T0.0–T0.7 suite now contains 67 tests. New gates cover middle,
+The permanent T0.0–T0.7 suite now contains 71 tests. New gates cover middle,
 edge, corner, negative-coordinate and exact-contact geometry; 1 mm enter/leave
 hysteresis; unique canonical output; exact capacity failure and invalid-input
-transactionality; a 2,000-operation reference-model anchor churn; stable local
-slots; snapshot, delta, history fallback, cross-chunk movement, publication
-epoch replacement, leave/reset convergence; and 0 B warmed query/no-change
-streaming allocation.
+transactionality; minimum/maximum addressable world coordinates; a 2,000-operation
+reference-model anchor churn; stable and generation-fenced reused local slots;
+fail-closed contradictory equal-version semantic input; snapshot, delta, history
+fallback, cross-chunk movement, publication epoch replacement, leave/reset
+convergence; a separate 5,000-operation 1/1/1-cadence consumer reference-model
+churn; and 0 B warmed query/no-change streaming allocation.
 
 The synthetic 64-public-entity local fixture produces 497 centered
 subscriptions: 1 Immediate, 136 Near, and 360 Far. The selected boundary and
@@ -2375,8 +2386,33 @@ tier/phase subscriber indexes rather than polling one such oracle independently
 per remote client. T0.8 owns the real bounded client resident cache and Godot
 resources.
 
-The immutable evidence is
+Most no-change `SnapshotApplications` in this fixture are cheap due-cadence
+probes of interested `ChunkAbsent` keys. Absence intentionally retains no
+publication cursor, so the direct oracle must probe to discover later residency.
+This is not a requirement that N1 transmit repeated empty snapshots: a future
+replication-owned subscriber/reverse index may notify interested recipients when
+an absent key becomes resident, while world/publication authority remains free
+of watcher state.
+
+The original implementation-stop evidence is
 [`terrain-t0.7-chunk-interest-local-oracle-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-2026-08-21.json).
+The immutable post-hardening observation, which adds semantic admission checks
+without replacing the original artifact, is
+[`terrain-t0.7-chunk-interest-local-oracle-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.7-chunk-interest-local-oracle-hardening-2026-08-21.json):
+
+```text
+exact query, no prior subscription          35.222 us mean / 35.568 us p95
+exact query, retained hysteresis             37.442 us mean / 37.821 us p95
+1 mm boundary oscillation                    37.276 us mean / 37.545 us p95
+canonical chunk-boundary crossing            38.794 us mean / 39.326 us p95
+local streaming, no semantic change          67.813 us mean / 68.353 us p95
+local streaming, one public update           70.734 us mean / 71.221 us p95
+local streaming, forced history fallback     70.865 us mean / 71.148 us p95
+```
+
+All hardened observations remain 0 B warmed allocation. The run is a separate
+longitudinal observation, not a paired claim that the semantic checks alone
+caused the difference from the implementation-stop measurements.
 
 ## T0.8 — client resident cache and Godot world renderer
 

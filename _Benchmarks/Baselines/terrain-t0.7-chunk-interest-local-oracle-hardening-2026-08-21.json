@@ -1,0 +1,156 @@
+{
+  "WorkloadVersion": "terrain-t0.7-chunk-interest-local-oracle-v1",
+  "CapturedAtUtc": "2026-08-21T13:00:11.4084166+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "QueryOperations": 20000,
+  "StreamingOperations": 2000,
+  "Profile": {
+    "Workload": "synthetic exact circular chunk-interest and OfflineDirect public-chunk consumer; not Network N1, a client resident renderer, or production population evidence",
+    "ChunkEdgeMillimeters": 16000,
+    "ImmediateEnterRadiusMillimeters": 5000,
+    "ImmediateLeaveRadiusMillimeters": 5500,
+    "NearEnterRadiusMillimeters": 96000,
+    "NearLeaveRadiusMillimeters": 96500,
+    "FarEnterRadiusMillimeters": 192000,
+    "FarLeaveRadiusMillimeters": 192500,
+    "ImmediateCadenceSteps": 1,
+    "NearCadenceSteps": 2,
+    "FarCadenceSteps": 4,
+    "PublicPopulation": 64,
+    "SubscriptionCount": 497,
+    "ResidentRecordCount": 64,
+    "OracleReservedBytes": 237056,
+    "PublicationReservedBytes": 139776,
+    "InterestEntryBytes": 24,
+    "ClientSemanticChunkSlotBytes": 8,
+    "PublicationCursorBytes": 32
+  },
+  "Shapes": {
+    "MiddleTotal": 497,
+    "MiddleImmediate": 1,
+    "MiddleNear": 136,
+    "MiddleFar": 360,
+    "BoundaryTotal": 503,
+    "BoundaryImmediate": 2,
+    "BoundaryNear": 139,
+    "BoundaryFar": 362,
+    "CornerTotal": 488,
+    "CornerImmediate": 4,
+    "CornerNear": 132,
+    "CornerFar": 352
+  },
+  "Streaming": {
+    "NoChange": {
+      "Name": "no-change",
+      "Synchronizations": 52001,
+      "SnapshotApplications": 8047497,
+      "ChunkAbsentApplications": 8047489,
+      "DeltaApplications": 0,
+      "NoChangeQueries": 221000,
+      "SnapshotFallbacks": 0,
+      "CadenceDeferrals": 17576000
+    },
+    "OnePublicUpdate": {
+      "Name": "one-public-update",
+      "Synchronizations": 52001,
+      "SnapshotApplications": 8047497,
+      "ChunkAbsentApplications": 8047489,
+      "DeltaApplications": 52000,
+      "NoChangeQueries": 169000,
+      "SnapshotFallbacks": 0,
+      "CadenceDeferrals": 17576000
+    },
+    "HistoryFallback": {
+      "Name": "history-fallback",
+      "Synchronizations": 6501,
+      "SnapshotApplications": 1012872,
+      "ChunkAbsentApplications": 1006364,
+      "DeltaApplications": 0,
+      "NoChangeQueries": 21125,
+      "SnapshotFallbacks": 6500,
+      "CadenceDeferrals": 2197000
+    }
+  },
+  "Timings": [
+    {
+      "Name": "exact-query-no-previous",
+      "Operations": 20000,
+      "MeanNanosecondsPerOperation": 35222.210821428576,
+      "P50NanosecondsPerOperation": 35251.6459,
+      "P95NanosecondsPerOperation": 35568.41245,
+      "MaximumNanosecondsPerOperation": 35699.6433,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 258440000
+    },
+    {
+      "Name": "exact-query-retained-hysteresis",
+      "Operations": 20000,
+      "MeanNanosecondsPerOperation": 37441.569899999995,
+      "P50NanosecondsPerOperation": 37486.90375,
+      "P95NanosecondsPerOperation": 37821.0522,
+      "MaximumNanosecondsPerOperation": 37841.62215,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 258440000
+    },
+    {
+      "Name": "one-millimeter-boundary-oscillation",
+      "Operations": 20000,
+      "MeanNanosecondsPerOperation": 37275.97121428571,
+      "P50NanosecondsPerOperation": 37269.38255,
+      "P95NanosecondsPerOperation": 37544.8278,
+      "MaximumNanosecondsPerOperation": 37603.5133,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 263640000
+    },
+    {
+      "Name": "canonical-chunk-boundary-crossing",
+      "Operations": 20000,
+      "MeanNanosecondsPerOperation": 38793.65382857143,
+      "P50NanosecondsPerOperation": 38689.7883,
+      "P95NanosecondsPerOperation": 39326.49305,
+      "MaximumNanosecondsPerOperation": 39359.42365,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 262079999
+    },
+    {
+      "Name": "local-streaming-no-change",
+      "Operations": 2000,
+      "MeanNanosecondsPerOperation": 67812.52733333333,
+      "P50NanosecondsPerOperation": 68019.6165,
+      "P95NanosecondsPerOperation": 68353.2635,
+      "MaximumNanosecondsPerOperation": 68539.952,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 240259500
+    },
+    {
+      "Name": "local-streaming-one-public-update",
+      "Operations": 2000,
+      "MeanNanosecondsPerOperation": 70734.43073809524,
+      "P50NanosecondsPerOperation": 70608.3225,
+      "P95NanosecondsPerOperation": 71220.7465,
+      "MaximumNanosecondsPerOperation": 72423.4355,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 702000
+    },
+    {
+      "Name": "local-streaming-history-fallback",
+      "Operations": 250,
+      "MeanNanosecondsPerOperation": 70865.06723809525,
+      "P50NanosecondsPerOperation": 70819.46,
+      "P95NanosecondsPerOperation": 71148.376,
+      "MaximumNanosecondsPerOperation": 71200.296,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 87750
+    }
+  ]
+}
