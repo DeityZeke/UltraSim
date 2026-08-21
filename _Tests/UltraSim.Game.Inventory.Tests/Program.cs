@@ -46,7 +46,7 @@ static void ClosedGameSchemaOwnsFinalInventoryIds()
 {
     _ = new UltraSimGameComposition();
     ComponentSchema schema = GameSchema.CreateSchema();
-    Assert.Equal(8, schema.ComponentCount);
+    Assert.Equal(9, schema.ComponentCount);
     ComponentId simulation = GameSchema.GetComponentId<GameSimulationState>();
     ComponentId character = GameSchema.GetComponentId<GameCharacter>();
     ComponentId container = GameSchema.GetComponentId<InventoryContainer>();

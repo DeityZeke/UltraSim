@@ -1,9 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.4 are accepted/frozen as of
-2026-08-20 after T0.4 ownership, single-space admission, and four-way seam
-hardening. T0.5 implementation is complete and stopped for checkpoint review;
-it is not yet accepted/frozen.
+Status: active forward plan. T0.0 through T0.5 are accepted/frozen as of
+2026-08-20 after T0.5 query-contract and orientation hardening. T0.6
+implementation is complete and stopped for checkpoint review; it is not yet
+accepted/frozen and T0.7 has not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -1806,9 +1806,12 @@ delivery/labor simulation, community building, or autonomous settlement planning
 it only preserves representations that those future workflows can validate and
 lower into.
 
-### T0.5 implementation stop — 2026-08-20
+### T0.5 accepted/frozen — 2026-08-20
 
-T0.5 is implemented and stopped for checkpoint review. It does not begin T0.6.
+T0.5 was accepted/frozen after the no-base query-validation and orientation
+contract hardening. The following implementation evidence is retained as the
+checkpoint record; T0.6 subsequently builds publication without changing these
+packed static/Multi contracts.
 The frozen `WorldPack/v1` header and 48-byte main chunk row remain unchanged.
 Terrain-only packs retain their original two-section canonical byte layout;
 structure data adds optional section-local layouts only when present:
@@ -2089,6 +2092,82 @@ resurrect the identity.
 
 A snapshot contains a complete current public scope for that publication chunk at one revision. Apply stages and validates before replacing the client's corresponding semantic chunk page. A delayed pre-snapshot delta cannot resurrect state older than the committed snapshot floor. T0 proves this locally before N1 has a packet format.
 **T0.6 gate:** deterministic snapshot/delta oracle, history wrap -> snapshot fallback, slot-reuse/tombstone tests, cross-chunk migration ordering tests, warmed zero-allocation publication/query, direct-read encoding/copy benchmark, eager-vs-on-demand prepared-publication evidence including wasted-work/cache-hit accounting, and bounded memory independent of observer lifetime.
+
+### T0.6 implementation stop — 2026-08-20
+
+T0.6 is implemented and stopped for checkpoint review. It does not begin T0.7.
+The implementation adds an explicit persisted `WorldPublicComponent`; Position
+or prefab provenance alone never opts an entity into broad public projection.
+`GameWorldState` consumes Position, public-component, and lifecycle changes at
+the existing post-ECS-step boundary, reads final current truth once per staged
+entity, and commits a separate generation-owned `ChunkPublicationStore` before
+acknowledging its cursors.
+
+The store uses separate nonzero `PublicationEpoch`, generational
+`WorldPublicEntityId`, monotonic entity-public version, and chunk publication
+revision domains. Current rows are fixed-capacity SoA pages keyed by
+`SpatialChunkKey`; a global bounded intrusive history pool records complete
+identity/version operations without multiplying history by observer or resident
+chunk. Public identities remain stable across movement. One crossing publishes
+the source remove and target present at successive entity-public versions;
+ECS-slot reuse advances the public generation. Empty source chunks retain their
+tombstone history until bounded chunk/history pressure requires an explicit
+snapshot fallback.
+
+Snapshot and delta copies are complete-or-fail into caller-owned spans. Snapshot
+rows and coalesced delta rows are sorted by public identity with allocation-free
+bounded heapsort; the canonical engine-neutral snapshot body is written only
+from that sorted snapshot. The borrowed committed page view remains the cheaper
+direct SoA path and is invalid after the next publication mutation or generation
+replacement. Oversized dirty commits publish current state, clear incomplete
+history, advance the affected floors, and increment invalidation diagnostics
+rather than rejecting authority.
+
+The permanent T0.0–T0.6 world suite contains 57 tests. T0.6 coverage proves:
+
+- explicit public eligibility and final-value observation after ten same-step
+  writes;
+- Snapshot / NoChanges / coalesced Delta behavior and exact field masks;
+- source remove before target present, stable movement identity/version order,
+  generation-fenced ECS-slot reuse, and retained empty-source tombstones;
+- history overflow -> `SnapshotRequired` while the new packed current state
+  remains available;
+- transactional canonical encoding, direct committed page iteration, and 0 B
+  across 100,000 combined update/snapshot/encode/read cycles.
+
+The accepted-candidate synthetic benchmark uses a 1,024-entity fixture with
+eight publication chunks and 128 public rows in the measured chunk. With tiered
+compilation and ReadyToRun disabled, all warmed observations allocate 0 B:
+
+```text
+post-step observation, no change       82.367 ns mean /   82.847 ns p95
+public update, same chunk             408.980 ns mean /  411.232 ns p95
+public migration, cross chunk         599.374 ns mean /  602.387 ns p95
+update + one-record delta copy         534.172 ns mean /  535.857 ns p95
+iterate prepared pages, 128 rows       207.366 ns mean /  208.547 ns p95
+copy canonical snapshot, 128 rows        3.870 us mean /    3.920 us p95
+copy + encode snapshot, 128 rows         4.862 us mean /    4.906 us p95
+```
+
+The store reserves 1,352,640 bytes for that 1,032-slot admitted profile,
+including current pages, identity maps, query/planning scratch, and bounded
+history. This is deterministic reserved payload, not per-observer memory.
+
+The policy census dirties 256 chunks. Under 256 requests concentrated on 64
+unique chunks, unconditional eager construction builds 256 bodies and wastes
+192 (75%); on-demand construction builds 64 and records 192 cache-hit
+opportunities. Under two full passes over all chunks, both policies construct
+256 bodies and on-demand records 256 hit opportunities on the second pass.
+T0.6 therefore selects **on-demand recipient-independent semantic construction
+over always-current prepared pages**, with no intentional wait. It does not add
+a retained production byte cache before T0.7/N1 supplies a real consumer and
+retention policy. It also does not add Network framing, MTU, reliability,
+connection, encryption, or recipient state.
+
+The immutable machine-readable observation is
+[`terrain-t0.6-chunk-publication-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-2026-08-20.json).
+The fixture is synthetic public locomotion state, not production content,
+client streaming, Network N1, or Godot evidence.
 
 ## T0.7 — chunk interest rings and local streaming oracle
 

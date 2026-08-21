@@ -13,6 +13,7 @@ public readonly record struct GameWorldStateSnapshot(
     long ChangedRowsObserved,
     long ReconciledEntities,
     WorldSpatialIndexSnapshot Index,
+    ChunkPublicationStoreSnapshot Publication,
     long ReservedBytes);
 
 /// <summary>
@@ -25,13 +26,19 @@ public sealed class GameWorldState : IDisposable
     private readonly WorldId _worldId;
     private readonly int _entityCapacity;
     private readonly ComponentLookup<WorldPositionComponent> _positionLookup;
+    private readonly ComponentLookup<WorldPublicComponent> _publicLookup;
     private readonly ReadJobPlan<WorldPositionComponent> _baseline;
-    private readonly ChangedRowsJobPlan<WorldPositionComponent, WorldPositionComponent> _changes;
+    private readonly ChangedRowsJobPlan<WorldPositionComponent, WorldPositionComponent> _positionChanges;
+    private readonly ChangedRowsJobPlan<WorldPublicComponent, WorldPublicComponent> _publicChanges;
     private readonly ComponentId _positionComponentId;
+    private readonly ComponentId _publicComponentId;
     private readonly LifecycleRecord[] _lifecycleScratch;
     private readonly uint[] _entityScratch;
+    private readonly Entity[] _stagedEntities;
     private readonly uint[] _stageStamps;
-    private ChangeCursor _changeCursor;
+    private readonly WorldPublicChange[] _publicationChanges;
+    private ChangeCursor _positionChangeCursor;
+    private ChangeCursor _publicChangeCursor;
     private LifecycleCursor _lifecycleCursor;
     private uint _stageStamp;
     private bool _initialized;
@@ -42,7 +49,10 @@ public sealed class GameWorldState : IDisposable
     private long _changedRowsObserved;
     private long _reconciledEntities;
 
-    public GameWorldState(EcsWorld world, BoundWorldPack? baseWorld = null)
+    public GameWorldState(
+        EcsWorld world,
+        BoundWorldPack? baseWorld = null,
+        ChunkPublicationLimits? publicationLimits = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         if (baseWorld is not null && baseWorld.Space != DefaultSpace)
@@ -56,19 +66,28 @@ public sealed class GameWorldState : IDisposable
         _worldId = world.Id;
         _entityCapacity = world.Options.EntityCapacity.MaximumEntities;
         _positionLookup = world.PrepareLookup<WorldPositionComponent>();
+        _publicLookup = world.PrepareLookup<WorldPublicComponent>();
         _baseline = world.PrepareReadJob<WorldPositionComponent>();
-        _changes = world.PrepareChangedRowsJob<WorldPositionComponent, WorldPositionComponent>();
+        _positionChanges = world.PrepareChangedRowsJob<WorldPositionComponent, WorldPositionComponent>();
+        _publicChanges = world.PrepareChangedRowsJob<WorldPublicComponent, WorldPublicComponent>();
         if (!world.Schema.TryGetComponentId<WorldPositionComponent>(out _positionComponentId))
             throw new ArgumentException("World schema does not contain WorldPositionComponent.", nameof(world));
+        if (!world.Schema.TryGetComponentId<WorldPublicComponent>(out _publicComponentId))
+            throw new ArgumentException("World schema does not contain WorldPublicComponent.", nameof(world));
         _lifecycleScratch = new LifecycleRecord[world.Options.LifecycleRecordCapacity];
         _entityScratch = new uint[_entityCapacity];
+        _stagedEntities = new Entity[_entityCapacity];
         _stageStamps = new uint[_entityCapacity];
+        _publicationChanges = new WorldPublicChange[_entityCapacity];
         Index = new WorldSpatialIndex(_entityCapacity);
+        ChunkPublicationLimits limits = publicationLimits ?? ChunkPublicationLimits.ForEntityCapacity(_entityCapacity);
+        Publications = new ChunkPublicationStore(PublicationEpoch.Create(), limits);
         BaseWorld = baseWorld;
     }
 
     public WorldId WorldId => _worldId;
     public WorldSpatialIndex Index { get; private set; }
+    public ChunkPublicationStore Publications { get; private set; }
     public BoundWorldPack? BaseWorld { get; }
 
     /// <summary>
@@ -146,6 +165,22 @@ public sealed class GameWorldState : IDisposable
         return false;
     }
 
+    public bool TrySetPublic(EcsWorld world, Entity entity, in WorldPublicDescriptor descriptor)
+    {
+        EnsureWorld(world);
+        return world.TryWrite(entity, _publicLookup, new WorldPublicComponent(descriptor));
+    }
+
+    public bool TryReadPublic(EcsWorld world, Entity entity, out WorldPublicDescriptor descriptor)
+    {
+        EnsureWorld(world);
+        if (world.TryRead(entity, _publicLookup, out WorldPublicComponent component) &&
+            component.TryGetValue(out descriptor))
+            return true;
+        descriptor = default;
+        return false;
+    }
+
     public void Initialize(EcsWorld world)
     {
         EnsureWorld(world);
@@ -158,17 +193,38 @@ public sealed class GameWorldState : IDisposable
     public void Rebuild(EcsWorld world)
     {
         EnsureWorld(world);
+        RebuildCore(world, checked((ulong)_commitCount));
+    }
+
+    private void RebuildCore(EcsWorld world, ulong authorityTick)
+    {
         var candidate = new WorldSpatialIndex(_entityCapacity);
+        var candidatePublications = new ChunkPublicationStore(
+            _initialized ? PublicationEpoch.Create() : Publications.Epoch,
+            Publications.Limits);
         var visitor = new BaselineVisitor(_entityScratch, _stageStamps, NextStageStamp(), _entityCapacity);
         _ = world.ExecuteJob(_baseline, ref visitor);
+        Array.Sort(_entityScratch, 0, visitor.Count);
         for (int index = 0; index < visitor.Count; index++)
-            ReconcileCurrent(world, candidate, visitor.Indices[index]);
+        {
+            uint entityIndex = visitor.Indices[index];
+            ReconcileCurrent(world, candidate, entityIndex);
+            _publicationChanges[index] = ReadPublicationChange(world, entityIndex, default);
+        }
+        if (!candidatePublications.TryCommit(
+                _publicationChanges.AsSpan(0, visitor.Count),
+                authorityTick,
+                out ChunkPublicationCommitError publicationError))
+            throw new InvalidOperationException($"Public-world rebuild failed: {publicationError}.");
 
         LifecycleCursor lifecycle = world.CaptureLifecycleCursorFromNow();
-        ChangeCursor changes = world.CreateChangeCursorFromNow();
+        ChangeCursor positionChanges = world.CreateChangeCursorFromNow();
+        ChangeCursor publicChanges = world.CreateChangeCursorFromNow();
         Index = candidate;
+        Publications = candidatePublications;
         _lifecycleCursor = lifecycle;
-        _changeCursor = changes;
+        _positionChangeCursor = positionChanges;
+        _publicChangeCursor = publicChanges;
         _initialized = true;
         _fullRebuildCount++;
         _reconciledEntities += visitor.Count;
@@ -185,8 +241,9 @@ public sealed class GameWorldState : IDisposable
         LifecycleReadResult lifecycle = world.ReadLifecycle(ref stagedLifecycle, _lifecycleScratch);
         if (lifecycle.Status == LifecycleReadStatus.ResyncRequired || lifecycle.RemainingCount != 0)
         {
-            Rebuild(world);
-            _commitCount++;
+            long recoveryCommit = checked(_commitCount + 1);
+            RebuildCore(world, checked((ulong)recoveryCommit));
+            _commitCount = recoveryCommit;
             return;
         }
 
@@ -196,20 +253,40 @@ public sealed class GameWorldState : IDisposable
         {
             ref readonly LifecycleRecord record = ref _lifecycleScratch[index];
             if (record.Kind is LifecycleKind.Created or LifecycleKind.Destroyed ||
-                record.ComponentId == _positionComponentId)
-                Stage(record.Entity.Index, stamp, ref count);
+                record.ComponentId == _positionComponentId || record.ComponentId == _publicComponentId)
+                Stage(record.Entity.Index, record.Entity, stamp, ref count);
         }
 
-        ChangeCursor stagedChanges = _changeCursor;
-        var changed = new ChangedVisitor(_entityScratch, _stageStamps, stamp, count);
-        int changedRows = world.ExecuteChangedRowsJob(_changes, ref stagedChanges, ref changed);
-        count = changed.Count;
+        ChangeCursor stagedPositionChanges = _positionChangeCursor;
+        var changedPositions = new PositionChangedVisitor(_entityScratch, _stageStamps, stamp, count);
+        int changedRows = world.ExecuteChangedRowsJob(
+            _positionChanges, ref stagedPositionChanges, ref changedPositions);
+        count = changedPositions.Count;
+        ChangeCursor stagedPublicChanges = _publicChangeCursor;
+        var changedPublic = new PublicChangedVisitor(_entityScratch, _stageStamps, stamp, count);
+        changedRows += world.ExecuteChangedRowsJob(
+            _publicChanges, ref stagedPublicChanges, ref changedPublic);
+        count = changedPublic.Count;
+        Array.Sort(_entityScratch, 0, count);
+
+        for (int index = 0; index < count; index++)
+        {
+            uint entityIndex = _entityScratch[index];
+            _publicationChanges[index] = ReadPublicationChange(
+                world, entityIndex, _stagedEntities[entityIndex]);
+        }
+        long nextCommit = checked(_commitCount + 1);
+        if (!Publications.TryCommit(
+                _publicationChanges.AsSpan(0, count), checked((ulong)nextCommit),
+                out ChunkPublicationCommitError publicationError))
+            throw new InvalidOperationException($"Public-world commit failed: {publicationError}.");
         for (int index = 0; index < count; index++)
             ReconcileCurrent(world, Index, _entityScratch[index]);
 
         _lifecycleCursor = stagedLifecycle;
-        _changeCursor = stagedChanges;
-        _commitCount++;
+        _positionChangeCursor = stagedPositionChanges;
+        _publicChangeCursor = stagedPublicChanges;
+        _commitCount = nextCommit;
         _lifecycleFactsObserved += lifecycle.Count;
         _changedRowsObserved += changedRows;
         _reconciledEntities += count;
@@ -220,8 +297,11 @@ public sealed class GameWorldState : IDisposable
         long scratch = checked(
             (long)_lifecycleScratch.Length * Unsafe.SizeOf<LifecycleRecord>() +
             (long)_entityScratch.Length * sizeof(uint) +
+            (long)_stagedEntities.Length * Unsafe.SizeOf<Entity>() +
+            (long)_publicationChanges.Length * Unsafe.SizeOf<WorldPublicChange>() +
             (long)_stageStamps.Length * sizeof(uint));
         WorldSpatialIndexSnapshot index = Index.GetSnapshot();
+        ChunkPublicationStoreSnapshot publication = Publications.GetSnapshot();
         return new GameWorldStateSnapshot(
             _initialized,
             _commitCount,
@@ -230,7 +310,8 @@ public sealed class GameWorldState : IDisposable
             _changedRowsObserved,
             _reconciledEntities,
             index,
-            checked(scratch + index.ReservedBytes));
+            publication,
+            checked(scratch + index.ReservedBytes + publication.ReservedBytes));
     }
 
     public void Dispose() => _disposed = true;
@@ -250,11 +331,36 @@ public sealed class GameWorldState : IDisposable
         }
     }
 
+    private WorldPublicChange ReadPublicationChange(EcsWorld world, uint entityIndex, Entity stagedEntity)
+    {
+        if (world.TryGetEntity(entityIndex, out Entity entity))
+        {
+            if (world.TryRead(entity, _positionLookup, out WorldPositionComponent positionComponent))
+            {
+                if (!positionComponent.TryGetValue(out WorldPosition position))
+                    throw new InvalidOperationException(
+                        "Authoritative WorldPositionComponent is not canonically normalized.");
+                if (world.TryRead(entity, _publicLookup, out WorldPublicComponent publicComponent))
+                {
+                    if (!publicComponent.TryGetValue(out WorldPublicDescriptor descriptor))
+                        throw new InvalidOperationException(
+                            "Authoritative WorldPublicComponent is not canonical.");
+                    return WorldPublicChange.Present(entity, position, descriptor);
+                }
+            }
+            return WorldPublicChange.Absent(entity);
+        }
+        if (!stagedEntity.IsValid)
+            throw new InvalidOperationException("A removed public-world entity has no retained lifecycle identity.");
+        return WorldPublicChange.Absent(stagedEntity);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Stage(uint entityIndex, uint stamp, ref int count)
+    private void Stage(uint entityIndex, Entity entity, uint stamp, ref int count)
     {
         if (entityIndex >= (uint)_stageStamps.Length)
             throw new InvalidOperationException("Spatial change referenced an entity outside configured capacity.");
+        _stagedEntities[entityIndex] = entity;
         if (_stageStamps[entityIndex] == stamp) return;
         _stageStamps[entityIndex] = stamp;
         _entityScratch[count++] = entityIndex;
@@ -315,13 +421,13 @@ public sealed class GameWorldState : IDisposable
         }
     }
 
-    private struct ChangedVisitor : IReadOnlyChunkJob<WorldPositionComponent>
+    private struct PositionChangedVisitor : IReadOnlyChunkJob<WorldPositionComponent>
     {
         private readonly uint[] _indices;
         private readonly uint[] _stamps;
         private readonly uint _stamp;
 
-        internal ChangedVisitor(uint[] indices, uint[] stamps, uint stamp, int count)
+        internal PositionChangedVisitor(uint[] indices, uint[] stamps, uint stamp, int count)
         {
             _indices = indices;
             _stamps = stamps;
@@ -332,6 +438,34 @@ public sealed class GameWorldState : IDisposable
         internal int Count;
 
         public void Execute(in ReadOnlyComponentChunk<WorldPositionComponent> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint index = chunk.EntityIndices[row];
+                if (_stamps[index] == _stamp) continue;
+                _stamps[index] = _stamp;
+                _indices[Count++] = index;
+            }
+        }
+    }
+
+    private struct PublicChangedVisitor : IReadOnlyChunkJob<WorldPublicComponent>
+    {
+        private readonly uint[] _indices;
+        private readonly uint[] _stamps;
+        private readonly uint _stamp;
+
+        internal PublicChangedVisitor(uint[] indices, uint[] stamps, uint stamp, int count)
+        {
+            _indices = indices;
+            _stamps = stamps;
+            _stamp = stamp;
+            Count = count;
+        }
+
+        internal int Count;
+
+        public void Execute(in ReadOnlyComponentChunk<WorldPublicComponent> chunk)
         {
             for (int row = 0; row < chunk.Count; row++)
             {

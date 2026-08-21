@@ -87,7 +87,15 @@ generation-owned `WorldSpatialIndex`. Exact ECS changed-row and lifecycle cursor
 are consumed after the complete ECS graph/structural barrier and before clock
 advancement. Same-home motion retains its membership row; chunk crossings relink
 that row; lifecycle overrun rebuilds privately from current ECS truth. Terrain
-packs, public chunk projection, and rendering remain absent.
+packs, public chunk projection, and rendering remain absent from that checkpoint.
+
+T0.6 adds the separate persisted `WorldPublicComponent` eligibility contract and
+generation-owned `ChunkPublicationStore`. `GameWorldState` consumes Position,
+public-component, and lifecycle changes at the same post-step barrier, then
+publishes final compact SoA rows with separate public identities/entity versions,
+chunk revisions, and bounded observer-independent dirty history. Snapshot/delta
+and borrowed-page reads are game-world semantics; no Network/session state or
+watcher list lives in the store.
 
 T0.4 binds an optional immutable `WorldPack` to the same concrete game space and
 content meaning before generation publication. Pure pack queries describe that

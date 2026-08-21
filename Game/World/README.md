@@ -4,7 +4,8 @@ Terrain T0.0 established the game-owned integer position/profile layer over the
 dependency-neutral [Spatial contracts](../../Kernels/Spatial/README.md). T0.1
 adds authoritative ECS position and generation-owned dynamic membership; T0.2–T0.5
 add the dense base terrain, immutable pack, base queries/mesh payload, and packed
-frozen-static/static-Multi content.
+frozen-static/static-Multi content. T0.6 adds explicit dynamic public eligibility,
+packed per-chunk current state, and bounded observer-independent dirty history.
 
 The frozen first profile is:
 
@@ -63,6 +64,53 @@ generation boundary.
 
 Terrain packs, statics, chunk publication/history, client streaming, rendering,
 and Network N1 are not part of T0.1.
+
+## Dynamic chunk publication
+
+T0.6 keeps broad public projection explicit. `WorldPositionComponent` supplies
+location but does not grant publication eligibility; a valid persisted
+`WorldPublicComponent` supplies the compact public prefab, yaw, and state flags.
+`GameWorldState` observes both components plus lifecycle at the same post-ECS
+barrier used by spatial membership and commits only final current values.
+
+`ChunkPublicationStore` is separate generation-owned game storage keyed by
+`SpatialChunkKey`:
+
+```text
+fixed SoA current pages
+separate PublicationEpoch
+generational WorldPublicEntityId
+monotonic entity-public versions
+chunk publication revisions
+one bounded global dirty-history pool
+```
+
+These identities do not alias ECS handles, spatial membership slots, durable
+identity, client slots, or Network replication identity. Movement retains one
+public identity and publishes a source remove before a target present using
+successive entity-public versions. Destruction/public-component removal emits a
+tombstone; ECS slot reuse advances the public generation.
+
+Snapshots and coalesced deltas write complete results into caller-owned spans.
+An old/future/foreign-epoch cursor requests a snapshot; no-change cursors produce
+no rows. History pressure never rejects a representable current page: an
+oversized dirty commit advances the current revision/floor, clears incomplete
+history, and forces older consumers to snapshot. Observer cursors and watcher
+lists are deliberately absent.
+
+The cheapest local bridge can borrow committed read-only SoA pages until the
+next mutation/replacement. Canonical semantic bytes instead use the sorted
+caller-owned snapshot result. Synthetic policy evidence selected on-demand
+semantic construction over always-current pages: sparse demand avoided 192 of
+256 otherwise eager constructions, while full demand required the same 256
+constructions either way. No retained encoded-body cache or Network packet
+format is introduced before a concrete consumer earns its lifetime policy.
+
+The 1,024-entity/8-chunk benchmark records 0 B warmed allocation, about 82 ns for
+an unchanged post-step observation, 409 ns for a same-chunk public update,
+599 ns for a crossing, 207 ns to iterate prepared 128-row pages, 3.87 us to copy
+a canonical 128-row snapshot, and 4.86 us to copy plus encode it. See the
+[immutable T0.6 evidence](../../_Benchmarks/Baselines/terrain-t0.6-chunk-publication-2026-08-20.json).
 
 ## Terrain foundation format
 

@@ -37,6 +37,12 @@ public static class GameWorldStaticDefinitionIds
     public const uint Book = 6;
 }
 
+/// <summary>Compact public-projection prefab identities admitted by the concrete game.</summary>
+public static class GameWorldPublicPrefabIds
+{
+    public const uint Character = 1;
+}
+
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
 public sealed class GameContent : IInventoryContentCatalog
 {
@@ -135,12 +141,16 @@ public sealed class GameContent : IInventoryContentCatalog
         character.With(new GameCharacter { Marker = 1 });
         character.With(new GameSimulationState { TickMarker = 0 });
         character.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        character.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.Character, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         character.DisplayName("Character");
         // The paired no-simulation shape is a real content route used when a
         // character's scheduled simulation membership is explicitly suspended.
         PrefabBuilder dormantCharacter = content.Define(GamePrefabKeys.CharacterDormant);
         dormantCharacter.With(new GameCharacter { Marker = 1 });
         dormantCharacter.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        dormantCharacter.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.Character, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         dormantCharacter.DisplayName("Dormant Character");
         InventoryContainerAuthoring backpackSource = InventoryContent.DefineContainer(
             content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);

@@ -43,6 +43,7 @@ when those systems exist.
 | `UltraSim.WorldPack.Benchmarks` | Terrain T0.3 canonical sectioned-pack compilation/open/file-reopen evidence plus allocation-free random base-terrain reads and complete-chunk copies. |
 | `UltraSim.TerrainQueryMesh.Benchmarks` | Terrain T0.4 exact base-height/material queries and fixed-grid engine-neutral mesh construction, including canonical payload identity and neighbor-aware seam frames. |
 | `UltraSim.FrozenWorldStructures.Benchmarks` | Terrain T0.5 packed independent-static/static-Multi reads, deterministic compatible render groups, and bounded transactional sparse plus dense 2x2-chunk exact static-bounds queries. |
+| `UltraSim.ChunkPublication.Benchmarks` | Terrain T0.6 post-step public updates/migration, coalesced delta copy, direct prepared-page iteration, canonical snapshot copy/encoding, reservation, and eager-vs-on-demand construction evidence. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |
@@ -86,6 +87,9 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.FrozenWorldStructures.Benchmarks -c Release -- \
     --output=_Benchmarks/results/terrain-t0.5-frozen-structures-local.json
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.ChunkPublication.Benchmarks -c Release -- \
+    --output=_Benchmarks/results/terrain-t0.6-chunk-publication-local.json
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \

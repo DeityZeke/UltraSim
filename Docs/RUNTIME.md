@@ -49,8 +49,9 @@ Clock.AdvanceSimulationTick()
 ```
 
 Runtime does not interpret the participant's domain state. Terrain T0.1 uses the
-capability for `WorldSpatialIndex`; later game-owned post-step projection may
-compose behind the same single generation root.
+capability for `WorldSpatialIndex`; T0.6 composes `ChunkPublicationStore` behind
+the same `GameWorldState` participant and post-step boundary without teaching
+Runtime either domain.
 
 ## Hosts
 

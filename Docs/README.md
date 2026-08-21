@@ -67,13 +67,13 @@ reports live in git history. Accepted measurements live in immutable JSON under
   terrain foundation, and T0.3 accepted the canonical sectioned immutable
   WorldPack/source. T0.4 accepted exact base-terrain queries plus the bounded
   deterministic engine-neutral mesh payload after single-space admission,
-  current-world query ownership, and four-way seam hardening. T0.5 is now
-  implemented and stopped for review with optional packed statics/Multi sections,
-  stable cross-chunk logical identities, deterministic render grouping, and
-  bounded exact static-bounds queries. The plan next proceeds to streaming,
-  dynamic membership, shared packed publication,
-  bounded dirty history, client rendering, persistence seams, and one playable
-  cabin vertical.
+  current-world query ownership, and four-way seam hardening. T0.5 accepted
+  optional packed statics/Multi sections, stable cross-chunk logical identities,
+  deterministic render grouping, and bounded exact static-bounds queries. T0.6
+  now implements explicit public eligibility, one packed current publication per
+  chunk, bounded observer-independent dirty history, and canonical snapshot/delta
+  reads; it is stopped for review. The plan next proceeds to local interest/
+  streaming, client rendering, persistence seams, and one playable cabin vertical.
 - [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
   N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0
   sparse relation graph: snapshot on first interest, query bounded dirty history

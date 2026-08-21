@@ -72,6 +72,15 @@ var tests = new (string Name, Action Body)[]
     ("FailedRebuildPreservesPublishedSpatialIndex", FailedRebuildPreservesPublishedSpatialIndex),
     ("GenerationReplacementPublishesFreshDerivedIndex", GenerationReplacementPublishesFreshDerivedIndex),
     ("MillionSameAndCrossChunkMovesAllocateZero", MillionSameAndCrossChunkMovesAllocateZero),
+    ("PublicEligibilityAndFinalPostStepTruthAreExplicit", PublicEligibilityAndFinalPostStepTruthAreExplicit),
+    ("PublicationSnapshotDeltaAndNoChangeSemanticsAreDeterministic",
+        PublicationSnapshotDeltaAndNoChangeSemanticsAreDeterministic),
+    ("CrossChunkPublicationOrdersRemoveBeforePresentAndFencesReuse",
+        CrossChunkPublicationOrdersRemoveBeforePresentAndFencesReuse),
+    ("PublicationHistoryLossFallsBackWithoutRejectingCurrentState",
+        PublicationHistoryLossFallsBackWithoutRejectingCurrentState),
+    ("PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree",
+        PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree),
 };
 
 foreach ((string name, Action body) in tests)
@@ -80,7 +89,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.5 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T0.6 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -1524,7 +1533,7 @@ static void AssertSharedTerrainEdgeWithDifferentBases(int elevationOffset)
 static void PositionComponentIsPersistedCanonicalAuthority()
 {
     ComponentSchema schema = GameSchema.CreateSchema();
-    Equal(8, schema.ComponentCount);
+    Equal(9, schema.ComponentCount);
     ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
     True(position.IsValid);
     PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();
@@ -1627,6 +1636,7 @@ static void ComponentRemovalReadditionAndSlotReuseConverge()
 static void LifecycleOverrunRebuildsFromCurrentTruth()
 {
     using RawSpatialFixture fixture = new(lifecycleCapacity: 4);
+    PublicationEpoch priorPublicationEpoch = fixture.State.Publications.Epoch;
     for (int index = 0; index < 8; index++)
     {
         True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity transient));
@@ -1639,6 +1649,7 @@ static void LifecycleOverrunRebuildsFromCurrentTruth()
     GameWorldStateSnapshot snapshot = fixture.State.GetSnapshot();
     Equal(2L, snapshot.FullRebuildCount);
     Equal(1, snapshot.Index.EntityCount);
+    True(snapshot.Publication.Epoch.Value > priorPublicationEpoch.Value);
     True(fixture.State.Index.TryGetHome(survivor, out SpatialChunkKey home));
     Equal(new SpatialChunkCoord(-2, -3), home.Coord);
 }
@@ -1899,6 +1910,283 @@ static void MillionSameAndCrossChunkMovesAllocateZero()
     Equal(1, fixture.State.Index.GetSnapshot().EntityCount);
 }
 
+static void PublicEligibilityAndFinalPostStepTruthAreExplicit()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 64);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+    True(fixture.State.TrySetPosition(
+        fixture.World, entity, new WorldPosition(2, -3, 10, 20, 30)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(0, fixture.State.Publications.GetSnapshot().PublicEntityCount);
+
+    True(fixture.World.TryTransition(entity, fixture.AddPublic));
+    Throws<InvalidOperationException>(() => fixture.State.CommitAfterEcsStep(fixture.World));
+    Equal(0, fixture.State.Publications.GetSnapshot().PublicEntityCount);
+    True(fixture.State.Index.TryGetHome(entity, out _));
+    for (int index = 0; index < 10; index++)
+    {
+        True(fixture.State.TrySetPosition(fixture.World, entity,
+            new WorldPosition(2, -3, checked((ushort)(100 + index)), 200, index)));
+        True(fixture.State.TrySetPublic(fixture.World, entity,
+            new WorldPublicDescriptor(77, new WorldYaw(checked((ushort)(1_000 + index))),
+                WorldPublicStateFlags.Visible)));
+    }
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    var records = new WorldPublicRecord[1];
+    SpatialChunkKey key = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(2, -3));
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(key, records, out ChunkPublicationBatch batch));
+    Equal(1, batch.Count);
+    Equal(77U, records[0].PrefabId);
+    Equal(new WorldPosition(2, -3, 109, 200, 9), records[0].Position);
+    Equal(new WorldYaw(1_009), records[0].Orientation);
+    Equal(WorldPublicStateFlags.Visible, records[0].StateFlags);
+    Equal(1UL, records[0].EntityPublicVersion);
+    True(records[0].Id.IsValid);
+    Equal(1, fixture.State.Publications.GetSnapshot().PublicEntityCount);
+    WorldPublicEntityId publicId = records[0].Id;
+    True(fixture.World.TryTransition(entity, fixture.RemovePublic));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    var removed = new WorldPublicDeltaRecord[1];
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(key, batch.Cursor, removed, out _));
+    Equal(WorldPublicOperation.Remove, removed[0].Operation);
+    Equal(publicId, removed[0].Id);
+    Equal(2UL, removed[0].EntityPublicVersion);
+    Equal(0, fixture.State.Publications.GetSnapshot().PublicEntityCount);
+}
+
+static void PublicationSnapshotDeltaAndNoChangeSemanticsAreDeterministic()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 64);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity entity));
+    True(fixture.State.TrySetPosition(
+        fixture.World, entity, new WorldPosition(-1, 4, 100, 200, 300)));
+    True(fixture.State.TrySetPublic(fixture.World, entity,
+        new WorldPublicDescriptor(9, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey key = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(-1, 4));
+    var snapshot = new WorldPublicRecord[1];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(key, snapshot, out ChunkPublicationBatch initial));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    var delta = new WorldPublicDeltaRecord[1];
+    Equal(ChunkPublicationReadStatus.NoChanges,
+        fixture.State.Publications.TryCopyDelta(key, initial.Cursor, delta, out ChunkPublicationBatch none));
+    Equal(initial.Cursor, none.Cursor);
+
+    True(fixture.State.TrySetPosition(
+        fixture.World, entity, new WorldPosition(-1, 4, 150, 250, 350)));
+    True(fixture.State.TrySetPublic(fixture.World, entity,
+        new WorldPublicDescriptor(9, WorldYaw.QuarterTurn, WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(key, initial.Cursor, delta, out ChunkPublicationBatch changed));
+    Equal(1, changed.Count);
+    Equal(WorldPublicOperation.Present, delta[0].Operation);
+    Equal(WorldPublicFieldMask.Transform | WorldPublicFieldMask.Orientation, delta[0].Fields);
+    Equal(2UL, delta[0].EntityPublicVersion);
+    Equal(new WorldPosition(-1, 4, 150, 250, 350), delta[0].Current.Position);
+    Equal(WorldYaw.QuarterTurn, delta[0].Current.Orientation);
+    True(changed.Cursor.Revision.Value > initial.Cursor.Revision.Value);
+}
+
+static void CrossChunkPublicationOrdersRemoveBeforePresentAndFencesReuse()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 64, entityCapacity: 4);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity first));
+    True(fixture.State.TrySetPosition(
+        fixture.World, first, new WorldPosition(0, 0, 1, 2, 3)));
+    True(fixture.State.TrySetPublic(fixture.World, first,
+        new WorldPublicDescriptor(41, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey source = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(0, 0));
+    SpatialChunkKey target = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(1, 0));
+    var records = new WorldPublicRecord[1];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(source, records, out ChunkPublicationBatch sourceBefore));
+    WorldPublicRecord original = records[0];
+
+    True(fixture.State.TrySetPosition(
+        fixture.World, first, new WorldPosition(1, 0, 4, 5, 6)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    var deltas = new WorldPublicDeltaRecord[2];
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(source, sourceBefore.Cursor, deltas,
+            out ChunkPublicationBatch sourceAfter));
+    Equal(1, sourceAfter.Count);
+    Equal(WorldPublicOperation.Remove, deltas[0].Operation);
+    Equal(original.Id, deltas[0].Id);
+    Equal(2UL, deltas[0].EntityPublicVersion);
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(target, records, out ChunkPublicationBatch targetBefore));
+    Equal(original.Id, records[0].Id);
+    Equal(3UL, records[0].EntityPublicVersion);
+    WorldPublicRecord moved = records[0];
+    var oracle = new PublicOracleState(original, present: true);
+    ApplyPublicOracle(ref oracle, new WorldPublicDeltaRecord(
+        WorldPublicOperation.Present, WorldPublicFieldMask.Complete,
+        moved.Id, moved.EntityPublicVersion, moved));
+    ApplyPublicOracle(ref oracle, deltas[0]);
+    True(oracle.Present);
+    Equal(moved.Position, oracle.Record.Position);
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(source, sourceBefore.Cursor, deltas, out sourceAfter));
+    Equal(WorldPublicOperation.Remove, deltas[0].Operation);
+
+    True(fixture.World.TryDestroy(first));
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity replacement));
+    Equal(first.Index, replacement.Index);
+    True(replacement.Generation > first.Generation);
+    True(fixture.State.TrySetPosition(
+        fixture.World, replacement, new WorldPosition(1, 0, 7, 8, 9)));
+    True(fixture.State.TrySetPublic(fixture.World, replacement,
+        new WorldPublicDescriptor(42, WorldYaw.HalfTurn, WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(target, targetBefore.Cursor, deltas,
+            out ChunkPublicationBatch replacementBatch));
+    Equal(1, replacementBatch.Count);
+    Equal(WorldPublicOperation.Present, deltas[0].Operation);
+    Equal(original.Id.Index, deltas[0].Id.Index);
+    True(deltas[0].Id.Generation > original.Id.Generation);
+    Equal(1UL, deltas[0].EntityPublicVersion);
+    Equal(42U, deltas[0].Current.PrefabId);
+    ApplyPublicOracle(ref oracle, deltas[0]);
+    ApplyPublicOracle(ref oracle, new WorldPublicDeltaRecord(
+        WorldPublicOperation.Present, WorldPublicFieldMask.Complete,
+        moved.Id, moved.EntityPublicVersion, moved));
+    True(oracle.Present);
+    Equal(42U, oracle.Record.PrefabId);
+    Equal(deltas[0].Id, oracle.Record.Id);
+}
+
+static void PublicationHistoryLossFallsBackWithoutRejectingCurrentState()
+{
+    var limits = new ChunkPublicationLimits(
+        MaximumPublicEntities: 4,
+        MaximumResidentChunks: 8,
+        RowsPerPage: 2,
+        HistoryEntryCapacity: 2);
+    using RawSpatialFixture fixture = new(
+        lifecycleCapacity: 64, entityCapacity: 4, publicationLimits: limits);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity first));
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity second));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(0, 0, 1, 1, 1)));
+    True(fixture.State.TrySetPosition(fixture.World, second, new WorldPosition(0, 0, 2, 2, 2)));
+    var descriptor = new WorldPublicDescriptor(5, WorldYaw.Zero, WorldPublicStateFlags.Visible);
+    True(fixture.State.TrySetPublic(fixture.World, first, descriptor));
+    True(fixture.State.TrySetPublic(fixture.World, second, descriptor));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey source = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(0, 0));
+    var sourceRows = new WorldPublicRecord[2];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(source, sourceRows, out ChunkPublicationBatch before));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(1, 0, 3, 3, 3)));
+    True(fixture.State.TrySetPosition(fixture.World, second, new WorldPosition(2, 0, 4, 4, 4)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    var deltas = new WorldPublicDeltaRecord[4];
+    Equal(ChunkPublicationReadStatus.SnapshotRequired,
+        fixture.State.Publications.TryCopyDelta(source, before.Cursor, deltas, out _));
+    ChunkPublicationStoreSnapshot state = fixture.State.Publications.GetSnapshot();
+    Equal(2, state.PublicEntityCount);
+    Equal(1UL, state.HistoryInvalidations);
+    Equal(4, state.LargestDirtyCommit);
+    var destinationRows = new WorldPublicRecord[1];
+    SpatialChunkKey firstDestination =
+        new(GameWorldState.DefaultSpace, new SpatialChunkCoord(1, 0));
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(
+            firstDestination, destinationRows, out ChunkPublicationBatch afterOverflow));
+    True(destinationRows[0].Id.IsValid);
+    Equal(new WorldPosition(1, 0, 3, 3, 3), destinationRows[0].Position);
+
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(1, 0, 5, 5, 5)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(
+            firstDestination, afterOverflow.Cursor, deltas, out _));
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(1, 0, 6, 6, 6)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(1, 0, 7, 7, 7)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(ChunkPublicationReadStatus.SnapshotRequired,
+        fixture.State.Publications.TryCopyDelta(
+            firstDestination, afterOverflow.Cursor, deltas, out _));
+}
+
+static void PublicationSemanticEncodingIsCanonicalTransactionalAndAllocationFree()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 64, entityCapacity: 4);
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity first));
+    True(fixture.World.TryCreate(fixture.PublicSpatialArchetype, out Entity second));
+    var descriptor = new WorldPublicDescriptor(11, WorldYaw.ThreeQuarterTurn,
+        WorldPublicStateFlags.Visible);
+    True(fixture.State.TrySetPosition(fixture.World, first, new WorldPosition(-2, -2, 8, 9, 10)));
+    True(fixture.State.TrySetPosition(fixture.World, second, new WorldPosition(-2, -2, 6, 7, 8)));
+    True(fixture.State.TrySetPublic(fixture.World, first, descriptor));
+    True(fixture.State.TrySetPublic(fixture.World, second, descriptor));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+
+    SpatialChunkKey key = new(GameWorldState.DefaultSpace, new SpatialChunkCoord(-2, -2));
+    var records = new WorldPublicRecord[2];
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(key, records, out ChunkPublicationBatch batch));
+    True(records[0].Id.CompareTo(records[1].Id) < 0);
+    var bytes = new byte[ChunkPublicationSemanticCodec.MeasureSnapshot(records.Length)];
+    True(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, bytes, out int written));
+    Equal(bytes.Length, written);
+    var repeated = new byte[bytes.Length];
+    True(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, repeated, out _));
+    True(bytes.AsSpan().SequenceEqual(repeated));
+
+    var tooSmall = new byte[bytes.Length - 1];
+    Array.Fill(tooSmall, (byte)0xA5);
+    False(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, tooSmall, out int rejected));
+    Equal(0, rejected);
+    True(tooSmall.AsSpan().IndexOfAnyExcept((byte)0xA5) < 0);
+    (records[0], records[1]) = (records[1], records[0]);
+    Array.Fill(repeated, (byte)0x5A);
+    False(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, repeated, out rejected));
+    Equal(0, rejected);
+    True(repeated.AsSpan().IndexOfAnyExcept((byte)0x5A) < 0);
+    (records[0], records[1]) = (records[1], records[0]);
+
+    for (int index = 0; index < 1_000; index++)
+    {
+        True(fixture.State.TrySetPosition(fixture.World, first,
+            new WorldPosition(-2, -2, checked((ushort)(100 + (index & 255))), 9, index)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+        Equal(ChunkPublicationReadStatus.Snapshot,
+            fixture.State.Publications.TryCopySnapshot(key, records, out batch));
+        True(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, bytes, out _));
+    }
+    long beforeAllocation = GC.GetAllocatedBytesForCurrentThread();
+    ulong checksum = 0;
+    for (int index = 0; index < 100_000; index++)
+    {
+        True(fixture.State.TrySetPosition(fixture.World, first,
+            new WorldPosition(-2, -2, checked((ushort)(100 + (index & 255))), 9, index)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+        Equal(ChunkPublicationReadStatus.Snapshot,
+            fixture.State.Publications.TryCopySnapshot(key, records, out batch));
+        True(ChunkPublicationSemanticCodec.TryWriteSnapshot(batch, records, bytes, out _));
+        checksum += bytes[0];
+        True(fixture.State.Publications.TryGetCommittedView(key, out ChunkPublicationView view));
+        foreach (ChunkPublicationPageView page in view)
+            checksum += checked((ulong)page.Count);
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - beforeAllocation;
+    Equal(0L, allocated);
+    True(checksum != 0);
+}
+
 static void FloorDivisionOwnsNegativeBoundaries()
 {
     (long Global, int Chunk, int Local)[] cases =
@@ -2147,6 +2435,27 @@ static void AssertPosition(
     Equal(globalZ, position.GlobalZMillimeters);
 }
 
+static void ApplyPublicOracle(ref PublicOracleState state, in WorldPublicDeltaRecord delta)
+{
+    int generation = delta.Id.Generation.CompareTo(state.Record.Id.Generation);
+    if (generation < 0 || generation == 0 && delta.EntityPublicVersion <= state.Record.EntityPublicVersion)
+        return;
+    if (delta.Operation == WorldPublicOperation.Remove)
+    {
+        state.Record = state.Record with
+        {
+            Id = delta.Id,
+            EntityPublicVersion = delta.EntityPublicVersion,
+        };
+        state.Present = false;
+    }
+    else
+    {
+        state.Record = delta.Current;
+        state.Present = true;
+    }
+}
+
 static void True(bool condition)
 {
     if (!condition) throw new InvalidOperationException("Expected true.");
@@ -2181,20 +2490,34 @@ static class WorldPackTestProfile
         new(0x1122_3344_5566_7788UL, 0x8877_6655_4433_2211UL);
 }
 
+struct PublicOracleState
+{
+    internal PublicOracleState(WorldPublicRecord record, bool present) =>
+        (Record, Present) = (record, present);
+    internal WorldPublicRecord Record;
+    internal bool Present;
+}
+
 sealed class RawSpatialFixture : IDisposable
 {
-    internal RawSpatialFixture(int lifecycleCapacity, int entityCapacity = 32, BoundWorldPack? baseWorld = null)
+    internal RawSpatialFixture(
+        int lifecycleCapacity,
+        int entityCapacity = 32,
+        BoundWorldPack? baseWorld = null,
+        ChunkPublicationLimits? publicationLimits = null)
     {
         var options = new EcsWorldOptions(
             new EntityCapacity(entityCapacity),
             maximumArchetypes: 4,
             maximumPreparedPlans: 8,
-            maximumPreparedTransitions: 2,
+            maximumPreparedTransitions: 4,
             lifecycleRecordCapacity: lifecycleCapacity);
         World = new EcsWorld(GameSchema.CreateSchema(), options);
-        State = new GameWorldState(World, baseWorld);
+        State = new GameWorldState(World, baseWorld, publicationLimits);
         RawPositionLookup = World.PrepareLookup<WorldPositionComponent>();
+        RawPublicLookup = World.PrepareLookup<WorldPublicComponent>();
         ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
+        ComponentId publication = GameSchema.GetComponentId<WorldPublicComponent>();
         NonSpatialArchetype = World.RegisterArchetype(
             ReadOnlySpan<ComponentId>.Empty,
             ChunkLayoutOptions.KiB16,
@@ -2204,8 +2527,15 @@ sealed class RawSpatialFixture : IDisposable
             spatialSignature,
             ChunkLayoutOptions.KiB16,
             maximumChunks: 1);
+        Span<ComponentId> publicSpatialSignature = stackalloc ComponentId[2] { position, publication };
+        PublicSpatialArchetype = World.RegisterArchetype(
+            publicSpatialSignature,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
         RemovePosition = World.PrepareTransition(SpatialArchetype, NonSpatialArchetype);
         AddPosition = World.PrepareTransition(NonSpatialArchetype, SpatialArchetype);
+        RemovePublic = World.PrepareTransition(PublicSpatialArchetype, SpatialArchetype);
+        AddPublic = World.PrepareTransition(SpatialArchetype, PublicSpatialArchetype);
         World.Seal();
         World.Initialize();
         World.BeginRun();
@@ -2215,10 +2545,14 @@ sealed class RawSpatialFixture : IDisposable
     internal EcsWorld World { get; }
     internal GameWorldState State { get; }
     internal ComponentLookup<WorldPositionComponent> RawPositionLookup { get; }
+    internal ComponentLookup<WorldPublicComponent> RawPublicLookup { get; }
     internal ArchetypeHandle SpatialArchetype { get; }
+    internal ArchetypeHandle PublicSpatialArchetype { get; }
     internal ArchetypeHandle NonSpatialArchetype { get; }
     internal ArchetypeTransition RemovePosition { get; }
     internal ArchetypeTransition AddPosition { get; }
+    internal ArchetypeTransition RemovePublic { get; }
+    internal ArchetypeTransition AddPublic { get; }
 
     public void Dispose()
     {

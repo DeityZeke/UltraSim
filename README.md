@@ -90,10 +90,12 @@ reference-model hardening, without creating a generic world storage kernel.
 T0.2 accepted the compact dense base-terrain contract using a per-chunk int32
 base plus unsigned q5 offsets, and T0.3 accepted the canonical sectioned
 immutable WorldPack/source. T0.4 accepted exact integer base queries and the
-bounded deterministic base-mesh payload. T0.5 now implements optional packed
+bounded deterministic base-mesh payload. T0.5 accepted optional packed
 frozen-static and static-Multi sections, stable logical identities, deterministic
-render groups, and bounded exact static-bounds queries; it is stopped for review.
-Publication and Network N1 remain later gates.
+render groups, and bounded exact static-bounds queries. T0.6 now implements the
+explicit dynamic-public component, generation-owned packed chunk publication,
+bounded dirty history, canonical snapshot/delta reads, and direct committed SoA
+views; it is stopped for review. Streaming/Godot and Network N1 remain later gates.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

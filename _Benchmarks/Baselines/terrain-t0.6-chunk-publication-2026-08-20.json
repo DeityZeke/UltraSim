@@ -1,0 +1,119 @@
+{
+  "Workload": "terrain-t0.6-chunk-publication-v1",
+  "TimestampUtc": "2026-08-21T04:00:53.0857407+00:00",
+  "RuntimeVersion": "8.0.29",
+  "FrameworkDescription": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "ProcessorCount": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "DotnetTieredCompilation": "0",
+  "DotnetReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "CommitOperationsPerSample": 100000,
+  "ReadOperationsPerSample": 50000,
+  "Profile": {
+    "Fixture": "synthetic dynamic public entities; 128-row packed read chunk and 256-chunk policy fixture; not production content or an observer/network workload",
+    "Population": 1024,
+    "AdmittedEntityCapacity": 1032,
+    "ChunkCount": 8,
+    "MaximumRowsPerChunk": 128,
+    "StoreReservedBytes": 1352640,
+    "HistoryEntryCapacity": 4128,
+    "WorldPublicComponentBytes": 8,
+    "WorldPublicEntityIdBytes": 8,
+    "PublicationEpochBytes": 8,
+    "ChunkPublicationRevisionBytes": 8,
+    "SemanticHeaderBytes": 56,
+    "SemanticRecordBytes": 40
+  },
+  "Policy": {
+    "DirtyChunkCount": 256,
+    "SparseRequests": 256,
+    "SparseEagerConstructions": 256,
+    "SparseEagerWastedConstructions": 192,
+    "SparseOnDemandConstructions": 64,
+    "SparseOnDemandCacheHits": 192,
+    "SparseEagerConstructedBytes": 178176,
+    "SparseOnDemandConstructedBytes": 44544,
+    "FullRequests": 512,
+    "FullEagerConstructions": 256,
+    "FullOnDemandConstructions": 256,
+    "FullOnDemandCacheHits": 256,
+    "SelectedPolicy": "on-demand semantic construction over always-current prepared pages; no wait and no production byte cache until a consumer earns its retention policy"
+  },
+  "Timings": [
+    {
+      "Name": "post-step-observation-no-change",
+      "Operations": 100000,
+      "MeanNanosecondsPerOperation": 82.36730000000001,
+      "P50NanosecondsPerOperation": 82.26602,
+      "P95NanosecondsPerOperation": 82.84722,
+      "MaximumNanosecondsPerOperation": 83.11501,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 35100000
+    },
+    {
+      "Name": "public-update-same-chunk",
+      "Operations": 100000,
+      "MeanNanosecondsPerOperation": 408.9802780952381,
+      "P50NanosecondsPerOperation": 409.13762,
+      "P95NanosecondsPerOperation": 411.23221,
+      "MaximumNanosecondsPerOperation": 411.9276,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 35100026
+    },
+    {
+      "Name": "public-migration-cross-chunk",
+      "Operations": 100000,
+      "MeanNanosecondsPerOperation": 599.3743328571428,
+      "P50NanosecondsPerOperation": 598.77663,
+      "P95NanosecondsPerOperation": 602.3873,
+      "MaximumNanosecondsPerOperation": 609.43153,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 70199974
+    },
+    {
+      "Name": "copy-one-record-delta",
+      "Operations": 100000,
+      "MeanNanosecondsPerOperation": 534.1719761904761,
+      "P50NanosecondsPerOperation": 534.29343,
+      "P95NanosecondsPerOperation": 535.85722,
+      "MaximumNanosecondsPerOperation": 537.45571,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 3380003900000
+    },
+    {
+      "Name": "iterate-prepared-pages-128",
+      "Operations": 50000,
+      "MeanNanosecondsPerOperation": 207.36633428571432,
+      "P50NanosecondsPerOperation": 207.31584,
+      "P95NanosecondsPerOperation": 208.54682,
+      "MaximumNanosecondsPerOperation": 208.90202,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 332800000
+    },
+    {
+      "Name": "copy-canonical-snapshot-128",
+      "Operations": 50000,
+      "MeanNanosecondsPerOperation": 3869.5070771428573,
+      "P50NanosecondsPerOperation": 3857.37646,
+      "P95NanosecondsPerOperation": 3919.77446,
+      "MaximumNanosecondsPerOperation": 3931.36074,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 167700000
+    },
+    {
+      "Name": "encode-canonical-snapshot-128",
+      "Operations": 50000,
+      "MeanNanosecondsPerOperation": 4862.399986666666,
+      "P50NanosecondsPerOperation": 4885.6409,
+      "P95NanosecondsPerOperation": 4906.3139,
+      "MaximumNanosecondsPerOperation": 4913.34324,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 6815900000
+    }
+  ]
+}

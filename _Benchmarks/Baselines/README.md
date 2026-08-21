@@ -107,6 +107,10 @@ Useful current anchors can be located by their embedded workload or filename:
   The `corrective-hardening` artifact is the protocol-v8 observation after
   reliable baseline cancellation, exact WorldState parity, participant-scoped
   Event retention, reclaimable client Event storage, and ACK/timeout liveness;
+- `terrain-t0.6-chunk-publication-*` — game-owned post-ECS public projection,
+  bounded observer-independent history, direct committed page reads, canonical
+  snapshot/delta copy and semantic encoding, plus synthetic eager/on-demand
+  construction-policy evidence. It is not Network N1 or client-streaming evidence;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

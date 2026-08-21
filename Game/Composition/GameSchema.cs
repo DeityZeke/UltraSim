@@ -30,6 +30,7 @@ public struct GameSimulationState : IComponent<GameSimulationState>
     typeof(InventoryContainerOwner),
     typeof(GameCharacter),
     typeof(WorldPositionComponent),
+    typeof(WorldPublicComponent),
     typeof(InventoryEquipCapability),
     typeof(InventoryStackPolicy))]
 public static partial class GameSchema
