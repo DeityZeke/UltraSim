@@ -42,7 +42,7 @@ when those systems exist.
 | `UltraSim.TerrainEncoding.Benchmarks` | Terrain T0.2 fixed 16 m/0.5 m geometry, global-vs-based height candidate matrix, synthetic multi-datum distribution, reconstructed shared-edge equality, scratch, and encode/decode evidence. |
 | `UltraSim.WorldPack.Benchmarks` | Terrain T0.3 canonical sectioned-pack compilation/open/file-reopen evidence plus allocation-free random base-terrain reads and complete-chunk copies. |
 | `UltraSim.TerrainQueryMesh.Benchmarks` | Terrain T0.4 exact base-height/material queries and fixed-grid engine-neutral mesh construction, including canonical payload identity and neighbor-aware seam frames. |
-| `UltraSim.FrozenWorldStructures.Benchmarks` | Terrain T0.5 packed independent-static/static-Multi reads, deterministic compatible render groups, and bounded transactional exact static-bounds queries. |
+| `UltraSim.FrozenWorldStructures.Benchmarks` | Terrain T0.5 packed independent-static/static-Multi reads, deterministic compatible render groups, and bounded transactional sparse plus dense 2x2-chunk exact static-bounds queries. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |

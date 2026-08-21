@@ -95,6 +95,36 @@ public enum WorldStaticFlags : ushort
     Collidable = 1 << 1,
 }
 
+/// <summary>
+/// Engine-neutral yaw for one static world placement. The unsigned 16-bit domain spans one complete
+/// turn: zero preserves the authored canonical facing and increasing values apply right-handed rotation
+/// around +Y (a quarter turn maps local +Z to +X and local +X to -Z).
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Size = 2)]
+public readonly struct WorldYaw : IEquatable<WorldYaw>, IComparable<WorldYaw>
+{
+    public const int UnitsPerTurn = 65_536;
+    public const ushort QuarterTurnUnits = 16_384;
+    public const ushort HalfTurnUnits = 32_768;
+    public const ushort ThreeQuarterTurnUnits = 49_152;
+
+    public WorldYaw(ushort units) => Units = units;
+
+    public ushort Units { get; }
+    public static WorldYaw Zero => default;
+    public static WorldYaw QuarterTurn => new(QuarterTurnUnits);
+    public static WorldYaw HalfTurn => new(HalfTurnUnits);
+    public static WorldYaw ThreeQuarterTurn => new(ThreeQuarterTurnUnits);
+
+    public int CompareTo(WorldYaw other) => Units.CompareTo(other.Units);
+    public bool Equals(WorldYaw other) => Units == other.Units;
+    public override bool Equals(object? obj) => obj is WorldYaw other && Equals(other);
+    public override int GetHashCode() => Units;
+    public override string ToString() => $"Yaw({Units}/{UnitsPerTurn})";
+    public static bool operator ==(WorldYaw left, WorldYaw right) => left.Equals(right);
+    public static bool operator !=(WorldYaw left, WorldYaw right) => !left.Equals(right);
+}
+
 /// <summary>Exact half-open authoritative bounds for immutable static geometry.</summary>
 public readonly struct WorldStaticBounds : IEquatable<WorldStaticBounds>
 {
@@ -166,7 +196,7 @@ public readonly record struct WorldFrozenStaticSource(
     WorldStaticId Id,
     WorldStaticDefinitionId DefinitionId,
     WorldPosition Position,
-    ushort Orientation,
+    WorldYaw Orientation,
     ushort Variant,
     WorldStaticFlags Flags,
     WorldStaticBounds Bounds);
@@ -176,12 +206,15 @@ public readonly record struct WorldMultiPieceSource(
     MultiPieceId PieceId,
     WorldStaticDefinitionId DefinitionId,
     WorldPosition Position,
-    ushort Orientation,
+    WorldYaw Orientation,
     ushort Variant,
     WorldStaticFlags Flags,
     WorldStaticBounds Bounds);
 
-/// <summary>Compatible render grouping key; instance transform and identity are deliberately excluded.</summary>
+/// <summary>
+/// Internal deterministic packed-row grouping hint. Instance transform and identity are deliberately
+/// excluded; this is not a renderer, Godot, Game.Contracts, or compatibility ABI.
+/// </summary>
 public readonly record struct WorldStaticRenderKey(
     WorldStaticDefinitionId DefinitionId,
     ushort Variant,
@@ -203,7 +236,7 @@ public readonly record struct WorldFrozenStaticRecord(
     WorldStaticId Id,
     WorldStaticDefinitionId DefinitionId,
     WorldPosition Position,
-    ushort Orientation,
+    WorldYaw Orientation,
     ushort Variant,
     WorldStaticFlags Flags,
     WorldStaticBounds Bounds)
@@ -217,7 +250,7 @@ public readonly record struct WorldMultiFragmentRecord(
     MultiPieceId PieceId,
     WorldStaticDefinitionId DefinitionId,
     WorldPosition Position,
-    ushort Orientation,
+    WorldYaw Orientation,
     ushort Variant,
     WorldStaticFlags Flags,
     WorldStaticBounds Bounds)
@@ -229,7 +262,7 @@ public readonly record struct WorldMultiFragmentRecord(
 public readonly record struct WorldMultiInstanceRecord(
     MultiInstanceId Id,
     WorldPosition Root,
-    ushort Orientation,
+    WorldYaw Orientation,
     int PieceCount);
 
 /// <summary>Borrowed packed independent-static rows belonging to one canonical home chunk.</summary>
@@ -395,7 +428,7 @@ public sealed partial class WorldPackBuilder
     public bool TryAddStaticMulti(
         MultiInstanceId id,
         in WorldPosition root,
-        ushort orientation,
+        WorldYaw orientation,
         ReadOnlySpan<WorldMultiPieceSource> pieces,
         out WorldPackBuildError error)
     {
@@ -438,7 +471,7 @@ public sealed partial class WorldPackBuilder
     internal sealed record SourceStaticMulti(
         MultiInstanceId Id,
         WorldPosition Root,
-        ushort Orientation,
+        WorldYaw Orientation,
         WorldMultiPieceSource[] Pieces);
 }
 
@@ -780,7 +813,7 @@ internal static class FrozenWorldStructureCodec
             new WorldStaticId(BinaryPrimitives.ReadUInt64LittleEndian(row)),
             new WorldStaticDefinitionId(BinaryPrimitives.ReadUInt32LittleEndian(row[8..])),
             position,
-            BinaryPrimitives.ReadUInt16LittleEndian(row[20..]),
+            new WorldYaw(BinaryPrimitives.ReadUInt16LittleEndian(row[20..])),
             BinaryPrimitives.ReadUInt16LittleEndian(row[22..]),
             (WorldStaticFlags)BinaryPrimitives.ReadUInt16LittleEndian(row[24..]),
             ReadBounds(row[28..], position));
@@ -798,7 +831,7 @@ internal static class FrozenWorldStructureCodec
             new MultiPieceId(BinaryPrimitives.ReadUInt32LittleEndian(row[8..])),
             new WorldStaticDefinitionId(BinaryPrimitives.ReadUInt32LittleEndian(row[12..])),
             position,
-            BinaryPrimitives.ReadUInt16LittleEndian(row[24..]),
+            new WorldYaw(BinaryPrimitives.ReadUInt16LittleEndian(row[24..])),
             BinaryPrimitives.ReadUInt16LittleEndian(row[26..]),
             (WorldStaticFlags)BinaryPrimitives.ReadUInt16LittleEndian(row[28..]),
             ReadBounds(row[32..], position));
@@ -817,7 +850,7 @@ internal static class FrozenWorldStructureCodec
         return new WorldMultiInstanceRecord(
             new MultiInstanceId(BinaryPrimitives.ReadUInt64LittleEndian(row)),
             root,
-            BinaryPrimitives.ReadUInt16LittleEndian(row[24..]),
+            new WorldYaw(BinaryPrimitives.ReadUInt16LittleEndian(row[24..])),
             BinaryPrimitives.ReadInt32LittleEndian(row[28..]));
     }
 
@@ -915,7 +948,7 @@ internal static class FrozenWorldStructureCodec
         BinaryPrimitives.WriteInt32LittleEndian(row[12..], source.Position.YMillimeters);
         BinaryPrimitives.WriteUInt16LittleEndian(row[16..], source.Position.Local.XMillimeters);
         BinaryPrimitives.WriteUInt16LittleEndian(row[18..], source.Position.Local.ZMillimeters);
-        BinaryPrimitives.WriteUInt16LittleEndian(row[20..], source.Orientation);
+        BinaryPrimitives.WriteUInt16LittleEndian(row[20..], source.Orientation.Units);
         BinaryPrimitives.WriteUInt16LittleEndian(row[22..], source.Variant);
         BinaryPrimitives.WriteUInt16LittleEndian(row[24..], (ushort)source.Flags);
         WriteBounds(row[28..], source.Position, source.Bounds);
@@ -929,7 +962,7 @@ internal static class FrozenWorldStructureCodec
         BinaryPrimitives.WriteUInt16LittleEndian(row[16..], source.Root.Local.XMillimeters);
         BinaryPrimitives.WriteUInt16LittleEndian(row[18..], source.Root.Local.ZMillimeters);
         BinaryPrimitives.WriteInt32LittleEndian(row[20..], source.Root.YMillimeters);
-        BinaryPrimitives.WriteUInt16LittleEndian(row[24..], source.Orientation);
+        BinaryPrimitives.WriteUInt16LittleEndian(row[24..], source.Orientation.Units);
         BinaryPrimitives.WriteInt32LittleEndian(row[28..], source.Pieces.Length);
     }
 
@@ -942,7 +975,7 @@ internal static class FrozenWorldStructureCodec
         BinaryPrimitives.WriteInt32LittleEndian(row[16..], piece.Position.YMillimeters);
         BinaryPrimitives.WriteUInt16LittleEndian(row[20..], piece.Position.Local.XMillimeters);
         BinaryPrimitives.WriteUInt16LittleEndian(row[22..], piece.Position.Local.ZMillimeters);
-        BinaryPrimitives.WriteUInt16LittleEndian(row[24..], piece.Orientation);
+        BinaryPrimitives.WriteUInt16LittleEndian(row[24..], piece.Orientation.Units);
         BinaryPrimitives.WriteUInt16LittleEndian(row[26..], piece.Variant);
         BinaryPrimitives.WriteUInt16LittleEndian(row[28..], (ushort)piece.Flags);
         WriteBounds(row[32..], piece.Position, piece.Bounds);

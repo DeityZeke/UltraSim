@@ -24,7 +24,7 @@ public readonly record struct WorldStaticQueryHit(
     MultiPieceId MultiPieceId,
     WorldStaticDefinitionId DefinitionId,
     WorldPosition Position,
-    ushort Orientation,
+    WorldYaw Orientation,
     ushort Variant,
     WorldStaticFlags Flags,
     WorldStaticBounds Bounds)
@@ -38,7 +38,7 @@ public readonly record struct WorldStaticQueryHit(
         record.Position, record.Orientation, record.Variant, record.Flags, record.Bounds);
 }
 
-/// <summary>Bounded authoritative queries over immutable frozen-static and static-Multi geometry.</summary>
+/// <summary>Bounded exact queries over one immutable pack's frozen-static and static-Multi geometry.</summary>
 public static class WorldStaticQueries
 {
     public static bool TryQueryStaticBounds(

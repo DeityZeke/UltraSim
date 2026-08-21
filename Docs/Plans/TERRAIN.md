@@ -2,7 +2,8 @@
 
 Status: active forward plan. T0.0 through T0.4 are accepted/frozen as of
 2026-08-20 after T0.4 ownership, single-space admission, and four-way seam
-hardening. T0.5 is not started.
+hardening. T0.5 implementation is complete and stopped for checkpoint review;
+it is not yet accepted/frozen.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -1442,6 +1443,15 @@ Godot resource paths/text names are presentation metadata, never server hot data
 overlays refer to that ID plus the required pack fingerprint. Renderer instance
 indices may map back to it but never become authority.
 Authoring/building tools may snap placements to the 100 mm grid, but the runtime format must not infer that all world objects are permanently restricted to that lattice. Dynamic or physically moved objects use the 1 mm authoritative position quantum.
+T0.5 freezes static placement orientation as engine-neutral yaw-only
+`WorldYaw`: one unsigned 16-bit turn around +Y. `0` preserves canonical authored
+facing; `16384`, `32768`, and `49152` are quarter, half, and three-quarter
+turns. Increasing values use right-handed rotation, so a quarter turn maps local
++Z to +X and local +X to -Z; `65535` lies immediately before wrap to `0`.
+Independent static and already-resolved Multi-piece orientations are
+world-placement yaw, while the logical Multi root retains its own root yaw. This
+does not establish pitch/roll or a moving local-coordinate-frame contract; a
+future concrete use that needs those transforms must earn another representation.
 Placements in an immutable pack use a CSR-style layout owned by
 `FrozenStatics/v1`: a section-local chunk range/index maps canonical main chunk
 index or `SpatialChunkKey` to `StaticOffset + StaticCount` in packed static rows.
@@ -1460,6 +1470,10 @@ independently. Every fragment retains the logical Multi/instance identity needed
 for inspection, rebuilding, or future editing.
 That `MultiInstanceId` is stable in the same pack/world domain; chunk-fragment and
 packed row slots are not its identity.
+T0.5 guarantees attribution and stable logical identity across fragmentation. It
+does not promise a dedicated bounded/O(1) `MultiInstanceId -> all fragments`
+reverse index. A future whole-structure editing/removal workload may earn a
+section-local reverse index or another prepared representation.
 `MultiFragments/v1` likewise owns its section-local chunk range/index metadata;
 it does not add fields to the frozen top-level terrain chunk row.
 T0.5 proves static placed Multi structures only. It does not establish moving
@@ -1819,6 +1833,13 @@ key and stable identity. A Multi root remains independently searchable while its
 pieces are compiled into their home chunks. Renderer grouping never becomes
 authority.
 
+The persisted `WorldYaw` field is yaw-only unsigned full-turn orientation:
+`0/16384/32768/49152` mean canonical/quarter/half/three-quarter turn, increasing
+right-handed around +Y. The packed field remains exactly two bytes. Static rows
+and already-resolved Multi fragments store world-placement yaw; the logical
+Multi root separately stores root yaw. Pitch, roll, and moving frames remain
+outside T0.5.
+
 Opening validates optional section hashes, bounds/counts, canonical CSR ranges,
 row ordering, stable-ID uniqueness, Multi piece totals, roots, flags, local
 coordinates, and exact half-open integer-mm bounds before publication.
@@ -1831,6 +1852,16 @@ bounds are limited to a one-chunk home halo, queries admit an explicit maximum
 candidate-chunk budget, and an undersized output span receives no partial writes.
 `BoundWorldPack` answers immutable-artifact truth while `GameWorldState` is the
 authoritative current-world route retained for T0.9 overlays.
+The +/-1 home-chunk halo is a compact `FrozenStatics/v1` and static
+`MultiFragments/v1` representation limit, not a universal maximum object size.
+Larger structures may use multiple pieces/statics or a later representation
+earned by a concrete workload.
+
+`WorldStaticRenderKey` and `WorldStaticRenderGroup` are internal deterministic
+packed-row preparation hints. They are not the final Godot batching/material
+contract, a renderer ABI, a `Game.Contracts` API, or a mod compatibility promise.
+T0.8 may filter non-renderable rows and coalesce or further subdivide these groups
+from measured presentation requirements without changing static authority.
 
 The permanent T0.0–T0.5 world suite contains 52 tests. It covers canonical
 insertion-order-independent bytes, cross-chunk Multi identity, allocation-free
@@ -1838,7 +1869,7 @@ packed reads/grouping, transactional exact bounds queries, malformed optional
 sections, invalid identities/placements/capacity, content binding, and generation
 publication.
 
-Accepted synthetic evidence:
+Hardened synthetic checkpoint evidence:
 
 ```text
 chunks                                      256
@@ -1847,17 +1878,20 @@ logical static Multis                        64
 Multi fragments                             512
 complete pack bytes                   1,589,672
 
-random static/fragment read mean/p95   166.488 /   169.256 ns / 0 B
-copy compatible render groups          1.942 /     1.975 us / 0 B
-bounded exact static-bounds query      23.099 /    23.373 us / 0 B
+random static/fragment read mean/p95   168.476 /   170.081 ns / 0 B
+copy compatible render groups          1.968 /     1.979 us / 0 B
+sparse exact bounds query (max 1 hit)  23.248 /    23.527 us / 0 B
+dense 2x2 bounds query (max 173 hits)  39.030 /    39.264 us / 0 B
 ```
 
-The bounds workload deliberately includes the admitted neighboring home-chunk
-halo and two-pass transactional output, not a single-row lookup. It is evidence
-of the current exact query cost, not a collision-engine SLO. The fixture is
-synthetic and is not production woods/cabin content or Godot evidence. The
-machine-readable observation is
-[`terrain-t0.5-frozen-structures-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.5-frozen-structures-2026-08-20.json).
+Both bounds workloads include the admitted neighboring home-chunk halo and
+two-pass transactional output, not a single-row lookup. The dense observation
+adds result-write scaling across a two-by-two exact footprint; it does not change
+or optimize the query algorithm. These are current exact-query costs, not a
+collision-engine SLO. The fixture is synthetic and is not production woods/cabin
+content or Godot evidence. The new machine-readable hardening observation is
+[`terrain-t0.5-frozen-structures-hardened-2026-08-20.json`](../../_Benchmarks/Baselines/terrain-t0.5-frozen-structures-hardened-2026-08-20.json);
+the earlier checkpoint artifact remains immutable historical evidence.
 
 The checkpoint does not add dynamic/interactable statics, mutable overlays,
 publication/history, client residency, Godot nodes/resources, property/region/

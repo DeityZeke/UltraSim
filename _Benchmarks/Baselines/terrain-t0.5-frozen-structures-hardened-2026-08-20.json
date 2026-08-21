@@ -1,0 +1,72 @@
+{
+  "Schema": "terrain-t0.5-frozen-statics-static-multis-v1",
+  "CapturedAtUtc": "2026-08-21T03:16:52.292484+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "LogicalProcessors": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Warmups": 5,
+  "Samples": 21,
+  "Fixture": {
+    "Description": "deterministic synthetic 16x16 base world with independent trees/rocks and static placed cabin/shelf fragments; not production content",
+    "GridEdge": 16,
+    "ChunkCount": 256,
+    "FrozenStaticCount": 8192,
+    "MultiInstanceCount": 64,
+    "MultiFragmentCount": 512,
+    "PackBytes": 1589672,
+    "SectionCount": 4,
+    "MaximumStaticsInOneChunk": 32,
+    "MaximumFragmentsInOneChunk": 8,
+    "MaximumRenderGroupsInOneChunk": 4,
+    "MaximumQueryHits": 173,
+    "ScopeBoundary": "logical Multi identity survives chunk fragmentation; no moving aggregate or vehicle contract"
+  },
+  "Timings": [
+    {
+      "Name": "random-static-or-fragment-read",
+      "OperationsPerSample": 1000000,
+      "MeanNanosecondsPerOperation": 168.47551833333333,
+      "P50NanosecondsPerOperation": 168.840808,
+      "P95NanosecondsPerOperation": 170.080866,
+      "MaximumNanosecondsPerOperation": 170.256304,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 106888407886
+    },
+    {
+      "Name": "copy-compatible-render-groups",
+      "OperationsPerSample": 250000,
+      "MeanNanosecondsPerOperation": 1968.0497266666664,
+      "P50NanosecondsPerOperation": 1970.83016,
+      "P95NanosecondsPerOperation": 1979.050232,
+      "MaximumNanosecondsPerOperation": 1979.247676,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 85925424
+    },
+    {
+      "Name": "bounded-static-bounds-query",
+      "OperationsPerSample": 25000,
+      "MeanNanosecondsPerOperation": 23248.40976190476,
+      "P50NanosecondsPerOperation": 23219.10512,
+      "P95NanosecondsPerOperation": 23527.06624,
+      "MaximumNanosecondsPerOperation": 23710.25872,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 2275000
+    },
+    {
+      "Name": "dense-static-bounds-query-2x2",
+      "OperationsPerSample": 25000,
+      "MeanNanosecondsPerOperation": 39029.873165714285,
+      "P50NanosecondsPerOperation": 39010.2122,
+      "P95NanosecondsPerOperation": 39263.61552,
+      "MaximumNanosecondsPerOperation": 39353.02024,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 95517448
+    }
+  ]
+}

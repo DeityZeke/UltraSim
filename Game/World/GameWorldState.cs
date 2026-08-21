@@ -101,8 +101,8 @@ public sealed class GameWorldState : IDisposable
     }
 
     /// <summary>
-    /// Queries authoritative immutable static geometry. Later durable overlays may shadow or augment
-    /// the base pack behind this game-world route without changing gameplay callers.
+    /// Queries authoritative current-world static geometry. Today this resolves the immutable base pack;
+    /// later durable overlays may shadow or augment it without changing gameplay callers.
     /// </summary>
     public bool TryQueryStaticBounds(
         in WorldStaticBounds bounds,
@@ -113,10 +113,16 @@ public sealed class GameWorldState : IDisposable
         out WorldStaticQueryError error)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCandidateChunks);
+        count = 0;
+        required = 0;
+        if (!bounds.IsValid)
+        {
+            error = WorldStaticQueryError.InvalidBounds;
+            return false;
+        }
         if (BaseWorld is null)
         {
-            count = 0;
-            required = 0;
             error = WorldStaticQueryError.None;
             return true;
         }

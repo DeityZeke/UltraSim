@@ -195,10 +195,21 @@ Multi may cross chunk boundaries while retaining one root record and one piece
 count. T0.5 does not establish moving local-coordinate frames, ships, vehicles,
 or moving aggregates.
 
+Static orientation is the 2-byte `WorldYaw` value: an unsigned full turn around
++Y. Zero preserves canonical authored facing; 16,384/32,768/49,152 are exact
+quarter/half/three-quarter turns, increasing with right-handed rotation (local
++Z maps to +X at one quarter turn). It is yaw-only. Independent statics and
+already-resolved fragments store world-placement yaw; a Multi root separately
+retains root yaw. Pitch, roll, and moving frames require a later proven
+representation.
+
 The compiler sorts rows canonically by main chunk, compatible render key, and
 stable identity. Borrowed per-chunk views decode directly from owned pack bytes
 and can copy deterministic compatible render groups into caller spans. Normal
 reads allocate no per-chunk lists or objects.
+Those groups are internal packed-row preparation hints, not a final Godot
+batch/material contract, renderer ABI, `Game.Contracts` API, or mod API. T0.8 may
+filter, coalesce, or subdivide them from real presentation evidence.
 
 `WorldStaticBounds` is an exact half-open integer-millimetre 3D bound. Frozen
 rows are assigned one canonical home chunk and may extend only through its
@@ -209,14 +220,20 @@ an undersized destination. Pure artifact queries live on `WorldPack`/
 `BoundWorldPack`; authoritative gameplay routes through `GameWorldState` so a
 future durable overlay can shadow or augment the immutable base without changing
 callers.
+The halo is a compact v1 section representation limit, not a universal UltraSim
+object-size limit. Larger structures can use multiple pieces/statics or another
+later representation earned by a concrete workload. Stable Multi/piece identity
+guarantees attribution across fragmentation; T0.5 does not provide or promise a
+dedicated `MultiInstanceId -> all fragments` reverse index.
 
 All optional section counts and offsets are validated against `WorldPackLimits`
 before a pack is published. Canonical ranges, row ordering, stable-ID uniqueness,
 logical Multi piece totals, root residency, flags, local coordinates, bounds,
 hashes, and content definitions are fail-closed.
 
-The accepted synthetic T0.5 evidence uses 256 chunks, 8,192 independent statics,
+The hardened synthetic T0.5 evidence uses 256 chunks, 8,192 independent statics,
 64 logical Multis, and 512 fragments in a 1,589,672-byte pack. Warmed packed
-reads, render-group copies, and bounded exact overlap queries all allocate 0 B.
-The overlap fixture deliberately exercises the transactional halo scan; it is
-not a collision-engine or production-content throughput claim.
+reads, render-group copies, a sparse exact query, and a 2x2-chunk dense query
+returning as many as 173 records all allocate 0 B. The overlap fixtures
+deliberately exercise the transactional halo scan and result-copy scaling; they
+are not collision-engine or production-content throughput claims.

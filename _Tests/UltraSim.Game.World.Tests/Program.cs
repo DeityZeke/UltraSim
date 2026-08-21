@@ -282,6 +282,12 @@ static void WorldPackFormatAndFingerprintsAreFrozen()
     Equal(8, Marshal.SizeOf<WorldStaticId>());
     Equal(8, Marshal.SizeOf<MultiInstanceId>());
     Equal(4, Marshal.SizeOf<MultiPieceId>());
+    Equal(2, Marshal.SizeOf<WorldYaw>());
+    Equal(65_536, WorldYaw.UnitsPerTurn);
+    Equal((ushort)16_384, WorldYaw.QuarterTurn.Units);
+    Equal((ushort)32_768, WorldYaw.HalfTurn.Units);
+    Equal((ushort)49_152, WorldYaw.ThreeQuarterTurn.Units);
+    Equal((ushort)65_535, new WorldYaw(ushort.MaxValue).Units);
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldContentFingerprint(0, 0));
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(159, 1, 2));
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldPackLimits(160, 0, 2));
@@ -587,6 +593,7 @@ static void FrozenStaticsAndStaticMultisCompileCanonically()
     Equal(2, statics.Count);
     Equal(new WorldStaticId(10), statics.GetRecord(0).Id);
     Equal(new WorldStaticId(30), statics.GetRecord(1).Id);
+    Equal(WorldYaw.QuarterTurn, statics.GetRecord(1).Orientation);
     Equal(1, statics.GetRenderGroupCount());
     Span<WorldStaticRenderGroup> groups = stackalloc WorldStaticRenderGroup[1];
     True(statics.TryCopyRenderGroups(groups, out int required));
@@ -598,6 +605,7 @@ static void FrozenStaticsAndStaticMultisCompileCanonically()
     WorldMultiFragmentRecord roof = fragments.GetRecord(0);
     Equal(new MultiInstanceId(700), roof.MultiId);
     Equal(new MultiPieceId(3), roof.PieceId);
+    Equal(WorldYaw.ThreeQuarterTurn, roof.Orientation);
     True(pack.TryGetMultiFragments(new SpatialChunkKey(pack.Space, -1, -1),
         out WorldMultiFragmentChunkView cabinLeft));
     True(pack.TryGetMultiFragments(new SpatialChunkKey(pack.Space, 0, -1),
@@ -609,6 +617,7 @@ static void FrozenStaticsAndStaticMultisCompileCanonically()
     True(pack.TryGetMultiInstance(new MultiInstanceId(700), out WorldMultiInstanceRecord cabin));
     Equal(3, cabin.PieceCount);
     Equal(new SpatialChunkCoord(-1, -1), cabin.Root.Chunk);
+    Equal(WorldYaw.HalfTurn, cabin.Orientation);
     True(pack.TryGetMultiInstance(new MultiInstanceId(600), out WorldMultiInstanceRecord shelf));
     Equal(1, shelf.PieceCount);
     False(pack.TryGetMultiInstance(new MultiInstanceId(999), out _));
@@ -628,7 +637,7 @@ static void FrozenStructureSectionsAreIndependentlyOptional()
     WorldPackBuilder multiOnly = CreateTerrainBuilder();
     var root = new WorldPosition(0, 0, 1_000, 1_000, 0);
     WorldMultiPieceSource[] pieces = [CreateMultiPiece(1, 3, root)];
-    True(multiOnly.TryAddStaticMulti(new MultiInstanceId(1), root, 0, pieces, out _));
+    True(multiOnly.TryAddStaticMulti(new MultiInstanceId(1), root, WorldYaw.Zero, pieces, out _));
     True(multiOnly.TryBuild(out WorldPackArtifact? multiArtifact, out _));
     WorldPack multiPack = multiArtifact!.Open();
     Equal(3, multiPack.SectionCount);
@@ -697,6 +706,19 @@ static void StaticBoundsQueryIsExactBoundedAndTransactional()
     False(pack.TryQueryStaticBounds(default, 16, hits, out count, out required, out error));
     Equal(WorldStaticQueryError.InvalidBounds, error);
 
+    using (RawSpatialFixture empty = new(lifecycleCapacity: 16))
+    {
+        False(empty.State.TryQueryStaticBounds(default, 16, hits, out count, out required, out error));
+        Equal(0, count);
+        Equal(0, required);
+        Equal(WorldStaticQueryError.InvalidBounds, error);
+        Throws<ArgumentOutOfRangeException>(() => QueryWithNonpositiveCandidateBudget(empty));
+        True(empty.State.TryQueryStaticBounds(query, 16, hits, out count, out required, out error));
+        Equal(0, count);
+        Equal(0, required);
+        Equal(WorldStaticQueryError.None, error);
+    }
+
     WorldPack gamePack = CreateStructuredWorldPackArtifact(
         reverse: false, GameContent.WorldFingerprint, GameWorldState.DefaultSpace).Open();
     var binding = new WorldContentBinding(GameContent.WorldFingerprint, [1, 2, 3, 4, 5],
@@ -707,6 +729,13 @@ static void StaticBoundsQueryIsExactBoundedAndTransactional()
         out error));
     Equal(expectedCount, gameRequired);
     Equal(gameRequired, gameCount);
+
+    static void QueryWithNonpositiveCandidateBudget(RawSpatialFixture fixture)
+    {
+        var destination = new WorldStaticQueryHit[1];
+        var valid = new WorldStaticBounds(0, 0, 0, 1, 1, 1);
+        fixture.State.TryQueryStaticBounds(valid, 0, destination, out _, out _, out _);
+    }
 }
 
 static void FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity()
@@ -738,7 +767,8 @@ static void FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity()
     WorldPackBuilder malformedMulti = CreateTerrainBuilder();
     WorldMultiPieceSource piece = CreateMultiPiece(1, 3, new WorldPosition(0, 0, 1_000, 1_000, 0));
     WorldMultiPieceSource[] duplicatePieces = [piece, piece];
-    False(malformedMulti.TryAddStaticMulti(new MultiInstanceId(1), position, 0, duplicatePieces, out error));
+    False(malformedMulti.TryAddStaticMulti(new MultiInstanceId(1), position, WorldYaw.Zero,
+        duplicatePieces, out error));
     Equal(WorldPackBuildError.InvalidMulti, error);
 
     var tight = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
@@ -1271,7 +1301,10 @@ static WorldPackArtifact CreateStructuredWorldPackArtifact(
     WorldPackBuilder builder = CreateTerrainBuilder(content, space);
     WorldFrozenStaticSource[] statics =
     [
-        CreateFrozenStatic(30, 1, new WorldPosition(0, 0, 1_000, 1_000, 0)),
+        CreateFrozenStatic(30, 1, new WorldPosition(0, 0, 1_000, 1_000, 0)) with
+        {
+            Orientation = WorldYaw.QuarterTurn,
+        },
         CreateFrozenStatic(10, 1, new WorldPosition(0, 0, 2_000, 2_000, 0)),
         CreateFrozenStatic(20, 2, new WorldPosition(-1, 0, 15_900, 200, 0), halfExtent: 300),
     ];
@@ -1279,7 +1312,10 @@ static WorldPackArtifact CreateStructuredWorldPackArtifact(
     [
         CreateMultiPiece(1, 3, new WorldPosition(-1, -1, 15_500, 15_500, 0)),
         CreateMultiPiece(2, 3, new WorldPosition(0, -1, 500, 15_500, 0)),
-        CreateMultiPiece(3, 4, new WorldPosition(0, 0, 500, 500, 2_000)),
+        CreateMultiPiece(3, 4, new WorldPosition(0, 0, 500, 500, 2_000)) with
+        {
+            Orientation = WorldYaw.ThreeQuarterTurn,
+        },
     ];
     WorldMultiPieceSource[] shelf =
     [
@@ -1290,16 +1326,16 @@ static WorldPackArtifact CreateStructuredWorldPackArtifact(
         Array.Reverse(statics);
         Array.Reverse(cabin);
         True(builder.TryAddStaticMulti(new MultiInstanceId(700),
-            new WorldPosition(-1, -1, 15_500, 15_500, 0), 0, cabin, out _));
+            new WorldPosition(-1, -1, 15_500, 15_500, 0), WorldYaw.HalfTurn, cabin, out _));
         True(builder.TryAddStaticMulti(new MultiInstanceId(600),
-            new WorldPosition(0, 0, 1_500, 1_500, 0), 0, shelf, out _));
+            new WorldPosition(0, 0, 1_500, 1_500, 0), WorldYaw.Zero, shelf, out _));
     }
     else
     {
         True(builder.TryAddStaticMulti(new MultiInstanceId(600),
-            new WorldPosition(0, 0, 1_500, 1_500, 0), 0, shelf, out _));
+            new WorldPosition(0, 0, 1_500, 1_500, 0), WorldYaw.Zero, shelf, out _));
         True(builder.TryAddStaticMulti(new MultiInstanceId(700),
-            new WorldPosition(-1, -1, 15_500, 15_500, 0), 0, cabin, out _));
+            new WorldPosition(-1, -1, 15_500, 15_500, 0), WorldYaw.HalfTurn, cabin, out _));
     }
     foreach (WorldFrozenStaticSource value in statics)
         True(builder.TryAddFrozenStatic(value, out _));
@@ -1337,7 +1373,7 @@ static WorldFrozenStaticSource CreateFrozenStatic(
         new WorldStaticId(id),
         new WorldStaticDefinitionId(definition),
         position,
-        0,
+        WorldYaw.Zero,
         0,
         WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
         BoundsAround(position, halfExtent));
@@ -1350,7 +1386,7 @@ static WorldMultiPieceSource CreateMultiPiece(
         new MultiPieceId(piece),
         new WorldStaticDefinitionId(definition),
         position,
-        0,
+        WorldYaw.Zero,
         0,
         WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
         BoundsAround(position, halfExtent));

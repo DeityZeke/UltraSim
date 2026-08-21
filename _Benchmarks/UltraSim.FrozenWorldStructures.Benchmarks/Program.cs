@@ -22,6 +22,7 @@ FrozenStructureTiming[] timings =
     Measure("random-static-or-fragment-read", warmups, samples, reads, fixture.RunReads),
     Measure("copy-compatible-render-groups", warmups, samples, groups, fixture.RunRenderGroups),
     Measure("bounded-static-bounds-query", warmups, samples, queries, fixture.RunBoundsQueries),
+    Measure("dense-static-bounds-query-2x2", warmups, samples, queries, fixture.RunDenseBoundsQueries),
 ];
 if (timings.Any(timing => timing.MaximumAllocatedBytes != 0))
     throw new InvalidOperationException("A warmed T0.5 frozen-structure path allocated.");
@@ -110,7 +111,7 @@ sealed class FrozenStructureFixture
         new(0x1122_3344_5566_7788UL, 0x8877_6655_4433_2211UL);
     private readonly BoundWorldPack _world;
     private readonly WorldStaticRenderGroup[] _groups = new WorldStaticRenderGroup[64];
-    private readonly WorldStaticQueryHit[] _hits = new WorldStaticQueryHit[128];
+    private readonly WorldStaticQueryHit[] _hits = new WorldStaticQueryHit[256];
 
     internal FrozenStructureFixture(int gridEdge, int staticsPerChunk, int multiCount, int piecesPerMulti)
     {
@@ -150,7 +151,8 @@ sealed class FrozenStructureFixture
                     var position = new WorldPosition(x, z, localX, localZ, index % 3 * 200);
                     var source = new WorldFrozenStaticSource(new WorldStaticId(staticId++),
                         new WorldStaticDefinitionId(checked((uint)(index % 4 + 1))), position,
-                        checked((ushort)(index & 3)), checked((ushort)(index & 1)),
+                        new WorldYaw(checked((ushort)((index & 3) * WorldYaw.QuarterTurnUnits))),
+                        checked((ushort)(index & 1)),
                         WorldStaticFlags.Renderable | WorldStaticFlags.Collidable, Bounds(position, 180));
                     if (!builder.TryAddFrozenStatic(source, out WorldPackBuildError error))
                         throw new InvalidOperationException($"Static fixture add failed: {error}.");
@@ -174,10 +176,11 @@ sealed class FrozenStructureFixture
                     throw new InvalidOperationException("Multi piece position exceeded the fixture profile.");
                 pieces[piece] = new WorldMultiPieceSource(new MultiPieceId(checked((uint)piece + 1)),
                     new WorldStaticDefinitionId(checked((uint)(piece % 4 + 5))), position,
-                    0, checked((ushort)(piece & 1)),
+                    WorldYaw.Zero, checked((ushort)(piece & 1)),
                     WorldStaticFlags.Renderable | WorldStaticFlags.Collidable, Bounds(position, 220));
             }
-            if (!builder.TryAddStaticMulti(new MultiInstanceId(checked((ulong)multi + 1)), root, 0, pieces,
+            if (!builder.TryAddStaticMulti(new MultiInstanceId(checked((ulong)multi + 1)), root,
+                    WorldYaw.Zero, pieces,
                     out WorldPackBuildError error))
                 throw new InvalidOperationException($"Multi fixture add failed: {error}.");
         }
@@ -287,6 +290,32 @@ sealed class FrozenStructureFixture
                 throw new InvalidOperationException($"Static bounds query failed: {error}/{required}.");
             MaximumQueryHits = Math.Max(MaximumQueryHits, count);
             checksum = unchecked(checksum + (uint)count + (count == 0 ? 0UL : _hits[0].DefinitionId.Value));
+        }
+        return checksum;
+    }
+
+    internal ulong RunDenseBoundsQueries(int operations)
+    {
+        ulong checksum = 0;
+        int minimum = -(GridEdge / 2);
+        int selectableEdge = GridEdge - 1;
+        for (int operation = 0; operation < operations; operation++)
+        {
+            int chunkX = minimum + operation % selectableEdge;
+            int chunkZ = minimum + operation / selectableEdge % selectableEdge;
+            long minimumX = (long)chunkX * GameWorldSpatialProfile.WorldChunkEdgeUnits;
+            long minimumZ = (long)chunkZ * GameWorldSpatialProfile.WorldChunkEdgeUnits;
+            var query = new WorldStaticBounds(minimumX, -1_000, minimumZ,
+                minimumX + 2L * GameWorldSpatialProfile.WorldChunkEdgeUnits, 4_000,
+                minimumZ + 2L * GameWorldSpatialProfile.WorldChunkEdgeUnits);
+            if (!_world.TryQueryStaticBounds(query, 16, _hits, out int count, out int required,
+                    out WorldStaticQueryError error))
+                throw new InvalidOperationException($"Dense static bounds query failed: {error}/{required}.");
+            if (count < 128)
+                throw new InvalidOperationException($"Dense query returned only {count} records.");
+            MaximumQueryHits = Math.Max(MaximumQueryHits, count);
+            checksum = unchecked(checksum + (uint)count + _hits[0].DefinitionId.Value +
+                _hits[count - 1].DefinitionId.Value);
         }
         return checksum;
     }
