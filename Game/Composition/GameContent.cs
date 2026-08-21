@@ -14,6 +14,8 @@ public static class GamePrefabKeys
     public static readonly PrefabKey Bread = new("game.item.bread");
     public static readonly PrefabKey IronSword = new("game.item.iron-sword");
     public static readonly PrefabKey Apple = new("game.item.apple");
+    public static readonly PrefabKey CabinDoor = new("game.world.cabin-door");
+    public static readonly PrefabKey WoodlandAnimal = new("game.world.woodland-animal");
 }
 
 /// <summary>Compact structural terrain identities admitted by the first game world content profile.</summary>
@@ -41,6 +43,9 @@ public static class GameWorldStaticDefinitionIds
 public static class GameWorldPublicPrefabIds
 {
     public const uint Character = 1;
+    public const uint CabinDoor = 2;
+    public const uint WorldChest = 3;
+    public const uint WoodlandAnimal = 4;
 }
 
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
@@ -59,6 +64,8 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryItemDefinition bread,
         InventoryItemDefinition ironSword,
         InventoryItemDefinition apple,
+        PrefabHandle cabinDoor,
+        PrefabHandle woodlandAnimal,
         WorldContentBinding world)
     {
         Prefabs = prefabs;
@@ -68,6 +75,8 @@ public sealed class GameContent : IInventoryContentCatalog
         Bread = bread;
         IronSword = ironSword;
         Apple = apple;
+        CabinDoor = cabinDoor;
+        WoodlandAnimal = woodlandAnimal;
         World = world;
         _itemsByHandle = new Dictionary<PrefabHandle, InventoryItemDefinition>(3)
         {
@@ -100,6 +109,8 @@ public sealed class GameContent : IInventoryContentCatalog
     public InventoryItemDefinition Bread { get; }
     public InventoryItemDefinition IronSword { get; }
     public InventoryItemDefinition Apple { get; }
+    public PrefabHandle CabinDoor { get; }
+    public PrefabHandle WoodlandAnimal { get; }
     public WorldContentBinding World { get; }
 
     // Governance: bump this identity whenever the semantic meaning of any packed numeric world-content
@@ -154,8 +165,14 @@ public sealed class GameContent : IInventoryContentCatalog
         dormantCharacter.DisplayName("Dormant Character");
         InventoryContainerAuthoring backpackSource = InventoryContent.DefineContainer(
             content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);
-        InventoryContainerAuthoring chestSource = InventoryContent.DefineContainer(
-            content, GamePrefabKeys.WorldChest, "World Chest", 64, hasOwner: false);
+        PrefabBuilder worldChest = content.Define(GamePrefabKeys.WorldChest);
+        worldChest.With(new InventoryContainer { Capacity = 64 });
+        worldChest.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        worldChest.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.WorldChest, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        worldChest.DisplayName("World Chest");
+        var chestSource = new InventoryContainerAuthoring(
+            GamePrefabKeys.WorldChest, "World Chest", 64, HasOwner: false);
         InventoryItemAuthoring breadSource = InventoryContent.DefineItem(
             content, GamePrefabKeys.Bread, "Bread", maximumQuantity: 20);
         InventoryItemAuthoring swordSource = InventoryContent.DefineItem(
@@ -169,6 +186,19 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryItemAuthoring appleSource = InventoryContent.DefineItem(
             content, GamePrefabKeys.Apple, "Apple", maximumQuantity: 10);
 
+        PrefabBuilder cabinDoor = content.Define(GamePrefabKeys.CabinDoor);
+        cabinDoor.With(new GameCabinDoorState { IsOpen = 0 });
+        cabinDoor.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        cabinDoor.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.CabinDoor, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        cabinDoor.DisplayName("Cabin Door");
+
+        PrefabBuilder woodlandAnimal = content.Define(GamePrefabKeys.WoodlandAnimal);
+        woodlandAnimal.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        woodlandAnimal.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.WoodlandAnimal, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        woodlandAnimal.DisplayName("Woodland Animal");
+
         CompiledPrefabCatalog compiled = content.Compile(world, options);
         InventoryItemDefinition bread = BindItem(compiled, breadSource);
         InventoryItemDefinition sword = BindItem(compiled, swordSource);
@@ -181,6 +211,8 @@ public sealed class GameContent : IInventoryContentCatalog
             bread,
             sword,
             apple,
+            compiled.GetHandle(GamePrefabKeys.CabinDoor),
+            compiled.GetHandle(GamePrefabKeys.WoodlandAnimal),
             new WorldContentBinding(WorldFingerprint,
             [
                 GameTerrainMaterialIds.Water,

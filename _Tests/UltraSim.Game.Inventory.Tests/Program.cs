@@ -46,7 +46,7 @@ static void ClosedGameSchemaOwnsFinalInventoryIds()
 {
     _ = new UltraSimGameComposition();
     ComponentSchema schema = GameSchema.CreateSchema();
-    Assert.Equal(9, schema.ComponentCount);
+    Assert.Equal(10, schema.ComponentCount);
     ComponentId simulation = GameSchema.GetComponentId<GameSimulationState>();
     ComponentId character = GameSchema.GetComponentId<GameCharacter>();
     ComponentId container = GameSchema.GetComponentId<InventoryContainer>();
@@ -458,7 +458,8 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
             staging.Inventory,
             staging.Content,
             staging.WorldState,
-            staging.SimulationLookup);
+            staging.SimulationLookup,
+            worldActions: staging.WorldActions);
         Assert.True(fixture.Runtime.Game.TryPublishPreparedGeneration(
             staging.World, candidate, out _));
         transferred = true;

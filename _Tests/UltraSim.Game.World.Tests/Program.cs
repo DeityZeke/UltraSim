@@ -1980,7 +1980,7 @@ static void AssertSharedTerrainEdgeWithDifferentBases(int elevationOffset)
 static void PositionComponentIsPersistedCanonicalAuthority()
 {
     ComponentSchema schema = GameSchema.CreateSchema();
-    Equal(9, schema.ComponentCount);
+    Equal(10, schema.ComponentCount);
     ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
     True(position.IsValid);
     PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();
@@ -2315,7 +2315,8 @@ static void GenerationReplacementPublishesFreshDerivedIndex()
             staging.Content,
             staging.WorldState,
             staging.SimulationLookup,
-            staging.Replication);
+            staging.Replication,
+            staging.WorldActions);
         True(runtime.Game.TryPublishPreparedGeneration(staging.World, candidate, out ulong newGeneration));
         published = true;
         candidate = null;

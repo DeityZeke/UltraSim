@@ -8,17 +8,21 @@ using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Input;
 using UltraSim.Game.Persistence;
 using UltraSim.Game.UI;
+using UltraSim.Game.World;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
+using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-s0.8-integrated-acceptance-v3";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v1";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
+Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
 Run("AccountlessAdmissionAndPersistence", AccountlessRoundTrip, results);
 Run("AuthoritativeClockRoundTripsAcrossHostCadences", AuthoritativeClockRoundTripsAcrossHostCadences, results);
@@ -38,7 +42,226 @@ if (!string.IsNullOrWhiteSpace(output))
     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
     File.WriteAllText(path, json + Environment.NewLine);
 }
-Console.WriteLine($"All {results.Count} S0.8 integrated acceptance gates passed.");
+Console.WriteLine($"All {results.Count} integrated acceptance gates passed.");
+
+static TestMetrics PlayableWoodsCabinRoundTrip()
+{
+    string root = TempRoot("t0-10-playable");
+    var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x80_0010));
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    try
+    {
+        using var host = new InternalHost(composition, RuntimeOptions(identity));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(new ParticipantId(101));
+        Expect(entered.IsEntered, "T0.10 accountless entry failed.");
+
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+            "T0.10 authored dynamic fixture could not be populated.");
+        host.Tick();
+
+        WorldPosition playerPosition = ReadWorldPosition(runtime.Game, entities.PlayerId);
+        PlayableClientProjection client = BuildPlayableProjection(runtime.Game, playerPosition);
+        Expect(client.Window.GetSnapshot().ActiveChunks == 9,
+            "The initial presentation window was not bounded to nine chunks.");
+        string initialProjection = CaptureProjectionCanonical(client);
+        Expect(initialProjection.Length != 0, "The initial client projection was empty.");
+
+        var input = new ClientWorldInputSequencer();
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.Interact, true), out GamePlayerCommand openDoor),
+            "The door input command could not be formed.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.ToggleCabinDoor(
+                world, game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                ResolveInWorld(world, entities.CabinDoorId),
+                openDoor,
+                out _),
+            out GameWorldActionStatus doorStatus) && doorStatus == GameWorldActionStatus.Accepted,
+            "The authoritative cabin door did not open.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.ToggleCabinDoor(
+                world, game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                ResolveInWorld(world, entities.CabinDoorId),
+                openDoor,
+                out _),
+            out GameWorldActionStatus duplicateDoorStatus) &&
+            duplicateDoorStatus == GameWorldActionStatus.StaleCommand,
+            "A duplicate interaction command was not fenced by its actor sequence.");
+        host.Tick();
+
+        const int movementCommands = 45;
+        var movementTicks = new double[movementCommands];
+        var offline = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId);
+        int chunkCrossings = 0;
+        SpatialChunkCoord previousChunk = playerPosition.Chunk;
+        long movementAllocated = 0;
+        for (int step = 0; step < movementCommands; step++)
+        {
+            Expect(input.TryCreateCommand(new ClientWorldInputSample(
+                1, 0, GamePlayerActions.None, true), out GamePlayerCommand command),
+                "A movement command could not be formed.");
+            long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            long started = Stopwatch.GetTimestamp();
+            Expect(offline.ApplyMovement(command) == GameWorldActionStatus.Accepted,
+                "Authoritative movement was rejected.");
+            host.Tick();
+            movementTicks[step] = ToNanoseconds(Stopwatch.GetTimestamp() - started);
+            movementAllocated += GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            playerPosition = offline.ReadPosition();
+            if (playerPosition.Chunk != previousChunk)
+            {
+                chunkCrossings++;
+                AdvancePlayableProjection(runtime.Game, client, playerPosition);
+                previousChunk = playerPosition.Chunk;
+            }
+        }
+        Expect(chunkCrossings == 1 && playerPosition.Chunk.X == 1,
+            "The playable path did not cross exactly one world chunk boundary.");
+
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.MoveItemToNearbyContainer(
+                world, game.WorldState, game.Inventory,
+                ResolveInWorld(world, entities.PlayerId),
+                ResolveInWorld(world, entities.BreadId),
+                ResolveInWorld(world, entities.BackpackId),
+                ResolveInWorld(world, entities.CabinChestId),
+                out _),
+            out GameWorldActionStatus chestStatus) && chestStatus == GameWorldActionStatus.Accepted,
+            "The nearby cabin-chest transfer was rejected.");
+        host.Tick();
+        RefreshPlayableProjection(runtime.Game, client);
+
+        string preSaveCanonical = CapturePlayableCanonical(runtime.Game, entities);
+        string preSaveProjection = CaptureProjectionCanonical(client);
+        PlayableClientProjection rebuilt = BuildPlayableProjection(runtime.Game, playerPosition);
+        Expect(CaptureProjectionCanonical(rebuilt) == preSaveProjection,
+            "Retiring/rebuilding the local client projection changed visible semantic truth.");
+
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var triangleMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+        Expect(rebuilt.Cache.TryGetResidentHandle(
+            playerPosition.ToChunkKey(GameWorldState.DefaultSpace), out ClientSemanticChunkHandle homeHandle) &&
+            rebuilt.Cache.TryBuildResidentTerrainMesh(
+                homeHandle, vertices, indices, triangleMaterials,
+                out TerrainBaseMeshSummary meshSummary,
+                out ClientSemanticChunkError semanticError,
+                out TerrainBaseMeshBuildError meshError) &&
+            semanticError == ClientSemanticChunkError.None &&
+            meshError == TerrainBaseMeshBuildError.None &&
+            meshSummary.VertexCount == TerrainChunkFormat.HeightVertexCount,
+            "The rebuilt client projection could not prepare its terrain mesh.");
+
+        var persistence = new GameRuntimePersistence(
+            runtime.Game,
+            composition,
+            RestoreOptions(),
+            new SaveSetCoordinator(root));
+        long saveStarted = Stopwatch.GetTimestamp();
+        GameSaveResult saved = persistence.TrySave(
+            new SaveSetContext(1, 1_700_000_810_001), static capture => capture());
+        long saveTicks = Stopwatch.GetTimestamp() - saveStarted;
+        Expect(saved.Succeeded, "The T0.10 world save failed.");
+
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.Interact, true), out GamePlayerCommand releaseHeld),
+            "The held-action release sample failed.");
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.None, true), out _),
+            "The door-action release command failed.");
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.Interact, true), out GamePlayerCommand closeDoor),
+            "The divergent close-door command failed.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, generationId, game) =>
+            {
+                GameWorldActionStatus closed = game.WorldActions.ToggleCabinDoor(
+                    world, game.WorldState,
+                    ResolveInWorld(world, entities.PlayerId),
+                    ResolveInWorld(world, entities.CabinDoorId), closeDoor, out _);
+                InventoryMutationResult moved = game.Inventory.Move(
+                    world,
+                    ResolveInWorld(world, entities.BreadId),
+                    ResolveInWorld(world, entities.CabinChestId),
+                    ResolveInWorld(world, entities.BackpackId));
+                return closed == GameWorldActionStatus.Accepted && moved.Accepted;
+            }, out bool diverged) && diverged,
+            "The post-save playable world did not diverge.");
+        host.Tick();
+        Expect(CapturePlayableCanonical(runtime.Game, entities) != preSaveCanonical,
+            "The divergent door/inventory state matched the save point.");
+
+        long loadStarted = Stopwatch.GetTimestamp();
+        GameLoadResult loaded = persistence.TryLoad();
+        long loadTicks = Stopwatch.GetTimestamp() - loadStarted;
+        Expect(loaded.Succeeded, "The T0.10 save could not restore.");
+        Expect(CapturePlayableCanonical(runtime.Game, entities) == preSaveCanonical,
+            "The restored woods/cabin authority differs from the saved state.");
+        Expect(admission.TryGetSession(entered.Participant, out AdmissionResult invalidated) &&
+            invalidated.Rejection == AdmissionRejection.GenerationReplaced,
+            "The local accountless session retained a stale generation entity after restore.");
+
+        WorldPosition restoredPosition = ReadWorldPosition(runtime.Game, entities.PlayerId);
+        PlayableClientProjection restored = BuildPlayableProjection(runtime.Game, restoredPosition);
+        Expect(CaptureProjectionCanonical(restored) == preSaveProjection,
+            "The restored client-visible world differs from the saved client projection.");
+
+        long identityIndexBytes = 0;
+        long worldReservedBytes = 0;
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (_, _, game) =>
+            {
+                identityIndexBytes = game.WorldState.BaseWorld!.StructuralIdentityIndexReservedBytes;
+                worldReservedBytes = game.WorldState.GetSnapshot().ReservedBytes;
+                return true;
+            }, out bool measured) && measured,
+            "T0.10 world memory evidence could not be captured.");
+
+        Array.Sort(movementTicks);
+        ClientWorldSemanticCacheSnapshot clientSnapshot = restored.Cache.GetSnapshot();
+        ClientPresentationWindowSnapshot windowSnapshot = restored.Window.GetSnapshot();
+        string canonicalHash = HashText(preSaveCanonical + '|' + preSaveProjection);
+        return new TestMetrics(
+            canonicalHash,
+            ToNanoseconds(saveTicks),
+            ToNanoseconds(loadTicks),
+            0, 0, 0,
+            saved.Manifest?.Artifacts.Sum(static artifact => artifact.ByteCount) ?? 0,
+            0,
+            movementTicks.Average(),
+            Percentile(movementTicks, 0.95),
+            0,
+            movementAllocated,
+            "Preauthored 5x5 woods/cabin; OfflineDirect neutral input; one chunk crossing; " +
+            "door + spatially validated chest interaction; bounded 3x3 presentation; terrain mesh prep; " +
+            "projection retire/rebuild; four-artifact save/diverge/restore; accountless session invalidation.",
+            pack.Length,
+            identityIndexBytes,
+            worldReservedBytes,
+            clientSnapshot.ReservedBytes,
+            clientSnapshot.ResidentChunks,
+            windowSnapshot.ActiveChunks,
+            input.Snapshot().CommandsProduced,
+            chunkCrossings,
+            movementTicks.Average(),
+            Percentile(movementTicks, 0.95),
+            movementAllocated);
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
 
 static TestMetrics AccountBackedRoundTrip()
 {
@@ -526,6 +749,256 @@ static TestMetrics RuntimeTickBenchmark()
     }
 }
 
+static PlayableClientProjection BuildPlayableProjection(
+    ServerGameFacet runtime,
+    WorldPosition playerPosition)
+{
+    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, PlayableClientProjection>(
+        (_, _, game) =>
+        {
+            WorldPreparedView prepared = game.WorldState.PreparedWorld ??
+                throw new InvalidOperationException("The playable world has no prepared structural view.");
+            var cache = new ClientWorldSemanticCache(
+                prepared,
+                new ClientWorldSemanticCacheLimits(
+                    MaximumResidentChunks: 12,
+                    MaximumFrozenStaticsPerChunk: 16,
+                    MaximumMultiFragmentsPerChunk: 16,
+                    MaximumPublicRecordsPerChunk: 16,
+                    MaximumKnownPublicIdentities: 64));
+            StageWindow(game.WorldState.Publications, cache, playerPosition.Chunk, radius: 1);
+            var window = new ClientPresentationWindow(cache, presentationRadiusChunks: 1);
+            Span<ClientPresentationChange> changes = stackalloc ClientPresentationChange[18];
+            Expect(window.TryPlanTrack(
+                playerPosition, changes,
+                out ClientPresentationWindowPlan plan,
+                out ClientPresentationWindowTransition transition,
+                out int required,
+                out ClientPresentationWindowError error),
+                $"The initial presentation plan failed: {error} ({required}).");
+            Expect(transition.Entered == 9 && transition.ActiveChunks == 9,
+                "The initial presentation transition did not enter exactly nine chunks.");
+            window.Commit(plan);
+            return new PlayableClientProjection(cache, window);
+        }, out PlayableClientProjection projection),
+        "The playable client projection could not be built.");
+    return projection;
+}
+
+static void AdvancePlayableProjection(
+    ServerGameFacet runtime,
+    PlayableClientProjection projection,
+    WorldPosition playerPosition)
+{
+    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (_, _, game) =>
+        {
+            StageMissingWindowChunks(
+                game.WorldState.Publications, projection.Cache, playerPosition.Chunk, radius: 1);
+            Span<ClientPresentationChange> changes = stackalloc ClientPresentationChange[18];
+            Expect(projection.Window.TryPlanTrack(
+                playerPosition, changes,
+                out ClientPresentationWindowPlan plan,
+                out ClientPresentationWindowTransition transition,
+                out int required,
+                out ClientPresentationWindowError error),
+                $"A crossing presentation plan failed: {error} ({required}).");
+            Expect(transition.Entered == 3 && transition.Exited == 3,
+                "A one-chunk cardinal crossing did not produce a 3/6/3 window transition.");
+            projection.Window.Commit(plan);
+            for (int index = 0; index < required; index++)
+            {
+                if (changes[index].Kind != ClientPresentationChangeKind.Exit) continue;
+                Expect(projection.Cache.BeginRetire(changes[index].Handle) &&
+                    projection.Cache.CompleteRetire(changes[index].Handle),
+                    "An exited semantic chunk could not retire.");
+            }
+            return true;
+        }, out bool advanced) && advanced,
+        "The playable projection did not advance.");
+}
+
+static void RefreshPlayableProjection(
+    ServerGameFacet runtime,
+    PlayableClientProjection projection)
+{
+    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (_, _, game) =>
+        {
+            Span<ClientPresentationBinding> bindings = stackalloc ClientPresentationBinding[9];
+            Expect(projection.Window.TryCopyBindings(bindings, out int count, out _),
+                "Presentation bindings could not be borrowed for refresh.");
+            Span<WorldPublicRecord> records = stackalloc WorldPublicRecord[16];
+            for (int index = 0; index < count; index++)
+            {
+                ref readonly ClientPresentationBinding binding = ref bindings[index];
+                ChunkPublicationReadStatus status = game.WorldState.Publications.TryCopySnapshot(
+                    binding.Key, records, out ChunkPublicationBatch batch);
+                if (status == ChunkPublicationReadStatus.Snapshot)
+                {
+                    Expect(projection.Cache.TryApplySnapshot(
+                        binding.SemanticHandle, batch, records[..batch.Count], out _),
+                        $"Snapshot refresh failed for {binding.Key}.");
+                }
+                else
+                {
+                    Expect(status == ChunkPublicationReadStatus.ChunkAbsent &&
+                        projection.Cache.TryApplyChunkAbsent(
+                            binding.SemanticHandle,
+                            game.WorldState.Publications.Epoch,
+                            batch,
+                            out _),
+                        $"Absent refresh failed for {binding.Key}.");
+                }
+            }
+            return true;
+        }, out bool refreshed) && refreshed,
+        "The playable projection did not refresh.");
+}
+
+static void StageWindow(
+    ChunkPublicationStore publications,
+    ClientWorldSemanticCache cache,
+    SpatialChunkCoord center,
+    int radius)
+{
+    for (int z = center.Z - radius; z <= center.Z + radius; z++)
+    {
+        for (int x = center.X - radius; x <= center.X + radius; x++)
+            StageChunk(publications, cache, new SpatialChunkKey(GameWorldState.DefaultSpace, x, z));
+    }
+}
+
+static void StageMissingWindowChunks(
+    ChunkPublicationStore publications,
+    ClientWorldSemanticCache cache,
+    SpatialChunkCoord center,
+    int radius)
+{
+    for (int z = center.Z - radius; z <= center.Z + radius; z++)
+    {
+        for (int x = center.X - radius; x <= center.X + radius; x++)
+        {
+            var key = new SpatialChunkKey(GameWorldState.DefaultSpace, x, z);
+            if (!cache.TryGetResidentHandle(key, out _)) StageChunk(publications, cache, key);
+        }
+    }
+}
+
+static void StageChunk(
+    ChunkPublicationStore publications,
+    ClientWorldSemanticCache cache,
+    SpatialChunkKey key)
+{
+    Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out ClientSemanticChunkError requestError),
+        $"Semantic request failed for {key}: {requestError}.");
+    Span<WorldPublicRecord> records = stackalloc WorldPublicRecord[16];
+    ChunkPublicationReadStatus status = publications.TryCopySnapshot(key, records, out ChunkPublicationBatch batch);
+    if (status == ChunkPublicationReadStatus.Snapshot)
+    {
+        Expect(cache.TryStageFromBaseWorld(handle, records[..batch.Count], batch.Cursor,
+            out ClientSemanticChunkError stageError),
+            $"Semantic snapshot stage failed for {key}: {stageError}.");
+    }
+    else
+    {
+        ClientSemanticChunkError stageError = default;
+        Expect(status == ChunkPublicationReadStatus.ChunkAbsent &&
+            cache.TryStageFromBaseWorld(handle, [], default, out stageError),
+            $"Semantic base-only stage failed for {key}: {stageError}.");
+    }
+    Expect(cache.TryPublish(handle, out ClientSemanticChunkError publishError),
+        $"Semantic publication failed for {key}: {publishError}.");
+}
+
+static string CapturePlayableCanonical(
+    ServerGameFacet runtime,
+    GamePlayableWorldEntities entities)
+{
+    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, string>(
+        (world, _, game) =>
+        {
+            Entity player = ResolveInWorld(world, entities.PlayerId);
+            Entity door = ResolveInWorld(world, entities.CabinDoorId);
+            Entity bread = ResolveInWorld(world, entities.BreadId);
+            Expect(game.WorldState.TryReadPosition(world, player, out WorldPosition playerPosition),
+                "The playable position is missing.");
+            Expect(game.WorldActions.TryReadCabinDoor(world, door, out bool isOpen),
+                "The cabin door state is missing.");
+            Expect(game.WorldState.TryReadPublic(world, door, out WorldPublicDescriptor doorPublic),
+                "The cabin door public state is missing.");
+            PersistentEntityId parentId = default;
+            Expect(game.Inventory.TryReadItem(world, bread, out InventoryItem item) &&
+                world.TryGetPersistentId(item.Parent, out parentId),
+                "The moved inventory item has no durable parent.");
+            string text = $"{game.WorldState.BaseWorld!.Fingerprint}|" +
+                $"{playerPosition.GlobalXMillimeters}:{playerPosition.YMillimeters}:{playerPosition.GlobalZMillimeters}|" +
+                $"door={isOpen}:{doorPublic.Orientation.Units}|bread-parent={parentId.Value}|" +
+                $"overlay={game.WorldState.Overlay?.Revision.Value ?? 0}";
+            return HashText(text);
+        }, out string canonical),
+        "The playable canonical state could not be captured.");
+    return canonical;
+}
+
+static string CaptureProjectionCanonical(PlayableClientProjection projection)
+{
+    Span<ClientPresentationBinding> bindings = stackalloc ClientPresentationBinding[9];
+    Expect(projection.Window.TryCopyBindings(bindings, out int count, out _),
+        "The presentation projection could not expose its bindings.");
+    var text = new StringBuilder(64 * 1024);
+    var publicRows = new List<string>();
+    for (int index = 0; index < count; index++)
+    {
+        ref readonly ClientPresentationBinding binding = ref bindings[index];
+        Expect(projection.Cache.TryGetResidentView(
+            binding.SemanticHandle, out ClientSemanticChunkView view),
+            $"The client semantic view for {binding.Key} is missing.");
+        text.Append("|chunk=").Append(binding.Key.Coord.X).Append(',').Append(binding.Key.Coord.Z);
+        foreach (ushort material in view.TerrainMaterials) text.Append(':').Append(material);
+        foreach (int height in view.TerrainAbsoluteHeightsMillimeters) text.Append(':').Append(height);
+        foreach (WorldFrozenStaticRecord value in view.FrozenStatics)
+        {
+            text.Append("|s=").Append(value.Id.Value).Append(':').Append(value.DefinitionId.Value)
+                .Append(':').Append(value.Position.GlobalXMillimeters)
+                .Append(':').Append(value.Position.YMillimeters)
+                .Append(':').Append(value.Position.GlobalZMillimeters);
+        }
+        foreach (WorldMultiFragmentRecord value in view.MultiFragments)
+        {
+            text.Append("|m=").Append(value.MultiId.Value).Append(':').Append(value.PieceId.Value)
+                .Append(':').Append(value.DefinitionId.Value)
+                .Append(':').Append(value.Position.GlobalXMillimeters)
+                .Append(':').Append(value.Position.YMillimeters)
+                .Append(':').Append(value.Position.GlobalZMillimeters);
+        }
+        foreach (WorldPublicRecord value in view.PublicRecords)
+        {
+            publicRows.Add($"{binding.Key.Coord.X},{binding.Key.Coord.Z}:" +
+                $"{value.PrefabId}:{value.Position.GlobalXMillimeters}:" +
+                $"{value.Position.YMillimeters}:{value.Position.GlobalZMillimeters}:" +
+                $"{value.Orientation.Units}:{(ushort)value.StateFlags}");
+        }
+    }
+    publicRows.Sort(StringComparer.Ordinal);
+    foreach (string value in publicRows) text.Append("|p=").Append(value);
+    return HashText(text.ToString());
+}
+
+static WorldPosition ReadWorldPosition(ServerGameFacet runtime, PersistentEntityId id)
+{
+    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
+        (world, _, game) =>
+        {
+            Expect(game.WorldState.TryReadPosition(
+                world, ResolveInWorld(world, id), out WorldPosition position),
+                "The requested world position is missing.");
+            return position;
+        }, out WorldPosition result),
+        "The world-position read did not run.");
+    return result;
+}
+
 static FixtureKeys PopulateAccountBacked(ServerGameFacet runtime)
 {
     Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, FixtureKeys>(
@@ -856,7 +1329,76 @@ sealed record TestMetrics(
     double HostedTickP95Nanoseconds,
     double TickWrapperRatio,
     long TimedTickAllocatedBytes,
-    string Notes);
+    string Notes,
+    long WorldPackBytes = 0,
+    long StructuralIdentityIndexBytes = 0,
+    long WorldStateReservedBytes = 0,
+    long ClientSemanticReservedBytes = 0,
+    int ClientResidentChunks = 0,
+    int PresentationActiveChunks = 0,
+    ulong InputCommands = 0,
+    int ChunkCrossings = 0,
+    double WholePipelineMeanNanoseconds = 0,
+    double WholePipelineP95Nanoseconds = 0,
+    long WholePipelineAllocatedBytes = 0);
+
+sealed record PlayableClientProjection(
+    ClientWorldSemanticCache Cache,
+    ClientPresentationWindow Window);
+
+sealed class PlayableOfflineDirectLink
+{
+    private readonly ServerGameFacet _runtime;
+    private readonly PersistentEntityId _playerId;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameWorldActionStatus> _apply;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, WorldPosition> _read;
+    private GamePlayerCommand _command;
+
+    internal PlayableOfflineDirectLink(ServerGameFacet runtime, PersistentEntityId playerId)
+    {
+        _runtime = runtime;
+        _playerId = playerId;
+        _apply = ApplyCore;
+        _read = ReadCore;
+    }
+
+    internal GameWorldActionStatus ApplyMovement(in GamePlayerCommand command)
+    {
+        _command = command;
+        if (!_runtime.TryUseActiveGeneration(_apply, out GameWorldActionStatus status))
+            throw new InvalidOperationException("OfflineDirect movement had no active generation.");
+        return status;
+    }
+
+    internal WorldPosition ReadPosition()
+    {
+        if (!_runtime.TryUseActiveGeneration(_read, out WorldPosition position))
+            throw new InvalidOperationException("OfflineDirect position read had no active generation.");
+        return position;
+    }
+
+    private GameWorldActionStatus ApplyCore(
+        EcsWorld world,
+        ulong generationId,
+        IGameGenerationStateProvider game)
+    {
+        if (!world.TryResolvePersistentEntity(_playerId, out Entity player))
+            return GameWorldActionStatus.MissingActor;
+        return game.WorldActions.ApplyMovement(
+            world, game.WorldState, player, _command, out _);
+    }
+
+    private WorldPosition ReadCore(
+        EcsWorld world,
+        ulong generationId,
+        IGameGenerationStateProvider game)
+    {
+        if (!world.TryResolvePersistentEntity(_playerId, out Entity player) ||
+            !game.WorldState.TryReadPosition(world, player, out WorldPosition position))
+            throw new InvalidOperationException("OfflineDirect player position is missing.");
+        return position;
+    }
+}
 
 sealed class NullHostLogSink : IHostLogSink
 {

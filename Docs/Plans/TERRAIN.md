@@ -1,10 +1,9 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.8 are accepted/frozen as of
-2026-08-21 after the final presentation-ownership and movement hardening. T0.9
-implementation plus client-portability hardening is complete and stopped for
-checkpoint review; it is not yet accepted/frozen. T0.10 and Network N1 have not
-started.
+Status: active forward plan. T0.0 through T0.9 are accepted/frozen as of
+2026-08-21. T0.9 was accepted at `2e147426` after invariant, persistence,
+prepared-mesh, Multi, changed-set-validation, and client-portability hardening.
+T0.10 is the active implementation checkpoint. Network N1 has not started.
 Revised from the
 accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
 spatial-publication archaeology.
@@ -3389,7 +3388,10 @@ The revised 256-base/64-changed fixture records about 3.54 ms mean / 3.64 ms p95
 build time, 2.84 ms restore-validation p95, and 39.81 ns p95 / 0 B prepared
 terrain-material reads.
 
-T0.9 remains stopped for checkpoint review. T0.10 and Network N1 have not begun.
+The cold structural identity indexes are an additional derived cost of binding a
+large `WorldPack`. They are bounded and cold, so T0.9 does not optimize them;
+T0.10 authored-world evidence must report their bytes alongside complete pack,
+prepared-view, client-resident, and presentation memory.
 
 ### T0.9 client-portability hardening stop — 2026-08-21
 
@@ -3437,7 +3439,21 @@ small engine-neutral input sample/action boundary between raw Godot events and
 shared client/game intent. Physical bindings, cursor capture, device discovery,
 and engine action maps remain concrete-engine concerns.
 
-T0.10 and Network N1 remain unstarted after this portability stop.
+### T0.9 acceptance — 2026-08-21
+
+T0.9 is accepted/frozen at `2e147426`. The immutable-pack plus durable-overlay
+prepared view, exact save/restore closure, changed-set structural validation,
+overlay-aware client mesh preparation, and engine-neutral presentation-window
+semantics are dependencies of T0.10 rather than subjects for another polish
+round.
+
+Network N1 must not treat `WorldChunkContentRevision` alone as complete live
+structural lineage. A chunk may return to exact immutable-base state (and retain
+no sparse replacement row) before becoming changed again. N1 must fence live
+structural transfer with the exact pack identity, whole overlay generation,
+base-versus-replacement state, and chunk revision/hash as applicable. The exact
+request/transfer representation remains an N1 protocol decision; T0.9 adds no
+network sequence or subscriber state.
 
 ## T0.10 — playable woods/cabin vertical and acceptance
 
@@ -3495,6 +3511,83 @@ The first playable movement path also freezes the smallest evidence-backed
 engine-neutral input sample/action seam. Godot translates raw device/input-map
 events into that seam; normalization, intent sequencing, and OfflineDirect/remote
 command formation must not be duplicated inside a future engine adapter.
+
+### T0.10 first playable vertical implementation stop — 2026-08-21
+
+The first bounded T0.10 vertical is implemented and stopped for evidence review;
+T0.10 is not yet accepted/frozen. It deliberately exercises one complete path
+before expanding into the full performance matrix:
+
+```text
+authored 5 x 5 woods/cabin WorldPack
+    -> authoritative ECS movement + terrain-height resolution
+    -> persisted door and spatially validated chest interaction
+    -> chunk publication and 3 x 3 client semantic residency
+    -> engine-neutral presentation-window crossing
+    -> Godot terrain/static/Multi/public realization
+    -> projection retirement/rebuild
+    -> exact four-artifact save/diverge/restore
+```
+
+The authored fixture uses the frozen 16 m chunk / 0.5 m cell / q5 terrain
+profile. It contains 25 uneven terrain chunks, a clearing, approximately 76
+frozen tree/rock/decor placements, one six-piece cabin Multi spanning a chunk
+boundary, a persisted/public door, a positioned chest/container, a player, an
+item, and a nearby public animal. It is small real acceptance content, not a
+production-density world claim.
+
+The accepted input boundary for this vertical is:
+
+```text
+engine adapter
+    raw finite movement axes + held action bits + focus
+
+Client Core
+    focus suppression
+    unit-circle normalization
+    held -> pressed edges
+    Q15 quantization
+    monotonic sequence
+
+GamePlayerCommand
+    engine-neutral movement/action intent
+
+game authority
+    per-actor generation/sequence fence
+    prepared-terrain movement
+    validated interaction
+```
+
+Key names, device discovery, mouse/cursor capture, and action-map construction
+remain engine policy. The authoritative actor sequence fences both movement and
+door interaction, so replaying an accepted interaction cannot toggle it twice.
+
+The current Release OfflineDirect artifact records a 112,406-byte complete pack,
+a 1,312-byte cold structural identity index, 284,800 bytes of generation-owned
+world state, 139,984 bytes for the 12-slot client semantic profile, nine resident
+and nine presented chunks, one chunk crossing, and zero thread allocation across
+the timed command-plus-authority-tick scope. The initial 45-command observation
+was approximately 38.2 us mean / 58.6 us p95 in the final Release verification.
+Its canonical authority plus
+client-projection hash is
+`3087478347B2884026C742C39F658D120B0B5C62C5D752A15CDBE6EFC127C89F`.
+Save/load timings are single cold observations and are not percentile claims.
+
+The native Godot acceptance uses the same authored pack and a radius-one window.
+It builds 12 chunks across one 3/6/3 crossing, keeps nine active, refreshes the
+door public layer without a structural rebuild, and returns Godot resource/buffer
+monitors to their baselines. The current headless observation reports 64 active
+nodes, 36 logical renderer resources, seven convergence frames, approximately
+27.3 ms maximum frame work and 23.1 ms maximum terrain-mesh build work. These are
+cold single-run headless maxima, not warmed production p95 values.
+
+The immutable evidence artifact is
+[`terrain-t0.10-playable-vertical-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-playable-vertical-2026-08-21.json).
+T0.10 remains active because the required flat/rough/corner/dense/static-heavy,
+publication, streaming, and native Godot matrix below has not yet been executed
+against representative content. Network N1, live structural transfer, remote
+request lineage, editor/housing workflows, and autonomous NPC behavior remain
+unstarted.
 
 ### T0 performance/evidence matrix
 

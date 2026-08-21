@@ -16,6 +16,7 @@ public sealed class GameStaging
         InventoryGenerationState inventory,
         GameContent content,
         GameWorldState worldState,
+        GameWorldActions worldActions,
         ComponentLookup<GameSimulationState> simulationLookup,
         GameReplicationBindings? replication = null)
     {
@@ -23,6 +24,7 @@ public sealed class GameStaging
         Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
         Content = content ?? throw new ArgumentNullException(nameof(content));
         WorldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        WorldActions = worldActions ?? throw new ArgumentNullException(nameof(worldActions));
         SimulationLookup = simulationLookup;
         Replication = replication;
     }
@@ -31,6 +33,7 @@ public sealed class GameStaging
     public InventoryGenerationState Inventory { get; }
     public GameContent Content { get; }
     public GameWorldState WorldState { get; }
+    public GameWorldActions WorldActions { get; }
     public ComponentLookup<GameSimulationState> SimulationLookup { get; }
     public GameReplicationBindings? Replication { get; }
 
@@ -86,7 +89,8 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             content,
             CreateWorldState(generation.World, content),
             simulation,
-            replication));
+            replication,
+            new GameWorldActions(generation.World)));
     }
 
     public GameStaging CreateStaging(
@@ -107,6 +111,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
                 new GameWorldState(world),
+                new GameWorldActions(world),
                 simulation,
                 replication);
         }
@@ -133,6 +138,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
                 CreateWorldState(world, content),
+                new GameWorldActions(world),
                 simulation,
                 replication);
         }

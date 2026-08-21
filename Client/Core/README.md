@@ -55,6 +55,15 @@ The Client Core test suite includes a Godot-free recording backend that exercise
 rejection atomicity, local movement, cardinal/diagonal crossings, a second move
 while earlier realization is notionally pending, reversal, reset, and bounded
 desired membership. This is a portability seam, not a renderer interface or mod
-API. Raw gameplay input normalization remains deliberately unfrozen: T0.10's
-first real playable movement consumer must earn the neutral sample/action shape
-between engine events and common game/network intent.
+API.
+
+T0.10 adds the first engine-neutral playable input seam. A concrete engine
+captures raw axes, action-map state, and focus into `ClientWorldInputSample`.
+`ClientWorldInputSequencer` then owns finite-value validation, focus suppression,
+unit-circle movement normalization, held-to-pressed edge detection, Q15 command
+quantization, and monotonic command sequencing. The resulting
+`GamePlayerCommand` is shared game/client intent; it contains no key names,
+device IDs, cursor mode, Godot event, or transport state. Physical bindings,
+mouse capture, controller discovery, and engine action maps remain adapter work.
+This is deliberately the smallest proven movement/interact boundary rather than
+a general input framework or compatibility API.

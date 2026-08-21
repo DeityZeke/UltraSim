@@ -95,3 +95,10 @@ build world-wide MultiMeshes.
 Godot resource layouts, scene nodes, renderer slots, fallback assets, and render
 group choices are presentation implementation—not world, persistence, Network,
 Game.Contracts, or mod APIs.
+
+`GodotWorldInput` is likewise a thin raw-input adapter. It reads the concrete
+Godot InputMap actions (`move_left/right/forward/back`, `interact`, and
+`primary_action`) plus viewport focus and emits `ClientWorldInputSample`.
+Normalization, focus suppression, held/pressed interpretation, command
+quantization, and sequencing live in Client Core; another engine supplies only
+its own physical capture and action-map policy.

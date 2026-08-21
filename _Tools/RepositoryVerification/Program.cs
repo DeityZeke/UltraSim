@@ -66,6 +66,12 @@ foreach (string configuration in configurations)
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://T08WorldHeadlessAcceptance.tscn",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "_Tests/UltraSim.S0.Godot.Tests",
+            "--scene", "res://T010PlayableWorldAcceptance.tscn",
+        ]);
     }
 }
 
@@ -93,6 +99,7 @@ static void VerifyArchitecture(string root)
             ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
         [
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
             "Kernels/UI/UltraSim.UI.csproj",

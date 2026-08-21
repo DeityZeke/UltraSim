@@ -175,7 +175,8 @@ public sealed class GameRuntimePersistence
                 built.Content,
                 built.WorldState,
                 built.SimulationLookup,
-                built.Replication);
+                built.Replication,
+                built.WorldActions);
 
             ulong publishedGeneration = 0;
             prepared.Commit(_ =>

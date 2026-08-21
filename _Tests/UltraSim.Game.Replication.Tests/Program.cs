@@ -1679,7 +1679,8 @@ static void GenerationReplacementRebindsDurableAdmission()
         staging.Content,
         staging.WorldState,
         staging.SimulationLookup,
-        staging.Replication);
+        staging.Replication,
+        staging.WorldActions);
     Check.True(fixture.Runtime.Game.TryPublishPreparedGeneration(
         staging.World,
         candidate,
@@ -1723,7 +1724,8 @@ static void GenerationReplacementRebuildsEpoch()
         staging.Content,
         staging.WorldState,
         staging.SimulationLookup,
-        staging.Replication);
+        staging.Replication,
+        staging.WorldActions);
     Check.True(fixture.Runtime.Game.TryPublishPreparedGeneration(
         staging.World,
         candidate,

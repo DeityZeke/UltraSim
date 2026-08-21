@@ -23,6 +23,13 @@ public struct GameSimulationState : IComponent<GameSimulationState>
     public int InputVelocity;
 }
 
+/// <summary>Persisted state of the concrete T0.10 cabin-door interaction.</summary>
+[EcsComponent("game.world.cabin-door", PersistenceId = 700605)]
+public struct GameCabinDoorState : IComponent<GameCabinDoorState>
+{
+    public int IsOpen;
+}
+
 [EcsSchema(
     typeof(InventoryContainer),
     typeof(GameSimulationState),
@@ -31,6 +38,7 @@ public struct GameSimulationState : IComponent<GameSimulationState>
     typeof(GameCharacter),
     typeof(WorldPositionComponent),
     typeof(WorldPublicComponent),
+    typeof(GameCabinDoorState),
     typeof(InventoryEquipCapability),
     typeof(InventoryStackPolicy))]
 public static partial class GameSchema

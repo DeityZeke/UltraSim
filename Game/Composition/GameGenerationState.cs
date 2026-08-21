@@ -15,6 +15,8 @@ public interface IGameGenerationStateProvider :
 
     GameWorldState WorldState { get; }
 
+    GameWorldActions WorldActions { get; }
+
     bool TryReadSimulationState(
         EcsWorld world,
         Entity entity,
@@ -38,7 +40,8 @@ public sealed class GameGenerationState :
         GameContent content,
         GameWorldState worldState,
         ComponentLookup<GameSimulationState> simulationLookup,
-        GameReplicationBindings? replication = null)
+        GameReplicationBindings? replication = null,
+        GameWorldActions? worldActions = null)
     {
         Accounting = accounting ?? throw new ArgumentNullException(nameof(accounting));
         Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
@@ -51,6 +54,7 @@ public sealed class GameGenerationState :
         if (worldState.WorldId != inventory.WorldId)
             throw new ArgumentException("World state and Inventory belong to different ECS worlds.", nameof(worldState));
         _simulationLookup = simulationLookup;
+        _worldActions = worldActions;
         Replication = replication;
     }
 
@@ -58,11 +62,14 @@ public sealed class GameGenerationState :
     public InventoryGenerationState Inventory { get; }
     public GameContent Content { get; }
     public GameWorldState WorldState { get; }
+    public GameWorldActions WorldActions => _worldActions ??
+        throw new InvalidOperationException("World actions are unavailable before generation initialization.");
 
     /// <summary>Gets generation-bound replication capabilities when the network profile was selected.</summary>
     public GameReplicationBindings? Replication { get; }
 
     private readonly ComponentLookup<GameSimulationState> _simulationLookup;
+    private GameWorldActions? _worldActions;
 
     /// <summary>Reads the minimal scheduled simulation state through its prepared world route.</summary>
     public bool TryReadSimulationState(
@@ -76,8 +83,10 @@ public sealed class GameGenerationState :
         return world.TryRead(entity, _simulationLookup, out state);
     }
 
-    void IServerGenerationStepParticipant.InitializeGeneration(EcsWorld world) =>
+    void IServerGenerationStepParticipant.InitializeGeneration(EcsWorld world)
+    {
         WorldState.Initialize(world);
+    }
 
     void IServerGenerationStepParticipant.CommitAfterEcsStep(EcsWorld world) =>
         WorldState.CommitAfterEcsStep(world);
