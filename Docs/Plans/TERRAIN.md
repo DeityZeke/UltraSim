@@ -3783,13 +3783,44 @@ and 120 Hz, then remains stopped. Adversarial evidence proves action-only
 `Unchanged`, latest Destination before a tick, Direct/Stop/session cancellation,
 invalid-target preservation of prior state, and non-durable save/restore
 behavior. `GameWorldActions` known reservation in the restored 64-slot fixture
-is now 4,672 B after adding bounded Destination coordinates/state.
+was 4,672 B at this initial implementation stop after adding bounded Destination
+coordinates/state.
 
 The immutable evidence artifact is
 [`terrain-t0.10-destination-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-destination-2026-08-21.json).
 OrbitCommand/control profiles, pointer gestures, the launchable
 `Client/_Godot` application, the broad matrix, and N1 have not started. T0.10
 remains active.
+
+### T0.10 Destination temporal hardening stop — 2026-08-21
+
+The initial Destination matrix proved exact arrival but used a route that all
+cadences completed before the one-second observation. It did not prove equal
+in-flight speed. The additive hardening replaces repeated rounded direction
+steps with original-route parametric progress:
+
+```text
+admission:
+    retain start + target + ceiling route length
+
+each fixed step:
+    cumulative progress += speed * exact Delta
+    X/Z = start + route * progress / route length
+```
+
+For the non-cardinal route from X/Z = 13,500/12,000 mm to
+37,123/31,777 mm (ceiling length 30,809 mm), authority at 20, 60, and
+120 Hz is still travelling after one second and is exactly at
+18,100/15,851 mm in every case. Each run then clamps to the exact target,
+retires, and remains stationary. The existing short-route arrival hash and all
+supersession/session/persistence evidence remain unchanged.
+
+Four additional retained `long` values per ECS slot make the current known
+`GameWorldActions` backing 6,720 B in the restored 64-slot fixture, +2,048 B
+over the initial Destination stop. The additive evidence artifact is
+[`terrain-t0.10-destination-temporal-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-destination-temporal-hardening-2026-08-21.json).
+Destination temporal integration is now closed for the straight-line,
+pre-navigation T0.10 scope. OrbitCommand and navigation remain unstarted.
 
 ### T0 performance/evidence matrix
 

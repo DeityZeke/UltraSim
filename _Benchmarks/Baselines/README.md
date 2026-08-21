@@ -149,10 +149,15 @@ Useful current anchors can be located by their embedded workload or filename:
   broad-matrix, or N1 evidence;
 - `terrain-t0.10-destination-*` — explicit command-level `Unchanged/Stop/Direct/
   Destination` mutation semantics plus the first latched, exact-arrival,
-  straight-line terrain-following Destination authority. It proves cadence,
-  supersession, action composition, invalid-target preservation, session
-  cancellation, and non-durable restore behavior without claiming pathfinding,
-  control-profile, launchable-client, or N1 completion;
+  straight-line terrain-following Destination authority. The initial artifact
+  proves sampled exact arrival, supersession, action composition, invalid-target
+  preservation, session cancellation, and non-durable restore behavior; it does
+  not by itself prove equal in-flight progress;
+- `terrain-t0.10-destination-temporal-hardening-*` — additive original-route
+  cumulative-progress evidence. A still-in-flight non-cardinal route has exact
+  equal X/Z after one authoritative second at 20/60/120 Hz, then exact arrival,
+  without claiming pathfinding, control-profile, launchable-client, or N1
+  completion;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

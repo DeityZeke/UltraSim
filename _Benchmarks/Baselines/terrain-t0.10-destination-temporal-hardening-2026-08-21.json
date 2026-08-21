@@ -1,0 +1,68 @@
+{
+  "schema": "terrain-t0.10-destination-temporal-hardening-v1",
+  "captured_at_local": "2026-08-21",
+  "runtime": "8.0.29",
+  "framework": ".NET 8.0.29",
+  "os": "CachyOS",
+  "architecture": "X64",
+  "processors": 16,
+  "checkpoint": "Destination temporal integration hardening stop; T0.10 remains active",
+  "adds_to": "terrain-t0.10-destination-2026-08-21.json",
+  "scope": "cadence-independent in-flight progress for unchanged straight-line Destination; not pathfinding, navmesh, collision/obstacle resolution, camera/control profiles, launchable client, broad matrix, or N1",
+  "workload": "ultrasim-t0.10-integrated-acceptance-v6",
+  "prior_evidence_correction": {
+    "initial_matrix_proved": "exact final clamp, retirement, and no drift at sampled authority frequencies",
+    "initial_matrix_did_not_prove": "equal position while still travelling because its route completed before the one-second observation"
+  },
+  "temporal_contract": "For an unchanged straight-line Destination, original route plus elapsed authoritative time determines X/Z; fixed-step partitioning does not.",
+  "integration": {
+    "route_start_retained": true,
+    "route_target_retained": true,
+    "route_length": "integer ceiling Euclidean length in millimeters",
+    "cumulative_progress": "speed times exact SimulationStepDelta with scalar remainder",
+    "position": "start + route_delta * cumulative_progress / route_length using Int128 intermediates",
+    "previous_rounded_position_used_as_next_projection_origin": false,
+    "final_step_clamps_to_exact_target": true
+  },
+  "in_flight_cadence_acceptance": {
+    "tested_authority_frequencies_hz": [20, 60, 120],
+    "commands_per_frequency": 1,
+    "elapsed_simulation_seconds": 1,
+    "initial_x_millimeters": 13500,
+    "initial_z_millimeters": 12000,
+    "destination_x_millimeters": 37123,
+    "destination_z_millimeters": 31777,
+    "ceiling_route_length_millimeters": 30809,
+    "cumulative_progress_millimeters": 6000,
+    "x_after_one_second_each_frequency_millimeters": 18100,
+    "z_after_one_second_each_frequency_millimeters": 15851,
+    "active_locomotion_after_one_second_each_frequency": 1,
+    "final_x_millimeters_each_frequency": 37123,
+    "final_z_millimeters_each_frequency": 31777,
+    "active_locomotion_after_arrival": 0,
+    "post_arrival_drift": false,
+    "canonical_hash": "F93543B223B32DD341B89E76CDEDBA0EBEE5DCFD85679DB63054A91900BAAAE8"
+  },
+  "preserved_evidence": {
+    "short_exact_arrival_hash": "376F3FE12032B278F1A1CDE43E909BBB41068279E46E73D3D2403B33A640305B",
+    "locomotion_composition_hash": "248FDF44B5B37D101787E2A5A36B0E9E855A7DA10A571F4ADC332D08EDEEBBE0",
+    "playable_world_canonical_hash": "A90988C7D9735DCB55AF51D3C413AB2F8F51FB2D4F260E232A1ACF373BA1DA88"
+  },
+  "capacity_observation": {
+    "restored_fixture_ecs_slots": 64,
+    "previous_game_world_actions_known_reserved_bytes": 4672,
+    "current_game_world_actions_known_reserved_bytes": 6720,
+    "increase_bytes": 2048,
+    "increase_bytes_per_ecs_slot": 32,
+    "added_state": "Destination start X/Z, ceiling route length, and cumulative progress",
+    "allocation_scope": "array payload accounting excludes managed array/object headers and alignment"
+  },
+  "remaining_t0_10_gates": [
+    "OrbitCommand camera and pointer-gesture policy",
+    "crude ThirdPersonDirect and IndependentMoveLook portability proofs",
+    "configured launchable Client/_Godot application and human cabin acceptance",
+    "broad authored-world/publication/streaming performance matrix",
+    "representative large-capacity GameWorldActions reservation",
+    "T0.10 acceptance and freeze"
+  ]
+}

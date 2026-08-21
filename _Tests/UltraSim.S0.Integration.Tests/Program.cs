@@ -18,7 +18,7 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v5";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v6";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
@@ -26,6 +26,7 @@ Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, res
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
 Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
+Run("PlayableDestinationProgressIsCadenceIndependent", PlayableDestinationProgressCadenceMatrix, results);
 Run("LocomotionUpdatesComposeAndSupersede", LocomotionUpdateSemantics, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
@@ -580,6 +581,85 @@ static TestMetrics PlayableDestinationCadenceMatrix()
         HashText(string.Join('|', arrivals)),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "One latched diagonal Destination command at 20/60/120 Hz; exact final clamp, automatic retirement, and no post-arrival drift.",
+        InputCommands: commands);
+}
+
+static TestMetrics PlayableDestinationProgressCadenceMatrix()
+{
+    const long targetX = 37_123;
+    const long targetZ = 31_777;
+    const long expectedOneSecondX = 18_100;
+    const long expectedOneSecondZ = 15_851;
+    int[] frequencies = [20, 60, 120];
+    var observations = new List<string>(frequencies.Length);
+    ulong commands = 0;
+    foreach (int frequency in frequencies)
+    {
+        WorldPack pack = GamePlayableWorld.CreateWorldPack();
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32),
+            baseWorldPack: pack);
+        using var host = new InternalHost(
+            composition,
+            RuntimeOptions(
+                new PersistenceIdentityOptions(new PersistentWorldId(
+                    checked((ulong)0x80_1250 + (ulong)frequency))),
+                frequencyHz: frequency));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(
+            new ParticipantId(checked((ulong)0x1250 + (ulong)frequency)));
+        Expect(entered.IsEntered,
+            $"The {frequency} Hz long-Destination actor could not enter.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+            $"The {frequency} Hz long-Destination fixture could not populate.");
+        host.Tick();
+
+        var input = new ClientWorldInputSequencer();
+        var link = new PlayableOfflineDirectLink(
+            runtime.Game, entities.PlayerId, input.ControlSession);
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDestination(targetX, targetZ),
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand destination),
+            $"The {frequency} Hz long Destination command could not be formed.");
+        GamePlayerCommandResult admitted = link.ApplyCommand(destination);
+        Expect(admitted.WasAdmitted && admitted.Locomotion == GameWorldActionStatus.Accepted,
+            $"The {frequency} Hz long Destination was not admitted.");
+
+        for (int step = 0; step < frequency; step++)
+            host.Tick();
+        WorldPosition afterOneSecond = link.ReadPosition();
+        Expect(afterOneSecond.GlobalXMillimeters == expectedOneSecondX &&
+            afterOneSecond.GlobalZMillimeters == expectedOneSecondZ,
+            $"The {frequency} Hz long Destination diverged after one second: {afterOneSecond}.");
+        Expect(ReadActiveLocomotionCount(runtime.Game) == 1,
+            $"The {frequency} Hz long Destination arrived before the in-flight observation.");
+
+        int remainingSteps = frequency * 6;
+        while (ReadActiveLocomotionCount(runtime.Game) != 0 && remainingSteps-- > 0)
+            host.Tick();
+        WorldPosition arrived = link.ReadPosition();
+        Expect(remainingSteps >= 0 &&
+            arrived.GlobalXMillimeters == targetX && arrived.GlobalZMillimeters == targetZ,
+            $"The {frequency} Hz long Destination did not reach its exact endpoint: {arrived}.");
+        host.Tick();
+        Expect(link.ReadPosition() == arrived,
+            $"The {frequency} Hz long Destination drifted after arrival.");
+
+        commands += input.Snapshot().CommandsProduced;
+        observations.Add($"{frequency}:{afterOneSecond}:{arrived}");
+    }
+
+    return new TestMetrics(
+        HashText(string.Join('|', observations)),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "One long non-cardinal Destination at 20/60/120 Hz; exact equal in-flight position after one authoritative second, then exact arrival and no drift.",
         InputCommands: commands);
 }
 

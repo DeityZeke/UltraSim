@@ -812,11 +812,14 @@ sequencing.
 
 The first Destination implementation is deliberately straight-line and terrain-
 following. Authority validates that the nominated endpoint is representable and
-present in prepared terrain before replacing current locomotion. Every fixed
-step derives a direction toward the retained X/Z, advances by game speed times
-exact `SimulationStepDelta`, and clamps the final displacement to the exact
-target. Arrival retires the active slot. A prepared-world gap encountered after
-admission makes the simple route impossible and clears it.
+present in prepared terrain before replacing current locomotion. Admission
+retains the original route start/target and integer ceiling route length. Every
+fixed step advances one scalar cumulative progress value by game speed times
+exact `SimulationStepDelta`, then derives X/Z parametrically from the original
+route rather than adding a newly rounded direction to the previous integer
+position. The final progress clamps to the exact target and retires the active
+slot. A prepared-world gap encountered after admission makes the simple route
+impossible and clears it.
 
 Rejected malformed or out-of-world destinations consume an otherwise fresh
 command but leave the previous valid locomotion state unchanged. Direct, Stop,
@@ -839,6 +842,22 @@ Permanent evidence covers:
 - session replacement/end cancellation;
 - an out-of-world Destination rejecting without replacing valid Direct;
 - save/restore discarding a latched player Destination.
+
+The initial exact-arrival matrix used a route short enough to finish well before
+its one-second observation and therefore did not, by itself, prove equal speed
+while still travelling. Temporal hardening adds a 30.809 m non-cardinal route.
+After exactly one authoritative second, 20/60/120 Hz all remain active at the
+same exact X/Z, then reach the same endpoint and retire without drift. This
+freezes the pre-navigation rule:
+
+> For an unchanged straight-line Destination, original route plus elapsed
+> authoritative time determines X/Z; fixed-step partitioning does not.
+
+The cumulative representation adds four `long` values per addressable ECS slot:
+route start X/Z, route length, and progress. The restored 64-slot fixture's
+known `GameWorldActions` backing is 6,720 B. This is explicit bounded evidence,
+not a claim that an ECS-capacity-sized control map remains optimal at production
+world capacity.
 
 No pathfinder, navmesh, obstacle avoidance, crowd steering, gait expansion,
 camera profile, or pointer gesture policy is implemented by this checkpoint.

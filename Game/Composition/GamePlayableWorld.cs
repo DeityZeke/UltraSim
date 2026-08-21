@@ -77,6 +77,10 @@ public sealed class GameWorldActions
     private readonly short[] _directZ;
     private readonly long[] _destinationX;
     private readonly long[] _destinationZ;
+    private readonly long[] _destinationStartX;
+    private readonly long[] _destinationStartZ;
+    private readonly long[] _destinationRouteLength;
+    private readonly long[] _destinationProgress;
     private readonly long[] _movementRemainderX;
     private readonly long[] _movementRemainderZ;
     private readonly Entity[] _activeLocomotion;
@@ -97,6 +101,10 @@ public sealed class GameWorldActions
         _directZ = new short[_lastSequences.Length];
         _destinationX = new long[_lastSequences.Length];
         _destinationZ = new long[_lastSequences.Length];
+        _destinationStartX = new long[_lastSequences.Length];
+        _destinationStartZ = new long[_lastSequences.Length];
+        _destinationRouteLength = new long[_lastSequences.Length];
+        _destinationProgress = new long[_lastSequences.Length];
         _movementRemainderX = new long[_lastSequences.Length];
         _movementRemainderZ = new long[_lastSequences.Length];
         _activeLocomotion = new Entity[_lastSequences.Length];
@@ -106,7 +114,7 @@ public sealed class GameWorldActions
     /// <summary>Known fixed backing reserved for control lineage and retained locomotion.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
         ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
-         (sizeof(long) * 4) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)));
+         (sizeof(long) * 8) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)));
 
     public int ActiveLocomotionCount => _activeLocomotionCount;
 
@@ -257,6 +265,7 @@ public sealed class GameWorldActions
                 }
                 SetDestination(
                     actor,
+                    current,
                     update.DestinationXMillimeters,
                     update.DestinationZMillimeters);
                 return GameWorldActionStatus.Accepted;
@@ -338,42 +347,26 @@ public sealed class GameWorldActions
         in WorldPosition current,
         long stepQuanta)
     {
-        long dx = checked(_destinationX[index] - current.GlobalXMillimeters);
-        long dz = checked(_destinationZ[index] - current.GlobalZMillimeters);
-        if (dx == 0 && dz == 0)
-        {
-            ClearLocomotion(index);
-            return false;
-        }
-
         int distance = IntegrateDistance(stepQuanta, ref _movementRemainderX[index]);
         if (distance == 0)
             return true;
 
-        Int128 squaredRemaining = (Int128)dx * dx + (Int128)dz * dz;
-        long nextX;
-        long nextZ;
-        bool reached = squaredRemaining <= (Int128)distance * distance;
+        // Derive each published point from the original route and cumulative
+        // authoritative progress. Never compound per-tick X/Z rounding.
+        long routeLength = _destinationRouteLength[index];
+        long progress = checked(_destinationProgress[index] + distance);
+        bool reached = progress >= routeLength;
         if (reached)
         {
-            nextX = _destinationX[index];
-            nextZ = _destinationZ[index];
+            progress = routeLength;
         }
-        else
-        {
-            long denominator = CeilingSquareRoot(squaredRemaining, dx, dz);
-            long deltaX = checked((long)((Int128)dx * distance / denominator));
-            long deltaZ = checked((long)((Int128)dz * distance / denominator));
-            if (deltaX == 0 && deltaZ == 0)
-            {
-                if (Int128.Abs((Int128)dx) >= Int128.Abs((Int128)dz))
-                    deltaX = Math.Sign(dx);
-                else
-                    deltaZ = Math.Sign(dz);
-            }
-            nextX = checked(current.GlobalXMillimeters + deltaX);
-            nextZ = checked(current.GlobalZMillimeters + deltaZ);
-        }
+
+        long routeX = checked(_destinationX[index] - _destinationStartX[index]);
+        long routeZ = checked(_destinationZ[index] - _destinationStartZ[index]);
+        long nextX = checked(_destinationStartX[index] +
+            (long)((Int128)routeX * progress / routeLength));
+        long nextZ = checked(_destinationStartZ[index] +
+            (long)((Int128)routeZ * progress / routeLength));
 
         if (!TryResolveTerrainPosition(worldState, current.YMillimeters, nextX, nextZ, out WorldPosition position))
         {
@@ -382,6 +375,7 @@ public sealed class GameWorldActions
             return false;
         }
         SetAuthoritativePosition(world, worldState, actor, position);
+        _destinationProgress[index] = progress;
         if (reached)
         {
             ClearLocomotion(index);
@@ -585,16 +579,34 @@ public sealed class GameWorldActions
         EnsureActive(actor, index);
     }
 
-    private void SetDestination(Entity actor, long globalX, long globalZ)
+    private void SetDestination(
+        Entity actor,
+        in WorldPosition start,
+        long globalX,
+        long globalZ)
     {
         int index = checked((int)actor.Index);
         if (_locomotionKinds[index] == RetainedLocomotionKind.Destination &&
             _destinationX[index] == globalX && _destinationZ[index] == globalZ)
             return;
         ClearLocomotion(index);
+
+        long routeX = checked(globalX - start.GlobalXMillimeters);
+        long routeZ = checked(globalZ - start.GlobalZMillimeters);
+        if (routeX == 0 && routeZ == 0)
+            return;
+
         _locomotionKinds[index] = RetainedLocomotionKind.Destination;
         _destinationX[index] = globalX;
         _destinationZ[index] = globalZ;
+        _destinationStartX[index] = start.GlobalXMillimeters;
+        _destinationStartZ[index] = start.GlobalZMillimeters;
+        // Ceiling keeps the integer route no shorter than the exact Euclidean
+        // route while final-progress clamping still publishes the exact target.
+        _destinationRouteLength[index] = CeilingSquareRoot(
+            (Int128)routeX * routeX + (Int128)routeZ * routeZ,
+            routeX,
+            routeZ);
         EnsureActive(actor, index);
     }
 
@@ -631,6 +643,10 @@ public sealed class GameWorldActions
         _directZ[index] = 0;
         _destinationX[index] = 0;
         _destinationZ[index] = 0;
+        _destinationStartX[index] = 0;
+        _destinationStartZ[index] = 0;
+        _destinationRouteLength[index] = 0;
+        _destinationProgress[index] = 0;
         _movementRemainderX[index] = 0;
         _movementRemainderZ[index] = 0;
     }
