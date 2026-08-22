@@ -167,11 +167,12 @@ static void RunN07(string[] arguments)
     int nearRadius = ReadInt(arguments, "--near-radius-mm", 96_000);
     int farRadius = ReadInt(arguments, "--far-radius-mm", 192_000);
     int spacing = ReadInt(arguments, "--spacing-mm", 4_000);
+    int recipientSpacing = ReadInt(arguments, "--recipient-spacing-mm", 24_000);
     string? output = ReadText(arguments, "--output");
     int immediateLeave = checked(immediateRadius + Math.Max(1, immediateRadius / 10));
     if (entities <= 0 || recipients <= 0 || dirtyPercent is < 0 or > 100 ||
         warmup < 1 || samples < 3 || regionEdge <= 0 || spacing <= 0 || immediateRadius <= 0 ||
-        nearRadius < immediateLeave || farRadius < nearRadius)
+        nearRadius < immediateLeave || farRadius < nearRadius || recipientSpacing < 0)
         throw new ArgumentOutOfRangeException(nameof(arguments));
 
     var profile = new GameInterestProfile(
@@ -208,7 +209,7 @@ static void RunN07(string[] arguments)
     {
         Check(service.SetRecipientAnchor(
             new ParticipantId(checked((ulong)recipient + 1)),
-            RecipientAnchor(recipient, anchorColumns),
+            RecipientAnchor(recipient, anchorColumns, recipientSpacing),
             0) == GameInterestUpdateStatus.Success,
             "Recipient setup exceeded the declared interest bounds.");
     }
@@ -234,7 +235,7 @@ static void RunN07(string[] arguments)
 
     for (int round = 0; round < warmup; round++)
         _ = RunInterestRound(service, points, versions, dirty, recipients, anchorColumns,
-            regionEdge, 20_000 + round * 100, recordScratch);
+            regionEdge, recipientSpacing, 20_000 + round * 100, recordScratch);
 
     var updateUs = new double[samples];
     var deliveryUs = new double[samples];
@@ -253,7 +254,7 @@ static void RunN07(string[] arguments)
     {
         InterestRoundTiming timing = RunInterestRound(
             service, points, versions, dirty, recipients, anchorColumns,
-            regionEdge, 30_000 + sample * 100, recordScratch);
+            regionEdge, recipientSpacing, 30_000 + sample * 100, recordScratch);
         updateUs[sample] = timing.UpdateMicroseconds;
         deliveryUs[sample] = timing.DeliveryMicroseconds;
         allRecipientSameCellMoveUs[sample] = timing.AllRecipientSameCellMoveMicroseconds;
@@ -294,6 +295,7 @@ static void RunN07(string[] arguments)
         warmup,
         samples,
         spacing,
+        recipientSpacing,
         regionEdge,
         immediateRadius,
         nearRadius,
@@ -342,6 +344,7 @@ static InterestRoundTiming RunInterestRound(
     int recipients,
     int anchorColumns,
     int regionEdge,
+    int recipientSpacing,
     long now,
     GameWorldStateRecord[] scratch)
 {
@@ -371,7 +374,7 @@ static InterestRoundTiming RunInterestRound(
     for (int index = 0; index < recipients; index++)
     {
         ParticipantId moving = new(checked((ulong)index + 1));
-        ReplicationSpatialPoint anchor = RecipientAnchor(index, anchorColumns);
+        ReplicationSpatialPoint anchor = RecipientAnchor(index, anchorColumns, recipientSpacing);
         Check(service.SetRecipientAnchor(moving,
             new ReplicationSpatialPoint(checked(anchor.XMillimeters + 1), anchor.ZMillimeters),
             now + 50) == GameInterestUpdateStatus.Success,
@@ -384,7 +387,7 @@ static InterestRoundTiming RunInterestRound(
 
     int recipientIndex = checked((int)((now / 100) % recipients));
     ParticipantId participant = new(checked((ulong)recipientIndex + 1));
-    ReplicationSpatialPoint origin = RecipientAnchor(recipientIndex, anchorColumns);
+    ReplicationSpatialPoint origin = RecipientAnchor(recipientIndex, anchorColumns, recipientSpacing);
     started = Stopwatch.GetTimestamp();
     Check(service.SetRecipientAnchor(participant,
         new ReplicationSpatialPoint(checked(origin.XMillimeters + regionEdge), origin.ZMillimeters),
@@ -435,9 +438,9 @@ static (ulong Bundles, ulong Bytes) DrainInterest(
     return (bundles, bytes);
 }
 
-static ReplicationSpatialPoint RecipientAnchor(int recipient, int columns) => new(
-    checked((recipient % columns) * 24_000),
-    checked((recipient / columns) * 24_000));
+static ReplicationSpatialPoint RecipientAnchor(int recipient, int columns, int spacing) => new(
+    checked((recipient % columns) * spacing),
+    checked((recipient / columns) * spacing));
 
 static GameProjectedEntity BenchmarkProjected(int index, int marker) => new(
     new ReplicationEntityId(checked((uint)index), 1),
@@ -530,6 +533,7 @@ readonly record struct N07BenchmarkReport(
     int Warmup,
     int Samples,
     int EntitySpacingMillimeters,
+    int RecipientSpacingMillimeters,
     int RegionEdgeMillimeters,
     int ImmediateRadiusMillimeters,
     int NearRadiusMillimeters,

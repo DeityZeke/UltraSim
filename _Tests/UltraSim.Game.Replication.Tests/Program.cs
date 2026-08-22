@@ -60,6 +60,12 @@ var tests = new (string Name, Action Body)[]
     ("N1OfflineDirectHistoryFallbackAndEpochReplacementConverge", N1OfflineDirectChunkTests.HistoryFallbackAndEpochReplacementConverge),
     ("N1OfflineDirectCapacityAndReadCommitAreTransactional", N1OfflineDirectChunkTests.CapacityAndReadCommitAreTransactional),
     ("N1OfflineDirectWarmedStableRecipientAllocatesZero", N1OfflineDirectChunkTests.WarmedStableRecipientAllocatesZero),
+    ("N14DirtySchedulerSkipsCleanScopesAndFansOutOnce", N1OfflineDirectChunkTests.DirtySchedulerSkipsCleanScopesAndFansOutOnce),
+    ("N14StableInterestBudgetSkipsOnlyProvablyUnchangedTopology", N1OfflineDirectChunkTests.StableInterestBudgetSkipsOnlyProvablyUnchangedTopology),
+    ("N14StableInterestBudgetMatchesRandomizedExactOracle", N1OfflineDirectChunkTests.StableInterestBudgetMatchesRandomizedExactOracle),
+    ("N14DirtySchedulerFencesTopologySourceGapsAndStaleRecipients", N1OfflineDirectChunkTests.DirtySchedulerFencesTopologySourceGapsAndStaleRecipients),
+    ("N14DirtySchedulerWarmedWorkDiscoveryAllocatesZero", N1OfflineDirectChunkTests.DirtySchedulerWarmedWorkDiscoveryAllocatesZero),
+    ("N14DirtySchedulerFeedsAcceptedRemoteChunkKeyPath", N1OfflineDirectChunkTests.DirtySchedulerFeedsAcceptedRemoteChunkKeyPath),
     ("N11ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe", N1OfflineDirectChunkTests.ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe),
     ("N11RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence", N1OfflineDirectChunkTests.RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence),
     ("N11RejectedProofAndEpochReplacementNeverAdvanceKnowledge", N1OfflineDirectChunkTests.RejectedProofAndEpochReplacementNeverAdvanceKnowledge),
@@ -78,7 +84,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Network N0/N1.0-N1.3 game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0/N1.0-N1.4 game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

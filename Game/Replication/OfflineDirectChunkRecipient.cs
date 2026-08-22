@@ -166,6 +166,8 @@ public readonly record struct OfflineDirectChunkRecipientSnapshot(
     ulong NoChangeReads,
     ulong SnapshotFallbacks,
     ulong CadenceDeferrals,
+    ulong FullInterestQueries,
+    ulong StableInterestFastPaths,
     long ReservedBytes);
 
 /// <summary>
@@ -200,6 +202,12 @@ public sealed class OfflineDirectChunkRecipient
     private ulong _noChangeReads;
     private ulong _snapshotFallbacks;
     private ulong _cadenceDeferrals;
+    private WorldPosition _lastInterestAnchor;
+    private SpatialSpaceId _lastInterestSpace;
+    private int _stableInterestMovementBudgetMillimeters;
+    private bool _hasLastInterestAnchor;
+    private ulong _fullInterestQueries;
+    private ulong _stableInterestFastPaths;
 
     public OfflineDirectChunkRecipient(
         OfflineDirectChunkRecipientLimits limits,
@@ -221,6 +229,8 @@ public sealed class OfflineDirectChunkRecipient
     }
 
     public OfflineDirectChunkRecipientLimits Limits => _limits;
+
+    internal uint GetCadencePeriod(ChunkInterestTier tier) => _cadence.Period(tier);
 
     /// <summary>Borrowed rows; valid only until reconcile or a committed publication read.</summary>
     public ReadOnlySpan<OfflineDirectChunkSubscription> Subscriptions
@@ -253,6 +263,21 @@ public sealed class OfflineDirectChunkRecipient
             return result.Status;
         }
 
+        if (_sourceEpoch == source.Epoch && _hasLastInterestAnchor &&
+            _lastInterestSpace == space &&
+            IsWithinStableInterestBudget(anchor))
+        {
+            _reconciliations++;
+            _stableInterestFastPaths++;
+            result = Result(
+                OfflineDirectChunkReconcileStatus.Reconciled,
+                false,
+                _subscriptionCount,
+                0,
+                0);
+            return result.Status;
+        }
+
         for (int index = 0; index < _subscriptionCount; index++)
             _previousInterest[index] = _subscriptions[index].Interest;
         ChunkInterestQueryStatus query = ChunkInterestQuery.TryQuery(
@@ -262,7 +287,9 @@ public sealed class OfflineDirectChunkRecipient
             _previousInterest.AsSpan(0, _subscriptionCount),
             _desiredInterest,
             out int desiredCount,
-            out int requiredSubscriptions);
+            out int requiredSubscriptions,
+            out int stableMovementBudget);
+        _fullInterestQueries++;
         if (query == ChunkInterestQueryStatus.InvalidInput)
         {
             result = Result(OfflineDirectChunkReconcileStatus.InvalidInterest, false,
@@ -290,6 +317,10 @@ public sealed class OfflineDirectChunkRecipient
         (_subscriptions, _nextSubscriptions) = (_nextSubscriptions, _subscriptions);
         _subscriptionCount = desiredCount;
         _sourceEpoch = source.Epoch;
+        _lastInterestAnchor = anchor;
+        _lastInterestSpace = space;
+        _stableInterestMovementBudgetMillimeters = stableMovementBudget;
+        _hasLastInterestAnchor = true;
         _reconciliations++;
         for (int index = 0; index < changeCount; index++)
         {
@@ -552,6 +583,8 @@ public sealed class OfflineDirectChunkRecipient
             _noChangeReads,
             _snapshotFallbacks,
             _cadenceDeferrals,
+            _fullInterestQueries,
+            _stableInterestFastPaths,
             CalculateReservedBytes());
     }
 
@@ -739,6 +772,13 @@ public sealed class OfflineDirectChunkRecipient
             hash = (hash ^ (uint)key.Coord.Z) * 16_777_619u;
             return hash % period;
         }
+    }
+
+    private bool IsWithinStableInterestBudget(in WorldPosition anchor)
+    {
+        long deltaX = Math.Abs(anchor.GlobalXMillimeters - _lastInterestAnchor.GlobalXMillimeters);
+        long deltaZ = Math.Abs(anchor.GlobalZMillimeters - _lastInterestAnchor.GlobalZMillimeters);
+        return deltaX + deltaZ <= _stableInterestMovementBudgetMillimeters;
     }
 
     private long CalculateReservedBytes() =>

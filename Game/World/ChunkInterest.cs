@@ -84,9 +84,28 @@ public static class ChunkInterestQuery
         Span<ChunkInterestEntry> destination,
         out int count,
         out int required)
+        => TryQuery(
+            space, anchor, profile, previous, destination,
+            out count, out required, out _);
+
+    /// <summary>
+    /// Executes the exact query and returns a conservative Manhattan movement budget around this
+    /// anchor. Reusing the result while cumulative X/Z movement remains within that budget cannot
+    /// cross any enter/leave threshold, so membership and tiers are provably unchanged.
+    /// </summary>
+    public static ChunkInterestQueryStatus TryQuery(
+        SpatialSpaceId space,
+        in WorldPosition anchor,
+        in ChunkInterestProfile profile,
+        ReadOnlySpan<ChunkInterestEntry> previous,
+        Span<ChunkInterestEntry> destination,
+        out int count,
+        out int required,
+        out int stableManhattanMovementBudgetMillimeters)
     {
         count = 0;
         required = 0;
+        stableManhattanMovementBudgetMillimeters = 0;
         if (!space.IsValid || !profile.IsValid || !ValidatePrevious(space, previous) ||
             !TryGetCandidateRange(anchor, profile.FarLeaveRadiusMillimeters,
                 out int minimumX, out int maximumX, out int minimumZ, out int maximumZ))
@@ -99,6 +118,9 @@ public static class ChunkInterestQuery
 
         long centerX = anchor.GlobalXMillimeters;
         long centerZ = anchor.GlobalZMillimeters;
+        int stableBudget = Math.Max(
+            0,
+            profile.FarLeaveRadiusMillimeters - profile.FarEnterRadiusMillimeters - 1);
         int previousIndex = 0;
         for (int chunkX = minimumX; ; chunkX++)
         {
@@ -112,6 +134,8 @@ public static class ChunkInterestQuery
                     : default;
                 Int128 distanceSquared = GameWorldSpatialProfile.ChunkGeometry
                     .GetBounds(key.Coord).SquaredDistanceTo(centerX, centerZ);
+                stableBudget = TightenThresholdMovementBudget(
+                    distanceSquared, previousTier, profile, stableBudget);
                 ChunkInterestTier? tier = Classify(distanceSquared, previousTier, profile);
                 if (tier.HasValue)
                 {
@@ -127,7 +151,70 @@ public static class ChunkInterestQuery
         if (destination.Length < required)
             return ChunkInterestQueryStatus.DestinationTooSmall;
         count = required;
+        stableManhattanMovementBudgetMillimeters = stableBudget;
         return ChunkInterestQueryStatus.Success;
+    }
+
+    private static int TightenThresholdMovementBudget(
+        Int128 distanceSquared,
+        ChunkInterestTier previous,
+        in ChunkInterestProfile profile,
+        int currentBudget)
+    {
+        if (currentBudget == 0) return 0;
+        long distanceFloor = -1;
+        int budget = currentBudget;
+        switch (previous)
+        {
+            case ChunkInterestTier.Immediate:
+                Consider(profile.ImmediateLeaveRadiusMillimeters);
+                Consider(profile.NearLeaveRadiusMillimeters);
+                Consider(profile.FarLeaveRadiusMillimeters);
+                break;
+            case ChunkInterestTier.Near:
+                Consider(profile.ImmediateEnterRadiusMillimeters);
+                Consider(profile.NearLeaveRadiusMillimeters);
+                Consider(profile.FarLeaveRadiusMillimeters);
+                break;
+            case ChunkInterestTier.Far:
+                Consider(profile.ImmediateEnterRadiusMillimeters);
+                Consider(profile.NearEnterRadiusMillimeters);
+                Consider(profile.FarLeaveRadiusMillimeters);
+                break;
+            default:
+                Consider(profile.ImmediateEnterRadiusMillimeters);
+                Consider(profile.NearEnterRadiusMillimeters);
+                Consider(profile.FarEnterRadiusMillimeters);
+                break;
+        }
+        return budget;
+
+        void Consider(int radius)
+        {
+            int reach = checked(budget + 1);
+            long minimum = Math.Max(0L, (long)radius - reach);
+            long maximum = (long)radius + reach;
+            if (distanceSquared < (Int128)minimum * minimum ||
+                distanceSquared > (Int128)maximum * maximum)
+                return;
+            if (distanceFloor < 0) distanceFloor = FloorSquareRoot(distanceSquared);
+            long lowerBound = distanceFloor >= radius
+                ? distanceFloor - radius
+                : (long)radius - distanceFloor - 1;
+            int thresholdBudget = lowerBound <= 0
+                ? 0
+                : checked((int)Math.Min(lowerBound - 1, int.MaxValue));
+            budget = Math.Min(budget, thresholdBudget);
+        }
+    }
+
+    private static long FloorSquareRoot(Int128 value)
+    {
+        if (value <= 0) return 0;
+        long estimate = checked((long)Math.Sqrt((double)value));
+        while ((Int128)(estimate + 1) * (estimate + 1) <= value) estimate++;
+        while ((Int128)estimate * estimate > value) estimate--;
+        return estimate;
     }
 
     private static bool ValidatePrevious(SpatialSpaceId space, ReadOnlySpan<ChunkInterestEntry> previous)

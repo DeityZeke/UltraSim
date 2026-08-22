@@ -5,11 +5,12 @@ remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
 as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
-stopped for checkpoint review; N1.4 adoption/scheduling work has not started.
+accepted. N1.4 dirty-driven work discovery is implemented and stopped for
+checkpoint review; the current-game AOI adoption decision remains open.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
-the implemented N1.0-N1.3 stops, and only forward decisions with a concrete owner.
+the implemented N1.0-N1.4 stops, and only forward decisions with a concrete owner.
 
 N0 proved the difficult semantic foundations:
 
@@ -794,9 +795,9 @@ snapshot is required.
 Evidence:
 [`network-n1.3-atomic-chunk-snapshot-recovery-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.3-atomic-chunk-snapshot-recovery-2026-08-22.json).
 
-This checkpoint does not implement N1.4 dirty-driven scheduling/adoption, N0
-deletion, shared encoding across recipients, public-WAN lifecycle, or production
-CCU claims. Stop for review before N1.4.
+This checkpoint was accepted at `ac96ddfe` before N1.4 began. It does not delete
+N0, share encoding across recipients, define public-WAN lifecycle, or make
+production CCU claims.
 
 ## Public chunk scheduling target
 
@@ -912,6 +913,75 @@ sparse crossover, not deliver a noisy single-digit gain at the cost of substanti
 complexity.
 
 Dense-400 may not regress outside normal run variance without a measured reason.
+
+### N1.4 dirty-scheduling implementation stop — 2026-08-22
+
+`ChunkPublicationStore` now exposes the sorted affected-chunk keys already
+calculated once by each successful authoritative commit. The borrowed keys remain
+valid only until the next commit and are explicitly shared publication facts, not
+recipient dirty state.
+
+`ChunkPublicationWorkScheduler` maintains a fixed-capacity, generation-fenced
+recipient membership set and chunk-to-recipient reverse index. Accepted topology
+changes create `Incoming` work, leaves remove membership and outstanding work,
+and one observed dirty chunk coalesces one `Dirty` candidate per current
+subscriber. Current scopes with no pending fact cause no publication query.
+Cadence is copied from the accepted recipient subscription; transiently blocked
+work can be requeued without creating another obligation. Source replacement and
+a missed commit observation fail closed by making retained scopes eligible to
+query current truth. The scheduler owns no encoded bytes, socket, connection,
+application proof, or publication history.
+
+Remote scheduling now accepts `SpatialChunkKey` rather than requiring a caller to
+retain a sorted subscription-array index. It still enters the frozen N1.1-N1.3
+encoder, delivery-ticket, transport, and application-proof paths.
+
+The exact chunk-interest query also returns a conservative Manhattan movement
+budget. It is derived from the current enter/leave circle-to-chunk-AABB thresholds
+and capped by the Far hysteresis envelope. Cumulative movement within that budget
+provably cannot change membership or tier, so the recipient can skip rebuilding
+its roughly 500-row topology. Crossing the budget runs the unchanged exact query.
+This is an exact acceleration, not a looser AOI approximation or client-trusted
+position route.
+
+Permanent gates prove:
+
+- clean scopes create zero dirty work;
+- one dirty chunk fans out exactly once to two subscribers and yields granular
+  deltas;
+- topology crossing, leave/re-entry, source replacement, missed-commit refresh,
+  stale recipient generation, and scheduler capacity remain fenced;
+- the scheduler's chunk-key work enters the accepted remote transport adapter;
+- the stable-movement budget agrees with a fresh exact query and forces another
+  exact query immediately beyond its bound;
+- warmed work discovery allocates zero caller-thread bytes.
+
+The first semantic-only observation at 256 recipients records 127,232 current
+memberships (497 per recipient). A one-chunk dirty commit/query/apply fanout was
+230.633 ns p95 per recipient (about 59 us aggregate), while a clean commit
+observation was 1.025 ns per recipient after amortizing the one shared fact.
+Small movement inside the exact stable budget no longer performs the prior full
+query. A real chunk crossing still costs 62.691 us p95 per recipient and remains
+an explicit transition-tail target.
+
+The same observation also records the main pressure honestly: broad recipient
+arrays plus the first reverse-index layout reserve 93,661,096 bytes at 256
+recipients. The same-machine one-entity/256-recipient N0 control retains only one
+relation per recipient and reserves 18,940,132 bytes. These are not equivalent
+production workloads, but they are enough to prohibit an N1 adoption claim or a
+4K extrapolation from the dirty-fanout timing alone. Subscription/cursor and
+reverse-index compaction must be evaluated in the controlled N1.4 profile matrix.
+
+Evidence:
+[`network-n1.4-dirty-publication-scheduling-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-dirty-publication-scheduling-2026-08-22.json),
+[`network-n1.4-n0-shared-one-dirty-256-control-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-256-control-2026-08-22.json).
+
+This is an N1.4 implementation stop, not production adoption. The complete
+512/768/1024/2048/4096, Dense-400, boundary/corner, dense-town, mixed-privacy,
+transport-replay, and sharded-client matrix remains required. Keep the single
+client snapshot candidate until dense-entry evidence proves a larger bounded
+window is worthwhile. Do not begin N1.5 or delete N0 before review and that
+controlled matrix.
 
 ## N1.5 — shared semantic packing / chunk page reuse
 
@@ -1174,8 +1244,9 @@ semantics and application-proof fencing. N1.2 carries MTU-admissible ordinary
 deltas and absences over real independent-unreliable transport with a bounded
 server ticket ledger and atomic production-client application. N1.3 adds bounded
 reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
+N1.4 adds the first shared dirty-work scheduler and exact stable-interest fast
+path, but the measured current-game AOI-profile adoption decision remains open.
 
-Do not begin N1.4 until the N1.3 checkpoint is reviewed. The next work is measured
-dirty-driven discovery and current-game AOI-profile adoption against the N0
-entity-relation reference—not UDP redesign, N0 deletion, shared encoded-byte
-caching, or a production scale claim.
+Stop at the N1.4 implementation checkpoint. The next work is review plus the
+controlled adoption matrix and layout evidence—not N1.5 shared encoding, UDP
+redesign, N0 deletion, or a production scale claim.

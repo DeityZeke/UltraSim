@@ -246,6 +246,19 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     }
 
     /// <summary>
+    /// Schedules one game-discovered chunk scope without treating the recipient's sorted-array
+    /// position as durable identity.
+    /// </summary>
+    public RemoteChunkWorldStateScheduleStatus TrySchedule(SpatialChunkKey key, ulong cadenceStep)
+    {
+        EnsureOwner();
+        int subscriptionIndex = FindSubscription(key);
+        return subscriptionIndex < 0
+            ? RemoteChunkWorldStateScheduleStatus.InvalidSubscription
+            : TrySchedule(subscriptionIndex, cadenceStep);
+    }
+
+    /// <summary>
     /// Starts a complete repair snapshot regardless of the retained chunk cursor. This is the
     /// explicit recovery route after an MTU-oversize delta or client-declared semantic rejection.
     /// </summary>

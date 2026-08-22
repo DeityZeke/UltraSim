@@ -15,21 +15,31 @@ int warmups = ReadInt(args, "--warmups=", 4);
 int samples = ReadInt(args, "--samples=", 15);
 int rounds = ReadInt(args, "--rounds=", 4);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/network-n1.3-atomic-chunk-snapshot-recovery.json"));
+    AppContext.BaseDirectory, "../../../../results/network-n1.4-dirty-publication-scheduling.json"));
 if (warmups < 1 || samples < 5 || rounds < 1) throw new ArgumentOutOfRangeException(nameof(args));
 
 int[] populations = [1, 32, 128, 256];
 var scales = new ScaleEvidence[populations.Length];
+var dirtyScheduling = new DirtySchedulingEvidence[populations.Length];
 for (int index = 0; index < populations.Length; index++)
 {
     using var fixture = new ScaleFixture(populations[index]);
     scales[index] = fixture.Measure(warmups, samples, rounds);
+    using var dirtyFixture = new DirtySchedulingFixture(populations[index]);
+    dirtyScheduling[index] = dirtyFixture.Measure(warmups, samples, rounds);
     Console.WriteLine(
         $"recipients={scales[index].Recipients} subscriptions={scales[index].SubscriptionsPerRecipient} " +
         $"reserved={scales[index].TotalRecipientReservedBytes} " +
         $"stable_p95={scales[index].StableReconcile.P95NanosecondsPerRecipient:F3} ns/recipient " +
         $"cross_p95={scales[index].CrossingReconcile.P95NanosecondsPerRecipient:F3} ns/recipient " +
         $"cross_changes={scales[index].CrossingChangesPerRecipient}");
+    Console.WriteLine(
+        $"dirty_scheduler_recipients={dirtyScheduling[index].Recipients} " +
+        $"memberships={dirtyScheduling[index].Memberships} " +
+        $"clean_p95={dirtyScheduling[index].CleanCommitObservation.P95NanosecondsPerRecipient:F3} ns/recipient " +
+        $"dirty_p95={dirtyScheduling[index].OneChunkDirtyFanout.P95NanosecondsPerRecipient:F3} ns/recipient " +
+        $"dirty_fanout={dirtyScheduling[index].DirtyRecipientFanout} " +
+        $"reserved={dirtyScheduling[index].SchedulerReservedBytes + dirtyScheduling[index].RecipientReservedBytes}");
 }
 
 using var cadence = new CadenceFixture();
@@ -112,7 +122,7 @@ using (establishedTransport)
 }
 
 var report = new Report(
-    "network-n1.3-atomic-chunk-snapshot-recovery-v1",
+    "network-n1.4-dirty-publication-scheduling-v1",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -125,8 +135,9 @@ var report = new Report(
     samples,
     rounds,
     new ProfileEvidence(
-        "N1.0 recipient control, N1.1 codecs, N1.2 ordinary delivery, and N1.3 atomic " +
-        "snapshot-envelope/capacity evidence; not N0 replacement, public WAN CCU, or production adoption evidence",
+        "N1.0 recipient control, frozen N1.1-N1.3 wire/recovery, and N1.4 shared dirty-work " +
+        "discovery evidence; semantic-only scheduler census, not N0 replacement, public WAN CCU, " +
+        "or final production adoption evidence",
         UltraSimGameProtocol.Manifest.Version,
         UltraSimGameProtocol.Manifest.Fingerprint,
         UltraSimGameProtocol.ChunkPublicationSchemaFingerprint,
@@ -141,6 +152,7 @@ var report = new Report(
         Marshal.SizeOf<ChunkPublicationCursor>(),
         Marshal.SizeOf<OfflineDirectChunkSubscriptionChange>()),
     scales,
+    dirtyScheduling,
     cadenceTiming,
     cadenceSnapshot,
     codecEvidence,
@@ -263,6 +275,159 @@ sealed class ScaleFixture : IDisposable
         OfflineDirectChunkCadence.EvidenceProfile);
 
     public void Dispose() { }
+}
+
+sealed class DirtySchedulingFixture : IDisposable
+{
+    private readonly EcsWorld _world;
+    private readonly Entity _entity;
+    private readonly ChunkPublicationStore _source;
+    private readonly OfflineDirectChunkRecipient[] _recipients;
+    private readonly ChunkReplicationRecipientId[] _recipientIds;
+    private readonly ChunkPublicationWorkScheduler _scheduler;
+    private readonly OfflineDirectChunkSubscriptionChange[] _changes =
+        new OfflineDirectChunkSubscriptionChange[1_024];
+    private readonly WorldPublicChange[] _dirty = new WorldPublicChange[1];
+    private readonly WorldPublicDescriptor _descriptor = new(
+        GameWorldPublicPrefabIds.Character, WorldYaw.Zero, WorldPublicStateFlags.Visible);
+    private bool _side;
+
+    internal DirtySchedulingFixture(int recipients)
+    {
+        _world = new EcsWorld(
+            GameSchema.CreateSchema(),
+            new EcsWorldOptions(new EntityCapacity(8), 2, 4, lifecycleRecordCapacity: 16));
+        ArchetypeHandle empty = _world.RegisterArchetype(
+            ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
+        _world.Seal();
+        _world.Initialize();
+        Require(_world.TryCreate(empty, out _entity));
+        _source = new ChunkPublicationStore(
+            PublicationEpoch.Create(), new ChunkPublicationLimits(8, 16, 2, 64));
+        Require(_source.TryCommit([
+            WorldPublicChange.Present(
+                _entity, new WorldPosition(0, 0, 8_000, 8_000, 0), _descriptor)
+        ], out _));
+        _scheduler = new ChunkPublicationWorkScheduler(
+            _source,
+            new ChunkPublicationWorkSchedulerLimits(
+                recipients,
+                checked(recipients * 1_024)));
+        _recipients = new OfflineDirectChunkRecipient[recipients];
+        _recipientIds = new ChunkReplicationRecipientId[recipients];
+        WorldPosition anchor = new(0, 0, 8_000, 8_000, 0);
+        for (int index = 0; index < recipients; index++)
+        {
+            var recipient = new OfflineDirectChunkRecipient(
+                new OfflineDirectChunkRecipientLimits(1_024, 64, 64),
+                GameChunkInterestProfile.Default,
+                new OfflineDirectChunkCadence(1, 1, 1));
+            _recipients[index] = recipient;
+            Require(_scheduler.TryRegister(recipient, out _recipientIds[index]));
+            Require(recipient.Reconcile(
+                _source, GameWorldState.DefaultSpace, anchor, _changes,
+                out OfflineDirectChunkReconcileResult result) ==
+                OfflineDirectChunkReconcileStatus.Reconciled);
+            Require(_scheduler.TryApplyReconciliation(
+                _recipientIds[index], _changes.AsSpan(0, result.ChangeCount), result));
+        }
+        DrainWork(0, expectDelta: false);
+    }
+
+    internal DirtySchedulingEvidence Measure(int warmups, int samples, int rounds)
+    {
+        TimingEvidence clean = MeasureTiming(warmups, samples, rounds, _recipients.Length, RunClean);
+        ChunkPublicationWorkSchedulerSnapshot beforeDirty = _scheduler.GetSnapshot();
+        TimingEvidence dirty = MeasureTiming(warmups, samples, rounds, _recipients.Length, RunDirty);
+        ChunkPublicationWorkSchedulerSnapshot afterDirty = _scheduler.GetSnapshot();
+        long recipientReserved = 0;
+        for (int index = 0; index < _recipients.Length; index++)
+            recipientReserved = checked(recipientReserved + _recipients[index].GetSnapshot().ReservedBytes);
+        return new DirtySchedulingEvidence(
+            _recipients.Length,
+            afterDirty.MembershipCount,
+            afterDirty.SharedChunkCount,
+            afterDirty.ReservedBytes,
+            recipientReserved,
+            afterDirty.DirtyChunksObserved - beforeDirty.DirtyChunksObserved,
+            afterDirty.DirtyRecipientFanout - beforeDirty.DirtyRecipientFanout,
+            afterDirty.DirtyWorkCoalesces - beforeDirty.DirtyWorkCoalesces,
+            clean,
+            dirty);
+    }
+
+    private ulong RunClean(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(_source.TryCommit([], out _));
+            Require(_scheduler.ObserveCommit(_source) ==
+                ChunkPublicationCommitObservationStatus.Observed);
+            Require(!_scheduler.TryDequeueDue(checked((ulong)round), out _));
+            checksum = unchecked(checksum + (uint)_scheduler.GetSnapshot().CurrentCleanMembershipCount);
+        }
+        return checksum;
+    }
+
+    private ulong RunDirty(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            _side = !_side;
+            _dirty[0] = WorldPublicChange.Present(
+                _entity,
+                new WorldPosition(0, 0, checked((ushort)(_side ? 8_001 : 8_000)), 8_000, 0),
+                _descriptor);
+            Require(_source.TryCommit(_dirty, out _));
+            Require(_scheduler.ObserveCommit(_source) ==
+                ChunkPublicationCommitObservationStatus.Observed);
+            checksum = unchecked(checksum + DrainWork(checked((ulong)round), expectDelta: true));
+        }
+        return checksum;
+    }
+
+    private ulong DrainWork(ulong step, bool expectDelta)
+    {
+        ulong checksum = 0;
+        int workCount = 0;
+        while (_scheduler.TryDequeueDue(step, out ChunkPublicationWork work))
+        {
+            OfflineDirectChunkRecipient recipient = _recipients[work.Recipient.Index];
+            int subscription = FindSubscription(recipient.Subscriptions, work.Key);
+            Require(subscription >= 0);
+            OfflineDirectChunkReadStatus status = recipient.TryBeginRead(
+                _source, subscription, step, out OfflineDirectChunkRead read);
+            if (expectDelta) Require(status == OfflineDirectChunkReadStatus.Delta);
+            else Require(status is OfflineDirectChunkReadStatus.Snapshot or
+                OfflineDirectChunkReadStatus.ChunkAbsent);
+            recipient.CommitRead();
+            checksum = unchecked(checksum + (uint)read.Batch.Count + (uint)subscription);
+            workCount++;
+        }
+        if (expectDelta) Require(workCount == _recipients.Length);
+        return checksum;
+    }
+
+    private static int FindSubscription(
+        ReadOnlySpan<OfflineDirectChunkSubscription> subscriptions,
+        SpatialChunkKey key)
+    {
+        int low = 0;
+        int high = subscriptions.Length - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            int comparison = subscriptions[middle].Interest.Key.CompareTo(key);
+            if (comparison == 0) return middle;
+            if (comparison < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        return -1;
+    }
+
+    public void Dispose() => _world.Dispose();
 }
 
 sealed class CadenceFixture : IDisposable
@@ -561,6 +726,18 @@ readonly record struct ScaleEvidence(
     TimingEvidence StableReconcile,
     TimingEvidence CrossingReconcile);
 
+readonly record struct DirtySchedulingEvidence(
+    int Recipients,
+    int Memberships,
+    int SharedChunks,
+    long SchedulerReservedBytes,
+    long RecipientReservedBytes,
+    ulong DirtyChunksObserved,
+    ulong DirtyRecipientFanout,
+    ulong DirtyWorkCoalesces,
+    TimingEvidence CleanCommitObservation,
+    TimingEvidence OneChunkDirtyFanout);
+
 readonly record struct ProfileEvidence(
     string Scope,
     ushort ProtocolManifestVersion,
@@ -627,6 +804,7 @@ readonly record struct Report(
     int RoundsPerSample,
     ProfileEvidence Profile,
     ScaleEvidence[] Scales,
+    DirtySchedulingEvidence[] DirtyScheduling,
     TimingEvidence CadencePass,
     OfflineDirectChunkRecipientSnapshot CadenceCounters,
     CodecEvidence Codec,

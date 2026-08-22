@@ -333,6 +333,33 @@ public sealed class ChunkPublicationStore
     public PublicationEpoch Epoch { get; }
     public ChunkPublicationLimits Limits => _limits;
 
+    /// <summary>
+    /// Latest authoritative commit sequence. This sequence advances for every successful commit,
+    /// including commits that publish no changed chunks.
+    /// </summary>
+    public ulong CommitSequence
+    {
+        get
+        {
+            EnsureOwner();
+            return _commitSequence;
+        }
+    }
+
+    /// <summary>
+    /// Borrowed canonical keys affected by the latest successful commit. The span is valid only
+    /// until the next <see cref="TryCommit"/> call on this store. It is shared publication work,
+    /// not recipient-owned dirty state.
+    /// </summary>
+    public ReadOnlySpan<SpatialChunkKey> LastCommittedDirtyChunks
+    {
+        get
+        {
+            EnsureOwner();
+            return _affectedKeys.AsSpan(0, _activeAffectedCount);
+        }
+    }
+
     public bool TryCommit(
         ReadOnlySpan<WorldPublicChange> changes,
         out ChunkPublicationCommitError error)

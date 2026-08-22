@@ -1,0 +1,335 @@
+{
+  "Workload": "network-n1.4-dirty-publication-scheduling-v1",
+  "CapturedUtc": "2026-08-22T11:16:42.986931+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "LogicalProcessors": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "Warmups": 4,
+  "Samples": 15,
+  "RoundsPerSample": 4,
+  "Profile": {
+    "Scope": "N1.0 recipient control, frozen N1.1-N1.3 wire/recovery, and N1.4 shared dirty-work discovery evidence; semantic-only scheduler census, not N0 replacement, public WAN CCU, or final production adoption evidence",
+    "ProtocolManifestVersion": 11,
+    "ProtocolManifestFingerprint": 11204815876809708509,
+    "ChunkPublicationSchemaFingerprint": 6148331928277823537,
+    "ChunkEdgeMillimeters": 16000,
+    "ImmediateRadiusMillimeters": 5000,
+    "NearRadiusMillimeters": 96000,
+    "FarRadiusMillimeters": 192000,
+    "ImmediateCadenceSteps": 1,
+    "NearCadenceSteps": 2,
+    "FarCadenceSteps": 4,
+    "SubscriptionBytes": 64,
+    "CursorBytes": 32,
+    "ChangeBytes": 32
+  },
+  "Scales": [
+    {
+      "Recipients": 1,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 187904,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 146,
+        "P50NanosecondsPerRecipient": 135,
+        "P95NanosecondsPerRecipient": 290,
+        "MaximumNanosecondsPerRecipient": 290,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 37772
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 1182683.75,
+        "P50NanosecondsPerRecipient": 996483.5,
+        "P95NanosecondsPerRecipient": 3476046.5,
+        "MaximumNanosecondsPerRecipient": 3476046.5,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 5022
+      }
+    },
+    {
+      "Recipients": 32,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 6012928,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 74.22239583333334,
+        "P50NanosecondsPerRecipient": 73.8203125,
+        "P95NanosecondsPerRecipient": 79.2109375,
+        "MaximumNanosecondsPerRecipient": 79.2109375,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 1208704
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 65831.5609375,
+        "P50NanosecondsPerRecipient": 66455.1875,
+        "P95NanosecondsPerRecipient": 67202.1328125,
+        "MaximumNanosecondsPerRecipient": 67202.1328125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 160704
+      }
+    },
+    {
+      "Recipients": 128,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 24051712,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 17.990755208333333,
+        "P50NanosecondsPerRecipient": 20.234375,
+        "P95NanosecondsPerRecipient": 21.328125,
+        "MaximumNanosecondsPerRecipient": 21.328125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 4834816
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 61914.301432291664,
+        "P50NanosecondsPerRecipient": 61723.95703125,
+        "P95NanosecondsPerRecipient": 62591.21484375,
+        "MaximumNanosecondsPerRecipient": 62591.21484375,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 642816
+      }
+    },
+    {
+      "Recipients": 256,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 48103424,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 44.655208333333334,
+        "P50NanosecondsPerRecipient": 18.9453125,
+        "P95NanosecondsPerRecipient": 388.736328125,
+        "MaximumNanosecondsPerRecipient": 388.736328125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 9669632
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 61875.06920572917,
+        "P50NanosecondsPerRecipient": 61709.572265625,
+        "P95NanosecondsPerRecipient": 62690.939453125,
+        "MaximumNanosecondsPerRecipient": 62690.939453125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 1285632
+      }
+    }
+  ],
+  "DirtyScheduling": [
+    {
+      "Recipients": 1,
+      "Memberships": 497,
+      "SharedChunks": 497,
+      "SchedulerReservedBytes": 180584,
+      "RecipientReservedBytes": 187904,
+      "DirtyChunksObserved": 76,
+      "DirtyRecipientFanout": 76,
+      "DirtyWorkCoalesces": 0,
+      "CleanCommitObservation": {
+        "MeanNanosecondsPerRecipient": 370.1666666666667,
+        "P50NanosecondsPerRecipient": 337.5,
+        "P95NanosecondsPerRecipient": 690,
+        "MaximumNanosecondsPerRecipient": 690,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 37772
+      },
+      "OneChunkDirtyFanout": {
+        "MeanNanosecondsPerRecipient": 4296.966666666666,
+        "P50NanosecondsPerRecipient": 2387.5,
+        "P95NanosecondsPerRecipient": 29929.75,
+        "MaximumNanosecondsPerRecipient": 29929.75,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 18924
+      }
+    },
+    {
+      "Recipients": 32,
+      "Memberships": 15904,
+      "SharedChunks": 497,
+      "SchedulerReservedBytes": 5837880,
+      "RecipientReservedBytes": 6012928,
+      "DirtyChunksObserved": 76,
+      "DirtyRecipientFanout": 2432,
+      "DirtyWorkCoalesces": 0,
+      "CleanCommitObservation": {
+        "MeanNanosecondsPerRecipient": 17.557291666666668,
+        "P50NanosecondsPerRecipient": 13.203125,
+        "P95NanosecondsPerRecipient": 71.953125,
+        "MaximumNanosecondsPerRecipient": 71.953125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 1208704
+      },
+      "OneChunkDirtyFanout": {
+        "MeanNanosecondsPerRecipient": 668.8109375,
+        "P50NanosecondsPerRecipient": 660.5390625,
+        "P95NanosecondsPerRecipient": 751.1640625,
+        "MaximumNanosecondsPerRecipient": 751.1640625,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 605568
+      }
+    },
+    {
+      "Recipients": 128,
+      "Memberships": 63616,
+      "SharedChunks": 497,
+      "SchedulerReservedBytes": 23968920,
+      "RecipientReservedBytes": 24051712,
+      "DirtyChunksObserved": 76,
+      "DirtyRecipientFanout": 9728,
+      "DirtyWorkCoalesces": 0,
+      "CleanCommitObservation": {
+        "MeanNanosecondsPerRecipient": 2.9036458333333335,
+        "P50NanosecondsPerRecipient": 2.34375,
+        "P95NanosecondsPerRecipient": 5.8984375,
+        "MaximumNanosecondsPerRecipient": 5.8984375,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 4834816
+      },
+      "OneChunkDirtyFanout": {
+        "MeanNanosecondsPerRecipient": 273.047265625,
+        "P50NanosecondsPerRecipient": 242.556640625,
+        "P95NanosecondsPerRecipient": 397.3984375,
+        "MaximumNanosecondsPerRecipient": 397.3984375,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 2422272
+      }
+    },
+    {
+      "Recipients": 256,
+      "Memberships": 127232,
+      "SharedChunks": 497,
+      "SchedulerReservedBytes": 45557672,
+      "RecipientReservedBytes": 48103424,
+      "DirtyChunksObserved": 76,
+      "DirtyRecipientFanout": 19456,
+      "DirtyWorkCoalesces": 0,
+      "CleanCommitObservation": {
+        "MeanNanosecondsPerRecipient": 0.8626302083333334,
+        "P50NanosecondsPerRecipient": 0.91796875,
+        "P95NanosecondsPerRecipient": 1.025390625,
+        "MaximumNanosecondsPerRecipient": 1.025390625,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 9669632
+      },
+      "OneChunkDirtyFanout": {
+        "MeanNanosecondsPerRecipient": 193.9740234375,
+        "P50NanosecondsPerRecipient": 201.140625,
+        "P95NanosecondsPerRecipient": 230.6328125,
+        "MaximumNanosecondsPerRecipient": 230.6328125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 4844544
+      }
+    }
+  ],
+  "CadencePass": {
+    "MeanNanosecondsPerRecipient": 27773.9,
+    "P50NanosecondsPerRecipient": 27304.75,
+    "P95NanosecondsPerRecipient": 30952,
+    "MaximumNanosecondsPerRecipient": 30952,
+    "MaximumAllocatedBytes": 0,
+    "Checksum": 37772
+  },
+  "CadenceCounters": {
+    "SourceEpoch": {
+      "Value": 9,
+      "IsValid": true
+    },
+    "SubscriptionCount": 497,
+    "Reconciliations": 77,
+    "EnteredSubscriptions": 497,
+    "LeftSubscriptions": 0,
+    "TierChanges": 0,
+    "SnapshotReads": 12505,
+    "ChunkAbsentReads": 12504,
+    "DeltaReads": 0,
+    "NoChangeReads": 76,
+    "SnapshotFallbacks": 0,
+    "CadenceDeferrals": 25688,
+    "FullInterestQueries": 1,
+    "StableInterestFastPaths": 76,
+    "ReservedBytes": 181184
+  },
+  "Codec": {
+    "Records": 64,
+    "SnapshotBytes": 2634,
+    "DeltaBytes": 2834,
+    "AbsenceBytes": 48,
+    "ProofBytes": 50,
+    "SnapshotEncode": {
+      "MeanNanosecondsPerRecipient": 26295.577083333334,
+      "P50NanosecondsPerRecipient": 26183.84375,
+      "P95NanosecondsPerRecipient": 27111.3125,
+      "MaximumNanosecondsPerRecipient": 27111.3125,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 1601472
+    },
+    "SnapshotDecode": {
+      "MeanNanosecondsPerRecipient": 31664.3375,
+      "P50NanosecondsPerRecipient": 31440.34375,
+      "P95NanosecondsPerRecipient": 32964.0625,
+      "MaximumNanosecondsPerRecipient": 32964.0625,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 8625615441932999456
+    },
+    "DeltaEncode": {
+      "MeanNanosecondsPerRecipient": 30894.05625,
+      "P50NanosecondsPerRecipient": 30908.78125,
+      "P95NanosecondsPerRecipient": 31652.84375,
+      "MaximumNanosecondsPerRecipient": 31652.84375,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 1723072
+    },
+    "DeltaDecode": {
+      "MeanNanosecondsPerRecipient": 37057.03958333333,
+      "P50NanosecondsPerRecipient": 36956.84375,
+      "P95NanosecondsPerRecipient": 38222.15625,
+      "MaximumNanosecondsPerRecipient": 38222.15625,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 497322787233999744
+    },
+    "AbsenceDecode": {
+      "MeanNanosecondsPerRecipient": 104.97916666666667,
+      "P50NanosecondsPerRecipient": 105,
+      "P95NanosecondsPerRecipient": 115.9375,
+      "MaximumNanosecondsPerRecipient": 115.9375,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 1824
+    },
+    "ProofDecode": {
+      "MeanNanosecondsPerRecipient": 125.72916666666667,
+      "P50NanosecondsPerRecipient": 126.5625,
+      "P95NanosecondsPerRecipient": 129.6875,
+      "MaximumNanosecondsPerRecipient": 129.6875,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 61408
+    }
+  },
+  "Transport": {
+    "DatagramBytes": 1472,
+    "MaximumUnfragmentedMessageBytes": 1405,
+    "MaximumDeltaRecordsPerDatagram": 30,
+    "MaximumAdmittedDeltaBytes": 1372,
+    "FirstRejectedDeltaBytes": 1415,
+    "OutstandingDeliveryCapacity": 128,
+    "ServerAdapterReservedBytes": 11060,
+    "Notes": "WorldState is independent-unreliable/nonfragmenting. Oversize deltas fail closed and route to the separately bounded N1.3 snapshot transaction."
+  },
+  "SnapshotRecovery": {
+    "MaximumRecords": 64,
+    "CanonicalSnapshotBytes": 2634,
+    "BeginBytes": 82,
+    "SegmentHeaderBytes": 30,
+    "SegmentPayloadBytes": 1375,
+    "SegmentCount": 2,
+    "CommitBytes": 56,
+    "CancelBytes": 24,
+    "ServerAdapterReservedBytes": 11060,
+    "Notes": "The canonical N1.1 snapshot body is segmented without redefining semantic bytes. Begin/segments/Commit/Cancel share reliable ordered Bulk; ordinary WorldState remains independent-unreliable. Permanent tests, not this census, prove atomicity and impairment."
+  }
+}

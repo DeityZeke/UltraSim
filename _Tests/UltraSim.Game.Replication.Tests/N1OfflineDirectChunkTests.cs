@@ -166,6 +166,294 @@ internal static class N1OfflineDirectChunkTests
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    internal static void DirtySchedulerSkipsCleanScopesAndFansOutOnce()
+    {
+        using var fixture = new Fixture(historyCapacity: 64, entityCount: 2);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store, new ChunkPublicationWorkSchedulerLimits(2, 128));
+        var first = NewScheduledRecipient();
+        var second = NewScheduledRecipient();
+        True(scheduler.TryRegister(first, out ChunkReplicationRecipientId firstId));
+        True(scheduler.TryRegister(second, out ChunkReplicationRecipientId secondId));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        ApplyScheduledReconcile(scheduler, firstId, first, fixture.Store, anchor, changes);
+        ApplyScheduledReconcile(scheduler, secondId, second, fixture.Store, anchor, changes);
+        DrainScheduledReads(scheduler, first, firstId, second, secondId, fixture.Store, 0);
+
+        ChunkPublicationWorkSchedulerSnapshot clean = scheduler.GetSnapshot();
+        Equal(0, clean.PendingWorkCount);
+        Equal(clean.MembershipCount, clean.CurrentCleanMembershipCount);
+        Equal(ChunkPublicationCommitObservationStatus.NoNewCommit,
+            scheduler.ObserveCommit(fixture.Store));
+        Equal(0, scheduler.GetSnapshot().PendingWorkCount);
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(1, fixture.Store.LastCommittedDirtyChunks.Length);
+        Equal(Key(0, 0), fixture.Store.LastCommittedDirtyChunks[0]);
+        Equal(ChunkPublicationCommitObservationStatus.Observed,
+            scheduler.ObserveCommit(fixture.Store));
+        ChunkPublicationWorkSchedulerSnapshot dirty = scheduler.GetSnapshot();
+        Equal(2, dirty.PendingWorkCount);
+        Equal((ulong)1, dirty.DirtyChunksObserved);
+        Equal((ulong)2, dirty.DirtyRecipientFanout);
+
+        int due = 0;
+        while (scheduler.TryDequeueDue(0, out ChunkPublicationWork work))
+        {
+            Equal(Key(0, 0), work.Key);
+            Equal(ChunkPublicationWorkKind.Dirty, work.Kind);
+            OfflineDirectChunkRecipient recipient = work.Recipient == firstId ? first : second;
+            int subscription = FindSubscription(recipient, work.Key);
+            Equal(OfflineDirectChunkReadStatus.Delta,
+                recipient.TryBeginRead(fixture.Store, subscription, 0, out _));
+            recipient.CommitRead();
+            due++;
+        }
+        Equal(2, due);
+        Equal(0, scheduler.GetSnapshot().PendingWorkCount);
+
+        fixture.CommitEmpty();
+        Equal(0, fixture.Store.LastCommittedDirtyChunks.Length);
+        Equal(ChunkPublicationCommitObservationStatus.Observed,
+            scheduler.ObserveCommit(fixture.Store));
+        Equal(0, scheduler.GetSnapshot().PendingWorkCount);
+    }
+
+    internal static void StableInterestBudgetSkipsOnlyProvablyUnchangedTopology()
+    {
+        using var fixture = new Fixture(historyCapacity: 32);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(1_024, 8, 8),
+            GameChunkInterestProfile.Default,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        var desired = new ChunkInterestEntry[1_024];
+        var oracle = new ChunkInterestEntry[1_024];
+        var changes = new OfflineDirectChunkSubscriptionChange[1_024];
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(
+                GameWorldState.DefaultSpace,
+                anchor,
+                GameChunkInterestProfile.Default,
+                [],
+                desired,
+                out int expectedCount,
+                out _,
+                out int stableBudget));
+        True(stableBudget > 0);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes, out _));
+        Equal(expectedCount, recipient.Subscriptions.Length);
+        OfflineDirectChunkRecipientSnapshot initial = recipient.GetSnapshot();
+
+        True(WorldPosition.TryFromGlobalMillimeters(
+            anchor.GlobalXMillimeters + stableBudget,
+            anchor.YMillimeters,
+            anchor.GlobalZMillimeters,
+            out WorldPosition within));
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, within, changes,
+                out OfflineDirectChunkReconcileResult unchanged));
+        Equal(0, unchanged.ChangeCount);
+        OfflineDirectChunkRecipientSnapshot fast = recipient.GetSnapshot();
+        Equal(initial.FullInterestQueries, fast.FullInterestQueries);
+        Equal(initial.StableInterestFastPaths + 1, fast.StableInterestFastPaths);
+
+        Equal(ChunkInterestQueryStatus.Success,
+            ChunkInterestQuery.TryQuery(
+                GameWorldState.DefaultSpace,
+                within,
+                GameChunkInterestProfile.Default,
+                desired.AsSpan(0, expectedCount),
+                oracle,
+                out int oracleCount,
+                out _,
+                out _));
+        Equal(expectedCount, oracleCount);
+
+        True(WorldPosition.TryFromGlobalMillimeters(
+            anchor.GlobalXMillimeters + stableBudget + 1L,
+            anchor.YMillimeters,
+            anchor.GlobalZMillimeters,
+            out WorldPosition outside));
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, outside, changes, out _));
+        Equal(fast.FullInterestQueries + 1, recipient.GetSnapshot().FullInterestQueries);
+    }
+
+    internal static void StableInterestBudgetMatchesRandomizedExactOracle()
+    {
+        var previous = new ChunkInterestEntry[1_024];
+        var current = new ChunkInterestEntry[1_024];
+        var oracle = new ChunkInterestEntry[1_024];
+        int previousCount = 0;
+        var random = new Random(0x1A04_2026);
+        True(WorldPosition.TryFromGlobalMillimeters(8_000, 0, 8_000, out WorldPosition anchor));
+
+        for (int iteration = 0; iteration < 2_000; iteration++)
+        {
+            if (iteration % 11 == 0)
+            {
+                long x = random.Next(-160_000, 160_001);
+                long z = random.Next(-160_000, 160_001);
+                True(WorldPosition.TryFromGlobalMillimeters(x, 0, z, out anchor));
+            }
+            Equal(ChunkInterestQueryStatus.Success,
+                ChunkInterestQuery.TryQuery(
+                    GameWorldState.DefaultSpace,
+                    anchor,
+                    GameChunkInterestProfile.Default,
+                    previous.AsSpan(0, previousCount),
+                    current,
+                    out int currentCount,
+                    out _,
+                    out int budget));
+
+            int deltaX = budget == 0 ? 0 : random.Next(-budget, budget + 1);
+            int remaining = budget - Math.Abs(deltaX);
+            int deltaZ = remaining == 0 ? 0 : random.Next(-remaining, remaining + 1);
+            True(WorldPosition.TryFromGlobalMillimeters(
+                anchor.GlobalXMillimeters + deltaX,
+                0,
+                anchor.GlobalZMillimeters + deltaZ,
+                out WorldPosition moved));
+            Equal(ChunkInterestQueryStatus.Success,
+                ChunkInterestQuery.TryQuery(
+                    GameWorldState.DefaultSpace,
+                    moved,
+                    GameChunkInterestProfile.Default,
+                    current.AsSpan(0, currentCount),
+                    oracle,
+                    out int oracleCount,
+                    out _));
+            True(current.AsSpan(0, currentCount).SequenceEqual(oracle.AsSpan(0, oracleCount)));
+
+            (previous, oracle) = (oracle, previous);
+            previousCount = oracleCount;
+            anchor = moved;
+        }
+    }
+
+    internal static void DirtySchedulerFencesTopologySourceGapsAndStaleRecipients()
+    {
+        using var fixture = new Fixture(historyCapacity: 64);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        var recipient = NewScheduledRecipient();
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store, new ChunkPublicationWorkSchedulerLimits(1, 64));
+        True(scheduler.TryRegister(recipient, out ChunkReplicationRecipientId id));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        WorldPosition firstAnchor = Position(0, 0, 8_000, 8_000);
+        ApplyScheduledReconcile(scheduler, id, recipient, fixture.Store, firstAnchor, changes);
+        DrainScheduledReads(scheduler, recipient, id, null, default, fixture.Store, 0);
+
+        WorldPosition crossed = Position(1, 0, 100, 8_000);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, crossed, changes,
+                out OfflineDirectChunkReconcileResult crossing));
+        True(crossing.ChangeCount > 0);
+        True(scheduler.TryApplyReconciliation(id, changes[..crossing.ChangeCount], crossing));
+        ChunkPublicationWorkSchedulerSnapshot afterCrossing = scheduler.GetSnapshot();
+        Equal(crossing.SubscriptionCount, afterCrossing.MembershipCount);
+        True(afterCrossing.PendingWorkCount > 0);
+        DrainScheduledReads(scheduler, recipient, id, null, default, fixture.Store, 1);
+
+        fixture.Present(0, Position(0, 0, 2_200, 2_000), GameWorldPublicPrefabIds.Character);
+        fixture.Present(0, Position(0, 0, 2_300, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(ChunkPublicationCommitObservationStatus.CommitGapRequiresRefresh,
+            scheduler.ObserveCommit(fixture.Store));
+        scheduler.RefreshAllFromCurrentSource();
+        Equal(recipient.Subscriptions.Length, scheduler.GetSnapshot().PendingWorkCount);
+        DrainScheduledReads(scheduler, recipient, id, null, default, fixture.Store, 4);
+
+        fixture.ReplaceStore(historyCapacity: 64);
+        scheduler.ReplaceSource(fixture.Store);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, crossed, changes,
+                out OfflineDirectChunkReconcileResult reset));
+        True(reset.SourceReset);
+        True(scheduler.TryApplyReconciliation(id, changes[..reset.ChangeCount], reset));
+        Equal(recipient.Subscriptions.Length, scheduler.GetSnapshot().PendingWorkCount);
+
+        True(scheduler.RemoveRecipient(id));
+        Equal(0, scheduler.GetSnapshot().MembershipCount);
+        False(scheduler.Requeue(new ChunkPublicationWork(
+            id, Key(0, 0), ChunkInterestTier.Immediate, ChunkPublicationWorkKind.Dirty)));
+        var replacement = NewScheduledRecipient();
+        True(scheduler.TryRegister(replacement, out ChunkReplicationRecipientId replacementId));
+        True(replacementId.Index == id.Index && replacementId.Generation > id.Generation);
+    }
+
+    internal static void DirtySchedulerWarmedWorkDiscoveryAllocatesZero()
+    {
+        using var fixture = new Fixture(historyCapacity: 32);
+        var recipient = NewScheduledRecipient();
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store, new ChunkPublicationWorkSchedulerLimits(1, 64));
+        True(scheduler.TryRegister(recipient, out ChunkReplicationRecipientId id));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        ApplyScheduledReconcile(scheduler, id, recipient, fixture.Store,
+            Position(0, 0, 8_000, 8_000), changes);
+        DrainScheduledWorkOnly(scheduler, 0);
+
+        for (int warm = 0; warm < 8; warm++)
+        {
+            scheduler.RefreshAllFromCurrentSource();
+            DrainScheduledWorkOnly(scheduler, checked((ulong)warm + 1));
+        }
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 128; iteration++)
+        {
+            scheduler.RefreshAllFromCurrentSource();
+            DrainScheduledWorkOnly(scheduler, checked((ulong)iteration + 32));
+        }
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    internal static void DirtySchedulerFeedsAcceptedRemoteChunkKeyPath()
+    {
+        using var fixture = new Fixture(historyCapacity: 32);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        var recipient = NewScheduledRecipient();
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store, new ChunkPublicationWorkSchedulerLimits(1, 64));
+        True(scheduler.TryRegister(recipient, out ChunkReplicationRecipientId id));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        ApplyScheduledReconcile(scheduler, id, recipient, fixture.Store,
+            Position(0, 0, 8_000, 8_000), changes);
+        DrainScheduledReads(scheduler, recipient, id, null, default, fixture.Store, 0);
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(ChunkPublicationCommitObservationStatus.Observed,
+            scheduler.ObserveCommit(fixture.Store));
+        True(scheduler.TryDequeueDue(1, out ChunkPublicationWork work));
+        Equal(Key(0, 0), work.Key);
+
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            default,
+            out ProtocolLoopback? loopback,
+            out _,
+            UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback established = loopback!;
+        var server = new RemoteChunkWorldStateServer(
+            established.Server,
+            recipient,
+            fixture.Store,
+            applicationSessionEpoch: 91,
+            limits: new RemoteChunkWorldStateTransportLimits(8));
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(work.Key, 1));
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+    }
+
     internal static void ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe()
     {
         RemoteChunkPublicRecord[] snapshot =
@@ -1120,6 +1408,59 @@ internal static class N1OfflineDirectChunkTests
         }
     }
 
+    private static OfflineDirectChunkRecipient NewScheduledRecipient() => new(
+        new OfflineDirectChunkRecipientLimits(64, 8, 8),
+        Interest,
+        new OfflineDirectChunkCadence(1, 1, 1));
+
+    private static void ApplyScheduledReconcile(
+        ChunkPublicationWorkScheduler scheduler,
+        ChunkReplicationRecipientId id,
+        OfflineDirectChunkRecipient recipient,
+        ChunkPublicationStore store,
+        in WorldPosition anchor,
+        Span<OfflineDirectChunkSubscriptionChange> changes)
+    {
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(store, GameWorldState.DefaultSpace, anchor, changes,
+                out OfflineDirectChunkReconcileResult result));
+        True(scheduler.TryApplyReconciliation(id, changes[..result.ChangeCount], result));
+    }
+
+    private static void DrainScheduledReads(
+        ChunkPublicationWorkScheduler scheduler,
+        OfflineDirectChunkRecipient first,
+        ChunkReplicationRecipientId firstId,
+        OfflineDirectChunkRecipient? second,
+        ChunkReplicationRecipientId secondId,
+        ChunkPublicationStore store,
+        ulong cadenceStep)
+    {
+        while (scheduler.TryDequeueDue(cadenceStep, out ChunkPublicationWork work))
+        {
+            OfflineDirectChunkRecipient recipient = work.Recipient == firstId
+                ? first
+                : work.Recipient == secondId && second is not null
+                    ? second
+                    : throw new InvalidOperationException("Scheduled an unknown recipient.");
+            int subscription = FindSubscription(recipient, work.Key);
+            OfflineDirectChunkReadStatus status =
+                recipient.TryBeginRead(store, subscription, cadenceStep, out _);
+            True(status is OfflineDirectChunkReadStatus.Snapshot or
+                OfflineDirectChunkReadStatus.ChunkAbsent or
+                OfflineDirectChunkReadStatus.Delta or
+                OfflineDirectChunkReadStatus.NoChanges);
+            recipient.CommitRead();
+        }
+    }
+
+    private static void DrainScheduledWorkOnly(
+        ChunkPublicationWorkScheduler scheduler,
+        ulong cadenceStep)
+    {
+        while (scheduler.TryDequeueDue(cadenceStep, out _)) { }
+    }
+
     private static void AssertOneIdentityIn(ClientWorldSemanticCache cache, SpatialChunkKey expectedKey)
     {
         int records = 0;
@@ -1427,6 +1768,8 @@ internal static class N1OfflineDirectChunkTests
             WorldPublicChange change = WorldPublicChange.Present(_entities[entity], position, descriptor);
             True(Store.TryCommit([change], out _));
         }
+
+        internal void CommitEmpty() => True(Store.TryCommit([], out _));
 
         internal void ReplaceStore(int historyCapacity) => Store = CreateStore(historyCapacity);
 
