@@ -5,8 +5,10 @@ remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
 as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
-accepted. N1.4 dirty-driven work discovery is implemented and stopped for
-checkpoint review; the current-game AOI adoption decision remains open.
+accepted. N1.4 dirty-driven work discovery is accepted at `682fcdcd`; mixed-cadence,
+dirty-density, roaming, and the first 512/768/1024 semantic crossover are now
+captured. The current-game AOI adoption decision remains open on layout memory,
+transition tails, and the remaining integrated matrix.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -976,12 +978,66 @@ Evidence:
 [`network-n1.4-dirty-publication-scheduling-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-dirty-publication-scheduling-2026-08-22.json),
 [`network-n1.4-n0-shared-one-dirty-256-control-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-256-control-2026-08-22.json).
 
-This is an N1.4 implementation stop, not production adoption. The complete
-512/768/1024/2048/4096, Dense-400, boundary/corner, dense-town, mixed-privacy,
-transport-replay, and sharded-client matrix remains required. Keep the single
+This is an N1.4 implementation stop, not production adoption. Keep the single
 client snapshot candidate until dense-entry evidence proves a larger bounded
-window is worthwhile. Do not begin N1.5 or delete N0 before review and that
+window is worthwhile. Do not begin N1.5 or delete N0 before review and the
 controlled matrix.
+
+### N1.4 adoption-diagnostic and first-crossover stop — 2026-08-22
+
+Checkpoint review identified two missing measurements: mixed-cadence pending
+traversal and dirty-density/roaming distributions. The first mixed-cadence probe
+confirmed repeated deferred-prefix rescans in `TryDequeueDue`. The scheduler
+retains the same bounded flat pending array, but now uses one pass marker per
+cadence step. Every pending membership is classified at most once in that pass;
+another no-work call at the same step performs no repeated scan. A permanent gate
+freezes that behavior, and all 65 N0/N1.0-N1.4 Game Replication tests pass.
+
+At 32 recipients and the accepted 1/2/4 evidence cadence, full 497-chunk dirtiness
+dequeues 15,904 obligations while examining 3.489 pending-array entries per work on
+average. The measured drain is 307.497 us p95 and zero-allocation. This is the
+smallest earned correction; no timing wheel, tier queue, or generic scheduler was
+added.
+
+The 256-recipient dirty-density sweep proves the intended workload dependence:
+one shared dirty chunk fans out 256 obligations, while all 497 subscribed scopes
+fan out 127,232 and approach recipient-times-chunk work again. A dispersed control
+with one populated home scope per recipient proves that 256 independently dirty
+chunks fan out only 256 obligations rather than inheriting the shared-anchor
+shape.
+
+The 4,096-step roaming census records a 44.41% stable fast-path rate and 55.59%
+exact-query rate for sustained 100 mm cardinal travel. The exact-query movement
+budget is 63 mm p50 / 499 mm p95. One-millimeter boundary and corner oscillations
+use the fast path for 99.95% of steps after their initial exact reconciliation.
+The shortcut is therefore useful but does not erase sustained-travel interest
+cost.
+
+The first semantic crossover reaches 512/768/1024 recipients. At 1,024, the
+one-shared-dirty-chunk packet-free commit/query/apply path is 619.643 ns p95 per
+recipient (about 635 us aggregate), while synchronized real crossings remain
+97.106 us p95 per recipient. The broad 1,024-subscription recipient plus scheduler
+reservation reaches 387,580,360 bytes. A capacity-sensitivity observation using
+640 declared slots still retains all 503 observed subscriptions and reduces that
+reservation to 242,183,400 bytes, but it remains materially above the 72,632,876 B
+same-machine N0 narrow control. The 640 value is evidence, not a frozen production
+maximum.
+
+This is the next stop condition: do not extrapolate to 2,048/4,096 yet. First
+attribute and compact the recipient subscription/cursor and scheduler reverse-index
+layout without changing accepted interest, publication, wire, recovery, or proof
+semantics. Then rerun the crossover before Dense-400, dense-town/snapshot,
+boundary/corner, mixed-privacy, transport-replay, and sharded-client evidence.
+
+Evidence:
+[`network-n1.4-adoption-diagnostics-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-adoption-diagnostics-2026-08-22.json),
+[`network-n1.4-semantic-crossover-512-1024-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-semantic-crossover-512-1024-2026-08-22.json),
+[`network-n1.4-capacity-sensitivity-1024x640-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-capacity-sensitivity-1024x640-2026-08-22.json), and the matching
+[`512`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-512-control-2026-08-22.json),
+[`768`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-768-control-2026-08-22.json), and
+[`1024`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-1024-control-2026-08-22.json)
+N0 controls. The concise interpretation is retained in
+[`network-n1.4-adoption-diagnostics-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-adoption-diagnostics-2026-08-22.md).
 
 ## N1.5 — shared semantic packing / chunk page reuse
 
@@ -1245,8 +1301,10 @@ deltas and absences over real independent-unreliable transport with a bounded
 server ticket ledger and atomic production-client application. N1.3 adds bounded
 reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
 N1.4 adds the first shared dirty-work scheduler and exact stable-interest fast
-path, but the measured current-game AOI-profile adoption decision remains open.
+path. Its scheduling mechanism and bounded cadence traversal are accepted, but
+the measured current-game AOI-profile adoption decision remains open.
 
-Stop at the N1.4 implementation checkpoint. The next work is review plus the
-controlled adoption matrix and layout evidence—not N1.5 shared encoding, UDP
-redesign, N0 deletion, or a production scale claim.
+Stop at the N1.4 first-crossover checkpoint. The next work is recipient/scheduler
+layout attribution and compaction followed by the remaining controlled adoption
+matrix—not N1.5 shared encoding, UDP redesign, N0 deletion, or a production scale
+claim.

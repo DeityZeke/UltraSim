@@ -52,6 +52,7 @@ public readonly record struct ChunkPublicationWorkSchedulerSnapshot(
     ulong DirtyChunksWithoutSubscribers,
     ulong DirtyRecipientFanout,
     ulong DirtyWorkCoalesces,
+    ulong PendingMembershipsExamined,
     ulong DueWorkDequeued,
     ulong CadenceDeferrals,
     ulong SourceRefreshes,
@@ -88,6 +89,11 @@ public sealed class ChunkPublicationWorkScheduler
     private int _membershipCount;
     private int _chunkCount;
     private int _pendingCount;
+    private int _pendingScanPosition;
+    private ulong _pendingPassId;
+    private ulong _pendingPassCadenceStep;
+    private bool _hasPendingPassCadenceStep;
+    private bool _pendingPassExhausted;
     private ulong _observedCommitSequence;
     private ulong _incomingQueued;
     private ulong _dirtyCommitsObserved;
@@ -95,6 +101,7 @@ public sealed class ChunkPublicationWorkScheduler
     private ulong _dirtyChunksWithoutSubscribers;
     private ulong _dirtyRecipientFanout;
     private ulong _dirtyWorkCoalesces;
+    private ulong _pendingMembershipsExamined;
     private ulong _dueWorkDequeued;
     private ulong _cadenceDeferrals;
     private ulong _sourceRefreshes;
@@ -316,10 +323,30 @@ public sealed class ChunkPublicationWorkScheduler
     public bool TryDequeueDue(ulong cadenceStep, out ChunkPublicationWork work)
     {
         EnsureOwner();
-        for (int position = 0; position < _pendingCount; position++)
+        if (_pendingCount == 0)
         {
+            work = default;
+            return false;
+        }
+        if (!_hasPendingPassCadenceStep || _pendingPassCadenceStep != cadenceStep)
+            StartPendingPass(cadenceStep);
+        if (_pendingPassExhausted)
+        {
+            work = default;
+            return false;
+        }
+
+        int remaining = _pendingCount;
+        while (remaining-- > 0 && _pendingCount != 0)
+        {
+            if (_pendingScanPosition >= _pendingCount) _pendingScanPosition = 0;
+            int position = _pendingScanPosition;
+            _pendingScanPosition = position + 1;
+            SaturatingIncrement(ref _pendingMembershipsExamined);
             int membershipIndex = _pendingMemberships[position];
             ref MembershipState membership = ref _memberships[membershipIndex];
+            if (membership.LastExaminedPendingPass == _pendingPassId) continue;
+            membership.LastExaminedPendingPass = _pendingPassId;
             if (membership.PendingKind == ChunkPublicationWorkKind.Dirty &&
                 cadenceStep % membership.CadencePeriod != membership.CadencePhase)
             {
@@ -335,6 +362,7 @@ public sealed class ChunkPublicationWorkScheduler
             SaturatingIncrement(ref _dueWorkDequeued);
             return true;
         }
+        _pendingPassExhausted = true;
         work = default;
         return false;
     }
@@ -367,6 +395,7 @@ public sealed class ChunkPublicationWorkScheduler
             _dirtyChunksWithoutSubscribers,
             _dirtyRecipientFanout,
             _dirtyWorkCoalesces,
+            _pendingMembershipsExamined,
             _dueWorkDequeued,
             _cadenceDeferrals,
             _sourceRefreshes,
@@ -488,9 +517,19 @@ public sealed class ChunkPublicationWorkScheduler
         if (subscriptionIndex < 0)
             throw new InvalidOperationException("Accepted subscription topology and scheduler diverged.");
         OfflineDirectChunkSubscription subscription = recipient.Subscriptions[subscriptionIndex];
+        uint cadencePeriod = recipient.GetCadencePeriod(subscription.Interest.Tier);
+        bool cadenceChanged = membership.Tier != subscription.Interest.Tier ||
+            membership.CadencePeriod != cadencePeriod ||
+            membership.CadencePhase != subscription.CadencePhase;
         membership.Tier = subscription.Interest.Tier;
-        membership.CadencePeriod = recipient.GetCadencePeriod(subscription.Interest.Tier);
+        membership.CadencePeriod = cadencePeriod;
         membership.CadencePhase = subscription.CadencePhase;
+        if (cadenceChanged && membership.PendingPosition >= 0)
+        {
+            membership.LastExaminedPendingPass = 0;
+            _pendingPassExhausted = false;
+            _pendingScanPosition = membership.PendingPosition;
+        }
     }
 
     private void QueueAllIncoming()
@@ -520,12 +559,18 @@ public sealed class ChunkPublicationWorkScheduler
                 return;
             }
             membership.PendingKind = ChunkPublicationWorkKind.Incoming;
+            membership.LastExaminedPendingPass = 0;
+            _pendingPassExhausted = false;
+            _pendingScanPosition = membership.PendingPosition;
             SaturatingIncrement(ref _incomingQueued);
             return;
         }
         membership.PendingKind = kind;
         membership.PendingPosition = _pendingCount;
+        membership.LastExaminedPendingPass = 0;
         _pendingMemberships[_pendingCount++] = membershipIndex;
+        _pendingPassExhausted = false;
+        _pendingScanPosition = membership.PendingPosition;
         if (kind == ChunkPublicationWorkKind.Incoming)
             SaturatingIncrement(ref _incomingQueued);
     }
@@ -542,6 +587,8 @@ public sealed class ChunkPublicationWorkScheduler
         if (position != last) _memberships[replacement].PendingPosition = position;
         membership.PendingPosition = -1;
         membership.PendingKind = default;
+        membership.LastExaminedPendingPass = 0;
+        _pendingScanPosition = _pendingCount == 0 ? 0 : Math.Min(position, _pendingCount - 1);
     }
 
     private bool TryResolve(ChunkReplicationRecipientId id, out int index)
@@ -609,6 +656,24 @@ public sealed class ChunkPublicationWorkScheduler
     private static void SaturatingAdd(ref ulong value, ulong amount) =>
         value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
 
+    private void StartPendingPass(ulong cadenceStep)
+    {
+        if (_pendingPassId == ulong.MaxValue)
+        {
+            for (int index = 0; index < _memberships.Length; index++)
+                _memberships[index].LastExaminedPendingPass = 0;
+            _pendingPassId = 1;
+        }
+        else
+        {
+            _pendingPassId++;
+        }
+        _pendingPassCadenceStep = cadenceStep;
+        _hasPendingPassCadenceStep = true;
+        _pendingPassExhausted = false;
+        _pendingScanPosition = 0;
+    }
+
     private void EnsureOwner()
     {
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
@@ -643,6 +708,7 @@ public sealed class ChunkPublicationWorkScheduler
         internal int ChunkIndex;
         internal int PendingPosition;
         internal ChunkPublicationWorkKind PendingKind;
+        internal ulong LastExaminedPendingPass;
     }
 
     private struct ChunkState

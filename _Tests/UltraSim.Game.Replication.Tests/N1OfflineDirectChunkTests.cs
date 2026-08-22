@@ -415,6 +415,64 @@ internal static class N1OfflineDirectChunkTests
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    internal static void DirtySchedulerDoesNotRescanDeferredCadencePrefix()
+    {
+        using var fixture = new Fixture(historyCapacity: 64, entityCount: 4);
+        var cadence = OfflineDirectChunkCadence.EvidenceProfile;
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(1_024, 8, 8),
+            GameChunkInterestProfile.Default,
+            cadence);
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store, new ChunkPublicationWorkSchedulerLimits(1, 1_024));
+        True(scheduler.TryRegister(recipient, out ChunkReplicationRecipientId id));
+        var changes = new OfflineDirectChunkSubscriptionChange[1_024];
+        ApplyScheduledReconcile(scheduler, id, recipient, fixture.Store,
+            Position(0, 0, 8_000, 8_000), changes);
+        DrainScheduledWorkOnly(scheduler, 0);
+
+        int queued = 0;
+        for (int subscription = 0; subscription < recipient.Subscriptions.Length && queued < 4;
+             subscription++)
+        {
+            OfflineDirectChunkSubscription candidate = recipient.Subscriptions[subscription];
+            uint period = candidate.Interest.Tier switch
+            {
+                ChunkInterestTier.Immediate => cadence.ImmediateSteps,
+                ChunkInterestTier.Near => cadence.NearSteps,
+                ChunkInterestTier.Far => cadence.FarSteps,
+                _ => throw new InvalidOperationException(),
+            };
+            if (candidate.CadencePhase == 0 || period == 1) continue;
+            SpatialChunkKey key = candidate.Interest.Key;
+            fixture.Present(
+                queued,
+                Position(key.Coord.X, key.Coord.Z, 8_000, 8_000),
+                GameWorldPublicPrefabIds.Character);
+            Equal(ChunkPublicationCommitObservationStatus.Observed,
+                scheduler.ObserveCommit(fixture.Store));
+            queued++;
+        }
+        Equal(4, queued);
+        Equal(4, scheduler.GetSnapshot().PendingWorkCount);
+
+        ChunkPublicationWorkSchedulerSnapshot before = scheduler.GetSnapshot();
+        False(scheduler.TryDequeueDue(0, out _));
+        ChunkPublicationWorkSchedulerSnapshot firstPass = scheduler.GetSnapshot();
+        Equal((ulong)4,
+            firstPass.PendingMembershipsExamined - before.PendingMembershipsExamined);
+        False(scheduler.TryDequeueDue(0, out _));
+        ChunkPublicationWorkSchedulerSnapshot repeated = scheduler.GetSnapshot();
+        Equal((ulong)0,
+            repeated.PendingMembershipsExamined - firstPass.PendingMembershipsExamined);
+
+        int due = 0;
+        for (ulong step = 1; step <= 3; step++)
+            while (scheduler.TryDequeueDue(step, out _)) due++;
+        Equal(4, due);
+        Equal(0, scheduler.GetSnapshot().PendingWorkCount);
+    }
+
     internal static void DirtySchedulerFeedsAcceptedRemoteChunkKeyPath()
     {
         using var fixture = new Fixture(historyCapacity: 32);

@@ -14,19 +14,25 @@ using static BenchmarkHarness;
 int warmups = ReadInt(args, "--warmups=", 4);
 int samples = ReadInt(args, "--samples=", 15);
 int rounds = ReadInt(args, "--rounds=", 4);
+int diagnosticRecipients = ReadInt(args, "--diagnostic-recipients=", 256);
+int mixedCadenceRecipients = ReadInt(args, "--mixed-cadence-recipients=", 32);
+int roamingSteps = ReadInt(args, "--roaming-steps=", 4_096);
+int subscriptionCapacity = ReadInt(args, "--subscription-capacity=", 1_024);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/network-n1.4-dirty-publication-scheduling.json"));
-if (warmups < 1 || samples < 5 || rounds < 1) throw new ArgumentOutOfRangeException(nameof(args));
+    AppContext.BaseDirectory, "../../../../results/network-n1.4-adoption-diagnostics.json"));
+if (warmups < 1 || samples < 5 || rounds < 1 || diagnosticRecipients < 1 ||
+    mixedCadenceRecipients < 1 || roamingSteps < 1 || subscriptionCapacity < 1)
+    throw new ArgumentOutOfRangeException(nameof(args));
 
-int[] populations = [1, 32, 128, 256];
+int[] populations = ReadIntList(args, "--populations=", [1, 32, 128, 256]);
 var scales = new ScaleEvidence[populations.Length];
 var dirtyScheduling = new DirtySchedulingEvidence[populations.Length];
 for (int index = 0; index < populations.Length; index++)
 {
-    using var fixture = new ScaleFixture(populations[index]);
-    scales[index] = fixture.Measure(warmups, samples, rounds);
-    using var dirtyFixture = new DirtySchedulingFixture(populations[index]);
-    dirtyScheduling[index] = dirtyFixture.Measure(warmups, samples, rounds);
+    using (var fixture = new ScaleFixture(populations[index], subscriptionCapacity))
+        scales[index] = fixture.Measure(warmups, samples, rounds);
+    using (var dirtyFixture = new DirtySchedulingFixture(populations[index], subscriptionCapacity))
+        dirtyScheduling[index] = dirtyFixture.Measure(warmups, samples, rounds);
     Console.WriteLine(
         $"recipients={scales[index].Recipients} subscriptions={scales[index].SubscriptionsPerRecipient} " +
         $"reserved={scales[index].TotalRecipientReservedBytes} " +
@@ -41,6 +47,32 @@ for (int index = 0; index < populations.Length; index++)
         $"dirty_fanout={dirtyScheduling[index].DirtyRecipientFanout} " +
         $"reserved={dirtyScheduling[index].SchedulerReservedBytes + dirtyScheduling[index].RecipientReservedBytes}");
 }
+
+N14AdoptionEvidence adoptionDiagnostics = N14AdoptionDiagnostics.Capture(
+    diagnosticRecipients,
+    mixedCadenceRecipients,
+    roamingSteps,
+    subscriptionCapacity,
+    warmups,
+    samples);
+foreach (DirtyDensityEvidence density in adoptionDiagnostics.SharedWindowDirtyDensity)
+    Console.WriteLine(
+        $"shared_density_dirty={density.DirtyChunks}/{density.TargetPublicationChunks} " +
+        $"fanout={density.AverageDirtyRecipientFanout:F0} " +
+        $"observe_p95_us={density.ObserveP95Nanoseconds / 1_000:F3} " +
+        $"drain_p95_us={density.DrainP95Nanoseconds / 1_000:F3}");
+foreach (MixedCadenceTraversalEvidence traversal in adoptionDiagnostics.MixedCadenceTraversal)
+    Console.WriteLine(
+        $"mixed_dirty={traversal.DirtyChunks}/{traversal.TargetPublicationChunks} " +
+        $"work={traversal.AverageDueDequeued:F0} " +
+        $"examined_per_work={traversal.AveragePendingMembershipsExaminedPerWork:F3} " +
+        $"drain_p95_us={traversal.DrainP95Nanoseconds / 1_000:F3}");
+foreach (RoamingInterestEvidence roaming in adoptionDiagnostics.RoamingInterest)
+    Console.WriteLine(
+        $"roaming={roaming.Path} full_rate={roaming.FullQueryRate:P2} " +
+        $"fast_rate={roaming.StableFastPathRate:P2} " +
+        $"budget_p50={roaming.StableBudgetP50Millimeters}mm " +
+        $"budget_p95={roaming.StableBudgetP95Millimeters}mm");
 
 using var cadence = new CadenceFixture();
 TimingEvidence cadenceTiming = cadence.Measure(warmups, samples, rounds);
@@ -122,7 +154,7 @@ using (establishedTransport)
 }
 
 var report = new Report(
-    "network-n1.4-dirty-publication-scheduling-v1",
+    "network-n1.4-adoption-diagnostics-v2",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -148,11 +180,13 @@ var report = new Report(
         OfflineDirectChunkCadence.EvidenceProfile.ImmediateSteps,
         OfflineDirectChunkCadence.EvidenceProfile.NearSteps,
         OfflineDirectChunkCadence.EvidenceProfile.FarSteps,
+        subscriptionCapacity,
         Marshal.SizeOf<OfflineDirectChunkSubscription>(),
         Marshal.SizeOf<ChunkPublicationCursor>(),
         Marshal.SizeOf<OfflineDirectChunkSubscriptionChange>()),
     scales,
     dirtyScheduling,
+    adoptionDiagnostics,
     cadenceTiming,
     cadenceSnapshot,
     codecEvidence,
@@ -168,6 +202,17 @@ static int ReadInt(string[] values, string prefix, int fallback) =>
         [prefix.Length..], out int parsed) ? parsed : fallback;
 static string? ReadString(string[] values, string prefix) =>
     values.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..];
+static int[] ReadIntList(string[] values, string prefix, int[] fallback)
+{
+    string? value = ReadString(values, prefix);
+    if (string.IsNullOrWhiteSpace(value)) return fallback;
+    string[] parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var parsed = new int[parts.Length];
+    for (int index = 0; index < parts.Length; index++)
+        if (!int.TryParse(parts[index], out parsed[index]) || parsed[index] <= 0)
+            throw new ArgumentOutOfRangeException(nameof(values));
+    return parsed;
+}
 
 sealed class ScaleFixture : IDisposable
 {
@@ -178,12 +223,15 @@ sealed class ScaleFixture : IDisposable
     private readonly WorldPosition[] _stableB;
     private readonly WorldPosition[] _crossA;
     private readonly WorldPosition[] _crossB;
-    private readonly OfflineDirectChunkSubscriptionChange[] _changes = new OfflineDirectChunkSubscriptionChange[1_024];
+    private readonly OfflineDirectChunkSubscriptionChange[] _changes;
+    private readonly int _subscriptionCapacity;
     private bool _stableSide;
     private bool _crossSide;
 
-    internal ScaleFixture(int recipients)
+    internal ScaleFixture(int recipients, int subscriptionCapacity)
     {
+        _subscriptionCapacity = subscriptionCapacity;
+        _changes = new OfflineDirectChunkSubscriptionChange[subscriptionCapacity];
         _recipients = new OfflineDirectChunkRecipient[recipients];
         _stableA = new WorldPosition[recipients];
         _stableB = new WorldPosition[recipients];
@@ -269,8 +317,8 @@ sealed class ScaleFixture : IDisposable
         return result.ChangeCount;
     }
 
-    private static OfflineDirectChunkRecipient NewRecipient() => new(
-        new OfflineDirectChunkRecipientLimits(1_024, 64, 64),
+    private OfflineDirectChunkRecipient NewRecipient() => new(
+        new OfflineDirectChunkRecipientLimits(_subscriptionCapacity, 64, 64),
         GameChunkInterestProfile.Default,
         OfflineDirectChunkCadence.EvidenceProfile);
 
@@ -285,15 +333,15 @@ sealed class DirtySchedulingFixture : IDisposable
     private readonly OfflineDirectChunkRecipient[] _recipients;
     private readonly ChunkReplicationRecipientId[] _recipientIds;
     private readonly ChunkPublicationWorkScheduler _scheduler;
-    private readonly OfflineDirectChunkSubscriptionChange[] _changes =
-        new OfflineDirectChunkSubscriptionChange[1_024];
+    private readonly OfflineDirectChunkSubscriptionChange[] _changes;
     private readonly WorldPublicChange[] _dirty = new WorldPublicChange[1];
     private readonly WorldPublicDescriptor _descriptor = new(
         GameWorldPublicPrefabIds.Character, WorldYaw.Zero, WorldPublicStateFlags.Visible);
     private bool _side;
 
-    internal DirtySchedulingFixture(int recipients)
+    internal DirtySchedulingFixture(int recipients, int subscriptionCapacity)
     {
+        _changes = new OfflineDirectChunkSubscriptionChange[subscriptionCapacity];
         _world = new EcsWorld(
             GameSchema.CreateSchema(),
             new EcsWorldOptions(new EntityCapacity(8), 2, 4, lifecycleRecordCapacity: 16));
@@ -312,14 +360,14 @@ sealed class DirtySchedulingFixture : IDisposable
             _source,
             new ChunkPublicationWorkSchedulerLimits(
                 recipients,
-                checked(recipients * 1_024)));
+                checked(recipients * subscriptionCapacity)));
         _recipients = new OfflineDirectChunkRecipient[recipients];
         _recipientIds = new ChunkReplicationRecipientId[recipients];
         WorldPosition anchor = new(0, 0, 8_000, 8_000, 0);
         for (int index = 0; index < recipients; index++)
         {
             var recipient = new OfflineDirectChunkRecipient(
-                new OfflineDirectChunkRecipientLimits(1_024, 64, 64),
+                new OfflineDirectChunkRecipientLimits(subscriptionCapacity, 64, 64),
                 GameChunkInterestProfile.Default,
                 new OfflineDirectChunkCadence(1, 1, 1));
             _recipients[index] = recipient;
@@ -750,6 +798,7 @@ readonly record struct ProfileEvidence(
     uint ImmediateCadenceSteps,
     uint NearCadenceSteps,
     uint FarCadenceSteps,
+    int MaximumSubscriptionsPerRecipient,
     int SubscriptionBytes,
     int CursorBytes,
     int ChangeBytes);
@@ -805,6 +854,7 @@ readonly record struct Report(
     ProfileEvidence Profile,
     ScaleEvidence[] Scales,
     DirtySchedulingEvidence[] DirtyScheduling,
+    N14AdoptionEvidence AdoptionDiagnostics,
     TimingEvidence CadencePass,
     OfflineDirectChunkRecipientSnapshot CadenceCounters,
     CodecEvidence Codec,

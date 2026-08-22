@@ -168,6 +168,7 @@ public readonly record struct OfflineDirectChunkRecipientSnapshot(
     ulong CadenceDeferrals,
     ulong FullInterestQueries,
     ulong StableInterestFastPaths,
+    int StableInterestMovementBudgetMillimeters,
     long ReservedBytes);
 
 /// <summary>
@@ -585,6 +586,7 @@ public sealed class OfflineDirectChunkRecipient
             _cadenceDeferrals,
             _fullInterestQueries,
             _stableInterestFastPaths,
+            _stableInterestMovementBudgetMillimeters,
             CalculateReservedBytes());
     }
 
