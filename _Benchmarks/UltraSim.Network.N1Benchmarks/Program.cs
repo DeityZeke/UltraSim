@@ -182,6 +182,7 @@ var report = new Report(
         OfflineDirectChunkCadence.EvidenceProfile.FarSteps,
         subscriptionCapacity,
         Marshal.SizeOf<OfflineDirectChunkSubscription>(),
+        scales[0].RecipientStorage.RetainedSubscriptionBytes,
         Marshal.SizeOf<ChunkPublicationCursor>(),
         Marshal.SizeOf<OfflineDirectChunkSubscriptionChange>()),
     scales,
@@ -265,6 +266,7 @@ sealed class ScaleFixture : IDisposable
             one.SubscriptionCount,
             totalReserved,
             one.ReservedBytes,
+            _recipients[0].GetStorageSnapshot(),
             CrossingChanges(_crossA[0], _crossB[0]),
             stable,
             crossing);
@@ -397,6 +399,7 @@ sealed class DirtySchedulingFixture : IDisposable
             afterDirty.SharedChunkCount,
             afterDirty.ReservedBytes,
             recipientReserved,
+            _scheduler.GetStorageSnapshot(),
             afterDirty.DirtyChunksObserved - beforeDirty.DirtyChunksObserved,
             afterDirty.DirtyRecipientFanout - beforeDirty.DirtyRecipientFanout,
             afterDirty.DirtyWorkCoalesces - beforeDirty.DirtyWorkCoalesces,
@@ -459,7 +462,7 @@ sealed class DirtySchedulingFixture : IDisposable
     }
 
     private static int FindSubscription(
-        ReadOnlySpan<OfflineDirectChunkSubscription> subscriptions,
+        OfflineDirectChunkSubscriptionView subscriptions,
         SpatialChunkKey key)
     {
         int low = 0;
@@ -770,6 +773,7 @@ readonly record struct ScaleEvidence(
     int SubscriptionsPerRecipient,
     long TotalRecipientReservedBytes,
     long ReservedBytesPerRecipient,
+    OfflineDirectChunkRecipientStorageSnapshot RecipientStorage,
     int CrossingChangesPerRecipient,
     TimingEvidence StableReconcile,
     TimingEvidence CrossingReconcile);
@@ -780,6 +784,7 @@ readonly record struct DirtySchedulingEvidence(
     int SharedChunks,
     long SchedulerReservedBytes,
     long RecipientReservedBytes,
+    ChunkPublicationWorkSchedulerStorageSnapshot SchedulerStorage,
     ulong DirtyChunksObserved,
     ulong DirtyRecipientFanout,
     ulong DirtyWorkCoalesces,
@@ -799,7 +804,8 @@ readonly record struct ProfileEvidence(
     uint NearCadenceSteps,
     uint FarCadenceSteps,
     int MaximumSubscriptionsPerRecipient,
-    int SubscriptionBytes,
+    int PublicSubscriptionViewBytes,
+    int RetainedSubscriptionBytes,
     int CursorBytes,
     int ChangeBytes);
 

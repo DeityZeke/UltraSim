@@ -473,6 +473,103 @@ internal static class N1OfflineDirectChunkTests
         Equal(0, scheduler.GetSnapshot().PendingWorkCount);
     }
 
+    internal static void DirtySchedulerCompactIndexesSurviveDeterministicChurn()
+    {
+        using var fixture = new Fixture(historyCapacity: 32);
+        const int recipientCount = 4;
+        var recipients = new OfflineDirectChunkRecipient[recipientCount];
+        var ids = new ChunkReplicationRecipientId[recipientCount];
+        var anchors = new WorldPosition[recipientCount];
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store,
+            new ChunkPublicationWorkSchedulerLimits(recipientCount, recipientCount * 64));
+        ChunkPublicationWorkSchedulerStorageSnapshot schedulerStorage =
+            scheduler.GetStorageSnapshot();
+        Equal(16, schedulerStorage.RecipientStateBytes);
+        Equal(40, schedulerStorage.MembershipStateBytes);
+        Equal(24, schedulerStorage.ChunkStateBytes);
+        Equal(4, schedulerStorage.MembershipIndexSlotBytes);
+        Equal(512, schedulerStorage.MembershipIndexCapacity);
+        Equal(512, schedulerStorage.ChunkIndexCapacity);
+        var changes = new OfflineDirectChunkSubscriptionChange[64];
+        for (int index = 0; index < recipientCount; index++)
+        {
+            recipients[index] = NewScheduledRecipient();
+            OfflineDirectChunkRecipientStorageSnapshot recipientStorage =
+                recipients[index].GetStorageSnapshot();
+            Equal(32, recipientStorage.RetainedSubscriptionBytes);
+            Equal(64, recipientStorage.PublicSubscriptionViewBytes);
+            True(scheduler.TryRegister(recipients[index], out ids[index]));
+            anchors[index] = Position(index * 3, index * -2, 8_000, 8_000);
+            ApplyScheduledReconcile(
+                scheduler, ids[index], recipients[index], fixture.Store, anchors[index], changes);
+        }
+        DrainScheduledWorkOnly(scheduler, 0);
+
+        uint random = 0xC0FFEEu;
+        for (int operation = 1; operation <= 2_000; operation++)
+        {
+            random = unchecked(random * 1_664_525u + 1_013_904_223u);
+            int selected = (int)(random % recipientCount);
+            if (operation % 97 == 0)
+            {
+                ChunkReplicationRecipientId stale = ids[selected];
+                True(scheduler.RemoveRecipient(stale));
+                False(scheduler.Requeue(new ChunkPublicationWork(
+                    stale, Key(0, 0), ChunkInterestTier.Immediate,
+                    ChunkPublicationWorkKind.Dirty)));
+                recipients[selected] = NewScheduledRecipient();
+                True(scheduler.TryRegister(recipients[selected], out ids[selected]));
+                True(ids[selected].Index == stale.Index && ids[selected].Generation > stale.Generation);
+            }
+
+            random = unchecked(random * 1_664_525u + 1_013_904_223u);
+            int chunkX = (int)(random % 129) - 64;
+            random = unchecked(random * 1_664_525u + 1_013_904_223u);
+            int chunkZ = (int)(random % 129) - 64;
+            anchors[selected] = Position(chunkX, chunkZ, 8_000, 8_000);
+            ApplyScheduledReconcile(
+                scheduler, ids[selected], recipients[selected], fixture.Store,
+                anchors[selected], changes);
+
+            if (operation % 10 != 0) continue;
+            int expectedMemberships = 0;
+            var uniqueChunks = new HashSet<SpatialChunkKey>();
+            for (int recipientIndex = 0; recipientIndex < recipientCount; recipientIndex++)
+            {
+                OfflineDirectChunkSubscriptionView subscriptions =
+                    recipients[recipientIndex].Subscriptions;
+                expectedMemberships += subscriptions.Length;
+                for (int subscriptionIndex = 0;
+                     subscriptionIndex < subscriptions.Length;
+                     subscriptionIndex++)
+                {
+                    OfflineDirectChunkSubscription subscription = subscriptions[subscriptionIndex];
+                    uniqueChunks.Add(subscription.Interest.Key);
+                    True(scheduler.Requeue(new ChunkPublicationWork(
+                        ids[recipientIndex],
+                        subscription.Interest.Key,
+                        subscription.Interest.Tier,
+                        ChunkPublicationWorkKind.Dirty)));
+                }
+            }
+            ChunkPublicationWorkSchedulerSnapshot snapshot = scheduler.GetSnapshot();
+            Equal(expectedMemberships, snapshot.MembershipCount);
+            Equal(uniqueChunks.Count, snapshot.SharedChunkCount);
+            Equal(expectedMemberships, snapshot.PendingWorkCount);
+
+            int drained = 0;
+            while (scheduler.TryDequeueDue(checked((ulong)operation), out ChunkPublicationWork work))
+            {
+                True(work.Recipient.IsValid);
+                True(FindSubscription(recipients[work.Recipient.Index], work.Key) >= 0);
+                drained++;
+            }
+            Equal(expectedMemberships, drained);
+            Equal(0, scheduler.GetSnapshot().PendingWorkCount);
+        }
+    }
+
     internal static void DirtySchedulerFeedsAcceptedRemoteChunkKeyPath()
     {
         using var fixture = new Fixture(historyCapacity: 32);

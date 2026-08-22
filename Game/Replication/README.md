@@ -18,8 +18,9 @@ application-proof fencing around that same oracle. N1.2 carries MTU-admissible
 ordinary deltas/absences through real independent-unreliable transport with a
 bounded delivery ledger and production client-cache application. N1.3 adds the
 exceptional atomic Bulk snapshot transaction. N1.4's shared dirty-work scheduler,
-exact stable-interest fast path, and bounded mixed-cadence traversal are accepted
-mechanisms; current-game profile adoption remains open. None replaces N0 yet.
+exact stable-interest fast path and bounded mixed-cadence traversal are accepted
+mechanisms. Compact recipient/reverse-index storage is stopped for checkpoint
+review; current-game profile adoption remains open. None replaces N0 yet.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -157,10 +158,12 @@ plus reverse-index capacities reserve about 95.8 MB after cadence-pass accountin
 and real chunk crossings still have a visible tail. A follow-up dirty-density
 diagnostic found and removed repeated cadence-deferred prefix scans using one
 bounded pass marker over the existing array. At 1,024 recipients, broad declared
-capacities still reserve about 387.6 MB; a 640-slot sensitivity case reduces this
-to about 242.2 MB without freezing 640 as a production maximum. Layout compaction
-and the remaining sparse/Dense-400/end-to-end matrix must decide current-game
-profile adoption before N1.5.
+capacities initially reserved about 387.6 MB. Compact 32-byte retained subscription
+rows, 40-byte scheduler memberships, 24-byte chunk rows, and two fixed 4-byte-slot
+indexes reduce the repeated crossover to about 221.8 MB. A 640-slot sensitivity
+case reports about 147.9 MB without freezing 640 as a production maximum. The
+roughly 100-us synchronized crossing tail and remaining Dense-400/end-to-end matrix
+must still decide current-game profile adoption before N1.5.
 
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions

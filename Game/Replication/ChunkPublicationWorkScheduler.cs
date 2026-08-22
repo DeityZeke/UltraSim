@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Numerics;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -58,6 +59,27 @@ public readonly record struct ChunkPublicationWorkSchedulerSnapshot(
     ulong SourceRefreshes,
     long ReservedBytes);
 
+/// <summary>Cold fixed-capacity payload attribution; excludes CLR object/array headers.</summary>
+public readonly record struct ChunkPublicationWorkSchedulerStorageSnapshot(
+    int RecipientStateBytes,
+    int MembershipStateBytes,
+    int ChunkStateBytes,
+    int MembershipIndexSlotBytes,
+    int ChunkIndexSlotBytes,
+    int MembershipIndexCapacity,
+    int ChunkIndexCapacity,
+    long RecipientStatesBytes,
+    long RecipientGenerationBytes,
+    long FreeRecipientBytes,
+    long MembershipStatesBytes,
+    long FreeMembershipBytes,
+    long ChunkStatesBytes,
+    long FreeChunkBytes,
+    long PendingMembershipBytes,
+    long MembershipIndexBytes,
+    long ChunkIndexBytes,
+    long TotalReservedBytes);
+
 /// <summary>
 /// N1.4 game-owned work discovery over accepted N1 subscriptions. Interest changes maintain a
 /// bounded chunk-to-recipient reverse index. One authoritative dirty-chunk fact fans out only to
@@ -76,10 +98,10 @@ public sealed class ChunkPublicationWorkScheduler
     private readonly ChunkState[] _chunks;
     private readonly int[] _freeChunks;
     private readonly int[] _pendingMemberships;
-    private readonly Dictionary<RecipientChunkKey, int> _membershipMap;
-    private readonly Dictionary<SpatialChunkKey, int> _chunkMap;
-    private readonly int _membershipMapCapacity;
-    private readonly int _chunkMapCapacity;
+    private readonly int[] _membershipIndex;
+    private readonly int[] _chunkIndex;
+    private readonly int _membershipIndexMask;
+    private readonly int _chunkIndexMask;
     private ChunkPublicationStore _source;
     private int _freeRecipientCount;
     private int _freeMembershipCount;
@@ -121,16 +143,18 @@ public sealed class ChunkPublicationWorkScheduler
         _chunks = new ChunkState[limits.MaximumMemberships];
         _freeChunks = new int[limits.MaximumMemberships];
         _pendingMemberships = new int[limits.MaximumMemberships];
-        _membershipMap = new Dictionary<RecipientChunkKey, int>(limits.MaximumMemberships);
-        _chunkMap = new Dictionary<SpatialChunkKey, int>(limits.MaximumMemberships);
-        _membershipMapCapacity = _membershipMap.EnsureCapacity(limits.MaximumMemberships);
-        _chunkMapCapacity = _chunkMap.EnsureCapacity(limits.MaximumMemberships);
+        int indexCapacity = IndexCapacity(limits.MaximumMemberships);
+        _membershipIndex = new int[indexCapacity];
+        _chunkIndex = new int[indexCapacity];
+        _membershipIndexMask = indexCapacity - 1;
+        _chunkIndexMask = indexCapacity - 1;
         for (int index = limits.MaximumRecipients - 1; index >= 0; index--)
             _freeRecipients[_freeRecipientCount++] = index;
         for (int index = limits.MaximumMemberships - 1; index >= 0; index--)
         {
             _freeMemberships[_freeMembershipCount++] = index;
             _freeChunks[_freeChunkCount++] = index;
+            _memberships[index].RecipientIndex = -1;
             _memberships[index].PendingPosition = -1;
             _memberships[index].RecipientPrevious = -1;
             _memberships[index].RecipientNext = -1;
@@ -170,8 +194,6 @@ public sealed class ChunkPublicationWorkScheduler
         _recipientGenerations[index] = generation;
         _recipients[index] = new RecipientState
         {
-            Active = true,
-            Generation = generation,
             Recipient = recipient,
             MembershipHead = -1,
             ReservedMemberships = recipient.Limits.MaximumSubscriptions,
@@ -224,7 +246,7 @@ public sealed class ChunkPublicationWorkScheduler
         {
             ref readonly OfflineDirectChunkSubscriptionChange change = ref changes[index];
             if (!change.Key.Space.IsValid) return false;
-            bool exists = _membershipMap.ContainsKey(new RecipientChunkKey(id, change.Key));
+            bool exists = TryFindMembership(new RecipientChunkKey(id, change.Key), out _);
             switch (change.Kind)
             {
                 case OfflineDirectChunkSubscriptionChangeKind.Left when exists:
@@ -254,13 +276,17 @@ public sealed class ChunkPublicationWorkScheduler
             switch (change.Kind)
             {
                 case OfflineDirectChunkSubscriptionChangeKind.Left:
-                    RemoveMembership(_membershipMap[mapKey]);
+                    if (!TryFindMembership(mapKey, out int leaving))
+                        throw new InvalidOperationException("Preflighted publication membership disappeared.");
+                    RemoveMembership(leaving);
                     break;
                 case OfflineDirectChunkSubscriptionChangeKind.Entered:
                     AddMembership(recipientIndex, id, change.Key);
                     break;
                 case OfflineDirectChunkSubscriptionChangeKind.TierChanged:
-                    RefreshMembershipCadence(_membershipMap[mapKey]);
+                    if (!TryFindMembership(mapKey, out int retained))
+                        throw new InvalidOperationException("Preflighted publication membership disappeared.");
+                    RefreshMembershipCadence(retained);
                     break;
             }
         }
@@ -348,14 +374,14 @@ public sealed class ChunkPublicationWorkScheduler
             if (membership.LastExaminedPendingPass == _pendingPassId) continue;
             membership.LastExaminedPendingPass = _pendingPassId;
             if (membership.PendingKind == ChunkPublicationWorkKind.Dirty &&
-                cadenceStep % membership.CadencePeriod != membership.CadencePhase)
+                !IsCadenceDue(membership, cadenceStep))
             {
                 SaturatingIncrement(ref _cadenceDeferrals);
                 continue;
             }
             work = new ChunkPublicationWork(
-                membership.Recipient,
-                membership.Key,
+                RecipientId(membership.RecipientIndex),
+                _chunks[membership.ChunkIndex].Key,
                 membership.Tier,
                 membership.PendingKind);
             RemovePending(membershipIndex);
@@ -372,7 +398,7 @@ public sealed class ChunkPublicationWorkScheduler
     {
         EnsureOwner();
         if (!work.Recipient.IsValid || !work.Key.Space.IsValid ||
-            !_membershipMap.TryGetValue(new RecipientChunkKey(work.Recipient, work.Key), out int membership))
+            !TryFindMembership(new RecipientChunkKey(work.Recipient, work.Key), out int membership))
             return false;
         Queue(membership, work.Kind);
         return true;
@@ -402,9 +428,49 @@ public sealed class ChunkPublicationWorkScheduler
             CalculateReservedBytes());
     }
 
+    public ChunkPublicationWorkSchedulerStorageSnapshot GetStorageSnapshot()
+    {
+        EnsureOwner();
+        int recipientStateBytes = Unsafe.SizeOf<RecipientState>();
+        int membershipStateBytes = Unsafe.SizeOf<MembershipState>();
+        int chunkStateBytes = Unsafe.SizeOf<ChunkState>();
+        int membershipIndexSlotBytes = sizeof(int);
+        int chunkIndexSlotBytes = sizeof(int);
+        long recipientStates = checked((long)_recipients.Length * recipientStateBytes);
+        long recipientGenerations = checked((long)_recipientGenerations.Length * sizeof(uint));
+        long freeRecipients = checked((long)_freeRecipients.Length * sizeof(int));
+        long memberships = checked((long)_memberships.Length * membershipStateBytes);
+        long freeMemberships = checked((long)_freeMemberships.Length * sizeof(int));
+        long chunks = checked((long)_chunks.Length * chunkStateBytes);
+        long freeChunks = checked((long)_freeChunks.Length * sizeof(int));
+        long pending = checked((long)_pendingMemberships.Length * sizeof(int));
+        long membershipIndex = checked((long)_membershipIndex.Length * membershipIndexSlotBytes);
+        long chunkIndex = checked((long)_chunkIndex.Length * chunkIndexSlotBytes);
+        return new ChunkPublicationWorkSchedulerStorageSnapshot(
+            recipientStateBytes,
+            membershipStateBytes,
+            chunkStateBytes,
+            membershipIndexSlotBytes,
+            chunkIndexSlotBytes,
+            _membershipIndex.Length,
+            _chunkIndex.Length,
+            recipientStates,
+            recipientGenerations,
+            freeRecipients,
+            memberships,
+            freeMemberships,
+            chunks,
+            freeChunks,
+            pending,
+            membershipIndex,
+            chunkIndex,
+            checked(recipientStates + recipientGenerations + freeRecipients + memberships +
+                freeMemberships + chunks + freeChunks + pending + membershipIndex + chunkIndex));
+    }
+
     private void MarkDirty(SpatialChunkKey key)
     {
-        if (!_chunkMap.TryGetValue(key, out int chunkIndex))
+        if (!TryFindChunk(key, out int chunkIndex))
         {
             SaturatingIncrement(ref _dirtyChunksWithoutSubscribers);
             return;
@@ -431,9 +497,7 @@ public sealed class ChunkPublicationWorkScheduler
         ref MembershipState membership = ref _memberships[index];
         membership = new MembershipState
         {
-            Active = true,
-            Recipient = recipient,
-            Key = key,
+            RecipientIndex = recipientIndex,
             RecipientPrevious = -1,
             RecipientNext = _recipients[recipientIndex].MembershipHead,
             ChunkPrevious = -1,
@@ -448,7 +512,7 @@ public sealed class ChunkPublicationWorkScheduler
             _memberships[membership.ChunkNext].ChunkPrevious = index;
         _chunks[chunkIndex].MembershipHead = index;
         _chunks[chunkIndex].MembershipCount++;
-        _membershipMap.Add(new RecipientChunkKey(recipient, key), index);
+        AddMembershipIndex(new RecipientChunkKey(recipient, key), index);
         _membershipCount++;
         RefreshMembershipCadence(index);
         Queue(index, ChunkPublicationWorkKind.Incoming);
@@ -458,7 +522,7 @@ public sealed class ChunkPublicationWorkScheduler
     {
         ref MembershipState membership = ref _memberships[index];
         RemovePending(index);
-        int recipientIndex = membership.Recipient.Index;
+        int recipientIndex = membership.RecipientIndex;
         if (membership.RecipientPrevious >= 0)
             _memberships[membership.RecipientPrevious].RecipientNext = membership.RecipientNext;
         else
@@ -474,10 +538,12 @@ public sealed class ChunkPublicationWorkScheduler
         if (membership.ChunkNext >= 0)
             _memberships[membership.ChunkNext].ChunkPrevious = membership.ChunkPrevious;
         _chunks[chunkIndex].MembershipCount--;
-        _membershipMap.Remove(new RecipientChunkKey(membership.Recipient, membership.Key));
+        SpatialChunkKey key = _chunks[chunkIndex].Key;
+        RemoveMembershipIndex(new RecipientChunkKey(RecipientId(recipientIndex), key));
         if (_chunks[chunkIndex].MembershipCount == 0) RemoveChunk(chunkIndex);
 
         membership = default;
+        membership.RecipientIndex = -1;
         membership.PendingPosition = -1;
         membership.RecipientPrevious = -1;
         membership.RecipientNext = -1;
@@ -489,19 +555,19 @@ public sealed class ChunkPublicationWorkScheduler
 
     private int GetOrCreateChunk(SpatialChunkKey key)
     {
-        if (_chunkMap.TryGetValue(key, out int existing)) return existing;
+        if (TryFindChunk(key, out int existing)) return existing;
         if (_freeChunkCount == 0)
             throw new InvalidOperationException("Publication reverse-index chunk capacity was exhausted.");
         int index = _freeChunks[--_freeChunkCount];
-        _chunks[index] = new ChunkState { Active = true, Key = key, MembershipHead = -1 };
-        _chunkMap.Add(key, index);
+        _chunks[index] = new ChunkState { Key = key, MembershipHead = -1 };
+        AddChunkIndex(key, index);
         _chunkCount++;
         return index;
     }
 
     private void RemoveChunk(int index)
     {
-        _chunkMap.Remove(_chunks[index].Key);
+        RemoveChunkIndex(_chunks[index].Key);
         _chunks[index] = default;
         _chunks[index].MembershipHead = -1;
         _freeChunks[_freeChunkCount++] = index;
@@ -512,18 +578,14 @@ public sealed class ChunkPublicationWorkScheduler
     {
         ref MembershipState membership = ref _memberships[membershipIndex];
         OfflineDirectChunkRecipient recipient =
-            _recipients[membership.Recipient.Index].Recipient!;
-        int subscriptionIndex = FindSubscription(recipient, membership.Key);
+            _recipients[membership.RecipientIndex].Recipient!;
+        SpatialChunkKey key = _chunks[membership.ChunkIndex].Key;
+        int subscriptionIndex = FindSubscription(recipient, key);
         if (subscriptionIndex < 0)
             throw new InvalidOperationException("Accepted subscription topology and scheduler diverged.");
         OfflineDirectChunkSubscription subscription = recipient.Subscriptions[subscriptionIndex];
-        uint cadencePeriod = recipient.GetCadencePeriod(subscription.Interest.Tier);
-        bool cadenceChanged = membership.Tier != subscription.Interest.Tier ||
-            membership.CadencePeriod != cadencePeriod ||
-            membership.CadencePhase != subscription.CadencePhase;
+        bool cadenceChanged = membership.Tier != subscription.Interest.Tier;
         membership.Tier = subscription.Interest.Tier;
-        membership.CadencePeriod = cadencePeriod;
-        membership.CadencePhase = subscription.CadencePhase;
         if (cadenceChanged && membership.PendingPosition >= 0)
         {
             membership.LastExaminedPendingPass = 0;
@@ -535,7 +597,7 @@ public sealed class ChunkPublicationWorkScheduler
     private void QueueAllIncoming()
     {
         for (int index = 0; index < _memberships.Length; index++)
-            if (_memberships[index].Active) Queue(index, ChunkPublicationWorkKind.Incoming);
+            if (_memberships[index].RecipientIndex >= 0) Queue(index, ChunkPublicationWorkKind.Incoming);
     }
 
     private void QueueRecipientIncoming(int recipientIndex)
@@ -594,7 +656,8 @@ public sealed class ChunkPublicationWorkScheduler
     private bool TryResolve(ChunkReplicationRecipientId id, out int index)
     {
         if (id.IsValid && (uint)id.Index < (uint)_recipients.Length &&
-            _recipients[id.Index].Active && _recipients[id.Index].Generation == id.Generation)
+            _recipients[id.Index].Recipient is not null &&
+            _recipientGenerations[id.Index] == id.Generation)
         {
             index = id.Index;
             return true;
@@ -617,7 +680,7 @@ public sealed class ChunkPublicationWorkScheduler
         OfflineDirectChunkRecipient recipient,
         SpatialChunkKey key)
     {
-        ReadOnlySpan<OfflineDirectChunkSubscription> subscriptions = recipient.Subscriptions;
+        OfflineDirectChunkSubscriptionView subscriptions = recipient.Subscriptions;
         int low = 0;
         int high = subscriptions.Length - 1;
         while (low <= high)
@@ -631,22 +694,176 @@ public sealed class ChunkPublicationWorkScheduler
         return -1;
     }
 
-    private long CalculateReservedBytes()
+    private bool TryFindMembership(in RecipientChunkKey key, out int membershipIndex)
     {
-        long bytes = checked(
-            (long)_recipients.Length * Unsafe.SizeOf<RecipientState>() +
-            (long)_recipientGenerations.Length * sizeof(uint) +
-            (long)_freeRecipients.Length * sizeof(int) +
-            (long)_memberships.Length * Unsafe.SizeOf<MembershipState>() +
-            (long)_freeMemberships.Length * sizeof(int) +
-            (long)_chunks.Length * Unsafe.SizeOf<ChunkState>() +
-            (long)_freeChunks.Length * sizeof(int) +
-            (long)_pendingMemberships.Length * sizeof(int));
-        bytes = checked(bytes +
-            (long)_membershipMapCapacity * (Unsafe.SizeOf<RecipientChunkKey>() + sizeof(int) * 2) +
-            (long)_chunkMapCapacity * (Unsafe.SizeOf<SpatialChunkKey>() + sizeof(int) * 2));
-        return bytes;
+        int position = key.GetHashCode() & _membershipIndexMask;
+        for (int probe = 0; probe < _membershipIndex.Length; probe++)
+        {
+            int encoded = _membershipIndex[position];
+            if (encoded == 0)
+            {
+                membershipIndex = -1;
+                return false;
+            }
+            int candidate = encoded - 1;
+            ref readonly MembershipState membership = ref _memberships[candidate];
+            if (membership.RecipientIndex == key.Recipient.Index &&
+                _recipientGenerations[membership.RecipientIndex] == key.Recipient.Generation &&
+                _chunks[membership.ChunkIndex].Key == key.Key)
+            {
+                membershipIndex = candidate;
+                return true;
+            }
+            position = (position + 1) & _membershipIndexMask;
+        }
+        membershipIndex = -1;
+        return false;
     }
+
+    private void AddMembershipIndex(in RecipientChunkKey key, int membershipIndex)
+    {
+        int position = key.GetHashCode() & _membershipIndexMask;
+        for (int probe = 0; probe < _membershipIndex.Length; probe++)
+        {
+            if (_membershipIndex[position] == 0)
+            {
+                _membershipIndex[position] = membershipIndex + 1;
+                return;
+            }
+            position = (position + 1) & _membershipIndexMask;
+        }
+        throw new InvalidOperationException("Preflighted publication membership index capacity disappeared.");
+    }
+
+    private void RemoveMembershipIndex(in RecipientChunkKey key)
+    {
+        int position = key.GetHashCode() & _membershipIndexMask;
+        for (int probe = 0; probe < _membershipIndex.Length; probe++)
+        {
+            int encoded = _membershipIndex[position];
+            if (encoded == 0)
+                throw new InvalidOperationException("Accepted publication membership index diverged.");
+            int membershipIndex = encoded - 1;
+            ref readonly MembershipState membership = ref _memberships[membershipIndex];
+            if (membership.RecipientIndex == key.Recipient.Index &&
+                _recipientGenerations[membership.RecipientIndex] == key.Recipient.Generation &&
+                _chunks[membership.ChunkIndex].Key == key.Key)
+            {
+                BackShiftMembershipIndex(position);
+                return;
+            }
+            position = (position + 1) & _membershipIndexMask;
+        }
+        throw new InvalidOperationException("Accepted publication membership index diverged.");
+    }
+
+    private void BackShiftMembershipIndex(int hole)
+    {
+        int scan = (hole + 1) & _membershipIndexMask;
+        while (_membershipIndex[scan] != 0)
+        {
+            int membershipIndex = _membershipIndex[scan] - 1;
+            ref readonly MembershipState membership = ref _memberships[membershipIndex];
+            var key = new RecipientChunkKey(
+                RecipientId(membership.RecipientIndex),
+                _chunks[membership.ChunkIndex].Key);
+            int home = key.GetHashCode() & _membershipIndexMask;
+            if (((hole - home) & _membershipIndexMask) < ((scan - home) & _membershipIndexMask))
+            {
+                _membershipIndex[hole] = _membershipIndex[scan];
+                hole = scan;
+            }
+            scan = (scan + 1) & _membershipIndexMask;
+        }
+        _membershipIndex[hole] = 0;
+    }
+
+    private bool TryFindChunk(SpatialChunkKey key, out int chunkIndex)
+    {
+        int position = key.GetHashCode() & _chunkIndexMask;
+        for (int probe = 0; probe < _chunkIndex.Length; probe++)
+        {
+            int encoded = _chunkIndex[position];
+            if (encoded == 0)
+            {
+                chunkIndex = -1;
+                return false;
+            }
+            int candidate = encoded - 1;
+            if (_chunks[candidate].Key == key)
+            {
+                chunkIndex = candidate;
+                return true;
+            }
+            position = (position + 1) & _chunkIndexMask;
+        }
+        chunkIndex = -1;
+        return false;
+    }
+
+    private void AddChunkIndex(SpatialChunkKey key, int chunkIndex)
+    {
+        int position = key.GetHashCode() & _chunkIndexMask;
+        for (int probe = 0; probe < _chunkIndex.Length; probe++)
+        {
+            if (_chunkIndex[position] == 0)
+            {
+                _chunkIndex[position] = chunkIndex + 1;
+                return;
+            }
+            position = (position + 1) & _chunkIndexMask;
+        }
+        throw new InvalidOperationException("Preflighted publication chunk index capacity disappeared.");
+    }
+
+    private void RemoveChunkIndex(SpatialChunkKey key)
+    {
+        int position = key.GetHashCode() & _chunkIndexMask;
+        for (int probe = 0; probe < _chunkIndex.Length; probe++)
+        {
+            int encoded = _chunkIndex[position];
+            if (encoded == 0)
+                throw new InvalidOperationException("Accepted publication chunk index diverged.");
+            if (_chunks[encoded - 1].Key == key)
+            {
+                BackShiftChunkIndex(position);
+                return;
+            }
+            position = (position + 1) & _chunkIndexMask;
+        }
+        throw new InvalidOperationException("Accepted publication chunk index diverged.");
+    }
+
+    private void BackShiftChunkIndex(int hole)
+    {
+        int scan = (hole + 1) & _chunkIndexMask;
+        while (_chunkIndex[scan] != 0)
+        {
+            int chunkIndex = _chunkIndex[scan] - 1;
+            int home = _chunks[chunkIndex].Key.GetHashCode() & _chunkIndexMask;
+            if (((hole - home) & _chunkIndexMask) < ((scan - home) & _chunkIndexMask))
+            {
+                _chunkIndex[hole] = _chunkIndex[scan];
+                hole = scan;
+            }
+            scan = (scan + 1) & _chunkIndexMask;
+        }
+        _chunkIndex[hole] = 0;
+    }
+
+    private static int IndexCapacity(int maximumEntries)
+    {
+        const int maximumSupportedEntries = 1 << 29;
+        if ((uint)maximumEntries > maximumSupportedEntries)
+            throw new ArgumentOutOfRangeException(nameof(maximumEntries));
+        uint required = checked((uint)Math.Max(2, maximumEntries * 2));
+        uint capacity = BitOperations.RoundUpToPowerOf2(required);
+        if (capacity == 0 || capacity > int.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(maximumEntries));
+        return checked((int)capacity);
+    }
+
+    private long CalculateReservedBytes() => GetStorageSnapshot().TotalReservedBytes;
 
     private static void SaturatingIncrement(ref ulong value)
     {
@@ -655,6 +872,19 @@ public sealed class ChunkPublicationWorkScheduler
 
     private static void SaturatingAdd(ref ulong value, ulong amount) =>
         value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
+
+    private ChunkReplicationRecipientId RecipientId(int recipientIndex) =>
+        new(recipientIndex, _recipientGenerations[recipientIndex]);
+
+    private bool IsCadenceDue(in MembershipState membership, ulong cadenceStep)
+    {
+        OfflineDirectChunkRecipient recipient =
+            _recipients[membership.RecipientIndex].Recipient!;
+        return recipient.IsCadenceDue(
+            _chunks[membership.ChunkIndex].Key,
+            membership.Tier,
+            cadenceStep);
+    }
 
     private void StartPendingPass(ulong cadenceStep)
     {
@@ -686,8 +916,6 @@ public sealed class ChunkPublicationWorkScheduler
 
     private struct RecipientState
     {
-        internal bool Active;
-        internal uint Generation;
         internal OfflineDirectChunkRecipient? Recipient;
         internal int MembershipHead;
         internal int ReservedMemberships;
@@ -695,25 +923,20 @@ public sealed class ChunkPublicationWorkScheduler
 
     private struct MembershipState
     {
-        internal bool Active;
-        internal ChunkReplicationRecipientId Recipient;
-        internal SpatialChunkKey Key;
-        internal ChunkInterestTier Tier;
-        internal uint CadencePeriod;
-        internal uint CadencePhase;
+        internal ulong LastExaminedPendingPass;
         internal int RecipientPrevious;
         internal int RecipientNext;
         internal int ChunkPrevious;
         internal int ChunkNext;
         internal int ChunkIndex;
         internal int PendingPosition;
+        internal int RecipientIndex;
+        internal ChunkInterestTier Tier;
         internal ChunkPublicationWorkKind PendingKind;
-        internal ulong LastExaminedPendingPass;
     }
 
     private struct ChunkState
     {
-        internal bool Active;
         internal SpatialChunkKey Key;
         internal int MembershipHead;
         internal int MembershipCount;

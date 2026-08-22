@@ -7,8 +7,9 @@ N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
 accepted. N1.4 dirty-driven work discovery is accepted at `682fcdcd`; mixed-cadence,
 dirty-density, roaming, and the first 512/768/1024 semantic crossover are now
-captured. The current-game AOI adoption decision remains open on layout memory,
-transition tails, and the remaining integrated matrix.
+captured. N1.4 recipient/scheduler storage compaction is implemented and stopped
+for review. The current-game AOI adoption decision remains open on transition
+tails and the remaining integrated matrix.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -1039,6 +1040,54 @@ Evidence:
 N0 controls. The concise interpretation is retained in
 [`network-n1.4-adoption-diagnostics-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-adoption-diagnostics-2026-08-22.md).
 
+### N1.4 storage-compaction stop — 2026-08-22
+
+The first crossover proved capacity selection alone was insufficient. This pass
+changes storage only and preserves every accepted N1.0-N1.4 interest, publication,
+cursor/history, proof, recovery, cadence, and dirty-work semantic.
+
+Recipient subscription banks now retain one 32-byte private row instead of the
+64-byte public self-validating cursor value. The borrowed public view reconstructs
+its cursor from the recipient-wide publication epoch, retained chunk key, and
+applied revision. Known absence remains explicit knowledge with no applied
+revision. At 1,024 declared slots, recipient reservation falls from 187,904 to
+122,368 bytes.
+
+Scheduler records remove duplicate recipient IDs, chunk keys, and derivable cadence
+state. Exact fixed-capacity attribution records 16-byte recipient, 40-byte
+membership, and 24-byte shared-chunk rows. The two pre-sized dictionaries remained
+the largest removable lines, so they are replaced by bounded open-address indexes
+containing only 4-byte scheduler-slot references. Backward-shift deletion prevents
+tombstone accumulation without adding a generic index framework or assuming a
+small globally shared chunk set.
+
+A permanent 2,000-operation topology-churn gate covers recipient generation reuse,
+random enter/leave transitions, lookup, reverse chunk membership, pending work,
+and drains. All 66 N0/N1.0-N1.4 Game Replication tests pass.
+
+The identical broad 512/768/1024 crossover now reports 221,798,400 combined bytes
+at 1,024 recipients, 42.8% below the prior recorded 387,580,360-byte workload.
+The 640-slot sensitivity case retains all 503 observed subscriptions at
+147,873,792 bytes instead of 242,183,400 bytes. The new attribution counts every
+fixed index slot and excludes only CLR object/array headers; historical dictionary
+accounting was coarser, so these are workload-reservation observations rather than
+process-RSS claims.
+
+Compaction did not close the synchronized topology tail. The broad 1,024 case
+reports 105.577 us p95 per recipient and the 640-slot case 99.573 us; separate
+captures do not justify a formal microarchitectural ratio, but neither demonstrates
+an improvement over the previous roughly 97 us observation.
+
+Stop here for checkpoint review. Do not run 2,048/4,096 and do not begin N1.5.
+If accepted, use this layout for the remaining Dense-400, dense-town/snapshot,
+boundary/corner, mixed-private, transport-replay, and sharded-client adoption
+matrix before deciding whether crossing needs its own optimization.
+
+Evidence:
+[`network-n1.4-storage-compaction-crossover-512-1024-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-crossover-512-1024-2026-08-22.json),
+[`network-n1.4-storage-compaction-capacity-sensitivity-1024x640-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-capacity-sensitivity-1024x640-2026-08-22.json), and
+[`network-n1.4-storage-compaction-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-2026-08-22.md).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
@@ -1300,11 +1349,11 @@ semantics and application-proof fencing. N1.2 carries MTU-admissible ordinary
 deltas and absences over real independent-unreliable transport with a bounded
 server ticket ledger and atomic production-client application. N1.3 adds bounded
 reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
-N1.4 adds the first shared dirty-work scheduler and exact stable-interest fast
-path. Its scheduling mechanism and bounded cadence traversal are accepted, but
-the measured current-game AOI-profile adoption decision remains open.
+N1.4 adds the shared dirty-work scheduler, exact stable-interest fast path, bounded
+cadence traversal, and compact recipient/reverse-index storage. Its mechanisms are
+implemented through the storage-compaction review stop; compaction acceptance and
+the measured current-game AOI-profile adoption decision remain open.
 
-Stop at the N1.4 first-crossover checkpoint. The next work is recipient/scheduler
-layout attribution and compaction followed by the remaining controlled adoption
-matrix—not N1.5 shared encoding, UDP redesign, N0 deletion, or a production scale
-claim.
+Stop at the N1.4 storage-compaction checkpoint. The next work, after review, is the
+remaining controlled adoption matrix—not N1.5 shared encoding, UDP redesign, N0
+deletion, or a production scale claim.

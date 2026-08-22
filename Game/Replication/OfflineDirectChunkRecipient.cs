@@ -66,6 +66,30 @@ public readonly record struct OfflineDirectChunkSubscription(
     bool HasKnowledge,
     uint CadencePhase);
 
+/// <summary>
+/// Borrowed read view over compact recipient-owned subscriptions. Indexing reconstructs the
+/// self-validating public cursor from the recipient-wide epoch, retained key, and applied revision.
+/// The view is valid only until the recipient next reconciles or commits publication knowledge.
+/// </summary>
+public readonly struct OfflineDirectChunkSubscriptionView
+{
+    private readonly OfflineDirectChunkRecipient? _owner;
+
+    internal OfflineDirectChunkSubscriptionView(OfflineDirectChunkRecipient owner) =>
+        _owner = owner;
+
+    public int Length => _owner?.SubscriptionCountForView ?? 0;
+
+    public OfflineDirectChunkSubscription this[int index]
+    {
+        get
+        {
+            if (_owner is null) throw new IndexOutOfRangeException();
+            return _owner.GetSubscriptionForView(index);
+        }
+    }
+}
+
 public readonly record struct OfflineDirectChunkReconcileResult(
     OfflineDirectChunkReconcileStatus Status,
     PublicationEpoch SourceEpoch,
@@ -171,6 +195,18 @@ public readonly record struct OfflineDirectChunkRecipientSnapshot(
     int StableInterestMovementBudgetMillimeters,
     long ReservedBytes);
 
+/// <summary>Cold fixed-capacity payload attribution; excludes CLR object/array headers.</summary>
+public readonly record struct OfflineDirectChunkRecipientStorageSnapshot(
+    int RetainedSubscriptionBytes,
+    int PublicSubscriptionViewBytes,
+    long CurrentSubscriptionsBytes,
+    long NextSubscriptionsBytes,
+    long PreviousInterestBytes,
+    long DesiredInterestBytes,
+    long SnapshotScratchBytes,
+    long DeltaScratchBytes,
+    long TotalReservedBytes);
+
 /// <summary>
 /// N1.0 packet-free recipient subscription/cursor layer. Game interest and applied publication
 /// cursors live here; authoritative history remains in <see cref="ChunkPublicationStore"/>, and
@@ -182,8 +218,8 @@ public sealed class OfflineDirectChunkRecipient
     private readonly OfflineDirectChunkRecipientLimits _limits;
     private readonly ChunkInterestProfile _interestProfile;
     private readonly OfflineDirectChunkCadence _cadence;
-    private OfflineDirectChunkSubscription[] _subscriptions;
-    private OfflineDirectChunkSubscription[] _nextSubscriptions;
+    private OfflineDirectChunkSubscriptionState[] _subscriptions;
+    private OfflineDirectChunkSubscriptionState[] _nextSubscriptions;
     private readonly ChunkInterestEntry[] _previousInterest;
     private readonly ChunkInterestEntry[] _desiredInterest;
     private readonly WorldPublicRecord[] _snapshotScratch;
@@ -221,8 +257,8 @@ public sealed class OfflineDirectChunkRecipient
         _limits = limits;
         _interestProfile = interestProfile;
         _cadence = cadence;
-        _subscriptions = new OfflineDirectChunkSubscription[limits.MaximumSubscriptions];
-        _nextSubscriptions = new OfflineDirectChunkSubscription[limits.MaximumSubscriptions];
+        _subscriptions = new OfflineDirectChunkSubscriptionState[limits.MaximumSubscriptions];
+        _nextSubscriptions = new OfflineDirectChunkSubscriptionState[limits.MaximumSubscriptions];
         _previousInterest = new ChunkInterestEntry[limits.MaximumSubscriptions];
         _desiredInterest = new ChunkInterestEntry[limits.MaximumSubscriptions];
         _snapshotScratch = new WorldPublicRecord[limits.MaximumSnapshotRecords];
@@ -233,14 +269,44 @@ public sealed class OfflineDirectChunkRecipient
 
     internal uint GetCadencePeriod(ChunkInterestTier tier) => _cadence.Period(tier);
 
-    /// <summary>Borrowed rows; valid only until reconcile or a committed publication read.</summary>
-    public ReadOnlySpan<OfflineDirectChunkSubscription> Subscriptions
+    internal bool IsCadenceDue(SpatialChunkKey key, ChunkInterestTier tier, ulong cadenceStep)
+    {
+        uint period = _cadence.Period(tier);
+        return cadenceStep % period == StablePhase(key, period);
+    }
+
+    /// <summary>Borrowed indexed view; valid only until reconcile or committed knowledge.</summary>
+    public OfflineDirectChunkSubscriptionView Subscriptions
     {
         get
         {
             EnsureOwner();
-            return _subscriptions.AsSpan(0, _subscriptionCount);
+            return new OfflineDirectChunkSubscriptionView(this);
         }
+    }
+
+    internal int SubscriptionCountForView
+    {
+        get
+        {
+            EnsureOwner();
+            return _subscriptionCount;
+        }
+    }
+
+    internal OfflineDirectChunkSubscription GetSubscriptionForView(int index)
+    {
+        EnsureOwner();
+        if ((uint)index >= (uint)_subscriptionCount) throw new IndexOutOfRangeException();
+        ref readonly OfflineDirectChunkSubscriptionState subscription = ref _subscriptions[index];
+        ChunkPublicationCursor cursor = subscription.AppliedRevision.IsValid
+            ? new ChunkPublicationCursor(_sourceEpoch, subscription.Key, subscription.AppliedRevision)
+            : default;
+        return new OfflineDirectChunkSubscription(
+            new ChunkInterestEntry(subscription.Key, subscription.Tier),
+            cursor,
+            subscription.HasKnowledge,
+            subscription.CadencePhase);
     }
 
     /// <summary>
@@ -371,8 +437,8 @@ public sealed class OfflineDirectChunkRecipient
             return read.Status;
         }
 
-        OfflineDirectChunkSubscription subscription = _subscriptions[subscriptionIndex];
-        uint period = _cadence.Period(subscription.Interest.Tier);
+        OfflineDirectChunkSubscriptionState subscription = _subscriptions[subscriptionIndex];
+        uint period = _cadence.Period(subscription.Tier);
         if (subscription.HasKnowledge && cadenceStep % period != subscription.CadencePhase)
         {
             _cadenceDeferrals++;
@@ -382,10 +448,11 @@ public sealed class OfflineDirectChunkRecipient
 
         ChunkPublicationReadStatus publicationStatus;
         ChunkPublicationBatch batch;
-        if (subscription.Cursor.IsValid)
+        ChunkPublicationCursor cursor = CursorFor(subscription);
+        if (cursor.IsValid)
         {
             publicationStatus = source.TryCopyDelta(
-                subscription.Interest.Key, subscription.Cursor, _deltaScratch, out batch);
+                subscription.Key, cursor, _deltaScratch, out batch);
             switch (publicationStatus)
             {
                 case ChunkPublicationReadStatus.Delta:
@@ -409,7 +476,7 @@ public sealed class OfflineDirectChunkRecipient
         }
 
         publicationStatus = source.TryCopySnapshot(
-            subscription.Interest.Key, _snapshotScratch, out batch);
+            subscription.Key, _snapshotScratch, out batch);
         if (publicationStatus == ChunkPublicationReadStatus.Snapshot)
             return PublishPending(subscriptionIndex, OfflineDirectChunkReadStatus.Snapshot,
                 source.Epoch, batch, _snapshotScratch.AsSpan(0, batch.Count), default, out read);
@@ -453,7 +520,7 @@ public sealed class OfflineDirectChunkRecipient
         }
 
         ChunkPublicationReadStatus status = source.TryCopySnapshot(
-            _subscriptions[subscriptionIndex].Interest.Key, _snapshotScratch, out var batch);
+            _subscriptions[subscriptionIndex].Key, _snapshotScratch, out var batch);
         if (status == ChunkPublicationReadStatus.Snapshot)
         {
             _snapshotFallbacks++;
@@ -476,23 +543,27 @@ public sealed class OfflineDirectChunkRecipient
     {
         EnsureOwner();
         if (_pendingIndex < 0) throw new InvalidOperationException("No publication read is pending.");
-        ref OfflineDirectChunkSubscription subscription = ref _subscriptions[_pendingIndex];
+        ref OfflineDirectChunkSubscriptionState subscription = ref _subscriptions[_pendingIndex];
         switch (_pendingStatus)
         {
             case OfflineDirectChunkReadStatus.Snapshot:
-                subscription = subscription with { Cursor = _pendingBatch.Cursor, HasKnowledge = true };
+                subscription.AppliedRevision = _pendingBatch.Cursor.Revision;
+                subscription.HasKnowledge = true;
                 _snapshotReads++;
                 break;
             case OfflineDirectChunkReadStatus.Delta:
-                subscription = subscription with { Cursor = _pendingBatch.Cursor, HasKnowledge = true };
+                subscription.AppliedRevision = _pendingBatch.Cursor.Revision;
+                subscription.HasKnowledge = true;
                 _deltaReads++;
                 break;
             case OfflineDirectChunkReadStatus.NoChanges:
-                subscription = subscription with { Cursor = _pendingBatch.Cursor, HasKnowledge = true };
+                subscription.AppliedRevision = _pendingBatch.Cursor.Revision;
+                subscription.HasKnowledge = true;
                 _noChangeReads++;
                 break;
             case OfflineDirectChunkReadStatus.ChunkAbsent:
-                subscription = subscription with { Cursor = default, HasKnowledge = true };
+                subscription.AppliedRevision = default;
+                subscription.HasKnowledge = true;
                 _snapshotReads++;
                 _chunkAbsentReads++;
                 break;
@@ -523,7 +594,7 @@ public sealed class OfflineDirectChunkRecipient
         if (_pendingStatus is not (OfflineDirectChunkReadStatus.Snapshot or
             OfflineDirectChunkReadStatus.Delta or OfflineDirectChunkReadStatus.ChunkAbsent))
             throw new InvalidOperationException("Only semantic payload reads may become remote deliveries.");
-        SpatialChunkKey key = _subscriptions[_pendingIndex].Interest.Key;
+        SpatialChunkKey key = _subscriptions[_pendingIndex].Key;
         var ticket = new OfflineDirectChunkDeliveryTicket(
             deliveryId, _sourceEpoch, key, _pendingStatus, _pendingBatch.Cursor);
         ClearPending();
@@ -543,26 +614,28 @@ public sealed class OfflineDirectChunkRecipient
             return OfflineDirectChunkAppliedProofStatus.Invalid;
         int subscriptionIndex = FindSubscription(ticket.Key);
         if (subscriptionIndex < 0) return OfflineDirectChunkAppliedProofStatus.Stale;
-        ref OfflineDirectChunkSubscription subscription = ref _subscriptions[subscriptionIndex];
+        ref OfflineDirectChunkSubscriptionState subscription = ref _subscriptions[subscriptionIndex];
 
         if (ticket.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
         {
-            if (subscription.Cursor.IsValid) return OfflineDirectChunkAppliedProofStatus.Stale;
+            if (subscription.AppliedRevision.IsValid) return OfflineDirectChunkAppliedProofStatus.Stale;
             if (subscription.HasKnowledge) return OfflineDirectChunkAppliedProofStatus.Duplicate;
-            subscription = subscription with { Cursor = default, HasKnowledge = true };
+            subscription.AppliedRevision = default;
+            subscription.HasKnowledge = true;
             _snapshotReads++;
             _chunkAbsentReads++;
             return OfflineDirectChunkAppliedProofStatus.Applied;
         }
 
         if (!ticket.Cursor.IsValid) return OfflineDirectChunkAppliedProofStatus.Invalid;
-        if (subscription.Cursor.IsValid)
+        if (subscription.AppliedRevision.IsValid)
         {
-            int comparison = ticket.Cursor.Revision.CompareTo(subscription.Cursor.Revision);
+            int comparison = ticket.Cursor.Revision.CompareTo(subscription.AppliedRevision);
             if (comparison < 0) return OfflineDirectChunkAppliedProofStatus.Stale;
             if (comparison == 0) return OfflineDirectChunkAppliedProofStatus.Duplicate;
         }
-        subscription = subscription with { Cursor = ticket.Cursor, HasKnowledge = true };
+        subscription.AppliedRevision = ticket.Cursor.Revision;
+        subscription.HasKnowledge = true;
         if (ticket.Status == OfflineDirectChunkReadStatus.Snapshot) _snapshotReads++;
         else _deltaReads++;
         return OfflineDirectChunkAppliedProofStatus.Applied;
@@ -588,6 +661,28 @@ public sealed class OfflineDirectChunkRecipient
             _stableInterestFastPaths,
             _stableInterestMovementBudgetMillimeters,
             CalculateReservedBytes());
+    }
+
+    public OfflineDirectChunkRecipientStorageSnapshot GetStorageSnapshot()
+    {
+        EnsureOwner();
+        int retainedBytes = Marshal.SizeOf<OfflineDirectChunkSubscriptionState>();
+        long current = checked((long)_subscriptions.Length * retainedBytes);
+        long next = checked((long)_nextSubscriptions.Length * retainedBytes);
+        long previous = checked((long)_previousInterest.Length * Marshal.SizeOf<ChunkInterestEntry>());
+        long desired = checked((long)_desiredInterest.Length * Marshal.SizeOf<ChunkInterestEntry>());
+        long snapshot = checked((long)_snapshotScratch.Length * Marshal.SizeOf<WorldPublicRecord>());
+        long delta = checked((long)_deltaScratch.Length * Marshal.SizeOf<WorldPublicDeltaRecord>());
+        return new OfflineDirectChunkRecipientStorageSnapshot(
+            retainedBytes,
+            Marshal.SizeOf<OfflineDirectChunkSubscription>(),
+            current,
+            next,
+            previous,
+            desired,
+            snapshot,
+            delta,
+            checked(current + next + previous + desired + snapshot + delta));
     }
 
     private OfflineDirectChunkReadStatus PublishPending(
@@ -683,19 +778,19 @@ public sealed class OfflineDirectChunkRecipient
                 previous++;
             if (previous < _subscriptionCount && _subscriptions[previous].Interest.Key == interest.Key)
             {
-                OfflineDirectChunkSubscription retained = _subscriptions[previous];
-                _nextSubscriptions[desired] = retained with
-                {
-                    Interest = interest,
-                    Cursor = sourceReset ? default : retained.Cursor,
-                    HasKnowledge = !sourceReset && retained.HasKnowledge,
-                    CadencePhase = StablePhase(interest.Key, _cadence.Period(interest.Tier)),
-                };
+                OfflineDirectChunkSubscriptionState retained = _subscriptions[previous];
+                _nextSubscriptions[desired] = new OfflineDirectChunkSubscriptionState(
+                    interest.Key,
+                    interest.Tier,
+                    sourceReset ? default : retained.AppliedRevision,
+                    !sourceReset && retained.HasKnowledge,
+                    StablePhase(interest.Key, _cadence.Period(interest.Tier)));
             }
             else
             {
-                _nextSubscriptions[desired] = new OfflineDirectChunkSubscription(
-                    interest,
+                _nextSubscriptions[desired] = new OfflineDirectChunkSubscriptionState(
+                    interest.Key,
+                    interest.Tier,
                     default,
                     false,
                     StablePhase(interest.Key, _cadence.Period(interest.Tier)));
@@ -783,18 +878,47 @@ public sealed class OfflineDirectChunkRecipient
         return deltaX + deltaZ <= _stableInterestMovementBudgetMillimeters;
     }
 
-    private long CalculateReservedBytes() =>
-        checked(
-            (long)_subscriptions.Length * Marshal.SizeOf<OfflineDirectChunkSubscription>() +
-            (long)_nextSubscriptions.Length * Marshal.SizeOf<OfflineDirectChunkSubscription>() +
-            (long)_previousInterest.Length * Marshal.SizeOf<ChunkInterestEntry>() +
-            (long)_desiredInterest.Length * Marshal.SizeOf<ChunkInterestEntry>() +
-            (long)_snapshotScratch.Length * Marshal.SizeOf<WorldPublicRecord>() +
-            (long)_deltaScratch.Length * Marshal.SizeOf<WorldPublicDeltaRecord>());
+    private long CalculateReservedBytes() => GetStorageSnapshot().TotalReservedBytes;
 
     private void EnsureOwner()
     {
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("The OfflineDirect chunk recipient is owner-thread bound.");
+    }
+
+    private ChunkPublicationCursor CursorFor(in OfflineDirectChunkSubscriptionState subscription) =>
+        subscription.AppliedRevision.IsValid
+            ? new ChunkPublicationCursor(_sourceEpoch, subscription.Key, subscription.AppliedRevision)
+            : default;
+
+    [StructLayout(LayoutKind.Sequential, Size = 32)]
+    private struct OfflineDirectChunkSubscriptionState
+    {
+        internal OfflineDirectChunkSubscriptionState(
+            SpatialChunkKey key,
+            ChunkInterestTier tier,
+            ChunkPublicationRevision appliedRevision,
+            bool hasKnowledge,
+            uint cadencePhase)
+        {
+            Key = key;
+            AppliedRevision = appliedRevision;
+            CadencePhase = cadencePhase;
+            Tier = tier;
+            HasKnowledgeByte = hasKnowledge ? (byte)1 : (byte)0;
+        }
+
+        internal SpatialChunkKey Key;
+        internal ChunkPublicationRevision AppliedRevision;
+        internal uint CadencePhase;
+        internal ChunkInterestTier Tier;
+        private byte HasKnowledgeByte;
+
+        internal readonly ChunkInterestEntry Interest => new(Key, Tier);
+        internal bool HasKnowledge
+        {
+            readonly get => HasKnowledgeByte != 0;
+            set => HasKnowledgeByte = value ? (byte)1 : (byte)0;
+        }
     }
 }

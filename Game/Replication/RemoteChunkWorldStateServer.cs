@@ -631,7 +631,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private int FindSubscription(SpatialChunkKey key)
     {
-        ReadOnlySpan<OfflineDirectChunkSubscription> subscriptions = _recipient.Subscriptions;
+        OfflineDirectChunkSubscriptionView subscriptions = _recipient.Subscriptions;
         int low = 0;
         int high = subscriptions.Length - 1;
         while (low <= high)

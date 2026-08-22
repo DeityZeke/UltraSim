@@ -66,6 +66,7 @@ var tests = new (string Name, Action Body)[]
     ("N14DirtySchedulerFencesTopologySourceGapsAndStaleRecipients", N1OfflineDirectChunkTests.DirtySchedulerFencesTopologySourceGapsAndStaleRecipients),
     ("N14DirtySchedulerWarmedWorkDiscoveryAllocatesZero", N1OfflineDirectChunkTests.DirtySchedulerWarmedWorkDiscoveryAllocatesZero),
     ("N14DirtySchedulerDoesNotRescanDeferredCadencePrefix", N1OfflineDirectChunkTests.DirtySchedulerDoesNotRescanDeferredCadencePrefix),
+    ("N14DirtySchedulerCompactIndexesSurviveDeterministicChurn", N1OfflineDirectChunkTests.DirtySchedulerCompactIndexesSurviveDeterministicChurn),
     ("N14DirtySchedulerFeedsAcceptedRemoteChunkKeyPath", N1OfflineDirectChunkTests.DirtySchedulerFeedsAcceptedRemoteChunkKeyPath),
     ("N11ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe", N1OfflineDirectChunkTests.ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe),
     ("N11RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence", N1OfflineDirectChunkTests.RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence),
