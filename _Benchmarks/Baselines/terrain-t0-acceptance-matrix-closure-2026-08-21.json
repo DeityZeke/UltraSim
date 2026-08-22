@@ -1,0 +1,87 @@
+{
+  "workload": "terrain-t0-cumulative-acceptance-matrix-closure-v1",
+  "captured_local_date": "2026-08-21",
+  "scope": "Cumulative T0.0-T0.10 closure over immutable component artifacts plus a current final Release integrated/native rerun; not Network N1 transport, exported GPU performance, public WAN CCU, navigation, editor/housing, or production authored-content tails.",
+  "fixed_profile": {
+    "world_chunk_edge_mm": 16000,
+    "terrain_cell_edge_mm": 500,
+    "dynamic_position_quantum_mm": 1,
+    "terrain_height_quantum_mm": 5,
+    "authority_hz": 60
+  },
+  "required_profile_coverage": [
+    {
+      "profiles": ["terrain_flat", "terrain_rough"],
+      "evidence": ["terrain-t0.2-height-encoding-2026-08-20.json", "terrain-t0.4-query-mesh-2026-08-20.json"]
+    },
+    {
+      "profiles": ["chunk_boundary_walk", "chunk_corner_walk", "client_stream_walk"],
+      "evidence": ["terrain-t0.7-chunk-interest-local-oracle-hardening-2026-08-21.json", "terrain-t0.8-sliding-render-window-final-hardening-2026-08-21.json", "terrain-t0.8-acceptance-hardening-2026-08-21.json"]
+    },
+    {
+      "profiles": ["sparse_world_movement", "movement_multiwrite_coalesce", "multi_boundary"],
+      "evidence": ["terrain-t0.1-world-spatial-index-2026-08-20.json", "terrain-t0.5-frozen-structures-hardened-2026-08-20.json", "terrain-t0.10-acceptance-closure-2026-08-21.json"]
+    },
+    {
+      "profiles": ["packed_dense_town", "static_heavy_property", "Godot_static_heavy"],
+      "evidence": ["terrain-t0.5-frozen-structures-hardened-2026-08-20.json", "terrain-t0.8-godot-world-streaming-hardening-2026-08-21.json"]
+    },
+    {
+      "profiles": ["publication_idle", "publication_dirty_2pct", "publication_heavy", "publication_prepared_vs_on_demand", "publication_unwatched_dirty", "publication_shared_hotspot", "history_wrap_snapshot"],
+      "evidence": ["terrain-t0.6-chunk-publication-hardening-2026-08-20.json", "terrain-t0.7-chunk-interest-local-oracle-hardening-2026-08-21.json"]
+    }
+  ],
+  "current_final_release_integrated_rerun": {
+    "evidence": "terrain-t0.10-acceptance-closure-2026-08-21.json",
+    "gates_passed": 16,
+    "canonical_hash": "B764C758305A266AE5CFF88B272E7708795A2254EC77BC35FDC76C271A5EF220",
+    "authored_world_pack_bytes": 112406,
+    "structural_identity_index_bytes": 1312,
+    "world_state_reserved_bytes": 284800,
+    "world_actions_reserved_bytes_at_128_ecs_slots": 13568,
+    "client_semantic_reserved_bytes": 139984,
+    "resident_chunks": 9,
+    "presented_chunks": 9,
+    "chunk_crossings": 1,
+    "timed_steps": 45,
+    "authority_step_mean_us": 42.696066666666666,
+    "authority_step_p95_us": 53.27,
+    "timed_thread_allocation_bytes": 0,
+    "cold_save_ms": 51.881213,
+    "cold_load_ms": 51.491306,
+    "note": "The 45-step timing is current post-collision authority work with client reconciliation on the observed crossing; it is not a per-frame full Godot render tail. Cold save/load are single observations."
+  },
+  "large_capacity_control_reservation": {
+    "representative_ecs_slots": 100000,
+    "world_actions_exact_backing_formula_bytes": 10500128,
+    "status": "Exact deterministic capacity projection from the accepted fixed arrays and fixed collision scratch; no sparse-control redesign is justified by this roughly 10.0 MiB reservation alone."
+  },
+  "current_final_native_rerun": {
+    "scene": "T010PlayableWorldAcceptance.tscn",
+    "status": "pass",
+    "semantic_reserved_bytes": 160242,
+    "active_chunks": 9,
+    "active_nodes": 66,
+    "logical_renderer_resources": 38,
+    "full_builds": 12,
+    "public_refreshes": 1,
+    "crossing_convergence_frames": 7,
+    "cold_max_frame_work_us": 27539.412,
+    "cold_max_terrain_mesh_work_us": 23013.453,
+    "resource_monitor_baseline_peak_after": [1, 1, 1],
+    "buffer_monitor_baseline_peak_after": [0, 0, 0],
+    "joined_input_player_x_mm": 15600,
+    "joined_input_public_refreshes": 2,
+    "launchable_client_smoke": "pass",
+    "note": "Headless cold maxima are seam/lifetime evidence, not warmed exported-client or GPU percentiles."
+  },
+  "accepted_invariants": {
+    "warmed_membership_publication_query_allocation_bytes": 0,
+    "same_chunk_movement_mutates_recipient_topology": false,
+    "chunk_crossing_source_destination_work_is_bounded": true,
+    "history_and_caches_are_fixed_capacity": true,
+    "client_semantic_and_render_slot_identity_are_independent": true,
+    "canonical_geometry_and_godot_winding_are_adapter_fenced": true,
+    "manual_launchable_vertical_issues_closed": true
+  }
+}

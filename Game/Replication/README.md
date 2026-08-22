@@ -11,6 +11,10 @@ multi-consumer retained application Events across OfflineDirect, secure
 ProtocolLoopback, and connected localhost UDP. Corrective hardening adds exact
 WorldState parity, reliable baseline cancellation, and client-slot ABA fencing.
 
+Terrain T0 is also accepted/frozen. N1.0 now adds a separate packet-free
+`OfflineDirectChunkRecipient` checkpoint over T0's `ChunkInterestQuery` and
+`ChunkPublicationStore`; it has no wire messages and does not replace N0 yet.
+
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
 replication identity, and invalidates old generation-local application facts.
@@ -50,6 +54,29 @@ The service never exposes an `Entity` in its output. Runtime entities are used
 only while borrowing one callback-scoped generation. Published identity is a
 `ReplicationEntityId`, stable for every recipient within one `StateEpoch`.
 Generation replacement creates a new epoch and rebuilds canonical truth.
+
+## N1.0 OfflineDirect chunk recipient
+
+`OfflineDirectChunkRecipient` is the game-owned oracle for recipient-to-chunk
+subscription/cursor state. It maintains one bounded canonical subscription set,
+tier/phase/cadence policy, and one chunk-bound applied cursor per key. Interest
+reconciliation is complete-or-fail. Publication reads must be committed before
+the cursor advances, so cancellation and client-apply failure cannot falsely
+publish application knowledge.
+
+The recipient borrows authoritative semantic data from `ChunkPublicationStore`
+and the tests apply it to the production `ClientWorldSemanticCache`. It owns no
+Network connection, packet, crypto, watcher, renderer, or duplicate dirty history.
+Permanent coverage includes stable/crossing topology, history fallback, epoch
+replacement, capacity transactionality, migration reorder, canonical client
+equivalence, and warmed zero allocation.
+
+The first packet-free evidence observes 503 subscriptions for the accepted
+5/96/192 m profile and 72 changes for one chunk crossing. At 256 recipients,
+stable/crossing reconciliation measured 42.74/43.50 us p95 per recipient. A broad
+1,024-subscription capacity currently reserves 187,904 B per recipient; this is
+explicit N1 layout/capacity evidence, not a production CCU or N0 replacement
+claim. N1.1 remains responsible for canonical messages and hostile wire codecs.
 
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions

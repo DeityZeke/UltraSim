@@ -158,6 +158,16 @@ Useful current anchors can be located by their embedded workload or filename:
   equal X/Z after one authoritative second at 20/60/120 Hz, then exact arrival,
   without claiming pathfinding, control-profile, launchable-client, or N1
   completion;
+- `terrain-t0-acceptance-matrix-closure-*` and
+  `terrain-t0.10-acceptance-closure-*` — cumulative T0.0-T0.10 profile mapping
+  plus the current final Release integrated/native rerun. They freeze the
+  launchable woods/cabin boundary without relabeling cold headless maxima as
+  exported-GPU tails or rerunning unchanged component artifacts;
+- `network-n1.0-offline-direct-chunk-recipient-*` — packet-free game-owned
+  subscription/cursor reconciliation over accepted T0 interest/publication,
+  including stable/crossing scale, cadence/no-change/absent reads, reservation,
+  and warmed allocation. It is not wire, N0 replacement, public WAN, or accepted
+  sparse-CCU evidence;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

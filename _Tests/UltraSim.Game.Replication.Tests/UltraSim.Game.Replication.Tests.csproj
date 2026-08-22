@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../../Game/Accounting/UltraSim.Game.Accounting.csproj" />
     <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
@@ -18,6 +19,7 @@
     <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+    <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
   </ItemGroup>
 </Project>

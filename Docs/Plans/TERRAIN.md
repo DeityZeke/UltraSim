@@ -1,13 +1,14 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: active forward plan. T0.0 through T0.9 are accepted/frozen as of
-2026-08-21. T0.9 was accepted at `2e147426` after invariant, persistence,
-prepared-mesh, Multi, changed-set-validation, and client-portability hardening.
-T0.10 is the active implementation checkpoint. Network N1 has not started.
-Revised from the
-accepted Network N0 baseline, later spatial-seam decisions, and V1/transitional
-spatial-publication archaeology.
-Network N0 is accepted and frozen as the current remote-authority reference. T0 is the next major implementation milestone. Network N1 is deliberately deferred until T0 has proved the world/spatial/publication contracts that N1 can consume.
+Status: accepted/frozen. T0.0 through T0.10 and the complete Terrain / World T0
+milestone are accepted as of 2026-08-21. T0.9 was accepted at `2e147426`; T0.10
+then closed the launchable woods/cabin vertical, controls/camera profiles,
+authoritative locomotion/collision, save/restore, native adapter geometry, and
+cumulative evidence matrix. Network N1.0 is now the active checkpoint.
+Revised from the accepted Network N0 baseline, later spatial-seam decisions, and
+V1/transitional spatial-publication archaeology. Network N0 remains the frozen
+remote-authority reference; accepted T0 now supplies the world/spatial/publication
+contracts consumed by active Network N1 work.
 T0 is not merely a terrain renderer. It establishes the spatial substrate for the persistent world: deterministic integer coordinates, a canonical coarse spatial partition, packed terrain and statics, incremental dynamic membership, chunk-associated public publication state, bounded dirty history, local streaming, Godot rendering, and the seams required by persistence and later replication profiles.
 The motivating observation is measured rather than speculative. Network V3 Dense-400 is efficient once recipient/entity relationships are established, while sparse movement is limited by changing and retiering those relationships. The rejected N0.11 exact-AOI experiment removed 31.55% of 4K maintained relations and 40.36% of WorldState records, yet doubled interest-update p95 because precise recipient/entity membership reconciliation cost more than the coherent work it removed.
 T0 therefore introduces a maintained coarse spatial index so entity spatial work is paid once when authoritative spatial state changes instead of being rediscovered independently by every observer. The game profile uses 16 m spatial chunks, but terrain, publication, AOI subscriptions, client semantic residency, rendering, physics, navigation, and other domains keep private representations and private local slot identities. They may share only canonical spatial identity/geometry where useful.
@@ -3859,9 +3860,10 @@ locomotion kinds remain stopped after relocation. `GameWorldActions` remains a
 watch for the first natural domain split; no speculative action/service
 framework was introduced.
 
-T0.10 is not frozen. Manual human acceptance of the launchable controls and the
-broad flat/rough/boundary/dense/static-heavy evidence matrix remain the stop
-gate. Network N1 has not started.
+At this implementation stop, T0.10 was not frozen: manual human acceptance and
+the broad flat/rough/boundary/dense/static-heavy evidence matrix remained the
+gate. The later hardening and acceptance section below closes that historical
+status.
 
 The first human launch exposed three real adapter/bridge defects. Godot's
 clockwise front-face contract now reverses the engine-neutral terrain winding at
@@ -3925,12 +3927,51 @@ have clockwise native faces with explicit outward stored normals. The asymmetric
 player wedge is independently checked as an eight-triangle closed prism so it
 cannot retain a separate inward face-order convention.
 
+### T0.10 / Terrain T0 acceptance and freeze — 2026-08-21
+
+The human launchable-client passes closed the terrain winding, profile switching,
+public-identity ghosting, finite-world camera following, fixed-isometric move/look,
+canonical cabin layout, authoritative wall/door/chest collision, procedural mesh
+normals, and player-wedge winding issues recorded above. The current Release
+integration rerun passes all 16 gates with canonical hash
+`B764C758305A266AE5CFF88B272E7708795A2254EC77BC35FDC76C271A5EF220`.
+
+The accepted 5x5 authored fixture records a 112,406 B pack, 1,312 B structural
+identity index, 284,800 B game-world reservation, 13,568 B `GameWorldActions`
+reservation at 128 ECS slots, 139,984 B client semantic reservation, nine resident
+and presented chunks, one chunk crossing, and zero timed caller-thread allocation.
+The current post-collision 45-step authority/client-reconciliation observation is
+42.70 us mean / 53.27 us p95. Its 51.88 ms save and 51.49 ms load values are single
+cold observations, not warmed tails.
+
+The current native headless rerun passes both the T0.10 scene and launchable-client
+smoke. It reports nine active chunks, 66 nodes, 38 logical renderer resources,
+12 full builds, one public-only refresh, and seven frames to converge the observed
+crossing. Cold maximum frame/terrain-mesh work (27.54/23.01 ms) remains seam and
+lifetime evidence rather than exported GPU performance.
+
+The performance matrix is cumulative: unchanged T0.0-T0.9 component artifacts
+remain immutable and are mapped to every required profile, while the final current
+Release integration/native reruns close the composed boundary. The deterministic
+current `GameWorldActions` backing formula projects 10,500,128 B at 100,000 ECS
+slots (about 10.0 MiB); that bounded cold reservation alone does not justify a
+sparse-control redesign.
+
+Closure evidence:
+
+- [`terrain-t0-acceptance-matrix-closure-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0-acceptance-matrix-closure-2026-08-21.json)
+- [`terrain-t0.10-acceptance-closure-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-acceptance-closure-2026-08-21.json)
+
+T0 is frozen at this boundary. Navigation, production art/content tails, editor/
+housing, remote command transport, and public-WAN scale are not retroactively T0
+requirements. Subsequent work consumes these contracts from Network N1.
+
 ### T0 performance/evidence matrix
 
 Every accepted benchmark records exact world geometry/profile, chunk edge, cell
 size, resident counts, dynamic/static density, authority cadence, allocation
 scope, and canonical state hashes.
-The broad matrix must also record `GameWorldActions.ReservedBytes` at a
+The accepted closure matrix also records `GameWorldActions.ReservedBytes` at a
 representative large ECS capacity. The current entity-addressed control arrays
 are intentionally simple and bounded; only measured large-world pressure may
 earn a denser sparse-control representation.
@@ -4195,13 +4236,15 @@ T0 is ready to hand back to Network only when the following are accepted APIs or
 ```
 SpatialChunkKey + explicit Spatial geometry/profile
 normalized 1 mm WorldPosition
-EnumerateInterestChunks(anchor/shape, destination) -> bounded keys + cadence tier
+ChunkInterestQuery(anchor, previous, destination) -> bounded keys + cadence tier
 committed direct publication read view with explicit lifetime
-CopyChunkSnapshot(key, destination) -> complete revisioned public scope
-QueryChunkDelta(key, cursor, destination) -> NoChanges | Delta | SnapshotRequired
-CurrentRevision / HistoryFloor
+ChunkPublicationStore.TryCopySnapshot(key, destination)
+    -> complete revisioned public scope
+ChunkPublicationStore.TryCopyDelta(cursor, destination)
+    -> NoChanges | Delta | SnapshotRequired
+ChunkPublicationCursor / ChunkPublicationRevision / HistoryFloor
 public identity/lifetime semantics across chunk migration
-client atomic snapshot/delta apply
+ClientWorldSemanticCache atomic snapshot/delta apply
 separate public vs owner/private/event state
 bounded spatial/publication/client capacities
 ```

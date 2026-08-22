@@ -1,13 +1,13 @@
 # Network V3: N1 chunk-native world replication plan
 
-Status: deferred forward plan. Network N0 is accepted and frozen as the current
-remote-authority implementation/reference. Terrain / World T0 is the active major
-milestone. Begin N1 only after [`TERRAIN.md`](TERRAIN.md) accepts the chunk,
-publication, streaming, and local snapshot/delta contracts listed below.
+Status: active forward plan. Network N0 remains accepted/frozen as the current
+remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
+as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is implemented
+and stopped for checkpoint review; N1.1 wire messages have not started.
 
 The completed N0 implementation and its checkpoint history remain in git and in
-immutable `_Benchmarks/Baselines` evidence. This file now describes only unfinished
-Network work, matching the repository documentation policy.
+immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
+the implemented N1.0 stop, and only forward decisions that have a concrete owner.
 
 N0 proved the difficult semantic foundations:
 
@@ -103,15 +103,16 @@ Do not begin production N1 integration until T0 provides accepted executable
 contracts for:
 
 ```text
-WorldChunkKey / normalized WorldPosition
+SpatialChunkKey / normalized WorldPosition
 ChunkInterestQuery(anchor, rings) -> bounded chunk keys + cadence tier
-CopyChunkSnapshot(key, destination) -> complete revisioned public scope
-QueryChunkDelta(key, cursor, destination)
+ChunkPublicationStore.TryCopySnapshot(key, destination)
+    -> complete revisioned public scope
+ChunkPublicationStore.TryCopyDelta(cursor, destination)
     -> NoChanges | Delta | SnapshotRequired
-CurrentRevision
-HistoryFloor
+chunk-bound ChunkPublicationCursor
+ChunkPublicationRevision / HistoryFloor
 public identity/lifetime semantics across chunk migration
-client atomic local snapshot/delta apply
+ClientWorldSemanticCache atomic local snapshot/delta apply
 separate public vs owner/private/event state
 bounded resident/history capacities
 ```
@@ -133,7 +134,8 @@ ECS committed dynamic state
         |
         v
 Game/World
-    resident WorldChunkStore
+    WorldSpatialIndex
+    ChunkPublicationStore
     packed current public pages
     bounded dirty histories
     chunk overlap query
@@ -168,6 +170,36 @@ for current WorldState.
 
 Network does not load terrain files, build meshes, inspect ECS chunks, resolve
 Godot resources, or decide whether a tree is visible behind a wall.
+
+## Remote control ingress handoff
+
+T0's local controls strengthened the remote-input contract that existed when this
+plan was first drafted. N1 must not route a remote player through the historical
+`InputVelocity` path or create a second Network-specific movement simulation.
+
+The target is:
+
+```text
+trusted connection/session authority
+    -> establish exact GameControlSessionEpoch
+
+client semantic control update
+    -> epoch + monotonically increasing sequence
+    -> locomotion mutation: Unchanged | Stop | Direct | Destination
+    -> adjacent actions
+    -> optional facing mutation when that wire consumer is implemented
+
+one game-owned command-admission boundary
+    -> the same GameWorldActions authority used by OfflineDirect
+```
+
+A remote client's process-local epoch counter is not trusted uniqueness. The
+server/session authority must assign or otherwise prove the epoch within the live
+authority lineage, so a restarted client cannot collide with an earlier control
+session. Locomotion, actions, and a future optional facing update compose under
+one epoch/sequence admission boundary; facing must not become an unsequenced side
+RPC that can be replayed independently. This freezes no aim/combat framework and
+does not add remote control messages in N1.0.
 
 ## Public spatial state versus other streams
 
@@ -211,7 +243,7 @@ Conceptually:
 
 ```text
 RecipientChunkCursor
-    WorldChunkKey
+    SpatialChunkKey
     LastAppliedRevision
     CadenceTier
     Phase / next eligibility
@@ -272,7 +304,7 @@ A snapshot descriptor names at minimum:
 
 ```text
 ApplicationSessionEpoch / StateEpoch as appropriate
-WorldSpaceId / WorldChunkKey
+SpatialSpaceId / SpatialChunkKey
 ChunkPublicationRevision
 snapshot/schema fingerprint
 record count / segment count
@@ -354,7 +386,7 @@ B @ revision Y
 
 Those messages may be delayed/reordered independently.
 
-The client therefore cannot treat `WorldChunkKey + local row slot` as entity
+The client therefore cannot treat `SpatialChunkKey + local row slot` as entity
 identity. Global canonical replication identity/generation from the game
 projection, or an accepted T0/N1 successor with equivalent lifetime fencing,
 must determine whether an old removal/update is stale.
@@ -395,7 +427,7 @@ dynamic public layer
     regular snapshot/delta cadence
 ```
 
-The same `WorldChunkKey` can index all of them without forcing one message or lane.
+The same `SpatialChunkKey` can index all of them without forcing one message or lane.
 
 Large immutable content transfer may use Bulk and client cache/fingerprint proof.
 The server should prefer proving the client already owns a matching immutable
@@ -408,7 +440,7 @@ Before a new wire message exists:
 
 - bind one authenticated/entered participant to T0 `ChunkInterestQuery`;
 - maintain fixed recipient chunk subscriptions/cursors;
-- consume `CopyChunkSnapshot` / `QueryChunkDelta` directly;
+- consume `ChunkPublicationStore.TryCopySnapshot` / `TryCopyDelta` directly;
 - apply to the same retained client-world model used by T0;
 - normalize semantic traces so current local T0 oracle and N1 OfflineDirect path
   end in identical chunk/entity state.
@@ -419,6 +451,45 @@ Benchmark chunk subscription mutation separately from current N0
 **Gate:** movement inside stable chunk window performs no entity-level AOI mutation;
 chunk crossing is bounded; canonical client state matches T0 local oracle; warmed
 hot path allocation is zero.
+
+### N1.0 implementation stop — 2026-08-21
+
+`OfflineDirectChunkRecipient` now implements the packet-free game-owned recipient
+layer. It owns a fixed sorted subscription set, tier/phase/cadence state, and one
+chunk-bound applied cursor per subscription. Reconciliation is complete-or-fail;
+leaves publish before enters; source publication-epoch replacement clears cursor
+knowledge; and reads remain pending until the consumer explicitly commits them.
+Cancelling a pending read cannot advance recipient knowledge.
+
+N1.0 takes an authority-resolved `WorldPosition` anchor; it is not a decoder or
+client-position authorization boundary. N1.1 application integration must derive
+that anchor from the authenticated entered participant's current controlled
+entity rather than accepting a claimed remote coordinate.
+
+The production recipient contains no connection ID, packet, socket, encryption,
+watcher, or client-render state. Tests apply its snapshots/deltas to the existing
+`ClientWorldSemanticCache` and compare that canonical state with the accepted T0
+direct publication path. They cover history-wrap snapshot fallback, publication
+epoch replacement, capacity transactionality, warmed allocation, and both
+cross-chunk orders (`B Present` before `A Remove`, and the reverse) while retaining
+exactly one public identity.
+
+The default 5/96/192 m profile produces 503 subscriptions in the scale fixture;
+one chunk crossing changes 72. At 256 packet-free recipients, stable reconciliation
+measured 42.74 us p95 per recipient and crossing reconciliation 43.50 us p95 per
+recipient, with zero warmed caller-thread allocation. The deliberately broad
+1,024-subscription recipient capacity reserves 187,904 B per recipient
+(48,103,424 B for 256), which is now an explicit pressure target for later N1
+capacity/layout evidence rather than a hidden production claim. Due-cadence reads
+also show that interested absent keys dominate direct snapshot probes; wire N1
+must not translate that oracle behavior into repeated empty payload transmission.
+
+Evidence:
+[`network-n1.0-offline-direct-chunk-recipient-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.0-offline-direct-chunk-recipient-2026-08-21.json).
+
+This accepts no N0 replacement or sparse-CCU improvement claim. N1.0 has no new
+wire schema, application proof, loss/reorder transport, or public WAN work. Stop
+for review before N1.1.
 
 ## N1.1 — canonical chunk messages and protocol manifest
 
@@ -776,14 +847,14 @@ Wait for T0 evidence before freezing:
 None of these decisions may move authority into Network or make private data part
 of the public chunk page.
 
-## Start condition
+## Current checkpoint boundary
 
-**Do not start N1 now.**
+T0 has accepted the chunk coordinate, packed publication, bounded dirty history,
+local interest query, production client semantic cache, presentation window, and
+launchable woods/cabin vertical. N1.0 has connected those contracts to a bounded
+packet-free recipient chunk-cursor layer and measured its isolated spatial
+maintenance.
 
-Proceed through [`TERRAIN.md`](TERRAIN.md). When T0 accepts the chunk coordinate,
-resident store, packed publication, bounded dirty history, local interest query,
-client streaming projection, and woods/cabin vertical, return here.
-
-The first N1 checkpoint is N1.0: connect the accepted T0 local chunk oracle to a
-bounded recipient chunk-cursor layer and measure its spatial maintenance against
-the frozen N0 sparse relation graph before adding new wire complexity.
+Do not begin N1.1 until the N1.0 checkpoint is reviewed. The next work is canonical
+game-owned chunk messages and hostile codec tests—not UDP redesign, N0 deletion,
+shared encoded-byte caching, or a production scale claim.

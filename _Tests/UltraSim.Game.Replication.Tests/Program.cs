@@ -5,6 +5,7 @@ using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
+using UltraSim.Game.Replication.Tests;
 using UltraSim.Network;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
@@ -53,6 +54,11 @@ var tests = new (string Name, Action Body)[]
     ("BundleExpirationSweepCachesOnlyCompletedSemanticTime", BundleExpirationSweepCachesOnlyCompletedSemanticTime),
     ("PendingEligibilityAttributionClassifiesDeferredDebt", PendingEligibilityAttributionClassifiesDeferredDebt),
     ("WarmedMaintainedInterestSchedulingAllocatesZero", WarmedMaintainedInterestSchedulingAllocatesZero),
+    ("N1OfflineDirectSubscriptionTopologyAndClientEquivalence", N1OfflineDirectChunkTests.SubscriptionTopologyAndClientEquivalence),
+    ("N1OfflineDirectMigrationOrderingPreservesOnePublicIdentity", N1OfflineDirectChunkTests.MigrationOrderingPreservesOnePublicIdentity),
+    ("N1OfflineDirectHistoryFallbackAndEpochReplacementConverge", N1OfflineDirectChunkTests.HistoryFallbackAndEpochReplacementConverge),
+    ("N1OfflineDirectCapacityAndReadCommitAreTransactional", N1OfflineDirectChunkTests.CapacityAndReadCommitAreTransactional),
+    ("N1OfflineDirectWarmedStableRecipientAllocatesZero", N1OfflineDirectChunkTests.WarmedStableRecipientAllocatesZero),
 };
 
 foreach ((string name, Action body) in tests)
@@ -60,7 +66,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Network N0.1/N0.7 game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0/N1.0 game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {
