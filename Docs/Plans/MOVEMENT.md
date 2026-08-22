@@ -615,13 +615,15 @@ Project Zomboid / Path of Exile-like architecture proof.
 
 ```text
 camera
-    overhead/fixed-ish or constrained orbit
+    fixed isometric-style angle/height
+    no orbit or zoom while this profile is active
 
 movement
-    WASD/stick -> Direct
+    world-axis WASD/stick -> Direct
+    W remains north regardless of camera or actor facing
 
 look
-    cursor/world point -> independent world look/facing direction
+    cursor/world point -> independent authoritative yaw/public facing
 ```
 
 The proof must demonstrate:
@@ -778,12 +780,11 @@ Still unfrozen/unimplemented at this boundary:
 - pointer gesture interpretation;
 - the human-launchable Godot client.
 
-The current integer remainder represents integrated desired displacement: it is
-advanced before an outside-prepared-world step is rejected. That distinction is
-irrelevant to this no-collision vertical. A future collision-resolution
-checkpoint must deliberately choose whether fractional remainder follows desired
-or successfully realized displacement rather than inheriting the behavior by
-accident.
+At this retained-Direct checkpoint, the integer remainder represented integrated
+desired displacement and advanced before an outside-prepared-world step was
+rejected. The later playable-collision hardening below deliberately retains that
+meaning when a step is blocked; it does not silently redefine remainder as
+successfully realized displacement.
 
 ## T0.10 Destination implementation boundary — 2026-08-21
 
@@ -886,10 +887,12 @@ Godot owns physical event capture, screen-ray construction, and `Camera3D`.
 Core owns hold/double-click state, world-direction formation, profile policy,
 and sequencing. Game still receives no camera, key, screen, or profile values.
 The launchable OrbitCommand mode is mouse-only. The crude
-`ThirdPersonDirectProfile` owns WASD and rotates camera-relative forward into world
-Direct, while `IndependentMoveLookProfile` produces a separate look point from
-its movement direction. The latter remains a seam proof; authoritative facing
-has not yet been earned by gameplay.
+`ThirdPersonDirectProfile` owns WASD and rotates camera-relative forward into
+world Direct. `IndependentMoveLookProfile` instead emits fixed world-axis Direct
+plus a separate look point. The launchable composition applies that point through
+the concrete Game-owned `FaceActorToward` operation, changing persisted/public
+yaw without rotating locomotion. An asymmetric character mesh makes facing
+visible; no combat, aiming, or animation framework is implied.
 
 The application also exercises chunk crossing, selected door interaction,
 two-sided-authorized bread transfer between backpack/chest, and F5/F9 durable
@@ -924,10 +927,77 @@ Human launch review found and corrected three presentation seams before freeze:
   supersession refreshes both old and new public layers rather than leaving a
   stale character `MultiMesh` ghost.
 
+A second human pass exposed two further composition seams. A finite map edge had
+been using one chunk identity both for desired structural-window membership and
+the continuous viewer origin; the off-map fringe therefore rejected the camera
+update. The engine-neutral window now accepts a separately clamped structural
+center while offsets and the common render root remain relative to the actual
+player chunk. Native smoke relocates twice within the far corner chunk and proves
+the root follows both positions. F3 is now the promised fixed-isometric,
+world-axis move/look canary: W remains north while mouse position publishes an
+independent actor yaw. Numeric 1/2/3 shortcuts and on-screen buttons accompany
+F1/F2/F3 because embedded editors may reserve function keys.
+
 The native terrain gate now inspects every face of one generated mesh for Godot
 front-face winding. The launch smoke switches all three cameras and moves the
 controlled public identity across a chunk boundary and back, asserting exactly
 one presented character at each point.
+
+### T0.10 cabin-authoring and minimum collision hardening — 2026-08-21
+
+Human review proved that the old “cabin” was not useful acceptance content. Its
+four alleged wall placements each owned a square footprint and the launchable
+asset resolver drew every structural definition as the same one-metre box. The
+fixture now authors one recognizable 8 m x 6 m shell:
+
+```text
+north wall       one thin 8 m segment
+west/east walls  two thin 6 m segments
+south wall       two thin 3 m segments
+doorway          2 m gap with the public cabin door centered in it
+roof             overhead render-only slab
+```
+
+Definition-local wall variants select matching grounded Godot meshes. Walls,
+door, chest, shelf, book, trees, and the controlled/public actors no longer use
+center-pivot boxes that bury half their height beneath terrain. The roof is
+translucent presentation and its authoritative bounds begin above the standing
+actor volume; it is not a horizontal blocker.
+
+The first minimum authoritative collision has also been earned. It remains a
+concrete T0.10 rule, not a general physics/controller/navigation framework:
+
+```text
+resolve proposed X/Z against prepared terrain
+    -> build the standing actor AABB
+    -> complete-or-fail query of collidable prepared static/Multi bounds
+    -> check the generation-owned concrete closed-door/chest blockers
+
+clear
+    -> commit WorldPosition
+
+blocked Direct
+    -> retain Direct and remain in place
+
+blocked Destination
+    -> stop the straight-line Destination as impossible
+```
+
+Opening the door removes only its dynamic blocking effect; closing it restores
+that effect. The implementation does not use Godot physics as authority, add
+sliding/capsules/steps, or route around obstacles. Authoritative relocation is
+still an explicit discontinuity and may place an actor without running the
+ordinary locomotion blocker.
+
+Permanent integrated gates prove the exact rectangular Multi layout, closed-door
+blocking/open-door passage, frozen Multi-wall blocking, chest blocking, retained
+Direct pressure, and retirement of a blocked straight Destination. Static query
+pressure fails closed and the warmed integrated path remains allocation-free.
+Because collision adds a two-pass exact static query to each moved actor, the
+pre-collision movement timings and smaller `GameWorldActions.ReservedBytes`
+observations are historical rather than like-for-like performance baselines.
+The additive Release evidence is
+[`terrain-t0.10-cabin-collision-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-cabin-collision-hardening-2026-08-21.json).
 
 ## T0.10 real-client requirement
 

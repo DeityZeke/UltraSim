@@ -3836,9 +3836,11 @@ the native renderer. Its configured InputMap feeds the engine-neutral,
 mouse-only `OrbitCommandProfile`: click selection, hold Direct,
 release/RMB/Escape Stop, and double-click Destination. Middle-drag orbit,
 wheel zoom, selected cabin-door use, nearby chest/backpack bread transfer, and
-F5/F9 save/restore are exposed in the scene. F1 selects the overhead
-OrbitCommand camera; F2 selects close camera-relative WASD; F3 selects the
-independent move/look proof camera.
+F5/F9 save/restore are exposed in the scene. F1/1 selects the overhead
+OrbitCommand camera; F2/2 selects close camera-relative WASD; F3/3 selects a
+fixed-isometric world-axis WASD profile whose mouse-nominated authoritative yaw
+is independent of locomotion. On-screen buttons remain available when the
+embedded editor reserves function keys.
 
 The Client Core profiles contain no Godot values. Godot supplies raw button
 edges, focus, a horizontal camera basis, and a nominated ray/world point; Game
@@ -3866,6 +3868,47 @@ transaction so cross-chunk public supersession refreshes both affected public
 layers. Native coverage inspects terrain winding, switches all cameras, and
 moves the player public identity across a chunk boundary and back while proving
 the presentation contains exactly one character.
+
+The next manual pass found that finite-world fringe failure could freeze the
+common viewer origin in the penultimate/last authored chunk. Presentation
+membership center and player-relative offset origin are now separate: the full
+3x3 membership square clamps inward, while render offsets and the camera root
+continue following the actual player through the edge chunk. The launch smoke
+forces two distinct positions in the far corner and proves both the clamped
+membership center and continuous root translation. Core and integrated tests
+also prove F3 world-north movement remains unchanged while authoritative/public
+facing turns toward an eastward mouse nomination.
+
+The following human pass rejected the cabin fixture itself: its “walls” had
+square 6 m x 6 m authority footprints while every structural definition rendered
+as the same one-metre rectangle. The cabin is now a canonical six-piece Multi:
+five thin rectangular wall segments form an 8 m x 6 m shell with a real two-metre
+south doorway, and one translucent render-only roof sits above the standing
+actor volume. Definition-local variants select matching 8 m, 6 m, and 3 m
+grounded wall meshes. Shelf/book and public meshes now also use deliberate
+grounded dimensions instead of the generic centered structural box.
+
+This review also earned the first authoritative static-occupancy consumer that
+T0.4/T0.5 had intentionally deferred. Fixed-step locomotion resolves terrain,
+then queries complete current prepared-world static/Multi bounds for a 300 mm
+radius, 1.8 m standing actor. A small generation-owned concrete registry adds
+the T0.10 public cabin door and chest: a closed door blocks, an open door does
+not, and the chest blocks. Direct remains retained against an obstruction;
+straight-line Destination retires when blocked because pathfinding remains
+outside T0.10. The query is allocation-free and fails closed on bounded query
+pressure. Godot collision remains non-authoritative and no general character
+controller, sliding solver, navmesh, or public collision-schema framework was
+introduced.
+
+The additive integration suite now contains 16 gates, including exact cabin
+layout and door/wall/chest collision behavior. The concrete 128-entity fixture
+reports 13,568 bytes of `GameWorldActions` backing after adding the fixed
+64-hit static-query scratch and 16-entry dynamic-blocker registry. The short
+45-step joined observation remains zero-allocation and recorded approximately
+42.3 us mean / 52.2 us p95 in the additive Release artifact. Its post-collision
+timing must not be compared directly with the earlier no-collision artifact;
+the broad T0.10 matrix remains the appropriate performance gate. Evidence:
+[`terrain-t0.10-cabin-collision-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-cabin-collision-hardening-2026-08-21.json).
 
 ### T0 performance/evidence matrix
 

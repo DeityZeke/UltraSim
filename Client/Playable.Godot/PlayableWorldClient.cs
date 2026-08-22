@@ -118,7 +118,10 @@ public partial class PlayableWorldClient : Node3D
             if (!_sequencer.TryCreateSemanticCommand(decision.Command, out GamePlayerCommand command))
                 throw new InvalidOperationException("The selected control profile produced an invalid command.");
 
-            ApplyCommand(command);
+            ApplyCommand(
+                command,
+                _profile == ControlProfile.IndependentMoveLook && decision.LookRequested,
+                decision.LookPoint);
             _runtime.Tick();
             SynchronizeProjection();
             UpdateCamera();
@@ -154,17 +157,20 @@ public partial class PlayableWorldClient : Node3D
                 {
                     _secondaryPressed = true;
                 }
-                else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed)
+                else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed &&
+                    _profile != ControlProfile.IndependentMoveLook)
                 {
                     _cameraDistance = Math.Max(7f, _cameraDistance - 2f);
                 }
-                else if (mouse.ButtonIndex == MouseButton.WheelDown && mouse.Pressed)
+                else if (mouse.ButtonIndex == MouseButton.WheelDown && mouse.Pressed &&
+                    _profile != ControlProfile.IndependentMoveLook)
                 {
                     _cameraDistance = Math.Min(55f, _cameraDistance + 2f);
                 }
                 break;
             case InputEventMouseMotion motion when
-                (motion.ButtonMask & MouseButtonMask.Middle) != 0:
+                (motion.ButtonMask & MouseButtonMask.Middle) != 0 &&
+                _profile != ControlProfile.IndependentMoveLook:
                 _cameraYaw -= motion.Relative.X * 0.006f;
                 _cameraPitch = Math.Clamp(_cameraPitch - motion.Relative.Y * 0.006f, 0.2f, 1.35f);
                 UpdateCamera();
@@ -303,18 +309,21 @@ public partial class PlayableWorldClient : Node3D
                 physical.MoveZ,
                 physical.HeldActions,
                 physical.HasFocus,
-                basis,
                 _pointerPointValid,
                 _pointerPoint),
             _ => throw new InvalidOperationException("Unknown control profile."),
         };
     }
 
-    private void ApplyCommand(in GamePlayerCommand command)
+    private void ApplyCommand(
+        in GamePlayerCommand command,
+        bool faceLookPoint,
+        in ClientControlWorldPoint lookPoint)
     {
         if (_runtime is null)
             return;
         GamePlayerCommand admitted = command;
+        ClientControlWorldPoint facingPoint = lookPoint;
         bool interactionPressed =
             (command.PressedActions & GamePlayerActions.Interact) != 0;
         bool chestInteraction = _selection == SelectionKind.CabinChest && interactionPressed;
@@ -342,6 +351,18 @@ public partial class PlayableWorldClient : Node3D
                         admitted,
                         target,
                         out GamePlayerCommandResult result);
+                    if (result.WasAdmitted && faceLookPoint)
+                    {
+                        GameWorldActionStatus facing = game.WorldActions.FaceActorToward(
+                            world,
+                            game.WorldState,
+                            Resolve(world, _entities.PlayerId),
+                            facingPoint.XMillimeters,
+                            facingPoint.ZMillimeters,
+                            out _);
+                        if (facing != GameWorldActionStatus.Accepted)
+                            throw new InvalidOperationException($"Independent facing failed: {facing}.");
+                    }
                     return result;
                 }, out GamePlayerCommandResult result))
             throw new InvalidOperationException("The OfflineDirect command had no authority generation.");
@@ -502,7 +523,8 @@ public partial class PlayableWorldClient : Node3D
                 _player, _presentationChanges, out _, out _, out ClientPresentationWindowError error,
                 out GodotWorldRenderQueueError rendererError)
             : _window.TryTrackPlayer(
-                _player, _presentationChanges, out _, out _, out error, out rendererError);
+                _player, PresentationCenter(_player), _presentationChanges,
+                out _, out _, out error, out rendererError);
         if (!tracked)
         {
             _lastOutcome = $"Presentation boundary: {error}/{rendererError}";
@@ -597,12 +619,15 @@ public partial class PlayableWorldClient : Node3D
                 _cancelPressed = true;
                 break;
             case global::Godot.Key.F1:
+            case global::Godot.Key.Key1:
                 SetProfile(ControlProfile.OrbitCommand);
                 break;
             case global::Godot.Key.F2:
+            case global::Godot.Key.Key2:
                 SetProfile(ControlProfile.ThirdPersonDirect);
                 break;
             case global::Godot.Key.F3:
+            case global::Godot.Key.Key3:
                 SetProfile(ControlProfile.IndependentMoveLook);
                 break;
             case global::Godot.Key.F5:
@@ -622,6 +647,9 @@ public partial class PlayableWorldClient : Node3D
         _orbit.Reset();
         _thirdPerson.Reset();
         _independent.Reset();
+        _primaryDown = false;
+        _primaryPressed = false;
+        _primaryReleased = false;
         _profileStopPending = true;
         ApplyProfileCameraDefaults();
         UpdateCamera();
@@ -659,6 +687,46 @@ public partial class PlayableWorldClient : Node3D
         if (before != 1 || afterCrossing != 1 || afterReturn != 1)
             throw new InvalidOperationException(
                 $"Public presentation ghosted across a chunk move: {before}/{afterCrossing}/{afterReturn}.");
+
+        var edge = new WorldPosition(
+            GamePlayableWorld.MaximumChunk,
+            GamePlayableWorld.MaximumChunk,
+            15_000,
+            14_000,
+            0);
+        RelocateControlledActor(edge);
+        _runtime.Tick();
+        SynchronizeProjection();
+        DrainRenderer();
+        SpatialChunkKey expectedCenter = ChunkKey(
+            GamePlayableWorld.MaximumChunk - RenderRadius,
+            GamePlayableWorld.MaximumChunk - RenderRadius);
+        ClientPresentationWindowSnapshot edgeWindow = _window?.GetSnapshot() ?? default;
+        if (_player.Chunk != edge.Chunk || edgeWindow.CenterChunk != expectedCenter ||
+            !Mathf.IsEqualApprox(_renderer.Root.Position.X, -15f) ||
+            !Mathf.IsEqualApprox(_renderer.Root.Position.Z, -14f))
+            throw new InvalidOperationException(
+                "The finite structural window detached the camera from the edge-chunk player origin.");
+
+        var fartherInsideEdge = new WorldPosition(
+            GamePlayableWorld.MaximumChunk,
+            GamePlayableWorld.MaximumChunk,
+            15_500,
+            14_500,
+            0);
+        RelocateControlledActor(fartherInsideEdge);
+        _runtime.Tick();
+        SynchronizeProjection();
+        DrainRenderer();
+        if (!Mathf.IsEqualApprox(_renderer.Root.Position.X, -15.5f) ||
+            !Mathf.IsEqualApprox(_renderer.Root.Position.Z, -14.5f))
+            throw new InvalidOperationException(
+                "Same-edge-chunk movement did not keep the camera centered on the player.");
+
+        RelocateControlledActor(GamePlayableWorld.PlayerStart);
+        _runtime.Tick();
+        SynchronizeProjection();
+        DrainRenderer();
     }
 
     private void RelocateControlledActor(in WorldPosition requested)
@@ -705,16 +773,19 @@ public partial class PlayableWorldClient : Node3D
         switch (_profile)
         {
             case ControlProfile.OrbitCommand:
+                _cameraYaw = -0.7f;
                 _cameraPitch = 1.12f;
                 _cameraDistance = 28f;
                 break;
             case ControlProfile.ThirdPersonDirect:
+                _cameraYaw = -0.7f;
                 _cameraPitch = 0.34f;
                 _cameraDistance = 8.5f;
                 break;
             case ControlProfile.IndependentMoveLook:
-                _cameraPitch = 0.52f;
-                _cameraDistance = 12f;
+                _cameraYaw = -MathF.PI * 0.25f;
+                _cameraPitch = 0.61548f;
+                _cameraDistance = 14f;
                 break;
         }
     }
@@ -785,7 +856,7 @@ public partial class PlayableWorldClient : Node3D
             OffsetLeft = 16,
             OffsetTop = 16,
             OffsetRight = 590,
-            OffsetBottom = 180,
+            OffsetBottom = 220,
         };
         layer.AddChild(panel);
         var stack = new VBoxContainer();
@@ -796,12 +867,24 @@ public partial class PlayableWorldClient : Node3D
         _details = new Label();
         stack.AddChild(_status);
         stack.AddChild(_details);
+        var profiles = new HBoxContainer();
+        stack.AddChild(profiles);
+        AddProfileButton("1/F1 Orbit", ControlProfile.OrbitCommand);
+        AddProfileButton("2/F2 Third person", ControlProfile.ThirdPersonDirect);
+        AddProfileButton("3/F3 Iso move/look", ControlProfile.IndependentMoveLook);
         stack.AddChild(new Label
         {
             Text = "LMB click select • hold steer • double-click destination • RMB/Esc stop\n" +
                 "MMB drag camera • wheel zoom • E use selected door/chest\n" +
-                "F1 Orbit mouse-command • F2 third-person WASD • F3 independent move/look • F5 save • F9 load",
+                "1/F1 Orbit • 2/F2 third-person • 3/F3 fixed iso move/look • F5 save • F9 load",
         });
+
+        void AddProfileButton(string text, ControlProfile profile)
+        {
+            var button = new Button { Text = text };
+            button.Pressed += () => SetProfile(profile);
+            profiles.AddChild(button);
+        }
     }
 
     private void UpdateHud()
@@ -872,6 +955,17 @@ public partial class PlayableWorldClient : Node3D
     private static SpatialChunkKey ChunkKey(int x, int z) =>
         new(GameWorldState.DefaultSpace, new SpatialChunkCoord(x, z));
 
+    private static SpatialChunkKey PresentationCenter(in WorldPosition player)
+    {
+        int minimum = checked(GamePlayableWorld.MinimumChunk + RenderRadius);
+        int maximum = checked(GamePlayableWorld.MaximumChunk - RenderRadius);
+        if (minimum > maximum)
+            throw new InvalidOperationException("The authored world cannot contain the render window.");
+        return ChunkKey(
+            Math.Clamp(player.Chunk.X, minimum, maximum),
+            Math.Clamp(player.Chunk.Z, minimum, maximum));
+    }
+
     private static Entity Resolve(EcsWorld world, PersistentEntityId id) =>
         world.TryResolvePersistentEntity(id, out Entity entity)
             ? entity
@@ -897,19 +991,47 @@ public partial class PlayableWorldClient : Node3D
             [GameTerrainMaterialIds.Rock] = Material(new Color(0.32f, 0.34f, 0.31f)),
             [GameTerrainMaterialIds.Snow] = Material(new Color(0.78f, 0.84f, 0.82f)),
         };
-        private readonly BoxMesh _wood = Box(new Vector3(0.75f, 2.5f, 0.75f), new Color(0.24f, 0.14f, 0.07f));
-        private readonly BoxMesh _stone = Box(Vector3.One, new Color(0.34f, 0.36f, 0.34f));
-        private readonly BoxMesh _structure = Box(new Vector3(1f, 2f, 0.35f), new Color(0.42f, 0.27f, 0.13f));
-        private readonly BoxMesh _character = Box(new Vector3(0.65f, 1.8f, 0.65f), new Color(0.82f, 0.55f, 0.18f));
-        private readonly BoxMesh _door = Box(new Vector3(1.1f, 2.1f, 0.22f), new Color(0.36f, 0.18f, 0.07f));
-        private readonly BoxMesh _chest = Box(new Vector3(1.2f, 0.8f, 0.8f), new Color(0.44f, 0.25f, 0.09f));
-        private readonly BoxMesh _animal = Box(new Vector3(1.1f, 1.15f, 0.55f), new Color(0.48f, 0.35f, 0.23f));
+        private readonly Mesh _wood = GroundedBox(
+            new Vector3(0.75f, 4.5f, 0.75f), new Color(0.24f, 0.14f, 0.07f));
+        private readonly Mesh _stone = GroundedBox(
+            Vector3.One, new Color(0.34f, 0.36f, 0.34f));
+        private readonly Mesh _wallEight = GroundedBox(
+            new Vector3(8f, 2.5f, 0.3f), new Color(0.42f, 0.27f, 0.13f));
+        private readonly Mesh _wallSix = GroundedBox(
+            new Vector3(6f, 2.5f, 0.3f), new Color(0.42f, 0.27f, 0.13f));
+        private readonly Mesh _wallThree = GroundedBox(
+            new Vector3(3f, 2.5f, 0.3f), new Color(0.42f, 0.27f, 0.13f));
+        private readonly Mesh _roof = GroundedBox(
+            new Vector3(8.3f, 0.25f, 6.3f), new Color(0.30f, 0.16f, 0.07f, 0.42f), transparent: true);
+        private readonly Mesh _shelf = GroundedBox(
+            new Vector3(0.9f, 1.8f, 0.35f), new Color(0.34f, 0.20f, 0.10f));
+        private readonly Mesh _book = GroundedBox(
+            new Vector3(0.24f, 0.18f, 0.18f), new Color(0.52f, 0.18f, 0.12f));
+        private readonly Mesh _fallbackStructure = GroundedBox(
+            new Vector3(1f, 2f, 0.35f), new Color(0.42f, 0.27f, 0.13f));
+        private readonly Mesh _character = CharacterMesh(new Color(0.82f, 0.55f, 0.18f));
+        private readonly Mesh _door = GroundedBox(
+            new Vector3(1.6f, 2.1f, 0.22f), new Color(0.36f, 0.18f, 0.07f));
+        private readonly Mesh _chest = GroundedBox(
+            new Vector3(1.2f, 0.8f, 0.8f), new Color(0.44f, 0.25f, 0.09f));
+        private readonly Mesh _animal = GroundedBox(
+            new Vector3(1.1f, 1.15f, 0.55f), new Color(0.48f, 0.35f, 0.23f));
 
         public Mesh? ResolveStaticMesh(WorldStaticRenderKey key) => key.DefinitionId switch
         {
             var id when id.Value == GameWorldStaticDefinitionIds.Tree => _wood,
             var id when id.Value == GameWorldStaticDefinitionIds.Rock => _stone,
-            _ => _structure,
+            var id when id.Value == GameWorldStaticDefinitionIds.CabinWall => key.Variant switch
+            {
+                GameWorldStaticVariants.CabinWallEightMeters => _wallEight,
+                GameWorldStaticVariants.CabinWallSixMeters => _wallSix,
+                GameWorldStaticVariants.CabinWallThreeMeters => _wallThree,
+                _ => _fallbackStructure,
+            },
+            var id when id.Value == GameWorldStaticDefinitionIds.CabinRoof => _roof,
+            var id when id.Value == GameWorldStaticDefinitionIds.Shelf => _shelf,
+            var id when id.Value == GameWorldStaticDefinitionIds.Book => _book,
+            _ => _fallbackStructure,
         };
 
         public Mesh? ResolvePublicMesh(uint prefabId) => prefabId switch
@@ -930,10 +1052,77 @@ public partial class PlayableWorldClient : Node3D
             Roughness = 0.95f,
         };
 
-        private static BoxMesh Box(Vector3 size, Color color) => new()
+        private static ArrayMesh GroundedBox(Vector3 size, Color color, bool transparent = false)
         {
-            Size = size,
-            Material = Material(color),
-        };
+            StandardMaterial3D material = Material(color);
+            if (transparent)
+                material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+            var surface = new SurfaceTool();
+            surface.Begin(Mesh.PrimitiveType.Triangles);
+            surface.SetMaterial(material);
+            float x = size.X * 0.5f;
+            float z = size.Z * 0.5f;
+            Vector3 nbl = new(-x, 0f, -z);
+            Vector3 nbr = new(x, 0f, -z);
+            Vector3 nfl = new(-x, 0f, z);
+            Vector3 nfr = new(x, 0f, z);
+            Vector3 tbl = new(-x, size.Y, -z);
+            Vector3 tbr = new(x, size.Y, -z);
+            Vector3 tfl = new(-x, size.Y, z);
+            Vector3 tfr = new(x, size.Y, z);
+            AddQuad(nbl, nbr, nfr, nfl);
+            AddQuad(tbl, tfl, tfr, tbr);
+            AddQuad(nbl, tbl, tbr, nbr);
+            AddQuad(nbr, tbr, tfr, nfr);
+            AddQuad(nfr, tfr, tfl, nfl);
+            AddQuad(nfl, tfl, tbl, nbl);
+            surface.GenerateNormals();
+            return surface.Commit();
+
+            void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+            {
+                surface.AddVertex(a);
+                surface.AddVertex(b);
+                surface.AddVertex(c);
+                surface.AddVertex(a);
+                surface.AddVertex(c);
+                surface.AddVertex(d);
+            }
+        }
+
+        private static ArrayMesh CharacterMesh(Color color)
+        {
+            StandardMaterial3D material = Material(color);
+            material.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
+            var surface = new SurfaceTool();
+            surface.Begin(Mesh.PrimitiveType.Triangles);
+            surface.SetMaterial(material);
+            Vector3 backLeftBottom = new(-0.42f, 0f, -0.42f);
+            Vector3 backRightBottom = new(0.42f, 0f, -0.42f);
+            Vector3 frontBottom = new(0f, 0f, 0.68f);
+            Vector3 backLeftTop = new(-0.42f, 1.8f, -0.42f);
+            Vector3 backRightTop = new(0.42f, 1.8f, -0.42f);
+            Vector3 frontTop = new(0f, 1.8f, 0.68f);
+            AddTriangle(backLeftBottom, frontBottom, backRightBottom);
+            AddTriangle(backLeftTop, backRightTop, frontTop);
+            AddQuad(backLeftBottom, backRightBottom, backRightTop, backLeftTop);
+            AddQuad(backRightBottom, frontBottom, frontTop, backRightTop);
+            AddQuad(frontBottom, backLeftBottom, backLeftTop, frontTop);
+            surface.GenerateNormals();
+            return surface.Commit();
+
+            void AddTriangle(Vector3 a, Vector3 b, Vector3 c)
+            {
+                surface.AddVertex(a);
+                surface.AddVertex(b);
+                surface.AddVertex(c);
+            }
+
+            void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+            {
+                AddTriangle(a, b, c);
+                AddTriangle(a, c, d);
+            }
+        }
     }
 }

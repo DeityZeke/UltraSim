@@ -39,6 +39,18 @@ public static class GameWorldStaticDefinitionIds
     public const uint Book = 6;
 }
 
+/// <summary>
+/// Definition-local presentation variants used by the concrete authored woods/cabin fixture.
+/// These are content semantics rather than renderer slot or engine identities.
+/// </summary>
+public static class GameWorldStaticVariants
+{
+    public const ushort CabinWallEightMeters = 1;
+    public const ushort CabinWallSixMeters = 2;
+    public const ushort CabinWallThreeMeters = 3;
+    public const ushort CabinRoofEightBySixMeters = 1;
+}
+
 /// <summary>Compact public-projection prefab identities admitted by the concrete game.</summary>
 public static class GameWorldPublicPrefabIds
 {

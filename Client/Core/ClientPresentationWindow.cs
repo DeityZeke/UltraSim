@@ -94,10 +94,12 @@ public sealed class ClientPresentationWindow
     private readonly ClientPresentationChange[] _changeScratch;
     private int _activeCount;
     private SpatialChunkKey _center;
+    private SpatialChunkKey _offsetOrigin;
     private ulong _nextPlanToken = 1;
     private ulong _pendingPlanToken;
     private PlanKind _pendingKind;
     private int _pendingCandidateCount;
+    private SpatialChunkKey _pendingOffsetOrigin;
     private ClientPresentationWindowTransition _pendingTransition;
     private bool _pendingWindowChanged;
     private bool _pendingSameCenter;
@@ -159,6 +161,25 @@ public sealed class ClientPresentationWindow
         out int required,
         out ClientPresentationWindowError error)
     {
+        SpatialChunkKey playerChunk = player.ToChunkKey(_space);
+        return TryPlanTrack(
+            player, playerChunk, changes, out plan, out transition, out required, out error);
+    }
+
+    /// <summary>
+    /// Plans a complete presentation window around <paramref name="presentationCenter"/> while
+    /// expressing every retained chunk relative to the player's actual home chunk. The center may
+    /// therefore clamp to a finite authored-world boundary without detaching the viewer origin.
+    /// </summary>
+    public bool TryPlanTrack(
+        in WorldPosition player,
+        SpatialChunkKey presentationCenter,
+        Span<ClientPresentationChange> changes,
+        out ClientPresentationWindowPlan plan,
+        out ClientPresentationWindowTransition transition,
+        out int required,
+        out ClientPresentationWindowError error)
+    {
         EnsureOwner();
         if (_pendingPlanToken != 0)
         {
@@ -169,20 +190,29 @@ public sealed class ClientPresentationWindow
             return false;
         }
 
-        SpatialChunkKey center = player.ToChunkKey(_space);
-        if (_activeCount != 0 && center == _center)
+        SpatialChunkKey offsetOrigin = player.ToChunkKey(_space);
+        if (!presentationCenter.Space.IsValid || presentationCenter.Space != _space ||
+            !offsetOrigin.Space.IsValid || offsetOrigin.Space != _space)
+        {
+            plan = default;
+            transition = default;
+            required = 0;
+            error = ClientPresentationWindowError.InvalidPlayerPosition;
+            return false;
+        }
+        if (_activeCount != 0 && presentationCenter == _center && offsetOrigin == _offsetOrigin)
         {
             transition = new ClientPresentationWindowTransition(
-                center, _activeCount, 0, _activeCount, 0, 0);
+                presentationCenter, _activeCount, 0, _activeCount, 0, 0);
             required = 0;
             plan = BeginPlan(
-                PlanKind.Track, center, _activeCount, transition,
+                PlanKind.Track, presentationCenter, offsetOrigin, _activeCount, transition,
                 windowChanged: false, sameCenter: true);
             error = ClientPresentationWindowError.None;
             return true;
         }
 
-        int candidateCount = FillCandidate(center, out error);
+        int candidateCount = FillCandidate(presentationCenter, offsetOrigin, out error);
         if (candidateCount < 0)
         {
             plan = default;
@@ -195,7 +225,7 @@ public sealed class ClientPresentationWindow
             out int entered, out int retained, out int moved, out int exited);
         required = changeCount;
         transition = new ClientPresentationWindowTransition(
-            center, candidateCount, entered, retained, moved, exited);
+            presentationCenter, candidateCount, entered, retained, moved, exited);
         if (changes.Length < changeCount)
         {
             plan = default;
@@ -205,8 +235,9 @@ public sealed class ClientPresentationWindow
 
         _changeScratch.AsSpan(0, changeCount).CopyTo(changes);
         plan = BeginPlan(
-            PlanKind.Track, center, candidateCount, transition,
-            windowChanged: _activeCount == 0 || _center != center,
+            PlanKind.Track, presentationCenter, offsetOrigin, candidateCount, transition,
+            windowChanged: _activeCount == 0 || _center != presentationCenter ||
+                _offsetOrigin != offsetOrigin,
             sameCenter: false);
         error = ClientPresentationWindowError.None;
         return true;
@@ -256,7 +287,7 @@ public sealed class ClientPresentationWindow
                 default);
         }
         plan = BeginPlan(
-            PlanKind.Reset, center, 0, transition,
+            PlanKind.Reset, center, center, 0, transition,
             windowChanged: true, sameCenter: false);
         error = ClientPresentationWindowError.None;
         return true;
@@ -278,6 +309,7 @@ public sealed class ClientPresentationWindow
                         .Clear();
                 _activeCount = _pendingCandidateCount;
                 _center = _pendingTransition.CenterChunk;
+                _offsetOrigin = _pendingOffsetOrigin;
             }
             if (_pendingSameCenter) _sameCenterFastPaths++;
             if (_pendingWindowChanged)
@@ -293,6 +325,7 @@ public sealed class ClientPresentationWindow
             _active.AsSpan(0, _activeCount).Clear();
             _activeCount = 0;
             _center = _pendingTransition.CenterChunk;
+            _offsetOrigin = _pendingOffsetOrigin;
             _transitions++;
             _resets++;
             _exited += checked((ulong)_pendingTransition.Exited);
@@ -344,6 +377,7 @@ public sealed class ClientPresentationWindow
     private ClientPresentationWindowPlan BeginPlan(
         PlanKind kind,
         SpatialChunkKey center,
+        SpatialChunkKey offsetOrigin,
         int candidateCount,
         ClientPresentationWindowTransition transition,
         bool windowChanged,
@@ -355,6 +389,7 @@ public sealed class ClientPresentationWindow
         _pendingPlanToken = token;
         _pendingKind = kind;
         _pendingCandidateCount = candidateCount;
+        _pendingOffsetOrigin = offsetOrigin;
         _pendingTransition = transition with { CenterChunk = center };
         _pendingWindowChanged = windowChanged;
         _pendingSameCenter = sameCenter;
@@ -373,6 +408,7 @@ public sealed class ClientPresentationWindow
         _pendingPlanToken = 0;
         _pendingKind = default;
         _pendingCandidateCount = 0;
+        _pendingOffsetOrigin = default;
         _pendingTransition = default;
         _pendingWindowChanged = false;
         _pendingSameCenter = false;
@@ -380,6 +416,7 @@ public sealed class ClientPresentationWindow
 
     private int FillCandidate(
         SpatialChunkKey center,
+        SpatialChunkKey offsetOrigin,
         out ClientPresentationWindowError error)
     {
         if (!center.Space.IsValid || center.Space != _space)
@@ -407,8 +444,8 @@ public sealed class ClientPresentationWindow
                     key,
                     handle,
                     new ClientPresentationOffset(
-                        checked((int)(x - center.Coord.X)),
-                        checked((int)(z - center.Coord.Z))));
+                        checked((int)(x - offsetOrigin.Coord.X)),
+                        checked((int)(z - offsetOrigin.Coord.Z))));
             }
         }
         error = ClientPresentationWindowError.None;

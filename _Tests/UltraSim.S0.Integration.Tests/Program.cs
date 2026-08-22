@@ -18,17 +18,20 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v7";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v9";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
+Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
+Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
 Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
 Run("PlayableDestinationProgressIsCadenceIndependent", PlayableDestinationProgressCadenceMatrix, results);
 Run("LocomotionUpdatesComposeAndSupersede", LocomotionUpdateSemantics, results);
 Run("AuthoritativeRelocationCancelsOperationalLocomotion", AuthoritativeRelocationCancelsLocomotion, results);
+Run("IndependentMoveLookKeepsWorldMovementAndFacingSeparate", IndependentMoveLookKeepsWorldMovementAndFacingSeparate, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
@@ -189,13 +192,27 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
             "The actor continued moving after Direct intent was released.");
 
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
-            (world, generationId, game) => game.WorldActions.MoveItemToNearbyContainer(
-                world, game.WorldState, game.Inventory,
-                ResolveInWorld(world, entities.PlayerId),
-                ResolveInWorld(world, entities.BreadId),
-                ResolveInWorld(world, entities.BackpackId),
-                ResolveInWorld(world, entities.CabinChestId),
-                out _),
+            (world, generationId, game) =>
+            {
+                Entity player = ResolveInWorld(world, entities.PlayerId);
+                WorldPosition chest = GamePlayableWorld.ChestPosition;
+                Expect(WorldPosition.TryFromGlobalMillimeters(
+                        chest.GlobalXMillimeters - 500,
+                        chest.YMillimeters,
+                        chest.GlobalZMillimeters - 1_500,
+                        out WorldPosition nearby) &&
+                    game.WorldActions.RelocateActor(
+                        world, game.WorldState, player, nearby, out _) ==
+                        GameWorldActionStatus.Accepted,
+                    "The player could not approach the cabin chest after the timed boundary walk.");
+                return game.WorldActions.MoveItemToNearbyContainer(
+                    world, game.WorldState, game.Inventory,
+                    player,
+                    ResolveInWorld(world, entities.BreadId),
+                    ResolveInWorld(world, entities.BackpackId),
+                    ResolveInWorld(world, entities.CabinChestId),
+                    out _);
+            },
             out GameWorldActionStatus chestStatus) && chestStatus == GameWorldActionStatus.Accepted,
             "The nearby cabin-chest transfer was rejected.");
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
@@ -372,6 +389,192 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
     finally
     {
         if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static TestMetrics PlayableCabinHasCanonicalRectangularShell()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var fragments = new List<WorldMultiFragmentRecord>(6);
+    for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
+    {
+        for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
+        {
+            var key = new SpatialChunkKey(GameWorldState.DefaultSpace, x, z);
+            if (!pack.TryGetMultiFragments(key, out WorldMultiFragmentChunkView chunk))
+                continue;
+            for (int index = 0; index < chunk.Count; index++)
+            {
+                WorldMultiFragmentRecord record = chunk.GetRecord(index);
+                if (record.MultiId == new MultiInstanceId(1))
+                    fragments.Add(record);
+            }
+        }
+    }
+
+    Expect(fragments.Count == 6,
+        $"The authored cabin did not have five wall pieces plus one roof: {fragments.Count}.");
+    WorldMultiFragmentRecord north = Piece(1);
+    WorldMultiFragmentRecord west = Piece(2);
+    WorldMultiFragmentRecord east = Piece(3);
+    WorldMultiFragmentRecord southWest = Piece(4);
+    WorldMultiFragmentRecord southEast = Piece(5);
+    WorldMultiFragmentRecord roof = Piece(6);
+
+    Expect(north.Variant == GameWorldStaticVariants.CabinWallEightMeters &&
+        north.Bounds.MinimumXMillimeters == 12_000 &&
+        north.Bounds.MaximumXExclusiveMillimeters == 20_001 &&
+        north.Bounds.MinimumZMillimeters == 14_850 &&
+        north.Bounds.MaximumZExclusiveMillimeters == 15_151,
+        "The north cabin wall is not one thin eight-metre rectangle.");
+    Expect(west.Variant == GameWorldStaticVariants.CabinWallSixMeters &&
+        west.Orientation == WorldYaw.QuarterTurn &&
+        west.Bounds.MinimumXMillimeters == 11_850 &&
+        west.Bounds.MaximumXExclusiveMillimeters == 12_151 &&
+        west.Bounds.MinimumZMillimeters == 9_000 &&
+        west.Bounds.MaximumZExclusiveMillimeters == 15_001,
+        "The west cabin wall is not one thin six-metre rectangle.");
+    Expect(east.Variant == GameWorldStaticVariants.CabinWallSixMeters &&
+        east.Orientation == WorldYaw.QuarterTurn &&
+        east.Bounds.MinimumXMillimeters == 19_850 &&
+        east.Bounds.MaximumXExclusiveMillimeters == 20_151,
+        "The east cabin wall is not the matching thin rectangle.");
+    Expect(southWest.Variant == GameWorldStaticVariants.CabinWallThreeMeters &&
+        southEast.Variant == GameWorldStaticVariants.CabinWallThreeMeters &&
+        southWest.Bounds.MaximumXExclusiveMillimeters == 15_001 &&
+        southEast.Bounds.MinimumXMillimeters == 17_000,
+        "The south wall does not preserve the authored two-metre doorway gap.");
+    Expect((roof.Flags & WorldStaticFlags.Collidable) == 0 &&
+        roof.Position.YMillimeters >= north.Bounds.MaximumYExclusiveMillimeters,
+        "The presentation roof blocks the standing actor volume.");
+
+    string canonical = string.Join('|', fragments.OrderBy(static row => row.PieceId.Value)
+        .Select(static row => $"{row.PieceId.Value}:{row.DefinitionId.Value}:{row.Variant}:" +
+            $"{row.Orientation.Units}:{row.Flags}:" +
+            $"{row.Bounds.MinimumXMillimeters}:{row.Bounds.MinimumYMillimeters}:{row.Bounds.MinimumZMillimeters}:" +
+            $"{row.Bounds.MaximumXExclusiveMillimeters}:{row.Bounds.MaximumYExclusiveMillimeters}:" +
+            $"{row.Bounds.MaximumZExclusiveMillimeters}"));
+    return new TestMetrics(
+        HashText(canonical),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Authored cabin is a canonical 8m x 6m thin-wall Multi with a 2m south doorway and non-blocking overhead roof.");
+
+    WorldMultiFragmentRecord Piece(uint id) => fragments.Single(
+        row => row.PieceId == new MultiPieceId(id));
+}
+
+static TestMetrics PlayableAuthorityBlocksCabinDoorWallsAndChest()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1050))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x1050));
+    Expect(entered.IsEntered, "The collision actor could not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+        (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+        out GamePlayableWorldEntities entities),
+        "The collision fixture could not populate.");
+    host.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+
+    Send(GameLocomotionUpdate.CreateDirect(0, GamePlayerCommand.MaximumAxisMagnitude));
+    for (int step = 0; step < 30; step++) host.Tick();
+    WorldPosition closedDoorStop = link.ReadPosition();
+    Expect(closedDoorStop.GlobalXMillimeters == GamePlayableWorld.DoorPosition.GlobalXMillimeters - 500 &&
+        closedDoorStop.GlobalZMillimeters == 8_500 && ReadActiveLocomotionCount(runtime.Game) == 1,
+        $"The closed cabin door did not block retained Direct: {closedDoorStop}.");
+
+    GamePlayerCommandResult opened = Send(
+        GameLocomotionUpdate.Unchanged,
+        GamePlayerActions.Interact,
+        entities.CabinDoorId);
+    Expect(opened.Interaction == GameWorldActionStatus.Accepted && opened.DoorIsOpen,
+        "The blocked actor could not open the nearby cabin door.");
+    for (int step = 0; step < 12; step++) host.Tick();
+    WorldPosition throughDoor = link.ReadPosition();
+    Expect(throughDoor.GlobalZMillimeters > 9_100,
+        $"The open cabin door remained an authoritative blocker: {throughDoor}.");
+
+    Stop();
+    Relocate(16_000, 12_000);
+    Send(GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MinimumAxisMagnitude, 0));
+    for (int step = 0; step < 50; step++) host.Tick();
+    WorldPosition wallStop = link.ReadPosition();
+    Expect(wallStop.GlobalXMillimeters == 12_500 &&
+        wallStop.GlobalZMillimeters == 12_000 && ReadActiveLocomotionCount(runtime.Game) == 1,
+        $"The west cabin Multi wall did not block retained Direct: {wallStop}.");
+
+    Stop();
+    Relocate(16_000, 12_000);
+    Send(GameLocomotionUpdate.CreateDestination(10_000, 12_000));
+    for (int step = 0; step < 60 && ReadActiveLocomotionCount(runtime.Game) != 0; step++)
+        host.Tick();
+    WorldPosition destinationStop = link.ReadPosition();
+    Expect(destinationStop.GlobalXMillimeters == 12_500 &&
+        ReadActiveLocomotionCount(runtime.Game) == 0,
+        $"A blocked straight-line Destination did not stop at the cabin wall: {destinationStop}.");
+
+    Relocate(18_000, 10_500);
+    Send(GameLocomotionUpdate.CreateDirect(0, GamePlayerCommand.MaximumAxisMagnitude));
+    for (int step = 0; step < 30; step++) host.Tick();
+    WorldPosition chestStop = link.ReadPosition();
+    Expect(chestStop.GlobalXMillimeters == 18_000 &&
+        chestStop.GlobalZMillimeters == 11_200,
+        $"The public cabin chest did not block retained Direct: {chestStop}.");
+
+    return new TestMetrics(
+        HashText($"{closedDoorStop}|{throughDoor}|{wallStop}|{destinationStop}|{chestStop}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Authority collision uses prepared static/Multi bounds plus concrete closed-door/chest bounds; open door passes, Direct remains held, blocked straight Destination retires.",
+        InputCommands: input.Snapshot().CommandsProduced);
+
+    GamePlayerCommandResult Send(
+        in GameLocomotionUpdate locomotion,
+        GamePlayerActions held = GamePlayerActions.None,
+        PersistentEntityId target = default)
+    {
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(locomotion, held, true),
+                out GamePlayerCommand command),
+            $"The collision {locomotion.Kind} command could not be formed.");
+        GamePlayerCommandResult result = link.ApplyCommand(command, target);
+        Expect(result.WasAdmitted &&
+            result.Locomotion is GameWorldActionStatus.Accepted or GameWorldActionStatus.NotRequested,
+            $"The collision {locomotion.Kind} command was not admitted.");
+        return result;
+    }
+
+    void Stop()
+    {
+        GamePlayerCommandResult stopped = Send(GameLocomotionUpdate.Stop);
+        Expect(stopped.Locomotion == GameWorldActionStatus.Accepted &&
+            ReadActiveLocomotionCount(runtime.Game) == 0,
+            "The collision actor could not stop retained locomotion.");
+    }
+
+    void Relocate(long globalX, long globalZ)
+    {
+        Expect(WorldPosition.TryFromGlobalMillimeters(globalX, 1_000, globalZ, out WorldPosition requested) &&
+            runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, generationId, game) => game.WorldActions.RelocateActor(
+                    world,
+                    game.WorldState,
+                    ResolveInWorld(world, entities.PlayerId),
+                    requested,
+                    out _),
+                out GameWorldActionStatus status) &&
+            status == GameWorldActionStatus.Accepted,
+            $"The collision actor could not relocate to ({globalX},{globalZ}).");
     }
 }
 
@@ -587,12 +790,11 @@ static TestMetrics PlayableDestinationCadenceMatrix()
 
 static TestMetrics PlayableDestinationProgressCadenceMatrix()
 {
-    const long targetX = 37_123;
-    const long targetZ = 31_777;
-    const long expectedOneSecondX = 18_100;
-    const long expectedOneSecondZ = 15_851;
+    const long targetX = 5_123;
+    const long targetZ = 4_777;
     int[] frequencies = [20, 60, 120];
     var observations = new List<string>(frequencies.Length);
+    WorldPosition? oneSecondReference = null;
     ulong commands = 0;
     foreach (int frequency in frequencies)
     {
@@ -636,8 +838,8 @@ static TestMetrics PlayableDestinationProgressCadenceMatrix()
         for (int step = 0; step < frequency; step++)
             host.Tick();
         WorldPosition afterOneSecond = link.ReadPosition();
-        Expect(afterOneSecond.GlobalXMillimeters == expectedOneSecondX &&
-            afterOneSecond.GlobalZMillimeters == expectedOneSecondZ,
+        oneSecondReference ??= afterOneSecond;
+        Expect(afterOneSecond == oneSecondReference.Value,
             $"The {frequency} Hz long Destination diverged after one second: {afterOneSecond}.");
         Expect(ReadActiveLocomotionCount(runtime.Game) == 1,
             $"The {frequency} Hz long Destination arrived before the in-flight observation.");
@@ -885,6 +1087,90 @@ static TestMetrics AuthoritativeRelocationCancelsLocomotion()
             "Successful relocation did not immediately retire retained locomotion.");
         return relocated;
     }
+}
+
+static TestMetrics IndependentMoveLookKeepsWorldMovementAndFacingSeparate()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var runtime = new ServerRuntime(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1800))));
+    runtime.Initialize();
+    runtime.Start();
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(118));
+    Expect(entered.IsEntered, "Independent-move/look participant did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+        (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+        out GamePlayableWorldEntities entities),
+        "Independent-move/look fixture did not populate.");
+    runtime.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    var profile = new IndependentMoveLookProfile();
+    ClientControlWorldPoint east = new(
+        GamePlayableWorld.PlayerStart.GlobalXMillimeters + 10_000,
+        GamePlayableWorld.PlayerStart.GlobalZMillimeters);
+    ClientControlProfileDecision decision = profile.Evaluate(
+        0,
+        -1,
+        GamePlayerActions.None,
+        true,
+        true,
+        east);
+    Expect(decision.Command.Locomotion.Kind == GameLocomotionUpdateKind.Direct &&
+        decision.Command.Locomotion.DirectX == 0 &&
+        decision.Command.Locomotion.DirectZ == GamePlayerCommand.MinimumAxisMagnitude &&
+        decision.LookRequested,
+        "Independent profile did not preserve fixed north movement and separate east look.");
+    Expect(input.TryCreateSemanticCommand(decision.Command, out GamePlayerCommand command) &&
+        link.ApplyCommand(command).Locomotion == GameWorldActionStatus.Accepted,
+        "Independent world-axis movement command was not admitted.");
+
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+        (world, _, game) =>
+        {
+            GameWorldActionStatus status = game.WorldActions.FaceActorToward(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                decision.LookPoint.XMillimeters,
+                decision.LookPoint.ZMillimeters,
+                out WorldYaw ignored);
+            return status;
+        },
+        out GameWorldActionStatus facing) && facing == GameWorldActionStatus.Accepted,
+        "Independent mouse-facing update was not accepted.");
+    runtime.Tick();
+
+    WorldPosition moved = link.ReadPosition();
+    WorldPublicDescriptor descriptor = runtime.Game.TryUseActiveGeneration<
+        IGameGenerationStateProvider, WorldPublicDescriptor>(
+        (world, _, game) => game.WorldState.TryReadPublic(
+            world,
+            ResolveInWorld(world, entities.PlayerId),
+            out WorldPublicDescriptor current)
+                ? current
+                : throw new InvalidOperationException("Player public descriptor was missing."),
+        out WorldPublicDescriptor read)
+        ? read
+        : throw new InvalidOperationException("Independent-facing generation was unavailable.");
+    Expect(moved.GlobalXMillimeters == GamePlayableWorld.PlayerStart.GlobalXMillimeters &&
+        moved.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters - 100,
+        "Facing east rotated fixed-world north movement.");
+    Expect(descriptor.Orientation == WorldYaw.QuarterTurn,
+        $"East-facing yaw was not canonical: {descriptor.Orientation}.");
+
+    return new TestMetrics(
+        HashText($"{moved}|{descriptor.Orientation}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "F3-style fixed-world WASD remains independent from authoritative mouse-facing yaw.",
+        InputCommands: input.Snapshot().CommandsProduced);
 }
 
 static TestMetrics ContradictoryRestoredDoorFailsClosed()

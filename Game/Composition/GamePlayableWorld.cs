@@ -56,6 +56,12 @@ public readonly record struct GamePlayerCommandResult(
 /// </summary>
 public sealed class GameWorldActions
 {
+    private const int ActorCollisionRadiusMillimeters = 300;
+    private const int ActorCollisionHeightMillimeters = 1_800;
+    private const int StaticCollisionCandidateChunks = 16;
+    private const int StaticCollisionHitCapacity = 64;
+    private const int PlayableDynamicBlockerCapacity = 16;
+
     private enum RetainedLocomotionKind : byte
     {
         None = 0,
@@ -85,7 +91,10 @@ public sealed class GameWorldActions
     private readonly long[] _movementRemainderZ;
     private readonly Entity[] _activeLocomotion;
     private readonly int[] _activeLocomotionPositions;
+    private readonly WorldStaticQueryHit[] _staticCollisionHits;
+    private readonly Entity[] _playableDynamicBlockers;
     private int _activeLocomotionCount;
+    private int _playableDynamicBlockerCount;
 
     internal GameWorldActions(EcsWorld world)
     {
@@ -109,12 +118,16 @@ public sealed class GameWorldActions
         _movementRemainderZ = new long[_lastSequences.Length];
         _activeLocomotion = new Entity[_lastSequences.Length];
         _activeLocomotionPositions = new int[_lastSequences.Length];
+        _staticCollisionHits = new WorldStaticQueryHit[StaticCollisionHitCapacity];
+        _playableDynamicBlockers = new Entity[PlayableDynamicBlockerCapacity];
     }
 
     /// <summary>Known fixed backing reserved for control lineage and retained locomotion.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
         ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
-         (sizeof(long) * 8) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)));
+         (sizeof(long) * 8) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)) +
+        (long)_staticCollisionHits.Length * Unsafe.SizeOf<WorldStaticQueryHit>() +
+        (long)_playableDynamicBlockers.Length * Unsafe.SizeOf<Entity>());
 
     public int ActiveLocomotionCount => _activeLocomotionCount;
 
@@ -335,6 +348,11 @@ public sealed class GameWorldActions
             // Direct remains current while this step is blocked by prepared-world bounds.
             return true;
         }
+        if (!CanOccupy(world, worldState, actor, position))
+        {
+            // Direct remains retained while the actor presses against authoritative geometry.
+            return true;
+        }
         SetAuthoritativePosition(world, worldState, actor, position);
         return true;
     }
@@ -371,6 +389,13 @@ public sealed class GameWorldActions
         if (!TryResolveTerrainPosition(worldState, current.YMillimeters, nextX, nextZ, out WorldPosition position))
         {
             // A previously admitted straight-line destination became impossible in prepared truth.
+            ClearLocomotion(index);
+            return false;
+        }
+        if (!CanOccupy(world, worldState, actor, position))
+        {
+            // T0.10 Destination is a straight route. Static obstruction makes that route
+            // impossible and stops it; navigation/pathfinding remains future work.
             ClearLocomotion(index);
             return false;
         }
@@ -412,6 +437,108 @@ public sealed class GameWorldActions
             throw new InvalidOperationException(
                 "A validated controlled actor lost its authoritative Position during locomotion.");
         }
+    }
+
+    private bool CanOccupy(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in WorldPosition position)
+    {
+        WorldStaticBounds actorBounds = ActorBounds(position);
+        if (!worldState.TryQueryStaticBounds(
+                actorBounds,
+                StaticCollisionCandidateChunks,
+                _staticCollisionHits,
+                out int staticCount,
+                out _,
+                out _))
+        {
+            // Expected bounded query pressure fails closed. No partial collision result
+            // is ever interpreted as a clear route.
+            return false;
+        }
+        for (int index = 0; index < staticCount; index++)
+        {
+            if ((_staticCollisionHits[index].Flags & WorldStaticFlags.Collidable) != 0)
+                return false;
+        }
+
+        for (int index = 0; index < _playableDynamicBlockerCount; index++)
+        {
+            Entity blocker = _playableDynamicBlockers[index];
+            if (blocker == actor || !world.IsAlive(blocker) ||
+                !worldState.TryReadPosition(world, blocker, out WorldPosition blockerPosition) ||
+                !worldState.TryReadPublic(world, blocker, out WorldPublicDescriptor descriptor))
+                continue;
+
+            WorldStaticBounds blockerBounds;
+            switch (descriptor.PrefabId)
+            {
+                case GameWorldPublicPrefabIds.CabinDoor:
+                    if (!world.TryRead(blocker, _door, out GameCabinDoorState door) ||
+                        door.IsOpen is not (0 or 1))
+                        return false;
+                    if (door.IsOpen != 0)
+                        continue;
+                    blockerBounds = Bounds(
+                        blockerPosition,
+                        halfExtentX: 800,
+                        halfExtentZ: 110,
+                        height: 2_100);
+                    break;
+                case GameWorldPublicPrefabIds.WorldChest:
+                    blockerBounds = Bounds(
+                        blockerPosition,
+                        halfExtentX: 600,
+                        halfExtentZ: 400,
+                        height: 800);
+                    break;
+                default:
+                    continue;
+            }
+            if (blockerBounds.Intersects(actorBounds))
+                return false;
+        }
+        return true;
+    }
+
+    private static WorldStaticBounds ActorBounds(in WorldPosition position) => Bounds(
+        position,
+        ActorCollisionRadiusMillimeters,
+        ActorCollisionRadiusMillimeters,
+        ActorCollisionHeightMillimeters);
+
+    private static WorldStaticBounds Bounds(
+        in WorldPosition position,
+        int halfExtentX,
+        int halfExtentZ,
+        int height) => new(
+        position.GlobalXMillimeters - halfExtentX,
+        position.YMillimeters,
+        position.GlobalZMillimeters - halfExtentZ,
+        position.GlobalXMillimeters + halfExtentX + 1L,
+        position.YMillimeters + height,
+        position.GlobalZMillimeters + halfExtentZ + 1L);
+
+    internal void RegisterPlayableDynamicBlocker(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity blocker)
+    {
+        EnsureWorld(world, worldState);
+        if (!world.IsAlive(blocker) ||
+            !worldState.TryReadPosition(world, blocker, out _) ||
+            !worldState.TryReadPublic(world, blocker, out WorldPublicDescriptor descriptor) ||
+            descriptor.PrefabId is not (
+                GameWorldPublicPrefabIds.CabinDoor or GameWorldPublicPrefabIds.WorldChest))
+            throw new ArgumentException("The entity is not a supported playable-world blocker.", nameof(blocker));
+        for (int index = 0; index < _playableDynamicBlockerCount; index++)
+            if (_playableDynamicBlockers[index] == blocker)
+                return;
+        if (_playableDynamicBlockerCount >= _playableDynamicBlockers.Length)
+            throw new InvalidOperationException("The bounded playable dynamic-blocker set is full.");
+        _playableDynamicBlockers[_playableDynamicBlockerCount++] = blocker;
     }
 
     private GameWorldActionStatus ToggleCabinDoorCore(
@@ -459,6 +586,49 @@ public sealed class GameWorldActions
         }
         isOpen = false;
         return false;
+    }
+
+    /// <summary>
+    /// Applies an engine-neutral yaw toward one nominated world X/Z point. This is a concrete
+    /// public-facing update for the playable character; locomotion direction remains independent.
+    /// </summary>
+    public GameWorldActionStatus FaceActorToward(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        long targetXMillimeters,
+        long targetZMillimeters,
+        out WorldYaw orientation)
+    {
+        EnsureWorld(world, worldState);
+        orientation = default;
+        if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+            !worldState.TryReadPosition(world, actor, out WorldPosition position) ||
+            !worldState.TryReadPublic(world, actor, out WorldPublicDescriptor descriptor))
+            return GameWorldActionStatus.MissingActor;
+
+        long deltaX = checked(targetXMillimeters - position.GlobalXMillimeters);
+        long deltaZ = checked(targetZMillimeters - position.GlobalZMillimeters);
+        if (deltaX == 0 && deltaZ == 0)
+        {
+            orientation = descriptor.Orientation;
+            return GameWorldActionStatus.Accepted;
+        }
+
+        double turn = Math.Atan2(deltaX, deltaZ) / Math.Tau;
+        if (turn < 0d) turn += 1d;
+        long rounded = (long)Math.Round(
+            turn * WorldYaw.UnitsPerTurn,
+            MidpointRounding.AwayFromZero);
+        orientation = new WorldYaw(unchecked((ushort)rounded));
+        if (descriptor.Orientation == orientation)
+            return GameWorldActionStatus.Accepted;
+        return worldState.TrySetPublic(
+                world,
+                actor,
+                descriptor with { Orientation = orientation })
+            ? GameWorldActionStatus.Accepted
+            : GameWorldActionStatus.InvariantViolation;
     }
 
     /// <summary>
@@ -526,10 +696,16 @@ public sealed class GameWorldActions
     internal void ValidateRestoredDoorConsistency(EcsWorld world, GameWorldState worldState)
     {
         EnsureWorld(world, worldState);
+        _playableDynamicBlockerCount = 0;
         for (uint index = 0; index < (uint)_lastSequences.Length; index++)
         {
-            if (!world.TryGetEntity(index, out Entity entity) ||
-                !world.TryRead(entity, _door, out GameCabinDoorState state))
+            if (!world.TryGetEntity(index, out Entity entity))
+                continue;
+            if (worldState.TryReadPublic(world, entity, out WorldPublicDescriptor publicDescriptor) &&
+                publicDescriptor.PrefabId is
+                    GameWorldPublicPrefabIds.CabinDoor or GameWorldPublicPrefabIds.WorldChest)
+                RegisterPlayableDynamicBlocker(world, worldState, entity);
+            if (!world.TryRead(entity, _door, out GameCabinDoorState state))
                 continue;
             if (state.IsOpen is not (0 or 1) ||
                 !worldState.TryReadPublic(world, entity, out WorldPublicDescriptor descriptor) ||
@@ -723,8 +899,8 @@ public static class GamePlayableWorld
     public const int MaximumChunk = 2;
     public const int ChunkCount = 25;
 
-    public static WorldPosition PlayerStart => FromGlobal(13_500, 12_000);
-    public static WorldPosition DoorPosition => FromGlobal(16_000, 12_000);
+    public static WorldPosition PlayerStart => FromGlobal(15_500, 7_000);
+    public static WorldPosition DoorPosition => FromGlobal(16_000, 9_000);
     public static WorldPosition ChestPosition => FromGlobal(18_000, 12_000);
     public static WorldPosition AnimalPosition => FromGlobal(8_000, 4_000);
 
@@ -788,6 +964,9 @@ public static class GamePlayableWorld
                 world, game.Content.Backpack, player, 8, out Entity backpack) ||
             !game.Inventory.TryCreateItem(world, backpack, game.Content.Bread, 3, out Entity bread))
             throw new InvalidOperationException("The playable inventory could not be created.");
+
+        game.WorldActions.RegisterPlayableDynamicBlocker(world, game.WorldState, door);
+        game.WorldActions.RegisterPlayableDynamicBlocker(world, game.WorldState, chest);
 
         return new GamePlayableWorldEntities(
             player,
@@ -876,26 +1055,50 @@ public static class GamePlayableWorld
         WorldPosition root = FromGlobal(16_000, 12_000);
         WorldMultiPieceSource[] pieces =
         [
-            CabinPiece(1, GameWorldStaticDefinitionIds.CabinWall, 13_000, 9_000, 3_000, 250),
-            CabinPiece(2, GameWorldStaticDefinitionIds.CabinWall, 19_000, 9_000, 3_000, 250),
-            CabinPiece(3, GameWorldStaticDefinitionIds.CabinWall, 13_000, 15_000, 3_000, 250),
-            CabinPiece(4, GameWorldStaticDefinitionIds.CabinWall, 19_000, 15_000, 3_000, 250),
-            CabinPiece(5, GameWorldStaticDefinitionIds.CabinRoof, 15_000, 12_000, 1_500, 3_500),
-            CabinPiece(6, GameWorldStaticDefinitionIds.CabinRoof, 17_000, 12_000, 1_500, 3_500),
+            // North wall and two side walls form a true 8 m x 6 m shell.
+            CabinPiece(1, GameWorldStaticDefinitionIds.CabinWall,
+                16_000, 15_000, 4_000, 150, 2_500,
+                WorldYaw.Zero, GameWorldStaticVariants.CabinWallEightMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            CabinPiece(2, GameWorldStaticDefinitionIds.CabinWall,
+                12_000, 12_000, 150, 3_000, 2_500,
+                WorldYaw.QuarterTurn, GameWorldStaticVariants.CabinWallSixMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            CabinPiece(3, GameWorldStaticDefinitionIds.CabinWall,
+                20_000, 12_000, 150, 3_000, 2_500,
+                WorldYaw.QuarterTurn, GameWorldStaticVariants.CabinWallSixMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            // The south wall is split around a real 2 m doorway centered on the public door.
+            CabinPiece(4, GameWorldStaticDefinitionIds.CabinWall,
+                13_500, 9_000, 1_500, 150, 2_500,
+                WorldYaw.Zero, GameWorldStaticVariants.CabinWallThreeMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            CabinPiece(5, GameWorldStaticDefinitionIds.CabinWall,
+                18_500, 9_000, 1_500, 150, 2_500,
+                WorldYaw.Zero, GameWorldStaticVariants.CabinWallThreeMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            // A translucent presentation roof proves the structural layer but sits above the
+            // actor collision volume, so standing beneath it is not a horizontal obstruction.
+            CabinPiece(6, GameWorldStaticDefinitionIds.CabinRoof,
+                16_000, 12_000, 4_150, 3_150, 250,
+                WorldYaw.Zero, GameWorldStaticVariants.CabinRoofEightBySixMeters,
+                WorldStaticFlags.Renderable, verticalOffset: 2_500),
         ];
         if (!builder.TryAddStaticMulti(new MultiInstanceId(1), root, WorldYaw.Zero, pieces,
                 out WorldPackBuildError multiError))
             throw new InvalidOperationException($"Authored cabin Multi failed: {multiError}.");
 
         WorldPosition shelf = FromGlobal(18_500, 14_000);
-        WorldPosition book = FromGlobal(18_500, 13_500);
+        WorldPosition book = WithVerticalOffset(FromGlobal(18_500, 14_000), 1_800);
         if (!builder.TryAddFrozenStatic(new WorldFrozenStaticSource(
                 new WorldStaticId(10_001), new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Shelf),
                 shelf, WorldYaw.QuarterTurn, 0,
-                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable, Bounds(shelf, 450, 1_800)), out _) ||
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
+                Bounds(shelf, 175, 450, 1_800)), out _) ||
             !builder.TryAddFrozenStatic(new WorldFrozenStaticSource(
                 new WorldStaticId(10_002), new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Book),
-                book, WorldYaw.Zero, 0, WorldStaticFlags.Renderable, Bounds(book, 120, 180)), out _))
+                book, WorldYaw.Zero, 0, WorldStaticFlags.Renderable,
+                Bounds(book, 120, 90, 180)), out _))
             throw new InvalidOperationException("Authored cabin decor failed.");
     }
 
@@ -904,18 +1107,26 @@ public static class GamePlayableWorld
         uint definitionId,
         long globalX,
         long globalZ,
-        int halfWidth,
-        int height)
+        int halfExtentX,
+        int halfExtentZ,
+        int height,
+        WorldYaw orientation,
+        ushort variant,
+        WorldStaticFlags flags,
+        int verticalOffset = 0)
     {
-        WorldPosition position = FromGlobal(globalX, globalZ);
+        WorldPosition ground = FromGlobal(globalX, globalZ);
+        WorldPosition position = verticalOffset == 0
+            ? ground
+            : WithVerticalOffset(ground, verticalOffset);
         return new WorldMultiPieceSource(
             new MultiPieceId(pieceId),
             new WorldStaticDefinitionId(definitionId),
             position,
-            WorldYaw.Zero,
-            0,
-            WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
-            Bounds(position, halfWidth, height));
+            orientation,
+            variant,
+            flags,
+            Bounds(position, halfExtentX, halfExtentZ, height));
     }
 
     private static WorldPosition FromGlobal(long xMillimeters, long zMillimeters)
@@ -930,6 +1141,17 @@ public static class GamePlayableWorld
         return position;
     }
 
+    private static WorldPosition WithVerticalOffset(in WorldPosition position, int offset)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(
+                position.GlobalXMillimeters,
+                checked(position.YMillimeters + offset),
+                position.GlobalZMillimeters,
+                out WorldPosition elevated))
+            throw new InvalidOperationException("Authored fixture height is outside the world profile.");
+        return elevated;
+    }
+
     private static WorldStaticBounds Bounds(in WorldPosition position, int halfWidth, int height) => new(
         position.GlobalXMillimeters - halfWidth,
         position.YMillimeters,
@@ -937,4 +1159,16 @@ public static class GamePlayableWorld
         position.GlobalXMillimeters + halfWidth + 1L,
         position.YMillimeters + height,
         position.GlobalZMillimeters + halfWidth + 1L);
+
+    private static WorldStaticBounds Bounds(
+        in WorldPosition position,
+        int halfExtentX,
+        int halfExtentZ,
+        int height) => new(
+        position.GlobalXMillimeters - halfExtentX,
+        position.YMillimeters,
+        position.GlobalZMillimeters - halfExtentZ,
+        position.GlobalXMillimeters + halfExtentX + 1L,
+        position.YMillimeters + height,
+        position.GlobalZMillimeters + halfExtentZ + 1L);
 }

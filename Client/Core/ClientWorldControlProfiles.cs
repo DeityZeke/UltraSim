@@ -241,25 +241,46 @@ public sealed class ThirdPersonDirectProfile
     }
 }
 
-/// <summary>Crude proof that movement and look can be produced independently in Client Core.</summary>
+/// <summary>
+/// Fixed-world-axis Direct producer with an independent nominated look point. Movement never
+/// rotates with either camera or facing: negative Z remains north even while the actor faces south.
+/// </summary>
 public sealed class IndependentMoveLookProfile
 {
-    private readonly ThirdPersonDirectProfile _movement = new();
+    private bool _active;
 
-    public void Reset() => _movement.Reset();
+    public void Reset() => _active = false;
 
     public ClientControlProfileDecision Evaluate(
         float moveX,
         float moveZ,
         GamePlayerActions heldActions,
         bool hasFocus,
-        in ClientHorizontalCameraBasis basis,
         bool lookPointValid,
         in ClientControlWorldPoint lookPoint)
     {
-        GameLocomotionUpdate locomotion = hasFocus
-            ? _movement.Evaluate(moveX, moveZ, basis)
-            : GameLocomotionUpdate.Stop;
+        if (!ClientWorldInputMath.TryCreateDirect(moveX, moveZ, out GameLocomotionUpdate sampled))
+            throw new ArgumentException("A finite world-axis movement sample is required.");
+        GameLocomotionUpdate locomotion;
+        if (!hasFocus)
+        {
+            locomotion = _active ? GameLocomotionUpdate.Stop : GameLocomotionUpdate.Unchanged;
+            _active = false;
+        }
+        else if (sampled.Kind == GameLocomotionUpdateKind.Direct)
+        {
+            _active = true;
+            locomotion = sampled;
+        }
+        else if (_active)
+        {
+            _active = false;
+            locomotion = GameLocomotionUpdate.Stop;
+        }
+        else
+        {
+            locomotion = GameLocomotionUpdate.Unchanged;
+        }
         return new ClientControlProfileDecision(
             new ClientWorldCommandIntent(
                 locomotion,

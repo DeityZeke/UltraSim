@@ -212,19 +212,19 @@ static class ClientWorldInputTests
         Assert.Equal(GameLocomotionUpdateKind.Stop, thirdPerson.Evaluate(0, 0, rotated).Kind);
 
         var independent = new IndependentMoveLookProfile();
-        ClientControlWorldPoint eastLook = new(9_000, 0);
+        ClientControlWorldPoint southLook = new(0, 9_000);
         ClientControlProfileDecision split = independent.Evaluate(
-            -1,
             0,
+            -1,
             GamePlayerActions.None,
             true,
-            ClientHorizontalCameraBasis.WorldAxes,
             true,
-            eastLook);
+            southLook);
         Assert.Equal(GameLocomotionUpdateKind.Direct, split.Command.Locomotion.Kind);
-        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, split.Command.Locomotion.DirectX);
+        Assert.Equal((short)0, split.Command.Locomotion.DirectX);
+        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, split.Command.Locomotion.DirectZ);
         Assert.True(split.LookRequested);
-        Assert.Equal(eastLook, split.LookPoint);
+        Assert.Equal(southLook, split.LookPoint);
     }
 
     private static void InvalidSamplesAndCrossThreadUseFailClosed()

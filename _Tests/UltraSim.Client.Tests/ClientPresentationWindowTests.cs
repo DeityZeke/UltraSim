@@ -99,6 +99,33 @@ internal static class ClientPresentationWindowTests
         Equal(9, backend.MaximumDesiredObserved);
         AssertEquivalent();
 
+        // A finite authored world may clamp structural membership inward while the player and
+        // camera continue through the boundary chunk. Membership stays centered on (1,1), but
+        // every presentation offset remains relative to the actual player home at (2,2).
+        SpatialChunkKey edgeCenter = ClientWorldSemanticCacheTests.Key(1, 1);
+        WorldPosition edgePlayer = Position(2, 2, 15_000, 14_000);
+        True(window.TryPlanTrack(edgePlayer, edgeCenter, changes,
+            out ClientPresentationWindowPlan edgePlan,
+            out ClientPresentationWindowTransition edgeTransition,
+            out int edgeRequired,
+            out error));
+        Equal(edgeCenter, edgeTransition.CenterChunk);
+        True(backend.TryAccept(changes.AsSpan(0, edgeRequired)));
+        window.Commit(edgePlan);
+        True(window.TryCopyBindings(bindings, out int edgeCount, out _));
+        Equal(9, edgeCount);
+        ClientPresentationBinding playerHome = bindings.Single(
+            binding => binding.Key == ClientWorldSemanticCacheTests.Key(2, 2));
+        ClientPresentationBinding inwardCorner = bindings.Single(
+            binding => binding.Key == ClientWorldSemanticCacheTests.Key(0, 0));
+        Equal(new ClientPresentationOffset(0, 0), playerHome.Offset);
+        Equal(new ClientPresentationOffset(-2, -2), inwardCorner.Offset);
+        ClientPresentationWindowSnapshot beforeEdgeLocal = window.GetSnapshot();
+        TrackCentered(Position(2, 2, 15_500, 14_500), edgeCenter);
+        ClientPresentationWindowSnapshot afterEdgeLocal = window.GetSnapshot();
+        Equal(beforeEdgeLocal.CandidateKeyLookups, afterEdgeLocal.CandidateKeyLookups);
+        Equal(beforeEdgeLocal.SameCenterFastPaths + 1, afterEdgeLocal.SameCenterFastPaths);
+
         for (int warm = 0; warm < 8; warm++)
             PlanAndCommit((warm & 1) == 0 ? Position(0, -1) : Position(-1, -1));
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
@@ -113,8 +140,13 @@ internal static class ClientPresentationWindowTests
             ushort localZ = 0) => new(chunkX, chunkZ, localX, localZ, 0);
 
         ClientPresentationWindowTransition Track(WorldPosition player)
+            => TrackCentered(player, player.ToChunkKey(cache.BaseWorld.Space));
+
+        ClientPresentationWindowTransition TrackCentered(
+            WorldPosition player,
+            SpatialChunkKey presentationCenter)
         {
-            True(window.TryPlanTrack(player, changes,
+            True(window.TryPlanTrack(player, presentationCenter, changes,
                 out ClientPresentationWindowPlan plan,
                 out ClientPresentationWindowTransition transition,
                 out int required,

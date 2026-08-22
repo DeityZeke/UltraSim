@@ -1,5 +1,6 @@
 using UltraSim.Client.Core;
 using UltraSim.Game.World;
+using UltraSim.Spatial;
 
 namespace UltraSim.Client.Godot;
 
@@ -13,6 +14,7 @@ public sealed class GodotSlidingRenderWindow
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly ClientPresentationWindow _window;
     private readonly GodotWorldRenderer _renderer;
+    private readonly SpatialSpaceId _space;
 
     public GodotSlidingRenderWindow(
         ClientWorldSemanticCache cache,
@@ -21,6 +23,7 @@ public sealed class GodotSlidingRenderWindow
     {
         ArgumentNullException.ThrowIfNull(cache);
         _renderer = renderer ?? throw new ArgumentNullException(nameof(renderer));
+        _space = cache.BaseWorld.Space;
         _window = new ClientPresentationWindow(cache, renderRadiusChunks);
         if (_window.MaximumActiveChunks > renderer.Limits.MaximumRenderChunks)
             throw new ArgumentOutOfRangeException(nameof(renderRadiusChunks),
@@ -46,9 +49,32 @@ public sealed class GodotSlidingRenderWindow
         out ClientPresentationWindowError error,
         out GodotWorldRenderQueueError rendererError)
     {
+        return TryTrackPlayer(
+            player,
+            player.ToChunkKey(_space),
+            changes,
+            out transition,
+            out required,
+            out error,
+            out rendererError);
+    }
+
+    /// <summary>
+    /// Tracks the continuous player origin while allowing finite-world composition to clamp the
+    /// complete structural presentation window to a different center chunk.
+    /// </summary>
+    public bool TryTrackPlayer(
+        in WorldPosition player,
+        SpatialChunkKey presentationCenter,
+        Span<ClientPresentationChange> changes,
+        out ClientPresentationWindowTransition transition,
+        out int required,
+        out ClientPresentationWindowError error,
+        out GodotWorldRenderQueueError rendererError)
+    {
         EnsureOwner();
         if (!_window.TryPlanTrack(
-                player, changes, out ClientPresentationWindowPlan plan,
+                player, presentationCenter, changes, out ClientPresentationWindowPlan plan,
                 out transition, out required, out error))
         {
             rendererError = GodotWorldRenderQueueError.None;
