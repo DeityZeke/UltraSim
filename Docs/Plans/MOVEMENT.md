@@ -648,7 +648,7 @@ OrbitCommand
     hold steer
     cancel without destination
     double-click destination
-    optional WASD direct
+    no WASD locomotion
     actor reaches/stops as expected
 
 ThirdPersonDirect
@@ -872,7 +872,7 @@ reason to give the adapter authority dependencies. It starts the real local
 and realizes them through `GodotWorldRenderer`.
 
 The actual application InputMap is configured. `OrbitCommandProfile` in Client
-Core owns camera-relative WASD plus the mouse grammar:
+Core owns the mouse grammar:
 
 ```text
 single click             selection only
@@ -885,7 +885,8 @@ double click             one Destination nomination
 Godot owns physical event capture, screen-ray construction, and `Camera3D`.
 Core owns hold/double-click state, world-direction formation, profile policy,
 and sequencing. Game still receives no camera, key, screen, or profile values.
-The crude `ThirdPersonDirectProfile` rotates camera-relative forward into world
+The launchable OrbitCommand mode is mouse-only. The crude
+`ThirdPersonDirectProfile` owns WASD and rotates camera-relative forward into world
 Direct, while `IndependentMoveLookProfile` produces a separate look point from
 its movement direction. The latter remains a seam proof; authoritative facing
 has not yet been earned by gameplay.
@@ -911,6 +912,22 @@ The launchable project has a headless native startup smoke, but T0.10 remains
 active until human acceptance and the broad performance/evidence matrix are
 recorded. Network N1 and the legacy remote `InputVelocity` path are unchanged;
 N1 must deliberately bind the new command/control-epoch semantics later.
+
+Human launch review found and corrected three presentation seams before freeze:
+
+- the engine-neutral upward terrain triangles are reversed only in the Godot
+  adapter because Godot front faces use clockwise winding;
+- profile switching now realizes visibly distinct overhead/third-person/
+  independent camera distances and atomically stops prior locomotion;
+- the OfflineDirect snapshot bridge compares every resident semantic hash
+  before/after the complete polling transaction, so cross-chunk public identity
+  supersession refreshes both old and new public layers rather than leaving a
+  stale character `MultiMesh` ghost.
+
+The native terrain gate now inspects every face of one generated mesh for Godot
+front-face winding. The launch smoke switches all three cameras and moves the
+controlled public identity across a chunk boundary and back, asserting exactly
+one presented character at each point.
 
 ## T0.10 real-client requirement
 

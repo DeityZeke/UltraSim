@@ -268,6 +268,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
         GodotWorldRendererSnapshot initialRender = renderer.GetSnapshot();
         Expect(initialRender.ActiveRenderChunks == 9 && initialRender.CompletedBuilds == 9,
             "The authored terrain/static/Multi/public window did not render.");
+        ValidateGodotTerrainFrontFaces(renderer.Root);
         Expect(initialRender.ActiveNodes < 9 * TerrainChunkFormat.MaterialCellCount,
             "The playable renderer created cell-shaped scene-tree identity.");
 
@@ -418,6 +419,30 @@ public partial class T010PlayableWorldAcceptance : Node3D
             orientation,
             WorldPublicStateFlags.Visible,
             new ChunkPublicationRevision(revision));
+
+    private static void ValidateGodotTerrainFrontFaces(Node root)
+    {
+        MeshInstance3D? terrain = root.FindChild("BaseTerrain", recursive: true, owned: false)
+            as MeshInstance3D;
+        ArrayMesh? mesh = terrain?.Mesh as ArrayMesh;
+        Expect(mesh is not null && mesh.GetSurfaceCount() != 0,
+            "The native terrain mesh could not be inspected.");
+        if (mesh is null) return;
+        for (int surface = 0; surface < mesh.GetSurfaceCount(); surface++)
+        {
+            using var data = new MeshDataTool();
+            Expect(data.CreateFromSurface(mesh, surface) == Error.Ok && data.GetFaceCount() != 0,
+                "A native terrain surface had no inspectable triangles.");
+            for (int face = 0; face < data.GetFaceCount(); face++)
+            {
+                Vector3 first = data.GetVertex(data.GetFaceVertex(face, 0));
+                Vector3 second = data.GetVertex(data.GetFaceVertex(face, 1));
+                Vector3 third = data.GetVertex(data.GetFaceVertex(face, 2));
+                Expect((second - first).Cross(third - first).Y < 0,
+                    "A Godot terrain triangle was not clockwise when viewed from above.");
+            }
+        }
+    }
 
     private static int Drain(GodotWorldRenderer renderer)
     {

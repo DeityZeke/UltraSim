@@ -3696,8 +3696,8 @@ Camera and physical gesture policy are Client concerns, not Game, Network,
 persistence, Spatial, or world authority. The primary client profile is
 `OrbitCommand`: orbit/zoom, single-click selection without implicit movement,
 hold-to-Direct steering, release-stop, RMB/Escape cancel without creating a
-destination, double-click `Destination`, and optional camera-relative WASD.
-`ThirdPersonDirect` and `IndependentMoveLook` remain deliberately crude
+destination, double-click `Destination`, and no WASD locomotion.
+`ThirdPersonDirect` owns camera-relative WASD; it and `IndependentMoveLook` remain deliberately crude
 portability canaries. Game receives only world-space semantic intent and must
 not know profile identity, camera yaw, Godot input names, or screen coordinates.
 
@@ -3832,12 +3832,13 @@ Client Core semantic state, and Godot presentation.
 
 The application uses the actual authored pack, actual publication snapshots,
 the production `ClientWorldSemanticCache` and `ClientPresentationWindow`, and
-the native renderer. Its configured InputMap feeds the engine-neutral
-`OrbitCommandProfile`: camera-relative WASD, click selection, hold Direct,
+the native renderer. Its configured InputMap feeds the engine-neutral,
+mouse-only `OrbitCommandProfile`: click selection, hold Direct,
 release/RMB/Escape Stop, and double-click Destination. Middle-drag orbit,
 wheel zoom, selected cabin-door use, nearby chest/backpack bread transfer, and
-F5/F9 save/restore are exposed in the scene. F1/F2/F3 select the primary
-OrbitCommand profile or the two crude portability canaries.
+F5/F9 save/restore are exposed in the scene. F1 selects the overhead
+OrbitCommand camera; F2 selects close camera-relative WASD; F3 selects the
+independent move/look proof camera.
 
 The Client Core profiles contain no Godot values. Godot supplies raw button
 edges, focus, a horizontal camera basis, and a nominated ray/world point; Game
@@ -3855,6 +3856,16 @@ framework was introduced.
 T0.10 is not frozen. Manual human acceptance of the launchable controls and the
 broad flat/rough/boundary/dense/static-heavy evidence matrix remain the stop
 gate. Network N1 has not started.
+
+The first human launch exposed three real adapter/bridge defects. Godot's
+clockwise front-face contract now reverses the engine-neutral terrain winding at
+native mesh construction, preventing top-down terrain culling. F1/F2/F3 now
+change concrete camera presentation and stop the outgoing locomotion profile.
+Finally, OfflineDirect polling snapshots resident hashes around the whole
+transaction so cross-chunk public supersession refreshes both affected public
+layers. Native coverage inspects terrain winding, switches all cameras, and
+moves the player public identity across a chunk boundary and back while proving
+the presentation contains exactly one character.
 
 ### T0 performance/evidence matrix
 

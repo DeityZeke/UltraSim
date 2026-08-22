@@ -15,6 +15,10 @@ Expected render/group pressure is rejected before native construction.
 Multi-fragment, and public-prefab groups; terrain cannot bypass the configured
 presentation-pressure bound.
 
+`Game.World` terrain indices use engine-neutral upward mathematical winding.
+Godot front faces are clockwise, so the adapter reverses each triangle when it
+constructs `ArrayMesh` surfaces while preserving the supplied upward normals.
+
 Presentation membership and semantic refresh are separate operations.
 `TryEnterPresentation` is residency-owner work and may reverse a pending
 retirement. `TryQueuePublicRefresh` only refreshes an already desired/rendered

@@ -7,7 +7,7 @@ static class ClientWorldInputTests
     {
         NormalizesAndSequencesWithoutEnginePolicyLeakage();
         SemanticLocomotionUpdatesRemainExplicit();
-        OrbitCommandInterpretsGesturesAndCameraRelativeIntent();
+        OrbitCommandInterpretsMouseGestures();
         ReferenceProfilesKeepMovementAndLookIndependent();
         FocusAndActionEdgesAreCommonClientSemantics();
         InvalidSamplesAndCrossThreadUseFailClosed();
@@ -123,17 +123,10 @@ static class ClientWorldInputTests
         Assert.True(pressedAfterRelease.IsValid);
     }
 
-    private static void OrbitCommandInterpretsGesturesAndCameraRelativeIntent()
+    private static void OrbitCommandInterpretsMouseGestures()
     {
         var profile = new OrbitCommandProfile();
         ClientOrbitCommandSample sample = Sample(timestamp: 0);
-
-        ClientControlProfileDecision forward = profile.Evaluate(sample with { MoveZ = -1 });
-        Assert.Equal(GameLocomotionUpdateKind.Direct, forward.Command.Locomotion.Kind);
-        Assert.Equal((short)0, forward.Command.Locomotion.DirectX);
-        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, forward.Command.Locomotion.DirectZ);
-        ClientControlProfileDecision released = profile.Evaluate(sample with { TimestampMilliseconds = 1 });
-        Assert.Equal(GameLocomotionUpdateKind.Stop, released.Command.Locomotion.Kind);
 
         ClientControlWorldPoint click = new(8_000, 6_000);
         ClientControlProfileDecision selected = profile.Evaluate(sample with
@@ -194,11 +187,8 @@ static class ClientWorldInputTests
         Assert.Equal(GameLocomotionUpdateKind.Stop, steeringReleased.Command.Locomotion.Kind);
 
         static ClientOrbitCommandSample Sample(long timestamp) => new(
-            0,
-            0,
             GamePlayerActions.None,
             true,
-            ClientHorizontalCameraBasis.WorldAxes,
             0,
             0,
             false,

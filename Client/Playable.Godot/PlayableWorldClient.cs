@@ -50,6 +50,7 @@ public partial class PlayableWorldClient : Node3D
     private readonly IndependentMoveLookProfile _independent = new();
     private readonly ClientPresentationChange[] _presentationChanges = new ClientPresentationChange[18];
     private readonly WorldPublicRecord[] _publicRows = new WorldPublicRecord[MaximumPublicRows];
+    private readonly ClientSemanticHash[] _semanticHashesBeforeRefresh = new ClientSemanticHash[25];
     private Camera3D? _camera;
     private Label? _status;
     private Label? _details;
@@ -62,9 +63,10 @@ public partial class PlayableWorldClient : Node3D
     private bool _secondaryPressed;
     private bool _cancelPressed;
     private float _cameraYaw = -0.7f;
-    private float _cameraPitch = 0.75f;
-    private float _cameraDistance = 24f;
+    private float _cameraPitch = 1.12f;
+    private float _cameraDistance = 28f;
     private ControlProfile _profile;
+    private bool _profileStopPending;
     private SelectionKind _selection;
     private string _lastOutcome = "Ready";
     private ulong _saveSequence;
@@ -78,6 +80,8 @@ public partial class PlayableWorldClient : Node3D
             StartFreshWorld();
             _initialized = true;
             SetPhysicsProcess(true);
+            if (OS.GetCmdlineUserArgs().Contains("--smoke", StringComparer.Ordinal))
+                RunLaunchSmokeAcceptance();
             UpdateHud();
             GodotWorldRendererSnapshot render = _renderer?.GetSnapshot() ?? default;
             GD.Print(
@@ -255,14 +259,24 @@ public partial class PlayableWorldClient : Node3D
         in ClientWorldInputSample physical,
         in ClientHorizontalCameraBasis basis)
     {
+        if (_profileStopPending)
+        {
+            _profileStopPending = false;
+            return new ClientControlProfileDecision(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop,
+                    physical.HasFocus ? physical.HeldActions : GamePlayerActions.None,
+                    physical.HasFocus),
+                false,
+                default,
+                false,
+                default);
+        }
         return _profile switch
         {
             ControlProfile.OrbitCommand => _orbit.Evaluate(new ClientOrbitCommandSample(
-                physical.MoveX,
-                physical.MoveZ,
                 physical.HeldActions,
                 physical.HasFocus,
-                basis,
                 _player.GlobalXMillimeters,
                 _player.GlobalZMillimeters,
                 _primaryDown,
@@ -301,9 +315,12 @@ public partial class PlayableWorldClient : Node3D
         if (_runtime is null)
             return;
         GamePlayerCommand admitted = command;
-        bool chestInteraction = _selection == SelectionKind.CabinChest &&
+        bool interactionPressed =
             (command.PressedActions & GamePlayerActions.Interact) != 0;
-        if (chestInteraction)
+        bool chestInteraction = _selection == SelectionKind.CabinChest && interactionPressed;
+        bool unsupportedInteraction = interactionPressed &&
+            _selection is not (SelectionKind.CabinDoor or SelectionKind.CabinChest);
+        if (chestInteraction || unsupportedInteraction)
         {
             admitted = command with
             {
@@ -329,7 +346,11 @@ public partial class PlayableWorldClient : Node3D
                 }, out GamePlayerCommandResult result))
             throw new InvalidOperationException("The OfflineDirect command had no authority generation.");
 
-        if (chestInteraction)
+        if (unsupportedInteraction)
+        {
+            _lastOutcome = "Select the cabin door or chest before using Interact";
+        }
+        else if (chestInteraction)
         {
             GameWorldActionStatus chest = ToggleBreadContainer();
             _lastOutcome = chest == GameWorldActionStatus.Accepted
@@ -408,13 +429,26 @@ public partial class PlayableWorldClient : Node3D
     {
         if (_cache is null || _renderer is null)
             return false;
+        int semanticIndex = 0;
         for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
         {
             for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
             {
                 SpatialChunkKey key = ChunkKey(x, z);
                 if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
-                    !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo before))
+                    !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info))
+                    return false;
+                _semanticHashesBeforeRefresh[semanticIndex++] = info.SemanticHash;
+            }
+        }
+
+        semanticIndex = 0;
+        for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
+        {
+            for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
+            {
+                SpatialChunkKey key = ChunkKey(x, z);
+                if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
                     return false;
                 ChunkPublicationReadStatus status = publications.TryCopySnapshot(
                     key, _publicRows, out ChunkPublicationBatch batch);
@@ -422,10 +456,25 @@ public partial class PlayableWorldClient : Node3D
                     ? _cache.TryApplySnapshot(handle, batch, _publicRows.AsSpan(0, batch.Count), out _)
                     : status == ChunkPublicationReadStatus.ChunkAbsent &&
                         _cache.TryApplyChunkAbsent(handle, publications.Epoch, batch, out _);
-                if (!applied || !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo after))
+                if (!applied)
                     return false;
-                if (after.SemanticHash != before.SemanticHash)
+            }
+        }
+
+        // Applying one snapshot can supersede the same public identity in a different resident
+        // chunk. Compare the complete resident set after the transaction so both the old and new
+        // presentation layers are refreshed; checking only the currently read chunk leaves ghosts.
+        for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
+        {
+            for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
+            {
+                SpatialChunkKey key = ChunkKey(x, z);
+                if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
+                    !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo after))
+                    return false;
+                if (after.SemanticHash != _semanticHashesBeforeRefresh[semanticIndex])
                     _ = _renderer.TryQueuePublicRefresh(handle, out _);
+                semanticIndex++;
             }
         }
         return true;
@@ -571,8 +620,103 @@ public partial class PlayableWorldClient : Node3D
             return;
         _profile = profile;
         _orbit.Reset();
-        _cancelPressed = true;
+        _thirdPerson.Reset();
+        _independent.Reset();
+        _profileStopPending = true;
+        ApplyProfileCameraDefaults();
+        UpdateCamera();
         _lastOutcome = $"Control profile: {profile}";
+    }
+
+    private void RunLaunchSmokeAcceptance()
+    {
+        if (_camera is null || _renderer is null || _runtime is null)
+            throw new InvalidOperationException("The launch smoke started before composition completed.");
+
+        Vector3 orbitCamera = _camera.Position;
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        Vector3 thirdPersonCamera = _camera.Position;
+        SetProfile(ControlProfile.IndependentMoveLook);
+        Vector3 independentCamera = _camera.Position;
+        SetProfile(ControlProfile.OrbitCommand);
+        if (!(thirdPersonCamera.Length() < orbitCamera.Length() &&
+            thirdPersonCamera.Y < orbitCamera.Y &&
+            independentCamera.DistanceTo(thirdPersonCamera) > 0.5f &&
+            _camera.Position.DistanceTo(orbitCamera) < 0.001f))
+            throw new InvalidOperationException("Control profile switches did not realize distinct camera modes.");
+
+        int before = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
+        RelocateControlledActor(GamePlayableWorld.ChestPosition);
+        _runtime.Tick();
+        SynchronizeProjection();
+        DrainRenderer();
+        int afterCrossing = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
+        RelocateControlledActor(GamePlayableWorld.PlayerStart);
+        _runtime.Tick();
+        SynchronizeProjection();
+        DrainRenderer();
+        int afterReturn = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
+        if (before != 1 || afterCrossing != 1 || afterReturn != 1)
+            throw new InvalidOperationException(
+                $"Public presentation ghosted across a chunk move: {before}/{afterCrossing}/{afterReturn}.");
+    }
+
+    private void RelocateControlledActor(in WorldPosition requested)
+    {
+        if (_runtime is null)
+            throw new InvalidOperationException("Authority is not available for relocation.");
+        WorldPosition target = requested;
+        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, generationId, game) =>
+                {
+                    GameWorldActionStatus result = game.WorldActions.RelocateActor(
+                        world,
+                        game.WorldState,
+                        Resolve(world, _entities.PlayerId),
+                        target,
+                        out WorldPosition relocated);
+                    _ = generationId;
+                    _ = relocated;
+                    return result;
+                },
+                out GameWorldActionStatus status) || status != GameWorldActionStatus.Accepted)
+            throw new InvalidOperationException($"Launch-smoke relocation failed: {status}.");
+    }
+
+    private int CountPresentedPrefab(uint prefabId)
+    {
+        if (_renderer is null) return 0;
+        string expectedName = $"Public_{prefabId}";
+        int count = 0;
+        Count(_renderer.Root);
+        return count;
+
+        void Count(Node node)
+        {
+            if (node is MultiMeshInstance3D instance && instance.Name == expectedName &&
+                instance.Multimesh is not null)
+                count += instance.Multimesh.InstanceCount;
+            foreach (Node child in node.GetChildren()) Count(child);
+        }
+    }
+
+    private void ApplyProfileCameraDefaults()
+    {
+        switch (_profile)
+        {
+            case ControlProfile.OrbitCommand:
+                _cameraPitch = 1.12f;
+                _cameraDistance = 28f;
+                break;
+            case ControlProfile.ThirdPersonDirect:
+                _cameraPitch = 0.34f;
+                _cameraDistance = 8.5f;
+                break;
+            case ControlProfile.IndependentMoveLook:
+                _cameraPitch = 0.52f;
+                _cameraDistance = 12f;
+                break;
+        }
     }
 
     private void SaveWorld()
@@ -655,8 +799,8 @@ public partial class PlayableWorldClient : Node3D
         stack.AddChild(new Label
         {
             Text = "LMB click select • hold steer • double-click destination • RMB/Esc stop\n" +
-                "WASD direct • MMB drag orbit • wheel zoom • E use selected door/chest\n" +
-                "F1 OrbitCommand • F2 ThirdPersonDirect • F3 IndependentMoveLook • F5 save • F9 load",
+                "MMB drag camera • wheel zoom • E use selected door/chest\n" +
+                "F1 Orbit mouse-command • F2 third-person WASD • F3 independent move/look • F5 save • F9 load",
         });
     }
 

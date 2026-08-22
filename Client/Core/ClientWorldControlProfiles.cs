@@ -26,11 +26,8 @@ public readonly record struct ClientControlWorldPoint(long XMillimeters, long ZM
 /// Core owns hold/double-click/cancel interpretation and produces neutral command intent.
 /// </summary>
 public readonly record struct ClientOrbitCommandSample(
-    float MoveX,
-    float MoveZ,
     GamePlayerActions HeldActions,
     bool HasFocus,
-    ClientHorizontalCameraBasis CameraBasis,
     long ActorXMillimeters,
     long ActorZMillimeters,
     bool PrimaryDown,
@@ -43,9 +40,8 @@ public readonly record struct ClientOrbitCommandSample(
     long TimestampMilliseconds)
 {
     public bool IsValid =>
-        float.IsFinite(MoveX) && float.IsFinite(MoveZ) &&
         (HeldActions & ~GamePlayerCommand.KnownActions) == 0 &&
-        CameraBasis.IsValid && TimestampMilliseconds >= 0;
+        TimestampMilliseconds >= 0;
 }
 
 /// <summary>One profile decision; selection/look remain client semantics adjacent to Game commands.</summary>
@@ -65,7 +61,6 @@ public sealed class OrbitCommandProfile
 
     private bool _primaryCandidate;
     private bool _mouseSteering;
-    private bool _keyboardSteering;
     private bool _suppressRelease;
     private long _primaryStartedAt;
     private ClientControlWorldPoint _primaryStart;
@@ -85,30 +80,12 @@ public sealed class OrbitCommandProfile
 
         if (!sample.HasFocus || sample.SecondaryPressed || sample.CancelPressed)
         {
-            bool wasActive = _mouseSteering || _keyboardSteering || _primaryCandidate;
+            bool wasActive = _mouseSteering || _primaryCandidate;
             ResetPointer();
-            _keyboardSteering = false;
             locomotion = wasActive || sample.SecondaryPressed || sample.CancelPressed
                 ? GameLocomotionUpdate.Stop
                 : GameLocomotionUpdate.Unchanged;
             return Decision(locomotion, false, default, look, sample.PointerWorldPoint, sample);
-        }
-
-        if (TryCameraRelativeDirect(
-                sample.MoveX, sample.MoveZ, sample.CameraBasis, out GameLocomotionUpdate keyboard))
-        {
-            if (keyboard.Kind == GameLocomotionUpdateKind.Direct)
-            {
-                _keyboardSteering = true;
-                _mouseSteering = false;
-                _primaryCandidate = false;
-                locomotion = keyboard;
-            }
-            else if (_keyboardSteering)
-            {
-                _keyboardSteering = false;
-                locomotion = GameLocomotionUpdate.Stop;
-            }
         }
 
         if (sample.PrimaryPressed)
@@ -122,7 +99,6 @@ public sealed class OrbitCommandProfile
                 ResetPointer();
                 _lastTapValid = false;
                 _suppressRelease = true;
-                _keyboardSteering = false;
                 locomotion = GameLocomotionUpdate.CreateDestination(
                     sample.PointerWorldPoint.XMillimeters,
                     sample.PointerWorldPoint.ZMillimeters);
@@ -150,7 +126,6 @@ public sealed class OrbitCommandProfile
                 sample.PointerWorldPoint,
                 out GameLocomotionUpdate pointerDirect))
         {
-            _keyboardSteering = false;
             locomotion = pointerDirect;
         }
 
@@ -183,7 +158,6 @@ public sealed class OrbitCommandProfile
     public void Reset()
     {
         ResetPointer();
-        _keyboardSteering = false;
         _lastTapValid = false;
     }
 
@@ -199,17 +173,6 @@ public sealed class OrbitCommandProfile
             selectionPoint,
             look,
             lookPoint);
-
-    private static bool TryCameraRelativeDirect(
-        float moveX,
-        float moveZ,
-        in ClientHorizontalCameraBasis basis,
-        out GameLocomotionUpdate locomotion)
-    {
-        float worldX = basis.RightX * moveX - basis.ForwardX * moveZ;
-        float worldZ = basis.RightZ * moveX - basis.ForwardZ * moveZ;
-        return ClientWorldInputMath.TryCreateDirect(worldX, worldZ, out locomotion);
-    }
 
     private static bool TryWorldPointDirect(
         long actorX,
@@ -252,6 +215,8 @@ public sealed class ThirdPersonDirectProfile
 {
     private bool _active;
 
+    public void Reset() => _active = false;
+
     public GameLocomotionUpdate Evaluate(
         float moveX,
         float moveZ,
@@ -280,6 +245,8 @@ public sealed class ThirdPersonDirectProfile
 public sealed class IndependentMoveLookProfile
 {
     private readonly ThirdPersonDirectProfile _movement = new();
+
+    public void Reset() => _movement.Reset();
 
     public ClientControlProfileDecision Evaluate(
         float moveX,
