@@ -63,6 +63,7 @@ var tests = new (string Name, Action Body)[]
     ("N14DirtySchedulerSkipsCleanScopesAndFansOutOnce", N1OfflineDirectChunkTests.DirtySchedulerSkipsCleanScopesAndFansOutOnce),
     ("N14StableInterestBudgetSkipsOnlyProvablyUnchangedTopology", N1OfflineDirectChunkTests.StableInterestBudgetSkipsOnlyProvablyUnchangedTopology),
     ("N14StableInterestBudgetMatchesRandomizedExactOracle", N1OfflineDirectChunkTests.StableInterestBudgetMatchesRandomizedExactOracle),
+    ("N14ReconcileAttributionIsExplicitAndDormantByDefault", N1OfflineDirectChunkTests.ReconcileAttributionIsExplicitAndDormantByDefault),
     ("N14DirtySchedulerFencesTopologySourceGapsAndStaleRecipients", N1OfflineDirectChunkTests.DirtySchedulerFencesTopologySourceGapsAndStaleRecipients),
     ("N14DirtySchedulerWarmedWorkDiscoveryAllocatesZero", N1OfflineDirectChunkTests.DirtySchedulerWarmedWorkDiscoveryAllocatesZero),
     ("N14DirtySchedulerDoesNotRescanDeferredCadencePrefix", N1OfflineDirectChunkTests.DirtySchedulerDoesNotRescanDeferredCadencePrefix),

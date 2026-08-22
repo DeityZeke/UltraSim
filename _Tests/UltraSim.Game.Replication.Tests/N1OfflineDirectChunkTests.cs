@@ -388,6 +388,44 @@ internal static class N1OfflineDirectChunkTests
         True(replacementId.Index == id.Index && replacementId.Generation > id.Generation);
     }
 
+    internal static void ReconcileAttributionIsExplicitAndDormantByDefault()
+    {
+        using var fixture = new Fixture(historyCapacity: 16);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(1_024, 8, 8),
+            GameChunkInterestProfile.Default,
+            OfflineDirectChunkCadence.EvidenceProfile);
+        var changes = new OfflineDirectChunkSubscriptionChange[1_024];
+
+        recipient.ResetReconcileAttribution(enabled: true);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_100, 8_000), changes, out _));
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(1, 0, 8_000, 8_000), changes, out _));
+        OfflineDirectChunkReconcileAttribution attributed =
+            recipient.GetReconcileAttribution();
+        True(attributed.Enabled);
+        Equal(2UL, attributed.ExactQueries);
+        Equal(1UL, attributed.StableFastPaths);
+        True(attributed.ExactQueryTicks > 0);
+        True(attributed.NextBankBuildTicks > 0);
+
+        recipient.ResetReconcileAttribution(enabled: false);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(1, 0, 8_100, 8_000), changes, out _));
+        OfflineDirectChunkReconcileAttribution dormant = recipient.GetReconcileAttribution();
+        False(dormant.Enabled);
+        Equal(0UL, dormant.ExactQueries);
+        Equal(0UL, dormant.StableFastPaths);
+        Equal(0UL, dormant.ExactQueryTicks);
+    }
+
     internal static void DirtySchedulerWarmedWorkDiscoveryAllocatesZero()
     {
         using var fixture = new Fixture(historyCapacity: 32);

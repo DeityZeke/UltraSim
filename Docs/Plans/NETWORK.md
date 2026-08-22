@@ -7,9 +7,11 @@ N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
 accepted. N1.4 dirty-driven work discovery is accepted at `682fcdcd`; mixed-cadence,
 dirty-density, roaming, and the first 512/768/1024 semantic crossover are now
-captured. N1.4 recipient/scheduler storage compaction is implemented and stopped
-for review. The current-game AOI adoption decision remains open on transition
-tails and the remaining integrated matrix.
+captured. N1.4 recipient/scheduler storage compaction is accepted. The first
+remaining server-semantic, deterministic secure-transport, dense-entry, and
+topology-attribution matrix is captured. The current-game AOI adoption decision
+remains open on realistic topology tails, mixed-private integration, and sharded
+socket evidence.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -1088,6 +1090,68 @@ Evidence:
 [`network-n1.4-storage-compaction-capacity-sensitivity-1024x640-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-capacity-sensitivity-1024x640-2026-08-22.json), and
 [`network-n1.4-storage-compaction-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-2026-08-22.md).
 
+### N1.4 remaining-adoption matrix stop — 2026-08-22
+
+Storage compaction is accepted. The public subscription projection is now a
+non-escaping `ref struct` live view, preserving the old borrowed-lifetime shape.
+Recipient reconciliation also has dormant opt-in phase attribution; normal use
+pays no timestamp cost until evidence explicitly enables it.
+
+The remaining matrix separates evidence levels instead of mixing fake-client CPU
+into a server claim:
+
+```text
+level 1
+    server semantic publication / dirty scheduling / recipient query
+
+level 2
+    secure deterministic protocol replay
+    framing + security + packetization + client apply + application proof
+
+still deferred
+    socket transport and sharded end-to-end clients
+```
+
+The fixed-runtime Dense-400-shaped semantic observation uses 400 distributed
+recipients, 1,000 public entities, 2% dirty entities per authority step, and the
+compacted 640-slot recipient profile. It reports 1.272 ms p95 total server
+semantic work, 1.248 ms p95 scheduling/query, zero measured warmed allocation,
+200,113 retained memberships, and 59,097,920 combined scheduler, recipient, and
+publication reserved bytes. This is encouraging current-game evidence, not a
+controlled full-stack N0/N1 ratio.
+
+The level-2 64-recipient ProtocolLoopback replay reports 2.386 ms p95 for real
+secure protocol, atomic client semantic application, and application proof, with
+zero measured warmed allocation. A 30-populated-chunk town entry at the maximum
+64 public rows per chunk serializes through the intentionally single private
+snapshot candidate and converges in 29.082 ms. It observes 29 expected
+`SnapshotTransferBusy` results and does not justify adding concurrent snapshot
+candidates.
+
+Topology attribution earned two local optimizations without changing the accepted
+interest contract: bounded candidate distance uses exact anchor-relative 64-bit
+math instead of repeated `Int128` point/AABB construction, and an exact query with
+no subscription changes preserves the current bank instead of rebuilding it.
+Changed reconciliation keeps leaves-before-enters while fusing next-bank
+construction with enter/tier-change emission.
+
+The resulting sustained distributed 100 mm movement observation remains just
+outside the existing 4-6 ms server-role usability range at 6.553 ms p95. It runs
+35,478 exact queries and 12,522 stable-budget fast paths across 48,000 recipient
+steps. Synchronized full-chunk cardinal and diagonal jumps remain deliberately
+hostile at 25.490 and 33.615 ms p95; reverse-index mutation, rather than immutable
+storage size, dominates those transition shapes.
+
+Therefore N1.4 work discovery and compact storage remain accepted mechanisms, but
+current-game AOI-profile adoption is not closed. The next evidence must cover a
+representative boundary/corner distribution, mixed public/private service cost,
+and sharded socket clients. Do not run 2,048/4,096 or begin N1.5 merely because
+ordinary dirty-state work is favorable.
+
+Evidence:
+[`network-n1.4-remaining-adoption-matrix-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-remaining-adoption-matrix-2026-08-22.json) and
+[`network-n1.4-remaining-adoption-matrix-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-remaining-adoption-matrix-2026-08-22.md).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
@@ -1351,9 +1415,11 @@ server ticket ledger and atomic production-client application. N1.3 adds bounded
 reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
 N1.4 adds the shared dirty-work scheduler, exact stable-interest fast path, bounded
 cadence traversal, and compact recipient/reverse-index storage. Its mechanisms are
-implemented through the storage-compaction review stop; compaction acceptance and
-the measured current-game AOI-profile adoption decision remain open.
+accepted through the storage-compaction stop. The first remaining semantic,
+secure deterministic replay, dense-entry, and topology matrix is captured; the
+measured current-game AOI-profile adoption decision remains open.
 
-Stop at the N1.4 storage-compaction checkpoint. The next work, after review, is the
-remaining controlled adoption matrix—not N1.5 shared encoding, UDP redesign, N0
-deletion, or a production scale claim.
+Stop at the N1.4 remaining-adoption matrix checkpoint. The next work is the still
+missing controlled mixed-private and sharded/socket evidence plus representative
+transition distribution—not N1.5 shared encoding, N0 deletion, 2K/4K escalation,
+or a production scale claim.

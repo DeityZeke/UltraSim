@@ -116,14 +116,18 @@ public static class ChunkInterestQuery
         if (width * depth > MaximumCandidateChunks)
             return ChunkInterestQueryStatus.InvalidInput;
 
-        long centerX = anchor.GlobalXMillimeters;
-        long centerZ = anchor.GlobalZMillimeters;
         int stableBudget = Math.Max(
             0,
             profile.FarLeaveRadiusMillimeters - profile.FarEnterRadiusMillimeters - 1);
+        var squaredProfile = new SquaredProfile(profile);
         int previousIndex = 0;
         for (int chunkX = minimumX; ; chunkX++)
         {
+            long deltaX = AxisDistance(
+                chunkX,
+                anchor.Chunk.X,
+                anchor.Local.XMillimeters);
+            long distanceXSquared = checked(deltaX * deltaX);
             for (int chunkZ = minimumZ; ; chunkZ++)
             {
                 var key = new SpatialChunkKey(space, chunkX, chunkZ);
@@ -132,11 +136,14 @@ public static class ChunkInterestQuery
                 ChunkInterestTier previousTier = previousIndex < previous.Length && previous[previousIndex].Key == key
                     ? previous[previousIndex].Tier
                     : default;
-                Int128 distanceSquared = GameWorldSpatialProfile.ChunkGeometry
-                    .GetBounds(key.Coord).SquaredDistanceTo(centerX, centerZ);
+                long deltaZ = AxisDistance(
+                    chunkZ,
+                    anchor.Chunk.Z,
+                    anchor.Local.ZMillimeters);
+                long distanceSquared = checked(distanceXSquared + deltaZ * deltaZ);
                 stableBudget = TightenThresholdMovementBudget(
                     distanceSquared, previousTier, profile, stableBudget);
-                ChunkInterestTier? tier = Classify(distanceSquared, previousTier, profile);
+                ChunkInterestTier? tier = Classify(distanceSquared, previousTier, squaredProfile);
                 if (tier.HasValue)
                 {
                     if (required < destination.Length)
@@ -156,7 +163,7 @@ public static class ChunkInterestQuery
     }
 
     private static int TightenThresholdMovementBudget(
-        Int128 distanceSquared,
+        long distanceSquared,
         ChunkInterestTier previous,
         in ChunkInterestProfile profile,
         int currentBudget)
@@ -194,8 +201,8 @@ public static class ChunkInterestQuery
             int reach = checked(budget + 1);
             long minimum = Math.Max(0L, (long)radius - reach);
             long maximum = (long)radius + reach;
-            if (distanceSquared < (Int128)minimum * minimum ||
-                distanceSquared > (Int128)maximum * maximum)
+            if (distanceSquared < minimum * minimum ||
+                distanceSquared > maximum * maximum)
                 return;
             if (distanceFloor < 0) distanceFloor = FloorSquareRoot(distanceSquared);
             long lowerBound = distanceFloor >= radius
@@ -208,13 +215,26 @@ public static class ChunkInterestQuery
         }
     }
 
-    private static long FloorSquareRoot(Int128 value)
+    private static long FloorSquareRoot(long value)
     {
         if (value <= 0) return 0;
         long estimate = checked((long)Math.Sqrt((double)value));
-        while ((Int128)(estimate + 1) * (estimate + 1) <= value) estimate++;
-        while ((Int128)estimate * estimate > value) estimate--;
+        while ((estimate + 1) * (estimate + 1) <= value) estimate++;
+        while (estimate * estimate > value) estimate--;
         return estimate;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long AxisDistance(
+        int candidateChunk,
+        int anchorChunk,
+        ushort anchorLocal)
+    {
+        const long edge = GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        long minimum = checked((candidateChunk - (long)anchorChunk) * edge - anchorLocal);
+        if (minimum > 0) return minimum;
+        long maximum = minimum + edge;
+        return maximum < 0 ? -maximum : 0;
     }
 
     private static bool ValidatePrevious(SpatialSpaceId space, ReadOnlySpan<ChunkInterestEntry> previous)
@@ -259,41 +279,54 @@ public static class ChunkInterestQuery
     }
 
     private static ChunkInterestTier? Classify(
-        Int128 distanceSquared,
+        long distanceSquared,
         ChunkInterestTier previous,
-        in ChunkInterestProfile profile)
+        in SquaredProfile profile)
     {
-        bool Within(int radius)
-        {
-            Int128 wide = radius;
-            return distanceSquared <= checked(wide * wide);
-        }
-
         return previous switch
         {
-            ChunkInterestTier.Immediate when Within(profile.ImmediateLeaveRadiusMillimeters) =>
+            ChunkInterestTier.Immediate when distanceSquared <= profile.ImmediateLeave =>
                 ChunkInterestTier.Immediate,
-            ChunkInterestTier.Immediate when Within(profile.NearLeaveRadiusMillimeters) =>
+            ChunkInterestTier.Immediate when distanceSquared <= profile.NearLeave =>
                 ChunkInterestTier.Near,
-            ChunkInterestTier.Immediate when Within(profile.FarLeaveRadiusMillimeters) =>
+            ChunkInterestTier.Immediate when distanceSquared <= profile.FarLeave =>
                 ChunkInterestTier.Far,
-            ChunkInterestTier.Near when Within(profile.ImmediateEnterRadiusMillimeters) =>
+            ChunkInterestTier.Near when distanceSquared <= profile.ImmediateEnter =>
                 ChunkInterestTier.Immediate,
-            ChunkInterestTier.Near when Within(profile.NearLeaveRadiusMillimeters) =>
+            ChunkInterestTier.Near when distanceSquared <= profile.NearLeave =>
                 ChunkInterestTier.Near,
-            ChunkInterestTier.Near when Within(profile.FarLeaveRadiusMillimeters) =>
+            ChunkInterestTier.Near when distanceSquared <= profile.FarLeave =>
                 ChunkInterestTier.Far,
-            ChunkInterestTier.Far when Within(profile.ImmediateEnterRadiusMillimeters) =>
+            ChunkInterestTier.Far when distanceSquared <= profile.ImmediateEnter =>
                 ChunkInterestTier.Immediate,
-            ChunkInterestTier.Far when Within(profile.NearEnterRadiusMillimeters) =>
+            ChunkInterestTier.Far when distanceSquared <= profile.NearEnter =>
                 ChunkInterestTier.Near,
-            ChunkInterestTier.Far when Within(profile.FarLeaveRadiusMillimeters) =>
+            ChunkInterestTier.Far when distanceSquared <= profile.FarLeave =>
                 ChunkInterestTier.Far,
-            _ when Within(profile.ImmediateEnterRadiusMillimeters) => ChunkInterestTier.Immediate,
-            _ when Within(profile.NearEnterRadiusMillimeters) => ChunkInterestTier.Near,
-            _ when Within(profile.FarEnterRadiusMillimeters) => ChunkInterestTier.Far,
+            _ when distanceSquared <= profile.ImmediateEnter => ChunkInterestTier.Immediate,
+            _ when distanceSquared <= profile.NearEnter => ChunkInterestTier.Near,
+            _ when distanceSquared <= profile.FarEnter => ChunkInterestTier.Far,
             _ => null,
         };
+    }
+
+    private readonly record struct SquaredProfile(
+        long ImmediateEnter,
+        long ImmediateLeave,
+        long NearEnter,
+        long NearLeave,
+        long FarEnter,
+        long FarLeave)
+    {
+        internal SquaredProfile(in ChunkInterestProfile profile) : this(
+            Square(profile.ImmediateEnterRadiusMillimeters),
+            Square(profile.ImmediateLeaveRadiusMillimeters),
+            Square(profile.NearEnterRadiusMillimeters),
+            Square(profile.NearLeaveRadiusMillimeters),
+            Square(profile.FarEnterRadiusMillimeters),
+            Square(profile.FarLeaveRadiusMillimeters)) { }
+
+        private static long Square(int value) => checked((long)value * value);
     }
 }
 

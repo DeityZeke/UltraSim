@@ -165,6 +165,22 @@ case reports about 147.9 MB without freezing 640 as a production maximum. The
 roughly 100-us synchronized crossing tail and remaining Dense-400/end-to-end matrix
 must still decide current-game profile adoption before N1.5.
 
+The accepted compact layout is now used by the first remaining-adoption matrix.
+`OfflineDirectChunkSubscriptionView` is a non-escaping `ref struct` live view, and
+recipient crossing attribution remains dormant unless explicitly enabled. The
+fixed-runtime observations report 1.272 ms p95 for Dense-400-shaped server
+semantic work, 2.386 ms p95 for a separate 64-recipient secure deterministic
+protocol replay, and 29.082 ms to recover 30 populated 64-row chunks through the
+single private snapshot candidate. The latter does not earn concurrent candidates.
+
+Exact candidate geometry now uses bounded anchor-relative 64-bit distance math,
+and exact no-change reconciliations preserve the current subscription bank. These
+are implementation optimizations only; the accepted geometry, topology,
+cursor/history, and leaves-before-enters contracts are unchanged. Sustained
+distributed movement still measures 6.553 ms p95 and synchronized transitions
+remain expensive, so current-game N0-to-N1 adoption is still open pending
+mixed-private and sharded/socket evidence. N1.5 and 2K/4K remain unstarted.
+
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions
 are explicitly invalidated. Projection bindings are refreshed from that Admission

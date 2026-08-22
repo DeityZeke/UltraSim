@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
@@ -71,7 +73,7 @@ public readonly record struct OfflineDirectChunkSubscription(
 /// self-validating public cursor from the recipient-wide epoch, retained key, and applied revision.
 /// The view is valid only until the recipient next reconciles or commits publication knowledge.
 /// </summary>
-public readonly struct OfflineDirectChunkSubscriptionView
+public readonly ref struct OfflineDirectChunkSubscriptionView
 {
     private readonly OfflineDirectChunkRecipient? _owner;
 
@@ -208,6 +210,21 @@ public readonly record struct OfflineDirectChunkRecipientStorageSnapshot(
     long TotalReservedBytes);
 
 /// <summary>
+/// Opt-in crossing-path attribution. Timings are raw <see cref="Stopwatch"/> ticks and remain
+/// dormant until explicitly enabled; they do not participate in subscription semantics.
+/// </summary>
+public readonly record struct OfflineDirectChunkReconcileAttribution(
+    bool Enabled,
+    ulong StableFastPaths,
+    ulong ExactQueries,
+    ulong PreviousInterestCopyTicks,
+    ulong ExactQueryTicks,
+    ulong ChangeCountTicks,
+    ulong NextBankBuildTicks,
+    ulong ChangeEmissionTicks,
+    ulong PublicationTicks);
+
+/// <summary>
 /// N1.0 packet-free recipient subscription/cursor layer. Game interest and applied publication
 /// cursors live here; authoritative history remains in <see cref="ChunkPublicationStore"/>, and
 /// client semantic/cache identity remains outside this server/game-owned object.
@@ -245,6 +262,15 @@ public sealed class OfflineDirectChunkRecipient
     private bool _hasLastInterestAnchor;
     private ulong _fullInterestQueries;
     private ulong _stableInterestFastPaths;
+    private bool _reconcileAttributionEnabled;
+    private ulong _attributedStableFastPaths;
+    private ulong _attributedExactQueries;
+    private ulong _previousInterestCopyTicks;
+    private ulong _exactQueryTicks;
+    private ulong _changeCountTicks;
+    private ulong _nextBankBuildTicks;
+    private ulong _changeEmissionTicks;
+    private ulong _reconcilePublicationTicks;
 
     public OfflineDirectChunkRecipient(
         OfflineDirectChunkRecipientLimits limits,
@@ -334,6 +360,7 @@ public sealed class OfflineDirectChunkRecipient
             _lastInterestSpace == space &&
             IsWithinStableInterestBudget(anchor))
         {
+            if (_reconcileAttributionEnabled) SaturatingIncrement(ref _attributedStableFastPaths);
             _reconciliations++;
             _stableInterestFastPaths++;
             result = Result(
@@ -345,8 +372,11 @@ public sealed class OfflineDirectChunkRecipient
             return result.Status;
         }
 
+        long phaseStarted = AttributionTimestamp();
         for (int index = 0; index < _subscriptionCount; index++)
             _previousInterest[index] = _subscriptions[index].Interest;
+        AttributeElapsed(ref _previousInterestCopyTicks, phaseStarted);
+        phaseStarted = AttributionTimestamp();
         ChunkInterestQueryStatus query = ChunkInterestQuery.TryQuery(
             space,
             anchor,
@@ -356,6 +386,8 @@ public sealed class OfflineDirectChunkRecipient
             out int desiredCount,
             out int requiredSubscriptions,
             out int stableMovementBudget);
+        AttributeElapsed(ref _exactQueryTicks, phaseStarted);
+        if (_reconcileAttributionEnabled) SaturatingIncrement(ref _attributedExactQueries);
         _fullInterestQueries++;
         if (query == ChunkInterestQueryStatus.InvalidInput)
         {
@@ -370,7 +402,9 @@ public sealed class OfflineDirectChunkRecipient
             return result.Status;
         }
 
+        phaseStarted = AttributionTimestamp();
         int requiredChanges = CountChanges(desiredCount);
+        AttributeElapsed(ref _changeCountTicks, phaseStarted);
         if (changes.Length < requiredChanges)
         {
             result = Result(OfflineDirectChunkReconcileStatus.ChangeDestinationTooSmall, false,
@@ -379,8 +413,31 @@ public sealed class OfflineDirectChunkRecipient
         }
 
         bool sourceReset = _sourceEpoch != source.Epoch;
-        BuildNextSubscriptions(desiredCount, sourceReset);
-        int changeCount = WriteChanges(changes, desiredCount);
+        if (requiredChanges == 0 && !sourceReset)
+        {
+            phaseStarted = AttributionTimestamp();
+            _lastInterestAnchor = anchor;
+            _lastInterestSpace = space;
+            _stableInterestMovementBudgetMillimeters = stableMovementBudget;
+            _hasLastInterestAnchor = true;
+            _reconciliations++;
+            result = Result(
+                OfflineDirectChunkReconcileStatus.Reconciled,
+                false,
+                requiredSubscriptions,
+                0,
+                0);
+            AttributeElapsed(ref _reconcilePublicationTicks, phaseStarted);
+            return result.Status;
+        }
+        phaseStarted = AttributionTimestamp();
+        int changeCount = WriteLeaves(changes, desiredCount);
+        AttributeElapsed(ref _changeEmissionTicks, phaseStarted);
+        phaseStarted = AttributionTimestamp();
+        changeCount = BuildNextSubscriptionsAndWriteChanges(
+            changes, desiredCount, sourceReset, changeCount);
+        AttributeElapsed(ref _nextBankBuildTicks, phaseStarted);
+        phaseStarted = AttributionTimestamp();
         (_subscriptions, _nextSubscriptions) = (_nextSubscriptions, _subscriptions);
         _subscriptionCount = desiredCount;
         _sourceEpoch = source.Epoch;
@@ -406,6 +463,7 @@ public sealed class OfflineDirectChunkRecipient
         }
         result = Result(OfflineDirectChunkReconcileStatus.Reconciled, sourceReset,
             requiredSubscriptions, changeCount, requiredChanges);
+        AttributeElapsed(ref _reconcilePublicationTicks, phaseStarted);
         return result.Status;
     }
 
@@ -685,6 +743,39 @@ public sealed class OfflineDirectChunkRecipient
             checked(current + next + previous + desired + snapshot + delta));
     }
 
+    /// <summary>
+    /// Enables or disables opt-in reconciliation attribution and clears every retained counter.
+    /// The normal path pays only dormant branch checks while attribution is disabled.
+    /// </summary>
+    public void ResetReconcileAttribution(bool enabled)
+    {
+        EnsureOwner();
+        _reconcileAttributionEnabled = enabled;
+        _attributedStableFastPaths = 0;
+        _attributedExactQueries = 0;
+        _previousInterestCopyTicks = 0;
+        _exactQueryTicks = 0;
+        _changeCountTicks = 0;
+        _nextBankBuildTicks = 0;
+        _changeEmissionTicks = 0;
+        _reconcilePublicationTicks = 0;
+    }
+
+    public OfflineDirectChunkReconcileAttribution GetReconcileAttribution()
+    {
+        EnsureOwner();
+        return new OfflineDirectChunkReconcileAttribution(
+            _reconcileAttributionEnabled,
+            _attributedStableFastPaths,
+            _attributedExactQueries,
+            _previousInterestCopyTicks,
+            _exactQueryTicks,
+            _changeCountTicks,
+            _nextBankBuildTicks,
+            _changeEmissionTicks,
+            _reconcilePublicationTicks);
+    }
+
     private OfflineDirectChunkReadStatus PublishPending(
         int subscriptionIndex,
         OfflineDirectChunkReadStatus status,
@@ -712,6 +803,26 @@ public sealed class OfflineDirectChunkRecipient
         _pendingIndex = -1;
         _pendingStatus = default;
         _pendingBatch = default;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long AttributionTimestamp() =>
+        _reconcileAttributionEnabled ? Stopwatch.GetTimestamp() : 0;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AttributeElapsed(ref ulong destination, long started)
+    {
+        if (!_reconcileAttributionEnabled) return;
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        if (elapsed <= 0) return;
+        ulong value = checked((ulong)elapsed);
+        destination = ulong.MaxValue - destination < value ? ulong.MaxValue : destination + value;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void SaturatingIncrement(ref ulong value)
+    {
+        if (value != ulong.MaxValue) value++;
     }
 
     private int CountChanges(int desiredCount)
@@ -767,7 +878,11 @@ public sealed class OfflineDirectChunkRecipient
         return -1;
     }
 
-    private void BuildNextSubscriptions(int desiredCount, bool sourceReset)
+    private int BuildNextSubscriptionsAndWriteChanges(
+        Span<OfflineDirectChunkSubscriptionChange> changes,
+        int desiredCount,
+        bool sourceReset,
+        int written)
     {
         int previous = 0;
         for (int desired = 0; desired < desiredCount; desired++)
@@ -785,6 +900,12 @@ public sealed class OfflineDirectChunkRecipient
                     sourceReset ? default : retained.AppliedRevision,
                     !sourceReset && retained.HasKnowledge,
                     StablePhase(interest.Key, _cadence.Period(interest.Tier)));
+                if (retained.Tier != interest.Tier)
+                    changes[written++] = new OfflineDirectChunkSubscriptionChange(
+                        OfflineDirectChunkSubscriptionChangeKind.TierChanged,
+                        interest.Key,
+                        retained.Tier,
+                        interest.Tier);
             }
             else
             {
@@ -794,11 +915,17 @@ public sealed class OfflineDirectChunkRecipient
                     default,
                     false,
                     StablePhase(interest.Key, _cadence.Period(interest.Tier)));
+                changes[written++] = new OfflineDirectChunkSubscriptionChange(
+                    OfflineDirectChunkSubscriptionChangeKind.Entered,
+                    interest.Key,
+                    default,
+                    interest.Tier);
             }
         }
+        return written;
     }
 
-    private int WriteChanges(Span<OfflineDirectChunkSubscriptionChange> changes, int desiredCount)
+    private int WriteLeaves(Span<OfflineDirectChunkSubscriptionChange> changes, int desiredCount)
     {
         int written = 0;
         int previous = 0;
@@ -815,31 +942,6 @@ public sealed class OfflineDirectChunkRecipient
                     OfflineDirectChunkSubscriptionChangeKind.Left, previousKey, tier, default);
             }
             previous++;
-        }
-
-        previous = 0;
-        for (desired = 0; desired < desiredCount; desired++)
-        {
-            ChunkInterestEntry current = _desiredInterest[desired];
-            while (previous < _subscriptionCount &&
-                _subscriptions[previous].Interest.Key.CompareTo(current.Key) < 0)
-                previous++;
-            if (previous == _subscriptionCount || _subscriptions[previous].Interest.Key != current.Key)
-            {
-                changes[written++] = new OfflineDirectChunkSubscriptionChange(
-                    OfflineDirectChunkSubscriptionChangeKind.Entered,
-                    current.Key,
-                    default,
-                    current.Tier);
-            }
-            else if (_subscriptions[previous].Interest.Tier != current.Tier)
-            {
-                changes[written++] = new OfflineDirectChunkSubscriptionChange(
-                    OfflineDirectChunkSubscriptionChangeKind.TierChanged,
-                    current.Key,
-                    _subscriptions[previous].Interest.Tier,
-                    current.Tier);
-            }
         }
         return written;
     }

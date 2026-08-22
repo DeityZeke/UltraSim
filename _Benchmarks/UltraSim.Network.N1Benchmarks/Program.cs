@@ -11,6 +11,12 @@ using UltraSim.Network;
 using UltraSim.Spatial;
 using static BenchmarkHarness;
 
+if (args.Contains("--remaining-adoption-matrix", StringComparer.OrdinalIgnoreCase))
+{
+    N14RemainingAdoptionMatrix.Run(args);
+    return;
+}
+
 int warmups = ReadInt(args, "--warmups=", 4);
 int samples = ReadInt(args, "--samples=", 15);
 int rounds = ReadInt(args, "--rounds=", 4);

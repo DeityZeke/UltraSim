@@ -187,6 +187,12 @@ Useful current anchors can be located by their embedded workload or filename:
   tests own atomic commit, absence/snapshot lineage, timeout, history advance,
   impairment, proof retry, and ordinary-WorldState independence; the artifact is
   not N1.4 adoption, N0 replacement, public WAN, or production-scale evidence;
+- `network-n1.4-remaining-adoption-matrix-*` — the compact N1.4 scheduler's first
+  separated level-1 server-semantic and level-2 secure deterministic replay
+  evidence, plus dense populated-chunk recovery and attributed distributed/
+  synchronized topology paths. It preserves zero warmed allocation and records
+  the still-open crossing, mixed-private, socket/sharded-client, N0-adoption, and
+  2K/4K gates; it is not an N1.5 or production-CCU artifact;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared
