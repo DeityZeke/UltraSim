@@ -102,6 +102,40 @@ public sealed class OfflineDirectChunkWireEncoder
         }
     }
 
+    /// <summary>Encodes one caller-authorized complete repair snapshot regardless of cursor state.</summary>
+    public OfflineDirectChunkWireEncodeStatus TryEncodeSnapshot(
+        OfflineDirectChunkRecipient recipient,
+        ChunkPublicationStore source,
+        int subscriptionIndex,
+        ulong deliveryId,
+        Span<byte> destination,
+        out OfflineDirectChunkWireEncodeResult result)
+    {
+        ArgumentNullException.ThrowIfNull(recipient);
+        ArgumentNullException.ThrowIfNull(source);
+        EnsureOwner();
+        if (deliveryId == 0)
+            return Finish(OfflineDirectChunkWireEncodeStatus.EncodingFailed, out result);
+        OfflineDirectChunkReadStatus status = recipient.TryBeginSnapshotRead(
+            source, subscriptionIndex, out OfflineDirectChunkRead read);
+        return status switch
+        {
+            OfflineDirectChunkReadStatus.Snapshot =>
+                EncodeSnapshot(recipient, deliveryId, destination, in read, out result),
+            OfflineDirectChunkReadStatus.ChunkAbsent =>
+                EncodeAbsence(recipient, deliveryId, destination, in read, out result),
+            OfflineDirectChunkReadStatus.InvalidSubscription =>
+                Finish(OfflineDirectChunkWireEncodeStatus.InvalidSubscription, out result),
+            OfflineDirectChunkReadStatus.SourceRequiresReconcile =>
+                Finish(OfflineDirectChunkWireEncodeStatus.SourceRequiresReconcile, out result),
+            OfflineDirectChunkReadStatus.ReadPending =>
+                Finish(OfflineDirectChunkWireEncodeStatus.ReadPending, out result),
+            OfflineDirectChunkReadStatus.SnapshotCapacityExceeded =>
+                Finish(OfflineDirectChunkWireEncodeStatus.CapacityExceeded, out result),
+            _ => throw new InvalidOperationException($"Unexpected forced snapshot status {status}."),
+        };
+    }
+
     public bool TryCommitAppliedProof(
         OfflineDirectChunkRecipient recipient,
         in OfflineDirectChunkDeliveryTicket ticket,

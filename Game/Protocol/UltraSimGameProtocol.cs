@@ -46,7 +46,7 @@ public enum RemoteApplicationEventApplyStatus : byte
     CapacityExceeded = 2,
 }
 
-[NetworkProtocol(8)]
+[NetworkProtocol(9)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -290,7 +290,7 @@ public readonly record struct RemoteWorldStateRecord(
         sizeof(byte) + sizeof(byte) + sizeof(int) * 4;
 }
 
-/// <summary>Accepted game application protocol manifest and bounded codecs through N1.1.</summary>
+/// <summary>Accepted game application protocol manifest and bounded codecs through N1.3.</summary>
 public static partial class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
@@ -305,7 +305,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 10,
+        version: 11,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -342,6 +342,11 @@ public static partial class UltraSimGameProtocol
                     MaximumChunkPublicationRecords * RemoteChunkDeltaRecord.EncodedSize },
             RemoteChunkAbsenceMessageCodec.Descriptor,
             RemoteChunkAppliedMessageCodec.Descriptor,
+            RemoteChunkSnapshotBeginMessageCodec.Descriptor,
+            RemoteChunkSnapshotSegmentHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumMessageBytes },
+            RemoteChunkSnapshotCommitMessageCodec.Descriptor,
+            RemoteChunkSnapshotCancelMessageCodec.Descriptor,
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;

@@ -66,6 +66,11 @@ var tests = new (string Name, Action Body)[]
     ("N12WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof", N1OfflineDirectChunkTests.WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof),
     ("N12ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge", N1OfflineDirectChunkTests.ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge),
     ("N12OversizeWorldStateDeltaFailsClosedAtDatagramBoundary", N1OfflineDirectChunkTests.OversizeWorldStateDeltaFailsClosedAtDatagramBoundary),
+    ("N13SnapshotTransactionAppliesAtomicallyAndRecoversOversize", N1OfflineDirectChunkTests.SnapshotTransactionAppliesAtomicallyAndRecoversOversize),
+    ("N13SnapshotLineageFencesDelayedAbsenceAndSnapshot", N1OfflineDirectChunkTests.SnapshotLineageFencesDelayedAbsenceAndSnapshot),
+    ("N13SnapshotTimeoutAndHistoryAdvanceRemainBounded", N1OfflineDirectChunkTests.SnapshotTimeoutAndHistoryAdvanceRemainBounded),
+    ("N13SnapshotImpairmentAndLostProofConverge", N1OfflineDirectChunkTests.SnapshotImpairmentAndLostProofConverge),
+    ("N13BulkSnapshotDoesNotBlockOrdinaryWorldState", N1OfflineDirectChunkTests.BulkSnapshotDoesNotBlockOrdinaryWorldState),
 };
 
 foreach ((string name, Action body) in tests)
@@ -73,7 +78,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Network N0/N1.0-N1.2 game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0/N1.0-N1.3 game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

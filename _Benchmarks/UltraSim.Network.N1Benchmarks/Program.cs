@@ -15,7 +15,7 @@ int warmups = ReadInt(args, "--warmups=", 4);
 int samples = ReadInt(args, "--samples=", 15);
 int rounds = ReadInt(args, "--rounds=", 4);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/network-n1.2-independent-chunk-delivery.json"));
+    AppContext.BaseDirectory, "../../../../results/network-n1.3-atomic-chunk-snapshot-recovery.json"));
 if (warmups < 1 || samples < 5 || rounds < 1) throw new ArgumentOutOfRangeException(nameof(args));
 
 int[] populations = [1, 32, 128, 256];
@@ -52,6 +52,7 @@ Console.WriteLine(
 
 const int defaultUdpMaximumDatagramBytes = 1_472;
 TransportEvidence transportEvidence;
+SnapshotRecoveryEvidence snapshotRecoveryEvidence;
 Require(ProtocolLoopback.TryCreate(
     NetworkProtocolLimits.Default,
     new DeterministicDatagramLimits(2_048, defaultUdpMaximumDatagramBytes),
@@ -60,7 +61,7 @@ Require(ProtocolLoopback.TryCreate(
     out _,
     UltraSimGameProtocol.Manifest));
 ProtocolLoopback establishedTransport = transportLoopback ??
-    throw new InvalidOperationException("N1.2 transport evidence loopback was not created.");
+    throw new InvalidOperationException("N1.3 transport evidence loopback was not created.");
 using (establishedTransport)
 {
     var transport = new RemoteChunkWorldStateServer(
@@ -79,17 +80,39 @@ using (establishedTransport)
         snapshot.OutstandingDeliveryCapacity,
         snapshot.ReservedBytes,
         "WorldState is independent-unreliable/nonfragmenting. Oversize deltas fail closed and " +
-        "defer complete recovery to N1.3; tests, not this census, prove impairment convergence.");
+        "route to the separately bounded N1.3 snapshot transaction.");
+    int snapshotBytes = UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
+        UltraSimGameProtocol.MaximumChunkPublicationRecords);
+    int segmentPayload = snapshot.MaximumUnfragmentedMessageBytes -
+        RemoteChunkSnapshotSegmentHeaderCodec.EncodedSize;
+    snapshotRecoveryEvidence = new SnapshotRecoveryEvidence(
+        UltraSimGameProtocol.MaximumChunkPublicationRecords,
+        snapshotBytes,
+        RemoteChunkSnapshotBeginMessageCodec.EncodedSize,
+        RemoteChunkSnapshotSegmentHeaderCodec.EncodedSize,
+        segmentPayload,
+        (snapshotBytes + segmentPayload - 1) / segmentPayload,
+        RemoteChunkSnapshotCommitMessageCodec.EncodedSize,
+        RemoteChunkSnapshotCancelMessageCodec.EncodedSize,
+        snapshot.ReservedBytes,
+        "The canonical N1.1 snapshot body is segmented without redefining semantic bytes. " +
+        "Begin/segments/Commit/Cancel share reliable ordered Bulk; ordinary WorldState remains " +
+        "independent-unreliable. Permanent tests, not this census, prove atomicity and impairment.");
     Console.WriteLine(
         $"udp_datagram={transportEvidence.DatagramBytes} " +
         $"unfragmented_message={transportEvidence.MaximumUnfragmentedMessageBytes} " +
         $"delta_rows={transportEvidence.MaximumDeltaRecordsPerDatagram} " +
         $"safe_delta_bytes={transportEvidence.MaximumAdmittedDeltaBytes} " +
         $"first_oversize_bytes={transportEvidence.FirstRejectedDeltaBytes}");
+    Console.WriteLine(
+        $"snapshot_bytes={snapshotRecoveryEvidence.CanonicalSnapshotBytes} " +
+        $"snapshot_segment_payload={snapshotRecoveryEvidence.SegmentPayloadBytes} " +
+        $"snapshot_segments={snapshotRecoveryEvidence.SegmentCount} " +
+        $"snapshot_server_reserved={snapshotRecoveryEvidence.ServerAdapterReservedBytes}");
 }
 
 var report = new Report(
-    "network-n1.2-independent-chunk-delivery-v1",
+    "network-n1.3-atomic-chunk-snapshot-recovery-v1",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -102,8 +125,8 @@ var report = new Report(
     samples,
     rounds,
     new ProfileEvidence(
-        "N1.0 recipient control, N1.1 codecs, and N1.2 real-transport MTU/ledger capacity " +
-        "evidence; not N1.3 snapshot recovery, N0 replacement, public WAN CCU, or production adoption evidence",
+        "N1.0 recipient control, N1.1 codecs, N1.2 ordinary delivery, and N1.3 atomic " +
+        "snapshot-envelope/capacity evidence; not N0 replacement, public WAN CCU, or production adoption evidence",
         UltraSimGameProtocol.Manifest.Version,
         UltraSimGameProtocol.Manifest.Fingerprint,
         UltraSimGameProtocol.ChunkPublicationSchemaFingerprint,
@@ -121,7 +144,8 @@ var report = new Report(
     cadenceTiming,
     cadenceSnapshot,
     codecEvidence,
-    transportEvidence);
+    transportEvidence,
+    snapshotRecoveryEvidence);
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
 File.WriteAllText(output, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }) +
     Environment.NewLine);
@@ -576,6 +600,18 @@ readonly record struct TransportEvidence(
     long ServerAdapterReservedBytes,
     string Notes);
 
+readonly record struct SnapshotRecoveryEvidence(
+    int MaximumRecords,
+    int CanonicalSnapshotBytes,
+    int BeginBytes,
+    int SegmentHeaderBytes,
+    int SegmentPayloadBytes,
+    int SegmentCount,
+    int CommitBytes,
+    int CancelBytes,
+    long ServerAdapterReservedBytes,
+    string Notes);
+
 readonly record struct Report(
     string Workload,
     DateTimeOffset CapturedUtc,
@@ -594,4 +630,5 @@ readonly record struct Report(
     TimingEvidence CadencePass,
     OfflineDirectChunkRecipientSnapshot CadenceCounters,
     CodecEvidence Codec,
-    TransportEvidence Transport);
+    TransportEvidence Transport,
+    SnapshotRecoveryEvidence SnapshotRecovery);

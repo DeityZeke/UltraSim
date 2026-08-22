@@ -196,8 +196,9 @@ validation to scale with retained replacements rather than the entire base pack;
 complete logical Multi-root replacement remains intentionally global.
 Runtime slots, publication cursors/history, client residency, and Godot resources
 remain derived and absent from the artifact.
-T0.10 closes the launchable local woods/cabin vertical. Network N1.0-N1.2 now
+T0.10 closes the launchable local woods/cabin vertical. Network N1.0-N1.3 now
 layer bounded recipient chunk subscriptions, canonical chunk messages/proofs,
-and MTU-admissible independent-unreliable delta/absence delivery onto those
-accepted publication/client-cache contracts. N0 remains the production/reference
-path until N1 also proves atomic snapshot recovery and the measured adoption gate.
+MTU-admissible independent-unreliable delta/absence delivery, and private atomic
+Bulk snapshot recovery onto those accepted publication/client-cache contracts.
+N0 remains the production/reference path until N1 proves the measured adoption
+gate.

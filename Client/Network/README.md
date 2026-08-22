@@ -11,6 +11,12 @@ application proof only after semantic success. A repeated delivery whose revisio
 is already covered is harmless and produces another applied proof, allowing a
 lost prior proof to recover without pretending transport delivery was knowledge.
 
-The bridge does not implement first-interest/history-recovery snapshots; N1.3
-owns that Bulk transaction. Presentation residency, rendering, authority, chunk
-publication history, and subscription entitlement remain separate owners.
+N1.3 adds one bounded private snapshot candidate. Reliable ordered Bulk
+Begin/segments/Commit reconstruct the frozen canonical snapshot body, which is
+fully validated before one atomic semantic-cache publication. Reliable Cancel
+retires only the matching private candidate. Per-resident-key delivery lineage
+orders snapshot, delta, and absence results so delayed same-session recovery data
+cannot erase or resurrect newer state.
+
+Presentation residency, rendering, authority, chunk publication history, and
+subscription entitlement remain separate owners.

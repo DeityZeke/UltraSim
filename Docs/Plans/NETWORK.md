@@ -3,13 +3,13 @@
 Status: active forward plan. Network N0 remains accepted/frozen as the current
 remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
 as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
-N1.1 canonical chunk messages/proof semantics are accepted. N1.2
-independent-unreliable ordinary delta/absence delivery is implemented and stopped
-for checkpoint review; N1.3 atomic snapshot recovery has not started.
+N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
+ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
+stopped for checkpoint review; N1.4 adoption/scheduling work has not started.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
-the implemented N1.0-N1.2 stops, and only forward decisions with a concrete owner.
+the implemented N1.0-N1.3 stops, and only forward decisions with a concrete owner.
 
 N0 proved the difficult semantic foundations:
 
@@ -644,7 +644,9 @@ encoded-byte caching, N0 deletion, public-WAN admission, or production scale.
 Evidence:
 [`network-n1.2-independent-chunk-delivery-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.2-independent-chunk-delivery-2026-08-21.json).
 
-Stop for checkpoint review before N1.3.
+This checkpoint was accepted before N1.3 began.
+
+N1.2 was accepted at `4e847c41`. N1.3 owns complete exceptional recovery below.
 
 ## N1.3 — atomic chunk snapshot recovery
 
@@ -670,6 +672,64 @@ and may advance regardless of one slow client; that client snapshots again.
 **Gate:** loss/reorder around Begin/segments/Commit, cancellation, timeout,
 history wrap during transfer, post-cutoff changes, delayed old deltas, and warmed
 ordinary-delta path allocation.
+
+### N1.3 implementation stop — 2026-08-22
+
+N1.3 retains the accepted N1.1 canonical full-snapshot bytes as its private
+transaction body. It does not define another public-row schema. Protocol manifest
+version 11 adds four transaction messages:
+
+```text
+123  ChunkSnapshotBegin     Bulk
+124  ChunkSnapshotSegment   Bulk
+125  ChunkSnapshotCommit    Bulk
+126  ChunkSnapshotCancel    Bulk
+```
+
+All four use reliable ordered Bulk. This avoids a cross-lane race where a valid
+segment could arrive before its descriptor. Ordinary delta/absence messages remain
+independent-unreliable WorldState, so a recovery transaction does not impose Bulk
+head-of-line ordering on ordinary dynamic state. The current manifest fingerprint
+is `11204815876809708509`; the accepted chunk semantic schema fingerprint remains
+`6148331928277823537`.
+
+The server captures one complete bounded canonical body and immediately releases
+publication scratch/history. It retains at most one connection-local snapshot
+transaction plus the accepted bounded proof ledger. Begin, MTU-sized byte segments,
+Commit, and reliable Cancel progress under peer backpressure. The delivery ID is
+consumed when the transaction starts, and only the exact later `ChunkApplied`
+proof may advance the recipient cursor. Timeout, leave, source replacement, and
+newer same-key recovery invalidate the older ticket/candidate; none pins shared
+publication history.
+
+The client stages bytes and segment receipt privately, validates the reconstructed
+body through the frozen N1.1 hostile decoder, converts into private semantic
+scratch, and invokes `ClientWorldSemanticCache.TryApplySnapshot` once. No partial
+row becomes live. A per-resident-key delivery lineage fences same-session ordering
+across snapshot, delta, and absence. Therefore a delayed old absence cannot erase
+a newer snapshot, and a delayed old snapshot commit cannot resurrect state after
+a newer absence.
+
+The default 1,472-byte UDP profile admits 1,405 application bytes. A transaction
+segment uses a 30-byte header and up to 1,375 payload bytes. The maximum 64-row
+canonical snapshot is 2,634 bytes and therefore uses two Bulk segments. An
+MTU-oversize ordinary delta, first populated interest, history-floor loss, or an
+explicit repair request can all enter this same complete recovery route.
+
+Permanent tests cover exact first-interest publication, oversize-delta repair,
+private atomic commit, both absence/snapshot reorder directions, timeout/cancel,
+history advancing beyond the captured revision, deterministic loss/duplication/
+delay/corruption, lost-proof retry, and ordinary WorldState progress while Bulk
+recovery is pending. Snapshot capture never extends chunk history lifetime; if
+the committed cutoff has already fallen below the current history floor, another
+snapshot is required.
+
+Evidence:
+[`network-n1.3-atomic-chunk-snapshot-recovery-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.3-atomic-chunk-snapshot-recovery-2026-08-22.json).
+
+This checkpoint does not implement N1.4 dirty-driven scheduling/adoption, N0
+deletion, shared encoding across recipients, public-WAN lifecycle, or production
+CCU claims. Stop for review before N1.4.
 
 ## N1.4 — public chunk AOI replaces N0 relation AOI experimentally
 
@@ -960,8 +1020,9 @@ launchable woods/cabin vertical. N1.0 connects those contracts to a bounded
 packet-free recipient chunk-cursor layer. N1.1 adds canonical bounded chunk wire
 semantics and application-proof fencing. N1.2 carries MTU-admissible ordinary
 deltas and absences over real independent-unreliable transport with a bounded
-server ticket ledger and atomic production-client application.
+server ticket ledger and atomic production-client application. N1.3 adds bounded
+reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
 
-Do not begin N1.3 until the N1.2 checkpoint is reviewed. The next work is atomic
-first-interest/history-recovery snapshot transfer—not UDP redesign, N0 deletion,
-shared encoded-byte caching, or a production scale claim.
+Do not begin N1.4 until the N1.3 checkpoint is reviewed. The next work is measured
+dirty-driven discovery/adoption against N0—not UDP redesign, N0 deletion, shared
+encoded-byte caching, or a production scale claim.

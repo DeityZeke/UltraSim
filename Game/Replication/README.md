@@ -16,8 +16,8 @@ Terrain T0 is also accepted/frozen. N1.0 adds a separate packet-free
 `ChunkPublicationStore`. N1.1 adds canonical snapshot/delta/absence encoding and
 application-proof fencing around that same oracle. N1.2 carries MTU-admissible
 ordinary deltas/absences through real independent-unreliable transport with a
-bounded delivery ledger and production client-cache application. None replaces
-N0 yet.
+bounded delivery ledger and production client-cache application. N1.3 adds the
+exceptional atomic Bulk snapshot transaction. None replaces N0 yet.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -112,7 +112,23 @@ The nonfragmenting WorldState lane admits 1,405 message bytes under the default
 1,472-byte UDP profile. The fixed N1.1 delta layout therefore carries at most 30
 rows in one ordinary datagram. Larger valid semantic deltas return a named
 `PayloadTooLarge` status and retain the old applied cursor; they are never split
-into independently applicable subsets. N1.3 owns complete Bulk snapshot recovery.
+into independently applicable subsets.
+
+## N1.3 atomic snapshot recovery
+
+`RemoteChunkWorldStateServer` wraps the frozen canonical snapshot body in one
+bounded reliable-Bulk Begin/segment/Commit transaction. Publication history is
+released immediately after capture and is never pinned for a slow connection.
+Timeout, leave, source replacement, and same-key retry retain reliable Cancel and
+invalidate the old proof ticket without changing recipient knowledge.
+
+`RemoteChunkWorldStateClient` stages all bytes privately, validates the complete
+canonical body, and publishes once through `ClientWorldSemanticCache`. Delivery-ID
+lineage spans snapshot/delta/absence application for each resident key, fencing a
+delayed absence after a newer snapshot and a delayed snapshot after newer absence.
+The maximum 64-row body is 2,634 bytes and uses two 1,375-byte Bulk payload
+segments under the default transport profile. Ordinary WorldState remains on its
+independent-unreliable lane and is not ordered behind Bulk recovery.
 
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions

@@ -98,6 +98,61 @@ public partial struct RemoteChunkAppliedMessage
     public RemoteChunkPublicationApplyStatus Status;
 }
 
+/// <summary>Declares one bounded atomic transfer of a canonical chunk-snapshot body.</summary>
+[NetworkMessage(123, "ultrasim.game.chunk-snapshot-begin", 1, NetworkLane.Bulk)]
+public partial struct RemoteChunkSnapshotBeginMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public ulong DeliveryId;
+    public ulong SpatialSpaceId;
+    public int ChunkX;
+    public int ChunkZ;
+    public ulong SchemaFingerprint;
+    public ulong Revision;
+    public ulong HistoryFloor;
+    public ulong ContentHash;
+    public uint EncodedBytes;
+    public ushort RecordCount;
+    public ushort SegmentCount;
+    public ushort SegmentPayloadBytes;
+}
+
+/// <summary>One independently reliable bounded byte range of a canonical chunk snapshot.</summary>
+[NetworkMessage(124, "ultrasim.game.chunk-snapshot-segment", 1, NetworkLane.Bulk)]
+public partial struct RemoteChunkSnapshotSegmentHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public ulong DeliveryId;
+    public ushort SegmentIndex;
+    public ushort SegmentCount;
+    public ushort PayloadBytes;
+}
+
+/// <summary>Signals that a complete staged chunk snapshot may be validated and published.</summary>
+[NetworkMessage(125, "ultrasim.game.chunk-snapshot-commit", 1, NetworkLane.Bulk)]
+public partial struct RemoteChunkSnapshotCommitMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public ulong DeliveryId;
+    public ulong SpatialSpaceId;
+    public int ChunkX;
+    public int ChunkZ;
+    public ulong Revision;
+    public ulong ContentHash;
+}
+
+/// <summary>Reliably abandons one private chunk-snapshot candidate without changing live state.</summary>
+[NetworkMessage(126, "ultrasim.game.chunk-snapshot-cancel", 1, NetworkLane.Bulk)]
+public partial struct RemoteChunkSnapshotCancelMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public ulong DeliveryId;
+}
+
 /// <summary>One complete public row; the enclosing chunk supplies global X/Z high bits.</summary>
 public readonly record struct RemoteChunkPublicRecord(
     uint EntityIndex,
@@ -135,6 +190,7 @@ public readonly record struct RemoteChunkDeltaRecord(
 public static partial class UltraSimGameProtocol
 {
     public const int MaximumChunkPublicationRecords = 64;
+    public const int MaximumChunkSnapshotSegments = 64;
     public const ulong ChunkPublicationSchemaFingerprint = 0x5553_4350_4231_3031UL; // USCPB101
 
     public static int GetChunkSnapshotEncodedBytes(int recordCount)
@@ -161,6 +217,141 @@ public static partial class UltraSimGameProtocol
         return Math.Min(MaximumChunkPublicationRecords,
             (maximumPayloadBytes - RemoteChunkDeltaHeaderCodec.EncodedSize) /
             RemoteChunkDeltaRecord.EncodedSize);
+    }
+
+    public static int GetChunkSnapshotSegmentEncodedBytes(int payloadBytes)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(payloadBytes);
+        if (payloadBytes > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(payloadBytes));
+        return checked(RemoteChunkSnapshotSegmentHeaderCodec.EncodedSize + payloadBytes);
+    }
+
+    public static bool TryWriteChunkSnapshotBegin(
+        Span<byte> destination,
+        in RemoteChunkSnapshotBeginMessage message,
+        out int written)
+    {
+        written = 0;
+        if (!ValidSnapshotBegin(message) ||
+            destination.Length < RemoteChunkSnapshotBeginMessageCodec.EncodedSize ||
+            !RemoteChunkSnapshotBeginMessageCodec.TryWriteExact(
+                destination[..RemoteChunkSnapshotBeginMessageCodec.EncodedSize], in message))
+            return false;
+        written = RemoteChunkSnapshotBeginMessageCodec.EncodedSize;
+        return true;
+    }
+
+    public static bool TryReadChunkSnapshotBegin(
+        ReadOnlySpan<byte> source,
+        out RemoteChunkSnapshotBeginMessage message)
+    {
+        if (!RemoteChunkSnapshotBeginMessageCodec.TryReadExact(source, out message) ||
+            !ValidSnapshotBegin(message))
+        {
+            message = default;
+            return false;
+        }
+        return true;
+    }
+
+    public static bool TryWriteChunkSnapshotSegment(
+        Span<byte> destination,
+        in RemoteChunkSnapshotSegmentHeader header,
+        ReadOnlySpan<byte> payload,
+        out int written)
+    {
+        written = 0;
+        if (!ValidSnapshotSegment(header) || payload.Length != header.PayloadBytes ||
+            payload.Overlaps(destination) ||
+            destination.Length < GetChunkSnapshotSegmentEncodedBytes(payload.Length))
+            return false;
+        var writer = new NetworkPacketWriter(destination);
+        if (!RemoteChunkSnapshotSegmentHeaderCodec.TryWrite(ref writer, in header) ||
+            !writer.TryWriteBytes(payload))
+            throw new InvalidOperationException("A preflighted chunk-snapshot segment did not fit.");
+        written = writer.WrittenCount;
+        return true;
+    }
+
+    public static bool TryReadChunkSnapshotSegment(
+        ReadOnlySpan<byte> source,
+        out RemoteChunkSnapshotSegmentHeader header,
+        Span<byte> payload,
+        out int count)
+    {
+        header = default;
+        count = 0;
+        var reader = new NetworkPacketReader(source);
+        if (!RemoteChunkSnapshotSegmentHeaderCodec.TryRead(ref reader, out var staged) ||
+            !ValidSnapshotSegment(staged) || reader.Remaining != staged.PayloadBytes ||
+            staged.PayloadBytes > payload.Length || source.Overlaps(payload))
+            return false;
+        if (!reader.TryReadBytes(staged.PayloadBytes, out ReadOnlySpan<byte> bytes) ||
+            !reader.IsComplete)
+            return false;
+        bytes.CopyTo(payload);
+        header = staged;
+        count = staged.PayloadBytes;
+        return true;
+    }
+
+    public static bool TryWriteChunkSnapshotCommit(
+        Span<byte> destination,
+        in RemoteChunkSnapshotCommitMessage message,
+        out int written)
+    {
+        written = 0;
+        if (!ValidSnapshotCommit(message) ||
+            destination.Length < RemoteChunkSnapshotCommitMessageCodec.EncodedSize ||
+            !RemoteChunkSnapshotCommitMessageCodec.TryWriteExact(
+                destination[..RemoteChunkSnapshotCommitMessageCodec.EncodedSize], in message))
+            return false;
+        written = RemoteChunkSnapshotCommitMessageCodec.EncodedSize;
+        return true;
+    }
+
+    public static bool TryReadChunkSnapshotCommit(
+        ReadOnlySpan<byte> source,
+        out RemoteChunkSnapshotCommitMessage message)
+    {
+        if (!RemoteChunkSnapshotCommitMessageCodec.TryReadExact(source, out message) ||
+            !ValidSnapshotCommit(message))
+        {
+            message = default;
+            return false;
+        }
+        return true;
+    }
+
+    public static bool TryWriteChunkSnapshotCancel(
+        Span<byte> destination,
+        in RemoteChunkSnapshotCancelMessage message,
+        out int written)
+    {
+        written = 0;
+        if (message.ApplicationSessionEpoch == 0 || message.PublicationEpoch == 0 ||
+            message.DeliveryId == 0 ||
+            destination.Length < RemoteChunkSnapshotCancelMessageCodec.EncodedSize ||
+            !RemoteChunkSnapshotCancelMessageCodec.TryWriteExact(
+                destination[..RemoteChunkSnapshotCancelMessageCodec.EncodedSize], in message))
+            return false;
+        written = RemoteChunkSnapshotCancelMessageCodec.EncodedSize;
+        return true;
+    }
+
+    public static bool TryReadChunkSnapshotCancel(
+        ReadOnlySpan<byte> source,
+        out RemoteChunkSnapshotCancelMessage message)
+    {
+        if (!RemoteChunkSnapshotCancelMessageCodec.TryReadExact(source, out message) ||
+            message.ApplicationSessionEpoch == 0 || message.PublicationEpoch == 0 ||
+            message.DeliveryId == 0)
+        {
+            message = default;
+            return false;
+        }
+        return true;
     }
 
     public static bool TryWriteChunkSnapshot(
@@ -441,6 +632,33 @@ public static partial class UltraSimGameProtocol
 
     private static bool ValidLineage(ulong application, ulong publication, ulong delivery, ulong space) =>
         application != 0 && publication != 0 && delivery != 0 && space != 0;
+
+    private static bool ValidSnapshotBegin(in RemoteChunkSnapshotBeginMessage message)
+    {
+        if (!ValidLineage(message.ApplicationSessionEpoch, message.PublicationEpoch,
+                message.DeliveryId, message.SpatialSpaceId) ||
+            message.SchemaFingerprint != ChunkPublicationSchemaFingerprint ||
+            message.Revision == 0 || message.HistoryFloor == 0 ||
+            message.HistoryFloor > message.Revision ||
+            message.RecordCount > MaximumChunkPublicationRecords ||
+            message.EncodedBytes != GetChunkSnapshotEncodedBytes(message.RecordCount) ||
+            message.SegmentCount is 0 or > MaximumChunkSnapshotSegments ||
+            message.SegmentPayloadBytes == 0)
+            return false;
+        return message.SegmentCount ==
+            (message.EncodedBytes + message.SegmentPayloadBytes - 1) /
+            message.SegmentPayloadBytes;
+    }
+
+    private static bool ValidSnapshotSegment(in RemoteChunkSnapshotSegmentHeader header) =>
+        header.ApplicationSessionEpoch != 0 && header.PublicationEpoch != 0 &&
+        header.DeliveryId != 0 &&
+        header.SegmentCount is > 0 and <= MaximumChunkSnapshotSegments &&
+        header.SegmentIndex < header.SegmentCount && header.PayloadBytes != 0;
+
+    private static bool ValidSnapshotCommit(in RemoteChunkSnapshotCommitMessage message) =>
+        ValidLineage(message.ApplicationSessionEpoch, message.PublicationEpoch,
+            message.DeliveryId, message.SpatialSpaceId) && message.Revision != 0;
 
     private static bool ValidateSnapshotRecords(ReadOnlySpan<RemoteChunkPublicRecord> records, ulong revision)
     {

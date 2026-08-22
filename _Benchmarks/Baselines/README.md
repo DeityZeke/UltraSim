@@ -180,6 +180,13 @@ Useful current anchors can be located by their embedded workload or filename:
   tests own loss/duplicate/reorder/corruption and application-proof convergence;
   the artifact is not N1.3 snapshot recovery, N0 replacement, public WAN, or a
   production-scale claim;
+- `network-n1.3-atomic-chunk-snapshot-recovery-*` — the bounded exceptional
+  recovery envelope over reliable ordered Bulk while retaining the canonical
+  N1.1 snapshot body: 64-row body bytes, MTU-safe segment payload/count,
+  Begin/segment/Commit/Cancel widths, and server-adapter reservation. Permanent
+  tests own atomic commit, absence/snapshot lineage, timeout, history advance,
+  impairment, proof retry, and ordinary-WorldState independence; the artifact is
+  not N1.4 adoption, N0 replacement, public WAN, or production-scale evidence;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

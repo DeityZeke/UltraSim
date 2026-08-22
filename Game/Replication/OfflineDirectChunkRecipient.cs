@@ -392,6 +392,53 @@ public sealed class OfflineDirectChunkRecipient
         throw new InvalidOperationException($"Unexpected publication snapshot status: {publicationStatus}.");
     }
 
+    /// <summary>
+    /// Begins an explicit complete-snapshot repair for one admitted subscription without consulting
+    /// its current cursor or cadence. This is the exceptional N1.3 path for an MTU-oversize delta,
+    /// client repair, or another caller-established recovery requirement.
+    /// </summary>
+    public OfflineDirectChunkReadStatus TryBeginSnapshotRead(
+        ChunkPublicationStore source,
+        int subscriptionIndex,
+        out OfflineDirectChunkRead read)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        EnsureOwner();
+        if (_pendingIndex >= 0)
+        {
+            read = EmptyRead(OfflineDirectChunkReadStatus.ReadPending, source.Epoch);
+            return read.Status;
+        }
+        if (source.Epoch != _sourceEpoch)
+        {
+            read = EmptyRead(OfflineDirectChunkReadStatus.SourceRequiresReconcile, source.Epoch);
+            return read.Status;
+        }
+        if ((uint)subscriptionIndex >= (uint)_subscriptionCount)
+        {
+            read = EmptyRead(OfflineDirectChunkReadStatus.InvalidSubscription, source.Epoch);
+            return read.Status;
+        }
+
+        ChunkPublicationReadStatus status = source.TryCopySnapshot(
+            _subscriptions[subscriptionIndex].Interest.Key, _snapshotScratch, out var batch);
+        if (status == ChunkPublicationReadStatus.Snapshot)
+        {
+            _snapshotFallbacks++;
+            return PublishPending(subscriptionIndex, OfflineDirectChunkReadStatus.Snapshot,
+                source.Epoch, batch, _snapshotScratch.AsSpan(0, batch.Count), default, out read);
+        }
+        if (status == ChunkPublicationReadStatus.ChunkAbsent)
+            return PublishPending(subscriptionIndex, OfflineDirectChunkReadStatus.ChunkAbsent,
+                source.Epoch, batch, default, default, out read);
+        if (status == ChunkPublicationReadStatus.DestinationTooSmall)
+        {
+            read = EmptyRead(OfflineDirectChunkReadStatus.SnapshotCapacityExceeded, source.Epoch, batch);
+            return read.Status;
+        }
+        throw new InvalidOperationException($"Unexpected forced publication snapshot status: {status}.");
+    }
+
     /// <summary>Commits the outstanding read only after its semantic consumer succeeded.</summary>
     public void CommitRead()
     {
