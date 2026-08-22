@@ -17,8 +17,10 @@ an on-screen control reference. Saves live under `user://t0-10-saves`.
 Profiles are intentionally distinct:
 
 - 1/F1 `OrbitCommand`: overhead mouse-command camera; click selects, hold steers,
-  double-click sets Destination, and WASD does not move.
-- 2/F2 `ThirdPersonDirect`: close third-person camera with camera-relative WASD.
+  double-click sets Destination, WASD does not move, and the character faces
+  the accepted steering/destination direction.
+- 2/F2 `ThirdPersonDirect`: close third-person camera with camera-relative WASD;
+  the character faces the accepted movement vector.
 - 3/F3 `IndependentMoveLook`: fixed isometric-style camera, world-axis WASD
   (`W` is always north), and authoritative mouse-facing independent of movement.
 
@@ -33,6 +35,10 @@ world bounds: ordinary Direct movement stops against them, opening the door
 allows passage through its two-metre gap, and a blocked straight-line
 Destination stops because this T0.10 client has no pathfinder yet. Godot physics
 is not the authority and there is not yet wall sliding or automatic route-around.
+The placeholder grounded meshes use outward Godot triangle winding and normals;
+their interior/back faces are not the intended visible shell. The asymmetric
+player wedge is built through the same Godot-native conversion helper and has
+its own closed-prism winding/normal acceptance.
 
 At the finite authored-world edge, the complete 3x3 structural window clamps to
 the final available chunks while the player-relative camera origin continues to

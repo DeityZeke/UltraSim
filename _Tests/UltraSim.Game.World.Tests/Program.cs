@@ -1014,6 +1014,18 @@ static void BaseTerrainMeshIsCanonicalBoundedAndMatchesQueries()
     Equal((ushort)34, indices[4]);
     Equal((ushort)1, indices[5]);
     True(indices.All(index => index < TerrainChunkFormat.HeightVertexCount));
+    for (int index = 0; index < indices.Length; index += 3)
+    {
+        TerrainBaseMeshVertex first = vertices[indices[index]];
+        TerrainBaseMeshVertex second = vertices[indices[index + 1]];
+        TerrainBaseMeshVertex third = vertices[indices[index + 2]];
+        long edgeOneX = (long)second.LocalXMillimeters - first.LocalXMillimeters;
+        long edgeOneZ = (long)second.LocalZMillimeters - first.LocalZMillimeters;
+        long edgeTwoX = (long)third.LocalXMillimeters - first.LocalXMillimeters;
+        long edgeTwoZ = (long)third.LocalZMillimeters - first.LocalZMillimeters;
+        long projectedCrossY = checked(edgeOneZ * edgeTwoX - edgeOneX * edgeTwoZ);
+        True(projectedCrossY > 0);
+    }
     for (int triangle = 0; triangle < materials.Length; triangle += 2)
         Equal(materials[triangle], materials[triangle + 1]);
 

@@ -23,6 +23,9 @@ public readonly record struct TerrainBaseMeshSummary(
 /// <summary>
 /// Engine-neutral deterministic base-terrain vertex. Position is chunk-local X/Z plus absolute Y.
 /// Normal and tangent are exact unnormalized integer directions; presentation may normalize them.
+/// Canonical triangle indices satisfy cross(v1-v0, v2-v0) toward the semantic front/outward side
+/// in UltraSim coordinates, and emitted normals occupy that same semantic hemisphere. Engine
+/// adapters own any coordinate, handedness, winding, normal, or tangent conversion they require.
 /// This is an internal repository mesh-preparation payload, not a persistence, pack, Network,
 /// Game.Contracts, mod, or long-term presentation ABI.
 /// </summary>

@@ -847,11 +847,16 @@ public sealed class GodotWorldRenderer : IDisposable
             if (!trianglesByMaterial.TryGetValue(material, out List<int>? indices))
                 trianglesByMaterial.Add(material, indices = []);
             int source = triangle * 3;
-            // Game.World emits upward-facing mathematical winding. Godot defines clockwise
-            // winding as the front face, so reverse each triangle only at the native adapter.
-            indices.Add(_terrainIndices[source]);
-            indices.Add(_terrainIndices[source + 2]);
-            indices.Add(_terrainIndices[source + 1]);
+            GodotMeshGeometry.ConvertCanonicalTriangle(
+                _terrainIndices[source],
+                _terrainIndices[source + 1],
+                _terrainIndices[source + 2],
+                out int first,
+                out int second,
+                out int third);
+            indices.Add(first);
+            indices.Add(second);
+            indices.Add(third);
         }
 
         var mesh = new ArrayMesh();

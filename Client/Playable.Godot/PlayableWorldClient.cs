@@ -118,10 +118,16 @@ public partial class PlayableWorldClient : Node3D
             if (!_sequencer.TryCreateSemanticCommand(decision.Command, out GamePlayerCommand command))
                 throw new InvalidOperationException("The selected control profile produced an invalid command.");
 
+            bool faceRequested = TryResolveProfileFacing(
+                command,
+                decision,
+                out ClientControlWorldPoint facingPoint,
+                out bool facingRequiresAcceptedLocomotion);
             ApplyCommand(
                 command,
-                _profile == ControlProfile.IndependentMoveLook && decision.LookRequested,
-                decision.LookPoint);
+                faceRequested,
+                facingPoint,
+                facingRequiresAcceptedLocomotion);
             _runtime.Tick();
             SynchronizeProjection();
             UpdateCamera();
@@ -318,7 +324,8 @@ public partial class PlayableWorldClient : Node3D
     private void ApplyCommand(
         in GamePlayerCommand command,
         bool faceLookPoint,
-        in ClientControlWorldPoint lookPoint)
+        in ClientControlWorldPoint lookPoint,
+        bool facingRequiresAcceptedLocomotion)
     {
         if (_runtime is null)
             return;
@@ -351,7 +358,9 @@ public partial class PlayableWorldClient : Node3D
                         admitted,
                         target,
                         out GamePlayerCommandResult result);
-                    if (result.WasAdmitted && faceLookPoint)
+                    if (result.WasAdmitted && faceLookPoint &&
+                        (!facingRequiresAcceptedLocomotion ||
+                         result.Locomotion == GameWorldActionStatus.Accepted))
                     {
                         GameWorldActionStatus facing = game.WorldActions.FaceActorToward(
                             world,
@@ -361,7 +370,7 @@ public partial class PlayableWorldClient : Node3D
                             facingPoint.ZMillimeters,
                             out _);
                         if (facing != GameWorldActionStatus.Accepted)
-                            throw new InvalidOperationException($"Independent facing failed: {facing}.");
+                            throw new InvalidOperationException($"Profile facing failed: {facing}.");
                     }
                     return result;
                 }, out GamePlayerCommandResult result))
@@ -383,6 +392,40 @@ public partial class PlayableWorldClient : Node3D
             _lastOutcome = result.Interaction == GameWorldActionStatus.Accepted
                 ? $"Cabin door {(result.DoorIsOpen ? "opened" : "closed")}"
                 : $"Interaction: {result.Interaction}";
+        }
+    }
+
+    private bool TryResolveProfileFacing(
+        in GamePlayerCommand command,
+        in ClientControlProfileDecision decision,
+        out ClientControlWorldPoint facingPoint,
+        out bool requiresAcceptedLocomotion)
+    {
+        GameLocomotionUpdate locomotion = command.Locomotion;
+        switch (_profile)
+        {
+            case ControlProfile.OrbitCommand when
+                decision.LookRequested &&
+                locomotion.Kind is GameLocomotionUpdateKind.Direct or
+                    GameLocomotionUpdateKind.Destination:
+                facingPoint = decision.LookPoint;
+                requiresAcceptedLocomotion = true;
+                return true;
+            case ControlProfile.ThirdPersonDirect when
+                locomotion.Kind == GameLocomotionUpdateKind.Direct:
+                facingPoint = new ClientControlWorldPoint(
+                    checked(_player.GlobalXMillimeters + locomotion.DirectX),
+                    checked(_player.GlobalZMillimeters + locomotion.DirectZ));
+                requiresAcceptedLocomotion = true;
+                return true;
+            case ControlProfile.IndependentMoveLook when decision.LookRequested:
+                facingPoint = decision.LookPoint;
+                requiresAcceptedLocomotion = false;
+                return true;
+            default:
+                facingPoint = default;
+                requiresAcceptedLocomotion = false;
+                return false;
         }
     }
 
@@ -658,7 +701,7 @@ public partial class PlayableWorldClient : Node3D
 
     private void RunLaunchSmokeAcceptance()
     {
-        if (_camera is null || _renderer is null || _runtime is null)
+        if (_camera is null || _renderer is null || _runtime is null || _sequencer is null)
             throw new InvalidOperationException("The launch smoke started before composition completed.");
 
         Vector3 orbitCamera = _camera.Position;
@@ -672,6 +715,20 @@ public partial class PlayableWorldClient : Node3D
             independentCamera.DistanceTo(thirdPersonCamera) > 0.5f &&
             _camera.Position.DistanceTo(orbitCamera) < 0.001f))
             throw new InvalidOperationException("Control profile switches did not realize distinct camera modes.");
+
+        ProbeMovementFacing(
+            ControlProfile.OrbitCommand,
+            GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MinimumAxisMagnitude, 0),
+            new ClientControlWorldPoint(
+                _player.GlobalXMillimeters - 1_000,
+                _player.GlobalZMillimeters),
+            WorldYaw.ThreeQuarterTurn);
+        ProbeMovementFacing(
+            ControlProfile.ThirdPersonDirect,
+            GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+            default,
+            WorldYaw.QuarterTurn);
+        SetProfile(ControlProfile.OrbitCommand);
 
         int before = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
         RelocateControlledActor(GamePlayableWorld.ChestPosition);
@@ -727,6 +784,55 @@ public partial class PlayableWorldClient : Node3D
         _runtime.Tick();
         SynchronizeProjection();
         DrainRenderer();
+
+        void ProbeMovementFacing(
+            ControlProfile profile,
+            in GameLocomotionUpdate locomotion,
+            in ClientControlWorldPoint lookPoint,
+            WorldYaw expected)
+        {
+            SetProfile(profile);
+            var intent = new ClientWorldCommandIntent(
+                locomotion,
+                GamePlayerActions.None,
+                true);
+            if (!_sequencer.TryCreateSemanticCommand(intent, out GamePlayerCommand command))
+                throw new InvalidOperationException($"{profile} facing probe could not form a command.");
+            var decision = new ClientControlProfileDecision(
+                intent,
+                false,
+                default,
+                profile == ControlProfile.OrbitCommand,
+                lookPoint);
+            if (!TryResolveProfileFacing(
+                    command,
+                    decision,
+                    out ClientControlWorldPoint facingPoint,
+                    out bool requiresAcceptedLocomotion))
+                throw new InvalidOperationException($"{profile} did not produce movement-facing intent.");
+            ApplyCommand(command, true, facingPoint, requiresAcceptedLocomotion);
+            _runtime.Tick();
+            SynchronizeProjection();
+            DrainRenderer();
+            if (ReadPlayerOrientation() != expected)
+                throw new InvalidOperationException(
+                    $"{profile} did not face its accepted movement direction.");
+        }
+    }
+
+    private WorldYaw ReadPlayerOrientation()
+    {
+        if (_runtime is null || !_runtime.Game.TryUseActiveGeneration<
+                IGameGenerationStateProvider, WorldYaw>(
+                (world, _, game) => game.WorldState.TryReadPublic(
+                    world,
+                    Resolve(world, _entities.PlayerId),
+                    out WorldPublicDescriptor descriptor)
+                        ? descriptor.Orientation
+                        : throw new InvalidOperationException("The playable character lost public state."),
+                out WorldYaw orientation))
+            throw new InvalidOperationException("The playable character orientation was unavailable.");
+        return orientation;
     }
 
     private void RelocateControlledActor(in WorldPosition requested)
@@ -1057,72 +1163,14 @@ public partial class PlayableWorldClient : Node3D
             StandardMaterial3D material = Material(color);
             if (transparent)
                 material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
-            var surface = new SurfaceTool();
-            surface.Begin(Mesh.PrimitiveType.Triangles);
-            surface.SetMaterial(material);
-            float x = size.X * 0.5f;
-            float z = size.Z * 0.5f;
-            Vector3 nbl = new(-x, 0f, -z);
-            Vector3 nbr = new(x, 0f, -z);
-            Vector3 nfl = new(-x, 0f, z);
-            Vector3 nfr = new(x, 0f, z);
-            Vector3 tbl = new(-x, size.Y, -z);
-            Vector3 tbr = new(x, size.Y, -z);
-            Vector3 tfl = new(-x, size.Y, z);
-            Vector3 tfr = new(x, size.Y, z);
-            AddQuad(nbl, nbr, nfr, nfl);
-            AddQuad(tbl, tfl, tfr, tbr);
-            AddQuad(nbl, tbl, tbr, nbr);
-            AddQuad(nbr, tbr, tfr, nfr);
-            AddQuad(nfr, tfr, tfl, nfl);
-            AddQuad(nfl, tfl, tbl, nbl);
-            surface.GenerateNormals();
-            return surface.Commit();
-
-            void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
-            {
-                surface.AddVertex(a);
-                surface.AddVertex(b);
-                surface.AddVertex(c);
-                surface.AddVertex(a);
-                surface.AddVertex(c);
-                surface.AddVertex(d);
-            }
+            return GodotMeshGeometry.CreateGroundedBox(size, material);
         }
 
         private static ArrayMesh CharacterMesh(Color color)
         {
             StandardMaterial3D material = Material(color);
-            material.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
-            var surface = new SurfaceTool();
-            surface.Begin(Mesh.PrimitiveType.Triangles);
-            surface.SetMaterial(material);
-            Vector3 backLeftBottom = new(-0.42f, 0f, -0.42f);
-            Vector3 backRightBottom = new(0.42f, 0f, -0.42f);
-            Vector3 frontBottom = new(0f, 0f, 0.68f);
-            Vector3 backLeftTop = new(-0.42f, 1.8f, -0.42f);
-            Vector3 backRightTop = new(0.42f, 1.8f, -0.42f);
-            Vector3 frontTop = new(0f, 1.8f, 0.68f);
-            AddTriangle(backLeftBottom, frontBottom, backRightBottom);
-            AddTriangle(backLeftTop, backRightTop, frontTop);
-            AddQuad(backLeftBottom, backRightBottom, backRightTop, backLeftTop);
-            AddQuad(backRightBottom, frontBottom, frontTop, backRightTop);
-            AddQuad(frontBottom, backLeftBottom, backLeftTop, frontTop);
-            surface.GenerateNormals();
-            return surface.Commit();
-
-            void AddTriangle(Vector3 a, Vector3 b, Vector3 c)
-            {
-                surface.AddVertex(a);
-                surface.AddVertex(b);
-                surface.AddVertex(c);
-            }
-
-            void AddQuad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
-            {
-                AddTriangle(a, b, c);
-                AddTriangle(a, c, d);
-            }
+            return GodotMeshGeometry.CreateGroundedPointerWedge(
+                0.42f, 0.42f, 0.68f, 1.8f, material);
         }
     }
 }

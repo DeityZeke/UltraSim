@@ -999,6 +999,13 @@ observations are historical rather than like-for-like performance baselines.
 The additive Release evidence is
 [`terrain-t0.10-cabin-collision-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-cabin-collision-hardening-2026-08-21.json).
 
+The subsequent launchable-client visual hardening keeps profile facing semantics
+deliberately distinct. OrbitCommand faces an accepted pointer Direct/Destination;
+ThirdPersonDirect faces its accepted camera-relative Direct vector; and
+IndependentMoveLook continues to face the nominated mouse point independently
+of its fixed-world-axis WASD movement. A rejected locomotion update does not
+change movement-following facing.
+
 ## T0.10 real-client requirement
 
 T0.10 must stop manufacturing the entire playable path only from tests.

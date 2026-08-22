@@ -281,7 +281,11 @@ GameWorldState
 `TryBuildBaseTerrainMesh` fills caller-owned fixed spans with 1,089
 `TerrainBaseMeshVertex` values, 6,144 ushort indices, and 2,048 triangle material
 IDs. Vertices retain integer local X/Z, absolute Y, and exact unnormalized normal
-and tangent directions. The 36-byte row is an internal mesh-preparation payload,
+and tangent directions. Canonical indices satisfy
+`cross(v1-v0, v2-v0)` toward the semantic front/outward side in UltraSim
+coordinates; normals occupy that same hemisphere. Engine adapters own any
+coordinate, handedness, winding, normal, or tangent conversion. The 36-byte row
+is an internal mesh-preparation payload,
 not a pack/persistence/Network/Game.Contracts/mod ABI. Frames include incident
 triangles from the bounded immutable packed-neighbor halo, so adjacent chunks
 independently reproduce identical seam

@@ -222,6 +222,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
 
     private void RunAcceptance()
     {
+        ValidateGodotGeometryConventions();
         WorldPack pack = GamePlayableWorld.CreateWorldPack();
         var binding = new WorldContentBinding(
             GameContent.WorldFingerprint,
@@ -441,6 +442,78 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 Expect((second - first).Cross(third - first).Y < 0,
                     "A Godot terrain triangle was not clockwise when viewed from above.");
             }
+        }
+    }
+
+    private static void ValidateGodotGeometryConventions()
+    {
+        GodotMeshGeometry.ConvertCanonicalTriangle(0, 1, 2,
+            out int first, out int second, out int third);
+        Expect(first == 0 && second == 2 && third == 1,
+            "The Godot adapter did not own canonical triangle conversion.");
+
+        var material = new StandardMaterial3D();
+        ArrayMesh mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(2f, 3f, 4f), material);
+        using var data = new MeshDataTool();
+        Expect(data.CreateFromSurface(mesh, 0) == Error.Ok && data.GetFaceCount() == 12,
+            "The Godot procedural box did not expose twelve triangles.");
+        for (int face = 0; face < data.GetFaceCount(); face++)
+        {
+            int firstVertex = data.GetFaceVertex(face, 0);
+            int secondVertex = data.GetFaceVertex(face, 1);
+            int thirdVertex = data.GetFaceVertex(face, 2);
+            Vector3 a = data.GetVertex(firstVertex);
+            Vector3 b = data.GetVertex(secondVertex);
+            Vector3 c = data.GetVertex(thirdVertex);
+            Vector3 triangleCenter = (a + b + c) / 3f;
+            Vector3 outward = ExpectedBoxNormal(triangleCenter);
+            Vector3 storedNormal = (data.GetVertexNormal(firstVertex) +
+                data.GetVertexNormal(secondVertex) +
+                data.GetVertexNormal(thirdVertex)).Normalized();
+            float normalDot = storedNormal.Dot(outward);
+            float windingDot = (b - a).Cross(c - a).Normalized().Dot(outward);
+            Expect(normalDot > 0.999f,
+                $"Godot procedural box face {face} normal was not outward: " +
+                $"dot={normalDot}, center={triangleCenter}, normal={storedNormal}.");
+            Expect(windingDot < -0.999f,
+                $"Godot procedural box face {face} was not native clockwise winding: " +
+                $"dot={windingDot}.");
+        }
+
+        static Vector3 ExpectedBoxNormal(Vector3 faceCenter)
+        {
+            if (Mathf.IsEqualApprox(faceCenter.Y, 0f)) return Vector3.Down;
+            if (Mathf.IsEqualApprox(faceCenter.Y, 3f)) return Vector3.Up;
+            if (Mathf.IsEqualApprox(faceCenter.X, -1f)) return Vector3.Left;
+            if (Mathf.IsEqualApprox(faceCenter.X, 1f)) return Vector3.Right;
+            if (Mathf.IsEqualApprox(faceCenter.Z, -2f)) return Vector3.Forward;
+            if (Mathf.IsEqualApprox(faceCenter.Z, 2f)) return Vector3.Back;
+            throw new InvalidOperationException($"A procedural box face was not planar: {faceCenter}.");
+        }
+
+        ArrayMesh wedge = GodotMeshGeometry.CreateGroundedPointerWedge(
+            0.42f, 0.42f, 0.68f, 1.8f, material);
+        using var wedgeData = new MeshDataTool();
+        Expect(wedgeData.CreateFromSurface(wedge, 0) == Error.Ok &&
+            wedgeData.GetFaceCount() == 8,
+            "The Godot character wedge did not expose eight triangles.");
+        Vector3 inside = new(0f, 0.9f, -0.05f);
+        for (int face = 0; face < wedgeData.GetFaceCount(); face++)
+        {
+            int firstVertex = wedgeData.GetFaceVertex(face, 0);
+            int secondVertex = wedgeData.GetFaceVertex(face, 1);
+            int thirdVertex = wedgeData.GetFaceVertex(face, 2);
+            Vector3 a = wedgeData.GetVertex(firstVertex);
+            Vector3 b = wedgeData.GetVertex(secondVertex);
+            Vector3 c = wedgeData.GetVertex(thirdVertex);
+            Vector3 normal = (wedgeData.GetVertexNormal(firstVertex) +
+                wedgeData.GetVertexNormal(secondVertex) +
+                wedgeData.GetVertexNormal(thirdVertex)).Normalized();
+            Vector3 rawCross = (b - a).Cross(c - a).Normalized();
+            Expect(normal.Dot((a + b + c) / 3f - inside) > 0f,
+                $"Godot character wedge face {face} normal pointed into the prism.");
+            Expect(rawCross.Dot(normal) < -0.999f,
+                $"Godot character wedge face {face} did not preserve native winding plus outward normal.");
         }
     }
 

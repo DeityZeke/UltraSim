@@ -15,9 +15,15 @@ Expected render/group pressure is rejected before native construction.
 Multi-fragment, and public-prefab groups; terrain cannot bypass the configured
 presentation-pressure bound.
 
-`Game.World` terrain indices use engine-neutral upward mathematical winding.
-Godot front faces are clockwise, so the adapter reverses each triangle when it
-constructs `ArrayMesh` surfaces while preserving the supplied upward normals.
+`Game.World` terrain indices use an engine-neutral mathematical invariant:
+`cross(v1-v0, v2-v0)` points toward the semantic front/outward side in UltraSim
+coordinates, and supplied normals occupy that same hemisphere. The current
+Godot coordinate mapping requires native clockwise order, so `GodotMeshGeometry`
+reverses each triangle at this adapter boundary while preserving semantic
+normals/tangents. A future engine adapter must account for its complete coordinate
+and handedness transform; it must not copy “reverse every triangle” as a generic
+rule. Godot-local fallback primitives use the same helper to emit native winding
+plus explicit outward normals directly.
 
 Presentation membership and semantic refresh are separate operations.
 `TryEnterPresentation` is residency-owner work and may reverse a pending

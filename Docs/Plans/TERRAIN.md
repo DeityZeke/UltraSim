@@ -1391,8 +1391,12 @@ packing, split streams, or normalized attributes when real Godot evidence earns
 it without reopening base-terrain authority or `WorldPack/v1`.
 
 The builder preflights every caller span and chunk identity before writing. It
-emits upward canonical winding and the same global-parity diagonal used by the
-authoritative sampler. Each vertex frame accumulates every incident triangle
+emits canonical mathematical winding where `cross(v1-v0, v2-v0)` points toward
+the semantic front/outward side in UltraSim coordinates, and uses the same
+global-parity diagonal as the authoritative sampler. Normals occupy the same
+semantic hemisphere. Each engine adapter owns its complete coordinate,
+handedness, winding, normal, and tangent conversion; canonical geometry does not
+encode a Godot/Unity/Unreal front-face rule. Each vertex frame accumulates every incident triangle
 from the immutable base surface, including neighboring packed chunks, so
 independently built adjacent meshes reproduce the same absolute edge position,
 normal, and tangent even when residency/build order differs. A later terrain
@@ -3909,6 +3913,17 @@ reports 13,568 bytes of `GameWorldActions` backing after adding the fixed
 timing must not be compared directly with the earlier no-collision artifact;
 the broad T0.10 matrix remains the appropriate performance gate. Evidence:
 [`terrain-t0.10-cabin-collision-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-cabin-collision-hardening-2026-08-21.json).
+
+The launchable placeholder tree, wall, roof, shelf, and public meshes subsequently
+corrected their procedural Godot triangle winding as one shared primitive fix.
+Their explicit stored normals and culled faces point outward; this is presentation-only
+hardening and does not change the accepted packed bounds or collision authority.
+Permanent native acceptance now checks both sides of the seam: canonical terrain
+cross products point toward the UltraSim semantic front, converted Godot terrain
+is native front-facing, and all twelve triangles of a Godot-local procedural box
+have clockwise native faces with explicit outward stored normals. The asymmetric
+player wedge is independently checked as an eight-triangle closed prism so it
+cannot retain a separate inward face-order convention.
 
 ### T0 performance/evidence matrix
 
