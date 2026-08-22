@@ -461,6 +461,37 @@ public sealed class GameWorldActions
         return false;
     }
 
+    /// <summary>
+    /// Performs one explicit authoritative positional discontinuity. A successful relocation
+    /// resolves the prepared terrain height and terminates operational Direct/Destination intent,
+    /// so the next locomotion step cannot pull the actor back onto an obsolete route.
+    /// </summary>
+    public GameWorldActionStatus RelocateActor(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in WorldPosition requested,
+        out WorldPosition relocated)
+    {
+        EnsureWorld(world, worldState);
+        relocated = default;
+        if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+            !worldState.TryReadPosition(world, actor, out _))
+            return GameWorldActionStatus.MissingActor;
+        if (!TryResolveTerrainPosition(
+                worldState,
+                requested.YMillimeters,
+                requested.GlobalXMillimeters,
+                requested.GlobalZMillimeters,
+                out relocated))
+            return GameWorldActionStatus.OutsidePreparedWorld;
+        if (!worldState.TrySetPosition(world, actor, relocated))
+            return GameWorldActionStatus.InvariantViolation;
+
+        ClearLocomotion(checked((int)actor.Index));
+        return GameWorldActionStatus.Accepted;
+    }
+
     public GameWorldActionStatus MoveItemToNearbyContainer(
         EcsWorld world,
         GameWorldState worldState,

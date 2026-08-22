@@ -81,3 +81,13 @@ Control profiles use `ClientWorldCommandIntent` and
 action command leave retained locomotion alone; it is not a retained authority
 mode. The sequencer owns fencing and action-edge formation, not camera/gesture
 policy. Command sampling frequency therefore does not define movement speed.
+
+The launchable T0.10 client builds concrete control profiles over that seam.
+`OrbitCommandProfile` owns single-click selection, hold-to-steer, release/
+escape/right-click stop, double-click Destination, and camera-relative WASD
+conversion. The engine supplies only button edges, focus, a horizontal camera
+basis, and a raycast-nominated world point. `ThirdPersonDirectProfile` and
+`IndependentMoveLookProfile` are intentionally crude executable canaries: the
+former proves relative forward rotates in Client Core rather than Game; the
+latter proves movement and look can be nominated in different directions.
+These types are T0 evidence, not a generic controller/mod framework.

@@ -72,6 +72,16 @@ foreach (string configuration in configurations)
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://T010PlayableWorldAcceptance.tscn",
         ]);
+        const string playableProject = "Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj";
+        var playableBuild = new List<string> { "build", playableProject, "-c", configuration };
+        if (options.NoRestore) playableBuild.Add("--no-restore");
+        Run(root, "dotnet", playableBuild);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Playable.Godot",
+            "--", "--smoke",
+        ]);
     }
 }
 
@@ -116,6 +126,18 @@ static void VerifyArchitecture(string root)
             "Client/Core/UltraSim.Client.Core.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
+        ],
+        ["Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj"] =
+        [
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Client/_Godot/UltraSim.Client.Godot.csproj",
+            "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Inventory/UltraSim.Game.Inventory.csproj",
+            "Game/Persistence/UltraSim.Game.Persistence.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
+            "Server/Persistence/UltraSim.Server.Persistence.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
@@ -251,6 +273,7 @@ static void VerifyDocumentation(string root)
         "Kernels/Spatial/README.md",
         "Client/Core/README.md",
         "Client/_Godot/README.md",
+        "Client/Playable.Godot/README.md",
         "Game/World/README.md",
         "Game/Replication/README.md",
         "_Benchmarks/README.md",
@@ -276,7 +299,7 @@ static void VerifyDocumentation(string root)
             "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
             "Docs/Plans/NETWORK.md", "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
-            "Client/_Godot/README.md", "Game/World/README.md",
+            "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
             "Game/Replication/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =

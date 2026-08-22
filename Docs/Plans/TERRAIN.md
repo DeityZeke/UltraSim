@@ -3788,9 +3788,9 @@ coordinates/state.
 
 The immutable evidence artifact is
 [`terrain-t0.10-destination-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-destination-2026-08-21.json).
-OrbitCommand/control profiles, pointer gestures, the launchable
-`Client/_Godot` application, the broad matrix, and N1 have not started. T0.10
-remains active.
+This was the pre-client boundary; the later launchable-client stop below now
+implements OrbitCommand/control profiles and the real application. The broad
+matrix and N1 remain outstanding.
 
 ### T0.10 Destination temporal hardening stop — 2026-08-21
 
@@ -3820,7 +3820,41 @@ Four additional retained `long` values per ECS slot make the current known
 over the initial Destination stop. The additive evidence artifact is
 [`terrain-t0.10-destination-temporal-hardening-2026-08-21.json`](../../_Benchmarks/Baselines/terrain-t0.10-destination-temporal-hardening-2026-08-21.json).
 Destination temporal integration is now closed for the straight-line,
-pre-navigation T0.10 scope. OrbitCommand and navigation remain unstarted.
+pre-navigation T0.10 scope. Navigation remains unstarted.
+
+### T0.10 launchable OfflineDirect client implementation stop — 2026-08-21
+
+`Client/Playable.Godot` is now the human-launchable woods/cabin composition
+root. The reusable `Client/_Godot` assembly remains only the native adapter and
+renderer; the application project deliberately owns the broader OfflineDirect
+dependencies required to compose `ServerRuntime`, Game authority/persistence,
+Client Core semantic state, and Godot presentation.
+
+The application uses the actual authored pack, actual publication snapshots,
+the production `ClientWorldSemanticCache` and `ClientPresentationWindow`, and
+the native renderer. Its configured InputMap feeds the engine-neutral
+`OrbitCommandProfile`: camera-relative WASD, click selection, hold Direct,
+release/RMB/Escape Stop, and double-click Destination. Middle-drag orbit,
+wheel zoom, selected cabin-door use, nearby chest/backpack bread transfer, and
+F5/F9 save/restore are exposed in the scene. F1/F2/F3 select the primary
+OrbitCommand profile or the two crude portability canaries.
+
+The Client Core profiles contain no Godot values. Godot supplies raw button
+edges, focus, a horizontal camera basis, and a nominated ray/world point; Game
+still validates all authority. A native headless launch smoke constructs nine
+render chunks and reports the actual controlled player/profile before exiting.
+
+The adversarial retained-route finding is also closed narrowly. A successful
+game-owned `RelocateActor` resolves prepared terrain, commits the positional
+discontinuity, and clears retained Direct/Destination. The primitive world
+position writer does not learn control policy. Integration coverage proves both
+locomotion kinds remain stopped after relocation. `GameWorldActions` remains a
+watch for the first natural domain split; no speculative action/service
+framework was introduced.
+
+T0.10 is not frozen. Manual human acceptance of the launchable controls and the
+broad flat/rough/boundary/dense/static-heavy evidence matrix remain the stop
+gate. Network N1 has not started.
 
 ### T0 performance/evidence matrix
 

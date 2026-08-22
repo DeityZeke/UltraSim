@@ -31,6 +31,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
   planning.
 - [Godot client adapter](../Client/_Godot/README.md) — native UI/world
   presentation, bounded render residency, grouping, and floating origin.
+- [Launchable T0.10 client](../Client/Playable.Godot/README.md) — real
+  OfflineDirect woods/cabin application, controls, and save location.
 
 ## ECS
 

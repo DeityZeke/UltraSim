@@ -36,6 +36,68 @@ public readonly record struct ClientWorldInputSnapshot(
     GamePlayerActions LastHeldActions,
     bool LastSampleHadFocus);
 
+/// <summary>Shared deterministic input-vector canonicalization for concrete client profiles.</summary>
+public static class ClientWorldInputMath
+{
+    public static bool TryCreateDirect(float rawX, float rawZ, out GameLocomotionUpdate locomotion)
+    {
+        if (!float.IsFinite(rawX) || !float.IsFinite(rawZ))
+        {
+            locomotion = default;
+            return false;
+        }
+        NormalizeAxes(rawX, rawZ, out short x, out short z);
+        if (x == 0 && z == 0)
+        {
+            locomotion = GameLocomotionUpdate.Stop;
+            return true;
+        }
+        locomotion = GameLocomotionUpdate.CreateDirect(x, z);
+        return true;
+    }
+
+    internal static void NormalizeAxes(float rawX, float rawZ, out short moveX, out short moveZ)
+    {
+        double x = rawX;
+        double z = rawZ;
+        double magnitudeSquared = x * x + z * z;
+        if (magnitudeSquared > 1d)
+        {
+            double inverse = 1d / Math.Sqrt(magnitudeSquared);
+            x *= inverse;
+            z *= inverse;
+        }
+
+        moveX = QuantizeAxis(x);
+        moveZ = QuantizeAxis(z);
+        ClampToQuantizedUnitCircle(ref moveX, ref moveZ);
+    }
+
+    private static void ClampToQuantizedUnitCircle(ref short x, ref short z)
+    {
+        long maximumSquared =
+            (long)GamePlayerCommand.MaximumAxisMagnitude * GamePlayerCommand.MaximumAxisMagnitude;
+        while ((long)x * x + (long)z * z > maximumSquared)
+        {
+            int absoluteX = Math.Abs((int)x);
+            int absoluteZ = Math.Abs((int)z);
+            if (absoluteX >= absoluteZ)
+                x = checked((short)(x - Math.Sign(x)));
+            if (absoluteZ >= absoluteX)
+                z = checked((short)(z - Math.Sign(z)));
+        }
+    }
+
+    private static short QuantizeAxis(double value)
+    {
+        value = Math.Clamp(value, -1d, 1d);
+        int quantized = checked((int)Math.Round(
+            value * GamePlayerCommand.MaximumAxisMagnitude,
+            MidpointRounding.AwayFromZero));
+        return checked((short)quantized);
+    }
+}
+
 /// <summary>
 /// Owner-thread input normalizer and sequencer. Physical bindings and raw device capture remain in
 /// the engine adapter; both OfflineDirect and future remote paths consume the same command value.
@@ -80,7 +142,7 @@ public sealed class ClientWorldInputSequencer
             return false;
         }
 
-        NormalizeAxes(
+        ClientWorldInputMath.NormalizeAxes(
             sample.HasFocus ? sample.MoveX : 0,
             sample.HasFocus ? sample.MoveZ : 0,
             out short moveX,
@@ -142,47 +204,6 @@ public sealed class ClientWorldInputSequencer
             _commandsProduced == 0 ? 0 : unchecked(_nextSequence - 1),
             _lastHeld,
             _lastFocused);
-    }
-
-    private static void NormalizeAxes(float rawX, float rawZ, out short moveX, out short moveZ)
-    {
-        double x = rawX;
-        double z = rawZ;
-        double magnitudeSquared = x * x + z * z;
-        if (magnitudeSquared > 1d)
-        {
-            double inverse = 1d / Math.Sqrt(magnitudeSquared);
-            x *= inverse;
-            z *= inverse;
-        }
-
-        moveX = QuantizeAxis(x);
-        moveZ = QuantizeAxis(z);
-        ClampToQuantizedUnitCircle(ref moveX, ref moveZ);
-    }
-
-    private static void ClampToQuantizedUnitCircle(ref short x, ref short z)
-    {
-        long maximumSquared =
-            (long)GamePlayerCommand.MaximumAxisMagnitude * GamePlayerCommand.MaximumAxisMagnitude;
-        while ((long)x * x + (long)z * z > maximumSquared)
-        {
-            int absoluteX = Math.Abs((int)x);
-            int absoluteZ = Math.Abs((int)z);
-            if (absoluteX >= absoluteZ)
-                x = checked((short)(x - Math.Sign(x)));
-            if (absoluteZ >= absoluteX)
-                z = checked((short)(z - Math.Sign(z)));
-        }
-    }
-
-    private static short QuantizeAxis(double value)
-    {
-        value = Math.Clamp(value, -1d, 1d);
-        int quantized = checked((int)Math.Round(
-            value * GamePlayerCommand.MaximumAxisMagnitude,
-            MidpointRounding.AwayFromZero));
-        return checked((short)quantized);
     }
 
     private void EnsureOwner()

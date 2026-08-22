@@ -18,7 +18,7 @@ using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-t0.10-integrated-acceptance-v6";
+const string Workload = "ultrasim-t0.10-integrated-acceptance-v7";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
@@ -28,6 +28,7 @@ Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRa
 Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
 Run("PlayableDestinationProgressIsCadenceIndependent", PlayableDestinationProgressCadenceMatrix, results);
 Run("LocomotionUpdatesComposeAndSupersede", LocomotionUpdateSemantics, results);
+Run("AuthoritativeRelocationCancelsOperationalLocomotion", AuthoritativeRelocationCancelsLocomotion, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
@@ -804,6 +805,85 @@ static TestMetrics LocomotionUpdateSemantics()
         host.Tick();
         Expect(link.ReadPosition() == start && ReadActiveLocomotionCount(runtime.Game) == 0,
             "The locomotion fixture reset was not canonical.");
+    }
+}
+
+static TestMetrics AuthoritativeRelocationCancelsLocomotion()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1350))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x1350));
+    Expect(entered.IsEntered, "The relocation actor could not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+        (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+        out GamePlayableWorldEntities entities),
+        "The relocation fixture could not populate.");
+    host.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+
+    Send(GameLocomotionUpdate.CreateDestination(30_000, 25_000));
+    host.Tick();
+    Expect(ReadActiveLocomotionCount(runtime.Game) == 1,
+        "Destination was not active before relocation.");
+    WorldPosition firstRelocation = Relocate(GamePlayableWorld.AnimalPosition);
+    host.Tick();
+    Expect(link.ReadPosition() == firstRelocation && ReadActiveLocomotionCount(runtime.Game) == 0,
+        "Destination resumed or rewound the actor after authoritative relocation.");
+
+    Send(GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0));
+    host.Tick();
+    Expect(ReadActiveLocomotionCount(runtime.Game) == 1,
+        "Direct was not active before relocation.");
+    WorldPosition secondRelocation = Relocate(GamePlayableWorld.PlayerStart);
+    host.Tick();
+    Expect(link.ReadPosition() == secondRelocation && ReadActiveLocomotionCount(runtime.Game) == 0,
+        "Direct continued after authoritative relocation.");
+
+    return new TestMetrics(
+        HashText($"{firstRelocation}|{secondRelocation}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Successful game-owned relocation resolves terrain and atomically cancels retained Direct/Destination; the primitive position writer remains policy-free.",
+        InputCommands: input.Snapshot().CommandsProduced);
+
+    void Send(in GameLocomotionUpdate locomotion)
+    {
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(locomotion, GamePlayerActions.None, true),
+                out GamePlayerCommand command),
+            $"The pre-relocation {locomotion.Kind} command could not be formed.");
+        GamePlayerCommandResult result = link.ApplyCommand(command);
+        Expect(result.WasAdmitted && result.Locomotion == GameWorldActionStatus.Accepted,
+            $"The pre-relocation {locomotion.Kind} command was not admitted.");
+    }
+
+    WorldPosition Relocate(in WorldPosition requested)
+    {
+        WorldPosition target = requested;
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolveInWorld(world, entities.PlayerId);
+                GameWorldActionStatus status = game.WorldActions.RelocateActor(
+                    world, game.WorldState, actor, target, out WorldPosition relocated);
+                Expect(status == GameWorldActionStatus.Accepted,
+                    $"Authoritative relocation failed: {status}.");
+                return relocated;
+            }, out WorldPosition relocated),
+            "Authoritative relocation had no active generation.");
+        Expect(ReadActiveLocomotionCount(runtime.Game) == 0,
+            "Successful relocation did not immediately retire retained locomotion.");
+        return relocated;
     }
 }
 

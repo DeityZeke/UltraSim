@@ -7,6 +7,8 @@ static class ClientWorldInputTests
     {
         NormalizesAndSequencesWithoutEnginePolicyLeakage();
         SemanticLocomotionUpdatesRemainExplicit();
+        OrbitCommandInterpretsGesturesAndCameraRelativeIntent();
+        ReferenceProfilesKeepMovementAndLookIndependent();
         FocusAndActionEdgesAreCommonClientSemantics();
         InvalidSamplesAndCrossThreadUseFailClosed();
     }
@@ -119,6 +121,120 @@ static class ClientWorldInputTests
         Assert.True(sequencer.TryCreateCommand(held, out GamePlayerCommand pressedAfterRelease));
         Assert.Equal(GamePlayerActions.Interact, pressedAfterRelease.PressedActions);
         Assert.True(pressedAfterRelease.IsValid);
+    }
+
+    private static void OrbitCommandInterpretsGesturesAndCameraRelativeIntent()
+    {
+        var profile = new OrbitCommandProfile();
+        ClientOrbitCommandSample sample = Sample(timestamp: 0);
+
+        ClientControlProfileDecision forward = profile.Evaluate(sample with { MoveZ = -1 });
+        Assert.Equal(GameLocomotionUpdateKind.Direct, forward.Command.Locomotion.Kind);
+        Assert.Equal((short)0, forward.Command.Locomotion.DirectX);
+        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, forward.Command.Locomotion.DirectZ);
+        ClientControlProfileDecision released = profile.Evaluate(sample with { TimestampMilliseconds = 1 });
+        Assert.Equal(GameLocomotionUpdateKind.Stop, released.Command.Locomotion.Kind);
+
+        ClientControlWorldPoint click = new(8_000, 6_000);
+        ClientControlProfileDecision selected = profile.Evaluate(sample with
+        {
+            PrimaryPressed = true,
+            PrimaryReleased = true,
+            PointerWorldPointValid = true,
+            PointerWorldPoint = click,
+            TimestampMilliseconds = 100,
+        });
+        Assert.True(selected.SelectionRequested);
+        Assert.Equal(GameLocomotionUpdateKind.Unchanged, selected.Command.Locomotion.Kind);
+
+        ClientControlProfileDecision destination = profile.Evaluate(sample with
+        {
+            PrimaryPressed = true,
+            PrimaryReleased = true,
+            PointerWorldPointValid = true,
+            PointerWorldPoint = click,
+            TimestampMilliseconds = 250,
+        });
+        Assert.False(destination.SelectionRequested);
+        Assert.Equal(GameLocomotionUpdateKind.Destination, destination.Command.Locomotion.Kind);
+        Assert.Equal(click.XMillimeters, destination.Command.Locomotion.DestinationXMillimeters);
+
+        ClientControlProfileDecision cancelled = profile.Evaluate(sample with
+        {
+            SecondaryPressed = true,
+            TimestampMilliseconds = 251,
+        });
+        Assert.Equal(GameLocomotionUpdateKind.Stop, cancelled.Command.Locomotion.Kind);
+
+        ClientControlWorldPoint steer = new(10_000, 0);
+        _ = profile.Evaluate(sample with
+        {
+            PrimaryDown = true,
+            PrimaryPressed = true,
+            PointerWorldPointValid = true,
+            PointerWorldPoint = steer,
+            TimestampMilliseconds = 1_000,
+        });
+        ClientControlProfileDecision steering = profile.Evaluate(sample with
+        {
+            PrimaryDown = true,
+            PointerWorldPointValid = true,
+            PointerWorldPoint = steer,
+            TimestampMilliseconds = 1_200,
+        });
+        Assert.Equal(GameLocomotionUpdateKind.Direct, steering.Command.Locomotion.Kind);
+        Assert.Equal(GamePlayerCommand.MaximumAxisMagnitude, steering.Command.Locomotion.DirectX);
+        ClientControlProfileDecision steeringReleased = profile.Evaluate(sample with
+        {
+            PrimaryReleased = true,
+            PointerWorldPointValid = true,
+            PointerWorldPoint = steer,
+            TimestampMilliseconds = 1_201,
+        });
+        Assert.Equal(GameLocomotionUpdateKind.Stop, steeringReleased.Command.Locomotion.Kind);
+
+        static ClientOrbitCommandSample Sample(long timestamp) => new(
+            0,
+            0,
+            GamePlayerActions.None,
+            true,
+            ClientHorizontalCameraBasis.WorldAxes,
+            0,
+            0,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            default,
+            timestamp);
+    }
+
+    private static void ReferenceProfilesKeepMovementAndLookIndependent()
+    {
+        var thirdPerson = new ThirdPersonDirectProfile();
+        var rotated = new ClientHorizontalCameraBasis(0, 1, 1, 0);
+        GameLocomotionUpdate cameraForward = thirdPerson.Evaluate(0, -1, rotated);
+        Assert.Equal(GameLocomotionUpdateKind.Direct, cameraForward.Kind);
+        Assert.Equal(GamePlayerCommand.MaximumAxisMagnitude, cameraForward.DirectX);
+        Assert.Equal((short)0, cameraForward.DirectZ);
+        Assert.Equal(GameLocomotionUpdateKind.Stop, thirdPerson.Evaluate(0, 0, rotated).Kind);
+
+        var independent = new IndependentMoveLookProfile();
+        ClientControlWorldPoint eastLook = new(9_000, 0);
+        ClientControlProfileDecision split = independent.Evaluate(
+            -1,
+            0,
+            GamePlayerActions.None,
+            true,
+            ClientHorizontalCameraBasis.WorldAxes,
+            true,
+            eastLook);
+        Assert.Equal(GameLocomotionUpdateKind.Direct, split.Command.Locomotion.Kind);
+        Assert.Equal(GamePlayerCommand.MinimumAxisMagnitude, split.Command.Locomotion.DirectX);
+        Assert.True(split.LookRequested);
+        Assert.Equal(eastLook, split.LookPoint);
     }
 
     private static void InvalidSamplesAndCrossThreadUseFailClosed()

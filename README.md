@@ -114,11 +114,14 @@ planner; the Godot class is now only its native admission bridge. T0.8 is
 accepted/frozen. T0.9 now implements the exact immutable
 pack plus bounded complete terrain/static/Multi overlay view, per-chunk structural
 revision/hash identity, and the fourth `worldview` save-set participant. Its
-implementation plus client-portability/invariant hardening is stopped for
-checkpoint review. Prepared client meshes now honor overlays; empty/no-op overlay
+implementation plus client-portability/invariant hardening is accepted/frozen.
+Prepared client meshes honor overlays; empty/no-op overlay
 lineage is save/restore-closed; and ordinary identity validation uses cold
-bound-pack indexes rather than rescanning the immutable world. T0.10 and Network
-N1 remain later work.
+bound-pack indexes rather than rescanning the immutable world. T0.10 is active:
+retained Direct/Destination authority and cadence semantics are closed, and
+`Client/Playable.Godot` now provides the first real OfflineDirect woods/cabin
+application. Human acceptance and the broad performance matrix remain before
+T0 freeze. Network N1 remains deferred.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
@@ -141,6 +144,15 @@ Useful focused variants:
 ./verify.sh --configuration=Release --skip-godot
 ./verify.sh --all-configurations --no-restore
 ```
+
+Launch the current T0.10 client with a Godot 4.7 .NET build:
+
+```bash
+godot --path Client/Playable.Godot
+```
+
+The controls and save location are documented in
+[`Client/Playable.Godot/README.md`](Client/Playable.Godot/README.md).
 
 The architecture-only gate also validates canonical documentation, relative
 links, root-document policy, XML-document generation policy, and stale claims.

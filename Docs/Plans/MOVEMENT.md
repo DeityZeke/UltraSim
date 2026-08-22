@@ -862,6 +862,56 @@ world capacity.
 No pathfinder, navmesh, obstacle avoidance, crowd steering, gait expansion,
 camera profile, or pointer gesture policy is implemented by this checkpoint.
 
+## T0.10 launchable OfflineDirect client implementation stop — 2026-08-21
+
+The first human-launchable client now lives at `Client/Playable.Godot`. It is a
+composition root beside the reusable `Client/_Godot` adapter rather than a
+reason to give the adapter authority dependencies. It starts the real local
+`ServerRuntime`, populates the authored woods/cabin pack, consumes actual
+`ChunkPublicationStore` snapshots into the production semantic cache/window,
+and realizes them through `GodotWorldRenderer`.
+
+The actual application InputMap is configured. `OrbitCommandProfile` in Client
+Core owns camera-relative WASD plus the mouse grammar:
+
+```text
+single click             selection only
+hold                     Direct toward current world point
+release after hold       Stop
+RMB / Escape             Stop without Destination
+double click             one Destination nomination
+```
+
+Godot owns physical event capture, screen-ray construction, and `Camera3D`.
+Core owns hold/double-click state, world-direction formation, profile policy,
+and sequencing. Game still receives no camera, key, screen, or profile values.
+The crude `ThirdPersonDirectProfile` rotates camera-relative forward into world
+Direct, while `IndependentMoveLookProfile` produces a separate look point from
+its movement direction. The latter remains a seam proof; authoritative facing
+has not yet been earned by gameplay.
+
+The application also exercises chunk crossing, selected door interaction,
+two-sided-authorized bread transfer between backpack/chest, and F5/F9 durable
+save/restore. Restore rebuilds Client semantic/presentation state from the new
+generation and binds a fresh non-durable control epoch.
+
+An explicit Game-owned `RelocateActor` operation closes the retained-route
+discontinuity hole: successful relocation resolves current prepared terrain,
+writes the authoritative position, and clears Direct/Destination before the
+next step. The lower-level `GameWorldState.TrySetPosition` remains policy-free.
+Permanent integration evidence covers both active Direct and active Destination
+followed by relocation and proves neither resumes on the next tick.
+
+`GameWorldActions` is intentionally still the small concrete T0.10 vertical
+authority surface. Its breadth is a watch item, not grounds for speculative
+service interfaces. Split it only when locomotion, interaction, or another
+domain acquires an independently substantial concrete rule set.
+
+The launchable project has a headless native startup smoke, but T0.10 remains
+active until human acceptance and the broad performance/evidence matrix are
+recorded. Network N1 and the legacy remote `InputVelocity` path are unchanged;
+N1 must deliberately bind the new command/control-epoch semantics later.
+
 ## T0.10 real-client requirement
 
 T0.10 must stop manufacturing the entire playable path only from tests.
