@@ -59,10 +59,11 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Network kernel foundation](../Kernels/Network/README.md) — bounded byte,
   protocol, reliability, security, and transport mechanisms accepted during N0.
 - [Network V3 N1 forward plan](Plans/NETWORK.md) — active chunk-native public
-  spatial replication. N1.0-N1.3 now cover packet-free subscriptions, canonical
-  chunk wire semantics, ordinary independent-unreliable delivery, and atomic
-  Bulk snapshot recovery; current N0 remains the executable production/reference
-  path.
+  spatial replication candidate for the current game. AOI remains Game-owned
+  profile policy above one shared Network delivery boundary. N1.0-N1.3 now cover
+  packet-free subscriptions, canonical chunk wire semantics, ordinary independent-
+  unreliable delivery, and atomic Bulk snapshot recovery; current N0 remains the
+  executable production/reference path.
 
 ## Evidence and tools
 

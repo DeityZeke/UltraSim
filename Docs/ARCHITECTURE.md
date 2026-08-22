@@ -202,3 +202,10 @@ MTU-admissible independent-unreliable delta/absence delivery, and private atomic
 Bulk snapshot recovery onto those accepted publication/client-cache contracts.
 N0 remains the production/reference path until N1 proves the measured adoption
 gate.
+AOI is Game/Replication policy, not Network policy. The current UltraSim game is
+testing chunk subscriptions/publication history against the retained entity-
+relation profile, but either profile must flatten after Game encoding into the
+same dependency-clean Network boundary: connection, descriptor/lane, bounded
+payload, security, delivery, and transport. Interest membership and replication-
+source cursor semantics remain concrete Game concerns; no universal generic AOI
+interface or separate entity/chunk Network stack is implied.

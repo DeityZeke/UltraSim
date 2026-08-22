@@ -43,7 +43,9 @@ connection sharding with explicit cross-owner packet-memory transfer. Do not fol
 that lifecycle/security work into N1's chunk-replication experiment, and do not
 quote same-process loopback population as public remote CCU.
 
-N1 tests the original chunk-native AOI model against that frozen N0 baseline.
+N1 tests the original chunk-native AOI model for the current UltraSim game against
+that frozen N0 baseline. It does not make chunks the permanent Network-level AOI
+unit for every game built on the substrate.
 
 The N1 milestone is:
 
@@ -87,8 +89,16 @@ CADENCE IS DELIVERY POLICY.
 N1 adds:
 
 ```text
-WORLD CHUNKS DEFINE PUBLIC SPATIAL SUBSCRIPTION UNITS.
-AOI QUERIES CHUNKS, NOT EVERY ENTITY AGAINST EVERY RECIPIENT.
+AOI IS GAME/REPLICATION POLICY, NOT NETWORK POLICY.
+THE ACTIVE GAME PROFILE DEFINES ITS SPATIAL SUBSCRIPTION UNIT.
+NETWORK CONSUMES BOUNDED DELIVERY RESULTS; IT DOES NOT OWN AOI REPRESENTATION.
+
+A GAME PROFILE MAY USE:
+    RECIPIENT x ENTITY RELATIONS
+    RECIPIENT x CHUNK SUBSCRIPTIONS
+    ANOTHER BOUNDED GAME-OWNED REPRESENTATION
+
+THE CURRENT ULTRASIM N1 CANDIDATE USES WORLD CHUNKS.
 CHUNK TIER CONTROLS QUERY FREQUENCY, NOT PUBLIC STATE TYPE.
 ONE CHUNK PUBLICATION IS SHARED SEMANTIC WORK.
 RECIPIENTS OWN CURSORS, NOT PRIVATE COPIES OF CHUNK HISTORY.
@@ -99,10 +109,9 @@ PRIVATE/SECRET STATE NEVER ENTERS A PUBLIC CHUNK PUBLICATION.
 ENTITY IDENTITY SURVIVES CHUNK MIGRATION.
 ```
 
-## N1 prerequisites from Terrain T0
+## Accepted Terrain T0 foundations
 
-Do not begin production N1 integration until T0 provides accepted executable
-contracts for:
+N1 now consumes these accepted executable T0 contracts:
 
 ```text
 SpatialChunkKey / normalized WorldPosition
@@ -119,11 +128,9 @@ separate public vs owner/private/event state
 bounded resident/history capacities
 ```
 
-The local T0 consumer is the semantic oracle. Network must reproduce its eventual
-client state without introducing another definition of world relevance.
-
-If T0 changes these contracts based on measured implementation evidence, update
-this plan before starting N1 rather than building an adapter around a stale idea.
+The local T0 consumer remains the semantic oracle. Remote replication must
+reproduce its eventual client state without introducing another definition of
+world relevance.
 
 ## Ownership and dependency shape
 
@@ -146,11 +153,18 @@ Game/World
 Game/Replication / Game/Network
     authorization
     public vs private/event routing
-    chunk subscription policy
+    game-owned AOI / interest policy
+    replication source/profile
+    semantic coalescing + application-proof meaning
+    Game codec + retained delivery ticket
+        |
+        v
+    bounded semantic delivery offer
         |
         v
 Kernels/Network
-    messages/codecs
+    connection + message descriptor/lane
+    bounded payload admission
     reliability / independent-unreliable state
     security
     pacing
@@ -169,6 +183,54 @@ Godot presentation / precise visibility culling
 `Kernels/Network` must not reference `Game/World` types. Game-owned adapters encode
 chunk semantics into dependency-clean Network messages just as N0 game adapters do
 for current WorldState.
+
+N0 and N1 are not intended to remain separate Network architectures. Their
+game-owned interest and replication models differ, but both flatten after Game
+encoding into the same minimal Network delivery boundary:
+
+```text
+EntityRelationAoI                 ChunkPublicationAoI
+        |                                  |
+Entity latest-state source        Chunk revision/history source
+        |                                  |
+        +------------ Game codec ----------+
+                         |
+                         v
+              recipient/connection
+              message descriptor + lane
+              bounded payload bytes
+                         |
+                         v
+                      Network
+```
+
+The Game adapter retains the semantic ticket. An authenticated application proof
+returns through the Game protocol adapter, which decides whether it advances an
+entity relation, a chunk revision, or another profile-specific knowledge domain.
+Network does not interpret that meaning.
+
+This is an ownership and convergence seam, not a requirement for one generic AOI
+interface. Interest membership and replication-source/cursor semantics may remain
+concrete and different. They meet only at the bounded delivery boundary; do not
+invent an `IAoiThing<TScope, TRevision, ...>` hierarchy to erase those differences.
+
+Keep two Game-owned layers conceptually distinct:
+
+```text
+AOI / interest policy
+    decides scope membership and entitlement
+
+Replication source/profile
+    decides how current state, change, cursors, and recovery are represented
+
+EntityRelationAoI              ChunkAoI
+    recipient -> entities          recipient -> chunks
+EntityLatestStateReplication   ChunkPublicationReplication
+    entity versions/state          chunk revisions/history
+```
+
+Those pairs need not expose identical internal APIs or cursor models. Only their
+bounded encoded delivery offers converge on Network.
 
 Network does not load terrain files, build meshes, inspect ECS chunks, resolve
 Godot resources, or decide whether a tree is visible behind a wall.
@@ -236,7 +298,7 @@ remain Event semantics. Terrain/static bulk streaming may use related chunk
 identity but does not automatically share the dynamic latest-state cadence or
 lane.
 
-## Recipient state target
+## Current chunk-profile recipient state target
 
 The hot N1 public-AOI state should scale primarily with **recipient x subscribed
 chunk**, not recipient x visible entity.
@@ -253,8 +315,8 @@ RecipientChunkCursor
 ```
 
 The exact layout is measured. The design target is a compact fixed array/set for
-roughly the R0/Near/Far chunk window, with no heap node per subscription and no
-per-recipient copy of chunk dirty history.
+roughly the Immediate/Near/Far chunk window, with no heap node per subscription
+and no per-recipient copy of chunk dirty history.
 
 A recipient moving inside the same chunk window does not create/remove entity
 relations. Crossing a chunk boundary changes a small number of chunk subscriptions.
@@ -263,15 +325,17 @@ member topology.
 
 ## Chunk interest policy
 
-N1 consumes the T0 chunk-overlap query. It does not reintroduce exact
-recipient/entity distance filtering inside Network.
+The current UltraSim N1 chunk profile consumes the T0 chunk-overlap query. It does
+not reintroduce exact recipient/entity distance filtering inside Network. A
+different game-owned AOI profile may legitimately use precise entity relations;
+that choice still remains above the shared Network delivery boundary.
 
-### R0
+### Immediate
 
-R0 is the local chunk set selected by the T0 observer footprint. A canonical home
-point belongs to one half-open chunk; a nonzero local footprint may intersect two
-chunks near an edge or up to four near a corner. The complete public page of each
-selected chunk is eligible at R0 cadence.
+Immediate is the local chunk set selected by the T0 observer footprint. A
+canonical home point belongs to one half-open chunk; a nonzero local footprint
+may intersect two chunks near an edge or up to four near a corner. The complete
+public page of each selected chunk is eligible at Immediate cadence.
 
 ### Near / Far
 
@@ -279,7 +343,7 @@ Outer radii select chunk AABBs. Each chunk receives its nearest applicable tier.
 The data schema is unchanged:
 
 ```text
-R0        same chunk public page, highest query cadence
+Immediate same chunk public page, highest query cadence
 Near      same chunk public page, lower cadence
 Far       same chunk public page, lower cadence
 Outside   no subscription
@@ -292,7 +356,7 @@ false-positive rows can lose overall.
 The client is free to cull by exact camera distance, view frustum, occlusion, LOD,
 interior visibility, or render budget. Camera state must not become authorization.
 Client world/view distance controls structural presentation capacity only; it
-does not enlarge the server/game-owned R0/Near/Far dynamic-public entitlement.
+does not enlarge the server/game-owned Immediate/Near/Far dynamic-public entitlement.
 Structural freshness reconciliation may use a different, likely farther policy,
 but N1 must earn and freeze that policy independently rather than reading a
 graphics slider as replication authority.
@@ -314,20 +378,23 @@ content hash
 optional world/static layer revision references where needed
 ```
 
-The exact message family is not frozen before T0 finalizes publication data.
-Reuse N0 baseline transaction lessons:
+N1.1 froze canonical chunk snapshot/delta/absence/application-proof messages and
+their bounded schemas. N1.3 retains the canonical snapshot bytes as the private
+body of this reliable ordered Bulk transaction:
 
 ```text
-Begin / descriptor on reliable Control
-Prepared proof if large staging needs it
-bounded Bulk segments
-Commit on reliable Control
-terminal application result
-cancel / timeout policy
+ChunkSnapshotBegin
+bounded ChunkSnapshotSegment messages
+ChunkSnapshotCommit
+terminal ChunkApplied result
+ChunkSnapshotCancel / timeout
 ```
 
-Small dynamic chunk snapshots may earn a simpler message if measurement proves the
-full baseline handshake unnecessary. Semantic atomicity may not be weakened.
+All transaction lifecycle messages currently share the Bulk lane, avoiding a
+cross-lane descriptor/segment race. Ordinary dynamic deltas and absence remain on
+independent-unreliable WorldState. A later encoding optimization may change byte
+packing only through an explicit protocol/schema version; semantic atomicity may
+not be weakened.
 
 Applying a snapshot replaces the client's complete corresponding public chunk
 scope at its revision. Delayed pre-snapshot deltas cannot resurrect older rows.
@@ -731,16 +798,68 @@ This checkpoint does not implement N1.4 dirty-driven scheduling/adoption, N0
 deletion, shared encoding across recipients, public-WAN lifecycle, or production
 CCU claims. Stop for review before N1.4.
 
-## N1.4 — public chunk AOI replaces N0 relation AOI experimentally
+## Public chunk scheduling target
+
+N1.0 deliberately proves correctness by polling bounded recipient subscriptions.
+That is the oracle, not the intended production discovery scheduler. Interest
+topology and publication dirtiness are independent:
+
+```text
+Incoming
+    first interest
+    re-entry
+    invalid knowledge
+    history recovery
+        -> establish complete current state
+
+Current + clean
+        -> zero replication work
+
+Current + dirty + cadence eligible
+        -> query bounded history from the recipient's applied cursor
+        -> send entity/field-granular delta or recover by snapshot
+
+Leaving
+        -> retire scope membership
+        -> invalidate outstanding delivery lineage
+```
+
+A dirty chunk is one shared publication/scheduling fact, not an instruction to
+send the complete chunk. The retained history still identifies granular public
+entity operations:
+
+```text
+same-chunk movement in K
+    K dirty
+    history: Present/Transform change for P
+
+boundary migration A -> B
+    A dirty: Remove P
+    B dirty: Present P
+```
+
+N1.4 therefore measures replacing relation-driven maintenance with the
+combination of bounded interest changes and shared dirty publication work. It may
+change how due work is discovered without changing the N1.0-N1.3 subscription,
+cursor, wire, proof, or recovery semantics.
+
+## N1.4 — measured AOI-profile scheduling and adoption experiment
 
 Run both paths behind explicit benchmark/config controls:
 
 ```text
-N0 relation graph            frozen reference
-N1 chunk subscriptions       candidate
+N0 entity-relation AOI + entity latest state       frozen game profile/reference
+N1 chunk AOI + chunk publication/history           current game candidate
+
+both
+    -> Game codec + retained semantic ticket
+    -> the same minimal Network delivery mechanisms
 ```
 
-Do not delete N0 before N1 earns production adoption.
+Do not delete N0 before N1 earns production adoption. A measured N1 win selects
+the current UltraSim game's replication profile; it does not prohibit another
+game, spectator mode, or specialized public stream from using a different bounded
+AOI policy.
 
 Canonical profiles must include at least:
 
@@ -758,7 +877,10 @@ mixed public/private state
 Measure:
 
 - recipient chunk subscriptions;
-- subscription enters/leaves/tier changes;
+- Incoming/Leaving membership and tier changes;
+- Current+clean scopes skipped without a publication query;
+- shared dirty scopes and dirty-to-recipient fanout;
+- cadence-eligible Current+dirty queries;
 - dynamic rows/chunk;
 - chunk revisions and dirty entries;
 - snapshot count/records/bytes;
@@ -784,9 +906,10 @@ N1 must produce a **material** sparse server-role improvement, not merely fewer
 relations or bytes. A change that improves counters while worsening p95 is
 rejected exactly as N0.11 was.
 
-Do not set a single percentage before the real T0 chunk-size profile exists, but
-an N1 production replacement should clearly move the practical sparse crossover,
-not deliver a noisy single-digit gain at the cost of substantial complexity.
+Do not invent a single percentage before the controlled N1.4 A/B matrix is
+captured, but an N1 production replacement should clearly move the practical
+sparse crossover, not deliver a noisy single-digit gain at the cost of substantial
+complexity.
 
 Dense-400 may not regress outside normal run variance without a measured reason.
 
@@ -826,8 +949,9 @@ The server's public chunk subscription is deliberately coarse. The client may
 render a smaller exact set.
 
 Game/world policy may also expose separate chunk layers for building interiors or
-decor. N1 routes those authorized layer subscriptions without reverting to
-entity-by-entity public AOI.
+decor. The current N1 chunk profile routes those authorized layer subscriptions
+without rebuilding entity relations. Another game-owned profile may represent
+that entitlement differently without changing Network.
 
 Examples:
 
@@ -963,19 +1087,42 @@ The N0 evidence discipline remains unchanged:
 - immutable JSON for accepted/rejected checkpoints;
 - negative experiments preserved rather than quietly removed.
 
+N1.4 scale claims require three explicitly separated evidence levels:
+
+```text
+1. Server semantic replication
+   no sockets and no fake-client CPU in the server-role number
+
+2. Server transport replay
+   real Network security/packetization with synthetic or replayed client traffic
+
+3. Full end-to-end sharded clients
+   real sockets plus client decode/apply outside the server process where scale
+   would otherwise hit the same-process bot ceiling
+```
+
+The first level isolates Game replication architecture, the second attributes
+transport cost, and the third proves actual integrated behavior. Same-process bot
+population is useful correctness evidence but is not, by itself, a remote CCU
+claim.
+
 The practical CPU goal remains to leave enough authority budget for the game.
 A workload fitting barely under one 60/62 Hz frame is feasibility, not the same as
 an accepted 4-6 ms server-role target.
 
-## N1 definition of done
+## Current UltraSim N1 definition of done
 
 N1 is complete only when:
 
 - T0 chunk publication remains the source of public spatial state;
-- recipients maintain bounded chunk subscriptions/cursors rather than rebuilding
-  exact entity AOI;
+- AOI remains explicit Game/Replication policy and the selected UltraSim profile
+  maintains bounded chunk subscriptions/cursors;
+- entity-relation and chunk-publication profiles both flatten through Game codecs
+  into the same minimal Network delivery boundary;
 - first interest and history misses recover through atomic snapshots;
 - continued interest uses bounded coalesced dirty history;
+- production discovery distinguishes Incoming, Current+clean, Current+dirty, and
+  Leaving so unchanged subscriptions require zero replication work;
 - tier changes affect cadence without rewriting member semantic type;
 - cross-chunk migration cannot be corrupted by delayed/reordered data;
 - public/private/Event streams remain distinct;
@@ -989,24 +1136,29 @@ N1 is complete only when:
   alone.
 
 If chunk-native replication fails the measured adoption gate, preserve T0's world
-architecture anyway, keep N0 as production reference, and investigate the next
-bottleneck from real gameplay profiles rather than weakening semantics.
+architecture anyway, keep the entity-relation game profile as production
+reference, and investigate the next bottleneck from real gameplay profiles rather
+than weakening semantics or creating separate Network stacks.
 
 ## Deliberate N1 decisions
 
-Wait for T0 evidence before freezing:
+Frozen for the current chunk profile through N1.3:
 
-- final dynamic chunk row wire schema;
-- chunk revision/floor field widths;
-- snapshot transaction granularity;
+- canonical bounded dynamic snapshot/delta/absence/proof schemas;
+- chunk revision/floor wire widths and schema fingerprint;
+- MTU-safe ordinary-delta admission;
+- reliable-Bulk snapshot transaction and atomic client publication;
+- application proof, not transport submission, advances recipient knowledge.
+
+Still require measured evidence before production adoption:
+
 - whether terrain/static data uses Network messages or deployment cache/content
   distribution for normal clients;
-- application-proof aggregation granularity;
-- subscription container layout;
+- production subscription/scheduling layout and any compaction;
 - whether same-revision semantic encoding can be reused across recipients;
 - local transform quantization;
 - compression thresholds;
-- exact N0 relation-graph retirement point;
+- exact entity-relation profile retirement/retention point for this game;
 - eventual server/world partition ownership boundaries.
 
 None of these decisions may move authority into Network or make private data part
@@ -1024,5 +1176,6 @@ server ticket ledger and atomic production-client application. N1.3 adds bounded
 reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
 
 Do not begin N1.4 until the N1.3 checkpoint is reviewed. The next work is measured
-dirty-driven discovery/adoption against N0—not UDP redesign, N0 deletion, shared
-encoded-byte caching, or a production scale claim.
+dirty-driven discovery and current-game AOI-profile adoption against the N0
+entity-relation reference—not UDP redesign, N0 deletion, shared encoded-byte
+caching, or a production scale claim.
