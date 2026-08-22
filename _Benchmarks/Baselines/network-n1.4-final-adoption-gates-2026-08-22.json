@@ -1,0 +1,455 @@
+{
+  "Schema": "network-n1.4-remaining-adoption-matrix-v3",
+  "CapturedAtUtc": "2026-08-22T23:53:00.1879297+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "LogicalProcessors": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "Scope": {
+    "EvidenceLevel": "The report separates level-1 server semantic replication from level-2 secure deterministic protocol replay. Dense-400 excludes protocol and client CPU; the replay includes real framing, security, packetization, decode, semantic apply, and proof without sockets. Neither is a controlled full-stack N0/N1 A/B.",
+    "MaximumSubscriptionsPerRecipient": 640,
+    "PublicSubscriptionValueBytes": 64,
+    "DeferredEvidence": "Mixed public/private/Event/Control lane traffic is included in deterministic replay. Real shared sockets and sharded client processes remain separate evidence. No N1.5 or 2K/4K work."
+  },
+  "Dense400Semantic": {
+    "Recipients": 400,
+    "Entities": 1000,
+    "DirtyEntitiesPerTick": 20,
+    "WarmupTicks": 30,
+    "MeasuredTicks": 120,
+    "EntitySpacingMillimeters": 4000,
+    "SpatialShape": "One approximately 126 m hotspot; recipient anchors are distributed through the same entity grid and every entity remains in each recipient\u0027s Far envelope.",
+    "MinimumSubscriptionsPerRecipient": 492,
+    "MaximumSubscriptionsPerRecipient": 503,
+    "Memberships": 200113,
+    "SharedChunks": 941,
+    "PopulatedPublicationChunks": 64,
+    "SchedulerReservedBytes": 23659904,
+    "RecipientReservedBytes": 31744000,
+    "PublicationReservedBytes": 3694016,
+    "AllocatedBytes": 0,
+    "DirtyChunksObserved": 701,
+    "DirtyRecipientFanout": 280400,
+    "DirtyWorkCoalesces": 76221,
+    "DueWorkDequeued": 205008,
+    "PublicationQueries": 205008,
+    "DeltaReads": 203672,
+    "NoChangeReads": 0,
+    "SnapshotReads": 0,
+    "DeltaRows": 958680,
+    "TotalMicroseconds": {
+      "Mean": 1042.0525083333328,
+      "P50": 1018.251,
+      "P95": 1269.568,
+      "P99": 1359.038,
+      "Maximum": 1414.737
+    },
+    "ChangePreparationMicroseconds": {
+      "Mean": 0.32807500000000017,
+      "P50": 0.32,
+      "P95": 0.45,
+      "P99": 0.58,
+      "Maximum": 0.59
+    },
+    "PublicationMicroseconds": {
+      "Mean": 3.7003833333333356,
+      "P50": 3.21,
+      "P95": 5.25,
+      "P99": 6.56,
+      "Maximum": 6.99
+    },
+    "ObserveDirtyMicroseconds": {
+      "Mean": 21.783350000000006,
+      "P50": 21.499,
+      "P95": 25.3,
+      "P99": 29.49,
+      "Maximum": 32.45
+    },
+    "ScheduleAndQueryMicroseconds": {
+      "Mean": 1016.2407,
+      "P50": 993.631,
+      "P95": 1245.138,
+      "P99": 1332.558,
+      "Maximum": 1389.678
+    }
+  },
+  "Topology": [
+    {
+      "Path": "DistributedCardinal",
+      "Recipients": 400,
+      "Ticks": 120,
+      "TopologyChanges": 22913,
+      "MaximumTopologyChangesPerTick": 268,
+      "TicksWithTopologyChanges": 120,
+      "BoundaryCrossings": 289,
+      "CornerCrossings": 0,
+      "Teleports": 0,
+      "FinalMemberships": 201032,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 6222.4006000000045,
+        "P50": 6210.664,
+        "P95": 6740.33,
+        "P99": 7060.806,
+        "Maximum": 7816.469
+      },
+      "ReconcileMicroseconds": {
+        "Mean": 5548.749283333332,
+        "P50": 5545.51,
+        "P95": 6029.335,
+        "P99": 6318.083,
+        "Maximum": 6318.933
+      },
+      "SchedulerMicroseconds": {
+        "Mean": 673.6513166666666,
+        "P50": 646.304,
+        "P95": 727.253,
+        "P99": 749.764,
+        "Maximum": 2990.033
+      },
+      "Attribution": {
+        "Enabled": true,
+        "StableFastPaths": 12522,
+        "ExactQueries": 35478,
+        "PreviousInterestCopyTicks": 31466835,
+        "ExactQueryTicks": 396130258,
+        "ChangeCountTicks": 63329239,
+        "NextBankBuildTicks": 121928297,
+        "ChangeEmissionTicks": 45252076,
+        "PublicationTicks": 920489
+      },
+      "Notes": "Attribution is opt-in and therefore diagnostic. Phase counters are raw Stopwatch ticks inside the recipient; scheduler index mutation is timed separately. Work dequeue is excluded from TotalMicroseconds."
+    },
+    {
+      "Path": "RepresentativeRoaming",
+      "Recipients": 400,
+      "Ticks": 120,
+      "TopologyChanges": 23519,
+      "MaximumTopologyChangesPerTick": 241,
+      "TicksWithTopologyChanges": 120,
+      "BoundaryCrossings": 152,
+      "CornerCrossings": 116,
+      "Teleports": 0,
+      "FinalMemberships": 200618,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 5645.656708333333,
+        "P50": 5679.359,
+        "P95": 5974.706,
+        "P99": 6185.664,
+        "Maximum": 6321.593
+      },
+      "ReconcileMicroseconds": {
+        "Mean": 4969.432566666667,
+        "P50": 5005.335,
+        "P95": 5297.012,
+        "P99": 5481.63,
+        "Maximum": 5618.219
+      },
+      "SchedulerMicroseconds": {
+        "Mean": 676.2241416666667,
+        "P50": 676.484,
+        "P95": 704.034,
+        "P99": 775.603,
+        "Maximum": 796.663
+      },
+      "Attribution": {
+        "Enabled": true,
+        "StableFastPaths": 14697,
+        "ExactQueries": 33303,
+        "PreviousInterestCopyTicks": 29313452,
+        "ExactQueryTicks": 371546919,
+        "ChangeCountTicks": 58883678,
+        "NextBankBuildTicks": 94001742,
+        "ChangeEmissionTicks": 35300365,
+        "PublicationTicks": 862013
+      },
+      "Notes": "Attribution is opt-in and therefore diagnostic. Phase counters are raw Stopwatch ticks inside the recipient; scheduler index mutation is timed separately. Work dequeue is excluded from TotalMicroseconds."
+    },
+    {
+      "Path": "StaggeredTeleports",
+      "Recipients": 400,
+      "Ticks": 120,
+      "TopologyChanges": 355755,
+      "MaximumTopologyChangesPerTick": 3566,
+      "TicksWithTopologyChanges": 120,
+      "BoundaryCrossings": 150,
+      "CornerCrossings": 115,
+      "Teleports": 400,
+      "FinalMemberships": 200673,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 6780.1799666666675,
+        "P50": 6817.759,
+        "P95": 7496.292,
+        "P99": 7580.881,
+        "Maximum": 7778.31
+      },
+      "ReconcileMicroseconds": {
+        "Mean": 5071.2706,
+        "P50": 5090.185,
+        "P95": 5479.121,
+        "P99": 5571.69,
+        "Maximum": 5702.729
+      },
+      "SchedulerMicroseconds": {
+        "Mean": 1708.9093666666658,
+        "P50": 1679.764,
+        "P95": 2136.35,
+        "P99": 2268.46,
+        "Maximum": 2276.379
+      },
+      "Attribution": {
+        "Enabled": true,
+        "StableFastPaths": 14040,
+        "ExactQueries": 33960,
+        "PreviousInterestCopyTicks": 31829821,
+        "ExactQueryTicks": 376414547,
+        "ChangeCountTicks": 60865057,
+        "NextBankBuildTicks": 95368464,
+        "ChangeEmissionTicks": 35844226,
+        "PublicationTicks": 1310613
+      },
+      "Notes": "Attribution is opt-in and therefore diagnostic. Phase counters are raw Stopwatch ticks inside the recipient; scheduler index mutation is timed separately. Work dequeue is excluded from TotalMicroseconds."
+    },
+    {
+      "Path": "SynchronizedCardinal",
+      "Recipients": 400,
+      "Ticks": 32,
+      "TopologyChanges": 1820000,
+      "MaximumTopologyChangesPerTick": 59200,
+      "TicksWithTopologyChanges": 32,
+      "BoundaryCrossings": 0,
+      "CornerCrossings": 0,
+      "Teleports": 12800,
+      "FinalMemberships": 201200,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 24870.134593750005,
+        "P50": 24822.746,
+        "P95": 25169.153,
+        "P99": 26142.844,
+        "Maximum": 26142.844
+      },
+      "ReconcileMicroseconds": {
+        "Mean": 9490.871500000003,
+        "P50": 9454.125,
+        "P95": 9660.963,
+        "P99": 9710.352,
+        "Maximum": 9710.352
+      },
+      "SchedulerMicroseconds": {
+        "Mean": 15379.263093749996,
+        "P50": 15408.391,
+        "P95": 15718.478,
+        "P99": 16481.881,
+        "Maximum": 16481.881
+      },
+      "Attribution": {
+        "Enabled": true,
+        "StableFastPaths": 0,
+        "ExactQueries": 12800,
+        "PreviousInterestCopyTicks": 11659917,
+        "ExactQueryTicks": 139027845,
+        "ChangeCountTicks": 23508508,
+        "NextBankBuildTicks": 91381209,
+        "ChangeEmissionTicks": 32729935,
+        "PublicationTicks": 3093084
+      },
+      "Notes": "Attribution is opt-in and therefore diagnostic. Phase counters are raw Stopwatch ticks inside the recipient; scheduler index mutation is timed separately. Work dequeue is excluded from TotalMicroseconds."
+    },
+    {
+      "Path": "SynchronizedDiagonal",
+      "Recipients": 400,
+      "Ticks": 32,
+      "TopologyChanges": 2664400,
+      "MaximumTopologyChangesPerTick": 85200,
+      "TicksWithTopologyChanges": 32,
+      "BoundaryCrossings": 0,
+      "CornerCrossings": 0,
+      "Teleports": 12800,
+      "FinalMemberships": 200800,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 31924.416718750006,
+        "P50": 31792.383,
+        "P95": 33023.792,
+        "P99": 33084.532,
+        "Maximum": 33084.532
+      },
+      "ReconcileMicroseconds": {
+        "Mean": 9530.091781250001,
+        "P50": 9514.134,
+        "P95": 9816.292,
+        "P99": 9820.662,
+        "Maximum": 9820.662
+      },
+      "SchedulerMicroseconds": {
+        "Mean": 22394.3249375,
+        "P50": 22309.479,
+        "P95": 23243.06,
+        "P99": 23263.87,
+        "Maximum": 23263.87
+      },
+      "Attribution": {
+        "Enabled": true,
+        "StableFastPaths": 0,
+        "ExactQueries": 12800,
+        "PreviousInterestCopyTicks": 12302937,
+        "ExactQueryTicks": 136906880,
+        "ChangeCountTicks": 24201058,
+        "NextBankBuildTicks": 91137624,
+        "ChangeEmissionTicks": 32974453,
+        "PublicationTicks": 5093973
+      },
+      "Notes": "Attribution is opt-in and therefore diagnostic. Phase counters are raw Stopwatch ticks inside the recipient; scheduler index mutation is timed separately. Work dequeue is excluded from TotalMicroseconds."
+    }
+  ],
+  "Transport": {
+    "ProtocolReplay": {
+      "Recipients": 64,
+      "WarmupTicks": 10,
+      "MeasuredTicks": 60,
+      "AppliedProofs": 3840,
+      "RejectedDeliveries": 0,
+      "MaximumPumpRoundsPerTick": 3,
+      "DatagramSubmissions": 7680,
+      "ServerPlaintextBytes": 568320,
+      "ClientProofPlaintextBytes": 280320,
+      "ReservedBytes": 149916596,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 2306.27935,
+        "P50": 2310.499,
+        "P95": 2393.529,
+        "P99": 2456.078,
+        "Maximum": 2456.078
+      },
+      "ServerSemanticMicroseconds": {
+        "Mean": 0.6893333333333335,
+        "P50": 0.66,
+        "P95": 0.78,
+        "P99": 1.65,
+        "Maximum": 1.65
+      },
+      "ServerOfferMicroseconds": {
+        "Mean": 51.67641666666666,
+        "P50": 50.09,
+        "P95": 56.77,
+        "P99": 81.95,
+        "Maximum": 81.95
+      },
+      "ProtocolPumpMicroseconds": {
+        "Mean": 1835.4018999999996,
+        "P50": 1837.5119999999997,
+        "P95": 1912.9319999999996,
+        "P99": 1938.4439999999997,
+        "Maximum": 1938.4439999999997
+      },
+      "ClientApplyMicroseconds": {
+        "Mean": 364.3259666666673,
+        "P50": 352.5260000000008,
+        "P95": 412.1860000000008,
+        "P99": 517.2549999999976,
+        "Maximum": 517.2549999999976
+      },
+      "ServerProofMicroseconds": {
+        "Mean": 15.187399999999998,
+        "P50": 14.009999999999998,
+        "P95": 15.289999999999992,
+        "P99": 48.99,
+        "Maximum": 48.99
+      }
+    },
+    "MixedTraffic": {
+      "Recipients": 64,
+      "WarmupTicks": 5,
+      "MeasuredTicks": 60,
+      "PublicDeltasApplied": 3840,
+      "OwnerStatesApplied": 3840,
+      "EventsApplied": 3840,
+      "ActionsApplied": 3840,
+      "EventProofsApplied": 3840,
+      "DisclosureViolations": 0,
+      "MaximumPumpRoundsPerTick": 3,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 3215.2071500000006,
+        "P50": 3200.491,
+        "P95": 3364.2,
+        "P99": 3451.448,
+        "Maximum": 3451.448
+      },
+      "ProtocolPumpMicroseconds": {
+        "Mean": 2713.8712833333334,
+        "P50": 2700.5140000000015,
+        "P95": 2848.330999999998,
+        "P99": 2886.8159999999975,
+        "Maximum": 2886.8159999999975
+      },
+      "ApplicationMicroseconds": {
+        "Mean": 386.8494833333341,
+        "P50": 383.45700000000113,
+        "P95": 411.4890000000004,
+        "P99": 448.5470000000007,
+        "Maximum": 448.5470000000007
+      },
+      "Notes": "Every recipient receives one chunk delta, one owner-private state, and one retained Event while sending one Control action. Recipient-specific owner/event identity is validated before counting; all four streams converge before the next tick."
+    },
+    "DenseTownEntry": {
+      "PopulatedChunks": 30,
+      "RecordsPerChunk": 64,
+      "PublicRecords": 1920,
+      "TotalInterestedChunks": 497,
+      "SnapshotBusyObservations": 29,
+      "TotalPumpRounds": 180,
+      "MaximumPumpRoundsPerSnapshot": 6,
+      "TotalConvergenceMicroseconds": 23663.717,
+      "SnapshotsQueued": 30,
+      "SnapshotSegmentsQueued": 60,
+      "SnapshotsApplied": 30,
+      "DatagramSubmissions": 270,
+      "ServerAdapterReservedBytes": 6108,
+      "ClientAdapterReservedBytes": 19803,
+      "ClientSemanticCacheReservedBytes": 518914,
+      "Notes": "All absent subscriptions are pre-established packet-free so this observation isolates populated incoming-chunk recovery. The current one-candidate client serializes snapshots and returns SnapshotTransferBusy for the next populated key."
+    },
+    "SharedSocketReplay": {
+      "Recipients": 64,
+      "WarmupTicks": 10,
+      "MeasuredTicks": 60,
+      "PublicDeltasApplied": 3840,
+      "MaximumPumpRoundsPerTick": 3,
+      "KnownServerReservedBytes": 11596779,
+      "KnownClientReservedBytes": 8492288,
+      "ConfiguredListenerSocketBufferBytes": 8388608,
+      "ConfiguredClientSocketBufferBytes": 8388608,
+      "ListenerSendCalls": 120,
+      "ListenerReceiveCalls": 180,
+      "NativeSendCalls": 120,
+      "NativeReceiveCalls": 180,
+      "NativeSendBatching": true,
+      "NativeReceiveBatching": true,
+      "AllocatedBytes": 0,
+      "TotalMicroseconds": {
+        "Mean": 1489.7807166666664,
+        "P50": 1480.707,
+        "P95": 1578.275,
+        "P99": 1603.325,
+        "Maximum": 1603.325
+      },
+      "SocketPumpMicroseconds": {
+        "Mean": 1049.1855166666667,
+        "P50": 1030.771,
+        "P95": 1136.2590000000002,
+        "P99": 1153.3809999999999,
+        "Maximum": 1153.3809999999999
+      },
+      "Notes": "One process owns one real shared UDP server listener and real connected loopback client sockets. This isolates the intended socket topology but not sharded client CPU."
+    },
+    "Scope": "Evidence level 2 uses secure deterministic ProtocolLoopback: real Network framing, security, packetization, client decode/apply, and application proof, but no sockets. The shared-socket row uses real connected loopback clients and one real shared server UDP listener in one process. It is not a sharded-client or public-WAN CCU claim."
+  }
+}

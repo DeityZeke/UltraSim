@@ -44,10 +44,15 @@ internal static class N14RemainingAdoptionMatrix
             $"schedule={dense.ScheduleAndQueryMicroseconds.P95:F3} us " +
             $"queries={dense.PublicationQueries:N0} rows={dense.DeltaRows:N0}");
 
-        Console.WriteLine("N1.4 topology attribution: distributed/cardinal/diagonal...");
+        Console.WriteLine(
+            "N1.4 topology attribution: distributed/representative/teleport/cardinal/diagonal...");
         TopologyEvidence[] topology =
         [
             MeasureTopology(TopologyPath.DistributedCardinal, clients, ticks, subscriptionCapacity),
+            MeasureTopology(TopologyPath.RepresentativeRoaming, clients, ticks,
+                subscriptionCapacity),
+            MeasureTopology(TopologyPath.StaggeredTeleports, clients, ticks,
+                subscriptionCapacity),
             MeasureTopology(TopologyPath.SynchronizedCardinal, clients, Math.Min(ticks, 32),
                 subscriptionCapacity),
             MeasureTopology(TopologyPath.SynchronizedDiagonal, clients, Math.Min(ticks, 32),
@@ -73,11 +78,13 @@ internal static class N14RemainingAdoptionMatrix
         Console.WriteLine(
             $"transport total_p95={transport.ProtocolReplay.TotalMicroseconds.P95:F3} us " +
             $"protocol_p95={transport.ProtocolReplay.ProtocolPumpMicroseconds.P95:F3} us " +
+            $"mixed_p95={transport.MixedTraffic.TotalMicroseconds.P95:F3} us " +
+            $"socket_p95={transport.SharedSocketReplay.TotalMicroseconds.P95:F3} us " +
             $"town_ms={transport.DenseTownEntry.TotalConvergenceMicroseconds / 1_000:F3} " +
             $"town_snapshots={transport.DenseTownEntry.SnapshotsApplied}");
 
         var report = new RemainingAdoptionReport(
-            "network-n1.4-remaining-adoption-matrix-v2",
+            "network-n1.4-remaining-adoption-matrix-v3",
             DateTimeOffset.UtcNow,
             Environment.Version.ToString(),
             RuntimeInformation.FrameworkDescription,
@@ -93,8 +100,9 @@ internal static class N14RemainingAdoptionMatrix
                 "and proof without sockets. Neither is a controlled full-stack N0/N1 A/B.",
                 subscriptionCapacity,
                 Marshal.SizeOf<OfflineDirectChunkSubscription>(),
-                "Mixed-private integration and sharded socket clients remain separate evidence. " +
-                "No N1.5 or 2K/4K work."),
+                "Mixed public/private/Event/Control lane traffic is included in deterministic " +
+                "replay. Real shared sockets and sharded client processes remain separate " +
+                "evidence. No N1.5 or 2K/4K work."),
             dense,
             topology,
             transport);
@@ -437,15 +445,17 @@ internal static class N14RemainingAdoptionMatrix
     private enum TopologyPath : byte
     {
         DistributedCardinal = 1,
-        SynchronizedCardinal = 2,
-        SynchronizedDiagonal = 3,
+        RepresentativeRoaming = 2,
+        StaggeredTeleports = 3,
+        SynchronizedCardinal = 4,
+        SynchronizedDiagonal = 5,
     }
 
     private sealed class TopologyFixture : IDisposable
     {
         private readonly TopologyPath _path;
         private readonly int _recipientsCount;
-        private readonly int _subscriptionCapacity;
+        private readonly int _changeCapacity;
         private readonly ChunkPublicationStore _source = new(
             PublicationEpoch.Create(),
             new ChunkPublicationLimits(1, 2, 1, 4));
@@ -462,7 +472,7 @@ internal static class N14RemainingAdoptionMatrix
         {
             _path = path;
             _recipientsCount = recipients;
-            _subscriptionCapacity = subscriptionCapacity;
+            _changeCapacity = checked(subscriptionCapacity * 2);
             _recipients = new OfflineDirectChunkRecipient[recipients];
             _ids = new ChunkReplicationRecipientId[recipients];
             _scheduler = new ChunkPublicationWorkScheduler(
@@ -471,7 +481,7 @@ internal static class N14RemainingAdoptionMatrix
                     recipients,
                     checked(recipients * subscriptionCapacity)));
             _changes = new OfflineDirectChunkSubscriptionChange[
-                checked(recipients * subscriptionCapacity)];
+                checked(recipients * _changeCapacity)];
             _results = new OfflineDirectChunkReconcileResult[recipients];
             for (int index = 0; index < recipients; index++)
             {
@@ -483,7 +493,7 @@ internal static class N14RemainingAdoptionMatrix
                 Check(_scheduler.TryRegister(recipient, out _ids[index]));
                 WorldPosition anchor = Anchor(index, 0);
                 Span<OfflineDirectChunkSubscriptionChange> destination =
-                    _changes.AsSpan(index * subscriptionCapacity, subscriptionCapacity);
+                    _changes.AsSpan(index * _changeCapacity, _changeCapacity);
                 Check(recipient.Reconcile(
                     _source,
                     GameWorldState.DefaultSpace,
@@ -505,6 +515,10 @@ internal static class N14RemainingAdoptionMatrix
             var scheduler = new double[ticks];
             ulong changes = 0;
             int maximumChanges = 0;
+            int ticksWithChanges = 0;
+            int boundaryCrossings = 0;
+            int cornerCrossings = 0;
+            int teleports = 0;
             long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             for (int tick = 1; tick <= ticks; tick++)
             {
@@ -512,12 +526,16 @@ internal static class N14RemainingAdoptionMatrix
                 int tickChanges = 0;
                 for (int index = 0; index < _recipients.Length; index++)
                 {
+                    WorldPosition previousAnchor = Anchor(index, tick - 1);
+                    WorldPosition currentAnchor = Anchor(index, tick);
+                    ClassifyTransition(previousAnchor, currentAnchor,
+                        ref boundaryCrossings, ref cornerCrossings, ref teleports);
                     Span<OfflineDirectChunkSubscriptionChange> destination =
-                        _changes.AsSpan(index * _subscriptionCapacity, _subscriptionCapacity);
+                        _changes.AsSpan(index * _changeCapacity, _changeCapacity);
                     Check(_recipients[index].Reconcile(
                         _source,
                         GameWorldState.DefaultSpace,
-                        Anchor(index, tick),
+                        currentAnchor,
                         destination,
                         out _results[index]) == OfflineDirectChunkReconcileStatus.Reconciled);
                     tickChanges += _results[index].ChangeCount;
@@ -526,7 +544,7 @@ internal static class N14RemainingAdoptionMatrix
                 for (int index = 0; index < _recipients.Length; index++)
                 {
                     Span<OfflineDirectChunkSubscriptionChange> destination =
-                        _changes.AsSpan(index * _subscriptionCapacity, _subscriptionCapacity);
+                        _changes.AsSpan(index * _changeCapacity, _changeCapacity);
                     Check(_scheduler.TryApplyReconciliation(
                         _ids[index], destination[.._results[index].ChangeCount], _results[index]));
                 }
@@ -537,6 +555,7 @@ internal static class N14RemainingAdoptionMatrix
                 scheduler[tick - 1] = Microseconds(scheduled - reconciled);
                 changes += checked((ulong)tickChanges);
                 maximumChanges = Math.Max(maximumChanges, tickChanges);
+                if (tickChanges != 0) ticksWithChanges++;
             }
             long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
             Check(allocated == 0);
@@ -547,6 +566,10 @@ internal static class N14RemainingAdoptionMatrix
                 ticks,
                 changes,
                 maximumChanges,
+                ticksWithChanges,
+                boundaryCrossings,
+                cornerCrossings,
+                teleports,
                 _scheduler.GetSnapshot().MembershipCount,
                 allocated,
                 Metric(total),
@@ -587,6 +610,44 @@ internal static class N14RemainingAdoptionMatrix
 
         private WorldPosition Anchor(int recipient, int tick)
         {
+            if (_path is TopologyPath.RepresentativeRoaming or TopologyPath.StaggeredTeleports)
+            {
+                const long regionStride = 512_000L;
+                long regionX = checked((recipient % 20) * regionStride);
+                long regionZ = checked((recipient / 20) * regionStride);
+                int direction = recipient & 7;
+                long x = checked(regionX + (recipient * 83L) % 16_000L);
+                long z = checked(regionZ + (recipient * 197L) % 16_000L);
+                if (direction >= 4)
+                {
+                    long phase = 1L + (recipient * 9_973L) % 15_999L;
+                    x = checked(regionX + phase);
+                    z = checked(regionZ +
+                        (direction is 4 or 7 ? phase : 16_000L - phase));
+                }
+                long cardinal = checked(tick * 100L);
+                long diagonal = checked(tick * 71L);
+                switch (direction)
+                {
+                    case 0: x += cardinal; break;
+                    case 1: x -= cardinal; break;
+                    case 2: z += cardinal; break;
+                    case 3: z -= cardinal; break;
+                    case 4: x += diagonal; z += diagonal; break;
+                    case 5: x += diagonal; z -= diagonal; break;
+                    case 6: x -= diagonal; z += diagonal; break;
+                    default: x -= diagonal; z -= diagonal; break;
+                }
+                if (_path == TopologyPath.StaggeredTeleports)
+                {
+                    int phase = checked((recipient * 37) % 120);
+                    long jumps = (tick + (long)phase) / 120L;
+                    long sign = (recipient & 1) == 0 ? 1L : -1L;
+                    x = checked(x + sign * jumps * 256_000L);
+                    z = checked(z - sign * jumps * 128_000L);
+                }
+                return Position(x, z);
+            }
             return _path switch
             {
                 TopologyPath.DistributedCardinal => Position(
@@ -598,6 +659,24 @@ internal static class N14RemainingAdoptionMatrix
                     (tick & 1) == 0 ? Position(8_000, 8_000) : Position(40_000, 40_000),
                 _ => throw new ArgumentOutOfRangeException(),
             };
+        }
+
+        private static void ClassifyTransition(
+            in WorldPosition previous,
+            in WorldPosition current,
+            ref int boundaryCrossings,
+            ref int cornerCrossings,
+            ref int teleports)
+        {
+            long deltaX = Math.Abs((long)current.Chunk.X - previous.Chunk.X);
+            long deltaZ = Math.Abs((long)current.Chunk.Z - previous.Chunk.Z);
+            if (deltaX > 1 || deltaZ > 1)
+            {
+                teleports++;
+                return;
+            }
+            if (deltaX != 0 && deltaZ != 0) cornerCrossings++;
+            else if (deltaX != 0 || deltaZ != 0) boundaryCrossings++;
         }
 
         public void Dispose() { }
@@ -683,6 +762,10 @@ internal readonly record struct TopologyEvidence(
     int Ticks,
     ulong TopologyChanges,
     int MaximumTopologyChangesPerTick,
+    int TicksWithTopologyChanges,
+    int BoundaryCrossings,
+    int CornerCrossings,
+    int Teleports,
     int FinalMemberships,
     long AllocatedBytes,
     N14Metric TotalMicroseconds,

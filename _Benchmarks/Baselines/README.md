@@ -193,6 +193,12 @@ Useful current anchors can be located by their embedded workload or filename:
   synchronized topology paths. It preserves zero warmed allocation and records
   the still-open crossing, mixed-private, socket/sharded-client, N0-adoption, and
   2K/4K gates; it is not an N1.5 or production-CCU artifact;
+- `network-n1.4-final-adoption-gates-*` — representative independently phased
+  boundary/corner/teleport topology, mixed WorldState/OwnerState/Event/Control
+  replay with disclosure checks, and a real shared UDP listener with connected
+  in-process clients. It explicitly leaves a genuine dedicated-server/sharded-
+  client run to the separately authorized hosted-listener/security lifecycle and
+  is not N1.5, N0 deletion, public-WAN, or production-CCU evidence;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

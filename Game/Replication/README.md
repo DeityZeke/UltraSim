@@ -181,6 +181,19 @@ distributed movement still measures 6.553 ms p95 and synchronized transitions
 remain expensive, so current-game N0-to-N1 adoption is still open pending
 mixed-private and sharded/socket evidence. N1.5 and 2K/4K remain unstarted.
 
+The follow-up representative run disperses recipients across independent world
+regions and includes 152 boundary plus 116 corner crossings. It reports 5.975 ms
+p95 total topology work. A staggered 400-teleport run reports 7.496 ms p95 without
+turning the synchronized-jump controls into a production claim.
+
+Mixed deterministic replay combines public chunk deltas, recipient-specific owner
+state, retained Events, Control action headers, and both application-proof streams.
+All 3,840 values per stream converge with zero disclosure mismatches and 3.364 ms
+p95 total work. A separate 64-recipient real shared-UDP-listener run reports
+1.578 ms p95 and zero warmed allocation. True external sharded clients remain a
+hosted-Network lifecycle gate because the accepted shared host deliberately owns
+only controlled in-process clients; Replication does not weaken that boundary.
+
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions
 are explicitly invalidated. Projection bindings are refreshed from that Admission

@@ -10,8 +10,10 @@ dirty-density, roaming, and the first 512/768/1024 semantic crossover are now
 captured. N1.4 recipient/scheduler storage compaction is accepted. The first
 remaining server-semantic, deterministic secure-transport, dense-entry, and
 topology-attribution matrix is captured. The current-game AOI adoption decision
-remains open on realistic topology tails, mixed-private integration, and sharded
-socket evidence.
+remains open only on a true dedicated-server/sharded-client run. Representative
+roaming, mixed public/private traffic, and the in-process real shared-socket
+topology are now captured without starting the separately deferred public hosted
+listener lifecycle.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -1152,6 +1154,63 @@ Evidence:
 [`network-n1.4-remaining-adoption-matrix-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-remaining-adoption-matrix-2026-08-22.json) and
 [`network-n1.4-remaining-adoption-matrix-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-remaining-adoption-matrix-2026-08-22.md).
 
+### N1.4 final adoption-gates stop — 2026-08-22
+
+The representative transition fixture now disperses 400 recipients across
+independent world regions, assigns independently phased cardinal and diagonal
+headings, and counts genuine boundary, corner, and teleport events separately.
+The ordinary roaming run observes 152 boundary crossings, 116 exact corner
+crossings, no teleports, and at most 241 topology changes in one authority step.
+It reports 5.975 ms p95 total topology work, of which 5.297 ms is recipient
+reconciliation and 0.704 ms scheduler mutation. This is inside the existing
+4-6 ms server-role usability range, narrowly rather than by a large margin.
+
+A separate staggered-fast-travel run includes 400 independently phased teleports
+plus ordinary boundaries/corners. It reports 7.496 ms p95 and at most 3,566
+topology changes per step. The old all-recipient synchronized cardinal/diagonal
+jumps remain hostile controls, not representative capacity claims.
+
+Mixed deterministic replay now combines, per recipient and authority step:
+
+```text
+public chunk delta          WorldState
+owner-private latest state  OwnerState
+retained application fact  Event
+semantic action header      Control, client -> server
+chunk/Event applied proof   WorldState / Control
+```
+
+Across 64 recipients and 60 measured steps, all 3,840 values in each stream
+converge in at most three pump rounds with zero disclosure mismatches and zero
+warmed allocation. Total p95 is 3.364 ms; protocol work remains dominant at
+2.848 ms p95. This is lane/freshness/disclosure evidence, not a complete gameplay
+action-authority benchmark.
+
+The actual intended socket topology is also exercised: 64 real connected loopback
+client sockets feed one real shared server UDP listener using native send/receive
+batching. Public delta/application-proof convergence reports 1.578 ms p95 total,
+1.136 ms p95 inside socket pumps, and zero warmed allocation. Known reservations
+are 11,596,779 server bytes and 8,492,288 client bytes, with configured listener
+and aggregate client socket buffers reported separately.
+
+The remaining sharded-process gate cannot be honestly produced by the current
+host. `SharedUdpProtocolHost` deliberately creates controlled in-process clients
+and exposes no external/public admission endpoint. Adding one requires the
+already-separated hosted-Network work: pinned deployment identity, bounded
+unauthenticated admission, amplification/rate limits, path/rebinding policy, and
+cross-owner packet-memory transfer. Do not fake a dedicated-server result by
+launching child processes that each own both sides of a loopback session, and do
+not silently widen N1.4 into that security/lifecycle checkpoint.
+
+N1's semantic, representative movement, mixed-lane, and real shared-socket
+evidence are now favorable enough for the current game, but final N0-to-N1 remote
+profile adoption remains conditional on the explicitly authorized hosted-listener
+and sharded-client gate. N1.5 and 2K/4K remain unstarted.
+
+Evidence:
+[`network-n1.4-final-adoption-gates-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.json) and
+[`network-n1.4-final-adoption-gates-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.md).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
@@ -1416,10 +1475,12 @@ reliable-Bulk snapshot recovery with private staging and same-key ordering linea
 N1.4 adds the shared dirty-work scheduler, exact stable-interest fast path, bounded
 cadence traversal, and compact recipient/reverse-index storage. Its mechanisms are
 accepted through the storage-compaction stop. The first remaining semantic,
-secure deterministic replay, dense-entry, and topology matrix is captured; the
-measured current-game AOI-profile adoption decision remains open.
+secure deterministic replay, dense-entry, representative topology, mixed-lane,
+and real shared-socket matrices are captured. The measured current-game profile
+is favorable through the current in-process socket boundary; final remote adoption
+remains conditional on an explicitly authorized hosted-listener/sharded-client gate.
 
-Stop at the N1.4 remaining-adoption matrix checkpoint. The next work is the still
-missing controlled mixed-private and sharded/socket evidence plus representative
-transition distribution—not N1.5 shared encoding, N0 deletion, 2K/4K escalation,
-or a production scale claim.
+Stop at the N1.4 final adoption-gates checkpoint. Do not begin N1.5 shared
+encoding, delete N0, run 2K/4K, or claim production CCU. The next decision is
+whether to authorize the separately scoped hosted-listener/security lifecycle
+needed for a genuine dedicated-server/sharded-client run.
