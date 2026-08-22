@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using UltraSim.ECS;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
@@ -13,7 +14,7 @@ int warmups = ReadInt(args, "--warmups=", 4);
 int samples = ReadInt(args, "--samples=", 15);
 int rounds = ReadInt(args, "--rounds=", 4);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/network-n1.0-offline-direct-chunk-recipient.json"));
+    AppContext.BaseDirectory, "../../../../results/network-n1.1-canonical-chunk-codecs.json"));
 if (warmups < 1 || samples < 5 || rounds < 1) throw new ArgumentOutOfRangeException(nameof(args));
 
 int[] populations = [1, 32, 128, 256];
@@ -38,8 +39,18 @@ Console.WriteLine(
     $"subscriptions={cadenceSnapshot.SubscriptionCount} snapshots={cadenceSnapshot.SnapshotReads} " +
     $"absent={cadenceSnapshot.ChunkAbsentReads} no_change={cadenceSnapshot.NoChangeReads}");
 
+var codecs = new CodecFixture();
+CodecEvidence codecEvidence = codecs.Measure(warmups, samples, checked(rounds * 8));
+Console.WriteLine(
+    $"snapshot_bytes={codecEvidence.SnapshotBytes} " +
+    $"snapshot_encode_p95={codecEvidence.SnapshotEncode.P95NanosecondsPerRecipient:F3} ns " +
+    $"snapshot_decode_p95={codecEvidence.SnapshotDecode.P95NanosecondsPerRecipient:F3} ns " +
+    $"delta_bytes={codecEvidence.DeltaBytes} " +
+    $"delta_encode_p95={codecEvidence.DeltaEncode.P95NanosecondsPerRecipient:F3} ns " +
+    $"delta_decode_p95={codecEvidence.DeltaDecode.P95NanosecondsPerRecipient:F3} ns");
+
 var report = new Report(
-    "network-n1.0-offline-direct-chunk-recipient-v1",
+    "network-n1.1-canonical-chunk-codecs-v1",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -52,8 +63,11 @@ var report = new Report(
     samples,
     rounds,
     new ProfileEvidence(
-        "packet-free recipient subscription/cursor scheduling over accepted T0 publication; " +
-        "not wire, transport, N0 replacement, public WAN CCU, or production adoption evidence",
+        "N1.0 packet-free recipient control plus N1.1 canonical snapshot/delta/absence/proof " +
+        "codec evidence; not transport, N0 replacement, public WAN CCU, or production adoption evidence",
+        UltraSimGameProtocol.Manifest.Version,
+        UltraSimGameProtocol.Manifest.Fingerprint,
+        UltraSimGameProtocol.ChunkPublicationSchemaFingerprint,
         GameWorldSpatialProfile.WorldChunkEdgeUnits,
         GameChunkInterestProfile.ImmediateEnterRadiusMillimeters,
         GameChunkInterestProfile.NearEnterRadiusMillimeters,
@@ -66,7 +80,8 @@ var report = new Report(
         Marshal.SizeOf<OfflineDirectChunkSubscriptionChange>()),
     scales,
     cadenceTiming,
-    cadenceSnapshot);
+    cadenceSnapshot,
+    codecEvidence);
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
 File.WriteAllText(output, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }) +
     Environment.NewLine);
@@ -258,6 +273,164 @@ sealed class CadenceFixture : IDisposable
     public void Dispose() => _world.Dispose();
 }
 
+sealed class CodecFixture
+{
+    private const ulong ApplicationEpoch = 71;
+    private const ulong PublicationEpoch = 72;
+    private const ulong Space = 1;
+    private const ulong BaseRevision = 100;
+    private const ulong CurrentRevision = 101;
+    private readonly byte[] _snapshotBytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+    private readonly byte[] _deltaBytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+    private readonly byte[] _absenceBytes = new byte[256];
+    private readonly byte[] _proofBytes = new byte[256];
+    private readonly RemoteChunkPublicRecord[] _snapshot =
+        new RemoteChunkPublicRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+    private readonly RemoteChunkPublicRecord[] _snapshotDecoded =
+        new RemoteChunkPublicRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+    private readonly RemoteChunkDeltaRecord[] _delta =
+        new RemoteChunkDeltaRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+    private readonly RemoteChunkDeltaRecord[] _deltaDecoded =
+        new RemoteChunkDeltaRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+    private readonly int _snapshotWritten;
+    private readonly int _deltaWritten;
+    private readonly int _absenceWritten;
+    private readonly int _proofWritten;
+
+    internal CodecFixture()
+    {
+        for (int index = 0; index < _snapshot.Length; index++)
+        {
+            uint identity = checked((uint)(index + 1));
+            _snapshot[index] = new RemoteChunkPublicRecord(
+                identity, 1, checked((ulong)(index + 1)), checked((uint)(1_000 + index)),
+                checked((ushort)(index * 127)), checked((ushort)(index * 193)), index - 32,
+                checked((ushort)(index * 977)), (ushort)(index & 1), BaseRevision);
+            bool remove = (index & 3) == 3;
+            _delta[index] = remove
+                ? new RemoteChunkDeltaRecord(
+                    RemoteChunkPublicOperation.Remove, RemoteChunkPublicFieldMask.None,
+                    identity, 1, checked((ulong)(index + 65)), 0, 0, 0, 0, 0, 0, 0)
+                : new RemoteChunkDeltaRecord(
+                    RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Complete,
+                    identity, 1, checked((ulong)(index + 65)), checked((uint)(1_000 + index)),
+                    checked((ushort)(index * 127)), checked((ushort)(index * 193)), index - 31,
+                    checked((ushort)(index * 977)), (ushort)(index & 1), CurrentRevision);
+        }
+        Require(UltraSimGameProtocol.TryWriteChunkSnapshot(
+            _snapshotBytes, ApplicationEpoch, PublicationEpoch, 1, Space, -8, 9,
+            BaseRevision, 1, _snapshot, out _snapshotWritten));
+        Require(UltraSimGameProtocol.TryWriteChunkDelta(
+            _deltaBytes, ApplicationEpoch, PublicationEpoch, 2, Space, -8, 9,
+            BaseRevision, CurrentRevision, 1, _delta, out _deltaWritten));
+        Require(UltraSimGameProtocol.TryWriteChunkAbsence(
+            _absenceBytes, ApplicationEpoch, PublicationEpoch, 3, Space, -8, 9,
+            out _absenceWritten));
+        var proof = new RemoteChunkAppliedMessage
+        {
+            ApplicationSessionEpoch = ApplicationEpoch,
+            PublicationEpoch = PublicationEpoch,
+            DeliveryId = 2,
+            SpatialSpaceId = Space,
+            ChunkX = -8,
+            ChunkZ = 9,
+            Revision = CurrentRevision,
+            Kind = RemoteChunkPublicationKind.Delta,
+            Status = RemoteChunkPublicationApplyStatus.Applied,
+        };
+        Require(UltraSimGameProtocol.TryWriteChunkApplied(_proofBytes, proof, out _proofWritten));
+    }
+
+    internal CodecEvidence Measure(int warmups, int samples, int rounds)
+    {
+        TimingEvidence snapshotEncode = MeasureTiming(warmups, samples, rounds, 1, EncodeSnapshot);
+        TimingEvidence snapshotDecode = MeasureTiming(warmups, samples, rounds, 1, DecodeSnapshot);
+        TimingEvidence deltaEncode = MeasureTiming(warmups, samples, rounds, 1, EncodeDelta);
+        TimingEvidence deltaDecode = MeasureTiming(warmups, samples, rounds, 1, DecodeDelta);
+        TimingEvidence absenceDecode = MeasureTiming(warmups, samples, rounds, 1, DecodeAbsence);
+        TimingEvidence proofDecode = MeasureTiming(warmups, samples, rounds, 1, DecodeProof);
+        return new CodecEvidence(
+            _snapshot.Length, _snapshotWritten, _deltaWritten, _absenceWritten, _proofWritten,
+            snapshotEncode, snapshotDecode, deltaEncode, deltaDecode, absenceDecode, proofDecode);
+    }
+
+    private ulong EncodeSnapshot(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(UltraSimGameProtocol.TryWriteChunkSnapshot(
+                _snapshotBytes, ApplicationEpoch, PublicationEpoch, checked((ulong)round + 1),
+                Space, -8, 9, BaseRevision, 1, _snapshot, out int written));
+            checksum = unchecked(checksum + (uint)written);
+        }
+        return checksum;
+    }
+
+    private ulong DecodeSnapshot(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(UltraSimGameProtocol.TryReadChunkSnapshot(
+                _snapshotBytes.AsSpan(0, _snapshotWritten), out RemoteChunkSnapshotHeader header,
+                _snapshotDecoded, out int count));
+            checksum = unchecked(checksum + header.ContentHash + (uint)count);
+        }
+        return checksum;
+    }
+
+    private ulong EncodeDelta(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(UltraSimGameProtocol.TryWriteChunkDelta(
+                _deltaBytes, ApplicationEpoch, PublicationEpoch, checked((ulong)round + 1),
+                Space, -8, 9, BaseRevision, CurrentRevision, 1, _delta, out int written));
+            checksum = unchecked(checksum + (uint)written);
+        }
+        return checksum;
+    }
+
+    private ulong DecodeDelta(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(UltraSimGameProtocol.TryReadChunkDelta(
+                _deltaBytes.AsSpan(0, _deltaWritten), out RemoteChunkDeltaHeader header,
+                _deltaDecoded, out int count));
+            checksum = unchecked(checksum + header.ContentHash + (uint)count);
+        }
+        return checksum;
+    }
+
+    private ulong DecodeAbsence(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(UltraSimGameProtocol.TryReadChunkAbsence(
+                _absenceBytes.AsSpan(0, _absenceWritten), out RemoteChunkAbsenceMessage message));
+            checksum = unchecked(checksum + message.DeliveryId);
+        }
+        return checksum;
+    }
+
+    private ulong DecodeProof(int rounds)
+    {
+        ulong checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            Require(UltraSimGameProtocol.TryReadChunkApplied(
+                _proofBytes.AsSpan(0, _proofWritten), out RemoteChunkAppliedMessage message));
+            checksum = unchecked(checksum + message.Revision);
+        }
+        return checksum;
+    }
+}
+
 static class BenchmarkHarness
 {
     internal static TimingEvidence MeasureTiming(
@@ -325,6 +498,9 @@ readonly record struct ScaleEvidence(
 
 readonly record struct ProfileEvidence(
     string Scope,
+    ushort ProtocolManifestVersion,
+    ulong ProtocolManifestFingerprint,
+    ulong ChunkPublicationSchemaFingerprint,
     int ChunkEdgeMillimeters,
     int ImmediateRadiusMillimeters,
     int NearRadiusMillimeters,
@@ -335,6 +511,19 @@ readonly record struct ProfileEvidence(
     int SubscriptionBytes,
     int CursorBytes,
     int ChangeBytes);
+
+readonly record struct CodecEvidence(
+    int Records,
+    int SnapshotBytes,
+    int DeltaBytes,
+    int AbsenceBytes,
+    int ProofBytes,
+    TimingEvidence SnapshotEncode,
+    TimingEvidence SnapshotDecode,
+    TimingEvidence DeltaEncode,
+    TimingEvidence DeltaDecode,
+    TimingEvidence AbsenceDecode,
+    TimingEvidence ProofDecode);
 
 readonly record struct Report(
     string Workload,
@@ -352,4 +541,5 @@ readonly record struct Report(
     ProfileEvidence Profile,
     ScaleEvidence[] Scales,
     TimingEvidence CadencePass,
-    OfflineDirectChunkRecipientSnapshot CadenceCounters);
+    OfflineDirectChunkRecipientSnapshot CadenceCounters,
+    CodecEvidence Codec);

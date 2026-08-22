@@ -11,9 +11,10 @@ multi-consumer retained application Events across OfflineDirect, secure
 ProtocolLoopback, and connected localhost UDP. Corrective hardening adds exact
 WorldState parity, reliable baseline cancellation, and client-slot ABA fencing.
 
-Terrain T0 is also accepted/frozen. N1.0 now adds a separate packet-free
-`OfflineDirectChunkRecipient` checkpoint over T0's `ChunkInterestQuery` and
-`ChunkPublicationStore`; it has no wire messages and does not replace N0 yet.
+Terrain T0 is also accepted/frozen. N1.0 adds a separate packet-free
+`OfflineDirectChunkRecipient` over T0's `ChunkInterestQuery` and
+`ChunkPublicationStore`. N1.1 adds canonical snapshot/delta/absence encoding and
+application-proof fencing around that same oracle. Neither replaces N0 yet.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -76,7 +77,23 @@ The first packet-free evidence observes 503 subscriptions for the accepted
 stable/crossing reconciliation measured 42.74/43.50 us p95 per recipient. A broad
 1,024-subscription capacity currently reserves 187,904 B per recipient; this is
 explicit N1 layout/capacity evidence, not a production CCU or N0 replacement
-claim. N1.1 remains responsible for canonical messages and hostile wire codecs.
+claim. N1.1 now wraps this oracle with canonical messages and hostile wire codecs.
+
+## N1.1 canonical chunk wire preparation
+
+`OfflineDirectChunkWireEncoder` is an owner-bound packet-free adapter from one
+borrowed publication read to the canonical Game/Protocol chunk schema. It owns no
+socket, peer, crypto, watcher, or authority. Encoding returns a trusted delivery
+ticket and releases publication scratch without changing the recipient's applied
+cursor. A matching authenticated `ChunkApplied` proof is the only remote path that
+can commit that ticket; transport send/ACK is insufficient.
+
+Snapshot/delta codecs are bounded at 64 rows, fixed-endian, hash-checked,
+canonically ordered, overlap-safe, and transactional on hostile input. The first
+applied `ChunkAbsent` establishes empty knowledge. Later cadence probes that are
+still absent are committed locally as no-change observations and produce no
+repeated empty wire payload. Loss/reorder transport and actual client bridge
+integration remain N1.2 work.
 
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions

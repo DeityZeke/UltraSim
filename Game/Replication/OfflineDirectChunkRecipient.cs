@@ -90,6 +90,45 @@ public enum OfflineDirectChunkReadStatus : byte
     FutureCursor = 11,
 }
 
+public enum OfflineDirectChunkAppliedProofStatus : byte
+{
+    Applied = 1,
+    Duplicate = 2,
+    Stale = 3,
+    Invalid = 4,
+}
+
+/// <summary>
+/// Trusted server-side record of one encoded remote delivery. The constructor is internal so
+/// untrusted proof bytes cannot manufacture publication knowledge without a retained offer.
+/// </summary>
+public readonly struct OfflineDirectChunkDeliveryTicket
+{
+    internal OfflineDirectChunkDeliveryTicket(
+        ulong deliveryId,
+        PublicationEpoch sourceEpoch,
+        SpatialChunkKey key,
+        OfflineDirectChunkReadStatus status,
+        ChunkPublicationCursor cursor)
+    {
+        DeliveryId = deliveryId;
+        SourceEpoch = sourceEpoch;
+        Key = key;
+        Status = status;
+        Cursor = cursor;
+    }
+
+    public ulong DeliveryId { get; }
+    public PublicationEpoch SourceEpoch { get; }
+    public SpatialChunkKey Key { get; }
+    public OfflineDirectChunkReadStatus Status { get; }
+    public ChunkPublicationCursor Cursor { get; }
+    public bool IsValid => DeliveryId != 0 && SourceEpoch.IsValid && Key.Space.IsValid &&
+        (Status == OfflineDirectChunkReadStatus.ChunkAbsent && !Cursor.IsValid ||
+         Status is OfflineDirectChunkReadStatus.Snapshot or OfflineDirectChunkReadStatus.Delta &&
+         Cursor.IsValid && Cursor.Epoch == SourceEpoch && Cursor.Key == Key);
+}
+
 /// <summary>Borrowed result of one packet-free publication read; valid until commit/cancel.</summary>
 public readonly ref struct OfflineDirectChunkRead
 {
@@ -392,6 +431,64 @@ public sealed class OfflineDirectChunkRecipient
         ClearPending();
     }
 
+    /// <summary>
+    /// Releases borrowed read scratch after a remote message is encoded without advancing applied
+    /// knowledge. The caller retains the returned trusted ticket and may commit it only after an
+    /// authenticated matching application proof. Queueing or sending bytes is never sufficient.
+    /// </summary>
+    public OfflineDirectChunkDeliveryTicket ReleaseReadForRemote(ulong deliveryId)
+    {
+        EnsureOwner();
+        ArgumentOutOfRangeException.ThrowIfZero(deliveryId);
+        if (_pendingIndex < 0) throw new InvalidOperationException("No publication read is pending.");
+        if (_pendingStatus is not (OfflineDirectChunkReadStatus.Snapshot or
+            OfflineDirectChunkReadStatus.Delta or OfflineDirectChunkReadStatus.ChunkAbsent))
+            throw new InvalidOperationException("Only semantic payload reads may become remote deliveries.");
+        SpatialChunkKey key = _subscriptions[_pendingIndex].Interest.Key;
+        var ticket = new OfflineDirectChunkDeliveryTicket(
+            deliveryId, _sourceEpoch, key, _pendingStatus, _pendingBatch.Cursor);
+        ClearPending();
+        return ticket;
+    }
+
+    /// <summary>
+    /// Advances recipient knowledge from one trusted retained delivery ticket after the remote
+    /// application proof has passed session, epoch, key, delivery-ID, kind, revision, and status
+    /// validation. Duplicate/stale proof is harmless and never regresses a newer cursor.
+    /// </summary>
+    public OfflineDirectChunkAppliedProofStatus CommitAppliedProof(
+        in OfflineDirectChunkDeliveryTicket ticket)
+    {
+        EnsureOwner();
+        if (_pendingIndex >= 0 || !ticket.IsValid || ticket.SourceEpoch != _sourceEpoch)
+            return OfflineDirectChunkAppliedProofStatus.Invalid;
+        int subscriptionIndex = FindSubscription(ticket.Key);
+        if (subscriptionIndex < 0) return OfflineDirectChunkAppliedProofStatus.Stale;
+        ref OfflineDirectChunkSubscription subscription = ref _subscriptions[subscriptionIndex];
+
+        if (ticket.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
+        {
+            if (subscription.Cursor.IsValid) return OfflineDirectChunkAppliedProofStatus.Stale;
+            if (subscription.HasKnowledge) return OfflineDirectChunkAppliedProofStatus.Duplicate;
+            subscription = subscription with { Cursor = default, HasKnowledge = true };
+            _snapshotReads++;
+            _chunkAbsentReads++;
+            return OfflineDirectChunkAppliedProofStatus.Applied;
+        }
+
+        if (!ticket.Cursor.IsValid) return OfflineDirectChunkAppliedProofStatus.Invalid;
+        if (subscription.Cursor.IsValid)
+        {
+            int comparison = ticket.Cursor.Revision.CompareTo(subscription.Cursor.Revision);
+            if (comparison < 0) return OfflineDirectChunkAppliedProofStatus.Stale;
+            if (comparison == 0) return OfflineDirectChunkAppliedProofStatus.Duplicate;
+        }
+        subscription = subscription with { Cursor = ticket.Cursor, HasKnowledge = true };
+        if (ticket.Status == OfflineDirectChunkReadStatus.Snapshot) _snapshotReads++;
+        else _deltaReads++;
+        return OfflineDirectChunkAppliedProofStatus.Applied;
+    }
+
     public OfflineDirectChunkRecipientSnapshot GetSnapshot()
     {
         EnsureOwner();
@@ -476,6 +573,21 @@ public sealed class OfflineDirectChunkRecipient
             }
         }
         return count;
+    }
+
+    private int FindSubscription(SpatialChunkKey key)
+    {
+        int low = 0;
+        int high = _subscriptionCount - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            int comparison = _subscriptions[middle].Interest.Key.CompareTo(key);
+            if (comparison == 0) return middle;
+            if (comparison < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        return -1;
     }
 
     private void BuildNextSubscriptions(int desiredCount, bool sourceReset)

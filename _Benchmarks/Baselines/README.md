@@ -168,6 +168,11 @@ Useful current anchors can be located by their embedded workload or filename:
   including stable/crossing scale, cadence/no-change/absent reads, reservation,
   and warmed allocation. It is not wire, N0 replacement, public WAN, or accepted
   sparse-CCU evidence;
+- `network-n1.1-canonical-chunk-codecs-*` — canonical bounded snapshot/delta/
+  absence/application-proof wire schemas, hostile transactional codec gates,
+  exact manifest/schema fingerprints, message sizes, and warmed zero-allocation
+  encode/decode timings. It retains N1.0 controls but is not transport,
+  loss/reorder, N0 replacement, public WAN, or production-CCU evidence;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

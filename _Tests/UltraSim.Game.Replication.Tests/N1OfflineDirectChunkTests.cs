@@ -1,6 +1,9 @@
+using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using UltraSim.Client.Core;
 using UltraSim.ECS;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -161,6 +164,276 @@ internal static class N1OfflineDirectChunkTests
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    internal static void ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe()
+    {
+        RemoteChunkPublicRecord[] snapshot =
+        [
+            new(2, 1, 7, 11, 100, 200, -300, 16_384, 1, 5),
+            new(8, 3, 9, 12, 15_999, 0, 42, 49_152, 0, 6),
+        ];
+        byte[] bytes = new byte[4_096];
+        True(UltraSimGameProtocol.TryWriteChunkSnapshot(
+            bytes, 10, 20, 30, 1, -4, 7, 8, 4, snapshot, out int snapshotBytes));
+        var decodedSnapshot = new RemoteChunkPublicRecord[2];
+        True(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes), out RemoteChunkSnapshotHeader snapshotHeader,
+            decodedSnapshot, out int snapshotCount));
+        Equal(2, snapshotCount);
+        True(snapshot.AsSpan().SequenceEqual(decodedSnapshot));
+        Equal(8UL, snapshotHeader.Revision);
+
+        RemoteChunkPublicRecord[] snapshotSentinel =
+        [new(99, 9, 9, 9, 9, 9, 9, 9, 1, 9), new(100, 9, 9, 9, 9, 9, 9, 9, 1, 9)];
+        RemoteChunkPublicRecord[] snapshotBefore = snapshotSentinel.ToArray();
+        bytes[snapshotBytes - 1] ^= 0x40;
+        False(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes), out _, snapshotSentinel, out _));
+        True(snapshotBefore.AsSpan().SequenceEqual(snapshotSentinel));
+        bytes[snapshotBytes - 1] ^= 0x40;
+        False(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes - 1), out _, snapshotSentinel, out _));
+        False(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes + 1), out _, snapshotSentinel, out _));
+        False(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes), out _, snapshotSentinel.AsSpan(0, 1), out _));
+
+        // Header schema/count and canonical row validation are independent hostile gates.
+        bytes[40] ^= 1;
+        False(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes), out _, snapshotSentinel, out _));
+        True(snapshotBefore.AsSpan().SequenceEqual(snapshotSentinel));
+        bytes[40] ^= 1;
+        BinaryPrimitives.WriteUInt16BigEndian(
+            bytes.AsSpan(RemoteChunkSnapshotHeaderCodec.EncodedSize - sizeof(ushort)), 65);
+        False(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshotBytes), out _, snapshotSentinel, out _));
+        True(snapshotBefore.AsSpan().SequenceEqual(snapshotSentinel));
+        BinaryPrimitives.WriteUInt16BigEndian(
+            bytes.AsSpan(RemoteChunkSnapshotHeaderCodec.EncodedSize - sizeof(ushort)), 2);
+
+        byte[] rejectedDestination = Enumerable.Repeat((byte)0xA5, 256).ToArray();
+        byte[] rejectedBefore = rejectedDestination.ToArray();
+        RemoteChunkPublicRecord[] duplicateSnapshot = [snapshot[0], snapshot[0]];
+        False(UltraSimGameProtocol.TryWriteChunkSnapshot(
+            rejectedDestination, 10, 20, 30, 1, -4, 7, 8, 4, duplicateSnapshot, out _));
+        True(rejectedBefore.AsSpan().SequenceEqual(rejectedDestination));
+        RemoteChunkPublicRecord[] invalidSnapshot =
+            [snapshot[0] with { StateFlags = 2, LastChangedRevision = 9 }];
+        False(UltraSimGameProtocol.TryWriteChunkSnapshot(
+            rejectedDestination, 10, 20, 30, 1, -4, 7, 8, 4, invalidSnapshot, out _));
+        True(rejectedBefore.AsSpan().SequenceEqual(rejectedDestination));
+
+        byte[] overlap = new byte[256];
+        Span<RemoteChunkPublicRecord> overlappingRecords =
+            MemoryMarshal.Cast<byte, RemoteChunkPublicRecord>(overlap);
+        overlappingRecords[0] = snapshot[0];
+        byte[] overlapBefore = overlap.ToArray();
+        False(UltraSimGameProtocol.TryWriteChunkSnapshot(
+            overlap, 10, 20, 30, 1, 0, 0, 8, 4, overlappingRecords[..1], out _));
+        True(overlapBefore.AsSpan().SequenceEqual(overlap));
+
+        RemoteChunkDeltaRecord[] deltas =
+        [
+            new(RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Transform,
+                2, 1, 8, 11, 101, 201, -299, 16_384, 1, 9),
+            new(RemoteChunkPublicOperation.Remove, RemoteChunkPublicFieldMask.None,
+                8, 3, 10, 0, 0, 0, 0, 0, 0, 0),
+        ];
+        True(UltraSimGameProtocol.TryWriteChunkDelta(
+            bytes, 10, 20, 31, 1, -4, 7, 8, 10, 4, deltas, out int deltaBytes));
+        var decodedDeltas = new RemoteChunkDeltaRecord[2];
+        True(UltraSimGameProtocol.TryReadChunkDelta(
+            bytes.AsSpan(0, deltaBytes), out RemoteChunkDeltaHeader deltaHeader,
+            decodedDeltas, out int deltaCount));
+        Equal(2, deltaCount);
+        True(deltas.AsSpan().SequenceEqual(decodedDeltas));
+        Equal(8UL, deltaHeader.BaseRevision);
+        Equal(10UL, deltaHeader.CurrentRevision);
+
+        RemoteChunkDeltaRecord[] deltaSentinel =
+        [new(RemoteChunkPublicOperation.Remove, default, 99, 9, 9, 0, 0, 0, 0, 0, 0, 0)];
+        RemoteChunkDeltaRecord[] deltaBefore = deltaSentinel.ToArray();
+        bytes[deltaBytes - 1] ^= 1;
+
+        RemoteChunkDeltaRecord[] duplicateDeltas = [deltas[0], deltas[0]];
+        False(UltraSimGameProtocol.TryWriteChunkDelta(
+            rejectedDestination, 10, 20, 31, 1, -4, 7, 8, 10, 4, duplicateDeltas, out _));
+        True(rejectedBefore.AsSpan().SequenceEqual(rejectedDestination));
+        RemoteChunkDeltaRecord[] invalidDeltas =
+            [deltas[0] with { Operation = (RemoteChunkPublicOperation)99,
+                Fields = (RemoteChunkPublicFieldMask)0x8000 }];
+        False(UltraSimGameProtocol.TryWriteChunkDelta(
+            rejectedDestination, 10, 20, 31, 1, -4, 7, 8, 10, 4, invalidDeltas, out _));
+        True(rejectedBefore.AsSpan().SequenceEqual(rejectedDestination));
+        byte[] deltaOverlap = new byte[256];
+        Span<RemoteChunkDeltaRecord> overlappingDeltas =
+            MemoryMarshal.Cast<byte, RemoteChunkDeltaRecord>(deltaOverlap);
+        overlappingDeltas[0] = deltas[0];
+        byte[] deltaOverlapBefore = deltaOverlap.ToArray();
+        False(UltraSimGameProtocol.TryWriteChunkDelta(
+            deltaOverlap, 10, 20, 31, 1, -4, 7, 8, 10, 4, overlappingDeltas[..1], out _));
+        True(deltaOverlapBefore.AsSpan().SequenceEqual(deltaOverlap));
+        False(UltraSimGameProtocol.TryReadChunkDelta(
+            bytes.AsSpan(0, deltaBytes), out _, deltaSentinel, out _));
+        True(deltaBefore.AsSpan().SequenceEqual(deltaSentinel));
+        bytes[deltaBytes - 1] ^= 1;
+
+        True(UltraSimGameProtocol.TryWriteChunkAbsence(
+            bytes, 10, 20, 32, 1, -4, 7, out int absenceBytes));
+        True(UltraSimGameProtocol.TryReadChunkAbsence(
+            bytes.AsSpan(0, absenceBytes), out RemoteChunkAbsenceMessage absence));
+        Equal(32UL, absence.DeliveryId);
+        False(UltraSimGameProtocol.TryReadChunkAbsence(
+            bytes.AsSpan(0, absenceBytes - 1), out _));
+
+        var proof = new RemoteChunkAppliedMessage
+        {
+            ApplicationSessionEpoch = 10,
+            PublicationEpoch = 20,
+            DeliveryId = 32,
+            SpatialSpaceId = 1,
+            ChunkX = -4,
+            ChunkZ = 7,
+            Revision = 0,
+            Kind = RemoteChunkPublicationKind.Absence,
+            Status = RemoteChunkPublicationApplyStatus.Applied,
+        };
+        True(UltraSimGameProtocol.TryWriteChunkApplied(bytes, proof, out int proofBytes));
+        True(UltraSimGameProtocol.TryReadChunkApplied(
+            bytes.AsSpan(0, proofBytes), out RemoteChunkAppliedMessage decodedProof));
+        Equal(proof.DeliveryId, decodedProof.DeliveryId);
+        False(UltraSimGameProtocol.TryReadChunkApplied(
+            bytes.AsSpan(0, proofBytes + 1), out _));
+        proof.Revision = 1;
+        False(UltraSimGameProtocol.TryWriteChunkApplied(bytes, proof, out _));
+
+        Equal((ushort)10, UltraSimGameProtocol.Manifest.Version);
+        Equal(16_305_363_788_555_709_530UL, UltraSimGameProtocol.Manifest.Fingerprint);
+        Equal(6_148_331_928_277_823_537UL,
+            UltraSimGameProtocol.ChunkPublicationSchemaFingerprint);
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteChunkSnapshotHeaderCodec.Descriptor.Id, out _));
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteChunkDeltaHeaderCodec.Descriptor.Id, out _));
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteChunkAbsenceMessageCodec.Descriptor.Id, out _));
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteChunkAppliedMessageCodec.Descriptor.Id, out _));
+    }
+
+    internal static void RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence()
+    {
+        using var fixture = new Fixture(historyCapacity: 32);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        var encoder = new OfflineDirectChunkWireEncoder(77, 8);
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        int occupied = FindSubscription(recipient, Key(0, 0));
+        int absent = FindAbsentSubscription(recipient, Key(0, 0));
+        byte[] bytes = new byte[4_096];
+
+        Equal(OfflineDirectChunkWireEncodeStatus.Snapshot,
+            encoder.TryEncode(recipient, fixture.Store, occupied, 0, 1, bytes,
+                out OfflineDirectChunkWireEncodeResult snapshot));
+        False(recipient.Subscriptions[occupied].HasKnowledge); // encoded/sent is not known
+        True(snapshot.Ticket.IsValid);
+        True(UltraSimGameProtocol.TryReadChunkSnapshot(
+            bytes.AsSpan(0, snapshot.Written), out _, new RemoteChunkPublicRecord[8], out int count));
+        Equal(1, count);
+        RemoteChunkAppliedMessage proof = Proof(77, snapshot.Ticket,
+            RemoteChunkPublicationApplyStatus.Applied);
+        True(encoder.TryCommitAppliedProof(
+            recipient, snapshot.Ticket, proof, out OfflineDirectChunkAppliedProofStatus applied));
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied, applied);
+        True(recipient.Subscriptions[occupied].HasKnowledge);
+        ulong snapshotRevision = recipient.Subscriptions[occupied].Cursor.Revision.Value;
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkWireEncodeStatus.Delta,
+            encoder.TryEncode(recipient, fixture.Store, occupied, 1, 2, bytes,
+                out OfflineDirectChunkWireEncodeResult firstDelta));
+        Equal(snapshotRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        RemoteChunkAppliedMessage wrong = Proof(77, firstDelta.Ticket,
+            RemoteChunkPublicationApplyStatus.Applied);
+        wrong.DeliveryId++;
+        False(encoder.TryCommitAppliedProof(recipient, firstDelta.Ticket, wrong, out _));
+        Equal(snapshotRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+
+        fixture.Present(0, Position(0, 0, 2_200, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkWireEncodeStatus.Delta,
+            encoder.TryEncode(recipient, fixture.Store, occupied, 2, 3, bytes,
+                out OfflineDirectChunkWireEncodeResult newerDelta));
+        True(encoder.TryCommitAppliedProof(recipient, newerDelta.Ticket,
+            Proof(77, newerDelta.Ticket, RemoteChunkPublicationApplyStatus.Applied), out applied));
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied, applied);
+        ulong newestRevision = recipient.Subscriptions[occupied].Cursor.Revision.Value;
+        True(newestRevision > snapshotRevision);
+        True(encoder.TryCommitAppliedProof(recipient, firstDelta.Ticket,
+            Proof(77, firstDelta.Ticket, RemoteChunkPublicationApplyStatus.Applied), out applied));
+        Equal(OfflineDirectChunkAppliedProofStatus.Stale, applied);
+        Equal(newestRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+
+        Equal(OfflineDirectChunkWireEncodeStatus.Absence,
+            encoder.TryEncode(recipient, fixture.Store, absent, 3, 4, bytes,
+                out OfflineDirectChunkWireEncodeResult absence));
+        False(recipient.Subscriptions[absent].HasKnowledge);
+        True(encoder.TryCommitAppliedProof(recipient, absence.Ticket,
+            Proof(77, absence.Ticket, RemoteChunkPublicationApplyStatus.Applied), out applied));
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied, applied);
+        True(recipient.Subscriptions[absent].HasKnowledge);
+        False(recipient.Subscriptions[absent].Cursor.IsValid);
+        Equal(OfflineDirectChunkWireEncodeStatus.NoPayload,
+            encoder.TryEncode(recipient, fixture.Store, absent, 4, 5, bytes, out var suppressed));
+        Equal(0, suppressed.Written);
+
+        fixture.Present(0, Position(0, 0, 2_300, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkWireEncodeStatus.EncodingFailed,
+            encoder.TryEncode(recipient, fixture.Store, occupied, 5, 6, bytes.AsSpan(0, 1), out _));
+        Equal(newestRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(OfflineDirectChunkWireEncodeStatus.Delta,
+            encoder.TryEncode(recipient, fixture.Store, occupied, 5, 7, bytes, out _));
+    }
+
+    internal static void RejectedProofAndEpochReplacementNeverAdvanceKnowledge()
+    {
+        using var fixture = new Fixture(historyCapacity: 16);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 8, 8), Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        var encoder = new OfflineDirectChunkWireEncoder(88, 8);
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes, out _));
+        int occupied = FindSubscription(recipient, Key(0, 0));
+        byte[] bytes = new byte[4_096];
+        Equal(OfflineDirectChunkWireEncodeStatus.Snapshot,
+            encoder.TryEncode(recipient, fixture.Store, occupied, 0, 1, bytes,
+                out OfflineDirectChunkWireEncodeResult delivery));
+
+        RemoteChunkAppliedMessage rejected = Proof(
+            88, delivery.Ticket, RemoteChunkPublicationApplyStatus.Rejected);
+        False(encoder.TryCommitAppliedProof(recipient, delivery.Ticket, rejected, out _));
+        False(recipient.Subscriptions[occupied].HasKnowledge);
+
+        fixture.ReplaceStore(historyCapacity: 16);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes,
+                out OfflineDirectChunkReconcileResult reset));
+        True(reset.SourceReset);
+        False(encoder.TryCommitAppliedProof(recipient, delivery.Ticket,
+            Proof(88, delivery.Ticket, RemoteChunkPublicationApplyStatus.Applied), out _));
+        False(recipient.Subscriptions[occupied].HasKnowledge);
+    }
+
     private static void Drain(
         OfflineDirectChunkRecipient recipient,
         ChunkPublicationStore store,
@@ -208,6 +481,37 @@ internal static class N1OfflineDirectChunkTests
             if (recipient.Subscriptions[index].Interest.Key == key) return index;
         throw new InvalidOperationException($"Subscription {key} was not found.");
     }
+
+    private static int FindAbsentSubscription(
+        OfflineDirectChunkRecipient recipient,
+        SpatialChunkKey occupied)
+    {
+        for (int index = 0; index < recipient.Subscriptions.Length; index++)
+            if (recipient.Subscriptions[index].Interest.Key != occupied) return index;
+        throw new InvalidOperationException("An absent subscription was not found.");
+    }
+
+    private static RemoteChunkAppliedMessage Proof(
+        ulong applicationSessionEpoch,
+        in OfflineDirectChunkDeliveryTicket ticket,
+        RemoteChunkPublicationApplyStatus status) => new()
+    {
+        ApplicationSessionEpoch = applicationSessionEpoch,
+        PublicationEpoch = ticket.SourceEpoch.Value,
+        DeliveryId = ticket.DeliveryId,
+        SpatialSpaceId = ticket.Key.Space.Value,
+        ChunkX = ticket.Key.Coord.X,
+        ChunkZ = ticket.Key.Coord.Z,
+        Revision = ticket.Cursor.IsValid ? ticket.Cursor.Revision.Value : 0,
+        Kind = ticket.Status switch
+        {
+            OfflineDirectChunkReadStatus.Snapshot => RemoteChunkPublicationKind.Snapshot,
+            OfflineDirectChunkReadStatus.Delta => RemoteChunkPublicationKind.Delta,
+            OfflineDirectChunkReadStatus.ChunkAbsent => RemoteChunkPublicationKind.Absence,
+            _ => throw new InvalidOperationException(),
+        },
+        Status = status,
+    };
 
     private static SpatialChunkKey Key(int x, int z) =>
         new(GameWorldState.DefaultSpace, x, z);

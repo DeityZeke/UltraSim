@@ -37,7 +37,7 @@ when those systems exist.
 | `UltraSim.Network.V2ComparisonAdapter` | Frozen V2 bot-harness child-process adapter and normalized owner-state evidence. |
 | `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected/shared-UDP bot adapter with bounded pressure, memory, wire, semantic-latency telemetry, cadence/stall acceptance, and V3-only integrated `spread_mix`/`dense_mix`. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
-| `UltraSim.Network.N1Benchmarks` | N1.0 packet-free bounded chunk-subscription/cursor reconciliation, cadence reads, topology mutation, allocation, and recipient reservation evidence. |
+| `UltraSim.Network.N1Benchmarks` | N1.0 packet-free bounded chunk-recipient controls plus N1.1 canonical snapshot/delta/absence/proof codec size, timing, allocation, and manifest evidence. |
 | `UltraSim.Spatial.Benchmarks` | Terrain T0.0 dependency-neutral spatial math and fixed game-position profile: normalization, reconstruction, key/hash/order, AABB distance, and terrain-cell lookup. |
 | `UltraSim.WorldSpatialIndex.Benchmarks` | Terrain T0.1 split post-step/index costs: idle observation, same-home change, cross-chunk migration, create/remove, full rebuild, and member reads. |
 | `UltraSim.TerrainEncoding.Benchmarks` | Terrain T0.2 fixed 16 m/0.5 m geometry, global-vs-based height candidate matrix, synthetic multi-datum distribution, reconstructed shared-edge equality, scratch, and encode/decode evidence. |
@@ -102,7 +102,7 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.N1Benchmarks -c Release -- \
     --rounds=64 \
-    --output=_Benchmarks/results/network-n1.0-offline-direct-chunk-recipient-local.json
+    --output=_Benchmarks/results/network-n1.1-canonical-chunk-codecs-local.json
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \

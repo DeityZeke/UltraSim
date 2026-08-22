@@ -2,12 +2,13 @@
 
 Status: active forward plan. Network N0 remains accepted/frozen as the current
 remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
-as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is implemented
-and stopped for checkpoint review; N1.1 wire messages have not started.
+as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
+N1.1 canonical chunk messages/proof semantics are implemented and stopped for
+checkpoint review; N1.2 transport integration has not started.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
-the implemented N1.0 stop, and only forward decisions that have a concrete owner.
+the implemented N1.0/N1.1 stops, and only forward decisions with a concrete owner.
 
 N0 proved the difficult semantic foundations:
 
@@ -488,8 +489,8 @@ Evidence:
 [`network-n1.0-offline-direct-chunk-recipient-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.0-offline-direct-chunk-recipient-2026-08-21.json).
 
 This accepts no N0 replacement or sparse-CCU improvement claim. N1.0 has no new
-wire schema, application proof, loss/reorder transport, or public WAN work. Stop
-for review before N1.1.
+wire schema, application proof, loss/reorder transport, or public WAN work. N1.0
+was accepted at `af493bc6`; N1.1 owns the wire boundary below.
 
 ## N1.1 — canonical chunk messages and protocol manifest
 
@@ -516,6 +517,64 @@ aggregation lesson.
 
 **Gate:** canonical round trips, hostile lengths/counts, duplicate IDs, malformed
 revisions, capacity preflight, schema mismatch, and zero partial client mutation.
+
+### N1.1 implementation stop — 2026-08-21
+
+The game protocol now defines four canonical, fixed-endian message families:
+
+```text
+119  ChunkSnapshot   Bulk
+120  ChunkDelta      WorldState
+121  ChunkAbsence    WorldState
+122  ChunkApplied    WorldState
+```
+
+The game manifest is version 10 with fingerprint
+`16305363788555709530`; the chunk semantic schema fingerprint is
+`6148331928277823537`. Snapshot and delta bodies use canonical local `uint16`
+X/Z coordinates beneath one explicit `SpatialSpaceId + ChunkX + ChunkZ`, sorted
+reusable public identity indices, generation/version lineage, and declared
+revision/history floors. Live CLR structs are not copied to the wire.
+
+The first bounded schema admits at most 64 public records in one message, matching
+the accepted default client public-page capacity. Larger pages fail preflight;
+segmented atomic snapshot recovery remains N1.3 work. Decoders reject unknown
+operations/fields/state bits, invalid identities/revisions, duplicate or
+noncanonical IDs, count/length/schema/hash mismatches, trailing bytes, and
+undersized destinations. They validate before publishing decoded rows, so hostile
+input cannot partially mutate the caller's destination. Source/destination
+overlap is rejected transactionally by encoders.
+
+Remote preparation preserves the N0 rule **SENT IS NOT KNOWN**. Encoding releases
+borrowed publication scratch and returns a trusted server-side delivery ticket,
+but does not advance the recipient cursor. Only an authenticated exact application
+proof matching session, publication epoch, delivery ID, chunk key, kind, and
+revision may commit that ticket. Old/duplicate proof is harmless and cannot
+regress newer knowledge; publication-epoch replacement fences outstanding
+tickets. The first absence requires proof and establishes authoritative empty
+knowledge. Repeated due-cadence probes while that key remains absent emit no wire
+payload.
+
+Permanent N1.1 tests cover canonical round trips, hostile corruption/truncation/
+trailing bytes, overlap, capacity transactionality, exact manifest admission,
+send-without-proof, wrong/rejected/stale proof, two outstanding revisions proved
+out of order, absence suppression, encoding retry, and epoch replacement. This is
+still packet-free wire preparation: it adds no socket, encryption, peer, watcher,
+or Network-owned game authority.
+
+The tiering-disabled Release artifact records zero warmed caller-thread allocation.
+For 64 records, snapshot encode/decode measured 12.54/12.83 us p95 at 2,634 B;
+mixed delta encode/decode measured 15.90/15.81 us p95 at 2,834 B. Absence and
+proof are 48 B and 50 B and decoded at 17.36 ns and 19.61 ns p95 respectively.
+The retained N1.0 control still reports 503 subscriptions, 72 changes for a
+one-chunk crossing, and 187,904 B reserved per broad-capacity recipient. These
+are local codec/control observations, not encrypted datagram, WAN, N0-replacement,
+or production-CCU evidence.
+
+Evidence:
+[`network-n1.1-canonical-chunk-codecs-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.1-canonical-chunk-codecs-2026-08-21.json).
+
+Stop for checkpoint review before N1.2.
 
 ## N1.2 — independent-unreliable dynamic chunk deltas
 
@@ -851,10 +910,10 @@ of the public chunk page.
 
 T0 has accepted the chunk coordinate, packed publication, bounded dirty history,
 local interest query, production client semantic cache, presentation window, and
-launchable woods/cabin vertical. N1.0 has connected those contracts to a bounded
-packet-free recipient chunk-cursor layer and measured its isolated spatial
-maintenance.
+launchable woods/cabin vertical. N1.0 connects those contracts to a bounded
+packet-free recipient chunk-cursor layer. N1.1 adds canonical bounded chunk wire
+semantics and application-proof fencing without adding transport.
 
-Do not begin N1.1 until the N1.0 checkpoint is reviewed. The next work is canonical
-game-owned chunk messages and hostile codec tests—not UDP redesign, N0 deletion,
-shared encoded-byte caching, or a production scale claim.
+Do not begin N1.2 until the N1.1 checkpoint is reviewed. The next work is
+independent-unreliable delivery/loss/reorder convergence—not UDP redesign, N0
+deletion, shared encoded-byte caching, or a production scale claim.

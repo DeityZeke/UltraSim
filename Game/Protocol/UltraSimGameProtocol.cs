@@ -46,7 +46,7 @@ public enum RemoteApplicationEventApplyStatus : byte
     CapacityExceeded = 2,
 }
 
-[NetworkProtocol(7)]
+[NetworkProtocol(8)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -290,8 +290,8 @@ public readonly record struct RemoteWorldStateRecord(
         sizeof(byte) + sizeof(byte) + sizeof(int) * 4;
 }
 
-/// <summary>Accepted game application protocol manifest and bounded dynamic codecs through N0.9.</summary>
-public static class UltraSimGameProtocol
+/// <summary>Accepted game application protocol manifest and bounded codecs through N1.1.</summary>
+public static partial class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
     public const int MaximumIdentityBytes = 1_024;
@@ -305,7 +305,7 @@ public static class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 9,
+        version: 10,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -334,6 +334,14 @@ public static class UltraSimGameProtocol
             RemoteApplicationEventAppliedMessageCodec.Descriptor,
             RemoteWorldBaselineCancelMessageCodec.Descriptor,
             RemoteWorldStateCompactionRequestMessageCodec.Descriptor,
+            RemoteChunkSnapshotHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = RemoteChunkSnapshotHeaderCodec.EncodedSize +
+                    MaximumChunkPublicationRecords * RemoteChunkPublicRecord.EncodedSize },
+            RemoteChunkDeltaHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = RemoteChunkDeltaHeaderCodec.EncodedSize +
+                    MaximumChunkPublicationRecords * RemoteChunkDeltaRecord.EncodedSize },
+            RemoteChunkAbsenceMessageCodec.Descriptor,
+            RemoteChunkAppliedMessageCodec.Descriptor,
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;
