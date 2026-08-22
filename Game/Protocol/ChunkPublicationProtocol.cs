@@ -137,6 +137,32 @@ public static partial class UltraSimGameProtocol
     public const int MaximumChunkPublicationRecords = 64;
     public const ulong ChunkPublicationSchemaFingerprint = 0x5553_4350_4231_3031UL; // USCPB101
 
+    public static int GetChunkSnapshotEncodedBytes(int recordCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(recordCount);
+        if (recordCount > MaximumChunkPublicationRecords)
+            throw new ArgumentOutOfRangeException(nameof(recordCount));
+        return checked(RemoteChunkSnapshotHeaderCodec.EncodedSize +
+            recordCount * RemoteChunkPublicRecord.EncodedSize);
+    }
+
+    public static int GetChunkDeltaEncodedBytes(int recordCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(recordCount);
+        if (recordCount > MaximumChunkPublicationRecords)
+            throw new ArgumentOutOfRangeException(nameof(recordCount));
+        return checked(RemoteChunkDeltaHeaderCodec.EncodedSize +
+            recordCount * RemoteChunkDeltaRecord.EncodedSize);
+    }
+
+    public static int GetMaximumChunkDeltaRecordsForPayload(int maximumPayloadBytes)
+    {
+        if (maximumPayloadBytes <= RemoteChunkDeltaHeaderCodec.EncodedSize) return 0;
+        return Math.Min(MaximumChunkPublicationRecords,
+            (maximumPayloadBytes - RemoteChunkDeltaHeaderCodec.EncodedSize) /
+            RemoteChunkDeltaRecord.EncodedSize);
+    }
+
     public static bool TryWriteChunkSnapshot(
         Span<byte> destination,
         ulong applicationSessionEpoch,
@@ -156,8 +182,7 @@ public static partial class UltraSimGameProtocol
             records.Length > MaximumChunkPublicationRecords ||
             !ValidateSnapshotRecords(records, revision))
             return false;
-        int required = checked(RemoteChunkSnapshotHeaderCodec.EncodedSize +
-            records.Length * RemoteChunkPublicRecord.EncodedSize);
+        int required = GetChunkSnapshotEncodedBytes(records.Length);
         if (destination.Length < required || MemoryMarshal.AsBytes(records).Overlaps(destination))
             return false;
         var header = new RemoteChunkSnapshotHeader
@@ -250,8 +275,7 @@ public static partial class UltraSimGameProtocol
             records.Length > MaximumChunkPublicationRecords ||
             !ValidateDeltaRecords(records, baseRevision, currentRevision))
             return false;
-        int required = checked(RemoteChunkDeltaHeaderCodec.EncodedSize +
-            records.Length * RemoteChunkDeltaRecord.EncodedSize);
+        int required = GetChunkDeltaEncodedBytes(records.Length);
         if (destination.Length < required || MemoryMarshal.AsBytes(records).Overlaps(destination))
             return false;
         var header = new RemoteChunkDeltaHeader

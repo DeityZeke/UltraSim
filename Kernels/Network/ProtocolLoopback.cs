@@ -510,6 +510,15 @@ public sealed class NetworkProtocolPeer : IDisposable
         get { EnsureOperational(); return _receivedCount; }
     }
 
+    /// <summary>
+    /// Maximum application-message bytes that fit in one authenticated protocol data frame.
+    /// Nonfragmenting lanes must keep each queued message at or below this value.
+    /// </summary>
+    public int MaximumUnfragmentedMessageBytes
+    {
+        get { EnsureOperational(); return FragmentPayloadBytes; }
+    }
+
     public bool TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload)
     {
         EnsureOperational();

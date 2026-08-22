@@ -29,6 +29,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Client Core](../Client/Core/README.md) — retained engine-neutral UI and
   production semantic-world projections plus transactional presentation-window
   planning.
+- [Client Network](../Client/Network/README.md) — authenticated protocol-to-client
+  semantic application, including N1 chunk delta/absence application proofs.
 - [Godot client adapter](../Client/_Godot/README.md) — native UI/world
   presentation, bounded render residency, grouping, and floating origin.
 - [Launchable T0.10 client](../Client/Playable.Godot/README.md) — real
@@ -56,9 +58,10 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Network kernel foundation](../Kernels/Network/README.md) — bounded byte,
   protocol, reliability, security, and transport mechanisms accepted during N0.
-- [Network V3 N1 forward plan](Plans/NETWORK.md) — deferred chunk-native public
-  spatial replication. N1 begins only after T0 accepts its chunk/publication
-  contracts; current N0 remains the executable reference meanwhile.
+- [Network V3 N1 forward plan](Plans/NETWORK.md) — active chunk-native public
+  spatial replication. N1.0-N1.2 now cover packet-free subscriptions, canonical
+  chunk wire semantics, and ordinary independent-unreliable delta/absence
+  delivery; current N0 remains the executable production/reference path.
 
 ## Evidence and tools
 
@@ -68,32 +71,12 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 ## Active plan
 
-- [Terrain / World T0](Plans/TERRAIN.md) is the active major implementation plan.
-  T0.0 accepted the value/coordinate seam and T0.1 accepted the maintained
-  world-spatial index after saturated-capacity/model-oracle hardening. T0.2
-  accepted the per-chunk-base 5 mm terrain height and 4,230-byte dense base
-  terrain foundation, and T0.3 accepted the canonical sectioned immutable
-  WorldPack/source. T0.4 accepted exact base-terrain queries plus the bounded
-  deterministic engine-neutral mesh payload after single-space admission,
-  current-world query ownership, and four-way seam hardening. T0.5 accepted
-  optional packed statics/Multi sections, stable cross-chunk logical identities,
-  deterministic render grouping, and bounded exact static-bounds queries. T0.6
-  accepted explicit public eligibility and bounded observer-independent chunk
-  publication; T0.7 accepted exact interest and the packet-free convergence
-  oracle. T0.8 accepted the distinct production client semantic cache and bounded
-  native Godot render owner. The window candidate/diff/reset state machine now
-  lives in Client Core behind a plan/admit/commit seam, leaving Godot with native
-  realization only. T0.9 implements exact-pack durable overlay
-  staging/persistence plus that portability hardening and is stopped for review.
-  Its invariant hardening makes prepared terrain meshes overlay-aware, closes
-  empty/no-op overlay save/restore lineage, proves Multi replacement persistence,
-  and makes ordinary identity validation proportional to retained changes rather
-  than immutable-world size.
-  The next implementation gate is the small playable woods/cabin vertical.
-- [Network N1](Plans/NETWORK.md) is intentionally deferred. After T0 is accepted,
-  N1 will test recipient-to-chunk subscriptions/cursors against the frozen N0
-  sparse relation graph: snapshot on first interest, query bounded dirty history
-  thereafter, cadence by chunk tier, client-side fine public visibility.
+- [Terrain / World T0](Plans/TERRAIN.md) is accepted/frozen through the launchable
+  T0.10 woods/cabin vertical.
+- [Network N1](Plans/NETWORK.md) is active. N1.0 packet-free subscriptions and
+  N1.1 canonical wire/proof semantics are accepted. N1.2 ordinary unfragmented
+  delta/absence delivery is implemented and stopped for review; N1.3 atomic
+  snapshot recovery is next only after that review.
 
 ## Source-of-truth hierarchy
 

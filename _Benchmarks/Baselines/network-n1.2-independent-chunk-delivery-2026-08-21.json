@@ -1,0 +1,215 @@
+{
+  "Workload": "network-n1.2-independent-chunk-delivery-v1",
+  "CapturedUtc": "2026-08-22T04:13:49.9180305+00:00",
+  "RuntimeVersion": "8.0.29",
+  "Framework": ".NET 8.0.29",
+  "OperatingSystem": "CachyOS",
+  "Architecture": "X64",
+  "LogicalProcessors": 16,
+  "ServerGc": false,
+  "StopwatchFrequency": 1000000000,
+  "Warmups": 4,
+  "Samples": 15,
+  "RoundsPerSample": 64,
+  "Profile": {
+    "Scope": "N1.0 recipient control, N1.1 codecs, and N1.2 real-transport MTU/ledger capacity evidence; not N1.3 snapshot recovery, N0 replacement, public WAN CCU, or production adoption evidence",
+    "ProtocolManifestVersion": 10,
+    "ProtocolManifestFingerprint": 16305363788555709530,
+    "ChunkPublicationSchemaFingerprint": 6148331928277823537,
+    "ChunkEdgeMillimeters": 16000,
+    "ImmediateRadiusMillimeters": 5000,
+    "NearRadiusMillimeters": 96000,
+    "FarRadiusMillimeters": 192000,
+    "ImmediateCadenceSteps": 1,
+    "NearCadenceSteps": 2,
+    "FarCadenceSteps": 4,
+    "SubscriptionBytes": 64,
+    "CursorBytes": 32,
+    "ChangeBytes": 32
+  },
+  "Scales": [
+    {
+      "Recipients": 1,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 187904,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 278272.40625,
+        "P50NanosecondsPerRecipient": 165820.65625,
+        "P95NanosecondsPerRecipient": 571247.234375,
+        "MaximumNanosecondsPerRecipient": 571247.234375,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 604352
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 35976.566666666666,
+        "P50NanosecondsPerRecipient": 35966.703125,
+        "P95NanosecondsPerRecipient": 36637.796875,
+        "MaximumNanosecondsPerRecipient": 36637.796875,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 80262
+      }
+    },
+    {
+      "Recipients": 32,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 6012928,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 35536.553125,
+        "P50NanosecondsPerRecipient": 35468.3359375,
+        "P95NanosecondsPerRecipient": 35915.78271484375,
+        "MaximumNanosecondsPerRecipient": 35915.78271484375,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 19339264
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 36325.86578776042,
+        "P50NanosecondsPerRecipient": 36294.80712890625,
+        "P95NanosecondsPerRecipient": 36848.53759765625,
+        "MaximumNanosecondsPerRecipient": 36848.53759765625,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 2568384
+      }
+    },
+    {
+      "Recipients": 128,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 24051712,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 35761.45122070312,
+        "P50NanosecondsPerRecipient": 35736.021240234375,
+        "P95NanosecondsPerRecipient": 36452.533203125,
+        "MaximumNanosecondsPerRecipient": 36452.533203125,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 77357056
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 36279.821525065105,
+        "P50NanosecondsPerRecipient": 36250.95788574219,
+        "P95NanosecondsPerRecipient": 36531.86950683594,
+        "MaximumNanosecondsPerRecipient": 36531.86950683594,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 10273536
+      }
+    },
+    {
+      "Recipients": 256,
+      "SubscriptionsPerRecipient": 503,
+      "TotalRecipientReservedBytes": 48103424,
+      "ReservedBytesPerRecipient": 187904,
+      "CrossingChangesPerRecipient": 72,
+      "StableReconcile": {
+        "MeanNanosecondsPerRecipient": 35582.59096272787,
+        "P50NanosecondsPerRecipient": 35506.42126464844,
+        "P95NanosecondsPerRecipient": 35789.684020996094,
+        "MaximumNanosecondsPerRecipient": 35789.684020996094,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 154714112
+      },
+      "CrossingReconcile": {
+        "MeanNanosecondsPerRecipient": 36791.12530110677,
+        "P50NanosecondsPerRecipient": 36883.89392089844,
+        "P95NanosecondsPerRecipient": 36997.11737060547,
+        "MaximumNanosecondsPerRecipient": 36997.11737060547,
+        "MaximumAllocatedBytes": 0,
+        "Checksum": 20547072
+      }
+    }
+  ],
+  "CadencePass": {
+    "MeanNanosecondsPerRecipient": 88869.828125,
+    "P50NanosecondsPerRecipient": 88721.375,
+    "P95NanosecondsPerRecipient": 90313.6875,
+    "MaximumNanosecondsPerRecipient": 90313.6875,
+    "MaximumAllocatedBytes": 0,
+    "Checksum": 604352
+  },
+  "CadenceCounters": {
+    "SourceEpoch": {
+      "Value": 5,
+      "IsValid": true
+    },
+    "SubscriptionCount": 497,
+    "Reconciliations": 1217,
+    "EnteredSubscriptions": 497,
+    "LeftSubscriptions": 0,
+    "TierChanges": 0,
+    "SnapshotReads": 192625,
+    "ChunkAbsentReads": 192624,
+    "DeltaReads": 0,
+    "NoChangeReads": 1216,
+    "SnapshotFallbacks": 0,
+    "CadenceDeferrals": 411008,
+    "ReservedBytes": 181184
+  },
+  "Codec": {
+    "Records": 64,
+    "SnapshotBytes": 2634,
+    "DeltaBytes": 2834,
+    "AbsenceBytes": 48,
+    "ProofBytes": 50,
+    "SnapshotEncode": {
+      "MeanNanosecondsPerRecipient": 19151.743359375,
+      "P50NanosecondsPerRecipient": 22824.33984375,
+      "P95NanosecondsPerRecipient": 26114.291015625,
+      "MaximumNanosecondsPerRecipient": 26114.291015625,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 25623552
+    },
+    "SnapshotDecode": {
+      "MeanNanosecondsPerRecipient": 20583.800130208332,
+      "P50NanosecondsPerRecipient": 22736.099609375,
+      "P95NanosecondsPerRecipient": 23104.611328125,
+      "MaximumNanosecondsPerRecipient": 23104.611328125,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 8882638554961129984
+    },
+    "DeltaEncode": {
+      "MeanNanosecondsPerRecipient": 15967.51328125,
+      "P50NanosecondsPerRecipient": 14845.1953125,
+      "P95NanosecondsPerRecipient": 18078.310546875,
+      "MaximumNanosecondsPerRecipient": 18078.310546875,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 27569152
+    },
+    "DeltaDecode": {
+      "MeanNanosecondsPerRecipient": 18292.987890625,
+      "P50NanosecondsPerRecipient": 18286.55078125,
+      "P95NanosecondsPerRecipient": 18506.900390625,
+      "MaximumNanosecondsPerRecipient": 18506.900390625,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 7957164595743995904
+    },
+    "AbsenceDecode": {
+      "MeanNanosecondsPerRecipient": 34.0453125,
+      "P50NanosecondsPerRecipient": 33.4765625,
+      "P95NanosecondsPerRecipient": 36.38671875,
+      "MaximumNanosecondsPerRecipient": 36.38671875,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 29184
+    },
+    "ProofDecode": {
+      "MeanNanosecondsPerRecipient": 51.651953125,
+      "P50NanosecondsPerRecipient": 50.625,
+      "P95NanosecondsPerRecipient": 60.78125,
+      "MaximumNanosecondsPerRecipient": 60.78125,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 982528
+    }
+  },
+  "Transport": {
+    "DatagramBytes": 1472,
+    "MaximumUnfragmentedMessageBytes": 1405,
+    "MaximumDeltaRecordsPerDatagram": 30,
+    "MaximumAdmittedDeltaBytes": 1372,
+    "FirstRejectedDeltaBytes": 1415,
+    "OutstandingDeliveryCapacity": 128,
+    "ServerAdapterReservedBytes": 9642,
+    "Notes": "WorldState is independent-unreliable/nonfragmenting. Oversize deltas fail closed and defer complete recovery to N1.3; tests, not this census, prove impairment convergence."
+  }
+}

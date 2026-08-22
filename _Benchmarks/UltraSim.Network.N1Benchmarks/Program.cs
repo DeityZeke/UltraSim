@@ -7,6 +7,7 @@ using UltraSim.Game.Composition;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.World;
+using UltraSim.Network;
 using UltraSim.Spatial;
 using static BenchmarkHarness;
 
@@ -14,7 +15,7 @@ int warmups = ReadInt(args, "--warmups=", 4);
 int samples = ReadInt(args, "--samples=", 15);
 int rounds = ReadInt(args, "--rounds=", 4);
 string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
-    AppContext.BaseDirectory, "../../../../results/network-n1.1-canonical-chunk-codecs.json"));
+    AppContext.BaseDirectory, "../../../../results/network-n1.2-independent-chunk-delivery.json"));
 if (warmups < 1 || samples < 5 || rounds < 1) throw new ArgumentOutOfRangeException(nameof(args));
 
 int[] populations = [1, 32, 128, 256];
@@ -49,8 +50,46 @@ Console.WriteLine(
     $"delta_encode_p95={codecEvidence.DeltaEncode.P95NanosecondsPerRecipient:F3} ns " +
     $"delta_decode_p95={codecEvidence.DeltaDecode.P95NanosecondsPerRecipient:F3} ns");
 
+const int defaultUdpMaximumDatagramBytes = 1_472;
+TransportEvidence transportEvidence;
+Require(ProtocolLoopback.TryCreate(
+    NetworkProtocolLimits.Default,
+    new DeterministicDatagramLimits(2_048, defaultUdpMaximumDatagramBytes),
+    default,
+    out ProtocolLoopback? transportLoopback,
+    out _,
+    UltraSimGameProtocol.Manifest));
+ProtocolLoopback establishedTransport = transportLoopback ??
+    throw new InvalidOperationException("N1.2 transport evidence loopback was not created.");
+using (establishedTransport)
+{
+    var transport = new RemoteChunkWorldStateServer(
+        establishedTransport.Server,
+        cadence.Recipient,
+        cadence.Source,
+        applicationSessionEpoch: 77,
+        limits: new RemoteChunkWorldStateTransportLimits(128));
+    RemoteChunkWorldStateServerSnapshot snapshot = transport.GetSnapshot();
+    transportEvidence = new TransportEvidence(
+        defaultUdpMaximumDatagramBytes,
+        snapshot.MaximumUnfragmentedMessageBytes,
+        snapshot.MaximumDeltaRecordsPerDatagram,
+        UltraSimGameProtocol.GetChunkDeltaEncodedBytes(snapshot.MaximumDeltaRecordsPerDatagram),
+        UltraSimGameProtocol.GetChunkDeltaEncodedBytes(snapshot.MaximumDeltaRecordsPerDatagram + 1),
+        snapshot.OutstandingDeliveryCapacity,
+        snapshot.ReservedBytes,
+        "WorldState is independent-unreliable/nonfragmenting. Oversize deltas fail closed and " +
+        "defer complete recovery to N1.3; tests, not this census, prove impairment convergence.");
+    Console.WriteLine(
+        $"udp_datagram={transportEvidence.DatagramBytes} " +
+        $"unfragmented_message={transportEvidence.MaximumUnfragmentedMessageBytes} " +
+        $"delta_rows={transportEvidence.MaximumDeltaRecordsPerDatagram} " +
+        $"safe_delta_bytes={transportEvidence.MaximumAdmittedDeltaBytes} " +
+        $"first_oversize_bytes={transportEvidence.FirstRejectedDeltaBytes}");
+}
+
 var report = new Report(
-    "network-n1.1-canonical-chunk-codecs-v1",
+    "network-n1.2-independent-chunk-delivery-v1",
     DateTimeOffset.UtcNow,
     Environment.Version.ToString(),
     RuntimeInformation.FrameworkDescription,
@@ -63,8 +102,8 @@ var report = new Report(
     samples,
     rounds,
     new ProfileEvidence(
-        "N1.0 packet-free recipient control plus N1.1 canonical snapshot/delta/absence/proof " +
-        "codec evidence; not transport, N0 replacement, public WAN CCU, or production adoption evidence",
+        "N1.0 recipient control, N1.1 codecs, and N1.2 real-transport MTU/ledger capacity " +
+        "evidence; not N1.3 snapshot recovery, N0 replacement, public WAN CCU, or production adoption evidence",
         UltraSimGameProtocol.Manifest.Version,
         UltraSimGameProtocol.Manifest.Fingerprint,
         UltraSimGameProtocol.ChunkPublicationSchemaFingerprint,
@@ -81,7 +120,8 @@ var report = new Report(
     scales,
     cadenceTiming,
     cadenceSnapshot,
-    codecEvidence);
+    codecEvidence,
+    transportEvidence);
 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
 File.WriteAllText(output, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }) +
     Environment.NewLine);
@@ -236,6 +276,7 @@ sealed class CadenceFixture : IDisposable
     }
 
     internal OfflineDirectChunkRecipient Recipient { get; }
+    internal ChunkPublicationStore Source => _source;
 
     internal TimingEvidence Measure(int warmups, int samples, int rounds) =>
         MeasureTiming(warmups, samples, rounds, 1, Run);
@@ -525,6 +566,16 @@ readonly record struct CodecEvidence(
     TimingEvidence AbsenceDecode,
     TimingEvidence ProofDecode);
 
+readonly record struct TransportEvidence(
+    int DatagramBytes,
+    int MaximumUnfragmentedMessageBytes,
+    int MaximumDeltaRecordsPerDatagram,
+    int MaximumAdmittedDeltaBytes,
+    int FirstRejectedDeltaBytes,
+    int OutstandingDeliveryCapacity,
+    long ServerAdapterReservedBytes,
+    string Notes);
+
 readonly record struct Report(
     string Workload,
     DateTimeOffset CapturedUtc,
@@ -542,4 +593,5 @@ readonly record struct Report(
     ScaleEvidence[] Scales,
     TimingEvidence CadencePass,
     OfflineDirectChunkRecipientSnapshot CadenceCounters,
-    CodecEvidence Codec);
+    CodecEvidence Codec,
+    TransportEvidence Transport);

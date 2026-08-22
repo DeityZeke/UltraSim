@@ -1,4 +1,5 @@
 using System.Reflection;
+using UltraSim.Client.Network;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
@@ -62,6 +63,9 @@ var tests = new (string Name, Action Body)[]
     ("N11ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe", N1OfflineDirectChunkTests.ChunkWireCodecsAreCanonicalTransactionalAndHostileSafe),
     ("N11RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence", N1OfflineDirectChunkTests.RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence),
     ("N11RejectedProofAndEpochReplacementNeverAdvanceKnowledge", N1OfflineDirectChunkTests.RejectedProofAndEpochReplacementNeverAdvanceKnowledge),
+    ("N12WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof", N1OfflineDirectChunkTests.WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof),
+    ("N12ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge", N1OfflineDirectChunkTests.ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge),
+    ("N12OversizeWorldStateDeltaFailsClosedAtDatagramBoundary", N1OfflineDirectChunkTests.OversizeWorldStateDeltaFailsClosedAtDatagramBoundary),
 };
 
 foreach ((string name, Action body) in tests)
@@ -69,7 +73,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Network N0/N1.0/N1.1 game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0/N1.0-N1.2 game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

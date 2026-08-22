@@ -134,7 +134,8 @@ Network N0 is accepted as the current remote-authority reference, including
 bounded long-lived WorldState recovery and the measured dense/sparse evidence.
 Its final sparse experiments showed that steady-state replication scales much
 better than continuously mutating precise recipient/entity interest topology.
-The active major milestone is therefore [Terrain / World T0](Plans/TERRAIN.md).
+Terrain / World T0 is accepted/frozen. The active major milestone is now
+[Network N1](Plans/NETWORK.md), measured against the retained N0 reference.
 T0.0 accepted the dependency-neutral Spatial seam plus the 16-byte game-world
 position/profile. T0.1 accepted persisted ECS position authority paired with a
 bounded, generation-owned maintained index through a generic Runtime post-ECS-step
@@ -195,6 +196,8 @@ validation to scale with retained replacements rather than the entire base pack;
 complete logical Multi-root replacement remains intentionally global.
 Runtime slots, publication cursors/history, client residency, and Godot resources
 remain derived and absent from the artifact.
-[Network N1](Plans/NETWORK.md) is deferred
-until T0 proves those chunk/publication contracts, then will test recipient-to-
-chunk subscription/cursor replication against the frozen N0 relation graph.
+T0.10 closes the launchable local woods/cabin vertical. Network N1.0-N1.2 now
+layer bounded recipient chunk subscriptions, canonical chunk messages/proofs,
+and MTU-admissible independent-unreliable delta/absence delivery onto those
+accepted publication/client-cache contracts. N0 remains the production/reference
+path until N1 also proves atomic snapshot recovery and the measured adoption gate.

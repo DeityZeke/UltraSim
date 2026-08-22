@@ -173,6 +173,13 @@ Useful current anchors can be located by their embedded workload or filename:
   exact manifest/schema fingerprints, message sizes, and warmed zero-allocation
   encode/decode timings. It retains N1.0 controls but is not transport,
   loss/reorder, N0 replacement, public WAN, or production-CCU evidence;
+- `network-n1.2-independent-chunk-delivery-*` — real authenticated
+  independent-unreliable ordinary chunk delivery envelope, including the exact
+  default 1,405-byte unfragmented message ceiling, 30-row/1,372-byte admitted
+  delta, first rejected size, and bounded ticket-ledger reservation. Permanent
+  tests own loss/duplicate/reorder/corruption and application-proof convergence;
+  the artifact is not N1.3 snapshot recovery, N0 replacement, public WAN, or a
+  production-scale claim;
 - `network-v2-v3-bot-n010-entry-*` — first 32/64/128/256 owner-movement matrix
   in both isolated process orders. Canonical identity/input-sequence/velocity
   matches at every stage. Ratios remain provisional because V2 owns one shared

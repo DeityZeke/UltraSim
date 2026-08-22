@@ -102,7 +102,7 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.N1Benchmarks -c Release -- \
     --rounds=64 \
-    --output=_Benchmarks/results/network-n1.1-canonical-chunk-codecs-local.json
+    --output=_Benchmarks/results/network-n1.2-independent-chunk-delivery-local.json
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \

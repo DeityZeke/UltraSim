@@ -1,10 +1,12 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using UltraSim.Client.Core;
+using UltraSim.Client.Network;
 using UltraSim.ECS;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
+using UltraSim.Network;
 using UltraSim.Spatial;
 
 namespace UltraSim.Game.Replication.Tests;
@@ -434,6 +436,293 @@ internal static class N1OfflineDirectChunkTests
         False(recipient.Subscriptions[occupied].HasKnowledge);
     }
 
+    internal static void WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof()
+    {
+        using var fixture = new Fixture(historyCapacity: 64);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        ReconcileAndStageInitial(fixture, recipient, cache, anchor);
+        int occupied = FindSubscription(recipient, Key(0, 0));
+        int absent = FindAbsentSubscription(recipient, Key(0, 0));
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 77,
+            new RemoteChunkWorldStateTransportLimits(16));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 77, maximumDeltaRecords: 8, maximumPendingProofs: 16);
+
+        ulong baselineRevision = recipient.Subscriptions[occupied].Cursor.Revision.Value;
+        fixture.Present(0, Position(0, 0, 2_500, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 1));
+        Equal(baselineRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+        True(recipient.Subscriptions[occupied].Cursor.Revision.Value > baselineRevision);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        True(cache.TryGetResidentHandle(Key(0, 0), out ClientSemanticChunkHandle occupiedHandle));
+        True(cache.TryGetInfo(occupiedHandle, out ClientSemanticChunkInfo occupiedInfo));
+        Equal(recipient.Subscriptions[occupied].Cursor, occupiedInfo.PublicationCursor);
+
+        False(recipient.Subscriptions[absent].HasKnowledge);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedAbsence,
+            server.TrySchedule(absent, 2));
+        False(recipient.Subscriptions[absent].HasKnowledge);
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 2);
+        True(recipient.Subscriptions[absent].HasKnowledge);
+        False(recipient.Subscriptions[absent].Cursor.IsValid);
+        Equal(RemoteChunkWorldStateScheduleStatus.NoPayload,
+            server.TrySchedule(absent, 3));
+
+        RemoteChunkWorldStateServerSnapshot transport = server.GetSnapshot();
+        True(transport.MaximumDeltaRecordsPerDatagram > 0);
+        True(transport.MaximumDeltaRecordsPerDatagram <
+            UltraSimGameProtocol.MaximumChunkPublicationRecords);
+        True(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(
+            transport.MaximumDeltaRecordsPerDatagram) <= transport.MaximumUnfragmentedMessageBytes);
+        True(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(
+            transport.MaximumDeltaRecordsPerDatagram + 1) > transport.MaximumUnfragmentedMessageBytes);
+
+        // The protocol's uint16 local field is broader than this game's 16 m chunk profile.
+        // The client bridge must reject it before constructing/mutating WorldPosition state.
+        True(cache.TryGetResidentView(occupiedHandle, out ClientSemanticChunkView beforeInvalid));
+        WorldPublicRecord retained = beforeInvalid.PublicRecords[0];
+        ulong currentRevision = occupiedInfo.PublicationCursor.Revision.Value;
+        RemoteChunkDeltaRecord[] invalidLocal =
+        [
+            new(RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Transform,
+                retained.Id.Index, retained.Id.Generation, retained.EntityPublicVersion + 1,
+                retained.PrefabId, 16_000, retained.Position.Local.ZMillimeters,
+                retained.Position.YMillimeters, retained.Orientation.Units,
+                (ushort)retained.StateFlags, currentRevision + 1),
+        ];
+        byte[] hostile = new byte[256];
+        True(UltraSimGameProtocol.TryWriteChunkDelta(
+            hostile, 77, fixture.Store.Epoch.Value, 999,
+            GameWorldState.DefaultSpace.Value, 0, 0,
+            currentRevision, currentRevision + 1, currentRevision,
+            invalidLocal, out int hostileBytes));
+        RemoteChunkWorldStateClientSnapshot beforeHostile = client.GetSnapshot();
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.WorldState, RemoteChunkDeltaHeaderCodec.Descriptor.Id,
+            RemoteChunkDeltaHeaderCodec.Descriptor.Version, default, hostileBytes),
+            hostile.AsSpan(0, hostileBytes)));
+        Equal(beforeHostile.RejectedDeliveries + 1, client.GetSnapshot().RejectedDeliveries);
+        True(cache.TryGetInfo(occupiedHandle, out ClientSemanticChunkInfo afterHostile));
+        Equal(occupiedInfo.PublicationCursor, afterHostile.PublicationCursor);
+        Equal(occupiedInfo.SemanticHash, afterHostile.SemanticHash);
+
+        server.SetNextDeliveryIdForTesting(ulong.MaxValue);
+        fixture.Present(0, Position(0, 0, 2_750, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 10));
+        Equal(0UL, server.GetSnapshot().NextDeliveryId);
+        Equal(RemoteChunkWorldStateScheduleStatus.DeliverySequenceExhausted,
+            server.TrySchedule(occupied, 11));
+    }
+
+    internal static void ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge()
+    {
+        using var fixture = new Fixture(historyCapacity: 128);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(
+            new NetworkImpairmentOptions(0xC81A_1200, 220, 240, 80, 5));
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        ReconcileAndStageInitial(fixture, recipient, cache, anchor);
+        int occupied = FindSubscription(recipient, Key(0, 0));
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 91,
+            new RemoteChunkWorldStateTransportLimits(64));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 91, maximumDeltaRecords: 8, maximumPendingProofs: 64);
+
+        fixture.Present(0, Position(0, 0, 3_000, 2_000), GameWorldPublicPrefabIds.Character);
+        ulong targetRevision = CurrentRevision(fixture.Store, Key(0, 0));
+        for (int step = 0; step < 4_096 &&
+            recipient.Subscriptions[occupied].Cursor.Revision.Value < targetRevision; step++)
+        {
+            RemoteChunkWorldStateScheduleStatus scheduled = server.TrySchedule(occupied, (ulong)step + 1);
+            True(scheduled is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
+                RemoteChunkWorldStateScheduleStatus.NoPayload or
+                RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
+                RemoteChunkWorldStateScheduleStatus.TransportNotAccepting);
+            Pump(loopback, server, client);
+        }
+        Equal(targetRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        True(cache.TryGetResidentHandle(Key(0, 0), out ClientSemanticChunkHandle handle));
+        True(cache.TryGetResidentView(handle, out ClientSemanticChunkView view));
+        Equal((ushort)3_000, view.PublicRecords[0].Position.Local.XMillimeters);
+        True(server.GetSnapshot().DeltasQueued > 1);
+
+        fixture.Present(0, Position(0, 0, 3_500, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 5_000));
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        WorldPosition far = Position(4, 0, 8_000, 8_000);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            server.Reconcile(GameWorldState.DefaultSpace, far, changes,
+                out OfflineDirectChunkReconcileResult left));
+        True(left.ChangeCount > 0);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        ulong appliedBeforeDelayedTraffic = server.GetSnapshot().AppliedProofs;
+        for (int step = 0; step < 64; step++) Pump(loopback, server, client);
+        Equal(appliedBeforeDelayedTraffic, server.GetSnapshot().AppliedProofs);
+
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            server.Reconcile(GameWorldState.DefaultSpace, anchor, changes, out _));
+        int reentered = FindSubscription(recipient, Key(0, 0));
+        False(recipient.Subscriptions[reentered].HasKnowledge);
+        Equal(RemoteChunkWorldStateScheduleStatus.SnapshotRequired,
+            server.TrySchedule(reentered, 6_000));
+        False(recipient.Subscriptions[reentered].HasKnowledge);
+
+        PublicationEpoch priorEpoch = fixture.Store.Epoch;
+        fixture.ReplaceStore(historyCapacity: 128);
+        server.ReplaceSource(fixture.Store);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            server.Reconcile(GameWorldState.DefaultSpace, anchor, changes,
+                out OfflineDirectChunkReconcileResult reset));
+        True(reset.SourceReset);
+        True(reset.SourceEpoch != priorEpoch);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+    }
+
+    internal static void OversizeWorldStateDeltaFailsClosedAtDatagramBoundary()
+    {
+        using var fixture = new Fixture(historyCapacity: 512, entityCount: 64);
+        for (int index = 0; index < 64; index++)
+            fixture.Present(index, Position(0, 0, 1_000 + index, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 64);
+        var cache = Cache(fixture, maximumPublicRecords: 64);
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        ReconcileAndStageInitial(fixture, recipient, cache, anchor);
+        int occupied = FindSubscription(recipient, Key(0, 0));
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 101,
+            new RemoteChunkWorldStateTransportLimits(8));
+        RemoteChunkWorldStateServerSnapshot before = server.GetSnapshot();
+        int changed = before.MaximumDeltaRecordsPerDatagram + 1;
+        True(changed <= 64);
+        ulong baselineRevision = recipient.Subscriptions[occupied].Cursor.Revision.Value;
+        for (int index = 0; index < changed; index++)
+            fixture.Present(index, Position(0, 0, 4_000 + index, 2_000),
+                GameWorldPublicPrefabIds.Character);
+
+        Equal(RemoteChunkWorldStateScheduleStatus.PayloadTooLarge,
+            server.TrySchedule(occupied, 1));
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal(baselineRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(1UL, server.GetSnapshot().OversizeDeltas);
+        Equal(0, loopback.Server.IndependentUnreliableQueued);
+    }
+
+    private static OfflineDirectChunkRecipient Recipient(int maximumRecords) => new(
+        new OfflineDirectChunkRecipientLimits(64, maximumRecords, maximumRecords),
+        Interest,
+        new OfflineDirectChunkCadence(1, 1, 1));
+
+    private static ClientWorldSemanticCache Cache(Fixture fixture, int maximumPublicRecords) => new(
+        fixture.Bound,
+        new ClientWorldSemanticCacheLimits(64, 32, 16, maximumPublicRecords, 128));
+
+    private static ProtocolLoopback CreateLoopback(NetworkImpairmentOptions impairment)
+    {
+        const int defaultUdpMaximumDatagramBytes = 1_472;
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, defaultUdpMaximumDatagramBytes),
+            impairment,
+            out ProtocolLoopback? loopback,
+            out _,
+            UltraSimGameProtocol.Manifest));
+        return loopback!;
+    }
+
+    private static void ReconcileAndStageInitial(
+        Fixture fixture,
+        OfflineDirectChunkRecipient recipient,
+        ClientWorldSemanticCache cache,
+        in WorldPosition anchor)
+    {
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes, out _));
+        var sourceRows = new WorldPublicRecord[64];
+        for (int index = 0; index < recipient.Subscriptions.Length; index++)
+        {
+            SpatialChunkKey key = recipient.Subscriptions[index].Interest.Key;
+            ChunkPublicationReadStatus sourceStatus = fixture.Store.TryCopySnapshot(
+                key, sourceRows, out _);
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            if (sourceStatus == ChunkPublicationReadStatus.Snapshot)
+            {
+                Equal(OfflineDirectChunkReadStatus.Snapshot,
+                    recipient.TryBeginRead(fixture.Store, index, 0, out OfflineDirectChunkRead read));
+                True(cache.TryStageFromBaseWorld(handle, read.Snapshot, read.Batch.Cursor, out _));
+                True(cache.TryPublish(handle, out _));
+                recipient.CommitRead();
+            }
+            else
+            {
+                Equal(ChunkPublicationReadStatus.ChunkAbsent, sourceStatus);
+                True(cache.TryStageFromBaseWorld(handle, [], default, out _));
+                True(cache.TryPublish(handle, out _));
+            }
+        }
+    }
+
+    private static ulong CurrentRevision(ChunkPublicationStore store, SpatialChunkKey key)
+    {
+        Span<WorldPublicRecord> rows = stackalloc WorldPublicRecord[64];
+        Equal(ChunkPublicationReadStatus.Snapshot,
+            store.TryCopySnapshot(key, rows, out ChunkPublicationBatch batch));
+        return batch.Cursor.Revision.Value;
+    }
+
+    private static void Drive(
+        ProtocolLoopback loopback,
+        RemoteChunkWorldStateServer server,
+        RemoteChunkWorldStateClient client,
+        Func<bool> complete)
+    {
+        for (int step = 0; step < 4_096; step++)
+        {
+            if (complete()) return;
+            Pump(loopback, server, client);
+        }
+        throw new InvalidOperationException("The N1.2 application proof did not converge.");
+    }
+
+    private static void Pump(
+        ProtocolLoopback loopback,
+        RemoteChunkWorldStateServer server,
+        RemoteChunkWorldStateClient client)
+    {
+        loopback.Pump();
+        while (loopback.Client.TryPeekReceived(
+                   out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+        {
+            _ = client.TryProcess(message, payload);
+            True(loopback.Client.TryConsumeReceived());
+        }
+        _ = client.TryProgress();
+        while (loopback.Server.TryPeekReceived(
+                   out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+        {
+            _ = server.TryProcess(message, payload);
+            True(loopback.Server.TryConsumeReceived());
+        }
+    }
+
     private static void Drain(
         OfflineDirectChunkRecipient recipient,
         ChunkPublicationStore store,
@@ -708,10 +997,12 @@ internal static class N1OfflineDirectChunkTests
     private sealed class Fixture : IDisposable
     {
         private readonly EcsWorld _world;
-        private readonly Entity[] _entities = new Entity[4];
+        private readonly Entity[] _entities;
+        private readonly int _entityCapacity;
 
-        internal Fixture(int historyCapacity)
+        internal Fixture(int historyCapacity, int entityCount = 4)
         {
+            if (entityCount <= 0) throw new ArgumentOutOfRangeException(nameof(entityCount));
             WorldPack pack = GamePlayableWorld.CreateWorldPack();
             var binding = new WorldContentBinding(
                 GameContent.WorldFingerprint,
@@ -729,12 +1020,15 @@ internal static class N1OfflineDirectChunkTests
                     GameWorldStaticDefinitionIds.CabinRoof,
                     GameWorldStaticDefinitionIds.Shelf,
                     GameWorldStaticDefinitionIds.Book,
-                ]);
+            ]);
             True(pack.TryBind(binding, out BoundWorldPack? bound, out _));
             Bound = bound!;
+            _entityCapacity = Math.Max(16, entityCount);
+            _entities = new Entity[entityCount];
             _world = new EcsWorld(
                 GameSchema.CreateSchema(),
-                new EcsWorldOptions(new EntityCapacity(16), 2, 4, lifecycleRecordCapacity: 32));
+                new EcsWorldOptions(new EntityCapacity(_entityCapacity), 2, 4,
+                    lifecycleRecordCapacity: Math.Max(32, entityCount)));
             ArchetypeHandle empty = _world.RegisterArchetype(
                 ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
             _world.Seal();
@@ -756,9 +1050,10 @@ internal static class N1OfflineDirectChunkTests
 
         internal void ReplaceStore(int historyCapacity) => Store = CreateStore(historyCapacity);
 
-        private static ChunkPublicationStore CreateStore(int historyCapacity) => new(
+        private ChunkPublicationStore CreateStore(int historyCapacity) => new(
             PublicationEpoch.Create(),
-            new ChunkPublicationLimits(16, 32, 2, historyCapacity));
+            new ChunkPublicationLimits(
+                _entityCapacity, checked(_entityCapacity * 2), 2, historyCapacity));
 
         public void Dispose() => _world.Dispose();
     }

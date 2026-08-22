@@ -3,12 +3,13 @@
 Status: active forward plan. Network N0 remains accepted/frozen as the current
 remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
 as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
-N1.1 canonical chunk messages/proof semantics are implemented and stopped for
-checkpoint review; N1.2 transport integration has not started.
+N1.1 canonical chunk messages/proof semantics are accepted. N1.2
+independent-unreliable ordinary delta/absence delivery is implemented and stopped
+for checkpoint review; N1.3 atomic snapshot recovery has not started.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
-the implemented N1.0/N1.1 stops, and only forward decisions with a concrete owner.
+the implemented N1.0-N1.2 stops, and only forward decisions with a concrete owner.
 
 N0 proved the difficult semantic foundations:
 
@@ -574,7 +575,7 @@ or production-CCU evidence.
 Evidence:
 [`network-n1.1-canonical-chunk-codecs-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.1-canonical-chunk-codecs-2026-08-21.json).
 
-Stop for checkpoint review before N1.2.
+N1.1 was accepted at `73ae0b14`. N1.2 owns the real delivery lifecycle below.
 
 ## N1.2 — independent-unreliable dynamic chunk deltas
 
@@ -599,6 +600,51 @@ intermediate reconstruction if a later query can coalesce to current state.
 **Gate:** deterministic loss/dup/reorder/corruption produces the same eventual
 chunk state as OfflineDirect; no reliable-state head-of-line behavior is
 introduced.
+
+### N1.2 implementation stop — 2026-08-21
+
+`RemoteChunkWorldStateServer` now owns one connection/session's bounded ordinary
+chunk-delivery ledger. `RemoteChunkWorldStateClient` decodes into private fixed
+scratch, applies to the existing production `ClientWorldSemanticCache`
+transactionally, and only then queues `ChunkApplied`. Transport submission and
+transport acknowledgement never advance the recipient cursor.
+
+The server owns monotonic delivery IDs and retains the exact trusted N1.1 ticket
+until a matching authenticated proof arrives or its lineage becomes obsolete.
+Leaves invalidate every outstanding ticket for that chunk before re-entry can
+establish a new subscription lifetime. Publication-store replacement invalidates
+the whole ledger and requires recipient reconciliation against the new epoch.
+Rejected/capacity/contradictory application proofs retire only their exact
+delivery; delayed/duplicate/stale applied proofs cannot regress newer knowledge.
+A lost proof causes a redundant later delivery from the still-applied server
+cursor, which the client recognizes as already covered and proves again.
+
+`WorldState` is independent-unreliable and nonfragmenting. The accepted UDP
+datagram profile provides 1,405 application-message bytes after secure/protocol
+framing. The 82-byte delta header plus 43-byte rows therefore admits exactly 30
+ordinary rows (1,372 bytes); 31 rows require 1,415 bytes and are rejected as
+`PayloadTooLarge` before queueing. A semantic 64-row delta remains valid N1.1
+data, but it is not silently split into partial messages carrying one final
+revision. Complete oversize/history/first-interest recovery belongs to N1.3.
+
+Permanent tests carry actual delta and absence messages through authenticated
+`ProtocolLoopback`, apply them to the real client semantic cache, and return
+application proofs. Deterministic loss, duplication, delay/reorder, corruption,
+lost-proof redundancy, subscription leave/re-entry, publication-epoch replacement,
+and MTU overflow all converge or fail closed without false recipient knowledge.
+Known absence still produces no repeated empty payload.
+
+The evidence artifact records the exact 1,472/1,405-byte datagram/message envelope,
+30-row cap, first rejected size, and a 9,642-byte server-adapter reservation for a
+128-ticket evidence ledger. Retained N1.0/N1.1 timing controls are repeated only
+as same-run context; they are not a controlled performance regression claim.
+This checkpoint does not implement snapshot transfer, UDP redesign, shared
+encoded-byte caching, N0 deletion, public-WAN admission, or production scale.
+
+Evidence:
+[`network-n1.2-independent-chunk-delivery-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.2-independent-chunk-delivery-2026-08-21.json).
+
+Stop for checkpoint review before N1.3.
 
 ## N1.3 — atomic chunk snapshot recovery
 
@@ -912,8 +958,10 @@ T0 has accepted the chunk coordinate, packed publication, bounded dirty history,
 local interest query, production client semantic cache, presentation window, and
 launchable woods/cabin vertical. N1.0 connects those contracts to a bounded
 packet-free recipient chunk-cursor layer. N1.1 adds canonical bounded chunk wire
-semantics and application-proof fencing without adding transport.
+semantics and application-proof fencing. N1.2 carries MTU-admissible ordinary
+deltas and absences over real independent-unreliable transport with a bounded
+server ticket ledger and atomic production-client application.
 
-Do not begin N1.2 until the N1.1 checkpoint is reviewed. The next work is
-independent-unreliable delivery/loss/reorder convergence—not UDP redesign, N0
-deletion, shared encoded-byte caching, or a production scale claim.
+Do not begin N1.3 until the N1.2 checkpoint is reviewed. The next work is atomic
+first-interest/history-recovery snapshot transfer—not UDP redesign, N0 deletion,
+shared encoded-byte caching, or a production scale claim.

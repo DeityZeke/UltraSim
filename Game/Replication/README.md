@@ -14,7 +14,10 @@ WorldState parity, reliable baseline cancellation, and client-slot ABA fencing.
 Terrain T0 is also accepted/frozen. N1.0 adds a separate packet-free
 `OfflineDirectChunkRecipient` over T0's `ChunkInterestQuery` and
 `ChunkPublicationStore`. N1.1 adds canonical snapshot/delta/absence encoding and
-application-proof fencing around that same oracle. Neither replaces N0 yet.
+application-proof fencing around that same oracle. N1.2 carries MTU-admissible
+ordinary deltas/absences through real independent-unreliable transport with a
+bounded delivery ledger and production client-cache application. None replaces
+N0 yet.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -92,8 +95,24 @@ Snapshot/delta codecs are bounded at 64 rows, fixed-endian, hash-checked,
 canonically ordered, overlap-safe, and transactional on hostile input. The first
 applied `ChunkAbsent` establishes empty knowledge. Later cadence probes that are
 still absent are committed locally as no-change observations and produce no
-repeated empty wire payload. Loss/reorder transport and actual client bridge
-integration remain N1.2 work.
+repeated empty wire payload.
+
+## N1.2 ordinary independent-unreliable delivery
+
+`RemoteChunkWorldStateServer` is the connection-owned transport adapter around
+one `OfflineDirectChunkRecipient`. It retains a fixed ledger of trusted delivery
+tickets; queueing bytes does not advance a cursor. Exact applied proof commits
+knowledge, while chunk leave and publication-source replacement invalidate old
+delivery lineage. `RemoteChunkWorldStateClient` decodes into bounded scratch,
+atomically applies to `ClientWorldSemanticCache`, and only then emits the proof.
+Loss of either data or proof therefore causes redundant current-state work, never
+false application knowledge.
+
+The nonfragmenting WorldState lane admits 1,405 message bytes under the default
+1,472-byte UDP profile. The fixed N1.1 delta layout therefore carries at most 30
+rows in one ordinary datagram. Larger valid semantic deltas return a named
+`PayloadTooLarge` status and retain the old applied cursor; they are never split
+into independently applicable subsets. N1.3 owns complete Bulk snapshot recovery.
 
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions
