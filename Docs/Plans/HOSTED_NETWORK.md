@@ -103,6 +103,9 @@ Accepted behavior:
 - a valid `ClientFinish` registers the exact IPv4/port path, advances the reserved
   connection, creates the server peer, and publishes one session as one
   transaction;
+- terminal success is committed locally before `ServerFinish` is submitted; a
+  rejected or lost first terminal flight leaves the one established session in
+  place, and a repeated `ClientFinish` resends its cached acknowledgement;
 - the client pins the deployment public key out of band and verifies the canonical
   manifest-bound transcript before proving possession of the derived secret;
 - duplicate `ClientFinish` on the established path resends the cached
@@ -119,7 +122,8 @@ The permanent H0.2 acceptance uses independent client/server sockets and proves
 the pre-finish zero-route boundary, bidirectional secure application traffic,
 candidate reuse/conflict fencing, malformed-key and invalid-finish rollback,
 timeout and connection-capacity reclamation, duplicate-finish recovery, scalar/
-native receive parity, caller-owned signer lifetime, literal cookie-manifest
+native receive parity, terminal-send failure recovery without a second session,
+caller-owned signer lifetime, literal cookie-manifest
 binding, and zero warmed managed allocation for secure delivery.
 
 Path ownership is deliberately strict in H0.2. Only the exact path established by

@@ -62,6 +62,7 @@ internal static class H02HostedUdpPromotionTests
         Run("HostedPromotionFailureAndTimeoutReleaseAllConnectionState", HostedPromotionFailureAndTimeoutReleaseAllConnectionState);
         Run("HostedPromotionCapacityIsTransactionalAndReusable", HostedPromotionCapacityIsTransactionalAndReusable);
         Run("HostedDuplicateClientFinishRecoversWithoutSecondSession", HostedDuplicateClientFinishRecoversWithoutSecondSession);
+        Run("HostedTerminalSendFailureKeepsOneRecoverableSession", HostedTerminalSendFailureKeepsOneRecoverableSession);
         Run("HostedPromotionNativeReceiveMatchesScalarLifecycle", HostedPromotionNativeReceiveMatchesScalarLifecycle);
         Run("HostedPromotionResamplesMonotonicTimeAfterInboundPublication", HostedPromotionResamplesMonotonicTimeAfterInboundPublication);
         Run("WarmedHostedSecureDeliveryAllocatesZero", WarmedHostedSecureDeliveryAllocatesZero);
@@ -309,6 +310,47 @@ internal static class H02HostedUdpPromotionTests
         host.Pump();
         Equal(1, host.GetSnapshot().EstablishedSessions);
         Equal(1, host.GetSnapshot().Listener.RegisteredPaths);
+    }
+
+    private static void HostedTerminalSendFailureKeepsOneRecoverableSession()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using var host = CreateHost(identity);
+        using HostedUdpProtocolClient client = CreateClient(host, identity);
+        PumpUntilPromoting(host, client);
+
+        // Receive the cached server key exchange so the next client pump emits
+        // ClientFinish, then reject only the first terminal server flight.
+        client.Pump();
+        host.Pump();
+        host.SuppressNextServerFinishForTesting();
+        client.Pump();
+        host.Pump();
+
+        HostedUdpAdmissionSnapshot committed = host.GetSnapshot();
+        Equal(HostedUdpClientState.Connecting, client.State);
+        Equal(1, committed.EstablishedSessions);
+        Equal(1, committed.Listener.RegisteredPaths);
+        Equal(1, committed.Connections.Active);
+        Equal(0, committed.ValidatedCandidates);
+        Equal(1UL, committed.EstablishedPromotions);
+        Equal(0UL, committed.ServerFinishFlights);
+        True(committed.SendCapacityDrops >= 1);
+        True(host.TryGetSession(client.Connection, out HostedUdpProtocolSession? original));
+        ConnectionId connection = original!.Connection;
+
+        PumpUntilEstablished(host, client);
+        HostedUdpAdmissionSnapshot recovered = host.GetSnapshot();
+        Equal(connection, client.Connection);
+        Equal(1, recovered.EstablishedSessions);
+        Equal(1, recovered.Listener.RegisteredPaths);
+        Equal(1, recovered.Connections.Active);
+        Equal(1UL, recovered.EstablishedPromotions);
+        True(recovered.DuplicateClientFinishes >= 1);
+        True(recovered.ServerFinishFlights >= 1);
+        True(host.TryGetSession(connection, out HostedUdpProtocolSession? current));
+        True(ReferenceEquals(original, current),
+            "Terminal retry published a second hosted session.");
     }
 
     private static void HostedPromotionNativeReceiveMatchesScalarLifecycle()

@@ -797,6 +797,7 @@ internal sealed class SharedUdpServerListener : IDisposable
     private int _maximumSentDatagramBytes;
     private int _maximumReceivedDatagramBytes;
     private SocketError _lastError;
+    private bool _suppressNextImmediateSendForTesting;
     private bool _disposed;
 
     internal SharedUdpServerListener(UdpProtocolLimits udp, SharedUdpProtocolLimits shared)
@@ -1081,8 +1082,21 @@ internal sealed class SharedUdpServerListener : IDisposable
     internal DatagramSendStatus TrySend(int slot, ReadOnlySpan<byte> datagram) =>
         TrySend(slot, datagram, allowBatch: true);
 
-    internal DatagramSendStatus TrySendImmediate(int slot, ReadOnlySpan<byte> datagram) =>
-        TrySend(slot, datagram, allowBatch: false);
+    internal DatagramSendStatus TrySendImmediate(int slot, ReadOnlySpan<byte> datagram)
+    {
+        if (_suppressNextImmediateSendForTesting)
+        {
+            _suppressNextImmediateSendForTesting = false;
+            return DatagramSendStatus.CapacityExceeded;
+        }
+        return TrySend(slot, datagram, allowBatch: false);
+    }
+
+    internal void SuppressNextImmediateSendForTesting()
+    {
+        EnsureOperational();
+        _suppressNextImmediateSendForTesting = true;
+    }
 
     internal DatagramSendStatus TrySendUnknown(
         ReadOnlySpan<byte> datagram,

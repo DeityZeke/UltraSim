@@ -418,6 +418,12 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         return true;
     }
 
+    internal void SuppressNextServerFinishForTesting()
+    {
+        EnsureOperational();
+        _listener.SuppressNextImmediateSendForTesting();
+    }
+
     /// <summary>Runs one bounded admission, promotion, protocol, and lifetime pass.</summary>
     public void Pump()
     {
@@ -1057,14 +1063,9 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             byte[] serverFinish = new byte[1 + 4 + 4 + 4 + ProtocolLoopbackHandshake.ProofBytes];
             int finishLength = ProtocolLoopbackHandshake.WriteServerFinish(
                 serverFinish, connection, epoch, master, transcript);
-            if (finishLength != serverFinish.Length ||
-                endpoint.TrySendHandshake(serverFinish) != DatagramSendStatus.Accepted)
-            {
-                CryptographicOperations.ZeroMemory(clientFinish);
-                CryptographicOperations.ZeroMemory(serverFinish);
-                _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
-                return true;
-            }
+            if (finishLength != serverFinish.Length)
+                throw new InvalidOperationException(
+                    "The hosted promotion produced a malformed terminal flight.");
             if (!_connections!.TryAdvance(
                     connection, NetworkConnectionState.ProtocolValidated) ||
                 !_connections.TryAdvance(connection, NetworkConnectionState.Established))
@@ -1080,10 +1081,13 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             _sessions[connection.Slot] = session;
             _sessionCount++;
             _establishedPromotions = SaturatingIncrement(_establishedPromotions);
-            _serverFinishFlights = SaturatingIncrement(_serverFinishFlights);
             server = null;
             published = true;
             ReleaseCandidate(slot, releaseConnection: false);
+            if (endpoint.TrySendHandshake(serverFinish) == DatagramSendStatus.Accepted)
+                _serverFinishFlights = SaturatingIncrement(_serverFinishFlights);
+            else
+                _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
             return true;
         }
         catch (InvalidOperationException)
