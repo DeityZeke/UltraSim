@@ -97,6 +97,125 @@ internal static class DirtyEntitySpatialFanoutTests
         Check.True(service.TryAcknowledgeBundle(first, finalPresent.DeliveryBundleId, true));
     }
 
+    internal static void HysteresisHorizonAndDespawn()
+    {
+        DirtyEntitySpatialFanout service = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId participant = new(1);
+        ReplicationEntityId entity = new(0, 1);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(participant, Point(0, 0), 0));
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[2];
+
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 1, true, true, GameReplicationHorizon.Immediate,
+                Point(4_500, 0), new GameSimulationState { TickMarker = 1 }), 0));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out _));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 0, 4_096, records, out DirtyEntityBundle first));
+        Check.True(records[0].IsPresent);
+        Check.True(service.TryAcknowledgeBundle(participant, first.DeliveryBundleId, true));
+
+        // 5.5m is outside Immediate enter (5m) but inside Immediate leave (6m).
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 2, true, true, GameReplicationHorizon.Immediate,
+                Point(5_500, 0), new GameSimulationState { TickMarker = 2 }), 1));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(1, out _));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 1, 4_096, records, out DirtyEntityBundle retained));
+        Check.True(records[0].IsPresent && records[0].CanonicalVersion == 2);
+        Check.True(service.TryAcknowledgeBundle(participant, retained.DeliveryBundleId, true));
+
+        // Beyond leave, the same known identity must receive a removal.
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 3, true, true, GameReplicationHorizon.Immediate,
+                Point(6_500, 0), new GameSimulationState { TickMarker = 3 }), 2));
+        service.TryProcessDirtyEntities(2, out _);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 2, 4_096, records, out DirtyEntityBundle removed));
+        Check.True(!records[0].IsPresent && records[0].CanonicalVersion == 3);
+        Check.True(service.TryAcknowledgeBundle(participant, removed.DeliveryBundleId, true));
+
+        // A horizon expansion is a new admission at Near radius; shrinking it back
+        // to Immediate preserves the existing same-generation obligation at 5.5m.
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 4, true, true, GameReplicationHorizon.Near,
+                Point(5_500, 0), new GameSimulationState { TickMarker = 4 }), 3));
+        service.TryProcessDirtyEntities(3, out _);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 13, 4_096, records, out DirtyEntityBundle expanded));
+        Check.True(records[0].IsPresent);
+        Check.True(service.TryAcknowledgeBundle(participant, expanded.DeliveryBundleId, true));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 5, true, true, GameReplicationHorizon.Immediate,
+                Point(5_500, 0), new GameSimulationState { TickMarker = 5 }), 24));
+        service.TryProcessDirtyEntities(24, out _);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 34, 4_096, records, out DirtyEntityBundle shrunk));
+        Check.True(records[0].IsPresent);
+        Check.True(service.TryAcknowledgeBundle(participant, shrunk.DeliveryBundleId, true));
+
+        Check.Equal(DirtyEntityUpdateStatus.Success, service.RemoveEntity(entity, 6, 35));
+        service.TryProcessDirtyEntities(35, out _);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 35, 4_096, records, out DirtyEntityBundle despawn));
+        Check.True(!records[0].IsPresent && records[0].Entity == entity);
+        Check.True(service.TryAcknowledgeBundle(participant, despawn.DeliveryBundleId, true));
+    }
+
+    internal static void CapacityFailureRetainsFootprint()
+    {
+        DirtyEntitySpatialFanout service = Create(maximumEntities: 4, maximumRecipients: 2, maximumRows: 2);
+        ParticipantId oldRecipient = new(1);
+        ParticipantId fullRecipient = new(2);
+        ReplicationEntityId moving = new(0, 1);
+        ReplicationEntityId filler = new(1, 1);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(oldRecipient, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(fullRecipient, Point(50_000, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 1, 0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(1, 1, 50_000, 0), 0));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out _));
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[4];
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(oldRecipient, 0, 4_096, records, out DirtyEntityBundle oldPresent));
+        Check.True(service.TryAcknowledgeBundle(oldRecipient, oldPresent.DeliveryBundleId, true));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(fullRecipient, 0, 4_096, records, out DirtyEntityBundle fillerPresent));
+        Check.True(service.TryAcknowledgeBundle(fullRecipient, fillerPresent.DeliveryBundleId, true));
+
+        // B is relevant to the full recipient but its semantic row cannot fit.
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 2, 50_000, 0), 1));
+        Check.Equal(DirtyEntityProcessStatus.CapacityExceeded,
+            service.TryProcessDirtyEntities(1, out _));
+        Check.Equal(1, service.GetSnapshot().DirtyEntityCount);
+
+        // C supersedes B while the original A footprint must remain retained.
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 3, 100_000, 0), 2));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.RemoveEntity(filler, 2, 2));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(2, out int processed));
+        Check.Equal(2, processed);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(oldRecipient, 2, 4_096, records, out DirtyEntityBundle oldRemoval));
+        Check.True(!records[0].IsPresent && records[0].Entity == moving);
+        Check.True(service.TryAcknowledgeBundle(oldRecipient, oldRemoval.DeliveryBundleId, true));
+        Check.Equal(0, service.GetSnapshot().DirtyEntityCount);
+    }
+
     internal static void CoalescingCadenceDisclosureAndCapacity()
     {
         DirtyEntitySpatialFanout service = Create(maximumEntities: 8, maximumRecipients: 4);
@@ -138,6 +257,185 @@ internal static class DirtyEntitySpatialFanoutTests
         Check.Equal(DirtyEntityProcessStatus.CapacityExceeded,
             bounded.TryProcessDirtyEntities(0, out _));
         Check.True(bounded.GetSnapshot().SemanticKnowledgeRowCount <= 1);
+
+        DirtyEntitySpatialFanout deferred = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId deferredRecipient = new(7);
+        deferred.SetRecipientAnchor(deferredRecipient, Point(0, 0), 0);
+        deferred.CommitEntity(new DirtyEntityLatestState(
+            new ReplicationEntityId(0, 1), 1, true, true, GameReplicationHorizon.Near,
+            Point(10_000, 0), new GameSimulationState { TickMarker = 1 }), 0);
+        deferred.TryProcessDirtyEntities(0, out _);
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            deferred.TryBuildBundle(deferredRecipient, 0, 4_096, records, out _));
+        deferred.CommitEntity(new DirtyEntityLatestState(
+            new ReplicationEntityId(0, 1), 2, true, true, GameReplicationHorizon.Near,
+            Point(11_000, 0), new GameSimulationState { TickMarker = 2 }), 1);
+        deferred.TryProcessDirtyEntities(1, out _);
+        deferred.CommitEntity(new DirtyEntityLatestState(
+            new ReplicationEntityId(0, 1), 3, true, true, GameReplicationHorizon.Far,
+            Point(12_000, 0), new GameSimulationState { TickMarker = 3 }), 9);
+        deferred.TryProcessDirtyEntities(9, out _);
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            deferred.TryBuildBundle(deferredRecipient, 9, 4_096, records, out _));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            deferred.TryBuildBundle(deferredRecipient, 10, 4_096, records, out DirtyEntityBundle latest));
+        Check.True(records[0].CanonicalVersion == 3);
+        Check.True(deferred.TryAcknowledgeBundle(deferredRecipient, latest.DeliveryBundleId, true));
+    }
+
+    internal static void ProofTimeoutAndStaleApplied()
+    {
+        DirtyEntitySpatialFanout service = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId participant = new(1);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(participant, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 1, 0, 0), 0));
+        service.TryProcessDirtyEntities(0, out _);
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[2];
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 0, 4_096, records, out DirtyEntityBundle first));
+
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 2, 100, 0), 1));
+        service.TryProcessDirtyEntities(1, out _);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 1, 4_096, records, out DirtyEntityBundle newer));
+        Check.True(newer.DeliveryBundleId != first.DeliveryBundleId);
+
+        DirtyEntitySpatialFanoutSnapshot beforeStale = service.GetSnapshot();
+        Check.True(!service.TryAcknowledgeBundle(participant, first.DeliveryBundleId, applied: true));
+        DirtyEntitySpatialFanoutSnapshot afterStale = service.GetSnapshot();
+        Check.Equal(beforeStale.ApplicationProofsApplied, afterStale.ApplicationProofsApplied);
+        Check.Equal(beforeStale.StaleOrRejectedProofs + 1, afterStale.StaleOrRejectedProofs);
+        Check.True(service.TryAcknowledgeBundle(participant, newer.DeliveryBundleId, applied: true));
+
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 3, 200, 0), 2));
+        service.TryProcessDirtyEntities(2, out _);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 2, 4_096, records, out DirtyEntityBundle timedOut));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 103, 4_096, records, out DirtyEntityBundle retry));
+        Check.True(retry.DeliveryBundleId != timedOut.DeliveryBundleId);
+        Check.True(service.GetSnapshot().TimedOutDeliveries >= 1);
+        Check.True(service.TryAcknowledgeBundle(participant, retry.DeliveryBundleId, applied: true));
+    }
+
+    internal static void StatusAndRemoteEpochRecovery()
+    {
+        DirtyEntitySpatialFanout bounded = Create(maximumEntities: 4, maximumRecipients: 1, maximumRows: 1);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            bounded.SetRecipientAnchor(new ParticipantId(1), Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            bounded.CommitEntity(Present(0, 1, 0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            bounded.CommitEntity(Present(1, 1, 100, 0), 0));
+        Check.Equal(DirtyEntityProcessStatus.CapacityExceeded,
+            bounded.ReconcileAllRecipients(0));
+        Check.Equal(DirtyEntityProcessStatus.CapacityExceeded,
+            bounded.TryProcessDirtyEntities(0, out _));
+
+        Check.True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            default,
+            out ProtocolLoopback? created,
+            out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        DirtyEntitySpatialFanout serverBounded = Create(
+            maximumEntities: 4, maximumRecipients: 1, maximumRows: 1);
+        serverBounded.SetRecipientAnchor(new ParticipantId(1), Point(0, 0), 0);
+        serverBounded.CommitEntity(Present(0, 1, 0, 0), 0);
+        serverBounded.CommitEntity(Present(1, 1, 100, 0), 0);
+        var boundedServer = new RemoteDirtyEntitySpatialFanoutServer(
+            loopback.Server, serverBounded, new ParticipantId(1), 77, 4);
+        Check.Equal(DirtyEntityBuildStatus.SpatialCapacityExceeded,
+            boundedServer.TrySchedule(0, 4_096));
+        Check.Equal(DirtyEntityProcessStatus.CapacityExceeded,
+            boundedServer.GetSnapshot().LastProcessStatus);
+
+        DirtyEntitySpatialFanout fanout = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId participant = new(1);
+        fanout.SetRecipientAnchor(participant, Point(0, 0), 0);
+        fanout.CommitEntity(Present(0, 1, 0, 0), 0);
+        var server = new RemoteDirtyEntitySpatialFanoutServer(
+            loopback.Server, fanout, participant, 77, 4);
+        var client = new RemoteDirtyEntitySpatialFanoutClient(
+            loopback.Client, 77, new StateEpoch(1), 8, 8, 4, 8);
+
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            server.TrySchedule(0, 4_096));
+        loopback.Pump();
+        DeliverDirty(loopback, client, server);
+        Check.Equal(1UL, fanout.GetSnapshot().ApplicationProofsApplied);
+        Check.True(fanout.ReplaceSourceEpoch(new StateEpoch(2)));
+        Check.True(client.ReplaceStateEpoch(new StateEpoch(2)));
+        fanout.CommitEntity(Present(0, 1, 100, 0), 0);
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            server.TrySchedule(0, 4_096));
+        loopback.Pump();
+        DeliverDirty(loopback, client, server);
+        Check.Equal(new StateEpoch(2), client.GetSnapshot().StateEpoch);
+        Check.Equal(2UL, fanout.GetSnapshot().ApplicationProofsApplied);
+    }
+
+    internal static void FamiliesCoexistAndPrivateDoesNotLeak()
+    {
+        DirtyEntitySpatialFanout fanout = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId participant = new(1);
+        fanout.SetRecipientAnchor(participant, Point(0, 0), 0);
+        fanout.CommitEntity(Present(0, 1, 0, 0), 0);
+        fanout.CommitEntity(new DirtyEntityLatestState(
+            new ReplicationEntityId(1, 1), 1, true, false, GameReplicationHorizon.Far,
+            Point(0, 0), new GameSimulationState { TickMarker = 99 }), 0);
+        fanout.TryProcessDirtyEntities(0, out _);
+        Span<DirtyEntitySemanticKnowledgeSnapshot> knowledge = stackalloc DirtyEntitySemanticKnowledgeSnapshot[4];
+        Check.Equal(1, fanout.CopySemanticKnowledge(knowledge));
+        Check.Equal(new ReplicationEntityId(0, 1), knowledge[0].Entity);
+
+        Check.True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            default,
+            out ProtocolLoopback? created,
+            out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyEntitySpatialFanoutServer(
+            loopback.Server, fanout, participant, 77, 4);
+        Span<byte> controlPayload = stackalloc byte[RemoteClockAnchorMessageCodec.EncodedSize];
+        RemoteClockAnchorMessage control = new()
+        {
+            ApplicationSessionEpoch = 77, StateEpoch = 1, ClockRevision = 1,
+            EffectiveFromSimulationTick = 0, SimulationFrequencyHz = 60,
+            WorldTimeMicroseconds = 0, WorldTimeFractionQuanta = 0,
+        };
+        Check.True(RemoteClockAnchorMessageCodec.TryWriteExact(controlPayload, in control));
+        Check.Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteClockAnchorMessageCodec.Descriptor.Id, controlPayload));
+        Span<byte> eventPayload = stackalloc byte[RemoteApplicationEventMessageCodec.EncodedSize];
+        RemoteApplicationEventMessage applicationEvent = new()
+        {
+            ApplicationSessionEpoch = 77, StateEpoch = 1, Sequence = 1,
+            ParticipantId = participant.Value, Kind = 1, Subject = 2, PayloadHash = 3,
+        };
+        Check.True(RemoteApplicationEventMessageCodec.TryWriteExact(eventPayload, in applicationEvent));
+        Check.Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteApplicationEventMessageCodec.Descriptor.Id, eventPayload));
+        loopback.Pump();
+        loopback.Pump();
+        int controlMessages = 0;
+        int eventMessages = 0;
+        while (loopback.Server.TryPeekReceived(out NetworkDeliveredMessage message,
+                   out ReadOnlySpan<byte> payload))
+        {
+            if (message.MessageId == RemoteClockAnchorMessageCodec.Descriptor.Id) controlMessages++;
+            if (message.MessageId == RemoteApplicationEventMessageCodec.Descriptor.Id) eventMessages++;
+            Check.True(!server.TryProcess(message, payload));
+            Check.True(loopback.Server.TryConsumeReceived());
+        }
+        Check.Equal(1, controlMessages);
+        Check.Equal(1, eventMessages);
     }
 
     internal static void EpochAndProofFencing()
@@ -228,6 +526,29 @@ internal static class DirtyEntitySpatialFanoutTests
         Span<RemoteWorldEntitySnapshot> active = stackalloc RemoteWorldEntitySnapshot[2];
         Check.Equal(1, client.CopyActiveEntities(active));
         Check.Equal(new ReplicationEntityId(0, 1), active[0].Entity);
+    }
+
+    private static void DeliverDirty(
+        ProtocolLoopback loopback,
+        RemoteDirtyEntitySpatialFanoutClient client,
+        RemoteDirtyEntitySpatialFanoutServer server)
+    {
+        loopback.Pump();
+        while (loopback.Client.TryPeekReceived(out NetworkDeliveredMessage message,
+                   out ReadOnlySpan<byte> payload))
+        {
+            Check.True(client.TryProcess(message, payload));
+            Check.True(loopback.Client.TryConsumeReceived());
+        }
+        Check.True(client.TryFlushProofs());
+        loopback.Pump();
+        loopback.Pump();
+        while (loopback.Server.TryPeekReceived(out NetworkDeliveredMessage message,
+                   out ReadOnlySpan<byte> payload))
+        {
+            Check.True(server.TryProcess(message, payload));
+            Check.True(loopback.Server.TryConsumeReceived());
+        }
     }
 
     private static DirtyEntitySpatialFanout Create(

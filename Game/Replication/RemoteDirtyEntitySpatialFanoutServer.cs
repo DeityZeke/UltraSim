@@ -11,6 +11,7 @@ public readonly record struct RemoteDirtyEntitySpatialFanoutServerSnapshot(
     ulong ApplicationRejections,
     ulong MalformedProofs,
     DirtyEntityBuildStatus LastBuildStatus,
+    DirtyEntityProcessStatus LastProcessStatus,
     long ReservedBytes);
 
 /// <summary>
@@ -36,6 +37,7 @@ public sealed class RemoteDirtyEntitySpatialFanoutServer : IRemoteGameProtocolHa
     private ulong _applicationRejections;
     private ulong _malformedProofs;
     private DirtyEntityBuildStatus _lastBuildStatus;
+    private DirtyEntityProcessStatus _lastProcessStatus = DirtyEntityProcessStatus.NoData;
 
     public RemoteDirtyEntitySpatialFanoutServer(
         NetworkProtocolPeer peer,
@@ -59,7 +61,12 @@ public sealed class RemoteDirtyEntitySpatialFanoutServer : IRemoteGameProtocolHa
     public DirtyEntityBuildStatus TrySchedule(long nowMilliseconds, int byteBudget)
     {
         EnsureOwnerThread();
-        _fanout.TryProcessDirtyEntities(nowMilliseconds, out _);
+        _lastProcessStatus = _fanout.TryProcessDirtyEntities(nowMilliseconds, out _);
+        if (_lastProcessStatus == DirtyEntityProcessStatus.CapacityExceeded)
+        {
+            _lastBuildStatus = DirtyEntityBuildStatus.SpatialCapacityExceeded;
+            return _lastBuildStatus;
+        }
         _lastBuildStatus = _fanout.TryBuildBundle(
             _participant, nowMilliseconds, byteBudget, _records, out DirtyEntityBundle bundle);
         if (_lastBuildStatus != DirtyEntityBuildStatus.Success) return _lastBuildStatus;
@@ -113,7 +120,7 @@ public sealed class RemoteDirtyEntitySpatialFanoutServer : IRemoteGameProtocolHa
     {
         EnsureOwnerThread();
         return new(_bundlesQueued, _applicationProofs, _applicationRejections,
-            _malformedProofs, _lastBuildStatus, checked(sizeof(ulong) * 4L +
+            _malformedProofs, _lastBuildStatus, _lastProcessStatus, checked(sizeof(ulong) * 4L +
                 (long)_records.Length * Unsafe.SizeOf<DirtyEntityDeliveryRecord>() +
                 (long)_wireRecords.Length * Unsafe.SizeOf<RemoteDirtyEntityRecord>() +
                 _messageScratch.Length));

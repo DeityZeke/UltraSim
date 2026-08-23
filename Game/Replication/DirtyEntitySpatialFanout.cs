@@ -114,6 +114,7 @@ public enum DirtyEntityBuildStatus : byte
     ByteBudgetTooSmall = 4,
     OutstandingCapacityExceeded = 5,
     TransportNotAccepting = 6,
+    SpatialCapacityExceeded = 7,
 }
 
 public enum DirtyEntityProcessStatus : byte
@@ -422,13 +423,15 @@ public sealed class DirtyEntitySpatialFanout
     {
         EnsureOwnerThread();
         if (nowMilliseconds < 0) return DirtyEntityProcessStatus.NoData;
+        bool success = true;
         for (int index = 0; index < _recipients.Length; index++)
             if (_recipients[index].Active)
             {
                 _topologyReconciliations++;
-                _ = ReconcileRecipient(index, _recipients[index].Anchor, _recipients[index].Anchor, nowMilliseconds);
+                success &= ReconcileRecipient(
+                    index, _recipients[index].Anchor, _recipients[index].Anchor, nowMilliseconds);
             }
-        return DirtyEntityProcessStatus.Success;
+        return success ? DirtyEntityProcessStatus.Success : DirtyEntityProcessStatus.CapacityExceeded;
     }
 
     /// <summary>Commits one newest public value and creates at most one dirty work item per entity.</summary>
@@ -527,12 +530,16 @@ public sealed class DirtyEntitySpatialFanout
         {
             int entityIndex = _dirtyEntities[index];
             ref DirtyEntitySlot entity = ref _entities[entityIndex];
-            entity.DirtyQueued = false;
             if (!ProcessDirtyEntity(entityIndex, entity.DirtyOld, nowMilliseconds))
             {
                 _capacityFailures++;
+                int remaining = count - index;
+                _dirtyEntities.AsSpan(index, remaining).CopyTo(_dirtyEntities);
+                Array.Clear(_dirtyEntities, remaining, index);
+                _dirtyCount = remaining;
                 return DirtyEntityProcessStatus.CapacityExceeded;
             }
+            entity.DirtyQueued = false;
             processed++;
             _dirtyProcessed++;
         }
@@ -661,7 +668,20 @@ public sealed class DirtyEntitySpatialFanout
             DirtyBundleItem item = _bundleItems[baseItem + index];
             ref DirtyRecord row = ref _rows[item.RowIndex];
             if (!row.Active || _rowGenerations[item.RowIndex] != item.RowGeneration ||
-                !row.Pending || row.PendingDeliveryId != item.DeliveryId) continue;
+                !row.Pending || row.PendingDeliveryId != item.DeliveryId)
+            {
+                // A sent bundle can remain in the ledger after newer work supersedes it.
+                // Validate the complete bundle before touching any row so a stale proof is
+                // both classified correctly and incapable of partially advancing knowledge.
+                _staleOrRejectedProofs++;
+                ReleaseBundle(bundleIndex);
+                return false;
+            }
+        }
+        for (int index = 0; index < bundle.Count; index++)
+        {
+            DirtyBundleItem item = _bundleItems[baseItem + index];
+            ref DirtyRecord row = ref _rows[item.RowIndex];
             if (applied)
             {
                 row.KnownEntity = item.Entity;
@@ -829,8 +849,8 @@ public sealed class DirtyEntitySpatialFanout
                         _recipientStamp[recipient] = _discoveryStamp;
                         bool oldRelevant = old.IsDiscoverable &&
                             IsWithinOld(_recipients[recipient].Anchor, old.Position, old.Horizon);
-                        bool currentRelevant = current.Active &&
-                            IsWithin(_recipients[recipient].Anchor, current.Position, current.Horizon);
+                        bool currentRelevant = IsCurrentRelevant(
+                            recipient, current, _recipients[recipient].Anchor);
                         if ((oldRelevant || currentRelevant) && currentRelevant &&
                             !_rowMap.ContainsKey(new DirtyRowKey(recipient, checked((uint)current.Entity.Index))))
                         {
@@ -873,7 +893,8 @@ public sealed class DirtyEntitySpatialFanout
                     {
                         _recipientStamp[recipient] = _discoveryStamp;
                         bool oldRelevant = old.IsDiscoverable && IsWithinOld(_recipients[recipient].Anchor, old.Position, old.Horizon);
-                        bool currentRelevant = current.Active && IsWithin(_recipients[recipient].Anchor, current.Position, current.Horizon);
+                        bool currentRelevant = IsCurrentRelevant(
+                            recipient, current, _recipients[recipient].Anchor);
                         if (oldRelevant || currentRelevant)
                         {
                             _interestedRecipientsDiscovered++;
@@ -907,7 +928,7 @@ public sealed class DirtyEntitySpatialFanout
             {
                 int entityIndex = checked((int)_rows[row].Entity.Index);
                 ref readonly DirtyEntitySlot entity = ref _entities[entityIndex];
-                bool relevant = entity.Active && IsWithin(currentAnchor, entity.Position, entity.Horizon);
+                bool relevant = IsCurrentRelevant(recipientIndex, entity, currentAnchor);
                 if (!EnsureEntityObligation(recipientIndex, entityIndex, entity, relevant, now))
                 { _capacityFailures++; success = false; }
             }
@@ -935,7 +956,7 @@ public sealed class DirtyEntitySpatialFanout
                     {
                         _entityStamp[entity] = _entityDiscoveryStamp;
                         ref readonly DirtyEntitySlot current = ref _entities[entity];
-                        if (current.Active && IsWithin(anchor, current.Position, current.Horizon) &&
+                        if (IsCurrentRelevant(recipientIndex, current, anchor) &&
                             !_rowMap.ContainsKey(new DirtyRowKey(recipientIndex, checked((uint)entity))))
                         {
                             needed++;
@@ -972,7 +993,7 @@ public sealed class DirtyEntitySpatialFanout
                     {
                         _entityStamp[entity] = _entityDiscoveryStamp;
                         ref readonly DirtyEntitySlot current = ref _entities[entity];
-                        bool relevant = current.Active && IsWithin(currentAnchor, current.Position, current.Horizon);
+                        bool relevant = IsCurrentRelevant(recipientIndex, current, currentAnchor);
                         if (!EnsureEntityObligation(recipientIndex, entity, current, relevant, now))
                         { _capacityFailures++; return false; }
                     }
@@ -1336,16 +1357,30 @@ public sealed class DirtyEntitySpatialFanout
 
     private int CellRadius(int radius) => checked((radius + _profile.RegionEdgeMillimeters - 1) / _profile.RegionEdgeMillimeters);
 
-    private bool IsWithin(in ReplicationSpatialPoint anchor, in ReplicationSpatialPoint entity, GameReplicationHorizon horizon)
+    private bool IsCurrentRelevant(
+        int recipientIndex,
+        in DirtyEntitySlot entity,
+        in ReplicationSpatialPoint anchor)
     {
-        int radius = horizon switch
+        if (!entity.Active) return false;
+        bool existingSameGeneration = false;
+        DirtyRowKey key = new(recipientIndex, checked((uint)entity.Entity.Index));
+        if (_rowMap.TryGetValue(key, out int rowIndex))
         {
-            GameReplicationHorizon.Immediate => _profile.ImmediateEnterRadiusMillimeters,
+            ref readonly DirtyRecord row = ref _rows[rowIndex];
+            existingSameGeneration = row.Active && row.Entity == entity.Entity &&
+                (row.KnownPresent || row.DesiredPresent);
+        }
+        int radius = entity.Horizon switch
+        {
+            GameReplicationHorizon.Immediate => existingSameGeneration
+                ? _profile.ImmediateLeaveRadiusMillimeters
+                : _profile.ImmediateEnterRadiusMillimeters,
             GameReplicationHorizon.Near => _profile.NearRadiusMillimeters,
             GameReplicationHorizon.Far => _profile.FarRadiusMillimeters,
             _ => 0,
         };
-        return radius > 0 && DistanceSquared(anchor, entity) <= (Int128)radius * radius;
+        return radius > 0 && DistanceSquared(anchor, entity.Position) <= (Int128)radius * radius;
     }
 
     private bool IsWithinOld(in ReplicationSpatialPoint anchor, in ReplicationSpatialPoint entity, GameReplicationHorizon horizon)

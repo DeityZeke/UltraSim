@@ -171,7 +171,7 @@ internal static class ReplicationProfileConformanceTests
                 new ReplicationSpatialPoint(100, 0),
                 new GameSimulationState { TickMarker = 20, InputVelocity = 40 }), 0));
         service.TryProcessDirtyEntities(0, out _);
-        True(service.TryAcknowledgeBundle(participant, first.DeliveryBundleId, applied: false));
+        False(service.TryAcknowledgeBundle(participant, first.DeliveryBundleId, applied: false));
         Equal(DirtyEntityBuildStatus.Success,
             service.TryBuildBundle(participant, 0, 4_096, records, out DirtyEntityBundle retry));
         bool superseded = retry.DeliveryBundleId != first.DeliveryBundleId &&

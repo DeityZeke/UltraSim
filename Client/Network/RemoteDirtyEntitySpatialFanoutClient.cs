@@ -24,7 +24,10 @@ public sealed class RemoteDirtyEntitySpatialFanoutClient : IRemoteGameProtocolHa
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
-    private readonly RemoteWorldStateClient _semantic;
+    private RemoteWorldStateClient _semantic;
+    private readonly int _maximumKnownIdentities;
+    private readonly int _maximumActiveEntities;
+    private readonly int _maximumRecordsPerBundle;
     private readonly RemoteDirtyEntityRecord[] _wireRecords;
     private readonly RemoteWorldStateRecord[] _semanticRecords;
     private readonly RemoteDirtyEntityStateAppliedMessage[] _pendingProofs;
@@ -52,12 +55,29 @@ public sealed class RemoteDirtyEntitySpatialFanoutClient : IRemoteGameProtocolHa
             throw new ArgumentOutOfRangeException(nameof(maximumRecordsPerBundle));
         if (maximumPendingProofs <= 0) throw new ArgumentOutOfRangeException(nameof(maximumPendingProofs));
         _applicationSessionEpoch = applicationSessionEpoch;
-        _semantic = new RemoteWorldStateClient(
-            peer, applicationSessionEpoch, stateEpoch, maximumKnownIdentities,
-            maximumActiveEntities, maximumRecordsPerBundle, maximumPendingAcknowledgements: 1);
+        _maximumKnownIdentities = maximumKnownIdentities;
+        _maximumActiveEntities = maximumActiveEntities;
+        _maximumRecordsPerBundle = maximumRecordsPerBundle;
+        _semantic = CreateSemanticClient(stateEpoch);
         _wireRecords = new RemoteDirtyEntityRecord[maximumRecordsPerBundle];
         _semanticRecords = new RemoteWorldStateRecord[maximumRecordsPerBundle];
         _pendingProofs = new RemoteDirtyEntityStateAppliedMessage[maximumPendingProofs];
+    }
+
+    /// <summary>
+    /// Replaces epoch-local client truth and pending proofs after an authoritative
+    /// source epoch replacement. Old dirty bundles remain rejected by the epoch fence.
+    /// </summary>
+    public bool ReplaceStateEpoch(StateEpoch nextEpoch)
+    {
+        EnsureOwnerThread();
+        if (_faulted || !nextEpoch.IsValid || nextEpoch.Value <= _semantic.GetSnapshot().StateEpoch.Value)
+            return false;
+        _semantic = CreateSemanticClient(nextEpoch);
+        Array.Clear(_pendingProofs);
+        _proofHead = 0;
+        _proofCount = 0;
+        return true;
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
@@ -167,4 +187,8 @@ public sealed class RemoteDirtyEntitySpatialFanoutClient : IRemoteGameProtocolHa
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("The dirty entity client adapter is owner-thread-bound.");
     }
+
+    private RemoteWorldStateClient CreateSemanticClient(StateEpoch stateEpoch) =>
+        new(_peer, _applicationSessionEpoch, stateEpoch, _maximumKnownIdentities,
+            _maximumActiveEntities, _maximumRecordsPerBundle, maximumPendingAcknowledgements: 1);
 }
