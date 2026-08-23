@@ -16,10 +16,10 @@ topology are now captured without starting the separately deferred public hosted
 listener lifecycle.
 
 The separately authorized externally admitted listener/security lifecycle is now
-tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.2 are implemented and
-stopped after transactional authenticated candidate promotion, before path
-rebinding. That milestone remains Network-generic and does not alter N1
-replication meaning.
+tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.3 are implemented and
+stopped after transactional authenticated candidate promotion and explicit path
+ownership/rebinding, before connection-owner sharding. That milestone remains
+Network-generic and does not alter N1 replication meaning.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -49,13 +49,14 @@ N0 proved the difficult semantic foundations:
 The remaining sparse problem is therefore treated as a world-spatial architecture
 problem, not an invitation to keep tuning packet code.
 
-N0's shared UDP host is still controlled IPv4 loopback topology, not a public WAN
-acceptor. A later hosted-Network checkpoint must separately earn pinned deployment
-identity, listener-lifetime cookie keys, bounded/rate-limited unauthenticated
-handshake admission, amplification limits, IPv6 and path-rebinding policy, and
-connection sharding with explicit cross-owner packet-memory transfer. Do not fold
-that lifecycle/security work into N1's chunk-replication experiment, and do not
-quote same-process loopback population as public remote CCU.
+N0's original shared UDP host remains controlled IPv4 loopback topology, not a
+public WAN acceptor. The separate Hosted H0 milestone has since earned pinned
+deployment identity, listener-lifetime cookie keys, bounded/rate-limited
+unauthenticated admission, amplification limits, promotion, and explicit IPv4
+path rebinding through H0.3. IPv6 and connection sharding with explicit
+cross-owner packet-memory transfer remain later Hosted gates. Do not fold that
+lifecycle/security work into N1's chunk-replication experiment, and do not quote
+same-process loopback population as public remote CCU.
 
 N1 tests the original chunk-native AOI model for the current UltraSim game against
 that frozen N0 baseline. It does not make chunks the permanent Network-level AOI
@@ -1488,6 +1489,6 @@ remains conditional on an explicitly authorized hosted-listener/sharded-client g
 
 Stop at the N1.4 final adoption-gates checkpoint. Do not begin N1.5 shared
 encoding, delete N0, run 2K/4K, or claim production CCU. The separately scoped
-hosted-listener/security lifecycle has been authorized and now stops at its H0.2
-authenticated-promotion review; see `HOSTED_NETWORK.md`. N1's final remote
+hosted-listener/security lifecycle has been authorized and now stops at its H0.3
+authenticated path-ownership review; see `HOSTED_NETWORK.md`. N1's final remote
 adoption still waits for that milestone's H0.5 dedicated-server/sharded-client run.

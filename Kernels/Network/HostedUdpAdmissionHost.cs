@@ -112,12 +112,21 @@ public readonly record struct HostedUdpAdmissionSnapshot(
     ulong EstablishedPromotions,
     ulong DuplicateClientFinishes,
     ulong ServerFinishFlights,
+    int PendingPathRebinds,
+    ulong PathRebindRequests,
+    ulong PathRebindChallenges,
+    ulong PathRebindProofs,
+    ulong PathRebindCommits,
+    ulong DuplicatePathProofs,
+    ulong PathRebindTimeouts,
+    ulong PathRebindRejections,
     long ReservedBytes,
     SharedUdpListenerSnapshot Listener,
     NetworkConnectionSnapshot Connections);
 
 /// <summary>
-/// Owner-thread server endpoint for H0.0-H0.2 external UDP admission and promotion.
+/// Owner-thread server endpoint for H0.0-H0.3 external UDP admission, promotion,
+/// and authenticated path ownership.
 /// </summary>
 /// <remarks>
 /// Unknown IPv4 paths receive only a stateless, listener-lifetime cookie challenge.
@@ -125,7 +134,8 @@ public readonly record struct HostedUdpAdmissionSnapshot(
 /// before a valid current/previous-bucket cookie is returned. Validated candidates
 /// occupy one bounded private row and expire independently. When constructed with
 /// protocol limits, H0.2 promotes proof-complete candidates into the existing
-/// authenticated protocol transactionally. It exposes no self-trusted client
+/// authenticated protocol transactionally. H0.3 permits one bounded authenticated
+/// endpoint ownership transaction per session. It exposes no self-trusted client
 /// construction and no Game meaning.
 /// </remarks>
 public sealed class HostedUdpAdmissionHost : IDisposable,
@@ -194,6 +204,14 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private ulong _establishedPromotions;
     private ulong _duplicateClientFinishes;
     private ulong _serverFinishFlights;
+    private int _pendingPathRebinds;
+    private ulong _pathRebindRequests;
+    private ulong _pathRebindChallenges;
+    private ulong _pathRebindProofs;
+    private ulong _pathRebindCommits;
+    private ulong _duplicatePathProofs;
+    private ulong _pathRebindTimeouts;
+    private ulong _pathRebindRejections;
     private ulong _lastMilliseconds;
     private bool _disposed;
 
@@ -424,12 +442,19 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         _listener.SuppressNextImmediateSendForTesting();
     }
 
+    internal void SuppressNextPathCommitForTesting()
+    {
+        EnsureOperational();
+        _listener.SuppressNextImmediateSendForTesting();
+    }
+
     /// <summary>Runs one bounded admission, promotion, protocol, and lifetime pass.</summary>
     public void Pump()
     {
         EnsureOperational();
         ulong now = GetMonotonicMilliseconds();
         SweepExpiredCandidates(now);
+        SweepExpiredPathRebinds(now);
         _listener.PumpInbound();
         // Admission/promotion callbacks may sample a later monotonic value while
         // routing inbound datagrams. Refresh before session lifetime arithmetic.
@@ -490,7 +515,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             for (int index = 0; index < _sessions.Length; index++)
                 if (_sessions[index] is HostedUdpProtocolSession current)
                     promotionReserved = checked(
-                        promotionReserved + current.Server.GetSnapshot().ReservedBytes);
+                        promotionReserved + current.Server.GetSnapshot().ReservedBytes +
+                        current.ReservedBytes);
         }
         return new(
             _candidateCount,
@@ -518,6 +544,14 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             _establishedPromotions,
             _duplicateClientFinishes,
             _serverFinishFlights,
+            _pendingPathRebinds,
+            _pathRebindRequests,
+            _pathRebindChallenges,
+            _pathRebindProofs,
+            _pathRebindCommits,
+            _duplicatePathProofs,
+            _pathRebindTimeouts,
+            _pathRebindRejections,
             checked(_listener.ReservedBytes + _serverPublicKey.Length +
                 _admissionLimits.EstimateReservedBytes() + promotionReserved),
             _listener.GetSnapshot(),
@@ -534,6 +568,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         _unknownDatagrams = SaturatingIncrement(_unknownDatagrams);
         _unknownBytes = SaturatingAdd(_unknownBytes, checked((ulong)datagram.Length));
         ulong now = GetMonotonicMilliseconds();
+        if (_promotionEnabled && TryHandlePathControl(
+                listener, datagram, remoteAddress, now)) return;
         ulong bucket = now / checked((ulong)_udpLimits.CookieBucketMilliseconds);
         ulong addressKey = PackAddressKey(remoteAddress);
 
@@ -617,17 +653,35 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         if (!_promotionEnabled || !endpoint.Connection.IsValid ||
             endpoint.Connection.Slot >= (uint)_sessions.Length ||
             _sessions[endpoint.Connection.Slot] is not HostedUdpProtocolSession session ||
-            session.Connection != endpoint.Connection ||
-            datagram.Length != session.ClientFinish.Length ||
-            !CryptographicOperations.FixedTimeEquals(datagram, session.ClientFinish))
+            session.Connection != endpoint.Connection)
             return false;
-        _duplicateClientFinishes = SaturatingIncrement(_duplicateClientFinishes);
-        if (endpoint.TrySendHandshake(session.ServerFinish) == DatagramSendStatus.Accepted)
-            _serverFinishFlights = SaturatingIncrement(_serverFinishFlights);
-        else
-            _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
-        session.LastActivityMilliseconds = GetMonotonicMilliseconds();
-        return true;
+        if (datagram.Length == session.ClientFinish.Length &&
+            CryptographicOperations.FixedTimeEquals(datagram, session.ClientFinish))
+        {
+            _duplicateClientFinishes = SaturatingIncrement(_duplicateClientFinishes);
+            if (endpoint.TrySendHandshake(session.ServerFinish) == DatagramSendStatus.Accepted)
+                _serverFinishFlights = SaturatingIncrement(_serverFinishFlights);
+            else
+                _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
+            session.LastActivityMilliseconds = GetMonotonicMilliseconds();
+            return true;
+        }
+        if (session.LastPathProofLength != 0 &&
+            datagram.Length == session.LastPathProofLength &&
+            CryptographicOperations.FixedTimeEquals(
+                datagram, session.LastPathProof.AsSpan(0, session.LastPathProofLength)))
+        {
+            _duplicatePathProofs = SaturatingIncrement(_duplicatePathProofs);
+            if (endpoint.TrySendHandshake(
+                    session.LastPathCommit.AsSpan(0, session.LastPathCommitLength)) ==
+                DatagramSendStatus.Accepted)
+                _pathRebindCommits = SaturatingIncrement(_pathRebindCommits);
+            else
+                _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
+            session.LastActivityMilliseconds = GetMonotonicMilliseconds();
+            return true;
+        }
+        return false;
     }
 
     public void Dispose()
@@ -688,6 +742,11 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             session.RawState,
             session.Connection,
             session.Candidate,
+            session.PathGeneration,
+            session.HasPendingPathRebind,
+            new IPEndPoint(
+                session.Endpoint.RemoteEndPoint.Address,
+                session.Endpoint.RemoteEndPoint.Port),
             session.Server.GetSnapshot(),
             session.Endpoint.GetSnapshot());
     }
@@ -721,6 +780,11 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             _ = _connections.TryAdvance(
                 session.Connection, NetworkConnectionState.Closed);
         session.RawState = UdpProtocolSessionState.Closed;
+        if (session.HasPendingPathRebind)
+        {
+            session.ClearPendingPathRebind();
+            _pendingPathRebinds--;
+        }
     }
 
     private void RetireCore(HostedUdpProtocolSession session)
@@ -1046,6 +1110,9 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         }
 
         NetworkProtocolPeer? server = null;
+        byte[]? clientFinish = null;
+        byte[]? serverFinish = null;
+        byte[]? pathKey = null;
         bool published = false;
         try
         {
@@ -1059,13 +1126,16 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 master,
                 sendsClientToServer: false,
                 usesMonotonicPacing: true);
-            byte[] clientFinish = datagram.ToArray();
-            byte[] serverFinish = new byte[1 + 4 + 4 + 4 + ProtocolLoopbackHandshake.ProofBytes];
+            clientFinish = datagram.ToArray();
+            serverFinish = new byte[1 + 4 + 4 + 4 + ProtocolLoopbackHandshake.ProofBytes];
             int finishLength = ProtocolLoopbackHandshake.WriteServerFinish(
                 serverFinish, connection, epoch, master, transcript);
             if (finishLength != serverFinish.Length)
                 throw new InvalidOperationException(
                     "The hosted promotion produced a malformed terminal flight.");
+            pathKey = new byte[HostedUdpPathRebindCodec.KeyBytes];
+            HostedUdpPathRebindCodec.DeriveKey(
+                master, _manifest, connection, epoch, pathKey);
             if (!_connections!.TryAdvance(
                     connection, NetworkConnectionState.ProtocolValidated) ||
                 !_connections.TryAdvance(connection, NetworkConnectionState.Established))
@@ -1077,11 +1147,14 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 checked((uint)slot), _candidateGenerations[slot]);
             var session = new HostedUdpProtocolSession(
                 this, endpoint, server, connection, candidateId,
-                clientFinish, serverFinish, now);
+                clientFinish, serverFinish, pathKey, now);
             _sessions[connection.Slot] = session;
             _sessionCount++;
             _establishedPromotions = SaturatingIncrement(_establishedPromotions);
             server = null;
+            clientFinish = null;
+            serverFinish = null;
+            pathKey = null;
             published = true;
             ReleaseCandidate(slot, releaseConnection: false);
             if (endpoint.TrySendHandshake(serverFinish) == DatagramSendStatus.Accepted)
@@ -1101,9 +1174,238 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             {
                 server?.Dispose();
                 endpoint.Dispose();
+                if (clientFinish is not null)
+                    CryptographicOperations.ZeroMemory(clientFinish);
+                if (serverFinish is not null)
+                    CryptographicOperations.ZeroMemory(serverFinish);
+                if (pathKey is not null)
+                    CryptographicOperations.ZeroMemory(pathKey);
             }
         }
     }
+
+    private bool TryHandlePathControl(
+        SharedUdpServerListener listener,
+        ReadOnlySpan<byte> datagram,
+        ReadOnlySpan<byte> remoteAddress,
+        ulong now)
+    {
+        if (HostedUdpPathRebindCodec.TryPeekConnection(
+                datagram, HostedPathDatagramKind.Request, _manifest,
+                out ConnectionId requestConnection))
+        {
+            if (!TryGetEstablishedSession(requestConnection, out HostedUdpProtocolSession? session) ||
+                !HostedUdpPathRebindCodec.TryReadRequest(
+                    datagram, _manifest, requestConnection, session.PathKey,
+                    out ulong attempt, out ReadOnlySpan<byte> nonce))
+            {
+                RejectPathRebind();
+                return true;
+            }
+            HandlePathRequest(session, attempt, nonce, listener, remoteAddress, now);
+            return true;
+        }
+
+        if (HostedUdpPathRebindCodec.TryPeekConnection(
+                datagram, HostedPathDatagramKind.Proof, _manifest,
+                out ConnectionId proofConnection))
+        {
+            if (!TryGetEstablishedSession(proofConnection, out HostedUdpProtocolSession? session) ||
+                !HostedUdpPathRebindCodec.TryReadPathFlight(
+                    datagram, HostedPathDatagramKind.Proof, _manifest,
+                    proofConnection, session.PathKey, out ulong attempt,
+                    out HostedPathGeneration generation,
+                    out ReadOnlySpan<byte> nonce,
+                    out ReadOnlySpan<byte> challenge,
+                    out ReadOnlySpan<byte> pathBinding))
+            {
+                RejectPathRebind();
+                return true;
+            }
+            HandlePathProof(
+                session, datagram, attempt, generation, nonce, challenge,
+                pathBinding, remoteAddress, now);
+            return true;
+        }
+        return false;
+    }
+
+    private bool TryGetEstablishedSession(
+        ConnectionId connection,
+        out HostedUdpProtocolSession session)
+    {
+        if (connection.IsValid && connection.Slot < (uint)_sessions.Length &&
+            _sessions[connection.Slot] is HostedUdpProtocolSession current &&
+            current.Connection == connection &&
+            current.RawState == UdpProtocolSessionState.Established)
+        {
+            session = current;
+            return true;
+        }
+        session = null!;
+        return false;
+    }
+
+    private void HandlePathRequest(
+        HostedUdpProtocolSession session,
+        ulong attempt,
+        ReadOnlySpan<byte> nonce,
+        SharedUdpServerListener listener,
+        ReadOnlySpan<byte> remoteAddress,
+        ulong now)
+    {
+        _pathRebindRequests = SaturatingIncrement(_pathRebindRequests);
+        ulong path = PackPath(remoteAddress);
+        if (path == PackPath(session.Endpoint.RemoteAddress) ||
+            attempt <= session.LastCommittedPathAttempt)
+        {
+            RejectPathRebind();
+            return;
+        }
+        if (session.HasPendingPathRebind)
+        {
+            if (attempt == session.PendingPathAttempt &&
+                path == session.PendingPath &&
+                CryptographicOperations.FixedTimeEquals(
+                    nonce, session.PendingPathNonce))
+            {
+                SendPathChallenge(session, listener, remoteAddress);
+                return;
+            }
+            if (attempt <= session.PendingPathAttempt)
+            {
+                RejectPathRebind();
+                return;
+            }
+            session.ClearPendingPathRebind();
+            _pendingPathRebinds--;
+        }
+        if (session.LastIssuedPathGeneration == uint.MaxValue)
+        {
+            RejectPathRebind();
+            return;
+        }
+
+        session.LastIssuedPathGeneration++;
+        session.PendingPathGeneration = new(session.LastIssuedPathGeneration);
+        session.PendingPathAttempt = attempt;
+        session.PendingPath = path;
+        session.PendingPathExpiration = checked(
+            now + (ulong)_admissionLimits.ValidatedCandidateTimeoutMilliseconds);
+        nonce.CopyTo(session.PendingPathNonce);
+        RandomNumberGenerator.Fill(session.PendingPathChallenge);
+        Span<byte> binding = stackalloc byte[HostedUdpPathRebindCodec.PathBindingBytes];
+        WritePathBinding(remoteAddress, binding);
+        session.PendingPathChallengeLength = HostedUdpPathRebindCodec.WritePathFlight(
+            session.PendingPathChallengeFlight,
+            HostedPathDatagramKind.Challenge,
+            _manifest,
+            session.Connection,
+            attempt,
+            session.PendingPathGeneration,
+            session.PendingPathNonce,
+            session.PendingPathChallenge,
+            binding,
+            session.PathKey);
+        _pendingPathRebinds++;
+        SendPathChallenge(session, listener, remoteAddress);
+    }
+
+    private void SendPathChallenge(
+        HostedUdpProtocolSession session,
+        SharedUdpServerListener listener,
+        ReadOnlySpan<byte> remoteAddress)
+    {
+        if (listener.TrySendUnknown(
+                session.PendingPathChallengeFlight.AsSpan(
+                    0, session.PendingPathChallengeLength), remoteAddress) ==
+            DatagramSendStatus.Accepted)
+            _pathRebindChallenges = SaturatingIncrement(_pathRebindChallenges);
+        else
+            _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
+    }
+
+    private void HandlePathProof(
+        HostedUdpProtocolSession session,
+        ReadOnlySpan<byte> datagram,
+        ulong attempt,
+        HostedPathGeneration generation,
+        ReadOnlySpan<byte> nonce,
+        ReadOnlySpan<byte> challenge,
+        ReadOnlySpan<byte> pathBinding,
+        ReadOnlySpan<byte> remoteAddress,
+        ulong now)
+    {
+        _pathRebindProofs = SaturatingIncrement(_pathRebindProofs);
+        Span<byte> expectedPath = stackalloc byte[
+            HostedUdpPathRebindCodec.PathBindingBytes];
+        WritePathBinding(remoteAddress, expectedPath);
+        if (!session.HasPendingPathRebind ||
+            generation != session.PendingPathGeneration ||
+            attempt != session.PendingPathAttempt ||
+            PackPath(remoteAddress) != session.PendingPath ||
+            !CryptographicOperations.FixedTimeEquals(nonce, session.PendingPathNonce) ||
+            !CryptographicOperations.FixedTimeEquals(
+                challenge, session.PendingPathChallenge) ||
+            !CryptographicOperations.FixedTimeEquals(pathBinding, expectedPath))
+        {
+            RejectPathRebind();
+            return;
+        }
+
+        IPEndPoint replacement = UnpackPath(session.PendingPath);
+        int commitLength = HostedUdpPathRebindCodec.WritePathFlight(
+            session.LastPathCommit,
+            HostedPathDatagramKind.Commit,
+            _manifest,
+            session.Connection,
+            attempt,
+            generation,
+            nonce,
+            challenge,
+            pathBinding,
+            session.PathKey);
+        datagram.CopyTo(session.LastPathProof);
+        if (!_listener.TryRebind(session.Endpoint, replacement))
+        {
+            CryptographicOperations.ZeroMemory(session.LastPathProof);
+            CryptographicOperations.ZeroMemory(session.LastPathCommit);
+            session.ClearPendingPathRebind();
+            _pendingPathRebinds--;
+            RejectPathRebind();
+            return;
+        }
+
+        session.LastPathProofLength = datagram.Length;
+        session.LastPathCommitLength = commitLength;
+        session.PathGeneration = generation;
+        session.LastCommittedPathAttempt = attempt;
+        session.ClearPendingPathRebind(clearFlights: false);
+        _pendingPathRebinds--;
+        session.LastActivityMilliseconds = now;
+        if (session.Endpoint.TrySendHandshake(
+                session.LastPathCommit.AsSpan(0, commitLength)) ==
+            DatagramSendStatus.Accepted)
+            _pathRebindCommits = SaturatingIncrement(_pathRebindCommits);
+        else
+            _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
+    }
+
+    private void SweepExpiredPathRebinds(ulong now)
+    {
+        for (int index = 0; index < _sessions.Length; index++)
+        {
+            if (_sessions[index] is not HostedUdpProtocolSession session ||
+                !session.HasPendingPathRebind ||
+                now < session.PendingPathExpiration) continue;
+            session.ClearPendingPathRebind();
+            _pendingPathRebinds--;
+            _pathRebindTimeouts = SaturatingIncrement(_pathRebindTimeouts);
+        }
+    }
+
+    private void RejectPathRebind() =>
+        _pathRebindRejections = SaturatingIncrement(_pathRebindRejections);
 
     private void SweepExpiredCandidates(ulong now)
     {
@@ -1225,6 +1527,17 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         return (((ulong)ipv4 << 16) | port) + 1UL;
     }
 
+    private static ulong PackPath(SocketAddress address)
+    {
+        if (address.Family != AddressFamily.InterNetwork || address.Size != 16)
+            throw new ArgumentException("Only IPv4 hosted paths are supported.",
+                nameof(address));
+        uint ipv4 = ((uint)address[4] << 24) | ((uint)address[5] << 16) |
+            ((uint)address[6] << 8) | address[7];
+        ushort port = (ushort)((address[2] << 8) | address[3]);
+        return (((ulong)ipv4 << 16) | port) + 1UL;
+    }
+
     private static IPEndPoint UnpackPath(ulong packed)
     {
         if (packed == 0) throw new ArgumentOutOfRangeException(nameof(packed));
@@ -1277,6 +1590,9 @@ public readonly record struct HostedUdpProtocolSessionSnapshot(
     UdpProtocolSessionState State,
     ConnectionId Connection,
     HostedCandidateId Candidate,
+    HostedPathGeneration PathGeneration,
+    bool PathRebindPending,
+    IPEndPoint RemoteEndPoint,
     NetworkProtocolSnapshot Server,
     UdpDatagramEndpointSnapshot Datagrams);
 
@@ -1295,6 +1611,7 @@ public sealed class HostedUdpProtocolSession : IDisposable
         HostedCandidateId candidate,
         byte[] clientFinish,
         byte[] serverFinish,
+        byte[] pathKey,
         ulong now)
     {
         Owner = owner;
@@ -1304,6 +1621,14 @@ public sealed class HostedUdpProtocolSession : IDisposable
         Candidate = candidate;
         ClientFinish = clientFinish;
         ServerFinish = serverFinish;
+        PathKey = pathKey;
+        PathGeneration = new(1);
+        LastIssuedPathGeneration = 1;
+        PendingPathNonce = new byte[HostedUdpPathRebindCodec.NonceBytes];
+        PendingPathChallenge = new byte[HostedUdpPathRebindCodec.ChallengeBytes];
+        PendingPathChallengeFlight = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
+        LastPathProof = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
+        LastPathCommit = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
         RawState = UdpProtocolSessionState.Established;
         LastActivityMilliseconds = now;
         LastKeepAliveMilliseconds = now;
@@ -1313,6 +1638,28 @@ public sealed class HostedUdpProtocolSession : IDisposable
     internal SharedUdpServerEndpoint Endpoint { get; }
     internal byte[] ClientFinish { get; }
     internal byte[] ServerFinish { get; }
+    internal byte[] PathKey { get; }
+    internal byte[] PendingPathNonce { get; }
+    internal byte[] PendingPathChallenge { get; }
+    internal byte[] PendingPathChallengeFlight { get; }
+    internal byte[] LastPathProof { get; }
+    internal byte[] LastPathCommit { get; }
+    internal HostedPathGeneration PathGeneration { get; set; }
+    internal HostedPathGeneration PendingPathGeneration { get; set; }
+    internal uint LastIssuedPathGeneration { get; set; }
+    internal ulong LastCommittedPathAttempt { get; set; }
+    internal ulong PendingPathAttempt { get; set; }
+    internal ulong PendingPath { get; set; }
+    internal ulong PendingPathExpiration { get; set; }
+    internal int PendingPathChallengeLength { get; set; }
+    internal int LastPathProofLength { get; set; }
+    internal int LastPathCommitLength { get; set; }
+    internal bool HasPendingPathRebind => PendingPathGeneration.IsValid;
+    internal long ReservedBytes => checked(
+        ClientFinish.Length + ServerFinish.Length + PathKey.Length +
+        PendingPathNonce.Length + PendingPathChallenge.Length +
+        PendingPathChallengeFlight.Length + LastPathProof.Length +
+        LastPathCommit.Length);
     internal UdpProtocolSessionState RawState { get; set; }
     internal ulong LastActivityMilliseconds { get; set; }
     internal ulong LastKeepAliveMilliseconds { get; set; }
@@ -1321,6 +1668,16 @@ public sealed class HostedUdpProtocolSession : IDisposable
     public ConnectionId Connection { get; }
     public HostedCandidateId Candidate { get; }
     public NetworkProtocolPeer Server { get; }
+    public IPEndPoint RemoteEndPoint
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return new IPEndPoint(
+                Endpoint.RemoteEndPoint.Address,
+                Endpoint.RemoteEndPoint.Port);
+        }
+    }
     public UdpProtocolSessionState State => _disposed
         ? UdpProtocolSessionState.Closed
         : Owner.GetState(this);
@@ -1347,6 +1704,23 @@ public sealed class HostedUdpProtocolSession : IDisposable
     {
         CryptographicOperations.ZeroMemory(ClientFinish);
         CryptographicOperations.ZeroMemory(ServerFinish);
+        CryptographicOperations.ZeroMemory(PathKey);
+        ClearPendingPathRebind();
+        CryptographicOperations.ZeroMemory(LastPathProof);
+        CryptographicOperations.ZeroMemory(LastPathCommit);
         _disposed = true;
+    }
+
+    internal void ClearPendingPathRebind(bool clearFlights = true)
+    {
+        CryptographicOperations.ZeroMemory(PendingPathNonce);
+        CryptographicOperations.ZeroMemory(PendingPathChallenge);
+        if (clearFlights)
+            CryptographicOperations.ZeroMemory(PendingPathChallengeFlight);
+        PendingPathGeneration = default;
+        PendingPathAttempt = 0;
+        PendingPath = 0;
+        PendingPathExpiration = 0;
+        PendingPathChallengeLength = 0;
     }
 }

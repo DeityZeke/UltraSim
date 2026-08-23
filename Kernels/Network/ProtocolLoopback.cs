@@ -186,7 +186,7 @@ public sealed class ProtocolLoopback : IDisposable
 public sealed class NetworkProtocolPeer : IDisposable
 {
     private readonly int _ownerThreadId;
-    private readonly INetworkDatagramEndpoint _endpoint;
+    private INetworkDatagramEndpoint _endpoint;
     private readonly NetworkProtocolManifest _manifest;
     private readonly NetworkProtocolLimits _limits;
     private readonly int _maximumUnreliableSendFramesPerDatagram;
@@ -887,6 +887,20 @@ public sealed class NetworkProtocolPeer : IDisposable
         CryptographicOperations.ZeroMemory(_wireScratch);
         CryptographicOperations.ZeroMemory(_plaintextScratch);
         _disposed = true;
+    }
+
+    internal void ReplaceEndpoint(
+        INetworkDatagramEndpoint expected,
+        INetworkDatagramEndpoint replacement)
+    {
+        EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(replacement);
+        if (!ReferenceEquals(_endpoint, expected))
+            throw new InvalidOperationException(
+                "The secure peer endpoint replacement has stale ownership.");
+        _endpoint = replacement;
     }
 
     private int FragmentPayloadBytes =>

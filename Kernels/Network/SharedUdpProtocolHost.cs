@@ -916,6 +916,45 @@ internal sealed class SharedUdpServerListener : IDisposable
         return true;
     }
 
+    internal bool TryRebind(SharedUdpServerEndpoint endpoint, IPEndPoint remote)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(endpoint);
+        ArgumentNullException.ThrowIfNull(remote);
+        if ((uint)endpoint.Slot >= (uint)_endpoints.Length ||
+            !ReferenceEquals(_endpoints[endpoint.Slot], endpoint)) return false;
+        ulong oldKey = Pack(endpoint.RemoteEndPoint);
+        ulong newKey = Pack(remote);
+        if (oldKey == newKey || TryResolve(newKey, out _)) return false;
+
+        int mask = _routeKeys.Length - 1;
+        int oldIndex = Hash(oldKey) & mask;
+        bool found = false;
+        for (int probe = 0; probe < _routeKeys.Length; probe++)
+        {
+            ulong current = _routeKeys[oldIndex];
+            if (current == 0) break;
+            if (current == oldKey && _routeSlots[oldIndex] == endpoint.Slot)
+            {
+                found = true;
+                break;
+            }
+            oldIndex = (oldIndex + 1) & mask;
+        }
+        int newIndex = FindInsertion(newKey);
+        if (!found || newIndex < 0) return false;
+
+        SocketAddress address = remote.Serialize();
+        byte[] binding = UdpDatagramEndpoint.CreatePathBinding(remote);
+        DiscardEndpointOutbound(endpoint);
+        _routeKeys[newIndex] = newKey;
+        _routeSlots[newIndex] = endpoint.Slot;
+        _routeKeys[oldIndex] = Tombstone;
+        _routeSlots[oldIndex] = -1;
+        endpoint.ApplyRemote(remote, address, binding);
+        return true;
+    }
+
     internal void PumpInbound()
     {
         EnsureOperational();
@@ -1668,9 +1707,9 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     }
 
     internal int Slot { get; }
-    internal IPEndPoint RemoteEndPoint { get; }
-    internal SocketAddress RemoteAddress { get; }
-    internal byte[] RemotePathBinding { get; }
+    internal IPEndPoint RemoteEndPoint { get; private set; }
+    internal SocketAddress RemoteAddress { get; private set; }
+    internal byte[] RemotePathBinding { get; private set; }
     internal int QueuedDatagrams => _count;
     internal bool IsDisposed => _disposed;
     internal ConnectionId Connection => _connection;
@@ -1690,6 +1729,21 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         if (_knownDatagramHandler is not null)
             throw new InvalidOperationException("The shared endpoint handshake handler is already bound.");
         _knownDatagramHandler = handler;
+    }
+
+    internal void ApplyRemote(
+        IPEndPoint remote,
+        SocketAddress remoteAddress,
+        byte[] remotePathBinding)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(remote);
+        ArgumentNullException.ThrowIfNull(remoteAddress);
+        ArgumentNullException.ThrowIfNull(remotePathBinding);
+        CryptographicOperations.ZeroMemory(RemotePathBinding);
+        RemoteEndPoint = remote;
+        RemoteAddress = remoteAddress;
+        RemotePathBinding = remotePathBinding;
     }
 
     internal bool TryEnqueue(ReadOnlySpan<byte> datagram)

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 
 namespace UltraSim.Network;
@@ -23,6 +24,13 @@ public readonly record struct HostedUdpClientSnapshot(
     ulong DuplicateServerFinishes,
     ConnectionId Connection,
     SecurityEpoch SecurityEpoch,
+    HostedPathGeneration PathGeneration,
+    HostedPathRebindState PathRebindState,
+    ulong PathRebindAttempts,
+    ulong PathRebindChallenges,
+    ulong PathRebindCommits,
+    ulong DuplicatePathCommits,
+    ulong PathRebindTimeouts,
     UdpDatagramEndpointSnapshot Datagrams,
     NetworkProtocolSnapshot Protocol);
 
@@ -48,7 +56,8 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     private readonly UdpProtocolLimits _udpLimits;
     private readonly NetworkProtocolManifest _manifest;
     private readonly INetworkMonotonicClock _clock;
-    private readonly UdpDatagramEndpoint _endpoint;
+    private UdpDatagramEndpoint _endpoint;
+    private readonly IPEndPoint _serverEndPoint;
     private ECDiffieHellman? _clientEcdh;
     private ECDsa? _trustedServer;
     private readonly byte[] _nonce;
@@ -59,11 +68,26 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     private byte[]? _transcript;
     private byte[]? _master;
     private byte[]? _serverFinish;
+    private readonly byte[] _pathKey = new byte[HostedUdpPathRebindCodec.KeyBytes];
+    private readonly byte[] _pathNonce = new byte[HostedUdpPathRebindCodec.NonceBytes];
+    private readonly byte[] _pathChallenge = new byte[HostedUdpPathRebindCodec.ChallengeBytes];
+    private readonly byte[] _pathBinding = new byte[HostedUdpPathRebindCodec.PathBindingBytes];
+    private readonly byte[] _pathFlight = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
+    private readonly byte[] _lastPathCommit = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
+    private UdpDatagramEndpoint? _pendingPathEndpoint;
     private NetworkProtocolPeer? _peer;
     private ConnectionId _connection;
     private SecurityEpoch _securityEpoch;
     private HandshakeStage _handshakeStage;
     private HostedUdpClientState _state;
+    private HostedPathGeneration _pathGeneration;
+    private HostedPathGeneration _pendingPathGeneration;
+    private HostedPathRebindState _pathRebindState;
+    private ulong _nextPathAttempt;
+    private ulong _pendingPathAttempt;
+    private int _pathFlightLength;
+    private int _lastPathCommitLength;
+    private int _pathRebindPumps;
     private ulong _lastActivity;
     private ulong _lastKeepAlive;
     private ulong _drainDeadline;
@@ -72,6 +96,11 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     private ulong _serverFlights;
     private ulong _invalidDatagrams;
     private ulong _duplicateServerFinishes;
+    private ulong _pathRebindAttempts;
+    private ulong _pathRebindChallenges;
+    private ulong _pathRebindCommits;
+    private ulong _duplicatePathCommits;
+    private ulong _pathRebindTimeouts;
     private bool _disposed;
 
     private HostedUdpProtocolClient(
@@ -80,6 +109,7 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
         NetworkProtocolManifest manifest,
         INetworkMonotonicClock clock,
         UdpDatagramEndpoint endpoint,
+        IPEndPoint serverEndPoint,
         ECDiffieHellman clientEcdh,
         ECDsa trustedServer,
         byte[] nonce,
@@ -90,6 +120,8 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
         _manifest = manifest;
         _clock = clock;
         _endpoint = endpoint;
+        _serverEndPoint = new IPEndPoint(
+            serverEndPoint.Address, serverEndPoint.Port);
         _clientEcdh = clientEcdh;
         _trustedServer = trustedServer;
         _nonce = nonce;
@@ -114,6 +146,16 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     public NetworkProtocolPeer? Peer
     {
         get { EnsureOperational(); return _peer; }
+    }
+
+    public HostedPathGeneration PathGeneration
+    {
+        get { EnsureOperational(); return _pathGeneration; }
+    }
+
+    public HostedPathRebindState PathRebindState
+    {
+        get { EnsureOperational(); return _pathRebindState; }
     }
 
     public IPEndPoint LocalEndPoint
@@ -191,7 +233,7 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
                 serverEndPoint);
             client = new HostedUdpProtocolClient(
                 protocolLimits, udpLimits, manifest, clock, endpoint,
-                ecdh, trusted, nonce, publicKey);
+                serverEndPoint, ecdh, trusted, nonce, publicKey);
             endpoint = null;
             ecdh = null;
             trusted = null;
@@ -226,6 +268,13 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             return;
         }
 
+        if (_state == HostedUdpClientState.Established &&
+            _pathRebindState != HostedPathRebindState.None)
+        {
+            PumpPathRebind();
+            if (_state != HostedUdpClientState.Established) return;
+        }
+
         NetworkProtocolPeer peer = _peer!;
         ulong receivedBefore = peer.ReceivedPacketCount;
         _ = peer.ProcessInbound(now);
@@ -250,6 +299,56 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             BeginDrainCore(_clock.Milliseconds);
     }
 
+    /// <summary>
+    /// Begins one bounded authenticated ownership transfer to a fresh local UDP
+    /// path. The current path remains the secure protocol path until commit.
+    /// </summary>
+    public bool TryBeginPathRebind(IPEndPoint? localEndPoint = null)
+    {
+        EnsureOperational();
+        if (_state != HostedUdpClientState.Established ||
+            _pathRebindState != HostedPathRebindState.None ||
+            _nextPathAttempt == ulong.MaxValue) return false;
+        UdpDatagramEndpoint? pending = null;
+        try
+        {
+            pending = UdpDatagramEndpoint.CreateConnectedClient(
+                _udpLimits,
+                localEndPoint ?? new IPEndPoint(IPAddress.Any, 0),
+                _serverEndPoint);
+            _nextPathAttempt++;
+            RandomNumberGenerator.Fill(_pathNonce);
+            _pathFlightLength = HostedUdpPathRebindCodec.WriteRequest(
+                _pathFlight,
+                _manifest,
+                _connection,
+                _nextPathAttempt,
+                _pathNonce,
+                _pathKey);
+            _pendingPathEndpoint = pending;
+            pending = null;
+            _pendingPathAttempt = _nextPathAttempt;
+            _pendingPathGeneration = default;
+            _pathRebindPumps = 0;
+            _pathRebindState = HostedPathRebindState.Requesting;
+            _pathRebindAttempts = SaturatingIncrement(_pathRebindAttempts);
+            return true;
+        }
+        catch (SocketException)
+        {
+            pending?.Dispose();
+            return false;
+        }
+    }
+
+    public bool TryCancelPathRebind()
+    {
+        EnsureOperational();
+        if (_pathRebindState != HostedPathRebindState.Requesting) return false;
+        CancelPathRebindCore(timedOut: false);
+        return true;
+    }
+
     public HostedUdpClientSnapshot GetSnapshot()
     {
         EnsureOperational();
@@ -262,6 +361,13 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             _duplicateServerFinishes,
             _connection,
             _securityEpoch,
+            _pathGeneration,
+            _pathRebindState,
+            _pathRebindAttempts,
+            _pathRebindChallenges,
+            _pathRebindCommits,
+            _duplicatePathCommits,
+            _pathRebindTimeouts,
             _endpoint.GetSnapshot(),
             _peer?.GetSnapshot() ?? default);
     }
@@ -272,6 +378,8 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
         if (_disposed) return;
         _peer?.Dispose();
         _peer = null;
+        _pendingPathEndpoint?.Dispose();
+        _pendingPathEndpoint = null;
         _endpoint.Dispose();
         ReleaseHandshakeSecrets();
         CryptographicOperations.ZeroMemory(_nonce);
@@ -279,6 +387,12 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
         CryptographicOperations.ZeroMemory(_cookie);
         CryptographicOperations.ZeroMemory(_sendScratch);
         CryptographicOperations.ZeroMemory(_receiveScratch);
+        CryptographicOperations.ZeroMemory(_pathKey);
+        CryptographicOperations.ZeroMemory(_pathNonce);
+        CryptographicOperations.ZeroMemory(_pathChallenge);
+        CryptographicOperations.ZeroMemory(_pathBinding);
+        CryptographicOperations.ZeroMemory(_pathFlight);
+        CryptographicOperations.ZeroMemory(_lastPathCommit);
         if (_serverFinish is not null)
         {
             CryptographicOperations.ZeroMemory(_serverFinish);
@@ -294,12 +408,33 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
         _endpoint.SuppressSendsForTesting = suppress;
     }
 
+    internal bool TryCopyPendingPathFlightForTesting(
+        Span<byte> destination,
+        out int written)
+    {
+        EnsureOperational();
+        written = 0;
+        if (_pathRebindState == HostedPathRebindState.None ||
+            destination.Length < _pathFlightLength) return false;
+        _pathFlight.AsSpan(0, _pathFlightLength).CopyTo(destination);
+        written = _pathFlightLength;
+        return true;
+    }
+
     bool IUdpKnownDatagramHandler.TryHandleKnownDatagram(
         ReadOnlySpan<byte> datagram)
     {
         if (_serverFinish is null || datagram.Length != _serverFinish.Length ||
             !CryptographicOperations.FixedTimeEquals(datagram, _serverFinish))
-            return false;
+        {
+            if (_lastPathCommitLength == 0 ||
+                datagram.Length != _lastPathCommitLength ||
+                !CryptographicOperations.FixedTimeEquals(
+                    datagram, _lastPathCommit.AsSpan(0, _lastPathCommitLength)))
+                return false;
+            _duplicatePathCommits = SaturatingIncrement(_duplicatePathCommits);
+            return true;
+        }
         _duplicateServerFinishes = SaturatingIncrement(_duplicateServerFinishes);
         return true;
     }
@@ -351,6 +486,102 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             {
                 EstablishProtocol();
                 break;
+            }
+            _invalidDatagrams = SaturatingIncrement(_invalidDatagrams);
+        }
+    }
+
+    private void PumpPathRebind()
+    {
+        UdpDatagramEndpoint pending = _pendingPathEndpoint ??
+            throw new InvalidOperationException(
+                "The hosted client path transaction has no endpoint.");
+        if (_pathRebindPumps >= _udpLimits.MaximumHandshakePumps)
+        {
+            if (_pathRebindState == HostedPathRebindState.Requesting)
+                CancelPathRebindCore(timedOut: true);
+            else
+                FailUncertainPathRebind();
+            return;
+        }
+        _pathRebindPumps++;
+        _ = pending.TrySend(_pathFlight.AsSpan(0, _pathFlightLength));
+
+        while (pending.TryReceive(_receiveScratch, out int received))
+        {
+            ReadOnlySpan<byte> datagram = _receiveScratch.AsSpan(0, received);
+            if (_pathRebindState == HostedPathRebindState.Requesting &&
+                HostedUdpPathRebindCodec.TryReadPathFlight(
+                    datagram,
+                    HostedPathDatagramKind.Challenge,
+                    _manifest,
+                    _connection,
+                    _pathKey,
+                    out ulong attempt,
+                    out HostedPathGeneration generation,
+                    out ReadOnlySpan<byte> nonce,
+                    out ReadOnlySpan<byte> challenge,
+                    out ReadOnlySpan<byte> pathBinding) &&
+                attempt == _pendingPathAttempt &&
+                generation.Value > _pathGeneration.Value &&
+                CryptographicOperations.FixedTimeEquals(nonce, _pathNonce))
+            {
+                challenge.CopyTo(_pathChallenge);
+                pathBinding.CopyTo(_pathBinding);
+                _pendingPathGeneration = generation;
+                _pathFlightLength = HostedUdpPathRebindCodec.WritePathFlight(
+                    _pathFlight,
+                    HostedPathDatagramKind.Proof,
+                    _manifest,
+                    _connection,
+                    attempt,
+                    generation,
+                    _pathNonce,
+                    _pathChallenge,
+                    _pathBinding,
+                    _pathKey);
+                _pathRebindState = HostedPathRebindState.Proving;
+                _pathRebindChallenges = SaturatingIncrement(_pathRebindChallenges);
+                continue;
+            }
+            if (_pathRebindState == HostedPathRebindState.Proving &&
+                HostedUdpPathRebindCodec.TryReadPathFlight(
+                    datagram,
+                    HostedPathDatagramKind.Commit,
+                    _manifest,
+                    _connection,
+                    _pathKey,
+                    out attempt,
+                    out generation,
+                    out nonce,
+                    out challenge,
+                    out pathBinding) &&
+                attempt == _pendingPathAttempt &&
+                generation == _pendingPathGeneration &&
+                CryptographicOperations.FixedTimeEquals(nonce, _pathNonce) &&
+                CryptographicOperations.FixedTimeEquals(challenge, _pathChallenge) &&
+                CryptographicOperations.FixedTimeEquals(pathBinding, _pathBinding))
+            {
+                datagram.CopyTo(_lastPathCommit);
+                _lastPathCommitLength = datagram.Length;
+                pending.BindKnownDatagramHandler(this);
+                _peer!.ReplaceEndpoint(_endpoint, pending);
+                UdpDatagramEndpoint prior = _endpoint;
+                _endpoint = pending;
+                _pendingPathEndpoint = null;
+                _pathGeneration = generation;
+                _pathRebindState = HostedPathRebindState.None;
+                _pendingPathGeneration = default;
+                _pendingPathAttempt = 0;
+                _pathFlightLength = 0;
+                _pathRebindPumps = 0;
+                CryptographicOperations.ZeroMemory(_pathNonce);
+                CryptographicOperations.ZeroMemory(_pathChallenge);
+                CryptographicOperations.ZeroMemory(_pathBinding);
+                CryptographicOperations.ZeroMemory(_pathFlight);
+                prior.Dispose();
+                _pathRebindCommits = SaturatingIncrement(_pathRebindCommits);
+                return;
             }
             _invalidDatagrams = SaturatingIncrement(_invalidDatagrams);
         }
@@ -416,9 +647,12 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             _master!,
             sendsClientToServer: true,
             usesMonotonicPacing: true);
+        HostedUdpPathRebindCodec.DeriveKey(
+            _master!, _manifest, _connection, _securityEpoch, _pathKey);
         _endpoint.BindKnownDatagramHandler(this);
         _handshakeStage = HandshakeStage.Complete;
         _state = HostedUdpClientState.Established;
+        _pathGeneration = new(1);
         _lastActivity = _clock.Milliseconds;
         _lastKeepAlive = _lastActivity;
         ReleaseHandshakeSecrets();
@@ -426,6 +660,13 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
 
     private void BeginDrainCore(ulong now)
     {
+        if (_pathRebindState == HostedPathRebindState.Proving)
+        {
+            FailUncertainPathRebind();
+            return;
+        }
+        if (_pathRebindState == HostedPathRebindState.Requesting)
+            CancelPathRebindCore(timedOut: false);
         _peer!.StopAcceptingNewSends();
         _state = HostedUdpClientState.Draining;
         _drainDeadline = checked(now + (ulong)_udpLimits.DrainTimeoutMilliseconds);
@@ -434,7 +675,10 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     private void CloseTransport()
     {
         if (_state == HostedUdpClientState.Closed) return;
+        _pendingPathEndpoint?.Dispose();
+        _pendingPathEndpoint = null;
         _endpoint.Dispose();
+        _pathRebindState = HostedPathRebindState.None;
         _state = HostedUdpClientState.Closed;
     }
 
@@ -442,6 +686,43 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     {
         ReleaseHandshakeSecrets();
         _endpoint.Dispose();
+        _state = HostedUdpClientState.Failed;
+    }
+
+    private void CancelPathRebindCore(bool timedOut)
+    {
+        _pendingPathEndpoint?.Dispose();
+        _pendingPathEndpoint = null;
+        _pendingPathGeneration = default;
+        _pendingPathAttempt = 0;
+        _pathFlightLength = 0;
+        _pathRebindPumps = 0;
+        _pathRebindState = HostedPathRebindState.None;
+        CryptographicOperations.ZeroMemory(_pathNonce);
+        CryptographicOperations.ZeroMemory(_pathChallenge);
+        CryptographicOperations.ZeroMemory(_pathBinding);
+        CryptographicOperations.ZeroMemory(_pathFlight);
+        if (timedOut)
+            _pathRebindTimeouts = SaturatingIncrement(_pathRebindTimeouts);
+    }
+
+    private void FailUncertainPathRebind()
+    {
+        _peer?.Dispose();
+        _peer = null;
+        _pendingPathEndpoint?.Dispose();
+        _pendingPathEndpoint = null;
+        _endpoint.Dispose();
+        _pendingPathGeneration = default;
+        _pendingPathAttempt = 0;
+        _pathFlightLength = 0;
+        _pathRebindPumps = 0;
+        _pathRebindState = HostedPathRebindState.None;
+        CryptographicOperations.ZeroMemory(_pathNonce);
+        CryptographicOperations.ZeroMemory(_pathChallenge);
+        CryptographicOperations.ZeroMemory(_pathBinding);
+        CryptographicOperations.ZeroMemory(_pathFlight);
+        _pathRebindTimeouts = SaturatingIncrement(_pathRebindTimeouts);
         _state = HostedUdpClientState.Failed;
     }
 

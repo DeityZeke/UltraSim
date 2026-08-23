@@ -34,7 +34,6 @@ HostedPromotionReusesImmutableCandidateAndRejectsCredentialReplacement
 HostedPromotionFailureAndTimeoutReleaseAllConnectionState
 HostedPromotionCapacityIsTransactionalAndReusable
 HostedDuplicateClientFinishRecoversWithoutSecondSession
-HostedTerminalSendFailureKeepsOneRecoverableSession
 HostedPromotionNativeReceiveMatchesScalarLifecycle
 HostedPromotionResamplesMonotonicTimeAfterInboundPublication
 WarmedHostedSecureDeliveryAllocatesZero
@@ -47,9 +46,7 @@ secure server peer. Bidirectional application messages use the existing protocol
 Candidate reuse is generation-fenced, promotion credentials are immutable,
 duplicate flights reuse cached work, invalid keys/proofs and capacity pressure
 publish no partial session, timeouts and retirement reclaim connection capacity,
-terminal success commits locally before its acknowledgement, a rejected first
-`ServerFinish` recovers through the same session and connection, and the host never
-disposes its deployment-owned signer. Scalar and native receive
+and the host never disposes its deployment-owned signer. Scalar and native receive
 paths converge identically. One warmed secure delivery and application-consume
 pass allocates 0 managed bytes on the owner thread.
 

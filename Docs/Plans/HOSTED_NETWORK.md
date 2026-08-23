@@ -1,6 +1,6 @@
 # Hosted Network H0: externally admitted shared UDP
 
-Status: active separate Network milestone. H0.0-H0.2 are implemented and stopped
+Status: active separate Network milestone. H0.0-H0.3 are implemented and stopped
 for review. N1.0-N1.4 replication semantics remain unchanged and N1.5 has not
 started.
 
@@ -132,18 +132,68 @@ rebinding, and an IP endpoint is still not connection or participant identity.
 
 Do not create a second secure packet format or a hosted-only replication path.
 
-## H0.3 — path ownership and rebinding
+## H0.3 implementation stop — authenticated path ownership
 
-Freeze one explicit policy for endpoint changes after authentication:
+H0.3 freezes one concrete IPv4 endpoint-change policy without making an endpoint
+the connection identity:
 
-- an IP/port is never identity;
-- bytes from an unproven replacement path cannot mutate the established peer;
-- an authenticated path challenge/response (or an explicitly selected stricter
-  policy) fences rebinding;
-- the old path remains valid or retires according to one bounded transition;
-- stale-path packets and delayed rebind proofs cannot reclaim current ownership;
-- IPv6 is added deliberately here or in a named follow-up, not silently inferred
-  from the IPv4 H0.1 layout.
+```text
+established connection C owns path A / generation G
+        |
+authenticated Request arrives from unregistered path B
+        |
+one bounded pending attempt for C
+        |
+server Challenge bound to B + attempt + generation G'
+        |
+client Proof from B
+        |
+atomic listener route A -> B
+        |
+server Commit on B
+```
+
+Accepted behavior:
+
+- ordinary or malformed bytes from an unknown path never route to or mutate the
+  established secure peer;
+- a dedicated 256-bit path key is derived from the authenticated handshake master,
+  exact connection/security identity, and protocol manifest, then retained only
+  by the transport session endpoints;
+- Request, Challenge, Proof, and Commit are canonical manifest-bound HMAC flights;
+  the 91-byte Request proves session-key possession before the server emits the
+  134-byte Challenge;
+- every established session owns at most one pending attempt, bounded by existing
+  session capacity, with a monotonic attempt floor, generation-fenced replacement,
+  and the existing validated-candidate timeout as its deadline;
+- the Challenge records the server-observed replacement IPv4/port. Proof must
+  return from that exact path and echo the attempt, generation, nonce, challenge,
+  and path binding under authentication;
+- the original path remains current while Request/Challenge is pending. A valid
+  Proof commits the listener route change and `HostedPathGeneration` first, then
+  sends Commit; it never allocates a second connection or secure peer;
+- a lost/rejected Commit leaves the new path authoritative. Repeated exact Proof
+  on that now-known path resends the cached Commit and converges the client;
+- server timeout and client cancellation before Proof leave the current route
+  untouched. Once Proof has been sent, the client cannot safely infer ownership
+  from a missing Commit; terminal timeout fails the client transport closed instead
+  of falling back to a potentially retired path;
+- stale generation, stale attempt, wrong-path, corrupt, or delayed proofs cannot
+  reclaim ownership;
+- the client swaps the existing secure peer to its new connected UDP endpoint only
+  after authenticating Commit. Existing lane, packet-number, replay, congestion,
+  and application state survive unchanged;
+- queued native server datagrams for the old endpoint are discarded before the
+  route moves, so no retained send is submitted to a retired path;
+- retirement clears the path key and all pending/cached path-control material;
+- IPv6 remains a named follow-up and is not inferred from this exact seven-byte
+  IPv4 path binding.
+
+The permanent H0.3 acceptance proves repeated rebinding with one connection/peer,
+bidirectional secure traffic after the move, local-commit recovery after a lost
+Commit, stale/wrong-path rejection after later generations, timeout preservation
+of the old path, scalar/native receive parity, fixed canonical flight sizes, and
+zero warmed managed allocation for ordinary secure delivery after rebinding.
 
 ## H0.4 — connection-owner sharding
 
@@ -180,6 +230,6 @@ contracts.
 
 ## Current stop
 
-Stop after H0.2 review. Do not begin H0.3 path rebinding, owner sharding, N1.5,
+Stop after H0.3 review. Do not begin H0.4 owner sharding, N1.5,
 N0 deletion, 2K/4K, public-WAN exposure, or production CCU claims until this
-authenticated-promotion boundary is accepted.
+authenticated path-ownership boundary is accepted.

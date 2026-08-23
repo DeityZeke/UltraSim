@@ -2,8 +2,9 @@
 
 Status: N0.0 through the hardened N0.9 integrated topology are accepted. N0.10
 scale work includes the V2/V3 comparison and bounded shared-listener
-specialization. Hosted H0.0-H0.2 now add externally sourced admission and
-transactional authenticated promotion, stopped before path rebinding.
+specialization. Hosted H0.0-H0.3 now add externally sourced admission,
+transactional authenticated promotion, and explicit path ownership, stopped
+before connection-owner sharding.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -242,7 +243,7 @@ nonblocking localhost UDP sockets. `UdpProtocolLimits` bounds datagram bytes,
 configured socket buffers, handshake work, cookie buckets, idle retirement, and
 graceful drain. Socket and protocol state share one owner thread.
 
-## Hosted H0.0-H0.2 external admission and promotion
+## Hosted H0.0-H0.3 external admission, promotion, and path ownership
 
 `HostedUdpAdmissionHost` binds a caller-selected IPv4 server endpoint and requires
 a caller-owned deployment identity. Unlike `CreateSelfTrustedLoopback`, it creates
@@ -268,8 +269,18 @@ but never disposes the deployment-owned signer.
 
 `HostedUdpProtocolClient` is the matching nonblocking external client. It requires
 an out-of-band pinned server public key, performs no self-trust, and exposes the
-same secure peer/lane machinery after establishment. H0.2 intentionally accepts
-only the exact established path; endpoint rebinding remains H0.3.
+same secure peer/lane machinery after establishment.
+
+H0.3 retains one HMAC path key and at most one pending path transaction per
+established session. An authenticated Request from an unknown IPv4/port receives
+a path-bound Challenge; only a matching Proof from that exact path atomically
+moves the shared-listener route and advances `HostedPathGeneration`. The secure
+peer, `ConnectionId`, packet/replay state, and Game-independent session object are
+retained. Commit is sent after local ownership changes, and an exact duplicate
+Proof on the new path recovers a lost terminal flight. Pending timeout/cancel,
+wrong-path proofs, and stale attempts leave the current path unchanged. Normal
+unknown bytes never become an implicit rebind. IPv6 remains explicit follow-up
+work rather than an accidental widening of the frozen IPv4 binding.
 
 The handshake cookie covers the client address/port and a current or immediately
 previous monotonic time bucket. Maximum accepted age can therefore approach twice
@@ -331,15 +342,14 @@ RTO early, and a later fatal socket failure can discard unreliable traffic. A
 future production acceptor must therefore define queue-age/fatal-transport policy
 and fault-inject `EAGAIN`, `ENOBUFS`, and partial submissions.
 
-### Deferred production host boundary
+### Hosted production boundary remains incomplete
 
-The current loopback host is not a public CCU acceptor. That future topology must
-earn listener-lifetime cookie keys, bounded unauthenticated handshake admission,
-amplification/rate limits, IPv6 and path-rebinding policy, and owner-thread/core
-sharding with explicit packet-memory transfer. Those are production Network-host
-requirements, not safe micro-patches to the accepted single-owner loopback proof.
-They remain deferred while Terrain T0 is the active repository milestone; N1 or a
-dedicated hosted-Network milestone must measure them before claiming remote CCU.
+The original loopback host is not a public CCU acceptor. Hosted H0.0-H0.3 have now
+earned listener-lifetime cookies, bounded unauthenticated admission,
+amplification/rate limits, deployment-pinned promotion, and explicit IPv4 path
+ownership on one listener owner. IPv6 and owner-thread/core sharding with explicit
+packet-memory transfer remain unearned production Network-host requirements.
+H0.4/H0.5 must measure them before any remote CCU claim.
 
 ### N0.10.2 reliable-only ACK elicitation
 
