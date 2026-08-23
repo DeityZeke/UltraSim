@@ -78,9 +78,11 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Terrain / World T0](Plans/TERRAIN.md) is accepted/frozen through the launchable
   T0.10 woods/cabin vertical.
-- [Network N1](Plans/NETWORK.md) is selected for the current game through N1.4
-  and the Hosted H0.5 dedicated-process closure. N1.5, N0 deletion, 2K/4K, and
-  public-WAN/production-CCU claims remain stopped.
+- [Network N1](Plans/NETWORK.md) is selected as the current game's
+  `ChunkPublication` profile through N1.4 and the Hosted H0.5 dedicated-process
+  closure. Frozen N0 is retained as `MaintainedEntityRelation`; N1.5,
+  `DirtyEntitySpatialFanout`, 2K/4K, and public-WAN/production-CCU claims remain
+  stopped.
 
 ## Source-of-truth hierarchy
 

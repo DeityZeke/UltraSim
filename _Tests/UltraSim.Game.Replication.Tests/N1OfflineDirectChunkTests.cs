@@ -18,6 +18,64 @@ internal static class N1OfflineDirectChunkTests
         15_000, 15_500,
         23_000, 23_500);
 
+    internal static ReplicationProfileConformanceObservation CaptureProfileConformance()
+    {
+        using var fixture = new Fixture(historyCapacity: 8, entityCount: 2);
+        WorldPosition firstPosition = Position(0, 0, 2_000, 2_000);
+        WorldPosition currentPosition = Position(0, 0, 2_100, 2_000);
+        SpatialChunkKey includedKey = Key(0, 0);
+        SpatialChunkKey excludedKey = Key(10, 10);
+        fixture.Present(0, firstPosition, GameWorldPublicPrefabIds.Character);
+        fixture.Present(1, Position(10, 10, 2_000, 2_000), GameWorldPublicPrefabIds.WoodlandAnimal);
+
+        var recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(64, 4, 4),
+            Interest,
+            new OfflineDirectChunkCadence(1, 1, 1));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(
+                fixture.Store,
+                GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000),
+                changes,
+                out _));
+        int included = FindSubscription(recipient, includedKey);
+        bool disclosure = !ContainsSubscription(recipient, excludedKey);
+
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, included, 0, out OfflineDirectChunkRead first));
+        True(first.Snapshot.Length == 1);
+        WorldPublicRecord firstRecord = first.Snapshot[0];
+        OfflineDirectChunkDeliveryTicket lost = recipient.ReleaseReadForRemote(1);
+        bool sentDidNotAdvance = !recipient.Subscriptions[included].HasKnowledge;
+
+        fixture.Present(0, currentPosition, GameWorldPublicPrefabIds.Character);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            recipient.TryBeginRead(fixture.Store, included, 1, out OfflineDirectChunkRead current));
+        True(current.Snapshot.Length == 1);
+        WorldPublicRecord currentRecord = current.Snapshot[0];
+        OfflineDirectChunkDeliveryTicket retry = recipient.ReleaseReadForRemote(2);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            recipient.CommitAppliedProof(retry));
+        bool staleProofFenced = recipient.CommitAppliedProof(lost) ==
+            OfflineDirectChunkAppliedProofStatus.Stale;
+        OfflineDirectChunkSubscription applied = recipient.Subscriptions[included];
+
+        return new ReplicationProfileConformanceObservation(
+            GamePublicReplicationProfileId.ChunkPublication,
+            currentRecord.Position == currentPosition &&
+                currentRecord.LastChangedRevision == retry.Cursor.Revision,
+            disclosure,
+            firstRecord.Id == currentRecord.Id &&
+                currentRecord.EntityPublicVersion > firstRecord.EntityPublicVersion,
+            sentDidNotAdvance,
+            staleProofFenced,
+            applied.HasKnowledge && applied.Cursor == retry.Cursor,
+            recipient.GetStorageSnapshot().TotalReservedBytes);
+    }
+
     internal static void SubscriptionTopologyAndClientEquivalence()
     {
         using var fixture = new Fixture(historyCapacity: 32);
@@ -1683,6 +1741,15 @@ internal static class N1OfflineDirectChunkTests
         for (int index = 0; index < recipient.Subscriptions.Length; index++)
             if (recipient.Subscriptions[index].Interest.Key == key) return index;
         throw new InvalidOperationException($"Subscription {key} was not found.");
+    }
+
+    private static bool ContainsSubscription(
+        OfflineDirectChunkRecipient recipient,
+        SpatialChunkKey key)
+    {
+        for (int index = 0; index < recipient.Subscriptions.Length; index++)
+            if (recipient.Subscriptions[index].Interest.Key == key) return true;
+        return false;
     }
 
     private static int FindAbsentSubscription(

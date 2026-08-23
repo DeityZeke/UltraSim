@@ -4,9 +4,11 @@ UltraSim is a bounded, deterministic simulation and game-runtime foundation for
 very large persistent worlds. The repository contains the accepted ECS 3.4.2
 kernel, authoritative Runtime/hosts, transactional persistence, neutral UI
 protocol and Godot renderer, concrete game composition, Accounting, Admission,
-Inventory, and the completed remote-authority Network N0 foundation.
+Inventory, the accepted Terrain/World T0 vertical, and the completed hosted
+remote-authority foundation.
 
-Network N0 is now frozen as the executable/reference remote path. It includes
+The original Network N0 path is frozen and retained as the explicit
+`MaintainedEntityRelation` Game replication profile. It includes
 secure ProtocolLoopback and UDP, authenticated application binding, controlled
 input/owner state, observer WorldState, retained Events, atomic baseline recovery,
 generation replacement, shared-listener/native socket batching, long-lived
@@ -15,23 +17,24 @@ evidence. Dense-400 demonstrated a usable <=6 ms server-role observation; sparse
 V3 remains materially behind frozen V2 scale. The final N0.11 exact-AOI experiment
 removed substantial relation/record/wire work but worsened server-role p95 because
 precise recipient/entity membership reconciliation doubled interest-update cost.
-That result closes open-ended N0 tuning and identifies world-spatial topology as
+That result closed open-ended N0 tuning and identified world-spatial topology as
 the next architectural dependency rather than another packet/codec problem.
 
-The active major milestone is **Terrain / World T0**. T0 builds the chunk-native
+Terrain / World T0 is accepted/frozen. It provides the chunk-native
 world substrate originally intended for terrain, statics, streaming, and AOI:
 deterministic chunk-relative coordinates, packed terrain and UO-like statics,
 logical Multi structure composition, a separate future 3D region/property seam,
 derived dynamic ECS membership, one shared
 revisioned publication page per chunk, bounded dirty history, local snapshot/delta
 streaming, and efficient Godot terrain/static rendering. The acceptance vertical
-is a small woods/cabin world rather than another isolated kernel demo.
+is a launchable woods/cabin world rather than another isolated kernel demo.
 
-**Network N1 is deliberately deferred until T0 is accepted.** N1 will then test
-recipient-to-chunk subscriptions/cursors against the frozen N0 sparse relation
-graph: snapshot a chunk on first interest, query its bounded dirty history at AOI
-cadence thereafter, change query frequency rather than entity semantic type, and
-let the client perform fine public visibility. See the forward plans below.
+Network N1.0-N1.4 and Hosted H0.0-H0.5 are accepted. The dedicated-server/
+independent-client gate selects `ChunkPublication` as the current UltraSim game
+profile while retaining `MaintainedEntityRelation` as a supported comparison and
+alternate Game policy. Both flatten after Game encoding into the same hosted
+Network machinery. N1.5 shared packing and the future `DirtyEntitySpatialFanout`
+profile have not started.
 
 ## Design
 
@@ -117,11 +120,12 @@ revision/hash identity, and the fourth `worldview` save-set participant. Its
 implementation plus client-portability/invariant hardening is accepted/frozen.
 Prepared client meshes honor overlays; empty/no-op overlay
 lineage is save/restore-closed; and ordinary identity validation uses cold
-bound-pack indexes rather than rescanning the immutable world. T0.10 is active:
+bound-pack indexes rather than rescanning the immutable world. T0.10 is accepted:
 retained Direct/Destination authority and cadence semantics are closed, and
 `Client/Playable.Godot` now provides the first real OfflineDirect woods/cabin
-application. Human acceptance and the broad performance matrix remain before
-T0 freeze. Network N1 remains deferred.
+application. Human acceptance and the broad performance matrix closed T0. Network
+N1 is now selected through the Hosted H0.5 remote-process gate; the current profile
+seam and paired conformance tests live in `Game/Replication`.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
@@ -170,7 +174,7 @@ Start with the [documentation map](Docs/README.md).
 - [Network kernel foundation](Kernels/Network/README.md)
 - [Game replication](Game/Replication/README.md)
 - [Benchmark methodology](_Benchmarks/README.md)
-- [Terrain / World T0 active plan](Docs/Plans/TERRAIN.md)
+- [Terrain / World T0 accepted plan/status](Docs/Plans/TERRAIN.md)
 - [Network V3 N1 plan/status](Docs/Plans/NETWORK.md)
 - [Hosted Network H0](Docs/Plans/HOSTED_NETWORK.md)
 

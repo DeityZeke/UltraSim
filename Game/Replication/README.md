@@ -21,8 +21,10 @@ exceptional atomic Bulk snapshot transaction. N1.4's shared dirty-work scheduler
 exact stable-interest fast path, bounded mixed-cadence traversal, and compact
 recipient/reverse-index storage are accepted. The representative/mixed/shared-
 socket matrix and Hosted H0.5
-dedicated-process gate select N1 for the current game. N0 remains compiled as the
-historical/reference profile; N1.5 and N0 deletion remain separate gates.
+dedicated-process gate select `ChunkPublication` for the current game. The frozen
+N0 implementation is retained and explicitly identified as the
+`MaintainedEntityRelation` Game profile. N1.5 and `DirtyEntitySpatialFanout` remain
+unstarted.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -40,6 +42,34 @@ boundary; it does not freeze capture for already admitted participants.
 `Game/Replication` is the game-owned seam between committed authoritative state
 and Network delivery. It depends on the concrete game composition and Runtime;
 `Kernels/Network` remains independent of ECS, Game, Server, UI, and Client.
+
+## Public replication profiles
+
+`GamePublicReplicationProfiles` names the two accepted concrete profiles and the
+shared semantic guarantees both must preserve. It deliberately does not hide them
+behind a universal AOI/cursor interface:
+
+```text
+MaintainedEntityRelation
+    GameInterestService + RemoteWorldStateServer
+    recipient/entity relations + entity latest state
+
+ChunkPublication                         selected for this game
+    OfflineDirectChunkRecipient
+    ChunkPublicationWorkScheduler
+    RemoteChunkWorldStateServer
+    recipient/chunk subscriptions + chunk revision/history
+
+both
+    -> Game codec and retained semantic ticket
+    -> the same bounded Network delivery machinery
+```
+
+Permanent paired conformance tests exercise authoritative current truth,
+recipient-scoped disclosure, stable identity/lifetime, sent-not-known application
+proof, rejected/lost-work recovery, eventual convergence, and bounded reservation
+for both profiles. Their internal types and their deeper hostile/performance suites
+remain separate. The future `DirtyEntitySpatialFanout` profile has not started.
 
 ## Ownership
 

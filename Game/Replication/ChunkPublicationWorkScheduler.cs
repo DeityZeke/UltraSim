@@ -88,6 +88,9 @@ public readonly record struct ChunkPublicationWorkSchedulerStorageSnapshot(
 /// </summary>
 public sealed class ChunkPublicationWorkScheduler
 {
+    public static GamePublicReplicationProfileDescriptor PublicReplicationProfile =>
+        GamePublicReplicationProfiles.ChunkPublication;
+
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly ChunkPublicationWorkSchedulerLimits _limits;
     private readonly RecipientState[] _recipients;

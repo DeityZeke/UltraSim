@@ -67,6 +67,9 @@ public enum RemoteWorldBaselineProgressStatus : byte
 /// </remarks>
 public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
 {
+    public static GamePublicReplicationProfileDescriptor PublicReplicationProfile =>
+        GamePublicReplicationProfiles.MaintainedEntityRelation;
+
     private readonly NetworkProtocolPeer _peer;
     private GameInterestService _interest;
     private readonly ParticipantId _participant;

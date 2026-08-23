@@ -1,9 +1,11 @@
 # Network V3: N1 chunk-native world replication plan
 
-Status: N1 is selected as the current UltraSim game replication profile through
-the Hosted H0.5 dedicated-process gate. Network N0 remains accepted/frozen and
-compiled as the historical/reference profile. Terrain / World T0 is accepted/
-frozen as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
+Status: `ChunkPublication` is selected as the current UltraSim game public
+replication profile through the Hosted H0.5 dedicated-process gate. The frozen N0
+implementation is retained explicitly as the `MaintainedEntityRelation` profile,
+not as a second Network architecture or deletion candidate. Terrain / World T0 is
+accepted/frozen as of 2026-08-21. N1.0's packet-free
+`OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
 accepted. N1.4 dirty-driven work discovery is accepted at `682fcdcd`; mixed-cadence,
@@ -13,8 +15,9 @@ remaining server-semantic, deterministic secure-transport, dense-entry, and
 topology-attribution matrix is captured. Representative roaming, mixed public/
 private traffic, and the in-process real shared-socket topology are accepted. The
 separate Hosted H0.5 dedicated-server/independent-client gate is also accepted, so
-N1 is now selected for the current UltraSim game. N0 remains compiled as the
-historical/reference profile; it has not been deleted.
+N1 is now selected for the current UltraSim game. Both concrete Game-owned profiles
+are registered by `GamePublicReplicationProfiles`; no generic AOI interface was
+introduced, and `DirtyEntitySpatialFanout` remains unstarted.
 
 The separately authorized externally admitted listener/security lifecycle is now
 tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.5 compose transactional
@@ -250,6 +253,37 @@ EntityLatestStateReplication   ChunkPublicationReplication
 
 Those pairs need not expose identical internal APIs or cursor models. Only their
 bounded encoded delivery offers converge on Network.
+
+The accepted profile-extraction checkpoint makes this boundary executable without
+renaming or redesigning the frozen implementations:
+
+```text
+MaintainedEntityRelation
+    GameInterestService
+    RemoteWorldStateServer
+    recipient/entity membership + entity latest-state lineage
+
+ChunkPublication                         selected for the current game
+    OfflineDirectChunkRecipient
+    ChunkPublicationWorkScheduler
+    RemoteChunkWorldStateServer
+    recipient/chunk membership + chunk revision/history lineage
+
+both
+    authoritative source truth
+    recipient disclosure
+    stable identity/lifetime
+    application proof (sent != known)
+    impairment recovery
+    eventual semantic convergence
+    bounded memory
+```
+
+`GamePublicReplicationProfiles` is a finite identity/descriptor catalog, not a
+factory or universal runtime interface. Permanent paired conformance probes execute
+the shared guarantees against both concrete profiles while their detailed hostile,
+recovery, and scale suites remain profile-specific. Obsolete N0 milestone naming
+may be cleaned up later; the entity-relation profile itself remains supported.
 
 Network does not load terrain files, build meshes, inspect ECS chunks, resolve
 Godot resources, or decide whether a tree is visible behind a wall.
@@ -725,7 +759,7 @@ The evidence artifact records the exact 1,472/1,405-byte datagram/message envelo
 128-ticket evidence ledger. Retained N1.0/N1.1 timing controls are repeated only
 as same-run context; they are not a controlled performance regression claim.
 This checkpoint does not implement snapshot transfer, UDP redesign, shared
-encoded-byte caching, N0 deletion, public-WAN admission, or production scale.
+encoded-byte caching, N0 profile extraction, public-WAN admission, or production scale.
 
 Evidence:
 [`network-n1.2-independent-chunk-delivery-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.2-independent-chunk-delivery-2026-08-21.json).
@@ -875,10 +909,10 @@ both
     -> the same minimal Network delivery mechanisms
 ```
 
-Do not delete N0 before N1 earns production adoption. A measured N1 win selects
-the current UltraSim game's replication profile; it does not prohibit another
-game, spectator mode, or specialized public stream from using a different bounded
-AOI policy.
+Do not remove the maintained entity-relation model when N1 earns production
+adoption. A measured N1 win selects the current UltraSim game's replication
+profile; it does not prohibit another game, spectator mode, or specialized public
+stream from using a different bounded AOI policy.
 
 Canonical profiles must include at least:
 
@@ -996,8 +1030,8 @@ Evidence:
 
 This is an N1.4 implementation stop, not production adoption. Keep the single
 client snapshot candidate until dense-entry evidence proves a larger bounded
-window is worthwhile. Do not begin N1.5 or delete N0 before review and the
-controlled matrix.
+window is worthwhile. Do not begin N1.5 or normalize N0 as a retained profile
+before review and the controlled matrix.
 
 ### N1.4 adoption-diagnostic and first-crossover stop — 2026-08-22
 
@@ -1217,7 +1251,9 @@ The cumulative N1.4 semantic/representative/mixed/shared-socket evidence plus H0
 therefore selects chunk-publication replication for the current UltraSim game.
 This is a Game profile decision, not a Network invariant and not a production CCU
 claim. N0 remains compiled as the comparison/reference implementation until a
-separate removal gate. N1.5 and 2K/4K remain unstarted.
+separate profile-extraction gate. That extraction is now complete: the implementation
+is the explicit `MaintainedEntityRelation` profile, while N1 is the selected
+`ChunkPublication` profile. N1.5 and 2K/4K remain unstarted.
 
 Evidence:
 [`network-n1.4-final-adoption-gates-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.json) and
@@ -1470,7 +1506,7 @@ Still require measured evidence before production adoption:
 - whether same-revision semantic encoding can be reused across recipients;
 - local transform quantization;
 - compression thresholds;
-- exact entity-relation profile retirement/retention point for this game;
+- future capacity/support policy for the retained entity-relation profile;
 - eventual server/world partition ownership boundaries.
 
 None of these decisions may move authority into Network or make private data part
@@ -1491,9 +1527,11 @@ cadence traversal, and compact recipient/reverse-index storage. Its mechanisms a
 accepted through the storage-compaction stop. The first remaining semantic,
 secure deterministic replay, dense-entry, representative topology, mixed-lane,
 and real shared-socket matrices are captured. Hosted H0.5 closes the dedicated-
-process gate, and the current-game profile is selected. N0 remains a retained
-reference and the selection does not authorize N1.5.
+process gate, and `ChunkPublication` is selected for the current game. The N0
+implementation is retained as the explicit `MaintainedEntityRelation` Game profile;
+the selection does not authorize N1.5.
 
-Stop after the H0.5 adoption closure. Do not begin N1.5 shared encoding, delete
-N0, run 2K/4K, or claim public-WAN/production CCU. The separately scoped hosted
-lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.
+Stop after the profile-extraction/conformance closure. Do not begin N1.5 shared
+encoding, `DirtyEntitySpatialFanout`, 2K/4K, or public-WAN/production-CCU claims.
+Do not remove the retained `MaintainedEntityRelation` profile. The separately
+scoped hosted lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.

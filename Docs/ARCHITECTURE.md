@@ -130,12 +130,13 @@ derived/application indexes when their ownership and scale are explicit.
   explicit comparison projects. The rest of `_Archive` is likewise outside the
   active project/build and Godot discovery surfaces.
 
-Network N0 is accepted as the current remote-authority reference, including
+Network N0 is accepted as the retained `MaintainedEntityRelation` profile, including
 bounded long-lived WorldState recovery and the measured dense/sparse evidence.
 Its final sparse experiments showed that steady-state replication scales much
 better than continuously mutating precise recipient/entity interest topology.
-Terrain / World T0 is accepted/frozen. The active major milestone is now
-[Network N1](Plans/NETWORK.md), measured against the retained N0 reference.
+Terrain / World T0 is accepted/frozen. [Network N1](Plans/NETWORK.md) and Hosted
+H0 are accepted through the dedicated-process gate; `ChunkPublication` is the
+selected current-game profile while `MaintainedEntityRelation` remains supported.
 T0.0 accepted the dependency-neutral Spatial seam plus the 16-byte game-world
 position/profile. T0.1 accepted persisted ECS position authority paired with a
 bounded, generation-owned maintained index through a generic Runtime post-ECS-step
@@ -196,15 +197,18 @@ validation to scale with retained replacements rather than the entire base pack;
 complete logical Multi-root replacement remains intentionally global.
 Runtime slots, publication cursors/history, client residency, and Godot resources
 remain derived and absent from the artifact.
-T0.10 closes the launchable local woods/cabin vertical. Network N1.0-N1.3 now
+T0.10 closes the launchable local woods/cabin vertical. Network N1.0-N1.4 now
 layer bounded recipient chunk subscriptions, canonical chunk messages/proofs,
 MTU-admissible independent-unreliable delta/absence delivery, and private atomic
-Bulk snapshot recovery onto those accepted publication/client-cache contracts.
-N0 remains the production/reference path until N1 proves the measured adoption
-gate.
+Bulk snapshot recovery plus dirty-driven scheduling onto those accepted
+publication/client-cache contracts. Hosted H0.0-H0.5 prove external admission,
+secure promotion, path rebinding, owner-thread handoff, and dedicated-process
+composition. `ChunkPublication` has therefore passed the current-game adoption
+gate; the N0 implementation remains the explicit `MaintainedEntityRelation`
+alternate/reference profile rather than a removal target.
 AOI is Game/Replication policy, not Network policy. The current UltraSim game is
-testing chunk subscriptions/publication history against the retained entity-
-relation profile, but either profile must flatten after Game encoding into the
+using chunk subscriptions/publication history alongside the retained entity-
+relation profile. Either profile must flatten after Game encoding into the
 same dependency-clean Network boundary: connection, descriptor/lane, bounded
 payload, security, delivery, and transport. Interest membership and replication-
 source cursor semantics remain concrete Game concerns; no universal generic AOI

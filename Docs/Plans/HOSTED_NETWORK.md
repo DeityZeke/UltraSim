@@ -330,12 +330,22 @@ Markdown artifacts.
 This closes the process-topology gate for selecting N1 as the current game's
 public replication profile. It does not establish public-WAN policy, production
 CCU, IPv6, multi-host/server-process connection migration, production admission
-rate values, or permission to delete N0. H0.4 remains intra-server-process
+rate values, or permission to remove the retained `MaintainedEntityRelation`
+profile. H0.4 remains intra-server-process
 thread-owner machinery; independent processes in H0.5 are the dedicated server
 and client workers.
 
+H0.5 proves process, socket, and owner-thread composition. N1.2 and N1.3 remain
+the authoritative deterministic impairment evidence for ordinary delivery and
+snapshot recovery: loss, duplication, delay/reorder, corruption, lost proofs,
+history recovery, and epoch/subscription replacement all converge or fail closed
+there through the same authenticated protocol and semantic cache used by H0.5.
+H0.5 additionally proves lost H0.3 Commit recovery across the owner split; it does
+not claim to repeat every N1 impairment permutation in the process harness.
+
 ## Current stop
 
-Stop after H0.5. Do not begin N1.5 shared packing, delete N0, run 2K/4K, claim
-public-WAN readiness/production CCU, or generalize the owner handoff into
-server-process migration without a separately reviewed checkpoint.
+Stop after H0.5 and the Game-owned replication-profile extraction. Do not begin
+N1.5 shared packing, `DirtyEntitySpatialFanout`, 2K/4K, claim public-WAN readiness/
+production CCU, remove `MaintainedEntityRelation`, or generalize the owner handoff
+into server-process migration without a separately reviewed checkpoint.

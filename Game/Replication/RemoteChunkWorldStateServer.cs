@@ -66,6 +66,9 @@ public readonly record struct RemoteChunkWorldStateServerSnapshot(
 /// </summary>
 public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor
 {
+    public static GamePublicReplicationProfileDescriptor PublicReplicationProfile =>
+        GamePublicReplicationProfiles.ChunkPublication;
+
     private readonly NetworkProtocolPeer _peer;
     private readonly OfflineDirectChunkRecipient _recipient;
     private ChunkPublicationStore _source;

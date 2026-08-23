@@ -231,6 +231,9 @@ public readonly record struct OfflineDirectChunkReconcileAttribution(
 /// </summary>
 public sealed class OfflineDirectChunkRecipient
 {
+    public static GamePublicReplicationProfileDescriptor PublicReplicationProfile =>
+        GamePublicReplicationProfiles.ChunkPublication;
+
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly OfflineDirectChunkRecipientLimits _limits;
     private readonly ChunkInterestProfile _interestProfile;

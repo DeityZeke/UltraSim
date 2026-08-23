@@ -18,6 +18,9 @@ namespace UltraSim.Game.Replication;
 /// </remarks>
 public sealed class GameInterestService
 {
+    public static GamePublicReplicationProfileDescriptor PublicReplicationProfile =>
+        GamePublicReplicationProfiles.MaintainedEntityRelation;
+
     private const int BundleHeaderEstimate = sizeof(ulong) * 3 + sizeof(byte);
     public const int DeferredDelayHistogramLength = 16;
 

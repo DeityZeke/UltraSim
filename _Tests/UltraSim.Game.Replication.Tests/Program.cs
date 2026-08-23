@@ -13,6 +13,7 @@ using UltraSim.UI;
 
 var tests = new (string Name, Action Body)[]
 {
+    ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("NetworkProfileIsExplicitAndLocalProfileRetainsSpatialLifecycle", NetworkProfileIsExplicit),
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),
     ("ChangedConsumersIngressAndWarmedCaptureAreIndependentAndBounded", ChangedConsumersIngressAndAllocation),
@@ -87,7 +88,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Network N0/N1.0-N1.4 game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} MaintainedEntityRelation/ChunkPublication game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

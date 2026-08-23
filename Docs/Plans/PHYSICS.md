@@ -1,10 +1,10 @@
 # Physics P0: injected authoritative motion plan
 
 Status: deferred forward plan. Terrain / World T0 and the launchable local client
-established the first concrete collision and locomotion evidence. Network N1 is
-the active major milestone. Begin Physics P0 after N1 accepts its chunk-native
-replication and remote-control handoff, unless an N1 correctness issue requires a
-smaller physics seam earlier.
+established the first concrete collision and locomotion evidence. Network N1 and
+Hosted H0 have since accepted the chunk-native replication and remote-control/
+process handoff gates. Physics P0 remains deferred until it is separately
+authorized; replication-profile extraction does not start physics implicitly.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
