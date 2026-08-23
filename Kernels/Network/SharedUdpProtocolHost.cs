@@ -706,6 +706,17 @@ internal interface ISharedUdpUnknownDatagramHandler
         ReadOnlySpan<byte> remoteAddress);
 }
 
+/// <summary>
+/// Consumes only authenticated-handshake residue on an already registered path.
+/// Ordinary secure protocol datagrams return false and enter the endpoint queue.
+/// </summary>
+internal interface ISharedUdpKnownDatagramHandler
+{
+    bool TryHandleKnownDatagram(
+        SharedUdpServerEndpoint endpoint,
+        ReadOnlySpan<byte> datagram);
+}
+
 internal sealed class SharedUdpServerListener : IDisposable
 {
     private const ulong Tombstone = ulong.MaxValue;
@@ -1614,6 +1625,7 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     private int _head;
     private int _count;
     private ConnectionId _connection;
+    private ISharedUdpKnownDatagramHandler? _knownDatagramHandler;
     private ulong _sent;
     private ulong _received;
     private ulong _sentBytes;
@@ -1647,6 +1659,7 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     internal byte[] RemotePathBinding { get; }
     internal int QueuedDatagrams => _count;
     internal bool IsDisposed => _disposed;
+    internal ConnectionId Connection => _connection;
 
     internal void BindConnection(ConnectionId connection)
     {
@@ -1654,6 +1667,15 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         if (_connection.IsValid || !connection.IsValid)
             throw new InvalidOperationException("The shared endpoint connection binding is invalid.");
         _connection = connection;
+    }
+
+    internal void BindKnownDatagramHandler(ISharedUdpKnownDatagramHandler handler)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_knownDatagramHandler is not null)
+            throw new InvalidOperationException("The shared endpoint handshake handler is already bound.");
+        _knownDatagramHandler = handler;
     }
 
     internal bool TryEnqueue(ReadOnlySpan<byte> datagram)
@@ -1664,6 +1686,11 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
             _rejected = SaturatingIncrement(_rejected);
             return false;
         }
+        _received = SaturatingIncrement(_received);
+        _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)datagram.Length));
+        _maximumReceivedDatagramBytes = Math.Max(_maximumReceivedDatagramBytes, datagram.Length);
+        if (_knownDatagramHandler?.TryHandleKnownDatagram(this, datagram) == true)
+            return true;
         if (_count == _lengths.Length)
         {
             _capacityDrops = SaturatingIncrement(_capacityDrops);
@@ -1673,9 +1700,13 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         datagram.CopyTo(_payloads.AsSpan(tail * _maximumDatagramBytes));
         _lengths[tail] = datagram.Length;
         _count++;
-        _received = SaturatingIncrement(_received);
-        _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)datagram.Length));
         return true;
+    }
+
+    internal DatagramSendStatus TrySendHandshake(ReadOnlySpan<byte> datagram)
+    {
+        EnsureOperational();
+        return _listener.TrySendImmediate(Slot, datagram);
     }
 
     public DatagramSendStatus TrySend(ReadOnlySpan<byte> datagram)
@@ -1731,6 +1762,7 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         EnsureOwnerThread();
         if (_disposed) return;
         _listener.Unregister(this);
+        _knownDatagramHandler = null;
         _disposed = true;
         CryptographicOperations.ZeroMemory(_payloads);
         CryptographicOperations.ZeroMemory(RemotePathBinding);

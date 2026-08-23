@@ -16,9 +16,10 @@ topology are now captured without starting the separately deferred public hosted
 listener lifecycle.
 
 The separately authorized externally admitted listener/security lifecycle is now
-tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0/H0.1 are implemented and
-stopped before authenticated candidate promotion. That milestone remains Network-
-generic and does not alter N1 replication meaning.
+tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.2 are implemented and
+stopped after transactional authenticated candidate promotion, before path
+rebinding. That milestone remains Network-generic and does not alter N1
+replication meaning.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -1487,6 +1488,6 @@ remains conditional on an explicitly authorized hosted-listener/sharded-client g
 
 Stop at the N1.4 final adoption-gates checkpoint. Do not begin N1.5 shared
 encoding, delete N0, run 2K/4K, or claim production CCU. The separately scoped
-hosted-listener/security lifecycle has been authorized and now stops at its H0.1
-external cookie-admission review; see `HOSTED_NETWORK.md`. N1's final remote
+hosted-listener/security lifecycle has been authorized and now stops at its H0.2
+authenticated-promotion review; see `HOSTED_NETWORK.md`. N1's final remote
 adoption still waits for that milestone's H0.5 dedicated-server/sharded-client run.

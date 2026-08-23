@@ -68,8 +68,12 @@ internal static class ProtocolLoopbackHandshake
     internal const int NonceBytes = 32;
     internal const int CookieBytes = 16;
     internal const int MaximumClientPublicKeyBytes = 512;
-    private const int ProofBytes = 32;
-    private const int SignatureBytes = 64;
+    internal const int MasterSecretBytes = 32;
+    internal const int ProofBytes = 32;
+    internal const int SignatureBytes = 64;
+    internal const int MaximumTranscriptBytes =
+        2 + 8 + NonceBytes + 2 + MaximumClientPublicKeyBytes + 2 +
+        MaximumClientPublicKeyBytes + 4 + 4 + 4;
 
     internal static bool TryEstablish(
         DeterministicDatagramLink link,
@@ -227,7 +231,7 @@ internal static class ProtocolLoopbackHandshake
                     ReadOnlySpan<byte> datagram = receive.AsSpan(0, length);
                     if (TryReadClientHello(datagram, serverManifest, out ReadOnlySpan<byte> nonce, out ReadOnlySpan<byte> publicKey))
                     {
-                        ComputeCookie(cookieKey, nonce, publicKey, clientPathBinding,
+                        ComputeCookie(cookieKey, serverManifest, nonce, publicKey, clientPathBinding,
                             cookieTimeBucket(), cookieScratch);
                         int response = WriteCookieChallenge(serverBuffer, nonce, cookieScratch);
                         _ = serverEndpoint.TrySend(serverBuffer.AsSpan(0, response));
@@ -238,12 +242,12 @@ internal static class ProtocolLoopbackHandshake
                     if (TryReadClientKeyExchange(datagram, serverManifest, out nonce, out publicKey, out ReadOnlySpan<byte> suppliedCookie))
                     {
                         ulong currentBucket = cookieTimeBucket();
-                        ComputeCookie(cookieKey, nonce, publicKey, clientPathBinding,
+                        ComputeCookie(cookieKey, serverManifest, nonce, publicKey, clientPathBinding,
                             currentBucket, cookieScratch);
                         bool cookieValid = CryptographicOperations.FixedTimeEquals(cookieScratch, suppliedCookie);
                         if (!cookieValid && currentBucket != 0)
                         {
-                            ComputeCookie(cookieKey, nonce, publicKey, clientPathBinding,
+                            ComputeCookie(cookieKey, serverManifest, nonce, publicKey, clientPathBinding,
                                 currentBucket - 1, cookieScratch);
                             cookieValid = CryptographicOperations.FixedTimeEquals(cookieScratch, suppliedCookie);
                         }
@@ -444,7 +448,7 @@ internal static class ProtocolLoopbackHandshake
         return true;
     }
 
-    private static int WriteServerKeyExchange(Span<byte> destination, ConnectionId connection, SecurityEpoch epoch,
+    internal static int WriteServerKeyExchange(Span<byte> destination, ConnectionId connection, SecurityEpoch epoch,
         ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> signature)
     {
         var writer = new NetworkPacketWriter(destination);
@@ -456,7 +460,7 @@ internal static class ProtocolLoopbackHandshake
         return writer.WrittenCount;
     }
 
-    private static bool TryReadServerKeyExchange(ReadOnlySpan<byte> source, out ConnectionId connection,
+    internal static bool TryReadServerKeyExchange(ReadOnlySpan<byte> source, out ConnectionId connection,
         out SecurityEpoch epoch, out ReadOnlySpan<byte> publicKey, out ReadOnlySpan<byte> signature)
     {
         var reader = new NetworkPacketReader(source);
@@ -477,6 +481,14 @@ internal static class ProtocolLoopbackHandshake
         return true;
     }
 
+    internal static int WriteClientFinish(Span<byte> destination, ConnectionId connection,
+        SecurityEpoch epoch, ReadOnlySpan<byte> master, ReadOnlySpan<byte> transcript) =>
+        WriteFinish(destination, ClientFinish, connection, epoch, master, transcript);
+
+    internal static int WriteServerFinish(Span<byte> destination, ConnectionId connection,
+        SecurityEpoch epoch, ReadOnlySpan<byte> master, ReadOnlySpan<byte> transcript) =>
+        WriteFinish(destination, ServerFinish, connection, epoch, master, transcript);
+
     private static int WriteFinish(Span<byte> destination, byte kind, ConnectionId connection, SecurityEpoch epoch,
         ReadOnlySpan<byte> master, ReadOnlySpan<byte> transcript)
     {
@@ -488,6 +500,16 @@ internal static class ProtocolLoopbackHandshake
             !writer.TryWriteBytes(proof)) throw new InvalidOperationException("The handshake datagram limit is too small.");
         return writer.WrittenCount;
     }
+
+    internal static bool TryReadClientFinish(ReadOnlySpan<byte> source,
+        ConnectionId expectedConnection, SecurityEpoch expectedEpoch,
+        out ReadOnlySpan<byte> proof) =>
+        TryReadFinish(source, ClientFinish, expectedConnection, expectedEpoch, out proof);
+
+    internal static bool TryReadServerFinish(ReadOnlySpan<byte> source,
+        ConnectionId expectedConnection, SecurityEpoch expectedEpoch,
+        out ReadOnlySpan<byte> proof) =>
+        TryReadFinish(source, ServerFinish, expectedConnection, expectedEpoch, out proof);
 
     private static bool TryReadFinish(ReadOnlySpan<byte> source, byte expectedKind, ConnectionId expectedConnection,
         SecurityEpoch expectedEpoch, out ReadOnlySpan<byte> proof)
@@ -505,7 +527,8 @@ internal static class ProtocolLoopbackHandshake
         return true;
     }
 
-    internal static void ComputeCookie(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce,
+    internal static void ComputeCookie(ReadOnlySpan<byte> key, NetworkProtocolManifest manifest,
+        ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> pathBinding, ulong timeBucket,
         Span<byte> cookie)
     {
@@ -513,12 +536,19 @@ internal static class ProtocolLoopbackHandshake
         if (pathBinding.Length > maximumPathBindingBytes)
             throw new ArgumentOutOfRangeException(nameof(pathBinding));
         Span<byte> hash = stackalloc byte[32];
-        Span<byte> inputBuffer = stackalloc byte[NonceBytes + 32 + 2 + maximumPathBindingBytes + 8];
-        Span<byte> input = inputBuffer[..checked(NonceBytes + 32 + 2 + pathBinding.Length + 8)];
-        nonce.CopyTo(input);
+        Span<byte> inputBuffer = stackalloc byte[2 + 8 + NonceBytes + 32 + 2 + maximumPathBindingBytes + 8];
+        Span<byte> input = inputBuffer[..checked(2 + 8 + NonceBytes + 32 + 2 + pathBinding.Length + 8)];
+        var prefix = new NetworkPacketWriter(input);
+        if (!prefix.TryWriteUInt16(manifest.Version) ||
+            !prefix.TryWriteUInt64(manifest.Fingerprint))
+            throw new InvalidOperationException("The handshake cookie manifest is invalid.");
+        int offset = prefix.WrittenCount;
+        nonce.CopyTo(input[offset..]);
+        offset += NonceBytes;
         SHA256.HashData(publicKey, hash);
-        hash.CopyTo(input[NonceBytes..]);
-        var writer = new NetworkPacketWriter(input[(NonceBytes + 32)..]);
+        hash.CopyTo(input[offset..]);
+        offset += 32;
+        var writer = new NetworkPacketWriter(input[offset..]);
         if (pathBinding.Length > ushort.MaxValue ||
             !writer.TryWriteUInt16((ushort)pathBinding.Length) ||
             !writer.TryWriteBytes(pathBinding) || !writer.TryWriteUInt64(timeBucket))
@@ -529,7 +559,7 @@ internal static class ProtocolLoopbackHandshake
         CryptographicOperations.ZeroMemory(hash);
     }
 
-    private static byte[] BuildTranscript(NetworkProtocolManifest manifest, ReadOnlySpan<byte> nonce,
+    internal static byte[] BuildTranscript(NetworkProtocolManifest manifest, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> clientPublic, ReadOnlySpan<byte> serverPublic, ConnectionId connection, SecurityEpoch epoch)
     {
         byte[] transcript = new byte[checked(2 + 8 + NonceBytes + 2 + clientPublic.Length + 2 +
@@ -544,7 +574,7 @@ internal static class ProtocolLoopbackHandshake
         return transcript;
     }
 
-    private static byte[] DeriveMaster(ReadOnlySpan<byte> secret, ReadOnlySpan<byte> nonce,
+    internal static byte[] DeriveMaster(ReadOnlySpan<byte> secret, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> cookie, ReadOnlySpan<byte> transcript)
     {
         Span<byte> salt = stackalloc byte[NonceBytes + CookieBytes];
@@ -552,10 +582,20 @@ internal static class ProtocolLoopbackHandshake
         cookie.CopyTo(salt[NonceBytes..]);
         Span<byte> transcriptHash = stackalloc byte[32];
         SHA256.HashData(transcript, transcriptHash);
-        byte[] master = new byte[32];
+        byte[] master = new byte[MasterSecretBytes];
         HKDF.DeriveKey(HashAlgorithmName.SHA256, secret, master, salt, transcriptHash);
         return master;
     }
+
+    internal static void ComputeClientProof(
+        ReadOnlySpan<byte> master,
+        ReadOnlySpan<byte> transcript,
+        Span<byte> proof) => ComputeProof(master, transcript, ClientFinish, proof);
+
+    internal static void ComputeServerProof(
+        ReadOnlySpan<byte> master,
+        ReadOnlySpan<byte> transcript,
+        Span<byte> proof) => ComputeProof(master, transcript, ServerFinish, proof);
 
     private static void ComputeProof(ReadOnlySpan<byte> master, ReadOnlySpan<byte> transcript, byte kind,
         Span<byte> proof)

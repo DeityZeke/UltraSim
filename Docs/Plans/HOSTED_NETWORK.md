@@ -1,6 +1,6 @@
 # Hosted Network H0: externally admitted shared UDP
 
-Status: active separate Network milestone. H0.0/H0.1 are implemented and stopped
+Status: active separate Network milestone. H0.0-H0.2 are implemented and stopped
 for review. N1.0-N1.4 replication semantics remain unchanged and N1.5 has not
 started.
 
@@ -53,7 +53,8 @@ lifecycle around them; it does not replace them.
 - the listener owns one random 256-bit cookie key for its lifetime and clears it
   on disposal;
 - a canonical `ClientHello` from an unknown path receives only a stateless cookie
-  challenge bound to protocol manifest, client nonce/key, source IPv4/port, and
+  challenge whose MAC is literally bound to protocol manifest version/fingerprint,
+  client nonce/key, source IPv4/port, and
   current monotonic time bucket;
 - challenges are limited per source IPv4 address and bucket by a fixed-capacity,
   stale-reusable table;
@@ -74,28 +75,56 @@ candidate and rate capacity, timeout reclamation, non-amplification, malformed
 flood containment, and zero warmed allocation for a 64-hello receive/challenge
 pass.
 
-This is not yet an authenticated remote session. The candidate rows intentionally
-stop before ECDH/signature/master-secret work and before an admitted endpoint is
-published into the existing protocol host.
+The admission-only constructor retains this exact H0.1 stop for isolated evidence.
+The H0.2 constructor additionally receives explicit protocol limits and enables
+authenticated promotion.
 
-## H0.2 — authenticated candidate promotion
+## H0.2 implementation stop — authenticated candidate promotion
 
-Promote one validated candidate through the existing handshake cryptography and
-protocol manifest into the existing `NetworkProtocolPeer` machinery.
+`HostedUdpAdmissionHost` now promotes a validated candidate through the existing
+handshake cryptography and protocol manifest into the existing
+`NetworkProtocolPeer` machinery. `HostedUdpProtocolClient` supplies the matching
+external-process-capable client side without constructing or self-trusting a
+server identity.
 
-Required behavior:
+Accepted behavior:
 
-- ECDH/signature work occurs only after cookie validation;
-- connection capacity is allocated transactionally and released on every failed
-  promotion;
-- server finish establishes one externally owned `ConnectionId` and secure peer;
-- the client pins the deployment public key out of band;
+- `HostedCandidateId(slot,generation)` fences candidate-slot reuse;
+- validated credentials become immutable while a candidate is `Promoting`;
+- duplicate identical key exchanges reuse the same candidate, reserved
+  `ConnectionId`, ECDH result, transcript, master secret, signature, and cached
+  `ServerKeyExchange` flight;
+- different credentials on that path cannot mutate an in-flight promotion;
+- ECDH/signature work occurs only after cookie validation, and malformed keys,
+  signer failure, capacity pressure, timeout, or invalid finish publish no route
+  or secure session;
+- the deployment owns the `NetworkServerIdentity`; the host retains it for
+  transcript signatures but never disposes it;
+- a valid `ClientFinish` registers the exact IPv4/port path, advances the reserved
+  connection, creates the server peer, and publishes one session as one
+  transaction;
+- the client pins the deployment public key out of band and verifies the canonical
+  manifest-bound transcript before proving possession of the derived secret;
+- duplicate `ClientFinish` on the established path resends the cached
+  `ServerFinish` without creating another candidate, route, connection, ECDH key,
+  or peer;
 - protocol mismatch, signature failure, malformed finish, timeout, and capacity
   pressure publish no partial session;
 - the promoted session exposes only transport/session identity to the Server
   adapter; Game Admission still creates/binds `ParticipantId` separately;
 - established traffic uses the existing lanes, replay windows, pacing, batching,
   drain, and application-proof contracts.
+
+The permanent H0.2 acceptance uses independent client/server sockets and proves
+the pre-finish zero-route boundary, bidirectional secure application traffic,
+candidate reuse/conflict fencing, malformed-key and invalid-finish rollback,
+timeout and connection-capacity reclamation, duplicate-finish recovery, scalar/
+native receive parity, caller-owned signer lifetime, literal cookie-manifest
+binding, and zero warmed managed allocation for secure delivery.
+
+Path ownership is deliberately strict in H0.2. Only the exact path established by
+the handshake routes to the secure peer. No endpoint change is interpreted as
+rebinding, and an IP endpoint is still not connection or participant identity.
 
 Do not create a second secure packet format or a hosted-only replication path.
 
@@ -147,6 +176,6 @@ contracts.
 
 ## Current stop
 
-Stop after H0.0/H0.1 review. Do not begin H0.2 promotion, path rebinding, owner
-sharding, N1.5, N0 deletion, 2K/4K, public-WAN exposure, or production CCU claims
-until this admission boundary is accepted.
+Stop after H0.2 review. Do not begin H0.3 path rebinding, owner sharding, N1.5,
+N0 deletion, 2K/4K, public-WAN exposure, or production CCU claims until this
+authenticated-promotion boundary is accepted.

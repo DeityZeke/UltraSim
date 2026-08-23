@@ -2,8 +2,8 @@
 
 Status: N0.0 through the hardened N0.9 integrated topology are accepted. N0.10
 scale work includes the V2/V3 comparison and bounded shared-listener
-specialization. Hosted H0.0/H0.1 now add the first externally sourced admission
-boundary and are stopped before authenticated candidate promotion.
+specialization. Hosted H0.0-H0.2 now add externally sourced admission and
+transactional authenticated promotion, stopped before path rebinding.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -37,6 +37,7 @@ Identity is explicit and non-interchangeable:
 
 | Identity | Owner | Lifetime / meaning |
 | --- | --- | --- |
+| `HostedCandidateId` | Network admission | Server-created pre-session slot plus reuse generation; valid only while one cookie-validated candidate row exists. |
 | `ConnectionId` | Network | Server-created transport slot plus reuse generation; neither durable nor client-chosen. |
 | `SecurityEpoch` | Network | Key/replay lifetime within one connection. |
 | `PacketNumber` | Network | Authenticated datagram sequence; admitted reliable-data packet numbers may be referenced separately by transport-delivery ACKs. |
@@ -241,7 +242,7 @@ nonblocking localhost UDP sockets. `UdpProtocolLimits` bounds datagram bytes,
 configured socket buffers, handshake work, cookie buckets, idle retirement, and
 graceful drain. Socket and protocol state share one owner thread.
 
-## Hosted H0.0/H0.1 external admission
+## Hosted H0.0-H0.2 external admission and promotion
 
 `HostedUdpAdmissionHost` binds a caller-selected IPv4 server endpoint and requires
 a caller-owned deployment identity. Unlike `CreateSelfTrustedLoopback`, it creates
@@ -249,11 +250,26 @@ no client and establishes no implicit trust.
 
 Unknown paths can receive only a stateless listener-lifetime cookie challenge.
 The challenge is manifest-, nonce-, client-key-, source-path-, and time-bucket-
-bound, rate-limited through fixed storage, and never larger than the triggering
+bound (including literal manifest version/fingerprint in the cookie MAC),
+rate-limited through fixed storage, and never larger than the triggering
 hello. Returning a valid current/previous-bucket cookie admits one bounded,
 expiring candidate row; it still allocates no endpoint route, `ConnectionId`,
-ECDH state, protocol peer, account, participant, or Game session. H0.2 must promote
-that row through the existing secure protocol transactionally.
+ECDH state, protocol peer, account, participant, or Game session.
+
+When explicit protocol limits enable H0.2, a generation-fenced candidate then
+owns immutable credentials and one bounded promotion. Duplicate identical key
+exchanges resend cached server key material; different credentials cannot mutate
+that promotion. Only a valid client secret-possession proof transactionally
+registers the exact path, establishes the reserved `ConnectionId`, and publishes
+one server `NetworkProtocolPeer`. Duplicate finish flights receive the cached
+server finish without duplicating session state. Failures and timeouts leave no
+registered route or partial peer and return connection capacity. The host retains
+but never disposes the deployment-owned signer.
+
+`HostedUdpProtocolClient` is the matching nonblocking external client. It requires
+an out-of-band pinned server public key, performs no self-trust, and exposes the
+same secure peer/lane machinery after establishment. H0.2 intentionally accepts
+only the exact established path; endpoint rebinding remains H0.3.
 
 The handshake cookie covers the client address/port and a current or immediately
 previous monotonic time bucket. Maximum accepted age can therefore approach twice

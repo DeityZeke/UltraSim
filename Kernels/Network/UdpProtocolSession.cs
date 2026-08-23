@@ -428,12 +428,18 @@ public sealed class UdpProtocolSession : IDisposable
     }
 }
 
+internal interface IUdpKnownDatagramHandler
+{
+    bool TryHandleKnownDatagram(ReadOnlySpan<byte> datagram);
+}
+
 internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposable
 {
     private readonly Socket _socket;
     private readonly int _maximumDatagramBytes;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _disposed;
+    private IUdpKnownDatagramHandler? _knownDatagramHandler;
     internal bool SuppressSendsForTesting { get; set; }
     private ulong _sent;
     private ulong _received;
@@ -460,6 +466,16 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
 
     internal IPEndPoint LocalEndPoint { get; }
     internal byte[] RemotePathBinding { get; }
+
+    internal void BindKnownDatagramHandler(IUdpKnownDatagramHandler handler)
+    {
+        EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_knownDatagramHandler is not null)
+            throw new InvalidOperationException("The connected UDP handshake handler is already bound.");
+        _knownDatagramHandler = handler;
+    }
 
     internal static void CreateConnectedLoopbackPair(
         UdpProtocolLimits limits,
@@ -492,13 +508,27 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
     internal static UdpDatagramEndpoint CreateConnectedLoopbackClient(
         UdpProtocolLimits limits,
         IPEndPoint serverEndPoint)
+        => CreateConnectedClient(
+            limits,
+            new IPEndPoint(IPAddress.Loopback, 0),
+            serverEndPoint);
+
+    internal static UdpDatagramEndpoint CreateConnectedClient(
+        UdpProtocolLimits limits,
+        IPEndPoint localEndPoint,
+        IPEndPoint serverEndPoint)
     {
+        limits.Validate();
+        ArgumentNullException.ThrowIfNull(localEndPoint);
         ArgumentNullException.ThrowIfNull(serverEndPoint);
+        if (localEndPoint.AddressFamily != AddressFamily.InterNetwork ||
+            serverEndPoint.AddressFamily != AddressFamily.InterNetwork)
+            throw new ArgumentException("Hosted H0 currently supports IPv4 endpoints only.");
         Socket? socket = null;
         try
         {
             socket = CreateSocket(limits);
-            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            socket.Bind(localEndPoint);
             socket.Connect(serverEndPoint);
             socket.Blocking = false;
             return new UdpDatagramEndpoint(socket, limits.MaximumDatagramBytes);
@@ -567,6 +597,12 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
             _received++;
             _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)length));
             _maximumReceivedDatagramBytes = Math.Max(_maximumReceivedDatagramBytes, length);
+            if (_knownDatagramHandler?.TryHandleKnownDatagram(
+                    destination[..length]) == true)
+            {
+                length = 0;
+                return false;
+            }
             return true;
         }
         catch (SocketException exception) when (exception.SocketErrorCode is
@@ -600,6 +636,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
         _disposed = true;
         try { _socket.Shutdown(SocketShutdown.Both); } catch (SocketException) { }
         _socket.Dispose();
+        _knownDatagramHandler = null;
         CryptographicOperations.ZeroMemory(RemotePathBinding);
     }
 
