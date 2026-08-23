@@ -1157,7 +1157,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             pathKey = null;
             published = true;
             ReleaseCandidate(slot, releaseConnection: false);
-            if (endpoint.TrySendHandshake(serverFinish) == DatagramSendStatus.Accepted)
+            if (endpoint.TrySendHandshake(session.ServerFinish) == DatagramSendStatus.Accepted)
                 _serverFinishFlights = SaturatingIncrement(_serverFinishFlights);
             else
                 _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);

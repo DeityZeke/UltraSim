@@ -63,6 +63,7 @@ internal static class H02HostedUdpPromotionTests
         Run("HostedPromotionCapacityIsTransactionalAndReusable", HostedPromotionCapacityIsTransactionalAndReusable);
         Run("HostedDuplicateClientFinishRecoversWithoutSecondSession", HostedDuplicateClientFinishRecoversWithoutSecondSession);
         Run("HostedTerminalSendFailureKeepsOneRecoverableSession", HostedTerminalSendFailureKeepsOneRecoverableSession);
+        Run("HostedFirstServerFinishIsValidWithoutClientRetry", HostedFirstServerFinishIsValidWithoutClientRetry);
         Run("HostedPromotionNativeReceiveMatchesScalarLifecycle", HostedPromotionNativeReceiveMatchesScalarLifecycle);
         Run("HostedPromotionResamplesMonotonicTimeAfterInboundPublication", HostedPromotionResamplesMonotonicTimeAfterInboundPublication);
         Run("WarmedHostedSecureDeliveryAllocatesZero", WarmedHostedSecureDeliveryAllocatesZero);
@@ -351,6 +352,66 @@ internal static class H02HostedUdpPromotionTests
         True(host.TryGetSession(connection, out HostedUdpProtocolSession? current));
         True(ReferenceEquals(original, current),
             "Terminal retry published a second hosted session.");
+    }
+
+    private static void HostedFirstServerFinishIsValidWithoutClientRetry()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using var host = CreateHost(identity);
+        using Socket socket = CreateRawClient(host.LocalEndPoint);
+        using ECDiffieHellman clientKey = ECDiffieHellman.Create(
+            ECCurve.NamedCurves.nistP256);
+        byte[] clientPublic = clientKey.ExportSubjectPublicKeyInfo();
+        byte[] nonce = RandomNumberGenerator.GetBytes(
+            ProtocolLoopbackHandshake.NonceBytes);
+        byte[] cookie = RequestCookie(host, socket, nonce, clientPublic);
+        SendKeyExchange(socket, nonce, clientPublic, cookie);
+        host.Pump();
+
+        Span<byte> serverKeyExchange = stackalloc byte[512];
+        int serverKeyExchangeLength = ReceiveRaw(socket, serverKeyExchange);
+        True(ProtocolLoopbackHandshake.TryReadServerKeyExchange(
+            serverKeyExchange[..serverKeyExchangeLength], out ConnectionId connection,
+            out SecurityEpoch epoch, out ReadOnlySpan<byte> serverPublic,
+            out _));
+        byte[] transcript = ProtocolLoopbackHandshake.BuildTranscript(
+            s_manifest, nonce, clientPublic, serverPublic, connection, epoch);
+        using ECDiffieHellman importedServer = ECDiffieHellman.Create();
+        importedServer.ImportSubjectPublicKeyInfo(serverPublic, out int read);
+        Equal(serverPublic.Length, read);
+        byte[] secret = clientKey.DeriveRawSecretAgreement(importedServer.PublicKey);
+        byte[] master = ProtocolLoopbackHandshake.DeriveMaster(
+            secret, nonce, cookie, transcript);
+        CryptographicOperations.ZeroMemory(secret);
+
+        Span<byte> clientFinish = stackalloc byte[64];
+        int clientFinishLength = ProtocolLoopbackHandshake.WriteClientFinish(
+            clientFinish, connection, epoch, master, transcript);
+        Equal(clientFinishLength, socket.Send(clientFinish[..clientFinishLength]));
+        host.Pump();
+
+        Span<byte> firstTerminalFlight = stackalloc byte[64];
+        int firstTerminalLength = ReceiveRaw(socket, firstTerminalFlight);
+        True(ProtocolLoopbackHandshake.TryReadServerFinish(
+            firstTerminalFlight[..firstTerminalLength], connection, epoch,
+            out ReadOnlySpan<byte> proof),
+            "The first terminal response was not a canonical ServerFinish.");
+        Span<byte> expected = stackalloc byte[ProtocolLoopbackHandshake.ProofBytes];
+        ProtocolLoopbackHandshake.ComputeServerProof(master, transcript, expected);
+        True(CryptographicOperations.FixedTimeEquals(expected, proof),
+            "The first ServerFinish carried the wrong proof.");
+
+        HostedUdpAdmissionSnapshot snapshot = host.GetSnapshot();
+        Equal(1, snapshot.EstablishedSessions);
+        Equal(1UL, snapshot.EstablishedPromotions);
+        Equal(1UL, snapshot.ServerFinishFlights);
+        Equal(0UL, snapshot.DuplicateClientFinishes,
+            "The immediate terminal-flight test accidentally used retry recovery.");
+        CryptographicOperations.ZeroMemory(master);
+        CryptographicOperations.ZeroMemory(transcript);
+        CryptographicOperations.ZeroMemory(clientPublic);
+        CryptographicOperations.ZeroMemory(nonce);
+        CryptographicOperations.ZeroMemory(cookie);
     }
 
     private static void HostedPromotionNativeReceiveMatchesScalarLifecycle()
