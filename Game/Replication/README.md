@@ -23,8 +23,8 @@ recipient/reverse-index storage are accepted. The representative/mixed/shared-
 socket matrix and Hosted H0.5
 dedicated-process gate select `ChunkPublication` for the current game. The frozen
 N0 implementation is retained and explicitly identified as the
-`MaintainedEntityRelation` Game profile. N1.5 and `DirtyEntitySpatialFanout` remain
-unstarted.
+`MaintainedEntityRelation` Game profile. P0.1 adds the concrete
+`DirtyEntitySpatialFanout` profile below; it is not selected for this game.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -45,8 +45,8 @@ and Network delivery. It depends on the concrete game composition and Runtime;
 
 ## Public replication profiles
 
-`GamePublicReplicationProfiles` names the two accepted concrete profiles and the
-shared semantic guarantees both must preserve. It deliberately does not hide them
+`GamePublicReplicationProfiles` names the three concrete profiles and the
+shared semantic guarantees they must preserve. It deliberately does not hide them
 behind a universal AOI/cursor interface:
 
 ```text
@@ -60,7 +60,12 @@ ChunkPublication                         selected for this game
     RemoteChunkWorldStateServer
     recipient/chunk subscriptions + chunk revision/history
 
-both
+DirtyEntitySpatialFanout
+    DirtyEntitySpatialFanout + RemoteDirtyEntitySpatialFanoutServer
+    dirty-time spatial recipient discovery + recipient topology reconciliation
+    entity latest state; bounded semantic knowledge/debt, no persistent R×E AOI graph
+
+all profiles
     -> Game codec and retained semantic ticket
     -> the same bounded Network delivery machinery
 ```
@@ -68,8 +73,8 @@ both
 Permanent paired conformance tests exercise authoritative current truth,
 recipient-scoped disclosure, stable identity/lifetime, sent-not-known application
 proof, rejected/lost-work recovery, eventual convergence, and bounded reservation
-for both profiles. Their internal types and their deeper hostile/performance suites
-remain separate. The future `DirtyEntitySpatialFanout` profile has not started.
+for all three profiles. Their internal types and deeper hostile/performance suites
+remain separate. `ChunkPublication` remains the selected current-game profile.
 
 ## Ownership
 

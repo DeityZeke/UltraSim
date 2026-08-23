@@ -8,6 +8,7 @@ public enum GamePublicReplicationProfileId : byte
 {
     MaintainedEntityRelation = 1,
     ChunkPublication = 2,
+    DirtyEntitySpatialFanout = 3,
 }
 
 /// <summary>The spatial membership model owned by one public replication profile.</summary>
@@ -15,6 +16,7 @@ public enum GamePublicReplicationInterestModel : byte
 {
     RecipientEntityRelation = 1,
     RecipientChunkSubscription = 2,
+    DirtyEntitySpatialDiscovery = 3,
 }
 
 /// <summary>The current-state and change-lineage model owned by one public replication profile.</summary>
@@ -75,10 +77,16 @@ public static class GamePublicReplicationProfiles
         GamePublicReplicationSourceModel.ChunkRevisionHistory,
         RequiredGuarantees);
 
+    public static GamePublicReplicationProfileDescriptor DirtyEntitySpatialFanout { get; } = new(
+        GamePublicReplicationProfileId.DirtyEntitySpatialFanout,
+        GamePublicReplicationInterestModel.DirtyEntitySpatialDiscovery,
+        GamePublicReplicationSourceModel.EntityLatestState,
+        RequiredGuarantees);
+
     /// <summary>Selected public replication profile for the current UltraSim game.</summary>
     public static GamePublicReplicationProfileDescriptor Selected => ChunkPublication;
 
-    public static int Count => 2;
+    public static int Count => 3;
 
     public static bool TryGet(
         GamePublicReplicationProfileId id,
@@ -91,6 +99,9 @@ public static class GamePublicReplicationProfiles
                 return true;
             case GamePublicReplicationProfileId.ChunkPublication:
                 profile = ChunkPublication;
+                return true;
+            case GamePublicReplicationProfileId.DirtyEntitySpatialFanout:
+                profile = DirtyEntitySpatialFanout;
                 return true;
             default:
                 profile = default;

@@ -849,7 +849,7 @@ internal static class N1OfflineDirectChunkTests
         False(UltraSimGameProtocol.TryWriteChunkApplied(bytes, proof, out _));
 
         Equal((ushort)11, UltraSimGameProtocol.Manifest.Version);
-        Equal(11_204_815_876_809_708_509UL, UltraSimGameProtocol.Manifest.Fingerprint);
+        Equal(12_079_342_559_617_020_304UL, UltraSimGameProtocol.Manifest.Fingerprint);
         Equal(6_148_331_928_277_823_537UL,
             UltraSimGameProtocol.ChunkPublicationSchemaFingerprint);
         True(UltraSimGameProtocol.Manifest.TryGet(

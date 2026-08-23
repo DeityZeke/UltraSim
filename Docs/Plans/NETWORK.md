@@ -3,7 +3,8 @@
 Status: `ChunkPublication` is selected as the current UltraSim game public
 replication profile through the Hosted H0.5 dedicated-process gate. The frozen N0
 implementation is retained explicitly as the `MaintainedEntityRelation` profile,
-not as a second Network architecture or deletion candidate. Terrain / World T0 is
+not as a second Network architecture or deletion candidate. P0.1 also registers
+the concrete `DirtyEntitySpatialFanout` Game profile without selecting it. Terrain / World T0 is
 accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -15,9 +16,10 @@ remaining server-semantic, deterministic secure-transport, dense-entry, and
 topology-attribution matrix is captured. Representative roaming, mixed public/
 private traffic, and the in-process real shared-socket topology are accepted. The
 separate Hosted H0.5 dedicated-server/independent-client gate is also accepted, so
-N1 is now selected for the current UltraSim game. Both concrete Game-owned profiles
-are registered by `GamePublicReplicationProfiles`; no generic AOI interface was
-introduced, and `DirtyEntitySpatialFanout` remains unstarted.
+N1 is now selected for the current UltraSim game. The three concrete Game-owned
+profiles are registered by `GamePublicReplicationProfiles`; no generic AOI interface
+was introduced. DirtyEntity uses dirty-time spatial discovery plus recipient
+topology reconciliation and retains only bounded semantic knowledge/debt.
 
 The separately authorized externally admitted listener/security lifecycle is now
 tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.5 compose transactional
@@ -269,7 +271,13 @@ ChunkPublication                         selected for the current game
     RemoteChunkWorldStateServer
     recipient/chunk membership + chunk revision/history lineage
 
-both
+DirtyEntitySpatialFanout
+    DirtyEntitySpatialFanout
+    RemoteDirtyEntitySpatialFanoutServer
+    dirty-time spatial discovery + recipient topology reconciliation
+    entity latest state + bounded semantic knowledge/debt; no persistent R×E graph
+
+all profiles
     authoritative source truth
     recipient disclosure
     stable identity/lifetime

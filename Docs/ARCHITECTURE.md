@@ -137,6 +137,9 @@ better than continuously mutating precise recipient/entity interest topology.
 Terrain / World T0 is accepted/frozen. [Network N1](Plans/NETWORK.md) and Hosted
 H0 are accepted through the dedicated-process gate; `ChunkPublication` is the
 selected current-game profile while `MaintainedEntityRelation` remains supported.
+P0.1 adds `DirtyEntitySpatialFanout` as a third Game-owned profile: dirty-time
+spatial recipient discovery plus recipient topology reconciliation, with bounded
+semantic knowledge/debt and no persistent Recipient×Entity AOI graph.
 T0.0 accepted the dependency-neutral Spatial seam plus the 16-byte game-world
 position/profile. T0.1 accepted persisted ECS position authority paired with a
 bounded, generation-owned maintained index through a generic Runtime post-ECS-step

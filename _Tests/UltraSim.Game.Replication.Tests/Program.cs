@@ -14,6 +14,12 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
+    ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
+    ("P01DirtyEntityMovementCleanTopologyRemovalAndReentry", DirtyEntitySpatialFanoutTests.MovementCleanTopologyRemovalAndReentry),
+    ("P01DirtyEntityCoalescingCadenceDisclosureAndCapacity", DirtyEntitySpatialFanoutTests.CoalescingCadenceDisclosureAndCapacity),
+    ("P01DirtyEntityEpochAndProofFencing", DirtyEntitySpatialFanoutTests.EpochAndProofFencing),
+    ("P01DirtyEntityWarmedPathAllocatesZero", DirtyEntitySpatialFanoutTests.WarmedPathAllocatesZero),
+    ("P01DirtyEntityRemoteProtocolPeerConvergesThroughProof", DirtyEntitySpatialFanoutTests.RemoteProtocolPeerConvergesThroughApplicationProof),
     ("NetworkProfileIsExplicitAndLocalProfileRetainsSpatialLifecycle", NetworkProfileIsExplicit),
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),
     ("ChangedConsumersIngressAndWarmedCaptureAreIndependentAndBounded", ChangedConsumersIngressAndAllocation),
@@ -88,7 +94,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} MaintainedEntityRelation/ChunkPublication game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} MaintainedEntityRelation/ChunkPublication/DirtyEntitySpatialFanout game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

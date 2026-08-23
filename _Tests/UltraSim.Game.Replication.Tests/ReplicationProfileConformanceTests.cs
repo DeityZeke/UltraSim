@@ -18,7 +18,7 @@ internal static class ReplicationProfileConformanceTests
 {
     internal static void ExplicitProfilesMeetSharedSemanticContract()
     {
-        Equal(2, GamePublicReplicationProfiles.Count);
+        Equal(3, GamePublicReplicationProfiles.Count);
         Equal(GamePublicReplicationProfiles.Count,
             Enum.GetValues<GamePublicReplicationProfileId>().Length);
         Equal(GamePublicReplicationProfileId.ChunkPublication,
@@ -36,17 +36,25 @@ internal static class ReplicationProfileConformanceTests
         Equal(GamePublicReplicationSourceModel.EntityLatestState, maintained.SourceModel);
         Equal(GamePublicReplicationInterestModel.RecipientChunkSubscription, chunk.InterestModel);
         Equal(GamePublicReplicationSourceModel.ChunkRevisionHistory, chunk.SourceModel);
+        True(GamePublicReplicationProfiles.TryGet(
+            GamePublicReplicationProfileId.DirtyEntitySpatialFanout,
+            out GamePublicReplicationProfileDescriptor dirty));
+        Equal(GamePublicReplicationInterestModel.DirtyEntitySpatialDiscovery, dirty.InterestModel);
+        Equal(GamePublicReplicationSourceModel.EntityLatestState, dirty.SourceModel);
         Equal(GamePublicReplicationProfiles.RequiredGuarantees, maintained.Guarantees);
         Equal(GamePublicReplicationProfiles.RequiredGuarantees, chunk.Guarantees);
+        Equal(GamePublicReplicationProfiles.RequiredGuarantees, dirty.Guarantees);
 
         Equal(maintained, GameInterestService.PublicReplicationProfile);
         Equal(maintained, RemoteWorldStateServer.PublicReplicationProfile);
         Equal(chunk, OfflineDirectChunkRecipient.PublicReplicationProfile);
         Equal(chunk, ChunkPublicationWorkScheduler.PublicReplicationProfile);
         Equal(chunk, RemoteChunkWorldStateServer.PublicReplicationProfile);
+        Equal(dirty, DirtyEntitySpatialFanout.PublicReplicationProfile);
 
         AssertObservation(CaptureMaintainedEntityRelation());
         AssertObservation(N1OfflineDirectChunkTests.CaptureProfileConformance());
+        AssertObservation(CaptureDirtyEntitySpatialFanout());
     }
 
     private static ReplicationProfileConformanceObservation CaptureMaintainedEntityRelation()
@@ -126,6 +134,58 @@ internal static class ReplicationProfileConformanceTests
             service.GetSnapshot().ReservedBytes);
     }
 
+    private static ReplicationProfileConformanceObservation CaptureDirtyEntitySpatialFanout()
+    {
+        var service = new DirtyEntitySpatialFanout(
+            new StateEpoch(0xD001),
+            new DirtyEntitySpatialFanoutLimits(8, 4, 128, 32, 8, 4),
+            new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100));
+        ParticipantId participant = new(0xD001);
+        Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+
+        ReplicationEntityId entity = new(0, 1);
+        Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 1, true, true, GameReplicationHorizon.Far,
+                new ReplicationSpatialPoint(0, 0),
+                new GameSimulationState { TickMarker = 10, InputVelocity = 20 }), 0));
+        Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out int processed));
+        Equal(1, processed);
+
+        Span<DirtyEntitySemanticKnowledgeSnapshot> rows = stackalloc DirtyEntitySemanticKnowledgeSnapshot[4];
+        int rowCount = service.CopySemanticKnowledge(rows);
+        bool disclosure = rowCount == 1 && rows[0].Entity == entity && rows[0].DesiredPresent;
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[4];
+        Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 0, 4_096, records, out DirtyEntityBundle first));
+        bool currentTruth = first.RecordCount == 1 && records[0].Entity == entity &&
+            records[0].CanonicalVersion == 1 && records[0].SimulationState.TickMarker == 10;
+        bool sentDidNotAdvance = service.CopySemanticKnowledge(rows) == 1 &&
+            rows[0].KnownCanonicalVersion == 0 && rows[0].PendingWasSent;
+
+        Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(new DirtyEntityLatestState(
+                entity, 2, true, true, GameReplicationHorizon.Far,
+                new ReplicationSpatialPoint(100, 0),
+                new GameSimulationState { TickMarker = 20, InputVelocity = 40 }), 0));
+        service.TryProcessDirtyEntities(0, out _);
+        True(service.TryAcknowledgeBundle(participant, first.DeliveryBundleId, applied: false));
+        Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 0, 4_096, records, out DirtyEntityBundle retry));
+        bool superseded = retry.DeliveryBundleId != first.DeliveryBundleId &&
+            records[0].CanonicalVersion == 2;
+        True(service.TryAcknowledgeBundle(participant, retry.DeliveryBundleId, applied: true));
+        rowCount = service.CopySemanticKnowledge(rows);
+        bool converged = rowCount == 1 && rows[0].KnownCanonicalVersion == 2 && rows[0].KnownPresent;
+
+        return new ReplicationProfileConformanceObservation(
+            GamePublicReplicationProfileId.DirtyEntitySpatialFanout,
+            currentTruth, disclosure, records[0].Entity == entity, sentDidNotAdvance,
+            superseded, converged, service.GetSnapshot().ReservedBytes);
+    }
+
     private static GameProjectedEntity Projected(ReplicationEntityId id, int marker) => new(
         id,
         HasSimulationState: true,
@@ -134,7 +194,8 @@ internal static class ReplicationProfileConformanceTests
     private static void AssertObservation(in ReplicationProfileConformanceObservation observation)
     {
         True(observation.Profile is GamePublicReplicationProfileId.MaintainedEntityRelation or
-            GamePublicReplicationProfileId.ChunkPublication);
+            GamePublicReplicationProfileId.ChunkPublication or
+            GamePublicReplicationProfileId.DirtyEntitySpatialFanout);
         True(observation.AuthoritativeSourceTruth);
         True(observation.RecipientDisclosure);
         True(observation.StableIdentityAndLifetime);
