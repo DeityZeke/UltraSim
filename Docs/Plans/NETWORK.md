@@ -16,10 +16,12 @@ topology are now captured without starting the separately deferred public hosted
 listener lifecycle.
 
 The separately authorized externally admitted listener/security lifecycle is now
-tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.3 are implemented and
-stopped after transactional authenticated candidate promotion and explicit path
-ownership/rebinding, before connection-owner sharding. That milestone remains
-Network-generic and does not alter N1 replication meaning.
+tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.4 are implemented and
+stopped after transactional authenticated candidate promotion, explicit path
+ownership/rebinding, and a bounded connection-owner packet handoff. The remaining
+H0.5 gate must compose that mechanism with the real external listener and
+dedicated/sharded processes. Hosted Network remains Network-generic and does not
+alter N1 replication meaning.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -53,10 +55,11 @@ N0's original shared UDP host remains controlled IPv4 loopback topology, not a
 public WAN acceptor. The separate Hosted H0 milestone has since earned pinned
 deployment identity, listener-lifetime cookie keys, bounded/rate-limited
 unauthenticated admission, amplification limits, promotion, and explicit IPv4
-path rebinding through H0.3. IPv6 and connection sharding with explicit
-cross-owner packet-memory transfer remain later Hosted gates. Do not fold that
-lifecycle/security work into N1's chunk-replication experiment, and do not quote
-same-process loopback population as public remote CCU.
+path rebinding through H0.3. H0.4 now proves generation-fenced, exclusive
+cross-owner packet-memory transfer and a separate-thread secure-protocol canary.
+IPv6 and the H0.5 real-listener/dedicated-process composition remain later Hosted
+gates. Do not fold that lifecycle/security work into N1's chunk-replication
+experiment, and do not quote same-process loopback population as public remote CCU.
 
 N1 tests the original chunk-native AOI model for the current UltraSim game against
 that frozen N0 baseline. It does not make chunks the permanent Network-level AOI

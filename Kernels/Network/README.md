@@ -2,9 +2,9 @@
 
 Status: N0.0 through the hardened N0.9 integrated topology are accepted. N0.10
 scale work includes the V2/V3 comparison and bounded shared-listener
-specialization. Hosted H0.0-H0.3 now add externally sourced admission,
-transactional authenticated promotion, and explicit path ownership, stopped
-before connection-owner sharding.
+specialization. Hosted H0.0-H0.4 now add externally sourced admission,
+transactional authenticated promotion, explicit path ownership, and bounded
+connection-owner packet transfer, stopped before dedicated/sharded process proof.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -347,9 +347,13 @@ and fault-inject `EAGAIN`, `ENOBUFS`, and partial submissions.
 The original loopback host is not a public CCU acceptor. Hosted H0.0-H0.3 have now
 earned listener-lifetime cookies, bounded unauthenticated admission,
 amplification/rate limits, deployment-pinned promotion, and explicit IPv4 path
-ownership on one listener owner. IPv6 and owner-thread/core sharding with explicit
-packet-memory transfer remain unearned production Network-host requirements.
-H0.4/H0.5 must measure them before any remote CCU claim.
+ownership on one listener owner. H0.4 adds fixed generation-fenced connection
+owners, bidirectional exclusive packet-slot transfer, transactional queue/capacity
+failure, failed-owner reclamation, and a real secure `NetworkProtocolPeer` canary
+on a separate owner thread. A clear H0.3 `ConnectionId` routes only to the owner;
+the owner still authenticates path control. IPv6 and H0.5 composition with the
+real external listener/dedicated process topology remain unearned production
+Network-host requirements. H0.5 must prove them before any remote CCU claim.
 
 ### N0.10.2 reliable-only ACK elicitation
 

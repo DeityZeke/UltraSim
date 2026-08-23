@@ -1,6 +1,6 @@
 # Hosted Network H0: externally admitted shared UDP
 
-Status: active separate Network milestone. H0.0-H0.3 are implemented and stopped
+Status: active separate Network milestone. H0.0-H0.4 are implemented and stopped
 for review. N1.0-N1.4 replication semantics remain unchanged and N1.5 has not
 started.
 
@@ -123,8 +123,9 @@ the pre-finish zero-route boundary, bidirectional secure application traffic,
 candidate reuse/conflict fencing, malformed-key and invalid-finish rollback,
 timeout and connection-capacity reclamation, duplicate-finish recovery, scalar/
 native receive parity, terminal-send failure recovery without a second session,
-caller-owned signer lifetime, literal cookie-manifest
-binding, and zero warmed managed allocation for secure delivery.
+an immediate canonical `ServerFinish` after exactly one raw `ClientFinish`, caller-
+owned signer lifetime, literal cookie-manifest binding, and zero warmed managed
+allocation for secure delivery.
 
 Path ownership is deliberately strict in H0.2. Only the exact path established by
 the handshake routes to the secure peer. No endpoint change is interpreted as
@@ -195,7 +196,7 @@ Commit, stale/wrong-path rejection after later generations, timeout preservation
 of the old path, scalar/native receive parity, fixed canonical flight sizes, and
 zero warmed managed allocation for ordinary secure delivery after rebinding.
 
-## H0.4 — connection-owner sharding
+## H0.4 implementation stop — connection-owner sharding
 
 Separate listener/socket ownership from connection/protocol ownership without
 sharing mutable packet buffers.
@@ -212,6 +213,47 @@ Required evidence includes full/closed/stale destination queues, owner failure,
 shutdown, connection migration/reuse fencing, no double release, and zero warmed
 allocation on the admitted handoff. Do not pass shared packet objects between
 owners and do not teach the handoff about Game messages.
+
+`HostedUdpConnectionOwnerHandoff` now provides the concrete bounded mechanism:
+
+- `HostedConnectionOwnerId` and `HostedPacketTransferId` are fixed eight-byte,
+  generation-fenced identities;
+- the listener thread is the sole ingress producer and egress consumer, while
+  every registered connection thread is the sole ingress consumer and egress
+  producer for its fixed queues;
+- one fixed payload slab owns all packet bytes. Publication moves an exclusive
+  slot token between owners; the receiver obtains only a read-only span, and
+  release clears the slot before it returns to listener capacity;
+- exact `ConnectionId` generation maps to one exact owner generation. Binding,
+  migration, and unbinding fail while any packet for that connection remains
+  queued or acquired;
+- ingress/egress queue capacity and global packet capacity fail separately and
+  transactionally. A failed offer publishes neither bytes nor a transfer token;
+- graceful owner close requires zero bindings and leases. After the failed owner
+  thread has stopped, the listener can explicitly reclaim its bounded bindings,
+  queued packets, and acquired leases; reuse advances owner generation;
+- stale, foreign, returned, or double-released transfer identities cannot regain
+  packet ownership;
+- an H0.3 Request/Proof clear `ConnectionId` may select an owner queue, but the
+  listener does not validate the HMAC or authorize a route change. The connection
+  owner receives the exact observed path binding and performs path-key validation;
+  authenticated path-control output returns through the owner-to-listener queue;
+- `HostedUdpConnectionOwnerEndpoint` proves an existing `NetworkProtocolPeer`
+  can own protocol/crypto state on a separate thread while listener-owned packet
+  memory crosses the bounded handoff in both directions;
+- the handoff contains no Game, participant, AOI, N0, or N1 vocabulary.
+
+The permanent acceptance covers ingress/egress exclusivity, full queues, packet
+pressure, graceful and failed-owner close, generation reuse, connection migration
+and reuse, exact no-double-release behavior, clear-ID-with-invalid-HMAC rejection,
+valid owner-authenticated H0.3 challenge production, a separate-thread secure
+protocol request/response, and zero warmed managed allocation. The measured
+two-owner/16-packet/512-byte test reservation is 9,184 bytes.
+
+H0.4 freezes the cross-owner mechanism and secure-protocol ownership canary. The
+accepted H0.0-H0.3 host remains the single-owner behavioral control. H0.5 must
+compose this mechanism with the real external listener and dedicated process
+topology; H0.4 does not claim that sharded deployment result in advance.
 
 ## H0.5 — dedicated server and sharded clients
 
@@ -230,6 +272,6 @@ contracts.
 
 ## Current stop
 
-Stop after H0.3 review. Do not begin H0.4 owner sharding, N1.5,
-N0 deletion, 2K/4K, public-WAN exposure, or production CCU claims until this
-authenticated path-ownership boundary is accepted.
+Stop after H0.4 review. Do not begin H0.5 dedicated/sharded process evidence,
+N1.5, N0 deletion, 2K/4K, public-WAN exposure, or production CCU claims until
+the connection-owner transfer boundary is accepted.
