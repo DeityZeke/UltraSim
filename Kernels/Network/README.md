@@ -1,8 +1,9 @@
 # UltraSim Network kernel
 
 Status: N0.0 through the hardened N0.9 integrated topology are accepted. N0.10
-scale work now includes the first provisional V2/V3 bot matrix and a bounded
-shared-listener specialization plus measured reliable-only ACK elicitation.
+scale work includes the V2/V3 comparison and bounded shared-listener
+specialization. Hosted H0.0/H0.1 now add the first externally sourced admission
+boundary and are stopped before authenticated candidate promotion.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -11,6 +12,8 @@ codecs/manifests, deterministic datagrams, and owner-thread connected UDP. It do
 not authenticate accounts, capture game state, or invent an alternate authority.
 
 The complete forward plan is [Network V3](../../Docs/Plans/NETWORK.md).
+The separate external-listener lifecycle is
+[Hosted Network H0](../../Docs/Plans/HOSTED_NETWORK.md).
 
 ## Ownership boundary
 
@@ -237,6 +240,20 @@ ProtocolLoopback and UDP; neither result justifies reopening N0.3 micro-optimiza
 nonblocking localhost UDP sockets. `UdpProtocolLimits` bounds datagram bytes,
 configured socket buffers, handshake work, cookie buckets, idle retirement, and
 graceful drain. Socket and protocol state share one owner thread.
+
+## Hosted H0.0/H0.1 external admission
+
+`HostedUdpAdmissionHost` binds a caller-selected IPv4 server endpoint and requires
+a caller-owned deployment identity. Unlike `CreateSelfTrustedLoopback`, it creates
+no client and establishes no implicit trust.
+
+Unknown paths can receive only a stateless listener-lifetime cookie challenge.
+The challenge is manifest-, nonce-, client-key-, source-path-, and time-bucket-
+bound, rate-limited through fixed storage, and never larger than the triggering
+hello. Returning a valid current/previous-bucket cookie admits one bounded,
+expiring candidate row; it still allocates no endpoint route, `ConnectionId`,
+ECDH state, protocol peer, account, participant, or Game session. H0.2 must promote
+that row through the existing secure protocol transactionally.
 
 The handshake cookie covers the client address/port and a current or immediately
 previous monotonic time bucket. Maximum accepted age can therefore approach twice

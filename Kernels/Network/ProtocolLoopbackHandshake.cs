@@ -65,8 +65,9 @@ internal static class ProtocolLoopbackHandshake
     private const byte ServerKeyExchange = 4;
     private const byte ClientFinish = 5;
     private const byte ServerFinish = 6;
-    private const int NonceBytes = 32;
-    private const int CookieBytes = 16;
+    internal const int NonceBytes = 32;
+    internal const int CookieBytes = 16;
+    internal const int MaximumClientPublicKeyBytes = 512;
     private const int ProofBytes = 32;
     private const int SignatureBytes = 64;
 
@@ -375,11 +376,11 @@ internal static class ProtocolLoopbackHandshake
         }
     }
 
-    private static int WriteClientHello(Span<byte> destination, NetworkProtocolManifest manifest,
+    internal static int WriteClientHello(Span<byte> destination, NetworkProtocolManifest manifest,
         ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> publicKey) =>
         WriteClientKey(destination, ClientHello, manifest, nonce, publicKey, default);
 
-    private static int WriteClientKeyExchange(Span<byte> destination, NetworkProtocolManifest manifest,
+    internal static int WriteClientKeyExchange(Span<byte> destination, NetworkProtocolManifest manifest,
         ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> cookie) =>
         WriteClientKey(destination, ClientKeyExchange, manifest, nonce, publicKey, cookie);
 
@@ -395,11 +396,11 @@ internal static class ProtocolLoopbackHandshake
         return writer.WrittenCount;
     }
 
-    private static bool TryReadClientHello(ReadOnlySpan<byte> source, NetworkProtocolManifest manifest,
+    internal static bool TryReadClientHello(ReadOnlySpan<byte> source, NetworkProtocolManifest manifest,
         out ReadOnlySpan<byte> nonce, out ReadOnlySpan<byte> publicKey) =>
         TryReadClientKey(source, ClientHello, manifest, out nonce, out publicKey, out _);
 
-    private static bool TryReadClientKeyExchange(ReadOnlySpan<byte> source, NetworkProtocolManifest manifest,
+    internal static bool TryReadClientKeyExchange(ReadOnlySpan<byte> source, NetworkProtocolManifest manifest,
         out ReadOnlySpan<byte> nonce, out ReadOnlySpan<byte> publicKey, out ReadOnlySpan<byte> cookie) =>
         TryReadClientKey(source, ClientKeyExchange, manifest, out nonce, out publicKey, out cookie);
 
@@ -412,7 +413,7 @@ internal static class ProtocolLoopbackHandshake
             !reader.TryReadUInt16(out ushort version) || version != manifest.Version ||
             !reader.TryReadUInt64(out ulong fingerprint) || fingerprint != manifest.Fingerprint ||
             !reader.TryReadBytes(NonceBytes, out nonce) || !reader.TryReadUInt16(out ushort publicLength) ||
-            publicLength is < 64 or > 512 || !reader.TryReadBytes(publicLength, out publicKey) ||
+            publicLength is < 64 or > MaximumClientPublicKeyBytes || !reader.TryReadBytes(publicLength, out publicKey) ||
             (expectedKind == ClientKeyExchange && !reader.TryReadBytes(CookieBytes, out cookie)) || !reader.IsComplete)
         {
             nonce = publicKey = cookie = default;
@@ -421,7 +422,7 @@ internal static class ProtocolLoopbackHandshake
         return true;
     }
 
-    private static int WriteCookieChallenge(Span<byte> destination, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> cookie)
+    internal static int WriteCookieChallenge(Span<byte> destination, ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> cookie)
     {
         var writer = new NetworkPacketWriter(destination);
         if (!writer.TryWriteByte(CookieChallenge) || !writer.TryWriteBytes(nonce) || !writer.TryWriteBytes(cookie))
@@ -429,7 +430,7 @@ internal static class ProtocolLoopbackHandshake
         return writer.WrittenCount;
     }
 
-    private static bool TryReadCookieChallenge(ReadOnlySpan<byte> source, ReadOnlySpan<byte> expectedNonce,
+    internal static bool TryReadCookieChallenge(ReadOnlySpan<byte> source, ReadOnlySpan<byte> expectedNonce,
         out ReadOnlySpan<byte> cookie)
     {
         var reader = new NetworkPacketReader(source);
@@ -504,7 +505,7 @@ internal static class ProtocolLoopbackHandshake
         return true;
     }
 
-    private static void ComputeCookie(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce,
+    internal static void ComputeCookie(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce,
         ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> pathBinding, ulong timeBucket,
         Span<byte> cookie)
     {

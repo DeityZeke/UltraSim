@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `network-hosted-h0.1-external-admission-*` — first real externally sourced
+  IPv4 listener boundary: deployment-key pin copy, listener-lifetime stateless
+  cookie, fixed per-source rate table, non-amplifying challenge, bounded expiring
+  candidates, hostile containment, and zero warmed allocation. It stops before
+  authenticated session promotion and is not WAN/CCU/N1 adoption evidence;
+
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;
 - `terrain-t0.0-spatial-contracts-*` — accepted dependency-neutral integer

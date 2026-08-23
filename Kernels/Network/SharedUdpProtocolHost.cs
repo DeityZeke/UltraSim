@@ -698,6 +698,14 @@ public sealed class SharedUdpProtocolSession : IDisposable
     internal void MarkDisposed() => _disposed = true;
 }
 
+internal interface ISharedUdpUnknownDatagramHandler
+{
+    void HandleUnknownDatagram(
+        SharedUdpServerListener listener,
+        ReadOnlySpan<byte> datagram,
+        ReadOnlySpan<byte> remoteAddress);
+}
+
 internal sealed class SharedUdpServerListener : IDisposable
 {
     private const ulong Tombstone = ulong.MaxValue;
@@ -711,6 +719,8 @@ internal sealed class SharedUdpServerListener : IDisposable
     private readonly long _actualSocketBufferBytes;
     private readonly byte[] _receiveScratch;
     private readonly SocketAddress _receivedAddress;
+    private readonly SocketAddress _unknownSendAddress;
+    private readonly ISharedUdpUnknownDatagramHandler? _unknownDatagramHandler;
     private readonly SharedUdpServerEndpoint?[] _endpoints;
     private readonly int[] _freeEndpoints;
     private readonly ulong[] _routeKeys;
@@ -779,7 +789,20 @@ internal sealed class SharedUdpServerListener : IDisposable
     private bool _disposed;
 
     internal SharedUdpServerListener(UdpProtocolLimits udp, SharedUdpProtocolLimits shared)
+        : this(udp, shared, new IPEndPoint(IPAddress.Loopback, 0), null)
     {
+    }
+
+    internal SharedUdpServerListener(
+        UdpProtocolLimits udp,
+        SharedUdpProtocolLimits shared,
+        IPEndPoint bindEndPoint,
+        ISharedUdpUnknownDatagramHandler? unknownDatagramHandler)
+    {
+        ArgumentNullException.ThrowIfNull(bindEndPoint);
+        if (bindEndPoint.AddressFamily != AddressFamily.InterNetwork)
+            throw new ArgumentException("The shared UDP listener currently supports IPv4 endpoints only.",
+                nameof(bindEndPoint));
         shared.Validate(udp);
         UdpProtocolLimits listenerLimits = shared.CreateListenerLimits(udp);
         _maximumDatagramBytes = udp.MaximumDatagramBytes;
@@ -795,6 +818,8 @@ internal sealed class SharedUdpServerListener : IDisposable
             LinuxUdpBatch.IsReceiveSupported;
         _receiveScratch = new byte[udp.MaximumDatagramBytes];
         _receivedAddress = new SocketAddress(AddressFamily.InterNetwork, 16);
+        _unknownSendAddress = new SocketAddress(AddressFamily.InterNetwork, 16);
+        _unknownDatagramHandler = unknownDatagramHandler;
         _endpoints = new SharedUdpServerEndpoint[shared.MaximumSessions];
         _freeEndpoints = new int[shared.MaximumSessions];
         for (int index = 0; index < _freeEndpoints.Length; index++)
@@ -841,7 +866,7 @@ internal sealed class SharedUdpServerListener : IDisposable
         _socketDescriptor = _usesNativeSendBatching || _usesNativeReceiveBatching
             ? _socket.SafeHandle.DangerousGetHandle().ToInt32()
             : -1;
-        _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        _socket.Bind(bindEndPoint);
         _socket.Blocking = false;
         LocalEndPoint = (IPEndPoint)_socket.LocalEndPoint!;
         ReservedBytes = shared.EstimateReservedPayloadBytes(
@@ -889,6 +914,7 @@ internal sealed class SharedUdpServerListener : IDisposable
         }
         int budget = _maximumInboundDatagramsPerPump;
         int receivedThisPump = 0;
+        Span<byte> unknownAddress = stackalloc byte[16];
         while (budget-- > 0)
         {
             _receivePollCalls = SaturatingIncrement(_receivePollCalls);
@@ -913,6 +939,14 @@ internal sealed class SharedUdpServerListener : IDisposable
                     _endpoints[slot] is not SharedUdpServerEndpoint endpoint)
                 {
                     _unknownPaths = SaturatingIncrement(_unknownPaths);
+                    if (_receivedAddress.Family == AddressFamily.InterNetwork &&
+                        _unknownDatagramHandler is not null)
+                    {
+                        for (int index = 0; index < unknownAddress.Length; index++)
+                            unknownAddress[index] = _receivedAddress[index];
+                        _unknownDatagramHandler.HandleUnknownDatagram(
+                            this, _receiveScratch.AsSpan(0, length), unknownAddress);
+                    }
                     RecordStageTiming(ref _receiveRoutingTicks, routingStarted);
                     continue;
                 }
@@ -1013,16 +1047,19 @@ internal sealed class SharedUdpServerListener : IDisposable
         _maximumReceivedDatagramBytes = Math.Max(_maximumReceivedDatagramBytes, length);
         long routingStarted = StartStageTiming();
         ReadOnlySpan<byte> address = _nativeReceiveAddresses.AsSpan(index * 16, 16);
+        ReadOnlySpan<byte> payload = _nativeReceivePayloads.AsSpan(
+            index * _maximumDatagramBytes, length);
         if (address[0] != (byte)AddressFamily.InterNetwork || address[1] != 0 ||
             !TryResolve(Pack(address), out int slot) ||
             _endpoints[slot] is not SharedUdpServerEndpoint endpoint)
         {
             _unknownPaths = SaturatingIncrement(_unknownPaths);
+            if (address[0] == (byte)AddressFamily.InterNetwork && address[1] == 0 &&
+                _unknownDatagramHandler is not null)
+                _unknownDatagramHandler.HandleUnknownDatagram(this, payload, address);
             RecordStageTiming(ref _receiveRoutingTicks, routingStarted);
             return;
         }
-        ReadOnlySpan<byte> payload = _nativeReceivePayloads.AsSpan(
-            index * _maximumDatagramBytes, length);
         if (!endpoint.TryEnqueue(payload))
             _capacityDrops = SaturatingIncrement(_capacityDrops);
         else
@@ -1035,6 +1072,55 @@ internal sealed class SharedUdpServerListener : IDisposable
 
     internal DatagramSendStatus TrySendImmediate(int slot, ReadOnlySpan<byte> datagram) =>
         TrySend(slot, datagram, allowBatch: false);
+
+    internal DatagramSendStatus TrySendUnknown(
+        ReadOnlySpan<byte> datagram,
+        ReadOnlySpan<byte> remoteAddress)
+    {
+        EnsureOperational();
+        if (datagram.Length > _maximumDatagramBytes)
+        {
+            _rejected = SaturatingIncrement(_rejected);
+            return DatagramSendStatus.DatagramTooLarge;
+        }
+        if (remoteAddress.Length != 16 ||
+            remoteAddress[0] != (byte)AddressFamily.InterNetwork || remoteAddress[1] != 0)
+        {
+            _rejected = SaturatingIncrement(_rejected);
+            return DatagramSendStatus.CapacityExceeded;
+        }
+        for (int index = 0; index < remoteAddress.Length; index++)
+            _unknownSendAddress[index] = remoteAddress[index];
+        try
+        {
+            _sendCalls = SaturatingIncrement(_sendCalls);
+            long sendStarted = StartStageTiming();
+            int sent = _socket.SendTo(datagram, SocketFlags.None, _unknownSendAddress);
+            RecordStageTiming(ref _sendSystemCallTicks, sendStarted);
+            if (sent != datagram.Length)
+            {
+                _capacityDrops = SaturatingIncrement(_capacityDrops);
+                return DatagramSendStatus.CapacityExceeded;
+            }
+            _sent = SaturatingIncrement(_sent);
+            _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
+            _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
+            return DatagramSendStatus.Accepted;
+        }
+        catch (SocketException exception) when (IsTransient(exception.SocketErrorCode))
+        {
+            _lastError = exception.SocketErrorCode;
+            _capacityDrops = SaturatingIncrement(_capacityDrops);
+            _wouldBlockEvents = SaturatingIncrement(_wouldBlockEvents);
+            return DatagramSendStatus.CapacityExceeded;
+        }
+        catch (SocketException exception)
+        {
+            _lastError = exception.SocketErrorCode;
+            _rejected = SaturatingIncrement(_rejected);
+            return DatagramSendStatus.CapacityExceeded;
+        }
+    }
 
     private DatagramSendStatus TrySend(
         int slot,

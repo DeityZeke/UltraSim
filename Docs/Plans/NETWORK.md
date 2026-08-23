@@ -1,6 +1,6 @@
 # Network V3: N1 chunk-native world replication plan
 
-Status: active forward plan. Network N0 remains accepted/frozen as the current
+Status: active N1 forward plan. Network N0 remains accepted/frozen as the current
 remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
 as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -14,6 +14,11 @@ remains open only on a true dedicated-server/sharded-client run. Representative
 roaming, mixed public/private traffic, and the in-process real shared-socket
 topology are now captured without starting the separately deferred public hosted
 listener lifecycle.
+
+The separately authorized externally admitted listener/security lifecycle is now
+tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0/H0.1 are implemented and
+stopped before authenticated candidate promotion. That milestone remains Network-
+generic and does not alter N1 replication meaning.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -1481,6 +1486,7 @@ is favorable through the current in-process socket boundary; final remote adopti
 remains conditional on an explicitly authorized hosted-listener/sharded-client gate.
 
 Stop at the N1.4 final adoption-gates checkpoint. Do not begin N1.5 shared
-encoding, delete N0, run 2K/4K, or claim production CCU. The next decision is
-whether to authorize the separately scoped hosted-listener/security lifecycle
-needed for a genuine dedicated-server/sharded-client run.
+encoding, delete N0, run 2K/4K, or claim production CCU. The separately scoped
+hosted-listener/security lifecycle has been authorized and now stops at its H0.1
+external cookie-admission review; see `HOSTED_NETWORK.md`. N1's final remote
+adoption still waits for that milestone's H0.5 dedicated-server/sharded-client run.
