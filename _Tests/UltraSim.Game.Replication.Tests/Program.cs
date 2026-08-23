@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("P01DirtyEntityCapacityFailureRetainsFootprint", DirtyEntitySpatialFanoutTests.CapacityFailureRetainsFootprint),
     ("P01DirtyEntityCoalescingCadenceDisclosureAndCapacity", DirtyEntitySpatialFanoutTests.CoalescingCadenceDisclosureAndCapacity),
     ("P01DirtyEntityProofTimeoutAndStaleApplied", DirtyEntitySpatialFanoutTests.ProofTimeoutAndStaleApplied),
+    ("P01DirtyEntityStaleBundleRearmsSiblingDebt", DirtyEntitySpatialFanoutTests.StaleBundleRearmsSiblingDebt),
     ("P01DirtyEntityStatusAndRemoteEpochRecovery", DirtyEntitySpatialFanoutTests.StatusAndRemoteEpochRecovery),
     ("P01DirtyEntityFamiliesCoexistAndPrivateDoesNotLeak", DirtyEntitySpatialFanoutTests.FamiliesCoexistAndPrivateDoesNotLeak),
     ("P01DirtyEntityEpochAndProofFencing", DirtyEntitySpatialFanoutTests.EpochAndProofFencing),

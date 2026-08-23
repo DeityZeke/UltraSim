@@ -322,6 +322,63 @@ internal static class DirtyEntitySpatialFanoutTests
         Check.True(service.TryAcknowledgeBundle(participant, retry.DeliveryBundleId, applied: true));
     }
 
+    internal static void StaleBundleRearmsSiblingDebt()
+    {
+        DirtyEntitySpatialFanout service = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId participant = new(1);
+        ReplicationEntityId firstEntity = new(0, 1);
+        ReplicationEntityId siblingEntity = new(1, 1);
+        service.SetRecipientAnchor(participant, Point(0, 0), 0);
+        service.CommitEntity(Present(0, 1, 0, 0), 0);
+        service.CommitEntity(Present(1, 1, 0, 0), 0);
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out _));
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[4];
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 0, 4_096, records, out DirtyEntityBundle first));
+        Check.Equal(2, first.RecordCount);
+
+        // Supersede only A while B remains the exact sent obligation in the old bundle.
+        service.CommitEntity(Present(0, 2, 100, 0), 1);
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(1, out _));
+        Check.True(!service.TryAcknowledgeBundle(participant, first.DeliveryBundleId, applied: true));
+
+        Span<DirtyEntitySemanticKnowledgeSnapshot> knowledge = stackalloc DirtyEntitySemanticKnowledgeSnapshot[4];
+        Check.Equal(2, service.CopySemanticKnowledge(knowledge));
+        bool firstRearmed = false;
+        bool siblingRearmed = false;
+        for (int index = 0; index < knowledge.Length && knowledge[index].Entity.IsValid; index++)
+        {
+            if (knowledge[index].Entity == firstEntity)
+                firstRearmed = knowledge[index].PendingCanonicalVersion == 2 && !knowledge[index].PendingWasSent;
+            if (knowledge[index].Entity == siblingEntity)
+                siblingRearmed = knowledge[index].PendingCanonicalVersion == 1 && !knowledge[index].PendingWasSent;
+        }
+        Check.True(firstRearmed && siblingRearmed);
+
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 1, 4_096, records, out DirtyEntityBundle retry));
+        bool sawNewestFirst = false;
+        bool sawRearmedSibling = false;
+        for (int index = 0; index < retry.RecordCount; index++)
+        {
+            sawNewestFirst |= records[index].Entity == firstEntity && records[index].CanonicalVersion == 2;
+            sawRearmedSibling |= records[index].Entity == siblingEntity && records[index].CanonicalVersion == 1;
+        }
+        Check.True(sawNewestFirst && sawRearmedSibling);
+        Check.True(service.TryAcknowledgeBundle(participant, retry.DeliveryBundleId, applied: true));
+        Check.Equal(1UL, service.GetSnapshot().ApplicationProofsApplied);
+        Check.Equal(2, service.CopySemanticKnowledge(knowledge));
+        for (int index = 0; index < knowledge.Length && knowledge[index].Entity.IsValid; index++)
+        {
+            if (knowledge[index].Entity == firstEntity)
+                Check.Equal((ulong)2, knowledge[index].KnownCanonicalVersion);
+            if (knowledge[index].Entity == siblingEntity)
+                Check.Equal((ulong)1, knowledge[index].KnownCanonicalVersion);
+        }
+    }
+
     internal static void StatusAndRemoteEpochRecovery()
     {
         DirtyEntitySpatialFanout bounded = Create(maximumEntities: 4, maximumRecipients: 1, maximumRows: 1);

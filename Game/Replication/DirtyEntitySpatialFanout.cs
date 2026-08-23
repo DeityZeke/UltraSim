@@ -674,7 +674,10 @@ public sealed class DirtyEntitySpatialFanout
                 // Validate the complete bundle before touching any row so a stale proof is
                 // both classified correctly and incapable of partially advancing knowledge.
                 _staleOrRejectedProofs++;
-                ReleaseBundle(bundleIndex);
+                // Retire the stale ledger while rearming every sibling whose sent
+                // delivery is still its current pending obligation. Superseded or
+                // reused rows do not match and remain governed by their newer debt.
+                ReleaseBundle(bundleIndex, retry: true);
                 return false;
             }
         }
