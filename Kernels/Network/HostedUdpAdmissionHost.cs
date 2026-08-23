@@ -154,6 +154,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private readonly NetworkServerIdentity _serverIdentity;
     private readonly NetworkConnectionTable? _connections;
     private readonly HostedUdpProtocolSession?[] _sessions;
+    private readonly HostedUdpConnectionOwnerRuntime? _ownerRuntime;
     private readonly byte[] _serverPublicKey;
     private readonly byte[] _cookieKey;
     private readonly ulong[] _rateKeys;
@@ -232,6 +233,27 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     }
 
     /// <summary>
+    /// Creates the H0.5 composition: the listener retains socket/path ownership,
+    /// while fixed connection-owner threads own promoted secure peers and the
+    /// caller-supplied application adapter.
+    /// </summary>
+    public HostedUdpAdmissionHost(
+        IPEndPoint bindEndPoint,
+        NetworkServerIdentity serverIdentity,
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        SharedUdpProtocolLimits sharedLimits,
+        HostedUdpAdmissionLimits admissionLimits,
+        HostedUdpOwnerShardingLimits ownerLimits,
+        IHostedUdpSessionApplicationFactory applicationFactory,
+        NetworkProtocolManifest? manifest = null)
+        : this(bindEndPoint, serverIdentity, protocolLimits, udpLimits,
+            sharedLimits, admissionLimits, StopwatchNetworkMonotonicClock.Instance,
+            manifest, ownerLimits, applicationFactory)
+    {
+    }
+
+    /// <summary>
     /// Creates an externally reachable host that promotes cookie-validated
     /// candidates into the existing secure protocol.
     /// </summary>
@@ -283,7 +305,9 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         SharedUdpProtocolLimits sharedLimits,
         HostedUdpAdmissionLimits admissionLimits,
         INetworkMonotonicClock clock,
-        NetworkProtocolManifest? manifest)
+        NetworkProtocolManifest? manifest,
+        HostedUdpOwnerShardingLimits? ownerLimits = null,
+        IHostedUdpSessionApplicationFactory? applicationFactory = null)
     {
         ArgumentNullException.ThrowIfNull(bindEndPoint);
         ArgumentNullException.ThrowIfNull(serverIdentity);
@@ -363,6 +387,29 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         _candidateFreeCount = candidates;
         _listener = new SharedUdpServerListener(
             udpLimits, sharedLimits, bindEndPoint, this);
+        try
+        {
+            if (ownerLimits.HasValue || applicationFactory is not null)
+            {
+                if (!_promotionEnabled || !ownerLimits.HasValue || applicationFactory is null ||
+                    ownerLimits.Value.MaximumConnections < sharedLimits.MaximumSessions)
+                    throw new ArgumentException(
+                        "Hosted owner sharding requires promotion, a factory, and enough connection slots.",
+                        nameof(ownerLimits));
+                _ownerRuntime = new HostedUdpConnectionOwnerRuntime(
+                    ownerLimits.Value,
+                    _manifest,
+                    _protocolLimits,
+                    _udpLimits,
+                    _admissionLimits,
+                    applicationFactory);
+            }
+        }
+        catch
+        {
+            _listener.Dispose();
+            throw;
+        }
     }
 
     /// <summary>The kernel-selected IPv4 listener endpoint.</summary>
@@ -380,6 +427,20 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     public int SessionCount
     {
         get { EnsureOperational(); return _sessionCount; }
+    }
+
+    /// <summary>Returns H0.5 owner-thread evidence when this host is sharded.</summary>
+    public bool TryGetConnectionOwnerSnapshot(
+        out HostedUdpConnectionOwnerRuntimeSnapshot snapshot)
+    {
+        EnsureOperational();
+        if (_ownerRuntime is null)
+        {
+            snapshot = default;
+            return false;
+        }
+        snapshot = _ownerRuntime.GetSnapshot();
+        return true;
     }
 
     /// <summary>Returns a cold generation-fenced view of one active candidate row.</summary>
@@ -454,30 +515,41 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         EnsureOperational();
         ulong now = GetMonotonicMilliseconds();
         SweepExpiredCandidates(now);
-        SweepExpiredPathRebinds(now);
+        if (_ownerRuntime is null) SweepExpiredPathRebinds(now);
         _listener.PumpInbound();
         // Admission/promotion callbacks may sample a later monotonic value while
         // routing inbound datagrams. Refresh before session lifetime arithmetic.
         now = GetMonotonicMilliseconds();
 
-        for (int index = 0; index < _sessions.Length; index++)
+        if (_ownerRuntime is null)
         {
-            if (_sessions[index] is not HostedUdpProtocolSession current ||
-                current.RawState == UdpProtocolSessionState.Closed)
-                continue;
-            ulong received = current.Server.ReceivedPacketCount;
-            _ = current.Server.ProcessInbound(now);
-            if (current.Server.ReceivedPacketCount != received)
-                current.LastActivityMilliseconds = now;
-            if (current.RawState == UdpProtocolSessionState.Established &&
-                now - current.LastKeepAliveMilliseconds >=
-                    (ulong)_udpLimits.KeepAliveIntervalMilliseconds &&
-                current.Server.TryEmitKeepAlive())
-                current.LastKeepAliveMilliseconds = now;
-            current.Server.Emit(now);
+            for (int index = 0; index < _sessions.Length; index++)
+            {
+                if (_sessions[index] is not HostedUdpProtocolSession current ||
+                    current.RawState == UdpProtocolSessionState.Closed)
+                    continue;
+                ulong received = current.Server.ReceivedPacketCount;
+                _ = current.Server.ProcessInbound(now);
+                if (current.Server.ReceivedPacketCount != received)
+                    current.LastActivityMilliseconds = now;
+                if (current.RawState == UdpProtocolSessionState.Established &&
+                    now - current.LastKeepAliveMilliseconds >=
+                        (ulong)_udpLimits.KeepAliveIntervalMilliseconds &&
+                    current.Server.TryEmitKeepAlive())
+                    current.LastKeepAliveMilliseconds = now;
+                current.Server.Emit(now);
+            }
         }
+        else
+            _ownerRuntime.DrainListenerEgress(_listener, _sessions);
 
         _listener.PumpOutbound();
+        if (_ownerRuntime is not null)
+        {
+            _ownerRuntime.DrainListenerEgress(_listener, _sessions);
+            _listener.PumpOutbound();
+            return;
+        }
         for (int index = 0; index < _sessions.Length; index++)
         {
             if (_sessions[index] is not HostedUdpProtocolSession current) continue;
@@ -512,11 +584,26 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 _candidateTranscripts.Length +
                 _candidateMasterSecrets.Length +
                 _candidateServerFlights.Length);
-            for (int index = 0; index < _sessions.Length; index++)
-                if (_sessions[index] is HostedUdpProtocolSession current)
-                    promotionReserved = checked(
-                        promotionReserved + current.Server.GetSnapshot().ReservedBytes +
-                        current.ReservedBytes);
+            if (_ownerRuntime is null)
+            {
+                for (int index = 0; index < _sessions.Length; index++)
+                    if (_sessions[index] is HostedUdpProtocolSession current)
+                        promotionReserved = checked(
+                            promotionReserved + current.Server.GetSnapshot().ReservedBytes +
+                            current.ReservedBytes);
+            }
+            else
+            {
+                promotionReserved = checked(promotionReserved + _ownerRuntime.ReservedBytes);
+                for (int index = 0; index < _sessions.Length; index++)
+                    if (_sessions[index] is HostedUdpProtocolSession current &&
+                        current.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+                    {
+                        owned.CopyCachedSnapshots(out NetworkProtocolSnapshot protocol, out _);
+                        promotionReserved = checked(
+                            promotionReserved + protocol.ReservedBytes + current.ReservedBytes);
+                    }
+            }
         }
         return new(
             _candidateCount,
@@ -666,6 +753,18 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             session.LastActivityMilliseconds = GetMonotonicMilliseconds();
             return true;
         }
+        if (_ownerRuntime is not null)
+        {
+            if (HostedUdpPathRebindCodec.TryPeekConnection(
+                    datagram, HostedPathDatagramKind.Request, _manifest, out _) ||
+                HostedUdpPathRebindCodec.TryPeekConnection(
+                    datagram, HostedPathDatagramKind.Proof, _manifest, out _))
+                _ = _ownerRuntime.TryOfferPathControl(
+                    datagram, endpoint.RemotePathBinding);
+            else
+                _ = _ownerRuntime.TryOfferSecure(session, datagram);
+            return true;
+        }
         if (session.LastPathProofLength != 0 &&
             datagram.Length == session.LastPathProofLength &&
             CryptographicOperations.FixedTimeEquals(
@@ -688,6 +787,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     {
         EnsureOwnerThread();
         if (_disposed) return;
+        _ownerRuntime?.StopAndJoin();
         for (int index = 0; index < _sessions.Length; index++)
             if (_sessions[index] is HostedUdpProtocolSession session)
                 RetireCore(session);
@@ -695,6 +795,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             if (_candidateStates[slot] != 0)
                 ReleaseCandidate(slot, releaseConnection: true);
         _listener.Dispose();
+        _ownerRuntime?.Dispose();
         CryptographicOperations.ZeroMemory(_cookieKey);
         CryptographicOperations.ZeroMemory(_serverPublicKey);
         CryptographicOperations.ZeroMemory(_candidateNonces);
@@ -738,6 +839,15 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         HostedUdpProtocolSession session)
     {
         EnsureSession(session);
+        NetworkProtocolSnapshot protocol;
+        UdpDatagramEndpointSnapshot datagrams;
+        if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+            owned.CopyCachedSnapshots(out protocol, out datagrams);
+        else
+        {
+            protocol = session.Server.GetSnapshot();
+            datagrams = session.Endpoint.GetSnapshot();
+        }
         return new(
             session.RawState,
             session.Connection,
@@ -747,8 +857,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             new IPEndPoint(
                 session.Endpoint.RemoteEndPoint.Address,
                 session.Endpoint.RemoteEndPoint.Port),
-            session.Server.GetSnapshot(),
-            session.Endpoint.GetSnapshot());
+            protocol,
+            datagrams);
     }
 
     internal void Retire(HostedUdpProtocolSession session)
@@ -759,6 +869,13 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
 
     private void BeginDrainCore(HostedUdpProtocolSession session, ulong now)
     {
+        if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+        {
+            session.RawState = UdpProtocolSessionState.Draining;
+            owned.RequestStop();
+            owned.Worker.Wake();
+            return;
+        }
         session.Server.StopAcceptingNewSends();
         session.RawState = UdpProtocolSessionState.Draining;
         session.DrainDeadlineMilliseconds = checked(
@@ -783,7 +900,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         if (session.HasPendingPathRebind)
         {
             session.ClearPendingPathRebind();
-            _pendingPathRebinds--;
+            if (_ownerRuntime is null) _pendingPathRebinds--;
         }
     }
 
@@ -791,8 +908,10 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     {
         if (session.RawState == UdpProtocolSessionState.Established)
             BeginDrainCore(session, GetMonotonicMilliseconds());
+        if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+            _ownerRuntime!.RetireTransport(owned, _listener, _sessions);
         CloseTransport(session);
-        session.Server.Dispose();
+        if (session.OwnedTransport is null) session.Server.Dispose();
         CloseAndReleaseConnection(session.Connection);
         _sessions[session.Connection.Slot] = null;
         _sessionCount--;
@@ -1110,22 +1229,33 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         }
 
         NetworkProtocolPeer? server = null;
+        HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? ownedTransport = null;
         byte[]? clientFinish = null;
         byte[]? serverFinish = null;
         byte[]? pathKey = null;
         bool published = false;
         try
         {
-            server = new NetworkProtocolPeer(
-                endpoint,
-                _manifest,
-                _protocolLimits,
-                new DeterministicDatagramLimits(1, _udpLimits.MaximumDatagramBytes),
-                connection,
-                epoch,
-                master,
-                sendsClientToServer: false,
-                usesMonotonicPacing: true);
+            if (_ownerRuntime is null)
+            {
+                server = new NetworkProtocolPeer(
+                    endpoint,
+                    _manifest,
+                    _protocolLimits,
+                    new DeterministicDatagramLimits(1, _udpLimits.MaximumDatagramBytes),
+                    connection,
+                    epoch,
+                    master,
+                    sendsClientToServer: false,
+                    usesMonotonicPacing: true);
+            }
+            else if (!_ownerRuntime.TryCreateTransport(
+                    connection, epoch, master, out ownedTransport) ||
+                ownedTransport is null)
+                throw new InvalidOperationException(
+                    "The hosted promotion could not create its connection-owner transport.");
+            else
+                server = ownedTransport.Peer;
             clientFinish = datagram.ToArray();
             serverFinish = new byte[1 + 4 + 4 + 4 + ProtocolLoopbackHandshake.ProofBytes];
             int finishLength = ProtocolLoopbackHandshake.WriteServerFinish(
@@ -1147,10 +1277,11 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 checked((uint)slot), _candidateGenerations[slot]);
             var session = new HostedUdpProtocolSession(
                 this, endpoint, server, connection, candidateId,
-                clientFinish, serverFinish, pathKey, now);
+                clientFinish, serverFinish, pathKey, now, ownedTransport);
             _sessions[connection.Slot] = session;
             _sessionCount++;
             _establishedPromotions = SaturatingIncrement(_establishedPromotions);
+            _ownerRuntime?.PublishTransport(ownedTransport!, session);
             server = null;
             clientFinish = null;
             serverFinish = null;
@@ -1172,7 +1303,10 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         {
             if (!published)
             {
-                server?.Dispose();
+                if (ownedTransport is not null)
+                    _ownerRuntime!.CancelTransport(ownedTransport);
+                else
+                    server?.Dispose();
                 endpoint.Dispose();
                 if (clientFinish is not null)
                     CryptographicOperations.ZeroMemory(clientFinish);
@@ -1190,6 +1324,17 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         ReadOnlySpan<byte> remoteAddress,
         ulong now)
     {
+        if (_ownerRuntime is not null &&
+            (HostedUdpPathRebindCodec.TryPeekConnection(
+                    datagram, HostedPathDatagramKind.Request, _manifest, out _) ||
+             HostedUdpPathRebindCodec.TryPeekConnection(
+                    datagram, HostedPathDatagramKind.Proof, _manifest, out _)))
+        {
+            Span<byte> binding = stackalloc byte[HostedUdpPathRebindCodec.PathBindingBytes];
+            WritePathBinding(remoteAddress, binding);
+            _ = _ownerRuntime.TryOfferPathControl(datagram, binding);
+            return true;
+        }
         if (HostedUdpPathRebindCodec.TryPeekConnection(
                 datagram, HostedPathDatagramKind.Request, _manifest,
                 out ConnectionId requestConnection))
@@ -1612,7 +1757,8 @@ public sealed class HostedUdpProtocolSession : IDisposable
         byte[] clientFinish,
         byte[] serverFinish,
         byte[] pathKey,
-        ulong now)
+        ulong now,
+        HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? ownedTransport = null)
     {
         Owner = owner;
         Endpoint = endpoint;
@@ -1622,11 +1768,15 @@ public sealed class HostedUdpProtocolSession : IDisposable
         ClientFinish = clientFinish;
         ServerFinish = serverFinish;
         PathKey = pathKey;
+        OwnedTransport = ownedTransport;
         PathGeneration = new(1);
+        ListenerPathGeneration = new(1);
         LastIssuedPathGeneration = 1;
         PendingPathNonce = new byte[HostedUdpPathRebindCodec.NonceBytes];
         PendingPathChallenge = new byte[HostedUdpPathRebindCodec.ChallengeBytes];
         PendingPathChallengeFlight = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
+        PendingPathBinding = new byte[HostedUdpPathRebindCodec.PathBindingBytes];
+        CurrentPathBinding = endpoint.RemotePathBinding.ToArray();
         LastPathProof = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
         LastPathCommit = new byte[HostedUdpPathRebindCodec.PathFlightBytes];
         RawState = UdpProtocolSessionState.Established;
@@ -1642,9 +1792,12 @@ public sealed class HostedUdpProtocolSession : IDisposable
     internal byte[] PendingPathNonce { get; }
     internal byte[] PendingPathChallenge { get; }
     internal byte[] PendingPathChallengeFlight { get; }
+    internal byte[] PendingPathBinding { get; }
+    internal byte[] CurrentPathBinding { get; }
     internal byte[] LastPathProof { get; }
     internal byte[] LastPathCommit { get; }
     internal HostedPathGeneration PathGeneration { get; set; }
+    internal HostedPathGeneration ListenerPathGeneration { get; set; }
     internal HostedPathGeneration PendingPathGeneration { get; set; }
     internal uint LastIssuedPathGeneration { get; set; }
     internal ulong LastCommittedPathAttempt { get; set; }
@@ -1654,11 +1807,14 @@ public sealed class HostedUdpProtocolSession : IDisposable
     internal int PendingPathChallengeLength { get; set; }
     internal int LastPathProofLength { get; set; }
     internal int LastPathCommitLength { get; set; }
+    internal bool PathCommitAwaitingListener { get; set; }
+    internal HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? OwnedTransport { get; }
     internal bool HasPendingPathRebind => PendingPathGeneration.IsValid;
     internal long ReservedBytes => checked(
         ClientFinish.Length + ServerFinish.Length + PathKey.Length +
         PendingPathNonce.Length + PendingPathChallenge.Length +
-        PendingPathChallengeFlight.Length + LastPathProof.Length +
+        PendingPathChallengeFlight.Length + PendingPathBinding.Length +
+        CurrentPathBinding.Length + LastPathProof.Length +
         LastPathCommit.Length);
     internal UdpProtocolSessionState RawState { get; set; }
     internal ulong LastActivityMilliseconds { get; set; }
@@ -1715,6 +1871,7 @@ public sealed class HostedUdpProtocolSession : IDisposable
     {
         CryptographicOperations.ZeroMemory(PendingPathNonce);
         CryptographicOperations.ZeroMemory(PendingPathChallenge);
+        CryptographicOperations.ZeroMemory(PendingPathBinding);
         if (clearFlights)
             CryptographicOperations.ZeroMemory(PendingPathChallengeFlight);
         PendingPathGeneration = default;
@@ -1722,5 +1879,6 @@ public sealed class HostedUdpProtocolSession : IDisposable
         PendingPath = 0;
         PendingPathExpiration = 0;
         PendingPathChallengeLength = 0;
+        PathCommitAwaitingListener = false;
     }
 }

@@ -18,9 +18,11 @@ application-proof fencing around that same oracle. N1.2 carries MTU-admissible
 ordinary deltas/absences through real independent-unreliable transport with a
 bounded delivery ledger and production client-cache application. N1.3 adds the
 exceptional atomic Bulk snapshot transaction. N1.4's shared dirty-work scheduler,
-exact stable-interest fast path and bounded mixed-cadence traversal are accepted
-mechanisms. Compact recipient/reverse-index storage is stopped for checkpoint
-review; current-game profile adoption remains open. None replaces N0 yet.
+exact stable-interest fast path, bounded mixed-cadence traversal, and compact
+recipient/reverse-index storage are accepted. The representative/mixed/shared-
+socket matrix and Hosted H0.5
+dedicated-process gate select N1 for the current game. N0 remains compiled as the
+historical/reference profile; N1.5 and N0 deletion remain separate gates.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -162,8 +164,8 @@ capacities initially reserved about 387.6 MB. Compact 32-byte retained subscript
 rows, 40-byte scheduler memberships, 24-byte chunk rows, and two fixed 4-byte-slot
 indexes reduce the repeated crossover to about 221.8 MB. A 640-slot sensitivity
 case reports about 147.9 MB without freezing 640 as a production maximum. The
-roughly 100-us synchronized crossing tail and remaining Dense-400/end-to-end matrix
-must still decide current-game profile adoption before N1.5.
+roughly 100-us synchronized crossing tail remained an adoption input rather than
+a reason to optimize before the representative matrix.
 
 The accepted compact layout is now used by the first remaining-adoption matrix.
 `OfflineDirectChunkSubscriptionView` is a non-escaping `ref struct` live view, and
@@ -178,8 +180,8 @@ and exact no-change reconciliations preserve the current subscription bank. Thes
 are implementation optimizations only; the accepted geometry, topology,
 cursor/history, and leaves-before-enters contracts are unchanged. Sustained
 distributed movement still measures 6.553 ms p95 and synchronized transitions
-remain expensive, so current-game N0-to-N1 adoption is still open pending
-mixed-private and sharded/socket evidence. N1.5 and 2K/4K remain unstarted.
+remain expensive; the later representative/mixed/hosted evidence, rather than
+those hostile synchronized controls, owns current-game selection.
 
 The follow-up representative run disperses recipients across independent world
 regions and includes 152 boundary plus 116 corner crossings. It reports 5.975 ms
@@ -190,9 +192,11 @@ Mixed deterministic replay combines public chunk deltas, recipient-specific owne
 state, retained Events, Control action headers, and both application-proof streams.
 All 3,840 values per stream converge with zero disclosure mismatches and 3.364 ms
 p95 total work. A separate 64-recipient real shared-UDP-listener run reports
-1.578 ms p95 and zero warmed allocation. True external sharded clients remain a
-hosted-Network lifecycle gate because the accepted shared host deliberately owns
-only controlled in-process clients; Replication does not weaken that boundary.
+1.578 ms p95 and zero warmed allocation. Hosted H0.5 then carries the unchanged
+scheduler and remote chunk adapters through one dedicated server, fixed owner
+threads, and independent externally admitted client processes. Its mixed traffic,
+cross-chunk migration, path rebind, proof-gated completion, and reconnect close
+the current-game selection gate without moving hosted lifecycle into Replication.
 
 `ParticipantId` remains game/session identity. Account-backed Admission sessions
 rebind through durable character identity after publication. Accountless sessions

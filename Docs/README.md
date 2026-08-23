@@ -58,12 +58,15 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Network kernel foundation](../Kernels/Network/README.md) — bounded byte,
   protocol, reliability, security, and transport mechanisms accepted during N0.
-- [Network V3 N1 forward plan](Plans/NETWORK.md) — active chunk-native public
-  spatial replication candidate for the current game. AOI remains Game-owned
-  profile policy above one shared Network delivery boundary. N1.0-N1.3 now cover
-  packet-free subscriptions, canonical chunk wire semantics, ordinary independent-
-  unreliable delivery, and atomic Bulk snapshot recovery; current N0 remains the
-  executable production/reference path.
+- [Network V3 N1 forward plan](Plans/NETWORK.md) — selected chunk-native public
+  spatial replication profile for the current game. AOI remains Game-owned policy
+  above one shared Network delivery boundary. N1.0-N1.4 and Hosted H0.5 cover
+  subscriptions, wire/proof semantics, ordinary/recovery delivery, dirty work,
+  compact storage, mixed/adoption evidence, and the dedicated-process gate. N0
+  remains compiled as the historical/reference profile.
+- [Hosted Network H0](Plans/HOSTED_NETWORK.md) — externally admitted shared UDP,
+  deployment pinning, bounded cookies/rates, authenticated promotion, IPv4 path
+  ownership, connection-owner packet handoff, and dedicated-process H0.5 scope.
 
 ## Evidence and tools
 
@@ -75,10 +78,9 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Terrain / World T0](Plans/TERRAIN.md) is accepted/frozen through the launchable
   T0.10 woods/cabin vertical.
-- [Network N1](Plans/NETWORK.md) is active. N1.0 packet-free subscriptions and
-  N1.1 canonical wire/proof semantics and N1.2 ordinary delivery are accepted.
-  N1.3 atomic snapshot recovery is implemented and stopped for review; N1.4
-  measured scheduling/adoption has not started.
+- [Network N1](Plans/NETWORK.md) is selected for the current game through N1.4
+  and the Hosted H0.5 dedicated-process closure. N1.5, N0 deletion, 2K/4K, and
+  public-WAN/production-CCU claims remain stopped.
 
 ## Source-of-truth hierarchy
 

@@ -38,6 +38,7 @@ when those systems exist.
 | `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected/shared-UDP bot adapter with bounded pressure, memory, wire, semantic-latency telemetry, cadence/stall acceptance, and V3-only integrated `spread_mix`/`dense_mix`. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Network.N1Benchmarks` | N1.0 packet-free chunk-recipient controls, N1.1 canonical codecs, N1.2 ordinary transport, N1.3 atomic snapshot recovery, and N1.4 dirty-scheduling/storage/adoption evidence. |
+| `UltraSim.Network.HostedH05` | H0.5 dedicated server plus independent external client processes through hosted admission, connection-owner sharding, H0.3 rebinding, mixed N1 traffic, cross-chunk migration, proof-gated completion, and reconnect. |
 | `UltraSim.Spatial.Benchmarks` | Terrain T0.0 dependency-neutral spatial math and fixed game-position profile: normalization, reconstruction, key/hash/order, AABB distance, and terrain-cell lookup. |
 | `UltraSim.WorldSpatialIndex.Benchmarks` | Terrain T0.1 split post-step/index costs: idle observation, same-home change, cross-chunk migration, create/remove, full rebuild, and member reads. |
 | `UltraSim.TerrainEncoding.Benchmarks` | Terrain T0.2 fixed 16 m/0.5 m geometry, global-vs-based height candidate matrix, synthetic multi-datum distribution, reconstructed shared-edge equality, scratch, and encode/decode evidence. |
@@ -107,6 +108,10 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.N1Benchmarks -c Release -- \
     --remaining-adoption-matrix \
     --output=_Benchmarks/results/network-n1.4-remaining-adoption-matrix-local.json
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.HostedH05 -c Release -- \
+    --clients=8 --owners=4 --ticks=24 --reconnects=1 \
+    --output=_Benchmarks/results/network-hosted-h0.5-local.json
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \

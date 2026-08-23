@@ -171,7 +171,8 @@ Start with the [documentation map](Docs/README.md).
 - [Game replication](Game/Replication/README.md)
 - [Benchmark methodology](_Benchmarks/README.md)
 - [Terrain / World T0 active plan](Docs/Plans/TERRAIN.md)
-- [Network V3 N1 deferred plan](Docs/Plans/NETWORK.md)
+- [Network V3 N1 plan/status](Docs/Plans/NETWORK.md)
+- [Hosted Network H0](Docs/Plans/HOSTED_NETWORK.md)
 
 Source and tests are executable truth. XML comments define public API semantics.
 Current Markdown explains architecture and rationale. Plans describe only

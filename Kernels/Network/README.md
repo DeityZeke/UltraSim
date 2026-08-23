@@ -342,7 +342,7 @@ RTO early, and a later fatal socket failure can discard unreliable traffic. A
 future production acceptor must therefore define queue-age/fatal-transport policy
 and fault-inject `EAGAIN`, `ENOBUFS`, and partial submissions.
 
-### Hosted production boundary remains incomplete
+### Hosted H0 process boundary
 
 The original loopback host is not a public CCU acceptor. Hosted H0.0-H0.3 have now
 earned listener-lifetime cookies, bounded unauthenticated admission,
@@ -351,9 +351,22 @@ ownership on one listener owner. H0.4 adds fixed generation-fenced connection
 owners, bidirectional exclusive packet-slot transfer, transactional queue/capacity
 failure, failed-owner reclamation, and a real secure `NetworkProtocolPeer` canary
 on a separate owner thread. A clear H0.3 `ConnectionId` routes only to the owner;
-the owner still authenticates path control. IPv6 and H0.5 composition with the
-real external listener/dedicated process topology remain unearned production
-Network-host requirements. H0.5 must prove them before any remote CCU claim.
+the owner still authenticates path control.
+
+H0.5 now composes that seam with the real external listener. Fixed owner workers
+construct and exclusively operate promoted `NetworkProtocolPeer` instances and
+caller-supplied application adapters; the listener owns sockets, paths, and the
+packet slab. One owner can host multiple connections because it demultiplexes each
+acquired lease before staging it into the exact peer—individual peers never drain
+foreign connection traffic. Host shutdown stops and joins workers before failed-
+owner reclamation.
+
+Permanent H0.5 tests cover two secure sessions on one owner, thread-affinity
+rejection, quiescent/capacity-reusable session retirement, full H0.3 rebinding,
+lost-Commit recovery, and zero residual packet leases. Dedicated-process evidence
+composes unchanged N1 Game adapters with eight independent clients. IPv6, public-
+WAN policy, deployment supervision, multi-host connection migration, and
+production CCU remain unearned; H0.5 is not a public Internet readiness claim.
 
 ### N0.10.2 reliable-only ACK elicitation
 

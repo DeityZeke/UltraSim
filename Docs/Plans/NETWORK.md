@@ -1,27 +1,27 @@
 # Network V3: N1 chunk-native world replication plan
 
-Status: active N1 forward plan. Network N0 remains accepted/frozen as the current
-remote-authority implementation/reference. Terrain / World T0 is accepted/frozen
-as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
+Status: N1 is selected as the current UltraSim game replication profile through
+the Hosted H0.5 dedicated-process gate. Network N0 remains accepted/frozen and
+compiled as the historical/reference profile. Terrain / World T0 is accepted/
+frozen as of 2026-08-21. N1.0's packet-free `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
 accepted. N1.4 dirty-driven work discovery is accepted at `682fcdcd`; mixed-cadence,
 dirty-density, roaming, and the first 512/768/1024 semantic crossover are now
 captured. N1.4 recipient/scheduler storage compaction is accepted. The first
 remaining server-semantic, deterministic secure-transport, dense-entry, and
-topology-attribution matrix is captured. The current-game AOI adoption decision
-remains open only on a true dedicated-server/sharded-client run. Representative
-roaming, mixed public/private traffic, and the in-process real shared-socket
-topology are now captured without starting the separately deferred public hosted
-listener lifecycle.
+topology-attribution matrix is captured. Representative roaming, mixed public/
+private traffic, and the in-process real shared-socket topology are accepted. The
+separate Hosted H0.5 dedicated-server/independent-client gate is also accepted, so
+N1 is now selected for the current UltraSim game. N0 remains compiled as the
+historical/reference profile; it has not been deleted.
 
 The separately authorized externally admitted listener/security lifecycle is now
-tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.4 are implemented and
-stopped after transactional authenticated candidate promotion, explicit path
-ownership/rebinding, and a bounded connection-owner packet handoff. The remaining
-H0.5 gate must compose that mechanism with the real external listener and
-dedicated/sharded processes. Hosted Network remains Network-generic and does not
-alter N1 replication meaning.
+tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.5 compose transactional
+authenticated promotion, explicit path ownership/rebinding, bounded connection-
+owner packet handoff, one dedicated server process, and independent client
+workers. Hosted Network remains Network-generic and does not alter N1 replication
+meaning.
 
 The completed N0 implementation and its checkpoint history remain in git and in
 immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
@@ -57,9 +57,10 @@ deployment identity, listener-lifetime cookie keys, bounded/rate-limited
 unauthenticated admission, amplification limits, promotion, and explicit IPv4
 path rebinding through H0.3. H0.4 now proves generation-fenced, exclusive
 cross-owner packet-memory transfer and a separate-thread secure-protocol canary.
-IPv6 and the H0.5 real-listener/dedicated-process composition remain later Hosted
-gates. Do not fold that lifecycle/security work into N1's chunk-replication
-experiment, and do not quote same-process loopback population as public remote CCU.
+H0.5 now owns the real-listener/dedicated-process composition. IPv6 and public-
+WAN/deployment hardening remain later Hosted gates; the accepted localhost process
+count is not public remote CCU. Do not fold lifecycle/security policy into N1's
+chunk-replication profile.
 
 N1 tests the original chunk-native AOI model for the current UltraSim game against
 that frozen N0 baseline. It does not make chunks the permanent Network-level AOI
@@ -1203,23 +1204,26 @@ batching. Public delta/application-proof convergence reports 1.578 ms p95 total,
 are 11,596,779 server bytes and 8,492,288 client bytes, with configured listener
 and aggregate client socket buffers reported separately.
 
-The remaining sharded-process gate cannot be honestly produced by the current
-host. `SharedUdpProtocolHost` deliberately creates controlled in-process clients
-and exposes no external/public admission endpoint. Adding one requires the
-already-separated hosted-Network work: pinned deployment identity, bounded
-unauthenticated admission, amplification/rate limits, path/rebinding policy, and
-cross-owner packet-memory transfer. Do not fake a dedicated-server result by
-launching child processes that each own both sides of a loopback session, and do
-not silently widen N1.4 into that security/lifecycle checkpoint.
+Hosted H0.5 supplies the previously missing process gate. One dedicated server
+process owns the externally admitted native-batched listener and four connection-
+owner threads; eight independent client processes establish two fresh connection
+phases each through the pinned deployment identity. The run composes the unchanged
+N1 scheduler/server/client adapters with mixed WorldState, OwnerState, Event,
+Control, and application-proof traffic, one chunk-boundary migration and one H0.3
+path rebind per phase. All 16 applications converge with no disclosure mismatch,
+handoff capacity drop, foreign-connection packet loss, or remaining packet lease.
 
-N1's semantic, representative movement, mixed-lane, and real shared-socket
-evidence are now favorable enough for the current game, but final N0-to-N1 remote
-profile adoption remains conditional on the explicitly authorized hosted-listener
-and sharded-client gate. N1.5 and 2K/4K remain unstarted.
+The cumulative N1.4 semantic/representative/mixed/shared-socket evidence plus H0.5
+therefore selects chunk-publication replication for the current UltraSim game.
+This is a Game profile decision, not a Network invariant and not a production CCU
+claim. N0 remains compiled as the comparison/reference implementation until a
+separate removal gate. N1.5 and 2K/4K remain unstarted.
 
 Evidence:
 [`network-n1.4-final-adoption-gates-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.json) and
-[`network-n1.4-final-adoption-gates-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.md).
+[`network-n1.4-final-adoption-gates-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.md), plus
+[`network-hosted-h0.5-dedicated-sharded-2026-08-22.json`](../../_Benchmarks/Baselines/network-hosted-h0.5-dedicated-sharded-2026-08-22.json) and
+[`network-hosted-h0.5-dedicated-sharded-2026-08-22.md`](../../_Benchmarks/Baselines/network-hosted-h0.5-dedicated-sharded-2026-08-22.md).
 
 ## N1.5 — shared semantic packing / chunk page reuse
 
@@ -1486,12 +1490,10 @@ N1.4 adds the shared dirty-work scheduler, exact stable-interest fast path, boun
 cadence traversal, and compact recipient/reverse-index storage. Its mechanisms are
 accepted through the storage-compaction stop. The first remaining semantic,
 secure deterministic replay, dense-entry, representative topology, mixed-lane,
-and real shared-socket matrices are captured. The measured current-game profile
-is favorable through the current in-process socket boundary; final remote adoption
-remains conditional on an explicitly authorized hosted-listener/sharded-client gate.
+and real shared-socket matrices are captured. Hosted H0.5 closes the dedicated-
+process gate, and the current-game profile is selected. N0 remains a retained
+reference and the selection does not authorize N1.5.
 
-Stop at the N1.4 final adoption-gates checkpoint. Do not begin N1.5 shared
-encoding, delete N0, run 2K/4K, or claim production CCU. The separately scoped
-hosted-listener/security lifecycle has been authorized and now stops at its H0.3
-authenticated path-ownership review; see `HOSTED_NETWORK.md`. N1's final remote
-adoption still waits for that milestone's H0.5 dedicated-server/sharded-client run.
+Stop after the H0.5 adoption closure. Do not begin N1.5 shared encoding, delete
+N0, run 2K/4K, or claim public-WAN/production CCU. The separately scoped hosted
+lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.

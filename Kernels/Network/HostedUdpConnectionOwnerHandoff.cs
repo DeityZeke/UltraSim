@@ -61,6 +61,7 @@ public enum HostedPacketTransferKind : byte
 {
     SecureProtocol = 1,
     PathControl = 2,
+    PathRebindCommit = 3,
 }
 
 /// <summary>Bounded admission result for a hosted owner handoff.</summary>
@@ -893,7 +894,7 @@ public sealed class HostedUdpConnectionOwnerHandoff : IDisposable
                 "The hosted connection queue belongs to another owner thread.");
     }
 
-    private bool TryGetBinding(
+    internal bool TryGetBinding(
         ConnectionId connection,
         out int connectionSlot,
         out HostedConnectionOwnerId owner)
@@ -982,7 +983,9 @@ public sealed class HostedUdpConnectionOwnerHandoff : IDisposable
         ReadOnlySpan<byte> payload,
         ReadOnlySpan<byte> pathBinding) =>
         (kind is HostedPacketTransferKind.SecureProtocol or
-            HostedPacketTransferKind.PathControl) && payload.Length is > 0 &&
+            HostedPacketTransferKind.PathControl or
+            HostedPacketTransferKind.PathRebindCommit) &&
+        payload.Length is > 0 &&
         payload.Length <= _limits.MaximumDatagramBytes &&
         (pathBinding.IsEmpty || pathBinding.Length == PathBindingBytes);
 
@@ -1028,6 +1031,9 @@ internal sealed class HostedUdpConnectionOwnerEndpoint : INetworkDatagramEndpoin
     private readonly HostedConnectionOwnerId _owner;
     private readonly ConnectionId _connection;
     private readonly int _maximumDatagramBytes;
+    private readonly IHostedUdpOwnerPathControlHandler? _pathControl;
+    private readonly bool _externallyDemultiplexed;
+    private HostedPacketTransfer _stagedIngress;
     private HostedPathGeneration _pathGeneration;
     private ulong _sent;
     private ulong _received;
@@ -1044,7 +1050,9 @@ internal sealed class HostedUdpConnectionOwnerEndpoint : INetworkDatagramEndpoin
         HostedConnectionOwnerId owner,
         ConnectionId connection,
         HostedPathGeneration pathGeneration,
-        int maximumDatagramBytes)
+        int maximumDatagramBytes,
+        IHostedUdpOwnerPathControlHandler? pathControl = null,
+        bool externallyDemultiplexed = false)
     {
         ArgumentNullException.ThrowIfNull(handoff);
         if (!owner.IsValid) throw new ArgumentOutOfRangeException(nameof(owner));
@@ -1056,6 +1064,8 @@ internal sealed class HostedUdpConnectionOwnerEndpoint : INetworkDatagramEndpoin
         _connection = connection;
         _pathGeneration = pathGeneration;
         _maximumDatagramBytes = maximumDatagramBytes;
+        _pathControl = pathControl;
+        _externallyDemultiplexed = externallyDemultiplexed;
     }
 
     internal void SetPathGeneration(HostedPathGeneration pathGeneration)
@@ -1099,13 +1109,92 @@ internal sealed class HostedUdpConnectionOwnerEndpoint : INetworkDatagramEndpoin
             throw new ArgumentException(
                 "The owner receive destination is below the admitted datagram size.",
                 nameof(destination));
-        if (!_handoff.TryAcquireIngress(_owner, out HostedPacketTransfer transfer))
-            return false;
+        if (_externallyDemultiplexed)
+        {
+            if (!_stagedIngress.Id.IsValid) return false;
+            HostedPacketTransfer staged = _stagedIngress;
+            _stagedIngress = default;
+            return TryReceiveTransfer(staged, destination, out length);
+        }
+        while (_handoff.TryAcquireIngress(_owner, out HostedPacketTransfer transfer))
+        {
+            if (TryReceiveTransfer(transfer, destination, out length)) return true;
+        }
+        return false;
+    }
+
+    internal void StageIngress(HostedPacketTransfer transfer)
+    {
+        EnsureOperational();
+        if (!_externallyDemultiplexed || _stagedIngress.Id.IsValid ||
+            transfer.Connection != _connection)
+            throw new InvalidOperationException(
+                "The owner endpoint cannot stage this ingress transfer.");
+        _stagedIngress = transfer;
+    }
+
+    internal void ReleaseStagedIngress()
+    {
+        EnsureOperational();
+        if (!_stagedIngress.Id.IsValid) return;
+        HostedPacketTransferId id = _stagedIngress.Id;
+        _stagedIngress = default;
+        if (!_handoff.TryReleaseIngress(_owner, id))
+            throw new InvalidOperationException(
+                "The owner endpoint could not release its staged packet lease.");
+    }
+
+    internal UdpDatagramEndpointSnapshot GetSnapshot()
+    {
+        EnsureOwnerThread();
+        return new(
+            _sent, _received, _sentBytes, _receivedBytes,
+            _capacityDrops, _rejected, 0, 0, 0, 0,
+            _maximumSentDatagramBytes, _maximumReceivedDatagramBytes,
+            !_disposed, System.Net.Sockets.SocketError.Success);
+    }
+
+    public void Dispose()
+    {
+        EnsureOwnerThread();
+        ReleaseStagedIngress();
+        _disposed = true;
+    }
+
+    private bool TryReceiveTransfer(
+        HostedPacketTransfer transfer,
+        Span<byte> destination,
+        out int length)
+    {
+        length = 0;
         try
         {
-            if (transfer.Connection != _connection ||
-                transfer.Kind != HostedPacketTransferKind.SecureProtocol ||
-                transfer.PathGeneration != _pathGeneration)
+            if (transfer.Connection != _connection)
+            {
+                _rejected = SaturatingIncrement(_rejected);
+                return false;
+            }
+            if (transfer.Kind != HostedPacketTransferKind.SecureProtocol)
+            {
+                if (_pathControl is null)
+                {
+                    _rejected = SaturatingIncrement(_rejected);
+                    return false;
+                }
+                Span<byte> path =
+                    stackalloc byte[HostedUdpConnectionOwnerHandoff.PathBindingBytes];
+                ReadOnlySpan<byte> binding = transfer.HasPathBinding &&
+                    _handoff.TryCopyIngressPathBinding(_owner, transfer, path)
+                    ? path
+                    : default;
+                _pathControl.HandlePathControl(
+                    transfer.Kind,
+                    transfer.PathGeneration,
+                    _handoff.GetIngressPayload(_owner, transfer),
+                    binding);
+                return false;
+            }
+            if (transfer.PathGeneration != _pathGeneration)
             {
                 _rejected = SaturatingIncrement(_rejected);
                 return false;
@@ -1126,22 +1215,6 @@ internal sealed class HostedUdpConnectionOwnerEndpoint : INetworkDatagramEndpoin
         }
     }
 
-    internal UdpDatagramEndpointSnapshot GetSnapshot()
-    {
-        EnsureOwnerThread();
-        return new(
-            _sent, _received, _sentBytes, _receivedBytes,
-            _capacityDrops, _rejected, 0, 0, 0, 0,
-            _maximumSentDatagramBytes, _maximumReceivedDatagramBytes,
-            !_disposed, System.Net.Sockets.SocketError.Success);
-    }
-
-    public void Dispose()
-    {
-        EnsureOwnerThread();
-        _disposed = true;
-    }
-
     private void EnsureOperational()
     {
         EnsureOwnerThread();
@@ -1160,4 +1233,17 @@ internal sealed class HostedUdpConnectionOwnerEndpoint : INetworkDatagramEndpoin
 
     private static ulong SaturatingAdd(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
+
+/// <summary>
+/// Owner-thread sink for authenticated hosted path-control work carried beside,
+/// but never interpreted as, secure application traffic.
+/// </summary>
+internal interface IHostedUdpOwnerPathControlHandler
+{
+    void HandlePathControl(
+        HostedPacketTransferKind kind,
+        HostedPathGeneration pathGeneration,
+        ReadOnlySpan<byte> datagram,
+        ReadOnlySpan<byte> observedPathBinding);
 }

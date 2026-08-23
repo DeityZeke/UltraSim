@@ -31,8 +31,9 @@ H01HostedUdpAdmissionTests.RunAll();
 H02HostedUdpPromotionTests.RunAll();
 H03HostedUdpPathRebindingTests.RunAll();
 H04HostedUdpOwnerShardingTests.RunAll();
+H05HostedUdpCompositionTests.RunAll();
 
-Console.WriteLine($"All {tests.Length} Network N0.0 tests plus N0.2/N0.3/N0.5/N0.10.1/H0.1/H0.2/H0.3/H0.4 tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0.0 tests plus N0.2/N0.3/N0.5/N0.10.1/H0.1-H0.5 tests passed.");
 
 static void ConnectionIdentityIsGenerationalAndFixedWidth()
 {

@@ -31,6 +31,14 @@ Useful current anchors can be located by their embedded workload or filename:
   cookie, fixed per-source rate table, non-amplifying challenge, bounded expiring
   candidates, hostile containment, and zero warmed allocation. It stops before
   authenticated session promotion and is not WAN/CCU/N1 adoption evidence;
+- `network-hosted-h0.5-dedicated-sharded-*` — one dedicated server process,
+  independent externally admitted client processes, fixed connection-owner
+  threads, exact packet-lease demultiplexing, H0.3 path rebind, N1 cross-chunk
+  public convergence, mixed OwnerState/Event/Control/application-proof traffic,
+  fresh reconnect, and split server/client/process evidence. Together with the
+  prior N1.4 adoption matrix it closes current-game profile selection, but it is
+  localhost evidence rather than public-WAN, production-CCU, N1.5, 2K/4K, or N0
+  deletion authority;
 
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;

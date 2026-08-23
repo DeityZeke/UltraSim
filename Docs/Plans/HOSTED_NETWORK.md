@@ -1,8 +1,8 @@
 # Hosted Network H0: externally admitted shared UDP
 
-Status: active separate Network milestone. H0.0-H0.4 are implemented and stopped
-for review. N1.0-N1.4 replication semantics remain unchanged and N1.5 has not
-started.
+Status: H0.0-H0.5 are implemented and accepted as the first externally admitted,
+connection-owner-sharded localhost deployment boundary. N1.0-N1.4 replication
+semantics remain unchanged and N1.5 has not started.
 
 This milestone exists to prove the lifecycle between an unknown external UDP path
 and an authenticated UltraSim protocol session. It is not another replication
@@ -255,23 +255,87 @@ accepted H0.0-H0.3 host remains the single-owner behavioral control. H0.5 must
 compose this mechanism with the real external listener and dedicated process
 topology; H0.4 does not claim that sharded deployment result in advance.
 
-## H0.5 — dedicated server and sharded clients
+## H0.5 implementation stop — dedicated server and independent clients
 
-Run a genuine dedicated server process with multiple independent client workers
-through the externally admitted listener. Preserve separate evidence for:
+H0.5 composes the accepted mechanisms without adding a hosted-only protocol or
+replication adapter:
+
+```text
+dedicated server process
+    listener thread
+        external admission / socket / path table / packet slab
+            |
+            v
+    fixed connection-owner threads
+        NetworkProtocolPeer
+        unchanged N1 scheduler + RemoteChunkWorldStateServer
+
+independent client processes
+    HostedUdpProtocolClient
+    unchanged RemoteChunkWorldStateClient + semantic cache
+```
+
+The owner runtime is fixed-capacity and Network-generic. Promotion constructs the
+secure peer and caller-supplied application adapter on the selected owner thread.
+The listener routes an untrusted clear connection claim to that owner but never
+authenticates H0.3 path control or interprets Game/AOI state. Owner-produced secure
+and path-control datagrams return through the same exclusive packet slab.
+
+The first multi-connection run found and permanently corrected an important
+composition bug: an owner queue is shared by all of that owner's connections, so
+an individual peer may not drain and discard foreign leases. The owner now
+demultiplexes each acquired ingress lease once, stages it only into the exact
+generation-matching peer, and releases it after that peer consumes it. The
+permanent two-client/one-owner regression freezes this rule.
+
+Permanent H0.5 Network acceptance additionally proves:
+
+- two promoted sessions carry secure application traffic through one owner;
+- listener-thread access to an owner-bound peer is rejected;
+- normal H0.3 Request/Challenge/Proof/Commit completes across the split;
+- a lost first Commit recovers through an exact duplicate Proof on the newly
+  authoritative path;
+- explicit session retirement waits for owner-thread quiescence, releases the
+  generation-fenced connection binding, and makes capacity reusable;
+- all packet leases and owner queues drain back to zero;
+- host disposal requests worker stop, observes thread join/quiescence, and only
+  then invokes failed-owner reclamation.
+
+The dedicated-process harness launches one server process and independent client
+worker processes. Each connection uses real cookie admission, deployment-key
+pinning, promotion, secure lanes, the shared native-batched listener, and the H0.4
+handoff. The Game adapter uses the existing N1.4 work scheduler and
+`RemoteChunkWorldStateServer`; the client uses the existing production semantic
+cache and `RemoteChunkWorldStateClient`. Per phase it carries public WorldState,
+owner-private latest state, retained Event, client Control, chunk/Event application
+proofs, one cross-chunk public-identity migration, and one concurrent authenticated
+path rebind. A second fresh connection phase proves reconnect without trusting
+client-local session identity.
+
+Evidence remains separated into:
 
 1. server semantic replication;
 2. server transport/security/packetization;
 3. client decode/application;
 4. end-to-end freshness and process/socket cost.
 
-H0.5 is the remaining N1 remote-adoption gate. It must repeat representative
-roaming, mixed public/private/Event/Control traffic, application proof, loss,
-reorder, reconnect, and bounded shutdown without weakening disclosure or identity
-contracts.
+The accepted run uses eight independent client processes, four connection-owner
+threads, two fresh connection phases per client, and 24 authoritative updates per
+phase. All 16 applications, 16 path rebinds, 384 public updates, 384 owner states,
+384 retained Events, and final proof-gated completion markers converge with zero
+disclosure mismatch, zero handoff capacity drop, and zero packet lease remaining.
+The exact observation and split timings are retained in the immutable H0.5 JSON/
+Markdown artifacts.
+
+This closes the process-topology gate for selecting N1 as the current game's
+public replication profile. It does not establish public-WAN policy, production
+CCU, IPv6, multi-host/server-process connection migration, production admission
+rate values, or permission to delete N0. H0.4 remains intra-server-process
+thread-owner machinery; independent processes in H0.5 are the dedicated server
+and client workers.
 
 ## Current stop
 
-Stop after H0.4 review. Do not begin H0.5 dedicated/sharded process evidence,
-N1.5, N0 deletion, 2K/4K, public-WAN exposure, or production CCU claims until
-the connection-owner transfer boundary is accepted.
+Stop after H0.5. Do not begin N1.5 shared packing, delete N0, run 2K/4K, claim
+public-WAN readiness/production CCU, or generalize the owner handoff into
+server-process migration without a separately reviewed checkpoint.
