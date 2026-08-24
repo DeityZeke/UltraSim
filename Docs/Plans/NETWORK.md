@@ -14,8 +14,9 @@ Chunk profile bounded equal-lineage chunk-page reuse and recipient-wide multi-ch
 semantic envelopes while retaining independent per-chunk application proof and no
 global Chunk-to-Recipient reverse graph. P0.3H replaces repeated Network ready-table
 scans with bounded ready-state selection. P0.3I packs independently meaningful chunk
-application proofs into a
-bounded MTU-safe reverse envelope without changing proof granularity.
+application proofs into a bounded MTU-safe reverse envelope without changing proof
+granularity.
+P0.3J closes rated server-role measurement with diagnostic stage timing disabled.
 Terrain / World T0 is accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -1624,6 +1625,21 @@ socket batching, and the 384-CCU rating are unchanged. No rated sweep is repeate
 
 Evidence:
 [`network-p0.3i-chunk-proof-envelope-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3i-chunk-proof-envelope-2026-08-24.md).
+
+## P0.3J — probes-off rated server-role closure
+
+P0.3J repeats the 270-tick rated whole-flow sweep with protocol/listener stage timing
+disabled while retaining normal counters, semantic validation, and zero-drop gates.
+Dense DirtyEntity retains 640 at 3.969 ms p95 and stops at 704/4.900 ms. Sparse
+MaintainedEntityRelation retains 512 at 3.032 ms and stops at 640/4.081 ms.
+
+Dense 640 is only 0.031 ms below the formal 4 ms cutoff and is recorded as a narrow
+observed rating, not a comfortable deployment target. P0.3J supersedes P0.3H's
+absolute 384-CCU rating, which included deep diagnostic timing overhead; it does not
+replace P0.3H's causal selector evidence or change production code.
+
+Evidence:
+[`network-p0.3j-rated-server-role-probes-off-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3j-rated-server-role-probes-off-2026-08-24.md).
 
 ## N1.5 — shared semantic packing / chunk page reuse
 

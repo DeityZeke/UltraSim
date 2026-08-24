@@ -52,6 +52,10 @@ Useful current anchors can be located by their embedded workload or filename:
   reverse proof-message packing for ChunkPublication and DirtyChunk. Entries remain
   independently fenced and applied; causal and probes-off whole-flow controls retain
   semantics while separating proof-message, frame, datagram, byte, and CPU effects;
+- `network-p0.3j-rated-server-role-probes-off-2026-08-24.*` — 270-tick cap-one
+  rated whole-flow closure without diagnostic protocol/listener stage timing. It
+  records the strict first-failure p95 boundary and supersedes only P0.3H's absolute
+  rating, not its ready-selector causal evidence;
 
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;
