@@ -99,7 +99,8 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
             _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
             return _lastBuildStatus;
         }
-        if (_snapshotActive || _outstandingCount == _outstanding.Length)
+        if (_snapshotActive || _pendingCancel.DeliveryId != 0 ||
+            _outstandingCount == _outstanding.Length)
         {
             _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
             return _lastBuildStatus;

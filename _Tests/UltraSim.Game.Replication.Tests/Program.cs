@@ -45,6 +45,7 @@ var tests = new (string Name, Action Body)[]
     ("P02DirtyChunkRemoteNetworkProtocolPeerConverges", DirtyChunkSpatialFanoutTests.RemoteNetworkProtocolPeerConverges),
     ("P02DirtyChunkRemoteLostProofRetriesAndDrains", DirtyChunkSpatialFanoutTests.RemoteLostProofRetriesAndDrains),
     ("P02DirtyChunkSnapshotTimeoutIsBounded", DirtyChunkSpatialFanoutTests.SnapshotTimeoutIsBounded),
+    ("P02DirtyChunkSnapshotCancelBackpressureDoesNotOverlapLifetimes", DirtyChunkSpatialFanoutTests.SnapshotCancelBackpressureDoesNotOverlapLifetimes),
     ("P02DirtyChunkFamiliesCoexistAndPrivateDoesNotLeak", DirtyChunkSpatialFanoutTests.FamiliesCoexistAndPrivateDoesNotLeak),
     ("NetworkProfileIsExplicitAndLocalProfileRetainsSpatialLifecycle", NetworkProfileIsExplicit),
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),

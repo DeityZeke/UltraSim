@@ -645,6 +645,101 @@ internal static class DirtyChunkSpatialFanoutTests
         Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(2));
     }
 
+    internal static void SnapshotCancelBackpressureDoesNotOverlapLifetimes()
+    {
+        using var fixture = new Fixture(32, 16);
+        WorldPosition[] positions = new WorldPosition[16];
+        for (int index = 0; index < positions.Length; index++)
+            positions[index] = Position(0, 0, 2_000 + index, 2_000);
+        fixture.PresentBatch(positions);
+        var service = Create(fixture, maximumRecipients: 1,
+            maximumOutstandingDeliveries: 1, maximumDeliveryAgeSteps: 2,
+            interest: new ChunkInterestProfile(5_000, 5_500, 5_500, 6_000, 6_000, 7_000));
+        ParticipantId participant = new(27);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+
+        NetworkProtocolLimits constrained = NetworkProtocolLimits.Default with
+        {
+            MaximumReliableMessages = 3,
+        };
+        True(ProtocolLoopback.TryCreate(
+            constrained,
+            new DeterministicDatagramLimits(256, 512),
+            default,
+            out ProtocolLoopback? created,
+            out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyChunkSpatialFanoutServer(
+            loopback.Server, service, participant, 0xD207);
+        var cache = new ClientWorldSemanticCache(
+            fixture.Bound, new ClientWorldSemanticCacheLimits(8, 32, 16, 16, 32));
+        True(cache.TryRequest(Key(0, 0), out ClientSemanticChunkHandle residentHandle, out _));
+        True(cache.TryStageFromBaseWorld(residentHandle, [], default, out _));
+        True(cache.TryPublish(residentHandle, out _));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xD207, maximumDeltaRecords: 16, maximumPendingProofs: 16);
+
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(0));
+        True(!server.TryProgress()); // Begin plus segments fill the reliable queue before commit.
+        True(loopback.Server.ReliableQueued >= 1);
+        True(server.GetSnapshot().SnapshotTransferActive);
+
+        Equal(1, server.ExpireOutstandingDeliveries(2));
+        RemoteDirtyChunkSpatialFanoutServerSnapshot expired = server.GetSnapshot();
+        Equal(0, expired.OutstandingDeliveries);
+        Equal(1UL, expired.SnapshotTimeouts);
+        True(expired.SnapshotCancelPending);
+        True(!expired.SnapshotTransferActive);
+
+        // The retained cancel is a live snapshot lifetime. No second snapshot may start
+        // while network pressure prevents that cancellation from being emitted.
+        Equal(DirtyChunkBuildStatus.CapacityExceeded, server.TrySchedule(3));
+        Equal(DirtyChunkBuildStatus.CapacityExceeded, server.TrySchedule(4));
+        RemoteDirtyChunkSpatialFanoutServerSnapshot blocked = server.GetSnapshot();
+        True(blocked.SnapshotCancelPending);
+        True(!blocked.SnapshotTransferActive);
+        Equal(0, blocked.OutstandingDeliveries);
+
+        for (int attempt = 0; attempt < 16 && loopback.Server.ReliableQueued != 0; attempt++)
+        {
+            loopback.Pump();
+            DrainClient(loopback, client);
+            client.TryProgress();
+            DrainServer(loopback, server);
+        }
+        True(loopback.Server.ReliableQueued == 0);
+        True(server.TryProgress()); // Cancel(A) is now retained no longer.
+        True(!server.GetSnapshot().SnapshotCancelPending);
+
+        for (int attempt = 0; attempt < 16; attempt++)
+        {
+            loopback.Pump();
+            DrainClient(loopback, client);
+            client.TryProgress();
+            DrainServer(loopback, server);
+        }
+        True(!client.GetSnapshot().SnapshotCandidateActive);
+
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(5));
+        for (int attempt = 0; attempt < 64 && server.GetSnapshot().ApplicationProofs == 0; attempt++)
+        {
+            server.TryProgress();
+            loopback.Pump();
+            DrainClient(loopback, client);
+            client.TryProgress();
+            DrainServer(loopback, server);
+        }
+
+        RemoteDirtyChunkSpatialFanoutServerSnapshot converged = server.GetSnapshot();
+        Equal(1UL, converged.ApplicationProofs);
+        Equal(0, converged.OutstandingDeliveries);
+        True(!converged.SnapshotCancelPending);
+        True(!converged.SnapshotTransferActive);
+        Equal(1UL, client.GetSnapshot().AppliedSnapshots);
+        Equal(0, loopback.Server.ReliableQueued);
+    }
+
     internal static void FamiliesCoexistAndPrivateDoesNotLeak()
     {
         using var fixture = new Fixture(16, 2);
