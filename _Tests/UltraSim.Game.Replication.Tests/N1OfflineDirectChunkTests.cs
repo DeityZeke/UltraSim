@@ -1080,6 +1080,49 @@ internal static class N1OfflineDirectChunkTests
             server.TrySchedule(occupied, 11));
     }
 
+    internal static void CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth()
+    {
+        using var fixture = new Fixture(historyCapacity: 64);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        int occupied = FindSubscription(recipient, Key(0, 0));
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xD312,
+            new RemoteChunkWorldStateTransportLimits(16));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xD312, maximumDeltaRecords: 8,
+            maximumPendingProofs: 16);
+
+        ulong serverBase = recipient.Subscriptions[occupied].Cursor.Revision.Value;
+        fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 1));
+        DeliverToClientWithoutProof(loopback, server, client,
+            () => client.GetSnapshot().AppliedDeltas == 1);
+        Equal(1UL, client.GetSnapshot().AppliedDeltas);
+        Equal(serverBase, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+
+        fixture.Present(0, Position(0, 0, 2_200, 2_000), GameWorldPublicPrefabIds.Character);
+        ulong latest = CurrentRevision(fixture.Store, Key(0, 0));
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 2));
+        DeliverToClientWithoutProof(loopback, server, client,
+            () => client.GetSnapshot().AppliedDeltas == 2);
+        RemoteChunkWorldStateClientSnapshot local = client.GetSnapshot();
+        Equal(2UL, local.AppliedDeltas);
+        Equal(0UL, local.RejectedDeliveries);
+        True(cache.TryGetResidentHandle(Key(0, 0), out ClientSemanticChunkHandle handle));
+        True(cache.TryGetInfo(handle, out ClientSemanticChunkInfo info));
+        Equal(latest, info.PublicationCursor.Revision.Value);
+
+        Drive(loopback, server, client, () =>
+            server.GetSnapshot().OutstandingDeliveries == 0);
+        Equal(latest, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+    }
+
     internal static void ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge()
     {
         using var fixture = new Fixture(historyCapacity: 128);
@@ -1614,6 +1657,34 @@ internal static class N1OfflineDirectChunkTests
         Equal(ChunkPublicationReadStatus.Snapshot,
             store.TryCopySnapshot(key, rows, out ChunkPublicationBatch batch));
         return batch.Cursor.Revision.Value;
+    }
+
+    private static void DrainClientWithoutProgress(
+        ProtocolLoopback loopback,
+        RemoteChunkWorldStateClient client)
+    {
+        while (loopback.Client.TryPeekReceived(
+                   out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+        {
+            True(client.TryProcess(message, payload));
+            True(loopback.Client.TryConsumeReceived());
+        }
+    }
+
+    private static void DeliverToClientWithoutProof(
+        ProtocolLoopback loopback,
+        RemoteChunkWorldStateServer server,
+        RemoteChunkWorldStateClient client,
+        Func<bool> delivered)
+    {
+        for (int step = 0; step < 32; step++)
+        {
+            _ = server.TryProgress();
+            loopback.Pump();
+            DrainClientWithoutProgress(loopback, client);
+            if (delivered()) return;
+        }
+        throw new InvalidOperationException("The unproved delta did not reach the client.");
     }
 
     private static void Drive(

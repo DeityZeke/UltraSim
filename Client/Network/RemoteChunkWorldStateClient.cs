@@ -271,7 +271,12 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             status = RemoteChunkPublicationApplyStatus.Applied;
             duplicate = true;
         }
-        else if (info.PublicationCursor.Revision.Value != entry.BaseRevision ||
+        // A later coalesced delivery may still start at the server's older applied cursor while
+        // this client has locally applied an unproved intermediate delivery. The delta contains
+        // latest operations for the complete base..current interval, and the semantic cache
+        // independently rejects conflicting identity/version rows, so an overlapping base is
+        // valid. Only a base ahead of local truth represents a gap.
+        else if (info.PublicationCursor.Revision.Value < entry.BaseRevision ||
                  !FitsWorldProfile(records))
             status = RemoteChunkPublicationApplyStatus.Rejected;
         else
@@ -450,7 +455,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             status = RemoteChunkPublicationApplyStatus.Applied;
             duplicate = true;
         }
-        else if (info.PublicationCursor.Revision.Value != header.BaseRevision)
+        else if (info.PublicationCursor.Revision.Value < header.BaseRevision)
         {
             status = RemoteChunkPublicationApplyStatus.Rejected;
         }

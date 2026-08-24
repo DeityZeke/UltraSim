@@ -1130,8 +1130,11 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
         return count;
     }
 
-    protected string? DescribeCacheMismatch(ClientWorldSemanticCache cache)
+    protected string? DescribeCacheMismatch(
+        ClientWorldSemanticCache cache,
+        out SpatialChunkKey mismatchKey)
     {
+        mismatchKey = default;
         var infos = new ClientSemanticChunkInfo[cache.Limits.MaximumResidentChunks];
         if (!cache.TryCopyResidentInfo(infos, out int count, out _))
             return "resident info destination was too small";
@@ -1140,22 +1143,31 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
             ClientSemanticChunkInfo info = infos[index];
             if (!cache.TryGetResidentHandle(info.Key, out ClientSemanticChunkHandle handle) ||
                 !cache.TryGetResidentView(handle, out ClientSemanticChunkView view))
+            {
+                mismatchKey = info.Key;
                 return $"resident handle/view missing for {info.Key}";
+            }
             ChunkPublicationReadStatus status = Source.TryCopySnapshot(
                 info.Key, _snapshotScratch, out ChunkPublicationBatch batch);
             if (status == ChunkPublicationReadStatus.ChunkAbsent)
             {
                 if (!view.PublicRecords.IsEmpty)
+                {
+                    mismatchKey = info.Key;
                     return $"source absent but client has {view.PublicRecords.Length} rows at {info.Key}";
+                }
                 continue;
             }
             if (status != ChunkPublicationReadStatus.Snapshot ||
                 batch.Count != view.PublicRecords.Length ||
                 !_snapshotScratch.AsSpan(0, batch.Count).SequenceEqual(view.PublicRecords))
+            {
+                mismatchKey = info.Key;
                 return $"source/client mismatch at {info.Key}: status={status}, " +
                     $"source={batch.Count}, client={view.PublicRecords.Length}, " +
                     $"sourceRevision={(batch.Cursor.IsValid ? batch.Cursor.Revision.Value : 0)}, " +
                     $"clientRevision={(info.PublicationCursor.IsValid ? info.PublicationCursor.Revision.Value : 0)}";
+            }
         }
         return null;
     }
@@ -1405,9 +1417,19 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         {
             RemoteChunkWorldStateServerSnapshot server = _servers[index].GetSnapshot();
             RemoteChunkWorldStateClientSnapshot client = _clients[index].GetSnapshot();
-            string? mismatch = DescribeCacheMismatch(Caches[index]);
+            string? mismatch = DescribeCacheMismatch(Caches[index], out SpatialChunkKey mismatchKey);
+            ulong serverRevision = 0;
+            OfflineDirectChunkSubscriptionView subscriptions = _recipients[index].Subscriptions;
+            for (int subscription = 0; subscription < subscriptions.Length; subscription++)
+                if (subscriptions[subscription].Interest.Key == mismatchKey)
+                {
+                    serverRevision = subscriptions[subscription].Cursor.IsValid
+                        ? subscriptions[subscription].Cursor.Revision.Value : 0;
+                    break;
+                }
             P03WholeFlowHarness.Require(mismatch is null,
-                $"ChunkPublication client {index} did not match current source truth: {mismatch}.");
+                $"ChunkPublication client {index} did not match current source truth: {mismatch}; " +
+                $"serverAppliedRevision={serverRevision}, server={server}, client={client}.");
             P03WholeFlowHarness.Require(server.RejectedProofs == 0 &&
                 server.MalformedProofs <= server.InvalidatedDeliveries &&
                 client.RejectedDeliveries == 0 && client.MalformedDeliveries == 0 &&
@@ -1584,7 +1606,7 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
         {
             RemoteDirtyChunkSpatialFanoutServerSnapshot server = _servers[index].GetSnapshot();
             RemoteChunkWorldStateClientSnapshot client = _clients[index].GetSnapshot();
-            string? mismatch = DescribeCacheMismatch(Caches[index]);
+            string? mismatch = DescribeCacheMismatch(Caches[index], out _);
             P03WholeFlowHarness.Require(mismatch is null,
                 $"DirtyChunk client {index} did not match current source truth: {mismatch}.");
             P03WholeFlowHarness.Require(server.ApplicationRejections == 0 &&
