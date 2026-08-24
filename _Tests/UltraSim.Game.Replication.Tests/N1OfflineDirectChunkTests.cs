@@ -856,8 +856,64 @@ internal static class N1OfflineDirectChunkTests
         proof.Revision = 1;
         False(UltraSimGameProtocol.TryWriteChunkApplied(bytes, proof, out _));
 
-        Equal((ushort)12, UltraSimGameProtocol.Manifest.Version);
-        Equal(10_804_745_783_046_976_666UL, UltraSimGameProtocol.Manifest.Fingerprint);
+        RemoteChunkAppliedEnvelopeEntry[] envelopeEntries =
+        [
+            new(41, 1, -4, 7, 9, RemoteChunkPublicationKind.Delta,
+                RemoteChunkPublicationApplyStatus.Applied),
+            new(42, 1, -3, 7, 0, RemoteChunkPublicationKind.Absence,
+                RemoteChunkPublicationApplyStatus.Rejected),
+            // A duplicate delivery ID is structurally safe: the server still evaluates each
+            // proof independently and may accept at most one matching outstanding delivery.
+            new(41, 1, -4, 7, 9, RemoteChunkPublicationKind.Delta,
+                RemoteChunkPublicationApplyStatus.Applied),
+        ];
+        byte[] envelopeBytes = new byte[1_405];
+        True(UltraSimGameProtocol.TryWriteChunkAppliedEnvelope(
+            envelopeBytes, 10, 20, envelopeEntries, out int envelopeLength));
+        Equal(RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize +
+            envelopeEntries.Length * RemoteChunkAppliedEnvelopeEntry.EncodedSize, envelopeLength);
+        RemoteChunkAppliedEnvelopeEntry[] decodedEntries =
+            Enumerable.Repeat(envelopeEntries[1], 4).ToArray();
+        True(UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+            envelopeBytes.AsSpan(0, envelopeLength), out RemoteChunkAppliedEnvelopeHeader envelope,
+            decodedEntries, out int decodedEntryCount));
+        Equal(10UL, envelope.ApplicationSessionEpoch);
+        Equal(20UL, envelope.PublicationEpoch);
+        Equal(3, decodedEntryCount);
+        for (int index = 0; index < decodedEntryCount; index++)
+            Equal(envelopeEntries[index], decodedEntries[index]);
+
+        RemoteChunkAppliedEnvelopeEntry[] transactional =
+            Enumerable.Repeat(envelopeEntries[1], 4).ToArray();
+        RemoteChunkAppliedEnvelopeEntry[] transactionalBefore = transactional.ToArray();
+        False(UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+            envelopeBytes.AsSpan(0, envelopeLength - 1), out _, transactional, out _));
+        True(transactionalBefore.AsSpan().SequenceEqual(transactional));
+        byte savedKind = envelopeBytes[RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize +
+            RemoteChunkAppliedEnvelopeEntry.EncodedSize - 2];
+        envelopeBytes[RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize +
+            RemoteChunkAppliedEnvelopeEntry.EncodedSize - 2] = 0x7F;
+        False(UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+            envelopeBytes.AsSpan(0, envelopeLength), out _, transactional, out _));
+        True(transactionalBefore.AsSpan().SequenceEqual(transactional));
+        envelopeBytes[RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize +
+            RemoteChunkAppliedEnvelopeEntry.EncodedSize - 2] = savedKind;
+        False(UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+            envelopeBytes.AsSpan(0, envelopeLength), out _, transactional.AsSpan(0, 2), out _));
+        Equal(40, UltraSimGameProtocol.GetMaximumChunkAppliedEnvelopeEntriesForPayload(1_405));
+        Equal(1_377, UltraSimGameProtocol.GetChunkAppliedEnvelopeEncodedBytes(40));
+        long proofEnvelopeAllocations = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 1_000; iteration++)
+        {
+            True(UltraSimGameProtocol.TryWriteChunkAppliedEnvelope(
+                envelopeBytes, 10, 20, envelopeEntries, out int warmedLength));
+            True(UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+                envelopeBytes.AsSpan(0, warmedLength), out _, decodedEntries, out _));
+        }
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - proofEnvelopeAllocations);
+
+        Equal((ushort)13, UltraSimGameProtocol.Manifest.Version);
+        Equal(5_993_274_912_390_600_944UL, UltraSimGameProtocol.Manifest.Fingerprint);
         Equal(6_148_331_928_277_823_537UL,
             UltraSimGameProtocol.ChunkPublicationSchemaFingerprint);
         True(UltraSimGameProtocol.Manifest.TryGet(
@@ -868,6 +924,8 @@ internal static class N1OfflineDirectChunkTests
             RemoteChunkAbsenceMessageCodec.Descriptor.Id, out _));
         True(UltraSimGameProtocol.Manifest.TryGet(
             RemoteChunkAppliedMessageCodec.Descriptor.Id, out _));
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id, out _));
         True(UltraSimGameProtocol.Manifest.TryGet(
             RemoteChunkSnapshotBeginMessageCodec.Descriptor.Id, out _));
         True(UltraSimGameProtocol.Manifest.TryGet(

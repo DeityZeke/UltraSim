@@ -222,18 +222,43 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwner();
-        if (message.MessageId != RemoteChunkAppliedMessageCodec.Descriptor.Id) return false;
-        if (!UltraSimGameProtocol.TryReadChunkApplied(payload, out RemoteChunkAppliedMessage proof) ||
-            proof.ApplicationSessionEpoch != _applicationSessionEpoch)
+        if (message.MessageId == RemoteChunkAppliedMessageCodec.Descriptor.Id)
+        {
+            if (!UltraSimGameProtocol.TryReadChunkApplied(
+                    payload, out RemoteChunkAppliedMessage proof) ||
+                proof.ApplicationSessionEpoch != _applicationSessionEpoch)
+                _malformedProofs++;
+            else
+                ProcessProof(in proof);
+            return true;
+        }
+        if (message.MessageId != RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id) return false;
+        Span<RemoteChunkAppliedEnvelopeEntry> entries =
+            stackalloc RemoteChunkAppliedEnvelopeEntry[
+                UltraSimGameProtocol.MaximumChunkAppliedEnvelopeEntries];
+        if (!UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+                payload, out RemoteChunkAppliedEnvelopeHeader header, entries, out int count) ||
+            header.ApplicationSessionEpoch != _applicationSessionEpoch)
         {
             _malformedProofs++;
             return true;
         }
+        for (int entry = 0; entry < count; entry++)
+        {
+            RemoteChunkAppliedMessage proof = entries[entry].ToMessage(
+                header.ApplicationSessionEpoch, header.PublicationEpoch);
+            ProcessProof(in proof);
+        }
+        return true;
+    }
+
+    private void ProcessProof(in RemoteChunkAppliedMessage proof)
+    {
         int index = FindDelivery(proof.DeliveryId);
         if (index < 0 || !Matches(_outstanding[index].Ticket, proof))
         {
             _malformedProofs++;
-            return true;
+            return;
         }
         bool applied = proof.Status == RemoteChunkPublicationApplyStatus.Applied;
         DirtyChunkAppliedProofStatus status = _fanout.TryAcknowledgeDelivery(
@@ -243,7 +268,6 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
             _applicationProofs++;
         else if (!applied || status is DirtyChunkAppliedProofStatus.Rejected)
             _applicationRejections++;
-        return true;
     }
 
     public bool TryProgress()

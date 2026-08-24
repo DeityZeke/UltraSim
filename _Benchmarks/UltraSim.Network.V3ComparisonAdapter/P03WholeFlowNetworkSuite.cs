@@ -35,6 +35,7 @@ internal static class P03WholeFlowNetworkSuite
         int sparsePopulation = ReadInt(args, "--sparse-population", 512);
         int warmup = ReadInt(args, "--warmup", 30);
         int ticks = ReadInt(args, "--ticks", 90);
+        bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-p0.3g-whole-flow-attribution.json";
         P03NetworkProfile[] profiles = ParseProfiles(ReadText(args, "--profiles"));
@@ -75,7 +76,8 @@ internal static class P03WholeFlowNetworkSuite
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
-            using var harness = new P03WholeFlowHarness(workload, profile, cap);
+            using var harness = new P03WholeFlowHarness(
+                workload, profile, cap, stageTimingEnabled);
             P03WholeFlowRow row = harness.Run(warmup, ticks) with
             {
                 ExecutionOrder = executionOrder,
@@ -105,7 +107,8 @@ internal static class P03WholeFlowNetworkSuite
                 "outside timed ticks. H0.4 connection-owner handoff, external admission, public WAN, " +
                 "loss, and slow-client behavior are excluded and remain separate evidence gates.",
                 "A comparison-only manifest negotiates up to eight unreliable frames. Local send " +
-                "caps 1/4/8 are the only A/B policy change; the production manifest remains cap one."),
+                "caps 1/4/8 are the only A/B policy change; the production manifest remains cap one. " +
+                $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
@@ -289,6 +292,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly P03NetworkWorkload _workload;
     private readonly P03NetworkProfile _profile;
     private readonly int _frameCap;
+    private readonly bool _stageTimingEnabled;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
     private readonly SharedUdpProtocolSession[] _sessions;
@@ -308,11 +312,16 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private long _tickServerApplication;
     private long _tickClientApplication;
 
-    internal P03WholeFlowHarness(P03NetworkWorkload workload, P03NetworkProfile profile, int frameCap)
+    internal P03WholeFlowHarness(
+        P03NetworkWorkload workload,
+        P03NetworkProfile profile,
+        int frameCap,
+        bool stageTimingEnabled = true)
     {
         _workload = workload;
         _profile = profile;
         _frameCap = frameCap;
+        _stageTimingEnabled = stageTimingEnabled;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -512,10 +521,10 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
         for (int index = 0; index < _sessions.Length; index++)
         {
-            _sessions[index].Server.ResetStageTiming(true);
-            _sessions[index].Client.ResetStageTiming(true);
+            _sessions[index].Server.ResetStageTiming(_stageTimingEnabled);
+            _sessions[index].Client.ResetStageTiming(_stageTimingEnabled);
         }
-        _host.ResetListenerStageTiming(true);
+        _host.ResetListenerStageTiming(_stageTimingEnabled);
         _adapter.ResetCounters();
     }
 

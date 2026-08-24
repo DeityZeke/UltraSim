@@ -1089,7 +1089,92 @@ internal static class DirtyChunkSpatialFanoutTests
         }
         Equal(4UL, server.GetSnapshot().ApplicationProofs);
         Equal(0, server.GetSnapshot().OutstandingDeliveries);
-        Equal(2UL, client.GetSnapshot().AppliedDeltas);
+        RemoteChunkWorldStateClientSnapshot clientSnapshot = client.GetSnapshot();
+        Equal(2UL, clientSnapshot.AppliedDeltas);
+        True(clientSnapshot.ProofsQueued >= 4);
+        True(clientSnapshot.ProofMessagesQueued < clientSnapshot.ProofsQueued);
+    }
+
+    internal static void RemoteProofEnvelopeProcessesEntriesIndependently()
+    {
+        using var fixture = new Fixture(64, 4);
+        fixture.PresentBatch([
+            Position(0, 0, 2_000, 2_000),
+            Position(1, 0, 2_000, 2_000)]);
+        var service = Create(fixture, maximumRecipients: 1,
+            interest: new ChunkInterestProfile(9_000, 9_000, 9_000, 9_000, 9_000, 9_000));
+        ParticipantId participant = new(0xD30A);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472), default,
+            out ProtocolLoopback? created, out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyChunkSpatialFanoutServer(
+            loopback.Server, service, participant, 0xD30A);
+
+        Equal(DirtyChunkBuildStatus.Success, server.TryScheduleBundle(0));
+        int outstandingBefore = server.GetSnapshot().OutstandingDeliveries;
+        True(outstandingBefore >= 2);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        RemoteDirtyChunkBundleEntry[] delivered =
+            new RemoteDirtyChunkBundleEntry[UltraSimGameProtocol.MaximumDirtyChunkBundleEntries];
+        RemoteChunkPublicRecord[] snapshots =
+            new RemoteChunkPublicRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+        RemoteChunkDeltaRecord[] deltas =
+            new RemoteChunkDeltaRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
+        True(loopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage forward, out ReadOnlySpan<byte> forwardPayload));
+        Equal(RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id, forward.MessageId);
+        True(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            forwardPayload, out RemoteDirtyChunkBundleHeader bundle, delivered,
+            snapshots, deltas, out int deliveredCount, out _, out _));
+        True(deliveredCount >= 2);
+        True(loopback.Client.TryConsumeReceived());
+
+        RemoteChunkAppliedEnvelopeEntry Applied(int index,
+            RemoteChunkPublicationApplyStatus status) => new(
+                delivered[index].DeliveryId, delivered[index].SpatialSpaceId,
+                delivered[index].ChunkX, delivered[index].ChunkZ,
+                delivered[index].CurrentRevision, delivered[index].Kind, status);
+        RemoteChunkAppliedEnvelopeEntry[] proofs =
+        [
+            Applied(0, RemoteChunkPublicationApplyStatus.Rejected),
+            Applied(1, RemoteChunkPublicationApplyStatus.Applied),
+            Applied(1, RemoteChunkPublicationApplyStatus.Applied), // duplicate/replay in-envelope
+            Applied(1, RemoteChunkPublicationApplyStatus.Applied) with
+                { DeliveryId = ulong.MaxValue }, // unrelated stale delivery
+        ];
+        byte[] bytes = new byte[1_405];
+        True(UltraSimGameProtocol.TryWriteChunkAppliedEnvelope(
+            bytes, bundle.ApplicationSessionEpoch, bundle.PublicationEpoch,
+            proofs, out int written));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id,
+                bytes.AsSpan(0, written)));
+        for (int pump = 0; pump < 8 && loopback.Server.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        DrainServer(loopback, server);
+        RemoteDirtyChunkSpatialFanoutServerSnapshot after = server.GetSnapshot();
+        Equal(1UL, after.ApplicationProofs);
+        Equal(1UL, after.ApplicationRejections);
+        Equal(2UL, after.MalformedProofs);
+        Equal(outstandingBefore - 2, after.OutstandingDeliveries);
+
+        // The valid envelope is itself replay-safe: no removed delivery can advance twice.
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id,
+                bytes.AsSpan(0, written)));
+        for (int pump = 0; pump < 8 && loopback.Server.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        DrainServer(loopback, server);
+        RemoteDirtyChunkSpatialFanoutServerSnapshot replayed = server.GetSnapshot();
+        Equal(1UL, replayed.ApplicationProofs);
+        Equal(1UL, replayed.ApplicationRejections);
+        Equal(6UL, replayed.MalformedProofs);
     }
 
     internal static void RecipientSpecificBundleCannotDequeueAnotherParticipant()

@@ -18,6 +18,7 @@ public readonly record struct RemoteChunkWorldStateClientSnapshot(
     ulong ContradictoryDeliveries,
     ulong MalformedDeliveries,
     ulong ProofsQueued,
+    ulong ProofMessagesQueued,
     bool SnapshotCandidateActive,
     int SnapshotSegmentsReceived,
     ulong AppliedSnapshots,
@@ -44,7 +45,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly bool[] _snapshotSegments;
     private readonly DeliveryLineage[] _deliveryLineage;
     private readonly RemoteChunkAppliedMessage[] _proofs;
-    private readonly byte[] _proofScratch = new byte[RemoteChunkAppliedMessageCodec.EncodedSize];
+    private readonly RemoteChunkAppliedEnvelopeEntry[] _proofEnvelopeEntries;
+    private readonly byte[] _proofScratch;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private int _proofHead;
     private int _proofCount;
@@ -56,6 +58,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private ulong _contradictoryDeliveries;
     private ulong _malformedDeliveries;
     private ulong _proofsQueued;
+    private ulong _proofMessagesQueued;
     private RemoteChunkSnapshotBeginMessage _snapshotBegin;
     private ClientSemanticChunkHandle _snapshotHandle;
     private int _snapshotSegmentsReceived;
@@ -102,6 +105,13 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _snapshotSegments = new bool[UltraSimGameProtocol.MaximumChunkSnapshotSegments];
         _deliveryLineage = new DeliveryLineage[cache.Limits.MaximumResidentChunks];
         _proofs = new RemoteChunkAppliedMessage[maximumPendingProofs];
+        int maximumEnvelopeEntries = UltraSimGameProtocol.
+            GetMaximumChunkAppliedEnvelopeEntriesForPayload(peer.MaximumUnfragmentedMessageBytes);
+        if (maximumEnvelopeEntries == 0)
+            throw new ArgumentOutOfRangeException(nameof(peer));
+        _proofEnvelopeEntries = new RemoteChunkAppliedEnvelopeEntry[maximumEnvelopeEntries];
+        _proofScratch = new byte[UltraSimGameProtocol.GetChunkAppliedEnvelopeEncodedBytes(
+            maximumEnvelopeEntries)];
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
@@ -157,16 +167,38 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     {
         while (_proofCount != 0)
         {
-            ref readonly RemoteChunkAppliedMessage proof = ref _proofs[_proofHead];
-            if (!UltraSimGameProtocol.TryWriteChunkApplied(_proofScratch, proof, out int written))
-                throw new InvalidOperationException("A retained chunk proof became non-canonical.");
-            if (_peer.TryQueue(RemoteChunkAppliedMessageCodec.Descriptor.Id,
+            ref readonly RemoteChunkAppliedMessage first = ref _proofs[_proofHead];
+            int count = 0;
+            while (count < _proofCount && count < _proofEnvelopeEntries.Length)
+            {
+                ref readonly RemoteChunkAppliedMessage proof =
+                    ref _proofs[(_proofHead + count) % _proofs.Length];
+                if (proof.ApplicationSessionEpoch != first.ApplicationSessionEpoch ||
+                    proof.PublicationEpoch != first.PublicationEpoch)
+                    break;
+                _proofEnvelopeEntries[count] =
+                    RemoteChunkAppliedEnvelopeEntry.FromMessage(in proof);
+                count++;
+            }
+            if (!UltraSimGameProtocol.TryWriteChunkAppliedEnvelope(
+                    _proofScratch, first.ApplicationSessionEpoch, first.PublicationEpoch,
+                    _proofEnvelopeEntries.AsSpan(0, count), out int written))
+                throw new InvalidOperationException("Retained chunk proofs became non-canonical.");
+            if (_peer.TryQueue(RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id,
                     _proofScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            {
+                _proofEnvelopeEntries.AsSpan(0, count).Clear();
                 return false;
-            _proofs[_proofHead] = default;
-            _proofHead = (_proofHead + 1) % _proofs.Length;
-            _proofCount--;
-            SaturatingIncrement(ref _proofsQueued);
+            }
+            for (int index = 0; index < count; index++)
+            {
+                _proofs[_proofHead] = default;
+                _proofHead = (_proofHead + 1) % _proofs.Length;
+            }
+            _proofCount -= count;
+            _proofEnvelopeEntries.AsSpan(0, count).Clear();
+            SaturatingAdd(ref _proofsQueued, checked((ulong)count));
+            SaturatingIncrement(ref _proofMessagesQueued);
         }
         return true;
     }
@@ -185,6 +217,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             _contradictoryDeliveries,
             _malformedDeliveries,
             _proofsQueued,
+            _proofMessagesQueued,
             _snapshotBegin.DeliveryId != 0,
             _snapshotSegmentsReceived,
             _appliedSnapshots,
@@ -199,6 +232,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 _snapshotSegments.Length +
                 (long)_deliveryLineage.Length * Unsafe.SizeOf<DeliveryLineage>() +
                 (long)_proofs.Length * Unsafe.SizeOf<RemoteChunkAppliedMessage>() +
+                (long)_proofEnvelopeEntries.Length *
+                    Unsafe.SizeOf<RemoteChunkAppliedEnvelopeEntry>() +
                 _proofScratch.Length));
     }
 
@@ -974,6 +1009,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private static void SaturatingIncrement(ref ulong value)
     {
         if (value != ulong.MaxValue) value++;
+    }
+
+    private static void SaturatingAdd(ref ulong value, ulong amount)
+    {
+        value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
     }
 
     private void EnsureOwner()

@@ -420,17 +420,42 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwner();
-        if (message.MessageId != RemoteChunkAppliedMessageCodec.Descriptor.Id) return false;
-        if (!UltraSimGameProtocol.TryReadChunkApplied(payload, out RemoteChunkAppliedMessage proof))
+        if (message.MessageId == RemoteChunkAppliedMessageCodec.Descriptor.Id)
+        {
+            if (!UltraSimGameProtocol.TryReadChunkApplied(
+                    payload, out RemoteChunkAppliedMessage proof))
+                SaturatingIncrement(ref _malformedProofs);
+            else
+                ProcessProof(in proof);
+            return true;
+        }
+        if (message.MessageId != RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id) return false;
+        Span<RemoteChunkAppliedEnvelopeEntry> entries =
+            stackalloc RemoteChunkAppliedEnvelopeEntry[
+                UltraSimGameProtocol.MaximumChunkAppliedEnvelopeEntries];
+        if (!UltraSimGameProtocol.TryReadChunkAppliedEnvelope(
+                payload, out RemoteChunkAppliedEnvelopeHeader header, entries, out int count) ||
+            header.ApplicationSessionEpoch != _applicationSessionEpoch)
         {
             SaturatingIncrement(ref _malformedProofs);
             return true;
         }
+        for (int entry = 0; entry < count; entry++)
+        {
+            RemoteChunkAppliedMessage proof = entries[entry].ToMessage(
+                header.ApplicationSessionEpoch, header.PublicationEpoch);
+            ProcessProof(in proof);
+        }
+        return true;
+    }
+
+    private void ProcessProof(in RemoteChunkAppliedMessage proof)
+    {
         int index = FindDelivery(proof.DeliveryId);
         if (index < 0 || !Matches(_outstanding[index].Ticket, proof))
         {
             SaturatingIncrement(ref _malformedProofs);
-            return true;
+            return;
         }
 
         OfflineDirectChunkDeliveryTicket ticket = _outstanding[index].Ticket;
@@ -438,14 +463,14 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         {
             RemoveAt(index);
             SaturatingIncrement(ref _rejectedProofs);
-            return true;
+            return;
         }
         if (!_encoder.TryCommitAppliedProof(
                 _recipient, ticket, proof, out OfflineDirectChunkAppliedProofStatus status))
         {
             RemoveAt(index);
             SaturatingIncrement(ref _malformedProofs);
-            return true;
+            return;
         }
         RemoveAt(index);
         if (status is OfflineDirectChunkAppliedProofStatus.Applied or
@@ -455,7 +480,6 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             InvalidateObsolete(in ticket);
             SaturatingIncrement(ref _appliedProofs);
         }
-        return true;
     }
 
     public RemoteChunkWorldStateServerSnapshot GetSnapshot()

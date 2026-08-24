@@ -98,6 +98,56 @@ public partial struct RemoteChunkAppliedMessage
     public RemoteChunkPublicationApplyStatus Status;
 }
 
+/// <summary>
+/// Transport envelope for independently meaningful chunk-application proofs. The header shares
+/// connection/publication lineage only; every entry retains its own delivery identity and result.
+/// </summary>
+[NetworkMessage(130, "ultrasim.game.chunk-applied-envelope", 1, NetworkLane.WorldState)]
+public partial struct RemoteChunkAppliedEnvelopeHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public byte EntryCount;
+}
+
+/// <summary>One independently applied/rejected proof inside a chunk-proof envelope.</summary>
+public readonly record struct RemoteChunkAppliedEnvelopeEntry(
+    ulong DeliveryId,
+    ulong SpatialSpaceId,
+    int ChunkX,
+    int ChunkZ,
+    ulong Revision,
+    RemoteChunkPublicationKind Kind,
+    RemoteChunkPublicationApplyStatus Status)
+{
+    public const int EncodedSize = sizeof(ulong) * 3 + sizeof(int) * 2 + sizeof(byte) * 2;
+
+    public RemoteChunkAppliedMessage ToMessage(
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch) => new()
+    {
+        ApplicationSessionEpoch = applicationSessionEpoch,
+        PublicationEpoch = publicationEpoch,
+        DeliveryId = DeliveryId,
+        SpatialSpaceId = SpatialSpaceId,
+        ChunkX = ChunkX,
+        ChunkZ = ChunkZ,
+        Revision = Revision,
+        Kind = Kind,
+        Status = Status,
+    };
+
+    public static RemoteChunkAppliedEnvelopeEntry FromMessage(
+        in RemoteChunkAppliedMessage message) => new(
+            message.DeliveryId,
+            message.SpatialSpaceId,
+            message.ChunkX,
+            message.ChunkZ,
+            message.Revision,
+            message.Kind,
+            message.Status);
+}
+
 /// <summary>Declares one bounded atomic transfer of a canonical chunk-snapshot body.</summary>
 [NetworkMessage(123, "ultrasim.game.chunk-snapshot-begin", 1, NetworkLane.Bulk)]
 public partial struct RemoteChunkSnapshotBeginMessage
@@ -229,6 +279,9 @@ public static partial class UltraSimGameProtocol
     public const int MaximumChunkPublicationRecords = 64;
     public const int MaximumChunkSnapshotSegments = 64;
     public const int MaximumDirtyChunkBundleEntries = 32;
+    // 17-byte header + 40 * 34-byte entries = 1,377 bytes, below the default secure
+    // nonfragmenting application-message limit of 1,405 bytes. Smaller peer limits clamp at use.
+    public const int MaximumChunkAppliedEnvelopeEntries = 40;
     public const ulong ChunkPublicationSchemaFingerprint = 0x5553_4350_4231_3031UL; // USCPB101
 
     public static int GetChunkSnapshotEncodedBytes(int recordCount)
@@ -1010,6 +1063,119 @@ public static partial class UltraSimGameProtocol
         return true;
     }
 
+    public static int GetChunkAppliedEnvelopeEncodedBytes(int entryCount)
+    {
+        if (entryCount is <= 0 or > MaximumChunkAppliedEnvelopeEntries)
+            throw new ArgumentOutOfRangeException(nameof(entryCount));
+        return checked(RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize +
+            entryCount * RemoteChunkAppliedEnvelopeEntry.EncodedSize);
+    }
+
+    public static int GetMaximumChunkAppliedEnvelopeEntriesForPayload(int payloadBytes)
+    {
+        if (payloadBytes <= RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize) return 0;
+        return Math.Min(MaximumChunkAppliedEnvelopeEntries,
+            (payloadBytes - RemoteChunkAppliedEnvelopeHeaderCodec.EncodedSize) /
+                RemoteChunkAppliedEnvelopeEntry.EncodedSize);
+    }
+
+    public static bool TryWriteChunkAppliedEnvelope(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ReadOnlySpan<RemoteChunkAppliedEnvelopeEntry> entries,
+        out int written)
+    {
+        written = 0;
+        if (applicationSessionEpoch == 0 || publicationEpoch == 0 || entries.IsEmpty ||
+            entries.Length > MaximumChunkAppliedEnvelopeEntries ||
+            MemoryMarshal.AsBytes(entries).Overlaps(destination))
+            return false;
+        int required = GetChunkAppliedEnvelopeEncodedBytes(entries.Length);
+        if (destination.Length < required) return false;
+        for (int index = 0; index < entries.Length; index++)
+            if (!ValidAppliedEnvelopeEntry(in entries[index])) return false;
+
+        var writer = new NetworkPacketWriter(destination[..required]);
+        var header = new RemoteChunkAppliedEnvelopeHeader
+        {
+            ApplicationSessionEpoch = applicationSessionEpoch,
+            PublicationEpoch = publicationEpoch,
+            EntryCount = checked((byte)entries.Length),
+        };
+        if (!RemoteChunkAppliedEnvelopeHeaderCodec.TryWrite(ref writer, in header)) return false;
+        for (int index = 0; index < entries.Length; index++)
+        {
+            ref readonly RemoteChunkAppliedEnvelopeEntry entry = ref entries[index];
+            if (!writer.TryWriteUInt64(entry.DeliveryId) ||
+                !writer.TryWriteUInt64(entry.SpatialSpaceId) ||
+                !writer.TryWriteInt32(entry.ChunkX) || !writer.TryWriteInt32(entry.ChunkZ) ||
+                !writer.TryWriteUInt64(entry.Revision) ||
+                !writer.TryWriteByte((byte)entry.Kind) || !writer.TryWriteByte((byte)entry.Status))
+                return false;
+        }
+        if (writer.WrittenCount != required)
+            throw new InvalidOperationException("Chunk-proof envelope size accounting diverged.");
+        written = required;
+        return true;
+    }
+
+    public static bool TryReadChunkAppliedEnvelope(
+        ReadOnlySpan<byte> source,
+        out RemoteChunkAppliedEnvelopeHeader header,
+        Span<RemoteChunkAppliedEnvelopeEntry> entries,
+        out int entryCount)
+    {
+        header = default;
+        entryCount = 0;
+        var validation = new NetworkPacketReader(source);
+        if (!RemoteChunkAppliedEnvelopeHeaderCodec.TryRead(
+                ref validation, out RemoteChunkAppliedEnvelopeHeader staged) ||
+            staged.ApplicationSessionEpoch == 0 || staged.PublicationEpoch == 0 ||
+            staged.EntryCount == 0 || staged.EntryCount > MaximumChunkAppliedEnvelopeEntries ||
+            staged.EntryCount > entries.Length ||
+            validation.Remaining != staged.EntryCount * RemoteChunkAppliedEnvelopeEntry.EncodedSize)
+            return false;
+        for (int index = 0; index < staged.EntryCount; index++)
+        {
+            if (!TryReadChunkAppliedEnvelopeEntry(
+                    ref validation, out RemoteChunkAppliedEnvelopeEntry entry)) return false;
+            if (!ValidAppliedEnvelopeEntry(in entry)) return false;
+        }
+        if (!validation.IsComplete) return false;
+
+        var reader = new NetworkPacketReader(source);
+        _ = RemoteChunkAppliedEnvelopeHeaderCodec.TryRead(ref reader, out _);
+        for (int index = 0; index < staged.EntryCount; index++)
+        {
+            _ = TryReadChunkAppliedEnvelopeEntry(
+                ref reader, out RemoteChunkAppliedEnvelopeEntry entry);
+            entries[index] = entry;
+        }
+        header = staged;
+        entryCount = staged.EntryCount;
+        return true;
+    }
+
+    private static bool TryReadChunkAppliedEnvelopeEntry(
+        ref NetworkPacketReader reader,
+        out RemoteChunkAppliedEnvelopeEntry entry)
+    {
+        if (!reader.TryReadUInt64(out ulong deliveryId) ||
+            !reader.TryReadUInt64(out ulong space) ||
+            !reader.TryReadInt32(out int chunkX) || !reader.TryReadInt32(out int chunkZ) ||
+            !reader.TryReadUInt64(out ulong revision) ||
+            !reader.TryReadByte(out byte kind) || !reader.TryReadByte(out byte status))
+        {
+            entry = default;
+            return false;
+        }
+        entry = new RemoteChunkAppliedEnvelopeEntry(
+            deliveryId, space, chunkX, chunkZ, revision,
+            (RemoteChunkPublicationKind)kind, (RemoteChunkPublicationApplyStatus)status);
+        return true;
+    }
+
     public static bool TryReadChunkApplied(
         ReadOnlySpan<byte> source,
         out RemoteChunkAppliedMessage message)
@@ -1033,6 +1199,18 @@ public static partial class UltraSimGameProtocol
 
     private static bool ValidLineage(ulong application, ulong publication, ulong delivery, ulong space) =>
         application != 0 && publication != 0 && delivery != 0 && space != 0;
+
+    private static bool ValidAppliedEnvelopeEntry(in RemoteChunkAppliedEnvelopeEntry entry) =>
+        entry.DeliveryId != 0 && entry.SpatialSpaceId != 0 &&
+        entry.Kind is RemoteChunkPublicationKind.Snapshot or RemoteChunkPublicationKind.Delta or
+            RemoteChunkPublicationKind.Absence &&
+        entry.Status is RemoteChunkPublicationApplyStatus.Applied or
+            RemoteChunkPublicationApplyStatus.Rejected or
+            RemoteChunkPublicationApplyStatus.CapacityExceeded or
+            RemoteChunkPublicationApplyStatus.Contradictory &&
+        (entry.Kind == RemoteChunkPublicationKind.Absence
+            ? entry.Revision == 0
+            : entry.Revision != 0);
 
     private static bool ValidSnapshotBegin(in RemoteChunkSnapshotBeginMessage message)
     {
