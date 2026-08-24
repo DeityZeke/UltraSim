@@ -131,51 +131,65 @@ internal static class P03FourProfileComparison
         ProfileKind profile,
         int warmup)
     {
-        using ProfileAdapter evidence = CreateAdapter(workload, profile);
-        evidence.DiagnosticsEnabled = true;
-        evidence.Initialize();
-        for (int tick = 0; tick < workload.Ticks.Length; tick++)
-            evidence.ApplyVerified(workload.Ticks[tick], tick);
+        CumulativeWork work;
+        MemoryBreakdown memory;
         int convergenceTicks = 0;
-        while (!evidence.IsConverged && convergenceTicks < DrainTicks)
+        SemanticSummary semantic;
+        using (ProfileAdapter evidence = CreateAdapter(workload, profile))
         {
-            convergenceTicks++;
-            evidence.Drain(workload.Ticks.Length + convergenceTicks);
-            evidence.RefreshSemanticStatus();
-        }
-        evidence.AssertSemanticContract();
-        CumulativeWork work = evidence.GetWork();
-
-        using ProfileAdapter timing = CreateAdapter(workload, profile);
-        timing.DiagnosticsEnabled = false;
-        timing.Initialize();
-        for (int tick = 0; tick < warmup; tick++)
-            timing.ApplyTimed(workload.Ticks[tick], tick, measure: false, out _, out _);
-        double[] timings = new double[workload.Ticks.Length - warmup];
-        var events = new List<EventTiming>(workload.PrimaryEventTicks.Length);
-        long allocated = 0;
-        for (int tick = warmup; tick < workload.Ticks.Length; tick++)
-        {
-            timing.ApplyTimed(workload.Ticks[tick], tick, measure: true,
-                out double elapsed, out long tickAllocated);
-            allocated = checked(allocated + tickAllocated);
-            timings[tick - warmup] = elapsed;
-            if (Array.BinarySearch(workload.PrimaryEventTicks, tick) >= 0)
-                events.Add(new EventTiming(tick, elapsed));
-        }
-        return new ProfileReport(
-            profile.ToString(),
-            new TimingSummary(Stats(timings), timings.Length, events.ToArray(), allocated),
-            work,
-            evidence.GetMemoryBreakdown(work),
-            new SemanticSummary(
+            evidence.DiagnosticsEnabled = true;
+            evidence.Initialize();
+            for (int tick = 0; tick < workload.Ticks.Length; tick++)
+                evidence.ApplyVerified(workload.Ticks[tick], tick);
+            while (!evidence.IsConverged && convergenceTicks < DrainTicks)
+            {
+                convergenceTicks++;
+                evidence.Drain(workload.Ticks.Length + convergenceTicks);
+                evidence.RefreshSemanticStatus();
+            }
+            evidence.AssertSemanticContract();
+            work = evidence.GetWork();
+            memory = evidence.GetMemoryBreakdown(work);
+            semantic = new SemanticSummary(
                 evidence.IsConverged,
                 convergenceTicks,
                 evidence.SemanticDigest,
                 evidence.DeliveredEntities,
                 evidence.ExpectedEntities,
                 evidence.MaxPending,
-                evidence.MaxOutstanding));
+                evidence.MaxOutstanding);
+        }
+        // The evidence replay owns large bounded stores. Reclaim it before constructing the
+        // independent timing adapter so the timed pass is not measured under double reservation.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+
+        double[] timings = new double[workload.Ticks.Length - warmup];
+        var events = new List<EventTiming>(workload.PrimaryEventTicks.Length);
+        long allocated = 0;
+        using (ProfileAdapter timing = CreateAdapter(workload, profile))
+        {
+            timing.DiagnosticsEnabled = false;
+            timing.Initialize();
+            for (int tick = 0; tick < warmup; tick++)
+                timing.ApplyTimed(workload.Ticks[tick], tick, measure: false, out _, out _);
+            for (int tick = warmup; tick < workload.Ticks.Length; tick++)
+            {
+                timing.ApplyTimed(workload.Ticks[tick], tick, measure: true,
+                    out double elapsed, out long tickAllocated);
+                allocated = checked(allocated + tickAllocated);
+                timings[tick - warmup] = elapsed;
+                if (Array.BinarySearch(workload.PrimaryEventTicks, tick) >= 0)
+                    events.Add(new EventTiming(tick, elapsed));
+            }
+        }
+        return new ProfileReport(
+            profile.ToString(),
+            new TimingSummary(Stats(timings), timings.Length, events.ToArray(), allocated),
+            work,
+            memory,
+            semantic);
     }
 
     private static bool FamilyEquivalent(
