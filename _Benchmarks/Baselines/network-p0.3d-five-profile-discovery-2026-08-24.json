@@ -1,0 +1,3570 @@
+{
+  "WorkloadIdentity": "ultrasim-game-p03-five-profile-shared-trace-v3",
+  "CapturedAtUtc": "2026-08-24T16:05:32.6200947+00:00",
+  "GitSha": "bc2b46c619f7f2018b1a3d2d3612106960cdec4c",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "Unix 7.1.5.1",
+  "ProcessorCount": 16,
+  "StopwatchFrequency": 1000000000,
+  "Scope": {
+    "MeasurementScope": "All five Game profiles replay the same authoritative entity, recipient, mutation, movement, login/re-entry, and traffic trace. Measurements cover the profile semantic core and a payload-derived synthesized client/proof boundary. Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic oracle verification, diagnostics, and cold snapshots run in a separate evidence replay outside the timer. The secure Network transport is held constant but is not included in the timed core figures.",
+    "SharedTraceContract": "Release; 5000 trace ticks; 100 warmup ticks; 4900 measured ticks per profile; designated primary event ticks are reported separately; application proof is immediate after each encoded delivery; public/private/Event/Control traffic counts are identical in every profile row. Payload counters use canonical Game codec sizes and count each semantic delivery once; transport framing/security are excluded.",
+    "SelectionPolicy": "ChunkPublication remains selected; this matrix is evidence only."
+  },
+  "TraceTicks": 5000,
+  "WarmupTicks": 100,
+  "TimingSamples": 4900,
+  "Workloads": [
+    {
+      "Workload": "stable-world",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 120,
+        "PrivateFacts": 8,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.12,
+              "P95": 0.15,
+              "P99": 0.16,
+              "Max": 2.91
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.12,
+            "P95Microseconds": 0.15,
+            "P99Microseconds": 0.16
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 3936,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 3936,
+            "RecipientReconciliations": 3936,
+            "SourceReads": 3936,
+            "RecordsMaterialized": 45,
+            "EncodedGamePayloadBytes": 191898,
+            "EncodedGameMessages": 3936,
+            "ApplicationProofs": 3936,
+            "MaxPending": 0,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "706D3E085D177E06",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 0,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.48,
+              "P95": 0.49,
+              "P99": 0.67,
+              "Max": 3.02
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.48,
+            "P95Microseconds": 0.49,
+            "P99Microseconds": 0.67
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 4056,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 60,
+            "RecipientReconciliations": 8,
+            "SourceReads": 120,
+            "RecordsMaterialized": 45,
+            "EncodedGamePayloadBytes": 191898,
+            "EncodedGameMessages": 3936,
+            "ApplicationProofs": 3936,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "706D3E085D177E06",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.6,
+              "P95": 0.63,
+              "P99": 0.67,
+              "Max": 3.51
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.6,
+            "P95Microseconds": 0.63,
+            "P99Microseconds": 0.67
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 128,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 16,
+            "SourceReads": 128,
+            "RecordsMaterialized": 45,
+            "EncodedGamePayloadBytes": 2290,
+            "EncodedGameMessages": 16,
+            "ApplicationProofs": 16,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "4F8B9FC72091D30C",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 3.33,
+              "P95": 3.44,
+              "P99": 5.35,
+              "Max": 14.16
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 3.33,
+            "P95Microseconds": 3.44,
+            "P99Microseconds": 5.35
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 128,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 16,
+            "SourceReads": 128,
+            "RecordsMaterialized": 45,
+            "EncodedGamePayloadBytes": 2290,
+            "EncodedGameMessages": 16,
+            "ApplicationProofs": 16,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "4F8B9FC72091D30C",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.79,
+              "P95": 0.84,
+              "P99": 0.86,
+              "Max": 12.18
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.79,
+            "P95Microseconds": 0.84,
+            "P99Microseconds": 0.86
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 19,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 45,
+            "SourceReads": 45,
+            "RecordsMaterialized": 45,
+            "EncodedGamePayloadBytes": 2540,
+            "EncodedGameMessages": 26,
+            "ApplicationProofs": 26,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "4F8B9FC72091D30C",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "one-dirty-entity",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 121,
+        "PrivateFacts": 8,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.14,
+              "P95": 0.15,
+              "P99": 0.16,
+              "Max": 5.06
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 2500,
+                "Microseconds": 4.65
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.14,
+            "P95Microseconds": 0.15,
+            "P99Microseconds": 0.16
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 3937,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 3942,
+            "RecipientReconciliations": 3936,
+            "SourceReads": 3938,
+            "RecordsMaterialized": 47,
+            "EncodedGamePayloadBytes": 192148,
+            "EncodedGameMessages": 3938,
+            "ApplicationProofs": 3938,
+            "MaxPending": 2,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "92C0D0C379670416",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 2,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.47,
+              "P95": 0.49,
+              "P99": 0.5,
+              "Max": 10.189
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 2500,
+                "Microseconds": 6.31
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.47,
+            "P95Microseconds": 0.49,
+            "P99Microseconds": 0.5
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 4057,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 62,
+            "RecipientReconciliations": 8,
+            "SourceReads": 121,
+            "RecordsMaterialized": 47,
+            "EncodedGamePayloadBytes": 192148,
+            "EncodedGameMessages": 3938,
+            "ApplicationProofs": 3938,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "92C0D0C379670416",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.46,
+              "P95": 0.51,
+              "P99": 0.53,
+              "Max": 37.199
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 2500,
+                "Microseconds": 37.199
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.46,
+            "P95Microseconds": 0.51,
+            "P99Microseconds": 0.53
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 129,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 47,
+            "RecipientReconciliations": 18,
+            "SourceReads": 129,
+            "RecordsMaterialized": 47,
+            "EncodedGamePayloadBytes": 2424,
+            "EncodedGameMessages": 18,
+            "ApplicationProofs": 18,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "51F50B5DD50898A4",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.47,
+              "P95": 0.48,
+              "P99": 0.5,
+              "Max": 39.759
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 2500,
+                "Microseconds": 39.759
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.47,
+            "P95Microseconds": 0.48,
+            "P99Microseconds": 0.5
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 129,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 47,
+            "RecipientReconciliations": 18,
+            "SourceReads": 129,
+            "RecordsMaterialized": 47,
+            "EncodedGamePayloadBytes": 2424,
+            "EncodedGameMessages": 18,
+            "ApplicationProofs": 18,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "51F50B5DD50898A4",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.8,
+              "P95": 0.84,
+              "P99": 0.87,
+              "Max": 11.06
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 2500,
+                "Microseconds": 6.35
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.8,
+            "P95Microseconds": 0.84,
+            "P99Microseconds": 0.87
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 20,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 47,
+            "SourceReads": 47,
+            "RecordsMaterialized": 47,
+            "EncodedGamePayloadBytes": 2674,
+            "EncodedGameMessages": 28,
+            "ApplicationProofs": 28,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "51F50B5DD50898A4",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "many-dirty-one-chunk",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 150120,
+        "PrivateFacts": 10008,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 7.93,
+              "P95": 18.399,
+              "P99": 18.77,
+              "Max": 23.55
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 7.93,
+            "P95Microseconds": 18.399,
+            "P99Microseconds": 18.77
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 8936,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 40194,
+            "RecipientReconciliations": 3936,
+            "SourceReads": 11438,
+            "RecordsMaterialized": 225195,
+            "EncodedGamePayloadBytes": 10488320,
+            "EncodedGameMessages": 11438,
+            "ApplicationProofs": 11438,
+            "MaxPending": 3,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 4,
+            "Digest": "FC71B4575C74246D",
+            "DeliveredEntities": 135,
+            "ExpectedEntities": 135,
+            "MaxPending": 3,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 9.19,
+              "P95": 19.54,
+              "P99": 22.03,
+              "Max": 31.73
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 9.19,
+            "P95Microseconds": 19.54,
+            "P99Microseconds": 22.03
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 9027,
+            "SpatialDiscoveryOperations": 5091,
+            "CandidateTests": 20064,
+            "RecipientReconciliations": 8,
+            "SourceReads": 5091,
+            "RecordsMaterialized": 225195,
+            "EncodedGamePayloadBytes": 10488320,
+            "EncodedGameMessages": 11438,
+            "ApplicationProofs": 11438,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 4,
+            "Digest": "FC71B4575C74246D",
+            "DeliveredEntities": 135,
+            "ExpectedEntities": 135,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 21.669,
+              "P95": 24.44,
+              "P99": 26.97,
+              "Max": 39.279
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 21.669,
+            "P95Microseconds": 24.44,
+            "P99Microseconds": 26.97
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 160128,
+            "SpatialDiscoveryOperations": 5091,
+            "CandidateTests": 15048,
+            "RecipientReconciliations": 7015,
+            "SourceReads": 160128,
+            "RecordsMaterialized": 108798,
+            "EncodedGamePayloadBytes": 4744891,
+            "EncodedGameMessages": 7015,
+            "ApplicationProofs": 7015,
+            "MaxPending": 135,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "EF33EFE139ABD3AF",
+            "DeliveredEntities": 135,
+            "ExpectedEntities": 135,
+            "MaxPending": 135,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 212.148,
+              "P95": 217.828,
+              "P99": 221.998,
+              "Max": 231.088
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 212.148,
+            "P95Microseconds": 217.828,
+            "P99Microseconds": 221.998
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 160128,
+            "SpatialDiscoveryOperations": 150120,
+            "CandidateTests": 450135,
+            "RecipientReconciliations": 7015,
+            "SourceReads": 160128,
+            "RecordsMaterialized": 108798,
+            "EncodedGamePayloadBytes": 4744891,
+            "EncodedGameMessages": 7015,
+            "ApplicationProofs": 7015,
+            "MaxPending": 135,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "EF33EFE139ABD3AF",
+            "DeliveredEntities": 135,
+            "ExpectedEntities": 135,
+            "MaxPending": 135,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 12.25,
+              "P95": 12.95,
+              "P99": 16.44,
+              "Max": 35.179
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 12.25,
+            "P95Microseconds": 12.95,
+            "P99Microseconds": 16.44
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 100013,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 136234,
+            "SourceReads": 136234,
+            "RecordsMaterialized": 136234,
+            "EncodedGamePayloadBytes": 6097328,
+            "EncodedGameMessages": 15020,
+            "ApplicationProofs": 15020,
+            "MaxPending": 135,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 4,
+            "Digest": "EF33EFE139ABD3AF",
+            "DeliveredEntities": 135,
+            "ExpectedEntities": 135,
+            "MaxPending": 135,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "distributed-dirty-chunks",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 75113,
+        "PrivateFacts": 5015,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 2.67,
+              "P95": 5.93,
+              "P99": 6.51,
+              "Max": 19.02
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 2.67,
+            "P95Microseconds": 5.93,
+            "P99Microseconds": 6.51
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 78929,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 87830,
+            "RecipientReconciliations": 3936,
+            "SourceReads": 32057,
+            "RecordsMaterialized": 28166,
+            "EncodedGamePayloadBytes": 3707023,
+            "EncodedGameMessages": 32057,
+            "ApplicationProofs": 32057,
+            "MaxPending": 19,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "A001A1B93EB64B42",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 19,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 8.53,
+              "P95": 13.34,
+              "P99": 14.11,
+              "Max": 18.71
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 8.53,
+            "P95Microseconds": 13.34,
+            "P99Microseconds": 14.11
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 79049,
+            "SpatialDiscoveryOperations": 75113,
+            "CandidateTests": 37554,
+            "RecipientReconciliations": 8,
+            "SourceReads": 75113,
+            "RecordsMaterialized": 28166,
+            "EncodedGamePayloadBytes": 3707023,
+            "EncodedGameMessages": 32057,
+            "ApplicationProofs": 32057,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "A001A1B93EB64B42",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 118.959,
+              "P95": 124.939,
+              "P99": 130.879,
+              "Max": 157.428
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 118.959,
+            "P95Microseconds": 124.939,
+            "P99Microseconds": 130.879
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 80128,
+            "SpatialDiscoveryOperations": 75113,
+            "CandidateTests": 28166,
+            "RecipientReconciliations": 20191,
+            "SourceReads": 80128,
+            "RecordsMaterialized": 28141,
+            "EncodedGamePayloadBytes": 1686697,
+            "EncodedGameMessages": 20191,
+            "ApplicationProofs": 20191,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 3,
+            "Digest": "3DD36EE5F2F72930",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 109.559,
+              "P95": 114.049,
+              "P99": 117.889,
+              "Max": 166.519
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 109.559,
+            "P95Microseconds": 114.049,
+            "P99Microseconds": 117.889
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 80128,
+            "SpatialDiscoveryOperations": 75113,
+            "CandidateTests": 28166,
+            "RecipientReconciliations": 20191,
+            "SourceReads": 80128,
+            "RecordsMaterialized": 28141,
+            "EncodedGamePayloadBytes": 1686697,
+            "EncodedGameMessages": 20191,
+            "ApplicationProofs": 20191,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 3,
+            "Digest": "3DD36EE5F2F72930",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 1.68,
+              "P95": 2.21,
+              "P99": 2.52,
+              "Max": 4.92
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 1.68,
+            "P95Microseconds": 2.21,
+            "P99Microseconds": 2.52
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 7991,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 15208,
+            "SourceReads": 15208,
+            "RecordsMaterialized": 15208,
+            "EncodedGamePayloadBytes": 962986,
+            "EncodedGameMessages": 12970,
+            "ApplicationProofs": 12970,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 6,
+            "Digest": "3DD36EE5F2F72930",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "mostly-clean-recipient-movement",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 120,
+        "PrivateFacts": 8,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 461.546,
+              "P95": 499.196,
+              "P99": 521.045,
+              "Max": 667.934
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 461.546,
+            "P95Microseconds": 499.196,
+            "P99Microseconds": 521.045
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 37473,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 37473,
+            "RecipientReconciliations": 37473,
+            "SourceReads": 37473,
+            "RecordsMaterialized": 364,
+            "EncodedGamePayloadBytes": 1811244,
+            "EncodedGameMessages": 37473,
+            "ApplicationProofs": 37473,
+            "MaxPending": 31,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "6C7617AC4F29D7E3",
+            "DeliveredEntities": 16,
+            "ExpectedEntities": 16,
+            "MaxPending": 31,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 787.143,
+              "P95": 845.323,
+              "P99": 888.912,
+              "Max": 1170
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 787.143,
+            "P95Microseconds": 845.323,
+            "P99Microseconds": 888.912
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 37593,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 60,
+            "RecipientReconciliations": 40008,
+            "SourceReads": 120,
+            "RecordsMaterialized": 364,
+            "EncodedGamePayloadBytes": 1811244,
+            "EncodedGameMessages": 37473,
+            "ApplicationProofs": 37473,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "6C7617AC4F29D7E3",
+            "DeliveredEntities": 16,
+            "ExpectedEntities": 16,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 214.698,
+              "P95": 227.038,
+              "P99": 273.917,
+              "Max": 306.108
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 214.698,
+            "P95Microseconds": 227.038,
+            "P99Microseconds": 273.917
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 128,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 182,
+            "SourceReads": 128,
+            "RecordsMaterialized": 282,
+            "EncodedGamePayloadBytes": 16394,
+            "EncodedGameMessages": 182,
+            "ApplicationProofs": 182,
+            "MaxPending": 93,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "589E020FBDFFA7FD",
+            "DeliveredEntities": 15,
+            "ExpectedEntities": 15,
+            "MaxPending": 93,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 214.728,
+              "P95": 224.368,
+              "P99": 270.328,
+              "Max": 351.817
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 214.728,
+            "P95Microseconds": 224.368,
+            "P99Microseconds": 270.328
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 128,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 182,
+            "SourceReads": 128,
+            "RecordsMaterialized": 282,
+            "EncodedGamePayloadBytes": 16394,
+            "EncodedGameMessages": 182,
+            "ApplicationProofs": 182,
+            "MaxPending": 93,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "589E020FBDFFA7FD",
+            "DeliveredEntities": 15,
+            "ExpectedEntities": 15,
+            "MaxPending": 93,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 21.33,
+              "P95": 54.319,
+              "P99": 130.959,
+              "Max": 235.448
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 21.33,
+            "P95Microseconds": 54.319,
+            "P99Microseconds": 130.959
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 20,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 349,
+            "SourceReads": 349,
+            "RecordsMaterialized": 349,
+            "EncodedGamePayloadBytes": 22858,
+            "EncodedGameMessages": 328,
+            "ApplicationProofs": 328,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "589E020FBDFFA7FD",
+            "DeliveredEntities": 15,
+            "ExpectedEntities": 15,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "active-town-mixed",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 37617,
+        "PrivateFacts": 2507,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 437.817,
+              "P95": 500.425,
+              "P99": 527.836,
+              "Max": 714.324
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 334.367
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 437.817,
+            "P95Microseconds": 500.425,
+            "P99Microseconds": 527.836
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 63815,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 56639,
+            "RecipientReconciliations": 26318,
+            "SourceReads": 33513,
+            "RecordsMaterialized": 7472,
+            "EncodedGamePayloadBytes": 2173265,
+            "EncodedGameMessages": 33513,
+            "ApplicationProofs": 33513,
+            "MaxPending": 49,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "8491D621E2A69842",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 49,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 755.193,
+              "P95": 851.053,
+              "P99": 895.312,
+              "Max": 1087.51
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 621.665
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 755.193,
+            "P95Microseconds": 851.053,
+            "P99Microseconds": 895.312
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 63935,
+            "SpatialDiscoveryOperations": 37617,
+            "CandidateTests": 13392,
+            "RecipientReconciliations": 26680,
+            "SourceReads": 37617,
+            "RecordsMaterialized": 7472,
+            "EncodedGamePayloadBytes": 2173265,
+            "EncodedGameMessages": 33513,
+            "ApplicationProofs": 33513,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "8491D621E2A69842",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 289.707,
+              "P95": 305.947,
+              "P99": 310.707,
+              "Max": 387.706
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 227.728
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 289.707,
+            "P95Microseconds": 305.947,
+            "P99Microseconds": 310.707
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 40124,
+            "SpatialDiscoveryOperations": 37617,
+            "CandidateTests": 8941,
+            "RecipientReconciliations": 5764,
+            "SourceReads": 40124,
+            "RecordsMaterialized": 6727,
+            "EncodedGamePayloadBytes": 426634,
+            "EncodedGameMessages": 5764,
+            "ApplicationProofs": 5764,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 2,
+            "Digest": "9C6042C05EA6DFD8",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 283.167,
+              "P95": 305.117,
+              "P99": 347.167,
+              "Max": 368.946
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 226.048
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 283.167,
+            "P95Microseconds": 305.117,
+            "P99Microseconds": 347.167
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 40124,
+            "SpatialDiscoveryOperations": 37617,
+            "CandidateTests": 8538,
+            "RecipientReconciliations": 5764,
+            "SourceReads": 40124,
+            "RecordsMaterialized": 6727,
+            "EncodedGamePayloadBytes": 426634,
+            "EncodedGameMessages": 5764,
+            "ApplicationProofs": 5764,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 2,
+            "Digest": "9C6042C05EA6DFD8",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 18.46,
+              "P95": 50.83,
+              "P99": 114.209,
+              "Max": 269.627
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 169.439
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 18.46,
+            "P95Microseconds": 50.83,
+            "P99Microseconds": 114.209
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 3287,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 6652,
+            "SourceReads": 6596,
+            "RecordsMaterialized": 6596,
+            "EncodedGamePayloadBytes": 414457,
+            "EncodedGameMessages": 5497,
+            "ApplicationProofs": 5497,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 4,
+            "Digest": "9C6042C05EA6DFD8",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "dense-400",
+      "EntityCount": 400,
+      "RecipientCount": 16,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 100635,
+        "PrivateFacts": 6421,
+        "EventFacts": 20000,
+        "ControlFacts": 85000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 911.652,
+              "P95": 1062.46,
+              "P99": 1141.399,
+              "Max": 1285.319
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 675.554
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 911.652,
+            "P95Microseconds": 1062.46,
+            "P99Microseconds": 1141.399
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 109228,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 873066,
+            "RecipientReconciliations": 47254,
+            "SourceReads": 183740,
+            "RecordsMaterialized": 460912,
+            "EncodedGamePayloadBytes": 33034309,
+            "EncodedGameMessages": 183740,
+            "ApplicationProofs": 183740,
+            "MaxPending": 441,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 4110720
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 4110720,
+            "AuthoritativeSourceHistoryBytes": 590208,
+            "HarnessSemanticStateBytes": 760640,
+            "TotalKnownReservedBytes": 5461568
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 4,
+            "Digest": "8DCF1542509A2F4C",
+            "DeliveredEntities": 6001,
+            "ExpectedEntities": 6001,
+            "MaxPending": 441,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 1546.926,
+              "P95": 1908.802,
+              "P99": 2028.632,
+              "Max": 2161.36
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 1256.738
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 1546.926,
+            "P95Microseconds": 1908.802,
+            "P99Microseconds": 2028.632
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 109292,
+            "SpatialDiscoveryOperations": 62038,
+            "CandidateTests": 481440,
+            "RecipientReconciliations": 53360,
+            "SourceReads": 62038,
+            "RecordsMaterialized": 460912,
+            "EncodedGamePayloadBytes": 33034309,
+            "EncodedGameMessages": 183740,
+            "ApplicationProofs": 183740,
+            "MaxPending": 7872,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 4430592
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 4430592,
+            "AuthoritativeSourceHistoryBytes": 590208,
+            "HarnessSemanticStateBytes": 760640,
+            "TotalKnownReservedBytes": 5781440
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 4,
+            "Digest": "8DCF1542509A2F4C",
+            "DeliveredEntities": 6001,
+            "ExpectedEntities": 6001,
+            "MaxPending": 7872,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 555.895,
+              "P95": 2711.505,
+              "P99": 2764.585,
+              "Max": 2883.784
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 2221.46
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 555.895,
+            "P95Microseconds": 2711.505,
+            "P99Microseconds": 2764.585
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 107056,
+            "SpatialDiscoveryOperations": 62038,
+            "CandidateTests": 355165,
+            "RecipientReconciliations": 20053,
+            "SourceReads": 107056,
+            "RecordsMaterialized": 286230,
+            "EncodedGamePayloadBytes": 12522985,
+            "EncodedGameMessages": 20053,
+            "ApplicationProofs": 20053,
+            "MaxPending": 6016,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2363064
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2363064,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 342784,
+            "TotalKnownReservedBytes": 2705848
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 3,
+            "Digest": "B45985D010E529F4",
+            "DeliveredEntities": 5972,
+            "ExpectedEntities": 5972,
+            "MaxPending": 6016,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 614.275,
+              "P95": 2765.085,
+              "P99": 2822.614,
+              "Max": 3444.639
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 2306.709
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 614.275,
+            "P95Microseconds": 2765.085,
+            "P99Microseconds": 2822.614
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 107056,
+            "SpatialDiscoveryOperations": 100635,
+            "CandidateTests": 550043,
+            "RecipientReconciliations": 20053,
+            "SourceReads": 107056,
+            "RecordsMaterialized": 286230,
+            "EncodedGamePayloadBytes": 12522985,
+            "EncodedGameMessages": 20053,
+            "ApplicationProofs": 20053,
+            "MaxPending": 6016,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2346552
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2346552,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 342784,
+            "TotalKnownReservedBytes": 2689336
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 3,
+            "Digest": "B45985D010E529F4",
+            "DeliveredEntities": 5972,
+            "ExpectedEntities": 5972,
+            "MaxPending": 6016,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 53.85,
+              "P95": 1500.696,
+              "P99": 1569.846,
+              "Max": 1983.042
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 1440.407
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 53.85,
+            "P95Microseconds": 1500.696,
+            "P99Microseconds": 1569.846
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 23070,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 221261,
+            "SourceReads": 218246,
+            "RecordsMaterialized": 218246,
+            "EncodedGamePayloadBytes": 9680882,
+            "EncodedGameMessages": 20582,
+            "ApplicationProofs": 20582,
+            "MaxPending": 6016,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 3762516
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 3762516,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 342784,
+            "TotalKnownReservedBytes": 4105300
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 20,
+            "Digest": "B45985D010E529F4",
+            "DeliveredEntities": 5972,
+            "ExpectedEntities": 5972,
+            "MaxPending": 6016,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "edge-corner",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 123,
+        "PrivateFacts": 9,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 474.026,
+              "P95": 511.966,
+              "P99": 519.676,
+              "Max": 532.365
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 414.366
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 474.026,
+            "P95Microseconds": 511.966,
+            "P99Microseconds": 519.676
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 37476,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 37473,
+            "RecipientReconciliations": 37473,
+            "SourceReads": 37473,
+            "RecordsMaterialized": 1956,
+            "EncodedGamePayloadBytes": 1842948,
+            "EncodedGameMessages": 37473,
+            "ApplicationProofs": 37473,
+            "MaxPending": 31,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "BF00B9B38EA20087",
+            "DeliveredEntities": 82,
+            "ExpectedEntities": 82,
+            "MaxPending": 31,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 681.984,
+              "P95": 720.953,
+              "P99": 729.494,
+              "Max": 982.411
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 626.434
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 681.984,
+            "P95Microseconds": 720.953,
+            "P99Microseconds": 729.494
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 37492,
+            "SpatialDiscoveryOperations": 19,
+            "CandidateTests": 49,
+            "RecipientReconciliations": 40008,
+            "SourceReads": 19,
+            "RecordsMaterialized": 1956,
+            "EncodedGamePayloadBytes": 1842948,
+            "EncodedGameMessages": 37473,
+            "ApplicationProofs": 37473,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "BF00B9B38EA20087",
+            "DeliveredEntities": 82,
+            "ExpectedEntities": 82,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 259.708,
+              "P95": 276.358,
+              "P99": 282.517,
+              "Max": 374.187
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 280.857
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 259.708,
+            "P95Microseconds": 276.358,
+            "P99Microseconds": 282.517
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 132,
+            "SpatialDiscoveryOperations": 19,
+            "CandidateTests": 26,
+            "RecipientReconciliations": 841,
+            "SourceReads": 132,
+            "RecordsMaterialized": 1495,
+            "EncodedGamePayloadBytes": 83815,
+            "EncodedGameMessages": 841,
+            "ApplicationProofs": 841,
+            "MaxPending": 441,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "1BBA8866088344E8",
+            "DeliveredEntities": 81,
+            "ExpectedEntities": 81,
+            "MaxPending": 441,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 260.148,
+              "P95": 275.188,
+              "P99": 279.037,
+              "Max": 402.846
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 284.157
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 260.148,
+            "P95Microseconds": 275.188,
+            "P99Microseconds": 279.037
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 132,
+            "SpatialDiscoveryOperations": 123,
+            "CandidateTests": 208,
+            "RecipientReconciliations": 841,
+            "SourceReads": 132,
+            "RecordsMaterialized": 1495,
+            "EncodedGamePayloadBytes": 83815,
+            "EncodedGameMessages": 841,
+            "ApplicationProofs": 841,
+            "MaxPending": 441,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "1BBA8866088344E8",
+            "DeliveredEntities": 81,
+            "ExpectedEntities": 81,
+            "MaxPending": 441,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 42.109,
+              "P95": 76.889,
+              "P99": 148.929,
+              "Max": 347.217
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 36.4
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 42.109,
+            "P95Microseconds": 76.889,
+            "P99Microseconds": 148.929
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 113,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 1903,
+            "SourceReads": 1903,
+            "RecordsMaterialized": 1903,
+            "EncodedGamePayloadBytes": 119026,
+            "EncodedGameMessages": 1564,
+            "ApplicationProofs": 1564,
+            "MaxPending": 126,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "1BBA8866088344E8",
+            "DeliveredEntities": 81,
+            "ExpectedEntities": 81,
+            "MaxPending": 126,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "teleport-login-reentry",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 121,
+        "PrivateFacts": 8,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.08,
+              "P95": 0.09,
+              "P99": 0.1,
+              "Max": 282.797
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 282.797
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 25.22
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 180.168
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 1.32
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.08,
+            "P95Microseconds": 0.09,
+            "P99Microseconds": 0.1
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 4926,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 4927,
+            "RecipientReconciliations": 4925,
+            "SourceReads": 3937,
+            "RecordsMaterialized": 58,
+            "EncodedGamePayloadBytes": 239891,
+            "EncodedGameMessages": 4926,
+            "ApplicationProofs": 4926,
+            "MaxPending": 497,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "66BB6D32551E78B3",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 497,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.48,
+              "P95": 0.53,
+              "P99": 0.54,
+              "Max": 629.864
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 288.038
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 629.864
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 207.708
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 2.81
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.48,
+            "P95Microseconds": 0.53,
+            "P99Microseconds": 0.54
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 5046,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 61,
+            "RecipientReconciliations": 10,
+            "SourceReads": 121,
+            "RecordsMaterialized": 58,
+            "EncodedGamePayloadBytes": 239891,
+            "EncodedGameMessages": 4926,
+            "ApplicationProofs": 4926,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "66BB6D32551E78B3",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.47,
+              "P95": 0.49,
+              "P99": 0.49,
+              "Max": 28.95
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 28.95
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 1.22
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 15.96
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 11.68
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.47,
+            "P95Microseconds": 0.49,
+            "P99Microseconds": 0.49
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 129,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 46,
+            "RecipientReconciliations": 20,
+            "SourceReads": 129,
+            "RecordsMaterialized": 58,
+            "EncodedGamePayloadBytes": 2936,
+            "EncodedGameMessages": 20,
+            "ApplicationProofs": 20,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "F22CC4918776151D",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.49,
+              "P95": 0.51,
+              "P99": 0.53,
+              "Max": 28.339
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 28.339
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 1.3
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 15.77
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 8.04
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.49,
+            "P95Microseconds": 0.51,
+            "P99Microseconds": 0.53
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 129,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 46,
+            "RecipientReconciliations": 20,
+            "SourceReads": 129,
+            "RecordsMaterialized": 58,
+            "EncodedGamePayloadBytes": 2936,
+            "EncodedGameMessages": 20,
+            "ApplicationProofs": 20,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "F22CC4918776151D",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.11,
+              "P95": 0.12,
+              "P99": 0.12,
+              "Max": 42.29
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 42.29
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 19.2
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 37.83
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 0.45
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.11,
+            "P95Microseconds": 0.12,
+            "P99Microseconds": 0.12
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 20,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 58,
+            "SourceReads": 58,
+            "RecordsMaterialized": 58,
+            "EncodedGamePayloadBytes": 3186,
+            "EncodedGameMessages": 30,
+            "ApplicationProofs": 30,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "F22CC4918776151D",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "synchronized-teleport-stress",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 120,
+        "PrivateFacts": 8,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.08,
+              "P95": 0.09,
+              "P99": 0.09,
+              "Max": 2289.969
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 2289.969
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 2250.259
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.08,
+            "P95Microseconds": 0.09,
+            "P99Microseconds": 0.09
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 11885,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 11885,
+            "RecipientReconciliations": 11885,
+            "SourceReads": 11885,
+            "RecordsMaterialized": 138,
+            "EncodedGamePayloadBytes": 576618,
+            "EncodedGameMessages": 11885,
+            "ApplicationProofs": 11885,
+            "MaxPending": 4013,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "BF7CE3291EA91B33",
+            "DeliveredEntities": 48,
+            "ExpectedEntities": 48,
+            "MaxPending": 4013,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.48,
+              "P95": 0.49,
+              "P99": 0.61,
+              "Max": 2474.458
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 2377.309
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 2474.458
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.48,
+            "P95Microseconds": 0.49,
+            "P99Microseconds": 0.61
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 12005,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 60,
+            "RecipientReconciliations": 24,
+            "SourceReads": 120,
+            "RecordsMaterialized": 138,
+            "EncodedGamePayloadBytes": 576618,
+            "EncodedGameMessages": 11885,
+            "ApplicationProofs": 11885,
+            "MaxPending": 4013,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "BF7CE3291EA91B33",
+            "DeliveredEntities": 48,
+            "ExpectedEntities": 48,
+            "MaxPending": 4013,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.48,
+              "P95": 0.53,
+              "P99": 0.54,
+              "Max": 232.908
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 219.038
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 232.908
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.48,
+            "P95Microseconds": 0.53,
+            "P99Microseconds": 0.54
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 128,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 41,
+            "SourceReads": 128,
+            "RecordsMaterialized": 120,
+            "EncodedGamePayloadBytes": 6065,
+            "EncodedGameMessages": 41,
+            "ApplicationProofs": 41,
+            "MaxPending": 69,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "923DB14E61374E93",
+            "DeliveredEntities": 48,
+            "ExpectedEntities": 48,
+            "MaxPending": 69,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.51,
+              "P95": 0.51,
+              "P99": 0.54,
+              "Max": 231.117
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 216.948
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 231.117
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.51,
+            "P95Microseconds": 0.51,
+            "P99Microseconds": 0.54
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 128,
+            "SpatialDiscoveryOperations": 120,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 41,
+            "SourceReads": 128,
+            "RecordsMaterialized": 120,
+            "EncodedGamePayloadBytes": 6065,
+            "EncodedGameMessages": 41,
+            "ApplicationProofs": 41,
+            "MaxPending": 69,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "923DB14E61374E93",
+            "DeliveredEntities": 48,
+            "ExpectedEntities": 48,
+            "MaxPending": 69,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.11,
+              "P95": 0.12,
+              "P99": 0.12,
+              "Max": 261.148
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 251.478
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 261.148
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.11,
+            "P95Microseconds": 0.12,
+            "P99Microseconds": 0.12
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 19,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 138,
+            "SourceReads": 120,
+            "RecordsMaterialized": 120,
+            "EncodedGamePayloadBytes": 6490,
+            "EncodedGameMessages": 58,
+            "ApplicationProofs": 58,
+            "MaxPending": 69,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "923DB14E61374E93",
+            "DeliveredEntities": 48,
+            "ExpectedEntities": 48,
+            "MaxPending": 69,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "lifecycle-privacy",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 122,
+        "PrivateFacts": 9,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.08,
+              "P95": 0.09,
+              "P99": 0.09,
+              "Max": 1.38
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 1.11
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 1.38
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 0.47
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 0.84
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.08,
+            "P95Microseconds": 0.09,
+            "P99Microseconds": 0.09
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 3940,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 3952,
+            "RecipientReconciliations": 3936,
+            "SourceReads": 3940,
+            "RecordsMaterialized": 49,
+            "EncodedGamePayloadBytes": 192398,
+            "EncodedGameMessages": 3940,
+            "ApplicationProofs": 3940,
+            "MaxPending": 2,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "BEF96C912671F312",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 2,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.47,
+              "P95": 0.48,
+              "P99": 0.48,
+              "Max": 3.8
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 2.47
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 2.55
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 1.43
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 1.85
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.47,
+            "P95Microseconds": 0.48,
+            "P99Microseconds": 0.48
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 4060,
+            "SpatialDiscoveryOperations": 124,
+            "CandidateTests": 68,
+            "RecipientReconciliations": 8,
+            "SourceReads": 124,
+            "RecordsMaterialized": 49,
+            "EncodedGamePayloadBytes": 192398,
+            "EncodedGameMessages": 3940,
+            "ApplicationProofs": 3940,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "BEF96C912671F312",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.45,
+              "P95": 0.46,
+              "P99": 0.48,
+              "Max": 8.65
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 1.61
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 8.65
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 1.49
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 8.45
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.45,
+            "P95Microseconds": 0.46,
+            "P99Microseconds": 0.48
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 132,
+            "SpatialDiscoveryOperations": 122,
+            "CandidateTests": 49,
+            "RecipientReconciliations": 22,
+            "SourceReads": 132,
+            "RecordsMaterialized": 51,
+            "EncodedGamePayloadBytes": 2692,
+            "EncodedGameMessages": 22,
+            "ApplicationProofs": 22,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "FA2A1AF70D37D784",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.52,
+              "P95": 0.53,
+              "P99": 0.82,
+              "Max": 8.06
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 1.67
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 8.06
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 1.48
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 7.679
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.52,
+            "P95Microseconds": 0.53,
+            "P99Microseconds": 0.82
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 132,
+            "SpatialDiscoveryOperations": 122,
+            "CandidateTests": 49,
+            "RecipientReconciliations": 22,
+            "SourceReads": 132,
+            "RecordsMaterialized": 51,
+            "EncodedGamePayloadBytes": 2692,
+            "EncodedGameMessages": 22,
+            "ApplicationProofs": 22,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "FA2A1AF70D37D784",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 0.11,
+              "P95": 0.12,
+              "P99": 0.12,
+              "Max": 3.72
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 1666,
+                "Microseconds": 1.65
+              },
+              {
+                "Tick": 1667,
+                "Microseconds": 0.97
+              },
+              {
+                "Tick": 1668,
+                "Microseconds": 0.64
+              },
+              {
+                "Tick": 1669,
+                "Microseconds": 0.86
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 0.11,
+            "P95Microseconds": 0.12,
+            "P99Microseconds": 0.12
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 20,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 53,
+            "SourceReads": 47,
+            "RecordsMaterialized": 47,
+            "EncodedGamePayloadBytes": 2674,
+            "EncodedGameMessages": 28,
+            "ApplicationProofs": 28,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "FA2A1AF70D37D784",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "high-dirt-low-movement",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 450122,
+        "PrivateFacts": 30006,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 16.02,
+              "P95": 23.2,
+              "P99": 24.93,
+              "Max": 30.12
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 16.02,
+            "P95Microseconds": 23.2,
+            "P99Microseconds": 24.93
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 453938,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 381403,
+            "RecipientReconciliations": 3936,
+            "SourceReads": 90043,
+            "RecordsMaterialized": 86152,
+            "EncodedGamePayloadBytes": 10955273,
+            "EncodedGameMessages": 90043,
+            "ApplicationProofs": 90043,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "6D111D7CFB4FFF5C",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 41.279,
+              "P95": 52.19,
+              "P99": 54.6,
+              "Max": 57.81
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 41.279,
+            "P95Microseconds": 52.19,
+            "P99Microseconds": 54.6
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 454058,
+            "SpatialDiscoveryOperations": 450122,
+            "CandidateTests": 225082,
+            "RecipientReconciliations": 8,
+            "SourceReads": 450122,
+            "RecordsMaterialized": 86152,
+            "EncodedGamePayloadBytes": 10955273,
+            "EncodedGameMessages": 90043,
+            "ApplicationProofs": 90043,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "6D111D7CFB4FFF5C",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 661.224,
+              "P95": 674.824,
+              "P99": 683.283,
+              "Max": 867.313
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 661.224,
+            "P95Microseconds": 674.824,
+            "P99Microseconds": 683.283
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 480128,
+            "SpatialDiscoveryOperations": 450122,
+            "CandidateTests": 168813,
+            "RecipientReconciliations": 16122,
+            "SourceReads": 480128,
+            "RecordsMaterialized": 42825,
+            "EncodedGamePayloadBytes": 2201700,
+            "EncodedGameMessages": 16122,
+            "ApplicationProofs": 16122,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 2,
+            "Digest": "0CF88807CEE4558E",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 605.915,
+              "P95": 618.034,
+              "P99": 625.485,
+              "Max": 739.773
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 605.915,
+            "P95Microseconds": 618.034,
+            "P99Microseconds": 625.485
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 480128,
+            "SpatialDiscoveryOperations": 450122,
+            "CandidateTests": 168813,
+            "RecipientReconciliations": 16122,
+            "SourceReads": 480128,
+            "RecordsMaterialized": 42825,
+            "EncodedGamePayloadBytes": 2201700,
+            "EncodedGameMessages": 16122,
+            "ApplicationProofs": 16122,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 2,
+            "Digest": "0CF88807CEE4558E",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 7.3,
+              "P95": 8.88,
+              "P99": 9.67,
+              "Max": 15.01
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 7.3,
+            "P95Microseconds": 8.88,
+            "P99Microseconds": 9.67
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 20234,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 33370,
+            "SourceReads": 33370,
+            "RecordsMaterialized": 33370,
+            "EncodedGamePayloadBytes": 1834015,
+            "EncodedGameMessages": 17299,
+            "ApplicationProofs": 17299,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 5,
+            "Digest": "0CF88807CEE4558E",
+            "DeliveredEntities": 45,
+            "ExpectedEntities": 45,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    },
+    {
+      "Workload": "high-movement-low-dirt",
+      "EntityCount": 128,
+      "RecipientCount": 8,
+      "TraceTicks": 5000,
+      "CommonTraffic": {
+        "PublicFacts": 121,
+        "PrivateFacts": 8,
+        "EventFacts": 10000,
+        "ControlFacts": 45000
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 464.515,
+              "P95": 500.916,
+              "P99": 507.235,
+              "Max": 715.634
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 406.286
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 464.515,
+            "P95Microseconds": 500.916,
+            "P99Microseconds": 507.235
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 37474,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 37473,
+            "RecipientReconciliations": 37473,
+            "SourceReads": 37473,
+            "RecordsMaterialized": 364,
+            "EncodedGamePayloadBytes": 1811244,
+            "EncodedGameMessages": 37473,
+            "ApplicationProofs": 37473,
+            "MaxPending": 31,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2055360
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2055360,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 2520992
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "6C7617AC4F29D7E3",
+            "DeliveredEntities": 16,
+            "ExpectedEntities": 16,
+            "MaxPending": 31,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 682.494,
+              "P95": 721.764,
+              "P99": 731.973,
+              "Max": 925.512
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 622.955
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 682.494,
+            "P95Microseconds": 721.764,
+            "P99Microseconds": 731.973
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 37594,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 60,
+            "RecipientReconciliations": 40008,
+            "SourceReads": 121,
+            "RecordsMaterialized": 364,
+            "EncodedGamePayloadBytes": 1811244,
+            "EncodedGameMessages": 37473,
+            "ApplicationProofs": 37473,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 2959520
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 2959520,
+            "AuthoritativeSourceHistoryBytes": 185856,
+            "HarnessSemanticStateBytes": 279776,
+            "TotalKnownReservedBytes": 3425152
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "6C7617AC4F29D7E3",
+            "DeliveredEntities": 16,
+            "ExpectedEntities": 16,
+            "MaxPending": 3936,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntityChunkBatchFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 218.298,
+              "P95": 228.778,
+              "P99": 233.658,
+              "Max": 287.827
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 225.218
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 218.298,
+            "P95Microseconds": 228.778,
+            "P99Microseconds": 233.658
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 129,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 182,
+            "SourceReads": 129,
+            "RecordsMaterialized": 282,
+            "EncodedGamePayloadBytes": 16394,
+            "EncodedGameMessages": 182,
+            "ApplicationProofs": 182,
+            "MaxPending": 93,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1084896
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1084896,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1143456
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "589E020FBDFFA7FD",
+            "DeliveredEntities": 15,
+            "ExpectedEntities": 15,
+            "MaxPending": 93,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "DirtyEntitySpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 217.418,
+              "P95": 228.288,
+              "P99": 232.868,
+              "Max": 448.176
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 223.158
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 217.418,
+            "P95Microseconds": 228.288,
+            "P99Microseconds": 232.868
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 129,
+            "SpatialDiscoveryOperations": 121,
+            "CandidateTests": 45,
+            "RecipientReconciliations": 182,
+            "SourceReads": 129,
+            "RecordsMaterialized": 282,
+            "EncodedGamePayloadBytes": 16394,
+            "EncodedGameMessages": 182,
+            "ApplicationProofs": 182,
+            "MaxPending": 93,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1080544
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1080544,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1139104
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "589E020FBDFFA7FD",
+            "DeliveredEntities": 15,
+            "ExpectedEntities": 15,
+            "MaxPending": 93,
+            "MaxOutstanding": 0
+          }
+        },
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 21.419,
+              "P95": 53.31,
+              "P99": 129.418,
+              "Max": 249.258
+            },
+            "SampleCount": 4900,
+            "PrimaryEvents": [
+              {
+                "Tick": 4999,
+                "Microseconds": 21.35
+              }
+            ],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 21.419,
+            "P95Microseconds": 53.31,
+            "P99Microseconds": 129.418
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 20,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 349,
+            "SourceReads": 349,
+            "RecordsMaterialized": 349,
+            "EncodedGamePayloadBytes": 22858,
+            "EncodedGameMessages": 328,
+            "ApplicationProofs": 328,
+            "MaxPending": 45,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 1723212
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 1723212,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 58560,
+            "TotalKnownReservedBytes": 1781772
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 0,
+            "Digest": "589E020FBDFFA7FD",
+            "DeliveredEntities": 15,
+            "ExpectedEntities": 15,
+            "MaxPending": 45,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    }
+  ]
+}
