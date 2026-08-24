@@ -1429,6 +1429,52 @@ is dirty. Debug and Release retain zero-allocation warmed-path coverage, exact p
 disclosure/lifetime conformance, and the five-profile remote codec tests. P0.4 remains
 on hold until the clean 5,000-tick matrix records the state-only/spatial crossover.
 
+The clean `c484efc9` matrix contains 16 workloads, 5 profiles, 100 warmup ticks,
+4,900 measured ticks per row, and 392,000 timed profile-ticks. Every workload
+converges, all three entity-family digests and both chunk-family digests match, and
+every timed row reports zero managed allocation.
+
+| Workload | Maintained entity | Dirty entity | Adaptive entity/chunk batch | Chunk publication | Dirty chunk |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| one state-only dirty (exact event) | 4.90 us | 2.67 us | 2.62 us | 6.55 us | 9.19 us |
+| one spatial dirty (exact event) | 2.71 us | 2.33 us | 3.37 us | 3.08 us | 4.23 us |
+| clustered state churn p95 | 13.08 us | 14.33 us | 15.67 us | 18.28 us | 21.14 us |
+| clustered micro-movement p95 | 13.18 us | 26.18 us | 19.13 us | 18.36 us | 20.46 us |
+| high state churn p95 | 9.44 us | 10.52 us | 10.10 us | 23.41 us | 54.21 us |
+| high spatial churn p95 | 9.37 us | 37.54 us | 38.92 us | 23.41 us | 54.29 us |
+| distributed spatial dirt p95 | 2.57 us | 7.98 us | 8.35 us | 5.82 us | 13.60 us |
+| mostly-clean recipient movement p95 | 53.76 us | 28.64 us | 28.54 us | 515.80 us | 736.62 us |
+| dense-400 p95 | 1.397 ms | 2.170 ms | 2.175 ms | 1.088 ms | 1.745 ms |
+
+This separates retained-fanout value from dirty-source truth. In state-only churn,
+both dirty-entity profiles stay near `MaintainedEntityRelation` because the initial
+120 spatial discoveries never increase: existing semantic knowledge/debt rows are the
+complete audience. With clustered movement, adaptive chunk batching reduces discovery
+from 150,120 to 5,091 and improves p95 from 26.18 to 19.13 us. Distributed/high spatial
+churn has no batchable cohort, so adaptive batching falls back to the point query and
+stays within small bookkeeping distance of ordinary dirty entity.
+
+The shared 128 m occupied-region index materially changes the dirty-entity floor. Against
+P0.3D, ordinary dirty-entity p95 moves from approximately 218 to 26 us for clustered
+movement, 114 to 8 us for distributed dirt, 224 to 29 us for mostly-clean recipient
+movement, and 618 to 38 us for high spatial churn. Dense-400 improves only from 2.765 to
+2.170 ms: after discovery is reduced, semantic row/materialization work dominates that
+case. The chunk semantic profiles continue to pay chunk-granular record/byte costs for
+state-only changes, and dirty-chunk discovery continues to rediscover recipients for each
+dirty scope because it intentionally owns no Chunk-to-Recipient reverse graph.
+
+These are Game semantic/payload-boundary observations, not secure-transport or production
+CCU claims. They establish the contestant floor; they do not by themselves change the
+selected current-game `ChunkPublication` profile. P0.4 may now evaluate composition by
+semantic class, but a single entity identity must never be simultaneously owned by two
+public replication profiles.
+
+Artifact SHA-256:
+`84401cf5a478432241b39be4026761b4e38cbbd01d18fb3399e6450c0b011d8c`.
+
+Evidence:
+[`network-p0.3e-five-profile-discovery-floor-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3e-five-profile-discovery-floor-2026-08-24.json).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
