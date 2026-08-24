@@ -17,7 +17,8 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
     int MaximumSnapshotRecords,
     int MaximumDeltaRecords,
     int SpatialRegionEdgeMillimeters,
-    ulong MaximumDeliveryAgeSteps = 1_024)
+    ulong MaximumDeliveryAgeSteps = 1_024,
+    int MaximumChunksPerBundle = UltraSimGameProtocol.MaximumDirtyChunkBundleEntries)
 {
     public static DirtyChunkSpatialFanoutLimits Default => new(
         MaximumRecipients: 256,
@@ -28,7 +29,8 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
         MaximumSnapshotRecords: 64,
         MaximumDeltaRecords: 64,
         SpatialRegionEdgeMillimeters: 128_000,
-        MaximumDeliveryAgeSteps: 1_024);
+        MaximumDeliveryAgeSteps: 1_024,
+        MaximumChunksPerBundle: UltraSimGameProtocol.MaximumDirtyChunkBundleEntries);
 
     internal void Validate()
     {
@@ -36,7 +38,8 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
             MaximumSpatialRegions <= 0 || MaximumDirtyChunks <= 0 ||
             MaximumOutstandingDeliveries < MaximumRecipients || MaximumSnapshotRecords <= 0 ||
             MaximumDeltaRecords <= 0 || SpatialRegionEdgeMillimeters <= 0 ||
-            MaximumDeliveryAgeSteps == 0)
+            MaximumDeliveryAgeSteps == 0 || MaximumChunksPerBundle <= 0 ||
+            MaximumChunksPerBundle > UltraSimGameProtocol.MaximumDirtyChunkBundleEntries)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecipients));
         if (MaximumSnapshotRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords ||
             MaximumDeltaRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords)
@@ -116,6 +119,58 @@ public readonly ref struct DirtyChunkDelivery
     public ReadOnlySpan<WorldPublicDeltaRecord> Deltas { get; }
 }
 
+/// <summary>One independently proved chunk entry inside a recipient delivery bundle.</summary>
+public readonly record struct DirtyChunkDeliveryEntry(
+    ulong DeliveryId,
+    OfflineDirectChunkDeliveryTicket Ticket,
+    ChunkPublicationCursor BaseCursor,
+    ChunkPublicationBatch Batch,
+    int SnapshotOffset,
+    int SnapshotCount,
+    int DeltaOffset,
+    int DeltaCount)
+{
+    public OfflineDirectChunkReadStatus Status => Ticket.Status;
+    public SpatialChunkKey Key => Ticket.Key;
+}
+
+/// <summary>
+/// One borrowed recipient-wide multi-chunk semantic envelope. The message is shared, while every
+/// entry retains an independent delivery ticket and application proof.
+/// </summary>
+public readonly ref struct DirtyChunkDeliveryBundle
+{
+    internal DirtyChunkDeliveryBundle(
+        ParticipantId participant,
+        PublicationEpoch sourceEpoch,
+        ulong bundleId,
+        ReadOnlySpan<DirtyChunkDeliveryEntry> entries,
+        ReadOnlySpan<WorldPublicRecord> snapshots,
+        ReadOnlySpan<WorldPublicDeltaRecord> deltas,
+        int estimatedEncodedBytes)
+    {
+        Participant = participant;
+        SourceEpoch = sourceEpoch;
+        BundleId = bundleId;
+        Entries = entries;
+        Snapshots = snapshots;
+        Deltas = deltas;
+        EstimatedEncodedBytes = estimatedEncodedBytes;
+    }
+
+    public ParticipantId Participant { get; }
+    public PublicationEpoch SourceEpoch { get; }
+    public ulong BundleId { get; }
+    public ReadOnlySpan<DirtyChunkDeliveryEntry> Entries { get; }
+    public ReadOnlySpan<WorldPublicRecord> Snapshots { get; }
+    public ReadOnlySpan<WorldPublicDeltaRecord> Deltas { get; }
+    public int EstimatedEncodedBytes { get; }
+    public ReadOnlySpan<WorldPublicRecord> Snapshot(in DirtyChunkDeliveryEntry entry) =>
+        Snapshots.Slice(entry.SnapshotOffset, entry.SnapshotCount);
+    public ReadOnlySpan<WorldPublicDeltaRecord> Delta(in DirtyChunkDeliveryEntry entry) =>
+        Deltas.Slice(entry.DeltaOffset, entry.DeltaCount);
+}
+
 /// <summary>
 /// Cold attribution for Dirty Chunk Push. Recipient chunk rows are semantic knowledge/debt;
 /// the spatial index contains recipient anchors only and has no chunk-to-recipient membership.
@@ -153,6 +208,10 @@ public readonly record struct DirtyChunkSpatialFanoutSnapshot(
     ulong SourceEpochRecoveries,
     ulong CapacityFailures,
     ulong DeliveryTimeouts,
+    ulong SharedPageMaterializations,
+    ulong SharedPageHits,
+    ulong RecipientBundlesBuilt,
+    ulong ChunkEntriesBundled,
     long ReservedBytes);
 
 /// <summary>
@@ -201,6 +260,14 @@ public sealed class DirtyChunkSpatialFanout
     private readonly OfflineDirectChunkSubscriptionChange[] _changes;
     private readonly WorldPublicRecord[] _snapshotScratch;
     private readonly WorldPublicDeltaRecord[] _deltaScratch;
+    private readonly SharedPageSlot[] _sharedPages;
+    private readonly int[] _sharedPageIndex;
+    private readonly int _sharedPageIndexMask;
+    private readonly WorldPublicRecord[] _sharedSnapshotRecords;
+    private readonly WorldPublicDeltaRecord[] _sharedDeltaRecords;
+    private readonly DirtyChunkDeliveryEntry[] _bundleEntries;
+    private readonly WorldPublicRecord[] _bundleSnapshotScratch;
+    private readonly WorldPublicDeltaRecord[] _bundleDeltaScratch;
     private readonly ulong[] _candidateStamps;
     private int _recipientCount;
     private int _rowCount;
@@ -215,6 +282,11 @@ public sealed class DirtyChunkSpatialFanout
     private int _dirtyHead;
     private int _dirtyTail;
     private ulong _nextDeliveryId = 1;
+    private ulong _nextBundleId = 1;
+    private ulong _sharedPageCommit = ulong.MaxValue;
+    private int _sharedPageCount;
+    private int _sharedSnapshotRecordCount;
+    private int _sharedDeltaRecordCount;
     private PublicationEpoch _observedEpoch;
     private ulong _observedCommit;
     private ulong _observedHistoryInvalidations;
@@ -240,6 +312,10 @@ public sealed class DirtyChunkSpatialFanout
     private ulong _sourceEpochRecoveries;
     private ulong _capacityFailures;
     private ulong _deliveryTimeouts;
+    private ulong _sharedPageMaterializations;
+    private ulong _sharedPageHits;
+    private ulong _recipientBundlesBuilt;
+    private ulong _chunkEntriesBundled;
 
     public DirtyChunkSpatialFanout(
         ChunkPublicationStore source,
@@ -304,6 +380,19 @@ public sealed class DirtyChunkSpatialFanout
         _changes = new OfflineDirectChunkSubscriptionChange[checked(_subscriptionsPerRecipient * 2)];
         _snapshotScratch = new WorldPublicRecord[limits.MaximumSnapshotRecords];
         _deltaScratch = new WorldPublicDeltaRecord[limits.MaximumDeltaRecords];
+        int sharedPageCapacity = Math.Max(1, Math.Min(
+            limits.MaximumDirtyChunks, source.Limits.MaximumResidentChunks));
+        _sharedPages = new SharedPageSlot[sharedPageCapacity];
+        int sharedPageIndexCapacity = MapCapacity(sharedPageCapacity);
+        _sharedPageIndex = new int[sharedPageIndexCapacity];
+        _sharedPageIndexMask = sharedPageIndexCapacity - 1;
+        _sharedSnapshotRecords = new WorldPublicRecord[source.Limits.MaximumPublicEntities];
+        _sharedDeltaRecords = new WorldPublicDeltaRecord[source.Limits.MaximumPublicEntities];
+        _bundleEntries = new DirtyChunkDeliveryEntry[limits.MaximumChunksPerBundle];
+        int maximumBundleRecords = checked(limits.MaximumChunksPerBundle *
+            Math.Max(limits.MaximumSnapshotRecords, limits.MaximumDeltaRecords));
+        _bundleSnapshotScratch = new WorldPublicRecord[maximumBundleRecords];
+        _bundleDeltaScratch = new WorldPublicDeltaRecord[maximumBundleRecords];
         _candidateStamps = new ulong[limits.MaximumRecipients];
         for (int index = 0; index < _recipients.Length; index++)
         {
@@ -438,6 +527,7 @@ public sealed class DirtyChunkSpatialFanout
         _observedHistoryInvalidations = source.GetSnapshot().HistoryInvalidations;
         _hasObservedSource = false;
         _hasPreparedCadenceStep = false;
+        _sharedPageCommit = ulong.MaxValue;
         _sourceEpochRecoveries++;
         for (int index = 0; index < _recipients.Length; index++)
         {
@@ -550,6 +640,111 @@ public sealed class DirtyChunkSpatialFanout
         return DirtyChunkBuildStatus.NoData;
     }
 
+    /// <summary>
+    /// Builds one bounded recipient-wide envelope from independently fenced chunk obligations.
+    /// Entries may name unrelated chunks; application proof remains per entry rather than per
+    /// envelope, so packing cannot manufacture recipient knowledge.
+    /// </summary>
+    public DirtyChunkBuildStatus TryBuildNextBundle(
+        ulong cadenceStep,
+        int byteBudget,
+        out DirtyChunkDeliveryBundle bundle)
+    {
+        EnsureOwner();
+        bundle = default;
+        PrepareCadenceStep(cadenceStep);
+        if (byteBudget <= RemoteDirtyChunkBundleHeaderCodec.EncodedSize || _nextBundleId == 0)
+            return DirtyChunkBuildStatus.CapacityExceeded;
+        while (TryPopReadyRecipient(out int recipientIndex))
+        {
+            DirtyChunkBuildStatus status = TryBuildBundleCore(
+                recipientIndex, cadenceStep, byteBudget, out bundle);
+            RefreshReadyRecipient(recipientIndex, cadenceStep);
+            if (status is DirtyChunkBuildStatus.NoData or DirtyChunkBuildStatus.NotDue) continue;
+            return status;
+        }
+        return DirtyChunkBuildStatus.NoData;
+    }
+
+    private DirtyChunkBuildStatus TryBuildBundleCore(
+        int recipientIndex,
+        ulong cadenceStep,
+        int byteBudget,
+        out DirtyChunkDeliveryBundle bundle)
+    {
+        bundle = default;
+        ParticipantId participant = _recipients[recipientIndex].Participant;
+        int entryCount = 0;
+        int snapshotCount = 0;
+        int deltaCount = 0;
+        int encodedBytes = RemoteDirtyChunkBundleHeaderCodec.EncodedSize;
+        DirtyChunkBuildStatus deferredStatus = DirtyChunkBuildStatus.NoData;
+        for (int rowIndex = _recipientPendingHeads[recipientIndex];
+             rowIndex >= 0 && entryCount < _bundleEntries.Length;)
+        {
+            int next = _rows[rowIndex].PendingNext;
+            if (_rows[rowIndex].PendingWasSent)
+            {
+                rowIndex = next;
+                continue;
+            }
+            DirtyChunkBuildStatus status = TryBuildDeliveryAtRow(
+                participant, recipientIndex, rowIndex, cadenceStep, out DirtyChunkDelivery delivery);
+            if (status == DirtyChunkBuildStatus.Success)
+            {
+                RemoteChunkPublicationKind kind = PublicationKind(delivery.Status);
+                int recordCount = delivery.Snapshot.Length + delivery.Deltas.Length;
+                int entryBytes = UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
+                    kind, recordCount);
+                if (encodedBytes + entryBytes > byteBudget)
+                {
+                    _ = AbandonDelivery(participant, delivery.DeliveryId);
+                    if (entryCount == 0) return DirtyChunkBuildStatus.CapacityExceeded;
+                    break;
+                }
+                delivery.Snapshot.CopyTo(_bundleSnapshotScratch.AsSpan(snapshotCount));
+                delivery.Deltas.CopyTo(_bundleDeltaScratch.AsSpan(deltaCount));
+                _bundleEntries[entryCount++] = new DirtyChunkDeliveryEntry(
+                    delivery.DeliveryId, delivery.Ticket, delivery.BaseCursor, delivery.Batch,
+                    snapshotCount, delivery.Snapshot.Length, deltaCount, delivery.Deltas.Length);
+                snapshotCount += delivery.Snapshot.Length;
+                deltaCount += delivery.Deltas.Length;
+                encodedBytes += entryBytes;
+            }
+            else if (status is not (DirtyChunkBuildStatus.NoData or DirtyChunkBuildStatus.NotDue))
+            {
+                if (entryCount == 0) return status;
+                deferredStatus = status;
+                break;
+            }
+            else if (status == DirtyChunkBuildStatus.NotDue)
+            {
+                deferredStatus = status;
+            }
+            rowIndex = next;
+        }
+        if (entryCount == 0) return deferredStatus;
+        ulong bundleId = _nextBundleId;
+        _nextBundleId = bundleId == ulong.MaxValue ? 0 : bundleId + 1;
+        _recipientBundlesBuilt++;
+        _chunkEntriesBundled = checked(_chunkEntriesBundled + (ulong)entryCount);
+        bundle = new DirtyChunkDeliveryBundle(
+            participant, _source.Epoch, bundleId,
+            _bundleEntries.AsSpan(0, entryCount),
+            _bundleSnapshotScratch.AsSpan(0, snapshotCount),
+            _bundleDeltaScratch.AsSpan(0, deltaCount), encodedBytes);
+        return DirtyChunkBuildStatus.Success;
+    }
+
+    private static RemoteChunkPublicationKind PublicationKind(OfflineDirectChunkReadStatus status) =>
+        status switch
+        {
+            OfflineDirectChunkReadStatus.Snapshot => RemoteChunkPublicationKind.Snapshot,
+            OfflineDirectChunkReadStatus.Delta => RemoteChunkPublicationKind.Delta,
+            OfflineDirectChunkReadStatus.ChunkAbsent => RemoteChunkPublicationKind.Absence,
+            _ => throw new ArgumentOutOfRangeException(nameof(status)),
+        };
+
     private DirtyChunkBuildStatus TryBuildDeliveryCore(
         ParticipantId participant,
         int recipientIndex,
@@ -609,7 +804,34 @@ public sealed class DirtyChunkSpatialFanout
         if (_deliveryCount >= _deliveries.Length || _nextDeliveryId == 0)
             return CapacityFailure<DirtyChunkBuildStatus>(DirtyChunkBuildStatus.CapacityExceeded);
 
-        ChunkPublicationCursor baseCursor = _recipients[recipientIndex].Recipient.Subscriptions[subscription].Cursor;
+        OfflineDirectChunkSubscription retainedSubscription =
+            _recipients[recipientIndex].Recipient.Subscriptions[subscription];
+        ChunkPublicationCursor baseCursor = retainedSubscription.Cursor;
+        EnsureSharedPagesCurrent();
+        int sharedPage = FindSharedPage(row.Key, baseCursor);
+        if (sharedPage >= 0)
+        {
+            uint period = _cadence.Period(retainedSubscription.Interest.Tier);
+            if (retainedSubscription.HasKnowledge &&
+                cadenceStep % period != retainedSubscription.CadencePhase)
+                return DirtyChunkBuildStatus.NotDue;
+            ref readonly SharedPageSlot page = ref _sharedPages[sharedPage];
+            ulong sharedDeliveryId = TakeDeliveryId();
+            if (sharedDeliveryId == 0)
+                return CapacityFailure<DirtyChunkBuildStatus>(DirtyChunkBuildStatus.CapacityExceeded);
+            var sharedTicket = new OfflineDirectChunkDeliveryTicket(
+                sharedDeliveryId, _source.Epoch, row.Key, page.Status, page.Batch.Cursor);
+            RegisterDelivery(participant, recipientIndex, rowIndex, sharedTicket, cadenceStep);
+            row.PendingWasSent = true;
+            row.PendingDeliveryId = sharedDeliveryId;
+            _sharedPageHits++;
+            delivery = new DirtyChunkDelivery(
+                participant, sharedDeliveryId, sharedTicket, baseCursor, page.Batch,
+                _sharedSnapshotRecords.AsSpan(page.SnapshotOffset, page.SnapshotCount),
+                _sharedDeltaRecords.AsSpan(page.DeltaOffset, page.DeltaCount));
+            return DirtyChunkBuildStatus.Success;
+        }
+
         OfflineDirectChunkReadStatus status = _recipients[recipientIndex].Recipient.TryBeginRead(
             _source, subscription, cadenceStep, out OfflineDirectChunkRead read);
         if (status == OfflineDirectChunkReadStatus.NotDue)
@@ -633,12 +855,54 @@ public sealed class DirtyChunkSpatialFanout
             OfflineDirectChunkReadStatus.Delta or OfflineDirectChunkReadStatus.ChunkAbsent))
             return DirtyChunkBuildStatus.NoData;
 
-        read.Snapshot.CopyTo(_snapshotScratch);
-        read.Deltas.CopyTo(_deltaScratch);
-        ulong deliveryId = _nextDeliveryId;
-        _nextDeliveryId = deliveryId == ulong.MaxValue ? 0 : deliveryId + 1;
+        int cachedPage = TryCacheSharedPage(row.Key, baseCursor, status, read.Batch,
+            read.Snapshot, read.Deltas);
+        ReadOnlySpan<WorldPublicRecord> snapshots;
+        ReadOnlySpan<WorldPublicDeltaRecord> deltas;
+        if (cachedPage >= 0)
+        {
+            ref readonly SharedPageSlot page = ref _sharedPages[cachedPage];
+            snapshots = _sharedSnapshotRecords.AsSpan(page.SnapshotOffset, page.SnapshotCount);
+            deltas = _sharedDeltaRecords.AsSpan(page.DeltaOffset, page.DeltaCount);
+        }
+        else
+        {
+            read.Snapshot.CopyTo(_snapshotScratch);
+            read.Deltas.CopyTo(_deltaScratch);
+            snapshots = _snapshotScratch.AsSpan(0, read.Snapshot.Length);
+            deltas = _deltaScratch.AsSpan(0, read.Deltas.Length);
+        }
+        ulong deliveryId = TakeDeliveryId();
+        if (deliveryId == 0)
+        {
+            _recipients[recipientIndex].Recipient.CancelRead();
+            return CapacityFailure<DirtyChunkBuildStatus>(DirtyChunkBuildStatus.CapacityExceeded);
+        }
         OfflineDirectChunkDeliveryTicket ticket =
             _recipients[recipientIndex].Recipient.ReleaseReadForRemote(deliveryId);
+        RegisterDelivery(participant, recipientIndex, rowIndex, ticket, cadenceStep);
+        row.PendingWasSent = true;
+        row.PendingDeliveryId = deliveryId;
+        delivery = new DirtyChunkDelivery(
+            participant, deliveryId, ticket, baseCursor, read.Batch, snapshots, deltas);
+        return DirtyChunkBuildStatus.Success;
+    }
+
+    private ulong TakeDeliveryId()
+    {
+        ulong deliveryId = _nextDeliveryId;
+        if (deliveryId == 0) return 0;
+        _nextDeliveryId = deliveryId == ulong.MaxValue ? 0 : deliveryId + 1;
+        return deliveryId;
+    }
+
+    private void RegisterDelivery(
+        ParticipantId participant,
+        int recipientIndex,
+        int rowIndex,
+        in OfflineDirectChunkDeliveryTicket ticket,
+        ulong cadenceStep)
+    {
         int deliveryIndex = FindFreeDelivery();
         _deliveries[deliveryIndex] = new DeliverySlot
         {
@@ -649,16 +913,9 @@ public sealed class DirtyChunkSpatialFanout
             Ticket = ticket,
             SentCadenceStep = cadenceStep,
         };
-        _deliveryMap.Add(deliveryId, deliveryIndex);
+        _deliveryMap.Add(ticket.DeliveryId, deliveryIndex);
         _deliveryCount++;
         _recipientOutstandingDeliveries[recipientIndex]++;
-        row.PendingWasSent = true;
-        row.PendingDeliveryId = deliveryId;
-        delivery = new DirtyChunkDelivery(
-            participant, deliveryId, ticket, baseCursor, read.Batch,
-            _snapshotScratch.AsSpan(0, read.Snapshot.Length),
-            _deltaScratch.AsSpan(0, read.Deltas.Length));
-        return DirtyChunkBuildStatus.Success;
     }
 
     /// <summary>
@@ -747,9 +1004,12 @@ public sealed class DirtyChunkSpatialFanout
             OfflineDirectChunkAppliedProofStatus.Duplicate or
             OfflineDirectChunkAppliedProofStatus.Stale)
         {
+            int recipientIndex = row.RecipientIndex;
             DeactivatePending(rowIndex);
             row.PendingWasSent = false;
             row.PendingDeliveryId = 0;
+            if (_recipientPendingCounts[recipientIndex] != 0)
+                QueueReadyRecipient(recipientIndex);
             if (committed == OfflineDirectChunkAppliedProofStatus.Applied)
                 _applicationProofsApplied++;
             else
@@ -823,6 +1083,13 @@ public sealed class DirtyChunkSpatialFanout
             (long)_changes.Length * Unsafe.SizeOf<OfflineDirectChunkSubscriptionChange>() +
             (long)_snapshotScratch.Length * Unsafe.SizeOf<WorldPublicRecord>() +
             (long)_deltaScratch.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
+            (long)_sharedPages.Length * Unsafe.SizeOf<SharedPageSlot>() +
+            (long)_sharedPageIndex.Length * sizeof(int) +
+            (long)_sharedSnapshotRecords.Length * Unsafe.SizeOf<WorldPublicRecord>() +
+            (long)_sharedDeltaRecords.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
+            (long)_bundleEntries.Length * Unsafe.SizeOf<DirtyChunkDeliveryEntry>() +
+            (long)_bundleSnapshotScratch.Length * Unsafe.SizeOf<WorldPublicRecord>() +
+            (long)_bundleDeltaScratch.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
             (long)_candidateStamps.Length * sizeof(ulong));
         for (int index = 0; index < _recipients.Length; index++)
         {
@@ -850,7 +1117,8 @@ public sealed class DirtyChunkSpatialFanout
             _dirtyObligationCoalesces, cadenceDeferrals, publicationReads, deltaReads,
             snapshotFallbacks, absenceReads, _applicationProofsApplied,
             _duplicateStaleRejectedProofs, _commitGapRecoveries, _sourceEpochRecoveries,
-            _capacityFailures, _deliveryTimeouts, reserved);
+            _capacityFailures, _deliveryTimeouts, _sharedPageMaterializations,
+            _sharedPageHits, _recipientBundlesBuilt, _chunkEntriesBundled, reserved);
     }
 
     private DirtyChunkProcessStatus ObserveSource()
@@ -1325,6 +1593,96 @@ public sealed class DirtyChunkSpatialFanout
         else RemoveReadyRecipient(recipientIndex);
     }
 
+    private void EnsureSharedPagesCurrent()
+    {
+        ulong commit = _source.CommitSequence;
+        if (_sharedPageCommit == commit) return;
+        _sharedPageCommit = commit;
+        _sharedPageCount = 0;
+        _sharedSnapshotRecordCount = 0;
+        _sharedDeltaRecordCount = 0;
+        Array.Clear(_sharedPageIndex);
+    }
+
+    private int FindSharedPage(SpatialChunkKey key, in ChunkPublicationCursor baseCursor)
+    {
+        int slot = SharedPageHash(key, baseCursor) & _sharedPageIndexMask;
+        for (int probe = 0; probe < _sharedPageIndex.Length; probe++)
+        {
+            int value = _sharedPageIndex[slot];
+            if (value == 0) return -1;
+            int pageIndex = value - 1;
+            ref readonly SharedPageSlot page = ref _sharedPages[pageIndex];
+            if (page.Key == key && SameBaseCursor(page.BaseCursor, baseCursor))
+                return pageIndex;
+            slot = (slot + 1) & _sharedPageIndexMask;
+        }
+        return -1;
+    }
+
+    private int TryCacheSharedPage(
+        SpatialChunkKey key,
+        in ChunkPublicationCursor baseCursor,
+        OfflineDirectChunkReadStatus status,
+        in ChunkPublicationBatch batch,
+        ReadOnlySpan<WorldPublicRecord> snapshots,
+        ReadOnlySpan<WorldPublicDeltaRecord> deltas)
+    {
+        if (_sharedPageCount == _sharedPages.Length ||
+            _sharedSnapshotRecordCount + snapshots.Length > _sharedSnapshotRecords.Length ||
+            _sharedDeltaRecordCount + deltas.Length > _sharedDeltaRecords.Length)
+            return -1;
+        int pageIndex = _sharedPageCount++;
+        int snapshotOffset = _sharedSnapshotRecordCount;
+        int deltaOffset = _sharedDeltaRecordCount;
+        snapshots.CopyTo(_sharedSnapshotRecords.AsSpan(snapshotOffset));
+        deltas.CopyTo(_sharedDeltaRecords.AsSpan(deltaOffset));
+        _sharedSnapshotRecordCount += snapshots.Length;
+        _sharedDeltaRecordCount += deltas.Length;
+        _sharedPages[pageIndex] = new SharedPageSlot
+        {
+            Key = key,
+            BaseCursor = baseCursor,
+            Status = status,
+            Batch = batch,
+            SnapshotOffset = snapshotOffset,
+            SnapshotCount = snapshots.Length,
+            DeltaOffset = deltaOffset,
+            DeltaCount = deltas.Length,
+        };
+        int slot = SharedPageHash(key, baseCursor) & _sharedPageIndexMask;
+        for (int probe = 0; probe < _sharedPageIndex.Length; probe++)
+        {
+            if (_sharedPageIndex[slot] == 0)
+            {
+                _sharedPageIndex[slot] = pageIndex + 1;
+                _sharedPageMaterializations++;
+                return pageIndex;
+            }
+            slot = (slot + 1) & _sharedPageIndexMask;
+        }
+        throw new InvalidOperationException("Shared chunk-page index capacity diverged from page capacity.");
+    }
+
+    private static bool SameBaseCursor(
+        in ChunkPublicationCursor left,
+        in ChunkPublicationCursor right) =>
+        left.IsValid == right.IsValid && (!left.IsValid || left == right);
+
+    private static int SharedPageHash(
+        in SpatialChunkKey key,
+        in ChunkPublicationCursor baseCursor)
+    {
+        unchecked
+        {
+            uint hash = (uint)Hash(key);
+            ulong revision = baseCursor.IsValid ? baseCursor.Revision.Value : 0;
+            hash = (hash ^ (uint)revision) * 16_777_619u;
+            hash = (hash ^ (uint)(revision >> 32)) * 16_777_619u;
+            return (int)hash & int.MaxValue;
+        }
+    }
+
     private bool ContainsDirty(SpatialChunkKey key)
     {
         int slot = Hash(key) & _dirtyIndexMask;
@@ -1596,6 +1954,18 @@ public sealed class DirtyChunkSpatialFanout
         internal int RowIndex;
         internal ulong SentCadenceStep;
         internal bool Active;
+    }
+
+    private struct SharedPageSlot
+    {
+        internal SpatialChunkKey Key;
+        internal ChunkPublicationCursor BaseCursor;
+        internal ChunkPublicationBatch Batch;
+        internal OfflineDirectChunkReadStatus Status;
+        internal int SnapshotOffset;
+        internal int SnapshotCount;
+        internal int DeltaOffset;
+        internal int DeltaCount;
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 24)]

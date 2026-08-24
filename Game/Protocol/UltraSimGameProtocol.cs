@@ -46,7 +46,7 @@ public enum RemoteApplicationEventApplyStatus : byte
     CapacityExceeded = 2,
 }
 
-[NetworkProtocol(9)]
+[NetworkProtocol(10)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -342,7 +342,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 11,
+        version: 12,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -388,6 +388,8 @@ public static partial class UltraSimGameProtocol
                 { MaximumEncodedBytes = MaximumMessageBytes },
             RemoteChunkSnapshotCommitMessageCodec.Descriptor,
             RemoteChunkSnapshotCancelMessageCodec.Descriptor,
+            RemoteDirtyChunkBundleHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumMessageBytes },
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;

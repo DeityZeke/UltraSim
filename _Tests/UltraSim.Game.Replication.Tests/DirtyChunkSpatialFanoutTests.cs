@@ -147,6 +147,256 @@ internal static class DirtyChunkSpatialFanoutTests
             service.TryAcknowledgeDelivery(participant, delivery.DeliveryId, true));
     }
 
+    internal static void SharedPagesReuseMatchingCursorLineageAndInvalidateOnCommit()
+    {
+        using var fixture = new Fixture(64, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 2,
+            interest: new ChunkInterestProfile(9_000, 9_000, 9_000, 9_000, 9_000, 9_000));
+        ParticipantId firstParticipant = new(0xD301);
+        ParticipantId secondParticipant = new(0xD302);
+        WorldPosition anchor = Position(0, 0, 8_000, 8_000);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(firstParticipant, GameWorldState.DefaultSpace, anchor, 0));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(secondParticipant, GameWorldState.DefaultSpace, anchor, 0));
+        Equal(DirtyChunkProcessStatus.Success, service.TryProcessDirtyChunks(0, out _));
+        ChunkPublicationStoreSnapshot beforeSnapshot = fixture.Store.GetSnapshot();
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(firstParticipant, Key(0, 0), 0, out DirtyChunkDelivery first));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(secondParticipant, Key(0, 0), 0, out DirtyChunkDelivery second));
+        Equal(beforeSnapshot.SnapshotReads + 1, fixture.Store.GetSnapshot().SnapshotReads);
+        Equal(1UL, service.GetSnapshot().SharedPageMaterializations);
+        Equal(1UL, service.GetSnapshot().SharedPageHits);
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(firstParticipant, first.DeliveryId, true));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(secondParticipant, second.DeliveryId, true));
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000));
+        Equal(DirtyChunkProcessStatus.Success, service.TryProcessDirtyChunks(1, out _));
+        ChunkPublicationStoreSnapshot beforeDelta = fixture.Store.GetSnapshot();
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(firstParticipant, Key(0, 0), 1, out first));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(secondParticipant, Key(0, 0), 1, out second));
+        Equal(beforeDelta.DeltaReads + 1, fixture.Store.GetSnapshot().DeltaReads);
+        Equal(2UL, service.GetSnapshot().SharedPageMaterializations);
+        Equal(2UL, service.GetSnapshot().SharedPageHits);
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(firstParticipant, first.DeliveryId, true));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(secondParticipant, second.DeliveryId, true));
+    }
+
+    internal static void RecipientBundlePacksChunksButProofsRemainIndependent()
+    {
+        using var fixture = new Fixture(64, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        fixture.Present(1, Position(1, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 1,
+            interest: new ChunkInterestProfile(9_000, 9_000, 9_000, 9_000, 9_000, 9_000));
+        ParticipantId participant = new(0xD303);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildNextBundle(0, UltraSimGameProtocol.MaximumMessageBytes,
+                out DirtyChunkDeliveryBundle bundle));
+        True(bundle.Entries.Length > 1);
+        int separateBytes = 0;
+        for (int index = 0; index < bundle.Entries.Length; index++)
+        {
+            DirtyChunkDeliveryEntry entry = bundle.Entries[index];
+            separateBytes += entry.Status switch
+            {
+                OfflineDirectChunkReadStatus.Snapshot =>
+                    UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(entry.SnapshotCount),
+                OfflineDirectChunkReadStatus.Delta =>
+                    UltraSimGameProtocol.GetChunkDeltaEncodedBytes(entry.DeltaCount),
+                OfflineDirectChunkReadStatus.ChunkAbsent => RemoteChunkAbsenceMessageCodec.EncodedSize,
+                _ => throw new InvalidOperationException(),
+            };
+        }
+        True(bundle.EstimatedEncodedBytes < separateBytes);
+        DirtyChunkDeliveryEntry rejected = bundle.Entries[0];
+        Equal(DirtyChunkAppliedProofStatus.Rejected,
+            service.TryAcknowledgeDelivery(participant, rejected.DeliveryId, false));
+        for (int index = 1; index < bundle.Entries.Length; index++)
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(participant, bundle.Entries[index].DeliveryId, true));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(participant, rejected.Key, 1, out DirtyChunkDelivery retry));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(participant, retry.DeliveryId, true));
+        DirtyChunkSpatialFanoutSnapshot snapshot = service.GetSnapshot();
+        Equal(1UL, snapshot.RecipientBundlesBuilt);
+        Equal((ulong)bundle.Entries.Length, snapshot.ChunkEntriesBundled);
+    }
+
+    internal static void RecipientBundleCodecIsCanonicalTransactionalAndBounded()
+    {
+        RemoteChunkPublicRecord[] snapshots =
+        [
+            new(2, 1, 7, 11, 100, 200, -300, 16_384, 1, 5),
+            new(8, 3, 9, 12, 15_999, 0, 42, 49_152, 0, 6),
+        ];
+        RemoteChunkDeltaRecord[] deltas =
+        [
+            new(RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Transform,
+                2, 1, 8, 11, 101, 201, -299, 16_384, 1, 9),
+        ];
+        RemoteDirtyChunkBundleEntry[] entries =
+        [
+            new(RemoteChunkPublicationKind.Snapshot, 30, 1, -4, 7,
+                0, 8, 4, 0, 2, 0),
+            new(RemoteChunkPublicationKind.Delta, 31, 1, -3, 7,
+                8, 10, 4, 0, 1, 0),
+            new(RemoteChunkPublicationKind.Absence, 32, 1, -2, 7,
+                0, 0, 0, 0, 0, 0),
+        ];
+        byte[] bytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+            bytes, 10, 20, 40, entries, snapshots, deltas, out int written));
+        Equal(UltraSimGameProtocol.GetDirtyChunkBundleEncodedBytes(entries), written);
+        var decodedEntries = new RemoteDirtyChunkBundleEntry[3];
+        var decodedSnapshots = new RemoteChunkPublicRecord[2];
+        var decodedDeltas = new RemoteChunkDeltaRecord[1];
+        True(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            bytes.AsSpan(0, written), out RemoteDirtyChunkBundleHeader header,
+            decodedEntries, decodedSnapshots, decodedDeltas,
+            out int entryCount, out int snapshotCount, out int deltaCount));
+        Equal(40UL, header.BundleId);
+        Equal(3, entryCount);
+        Equal(2, snapshotCount);
+        Equal(1, deltaCount);
+        True(snapshots.AsSpan().SequenceEqual(decodedSnapshots));
+        True(deltas.AsSpan().SequenceEqual(decodedDeltas));
+        Equal(RemoteChunkPublicationKind.Absence, decodedEntries[2].Kind);
+
+        RemoteDirtyChunkBundleEntry[] entrySentinel =
+        [new(RemoteChunkPublicationKind.Absence, 99, 9, 9, 9, 0, 0, 0, 0, 0, 0)];
+        RemoteDirtyChunkBundleEntry[] entryBefore = entrySentinel.ToArray();
+        RemoteChunkPublicRecord[] snapshotSentinel =
+        [new(99, 9, 9, 9, 9, 9, 9, 9, 1, 9), new(100, 9, 9, 9, 9, 9, 9, 9, 1, 9)];
+        RemoteChunkPublicRecord[] snapshotBefore = snapshotSentinel.ToArray();
+        bytes[written - 1] ^= 1;
+        False(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            bytes.AsSpan(0, written), out _, entrySentinel, snapshotSentinel,
+            new RemoteChunkDeltaRecord[1], out _, out _, out _));
+        True(entryBefore.AsSpan().SequenceEqual(entrySentinel));
+        True(snapshotBefore.AsSpan().SequenceEqual(snapshotSentinel));
+        bytes[written - 1] ^= 1;
+
+        byte[] rejected = Enumerable.Repeat((byte)0xA5, bytes.Length).ToArray();
+        byte[] rejectedBefore = rejected.ToArray();
+        RemoteDirtyChunkBundleEntry[] duplicateKeys = [entries[0], entries[1] with
+        {
+            SpatialSpaceId = entries[0].SpatialSpaceId,
+            ChunkX = entries[0].ChunkX,
+            ChunkZ = entries[0].ChunkZ,
+        }];
+        False(UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+            rejected, 10, 20, 40, duplicateKeys, snapshots, deltas, out _));
+        True(rejectedBefore.AsSpan().SequenceEqual(rejected));
+        False(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            bytes.AsSpan(0, written - 1), out _, decodedEntries,
+            decodedSnapshots, decodedDeltas, out _, out _, out _));
+    }
+
+    internal static void RecipientBundleMatchesSingleDeliveryCursorTrace()
+    {
+        using var fixture = new Fixture(128, 8);
+        fixture.PresentBatch([
+            Position(0, 0, 2_000, 2_000), Position(1, 0, 2_000, 2_000),
+            Position(0, 1, 2_000, 2_000), Position(1, 1, 2_000, 2_000)]);
+        ChunkInterestProfile interest = new(
+            9_000, 9_000, 17_000, 17_000, 33_000, 33_000);
+        OfflineDirectChunkCadence cadence = new(1, 2, 3);
+        DirtyChunkSpatialFanout singles = Create(
+            fixture, maximumRecipients: 2, cadence: cadence, interest: interest);
+        DirtyChunkSpatialFanout bundles = Create(
+            fixture, maximumRecipients: 2, cadence: cadence, interest: interest);
+        ParticipantId[] participants = [new(0xD305), new(0xD306)];
+        for (int index = 0; index < participants.Length; index++)
+        {
+            WorldPosition anchor = Position(index, 0, 8_000, 8_000);
+            Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+                singles.SetRecipientAnchor(participants[index], GameWorldState.DefaultSpace,
+                    anchor, 0));
+            Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+                bundles.SetRecipientAnchor(participants[index], GameWorldState.DefaultSpace,
+                    anchor, 0));
+        }
+        for (ulong step = 0; step < 12; step++)
+        {
+            Equal(singles.TryProcessDirtyChunks(step, out int singleDirty),
+                bundles.TryProcessDirtyChunks(step, out int bundleDirty));
+            Equal(singleDirty, bundleDirty);
+            int singleProofs = DrainSingles(singles, step);
+            int bundleProofs = DrainBundlesAndCount(bundles, step);
+            Equal(singleProofs, bundleProofs);
+            DirtyChunkSpatialFanoutSnapshot singleSnapshot = singles.GetSnapshot();
+            DirtyChunkSpatialFanoutSnapshot bundleSnapshot = bundles.GetSnapshot();
+            Equal(singleSnapshot.ApplicationProofsApplied, bundleSnapshot.ApplicationProofsApplied);
+            Equal(singleSnapshot.PendingChunkObligationCount,
+                bundleSnapshot.PendingChunkObligationCount);
+            if (step == 11) break;
+            fixture.PresentBatch([
+                Position(0, 0, checked((int)(2_001 + step)), 2_000),
+                Position(1, 0, checked((int)(2_001 + step)), 2_000),
+                Position(0, 1, checked((int)(2_001 + step)), 2_000),
+                Position(1, 1, checked((int)(2_001 + step)), 2_000)]);
+        }
+    }
+
+    internal static void FullBundleProofRequeuesRemainingDueDebt()
+    {
+        using var fixture = new Fixture(64, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        DirtyChunkSpatialFanout service = Create(
+            fixture, maximumRecipients: 1, maximumOutstandingDeliveries: 32);
+        ParticipantId participant = new(0xD307);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkProcessStatus.Success, service.TryProcessDirtyChunks(0, out _));
+        int expected = service.GetSnapshot().PendingChunkObligationCount;
+        True(expected > UltraSimGameProtocol.MaximumDirtyChunkBundleEntries);
+        Equal(expected, DrainBundlesAndCount(service, 0));
+        Equal(0, service.GetSnapshot().PendingChunkObligationCount);
+    }
+
+    private static int DrainSingles(DirtyChunkSpatialFanout service, ulong step)
+    {
+        int count = 0;
+        while (service.TryBuildNextDelivery(step, out DirtyChunkDelivery delivery) ==
+               DirtyChunkBuildStatus.Success)
+        {
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(delivery.Participant, delivery.DeliveryId, true));
+            count++;
+        }
+        return count;
+    }
+
+    private static int DrainBundlesAndCount(DirtyChunkSpatialFanout service, ulong step)
+    {
+        int count = 0;
+        while (service.TryBuildNextBundle(
+                   step, UltraSimGameProtocol.MaximumMessageBytes,
+                   out DirtyChunkDeliveryBundle bundle) == DirtyChunkBuildStatus.Success)
+            for (int index = 0; index < bundle.Entries.Length; index++)
+            {
+                Equal(DirtyChunkAppliedProofStatus.Applied,
+                    service.TryAcknowledgeDelivery(
+                        bundle.Participant, bundle.Entries[index].DeliveryId, true));
+                count++;
+            }
+        return count;
+    }
+
     internal static void SpatialCandidatesAvoidFarRecipientsAndMatchOracle()
     {
         using var fixture = new Fixture(32, 4);
@@ -686,6 +936,57 @@ internal static class DirtyChunkSpatialFanoutTests
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
+    internal static void WarmedSharedPageBundlePathAllocatesZero()
+    {
+        using var fixture = new Fixture(64, 4);
+        fixture.PresentBatch([
+            Position(0, 0, 2_000, 2_000),
+            Position(1, 0, 2_000, 2_000),
+            Position(0, 1, 2_000, 2_000)]);
+        var service = Create(fixture, maximumRecipients: 1,
+            interest: new ChunkInterestProfile(25_000, 25_000, 25_000, 25_000, 25_000, 25_000));
+        ParticipantId participant = new(0xD304);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        service.TryProcessDirtyChunks(0, out _);
+        DrainBundles(service, 0);
+        fixture.PresentBatch([
+            Position(0, 0, 2_001, 2_000),
+            Position(1, 0, 2_001, 2_000),
+            Position(0, 1, 2_001, 2_000)]);
+        service.TryProcessDirtyChunks(1, out _);
+        DrainBundles(service, 1);
+        Span<WorldPosition> positions = stackalloc WorldPosition[3];
+        long allocated = 0;
+        for (ulong step = 2; step < 32; step++)
+        {
+            positions[0] = Position(0, 0, checked((int)(2_000 + step)), 2_000);
+            positions[1] = Position(1, 0, checked((int)(2_000 + step)), 2_000);
+            positions[2] = Position(0, 1, checked((int)(2_000 + step)), 2_000);
+            fixture.PresentBatch(positions);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            service.TryProcessDirtyChunks(step, out _);
+            DrainBundles(service, step);
+            allocated += GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+        Equal(0L, allocated);
+    }
+
+    private static void DrainBundles(DirtyChunkSpatialFanout service, ulong step)
+    {
+        while (service.TryBuildNextBundle(
+                   step, UltraSimGameProtocol.MaximumMessageBytes,
+                   out DirtyChunkDeliveryBundle bundle) == DirtyChunkBuildStatus.Success)
+            for (int index = 0; index < bundle.Entries.Length; index++)
+            {
+                DirtyChunkAppliedProofStatus status = service.TryAcknowledgeDelivery(
+                    bundle.Participant, bundle.Entries[index].DeliveryId, true);
+                if (status != DirtyChunkAppliedProofStatus.Applied)
+                    throw new InvalidOperationException(
+                        $"Bundle proof {status} at step {step} for {bundle.Entries[index].Key}.");
+            }
+    }
+
     internal static void RemoteNetworkProtocolPeerConverges()
     {
         using var fixture = new Fixture(32, 4);
@@ -1045,6 +1346,8 @@ internal static class DirtyChunkSpatialFanoutTests
     {
         if (!value) throw new InvalidOperationException("Expected true.");
     }
+
+    private static void False(bool value) => True(!value);
 
     private static void Equal<T>(T expected, T actual)
     {

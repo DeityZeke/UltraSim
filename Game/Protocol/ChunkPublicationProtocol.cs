@@ -153,6 +153,43 @@ public partial struct RemoteChunkSnapshotCancelMessage
     public ulong DeliveryId;
 }
 
+/// <summary>
+/// One bounded recipient envelope containing independently fenced chunk publications. The
+/// envelope shares transport/message overhead only; every entry retains its own delivery ID and
+/// still requires an individual application proof.
+/// </summary>
+[NetworkMessage(129, "ultrasim.game.dirty-chunk-bundle", 1, NetworkLane.WorldState)]
+public partial struct RemoteDirtyChunkBundleHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong PublicationEpoch;
+    public ulong BundleId;
+    public byte EntryCount;
+}
+
+/// <summary>Decoded metadata for one entry in a dirty-chunk recipient envelope.</summary>
+public readonly record struct RemoteDirtyChunkBundleEntry(
+    RemoteChunkPublicationKind Kind,
+    ulong DeliveryId,
+    ulong SpatialSpaceId,
+    int ChunkX,
+    int ChunkZ,
+    ulong BaseRevision,
+    ulong CurrentRevision,
+    ulong HistoryFloor,
+    ulong ContentHash,
+    ushort RecordCount,
+    int RecordOffset)
+{
+    public const int CommonEncodedHeaderSize =
+        sizeof(byte) + sizeof(ulong) * 2 + sizeof(int) * 2;
+    public const int SnapshotEncodedHeaderSize =
+        CommonEncodedHeaderSize + sizeof(ulong) * 3 + sizeof(ushort);
+    public const int DeltaEncodedHeaderSize =
+        CommonEncodedHeaderSize + sizeof(ulong) * 4 + sizeof(ushort);
+    public const int AbsenceEncodedHeaderSize = CommonEncodedHeaderSize;
+}
+
 /// <summary>One complete public row; the enclosing chunk supplies global X/Z high bits.</summary>
 public readonly record struct RemoteChunkPublicRecord(
     uint EntityIndex,
@@ -191,6 +228,7 @@ public static partial class UltraSimGameProtocol
 {
     public const int MaximumChunkPublicationRecords = 64;
     public const int MaximumChunkSnapshotSegments = 64;
+    public const int MaximumDirtyChunkBundleEntries = 32;
     public const ulong ChunkPublicationSchemaFingerprint = 0x5553_4350_4231_3031UL; // USCPB101
 
     public static int GetChunkSnapshotEncodedBytes(int recordCount)
@@ -225,6 +263,39 @@ public static partial class UltraSimGameProtocol
         if (payloadBytes > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(payloadBytes));
         return checked(RemoteChunkSnapshotSegmentHeaderCodec.EncodedSize + payloadBytes);
+    }
+
+    public static int GetDirtyChunkBundleEntryEncodedBytes(
+        RemoteChunkPublicationKind kind,
+        int recordCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(recordCount);
+        if (recordCount > MaximumChunkPublicationRecords)
+            throw new ArgumentOutOfRangeException(nameof(recordCount));
+        return kind switch
+        {
+            RemoteChunkPublicationKind.Snapshot =>
+                checked(RemoteDirtyChunkBundleEntry.SnapshotEncodedHeaderSize +
+                    recordCount * RemoteChunkPublicRecord.EncodedSize),
+            RemoteChunkPublicationKind.Delta when recordCount != 0 =>
+                checked(RemoteDirtyChunkBundleEntry.DeltaEncodedHeaderSize +
+                    recordCount * RemoteChunkDeltaRecord.EncodedSize),
+            RemoteChunkPublicationKind.Absence when recordCount == 0 =>
+                RemoteDirtyChunkBundleEntry.AbsenceEncodedHeaderSize,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+    }
+
+    public static int GetDirtyChunkBundleEncodedBytes(
+        ReadOnlySpan<RemoteDirtyChunkBundleEntry> entries)
+    {
+        if (entries.IsEmpty || entries.Length > MaximumDirtyChunkBundleEntries)
+            throw new ArgumentOutOfRangeException(nameof(entries));
+        int bytes = RemoteDirtyChunkBundleHeaderCodec.EncodedSize;
+        for (int index = 0; index < entries.Length; index++)
+            bytes = checked(bytes + GetDirtyChunkBundleEntryEncodedBytes(
+                entries[index].Kind, entries[index].RecordCount));
+        return bytes;
     }
 
     public static bool TryWriteChunkSnapshotBegin(
@@ -585,6 +656,336 @@ public static partial class UltraSimGameProtocol
         }
         return true;
     }
+
+    public static bool TryWriteDirtyChunkBundle(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong bundleId,
+        ReadOnlySpan<RemoteDirtyChunkBundleEntry> entries,
+        ReadOnlySpan<RemoteChunkPublicRecord> snapshotRecords,
+        ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords,
+        out int written)
+    {
+        written = 0;
+        if (applicationSessionEpoch == 0 || publicationEpoch == 0 || bundleId == 0 ||
+            entries.IsEmpty || entries.Length > MaximumDirtyChunkBundleEntries ||
+            MemoryMarshal.AsBytes(entries).Overlaps(destination) ||
+            MemoryMarshal.AsBytes(snapshotRecords).Overlaps(destination) ||
+            MemoryMarshal.AsBytes(deltaRecords).Overlaps(destination))
+            return false;
+        int required;
+        try { required = GetDirtyChunkBundleEncodedBytes(entries); }
+        catch (ArgumentOutOfRangeException) { return false; }
+        if (required > MaximumMessageBytes || destination.Length < required) return false;
+
+        int expectedSnapshots = 0;
+        int expectedDeltas = 0;
+        for (int index = 0; index < entries.Length; index++)
+        {
+            ref readonly RemoteDirtyChunkBundleEntry entry = ref entries[index];
+            if (!ValidDirtyChunkBundleEntry(
+                    publicationEpoch, in entry, snapshotRecords, deltaRecords,
+                    expectedSnapshots, expectedDeltas, out ulong hash))
+                return false;
+            for (int prior = 0; prior < index; prior++)
+                if (entries[prior].DeliveryId == entry.DeliveryId ||
+                    entries[prior].SpatialSpaceId == entry.SpatialSpaceId &&
+                    entries[prior].ChunkX == entry.ChunkX && entries[prior].ChunkZ == entry.ChunkZ)
+                    return false;
+            if (entry.ContentHash != 0 && entry.ContentHash != hash) return false;
+            if (entry.Kind == RemoteChunkPublicationKind.Snapshot)
+                expectedSnapshots += entry.RecordCount;
+            else if (entry.Kind == RemoteChunkPublicationKind.Delta)
+                expectedDeltas += entry.RecordCount;
+        }
+        if (expectedSnapshots != snapshotRecords.Length || expectedDeltas != deltaRecords.Length)
+            return false;
+
+        var writer = new NetworkPacketWriter(destination[..required]);
+        var header = new RemoteDirtyChunkBundleHeader
+        {
+            ApplicationSessionEpoch = applicationSessionEpoch,
+            PublicationEpoch = publicationEpoch,
+            BundleId = bundleId,
+            EntryCount = checked((byte)entries.Length),
+        };
+        if (!RemoteDirtyChunkBundleHeaderCodec.TryWrite(ref writer, in header)) return false;
+        for (int index = 0; index < entries.Length; index++)
+        {
+            ref readonly RemoteDirtyChunkBundleEntry entry = ref entries[index];
+            ulong hash = DirtyChunkBundleEntryHash(
+                publicationEpoch, in entry, snapshotRecords, deltaRecords);
+            if (!writer.TryWriteByte((byte)entry.Kind) ||
+                !writer.TryWriteUInt64(entry.DeliveryId) ||
+                !writer.TryWriteUInt64(entry.SpatialSpaceId) ||
+                !writer.TryWriteInt32(entry.ChunkX) || !writer.TryWriteInt32(entry.ChunkZ))
+                return false;
+            if (entry.Kind == RemoteChunkPublicationKind.Snapshot)
+            {
+                if (!writer.TryWriteUInt64(entry.CurrentRevision) ||
+                    !writer.TryWriteUInt64(entry.HistoryFloor) ||
+                    !writer.TryWriteUInt64(hash) || !writer.TryWriteUInt16(entry.RecordCount))
+                    return false;
+                ReadOnlySpan<RemoteChunkPublicRecord> records =
+                    snapshotRecords.Slice(entry.RecordOffset, entry.RecordCount);
+                for (int record = 0; record < records.Length; record++)
+                    WriteSnapshotRecord(ref writer, records[record]);
+            }
+            else if (entry.Kind == RemoteChunkPublicationKind.Delta)
+            {
+                if (!writer.TryWriteUInt64(entry.BaseRevision) ||
+                    !writer.TryWriteUInt64(entry.CurrentRevision) ||
+                    !writer.TryWriteUInt64(entry.HistoryFloor) ||
+                    !writer.TryWriteUInt64(hash) || !writer.TryWriteUInt16(entry.RecordCount))
+                    return false;
+                ReadOnlySpan<RemoteChunkDeltaRecord> records =
+                    deltaRecords.Slice(entry.RecordOffset, entry.RecordCount);
+                for (int record = 0; record < records.Length; record++)
+                    WriteDeltaRecord(ref writer, records[record]);
+            }
+        }
+        if (writer.WrittenCount != required)
+            throw new InvalidOperationException("Dirty-chunk bundle size accounting diverged.");
+        written = required;
+        return true;
+    }
+
+    public static bool TryReadDirtyChunkBundle(
+        ReadOnlySpan<byte> source,
+        out RemoteDirtyChunkBundleHeader header,
+        Span<RemoteDirtyChunkBundleEntry> entries,
+        Span<RemoteChunkPublicRecord> snapshotRecords,
+        Span<RemoteChunkDeltaRecord> deltaRecords,
+        out int entryCount,
+        out int snapshotCount,
+        out int deltaCount)
+    {
+        header = default;
+        entryCount = snapshotCount = deltaCount = 0;
+        var validation = new NetworkPacketReader(source);
+        if (!RemoteDirtyChunkBundleHeaderCodec.TryRead(
+                ref validation, out RemoteDirtyChunkBundleHeader staged) ||
+            staged.ApplicationSessionEpoch == 0 || staged.PublicationEpoch == 0 ||
+            staged.BundleId == 0 || staged.EntryCount == 0 ||
+            staged.EntryCount > MaximumDirtyChunkBundleEntries || staged.EntryCount > entries.Length)
+            return false;
+        Span<ulong> deliveryIds = stackalloc ulong[MaximumDirtyChunkBundleEntries];
+        Span<ulong> spaces = stackalloc ulong[MaximumDirtyChunkBundleEntries];
+        Span<int> chunkXs = stackalloc int[MaximumDirtyChunkBundleEntries];
+        Span<int> chunkZs = stackalloc int[MaximumDirtyChunkBundleEntries];
+        int snapshots = 0;
+        int deltas = 0;
+        for (int index = 0; index < staged.EntryCount; index++)
+        {
+            if (!TryReadDirtyChunkBundleEntryHeader(
+                    ref validation, snapshots, deltas, out RemoteDirtyChunkBundleEntry entry) ||
+                entry.SpatialSpaceId == 0 || entry.DeliveryId == 0)
+                return false;
+            for (int prior = 0; prior < index; prior++)
+                if (deliveryIds[prior] == entry.DeliveryId ||
+                    spaces[prior] == entry.SpatialSpaceId && chunkXs[prior] == entry.ChunkX &&
+                    chunkZs[prior] == entry.ChunkZ)
+                    return false;
+            deliveryIds[index] = entry.DeliveryId;
+            spaces[index] = entry.SpatialSpaceId;
+            chunkXs[index] = entry.ChunkX;
+            chunkZs[index] = entry.ChunkZ;
+
+            if (entry.Kind == RemoteChunkPublicationKind.Snapshot)
+            {
+                if (entry.BaseRevision != 0 || entry.CurrentRevision == 0 ||
+                    entry.HistoryFloor == 0 || entry.HistoryFloor > entry.CurrentRevision ||
+                    snapshots + entry.RecordCount > snapshotRecords.Length)
+                    return false;
+                ulong hash = BeginSnapshotHash(staged.PublicationEpoch, entry.SpatialSpaceId,
+                    entry.ChunkX, entry.ChunkZ, entry.CurrentRevision, entry.HistoryFloor);
+                uint priorEntity = 0;
+                for (int recordIndex = 0; recordIndex < entry.RecordCount; recordIndex++)
+                {
+                    if (!TryReadSnapshotRecord(ref validation, out RemoteChunkPublicRecord record) ||
+                        !ValidSnapshotRecord(record, entry.CurrentRevision) ||
+                        recordIndex != 0 && record.EntityIndex <= priorEntity)
+                        return false;
+                    priorEntity = record.EntityIndex;
+                    MixSnapshotRecord(ref hash, record);
+                }
+                if (hash != entry.ContentHash) return false;
+                snapshots += entry.RecordCount;
+            }
+            else if (entry.Kind == RemoteChunkPublicationKind.Delta)
+            {
+                if (entry.BaseRevision == 0 || entry.CurrentRevision <= entry.BaseRevision ||
+                    entry.HistoryFloor == 0 || entry.HistoryFloor > entry.BaseRevision ||
+                    entry.RecordCount == 0 || deltas + entry.RecordCount > deltaRecords.Length)
+                    return false;
+                ulong hash = BeginDeltaHash(staged.PublicationEpoch, entry.SpatialSpaceId,
+                    entry.ChunkX, entry.ChunkZ, entry.BaseRevision,
+                    entry.CurrentRevision, entry.HistoryFloor);
+                uint priorEntity = 0;
+                for (int recordIndex = 0; recordIndex < entry.RecordCount; recordIndex++)
+                {
+                    if (!TryReadDeltaRecord(ref validation, out RemoteChunkDeltaRecord record) ||
+                        !ValidDeltaRecord(record, entry.BaseRevision, entry.CurrentRevision) ||
+                        recordIndex != 0 && record.EntityIndex <= priorEntity)
+                        return false;
+                    priorEntity = record.EntityIndex;
+                    MixDeltaRecord(ref hash, record);
+                }
+                if (hash != entry.ContentHash) return false;
+                deltas += entry.RecordCount;
+            }
+            else if (entry.Kind != RemoteChunkPublicationKind.Absence ||
+                     entry.BaseRevision != 0 || entry.CurrentRevision != 0 ||
+                     entry.HistoryFloor != 0 || entry.ContentHash != 0 || entry.RecordCount != 0)
+            {
+                return false;
+            }
+        }
+        if (!validation.IsComplete) return false;
+
+        var reader = new NetworkPacketReader(source);
+        _ = RemoteDirtyChunkBundleHeaderCodec.TryRead(ref reader, out _);
+        int snapshotOffset = 0;
+        int deltaOffset = 0;
+        for (int index = 0; index < staged.EntryCount; index++)
+        {
+            _ = TryReadDirtyChunkBundleEntryHeader(
+                ref reader, snapshotOffset, deltaOffset, out RemoteDirtyChunkBundleEntry entry);
+            entries[index] = entry;
+            if (entry.Kind == RemoteChunkPublicationKind.Snapshot)
+            {
+                for (int record = 0; record < entry.RecordCount; record++)
+                {
+                    _ = TryReadSnapshotRecord(ref reader, out RemoteChunkPublicRecord decoded);
+                    snapshotRecords[snapshotOffset++] = decoded;
+                }
+            }
+            else if (entry.Kind == RemoteChunkPublicationKind.Delta)
+            {
+                for (int record = 0; record < entry.RecordCount; record++)
+                {
+                    _ = TryReadDeltaRecord(ref reader, out RemoteChunkDeltaRecord decoded);
+                    deltaRecords[deltaOffset++] = decoded;
+                }
+            }
+        }
+        header = staged;
+        entryCount = staged.EntryCount;
+        snapshotCount = snapshotOffset;
+        deltaCount = deltaOffset;
+        return true;
+    }
+
+    private static bool TryReadDirtyChunkBundleEntryHeader(
+        ref NetworkPacketReader reader,
+        int snapshotOffset,
+        int deltaOffset,
+        out RemoteDirtyChunkBundleEntry entry)
+    {
+        entry = default;
+        if (!reader.TryReadByte(out byte kindValue) ||
+            kindValue is < (byte)RemoteChunkPublicationKind.Snapshot or
+                > (byte)RemoteChunkPublicationKind.Absence ||
+            !reader.TryReadUInt64(out ulong deliveryId) ||
+            !reader.TryReadUInt64(out ulong space) ||
+            !reader.TryReadInt32(out int chunkX) || !reader.TryReadInt32(out int chunkZ))
+            return false;
+        RemoteChunkPublicationKind kind = (RemoteChunkPublicationKind)kindValue;
+        ulong baseRevision = 0;
+        ulong currentRevision = 0;
+        ulong historyFloor = 0;
+        ulong contentHash = 0;
+        ushort recordCount = 0;
+        if (kind == RemoteChunkPublicationKind.Snapshot)
+        {
+            if (!reader.TryReadUInt64(out currentRevision) ||
+                !reader.TryReadUInt64(out historyFloor) ||
+                !reader.TryReadUInt64(out contentHash) ||
+                !reader.TryReadUInt16(out recordCount)) return false;
+        }
+        else if (kind == RemoteChunkPublicationKind.Delta)
+        {
+            if (!reader.TryReadUInt64(out baseRevision) ||
+                !reader.TryReadUInt64(out currentRevision) ||
+                !reader.TryReadUInt64(out historyFloor) ||
+                !reader.TryReadUInt64(out contentHash) ||
+                !reader.TryReadUInt16(out recordCount)) return false;
+        }
+        if (recordCount > MaximumChunkPublicationRecords) return false;
+        entry = new RemoteDirtyChunkBundleEntry(
+            kind, deliveryId, space, chunkX, chunkZ, baseRevision, currentRevision,
+            historyFloor, contentHash, recordCount,
+            kind == RemoteChunkPublicationKind.Snapshot ? snapshotOffset :
+                kind == RemoteChunkPublicationKind.Delta ? deltaOffset : 0);
+        return true;
+    }
+
+    private static bool ValidDirtyChunkBundleEntry(
+        ulong publicationEpoch,
+        in RemoteDirtyChunkBundleEntry entry,
+        ReadOnlySpan<RemoteChunkPublicRecord> snapshotRecords,
+        ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords,
+        int expectedSnapshotOffset,
+        int expectedDeltaOffset,
+        out ulong hash)
+    {
+        hash = 0;
+        if (entry.DeliveryId == 0 || entry.SpatialSpaceId == 0 ||
+            entry.RecordCount > MaximumChunkPublicationRecords)
+            return false;
+        if (entry.Kind == RemoteChunkPublicationKind.Snapshot)
+        {
+            if (entry.RecordOffset != expectedSnapshotOffset || entry.BaseRevision != 0 ||
+                entry.CurrentRevision == 0 || entry.HistoryFloor == 0 ||
+                entry.HistoryFloor > entry.CurrentRevision ||
+                entry.RecordOffset + entry.RecordCount > snapshotRecords.Length)
+                return false;
+            ReadOnlySpan<RemoteChunkPublicRecord> records =
+                snapshotRecords.Slice(entry.RecordOffset, entry.RecordCount);
+            if (!ValidateSnapshotRecords(records, entry.CurrentRevision)) return false;
+            hash = ComputeSnapshotHash(publicationEpoch, entry.SpatialSpaceId,
+                entry.ChunkX, entry.ChunkZ, entry.CurrentRevision, entry.HistoryFloor, records);
+            return true;
+        }
+        if (entry.Kind == RemoteChunkPublicationKind.Delta)
+        {
+            if (entry.RecordOffset != expectedDeltaOffset || entry.BaseRevision == 0 ||
+                entry.CurrentRevision <= entry.BaseRevision || entry.HistoryFloor == 0 ||
+                entry.HistoryFloor > entry.BaseRevision || entry.RecordCount == 0 ||
+                entry.RecordOffset + entry.RecordCount > deltaRecords.Length)
+                return false;
+            ReadOnlySpan<RemoteChunkDeltaRecord> records =
+                deltaRecords.Slice(entry.RecordOffset, entry.RecordCount);
+            if (!ValidateDeltaRecords(records, entry.BaseRevision, entry.CurrentRevision)) return false;
+            hash = ComputeDeltaHash(publicationEpoch, entry.SpatialSpaceId,
+                entry.ChunkX, entry.ChunkZ, entry.BaseRevision, entry.CurrentRevision,
+                entry.HistoryFloor, records);
+            return true;
+        }
+        return entry.Kind == RemoteChunkPublicationKind.Absence && entry.RecordOffset == 0 &&
+            entry.RecordCount == 0 && entry.BaseRevision == 0 && entry.CurrentRevision == 0 &&
+            entry.HistoryFloor == 0 && entry.ContentHash == 0;
+    }
+
+    private static ulong DirtyChunkBundleEntryHash(
+        ulong publicationEpoch,
+        in RemoteDirtyChunkBundleEntry entry,
+        ReadOnlySpan<RemoteChunkPublicRecord> snapshotRecords,
+        ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords) =>
+        entry.Kind switch
+        {
+            RemoteChunkPublicationKind.Snapshot => ComputeSnapshotHash(
+                publicationEpoch, entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ,
+                entry.CurrentRevision, entry.HistoryFloor,
+                snapshotRecords.Slice(entry.RecordOffset, entry.RecordCount)),
+            RemoteChunkPublicationKind.Delta => ComputeDeltaHash(
+                publicationEpoch, entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ,
+                entry.BaseRevision, entry.CurrentRevision, entry.HistoryFloor,
+                deltaRecords.Slice(entry.RecordOffset, entry.RecordCount)),
+            RemoteChunkPublicationKind.Absence => 0,
+            _ => throw new InvalidOperationException("Invalid dirty-chunk bundle entry kind."),
+        };
 
     public static bool TryWriteChunkApplied(
         Span<byte> destination,

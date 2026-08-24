@@ -856,8 +856,8 @@ internal static class N1OfflineDirectChunkTests
         proof.Revision = 1;
         False(UltraSimGameProtocol.TryWriteChunkApplied(bytes, proof, out _));
 
-        Equal((ushort)11, UltraSimGameProtocol.Manifest.Version);
-        Equal(12_079_342_559_617_020_304UL, UltraSimGameProtocol.Manifest.Fingerprint);
+        Equal((ushort)12, UltraSimGameProtocol.Manifest.Version);
+        Equal(10_804_745_783_046_976_666UL, UltraSimGameProtocol.Manifest.Fingerprint);
         Equal(6_148_331_928_277_823_537UL,
             UltraSimGameProtocol.ChunkPublicationSchemaFingerprint);
         True(UltraSimGameProtocol.Manifest.TryGet(
@@ -876,6 +876,8 @@ internal static class N1OfflineDirectChunkTests
             RemoteChunkSnapshotCommitMessageCodec.Descriptor.Id, out _));
         True(UltraSimGameProtocol.Manifest.TryGet(
             RemoteChunkSnapshotCancelMessageCodec.Descriptor.Id, out _));
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id, out _));
     }
 
     internal static void RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence()

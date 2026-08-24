@@ -113,7 +113,7 @@ internal static class P03FourProfileComparison
 
         var matrix = new ComparisonReport(
             scaleSuite
-                ? "ultrasim-game-p03f-five-profile-scale-matrix-v1"
+                ? "ultrasim-game-p03g-dirty-chunk-packing-scale-v1"
                 : "ultrasim-game-p03-five-profile-shared-trace-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
@@ -122,7 +122,7 @@ internal static class P03FourProfileComparison
             Environment.ProcessorCount,
             Stopwatch.Frequency,
             new MatrixScope(
-                "All five Game profiles replay the same authoritative entity, recipient, " +
+                "Requested Game profiles replay the same authoritative entity, recipient, " +
                 "mutation, movement, login/re-entry, and traffic trace. Measurements cover the " +
                 "profile semantic core and a payload-derived synthesized client/proof boundary. " +
                 "Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic " +
@@ -133,7 +133,7 @@ internal static class P03FourProfileComparison
                 $"Release; {totalTicks} trace ticks; {warmup} warmup ticks; " +
                 $"{totalTicks - warmup} measured ticks per profile; designated primary event " +
                 "ticks are reported separately; application proof is immediate " +
-                "after each encoded delivery; public/private/Event/Control traffic counts are " +
+                "after each independently fenced semantic entry; public/private/Event/Control traffic counts are " +
                 "identical in every profile row. Payload counters use canonical Game codec sizes " +
                 "and count each semantic delivery once; transport framing/security are excluded.",
                 scaleSuite
@@ -1000,7 +1000,11 @@ internal static class P03FourProfileComparison
         ulong ApplicationProofs,
         int MaxPending,
         int MaxOutstanding,
-        long ReservedBytes);
+        long ReservedBytes,
+        ulong SharedPageMaterializations = 0,
+        ulong SharedPageHits = 0,
+        ulong RecipientBundlesBuilt = 0,
+        ulong ChunkEntriesBundled = 0);
 
     private readonly record struct MemoryBreakdown(
         long ProfileMechanismReservedBytes,
@@ -1418,11 +1422,11 @@ internal static class P03FourProfileComparison
                 checked(profileStorageBytes + sourceHistoryBytes + semanticStateBytes));
         }
 
-        protected void RecordMessageBytes(int bytes)
+        protected void RecordMessageBytes(int bytes, int proofCount = 1)
         {
             _encodedGamePayloadBytes = checked(_encodedGamePayloadBytes + checked((ulong)bytes));
             _encodedGameMessages++;
-            _proofs++;
+            _proofs = checked(_proofs + checked((ulong)proofCount));
         }
 
         protected static ReplicationEntityId ReplicationId(in TraceEntity entity) =>
@@ -1654,7 +1658,11 @@ internal static class P03FourProfileComparison
                 Proofs,
                 MaxPending,
                 MaxOutstanding,
-                snapshot.ReservedBytes);
+                snapshot.ReservedBytes,
+                snapshot.SharedPageMaterializations,
+                snapshot.SharedPageHits,
+                snapshot.RecipientBundlesBuilt,
+                snapshot.ChunkEntriesBundled);
         }
 
         public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
@@ -2066,7 +2074,8 @@ internal static class P03FourProfileComparison
                     checked(Recipients.Length * workload.MaximumSubscriptionsPerRecipient),
                     16_384,
                     8_192,
-                    Math.Max(64, Recipients.Length * 4),
+                    Math.Max(64, checked(Recipients.Length *
+                        UltraSimGameProtocol.MaximumDirtyChunkBundleEntries)),
                     64,
                     64,
                     _dirtyChunkSpatialRegionEdgeMillimeters),
@@ -2104,37 +2113,36 @@ internal static class P03FourProfileComparison
             }
             while (true)
             {
-                DirtyChunkBuildStatus status = _service.TryBuildNextDelivery(
-                    checked((ulong)cadenceStep), out DirtyChunkDelivery delivery);
+                DirtyChunkBuildStatus status = _service.TryBuildNextBundle(
+                    checked((ulong)cadenceStep), ByteBudget,
+                    out DirtyChunkDeliveryBundle bundle);
                 if (status == DirtyChunkBuildStatus.NoData) break;
                 if (status != DirtyChunkBuildStatus.Success)
                     throw new InvalidOperationException(
                         $"P0.3 dirty-chunk next build returned {status} at cadence {cadenceStep}.");
-                int recipientIndex = ParticipantIndex(delivery.Participant);
-                if (delivery.Status == OfflineDirectChunkReadStatus.Snapshot)
+                int recipientIndex = ParticipantIndex(bundle.Participant);
+                for (int entryIndex = 0; entryIndex < bundle.Entries.Length; entryIndex++)
                 {
-                    foreach (WorldPublicRecord record in delivery.Snapshot)
-                        RecordChunkRecord(recipientIndex, record);
-                    RecordMessageBytes(UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
-                        delivery.Snapshot.Length));
-                }
-                else if (delivery.Status == OfflineDirectChunkReadStatus.Delta)
-                {
-                    foreach (WorldPublicDeltaRecord record in delivery.Deltas)
+                    DirtyChunkDeliveryEntry entry = bundle.Entries[entryIndex];
+                    if (entry.Status == OfflineDirectChunkReadStatus.Snapshot)
                     {
-                        RecordChunkDelta(recipientIndex, record);
+                        foreach (WorldPublicRecord record in bundle.Snapshot(in entry))
+                            RecordChunkRecord(recipientIndex, record);
                     }
-                    RecordMessageBytes(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(
-                        delivery.Deltas.Length));
+                    else if (entry.Status == OfflineDirectChunkReadStatus.Delta)
+                    {
+                        foreach (WorldPublicDeltaRecord record in bundle.Delta(in entry))
+                            RecordChunkDelta(recipientIndex, record);
+                    }
+                    else if (entry.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
+                    {
+                        ClearChunk(recipientIndex, entry.Key);
+                    }
+                    Require(_service.TryAcknowledgeDelivery(
+                        bundle.Participant, entry.DeliveryId, applied: true) ==
+                        DirtyChunkAppliedProofStatus.Applied);
                 }
-                else if (delivery.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
-                {
-                    ClearChunk(recipientIndex, delivery.Key);
-                    RecordMessageBytes(RemoteChunkAbsenceMessageCodec.EncodedSize);
-                }
-                Require(_service.TryAcknowledgeDelivery(
-                    delivery.Participant, delivery.DeliveryId, applied: true) ==
-                    DirtyChunkAppliedProofStatus.Applied);
+                RecordMessageBytes(bundle.EstimatedEncodedBytes, bundle.Entries.Length);
             }
             if (DiagnosticsEnabled)
             {
