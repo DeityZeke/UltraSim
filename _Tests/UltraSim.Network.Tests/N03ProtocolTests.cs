@@ -28,6 +28,8 @@ internal static class N03ProtocolTests
         Run("UnreliableMultiframeSurvivesDeterministicImpairment", UnreliableMultiframeSurvivesDeterministicImpairment);
         Run("WarmedUnreliableMultiframeAggregationAllocatesZero", WarmedUnreliableMultiframeAggregationAllocatesZero);
         Run("ProtocolStageTimingIsOptInAndResettable", ProtocolStageTimingIsOptInAndResettable);
+        Run("ReadySelectionAvoidsInactiveCapacityScans", ReadySelectionAvoidsInactiveCapacityScans);
+        Run("ReadySelectionPreservesLanePriorityAndIndependentFairness", ReadySelectionPreservesLanePriorityAndIndependentFairness);
         Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
         Run("UnreliableMessageFamiliesOwnIndependentStreams", UnreliableMessageFamiliesOwnIndependentStreams);
         Run("SequencedCapacityDropAdvancesStaleFloor", SequencedCapacityDropAdvancesStaleFloor);
@@ -556,6 +558,100 @@ internal static class N03ProtocolTests
         loopback.Server.ResetStageTiming(enabled: false);
         Equal(default, loopback.Client.GetStageTiming());
         Equal(default, loopback.Server.GetStageTiming());
+    }
+
+    private static void ReadySelectionAvoidsInactiveCapacityScans()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            MaximumReliableMessages = 64,
+            MaximumIndependentUnreliableMessages = 128,
+            MaximumPacketsPerPump = 1,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        pair.Sender.ResetStageTiming(enabled: true);
+
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 1 }));
+        pair.Sender.Emit(0);
+        NetworkProtocolStageTiming independent = pair.Sender.GetStageTiming();
+        Equal(1UL, independent.ReadySelections);
+        Equal(1UL, independent.IndependentSlotProbes);
+        Equal(0UL, independent.ReliableSlotProbes);
+        Equal(1UL, independent.LaneSelectionPasses);
+
+        pair.Sender.Emit(1);
+        NetworkProtocolStageTiming empty = pair.Sender.GetStageTiming();
+        Equal(1UL, empty.EmptySelectionAttempts);
+        Equal(independent.IndependentSlotProbes, empty.IndependentSlotProbes);
+        Equal(independent.ReliableSlotProbes, empty.ReliableSlotProbes);
+
+        pair.Sender.ResetStageTiming(enabled: true);
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 2 }));
+        pair.Sender.Emit(2);
+        NetworkProtocolStageTiming reliable = pair.Sender.GetStageTiming();
+        Equal(1UL, reliable.ReadySelections);
+        Equal(1UL, reliable.ReliableSlotProbes);
+        Equal(0UL, reliable.IndependentSlotProbes);
+        Equal(1UL, reliable.LaneSelectionPasses);
+    }
+
+    private static void ReadySelectionPreservesLanePriorityAndIndependentFairness()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            MaximumPacketsPerPump = 1,
+            InitialCongestionWindowPackets = 1,
+            MaximumCongestionWindowPackets = 1,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        Span<byte> valuePayload = stackalloc byte[1];
+        for (byte value = 0; value < 3; value++)
+        {
+            valuePayload[0] = value;
+            Equal(NetworkQueueStatus.Accepted,
+                pair.Sender.TryQueue(Id(NetworkLane.WorldState), valuePayload));
+        }
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 9 }));
+
+        pair.Sender.Emit(0);
+        pair.Receiver.ProcessInbound(0);
+        AssertReceive(pair.Receiver, NetworkLane.OwnerState, stackalloc byte[] { 9 });
+
+        for (byte expected = 0; expected < 3; expected++)
+        {
+            pair.Sender.Emit(checked((ulong)expected + 1));
+            pair.Receiver.ProcessInbound(checked((ulong)expected + 1));
+            valuePayload[0] = expected;
+            AssertReceive(pair.Receiver, NetworkLane.WorldState, valuePayload);
+            if (expected == 0)
+            {
+                valuePayload[0] = 3;
+                Equal(NetworkQueueStatus.Accepted,
+                    pair.Sender.TryQueue(Id(NetworkLane.WorldState), valuePayload));
+            }
+        }
+        pair.Sender.Emit(4);
+        pair.Receiver.ProcessInbound(4);
+        AssertReceive(pair.Receiver, NetworkLane.WorldState, stackalloc byte[] { 3 });
+        Equal(0, pair.Sender.IndependentUnreliableQueued);
+
+        using ProtocolLoopback reliable = Create(new(0x5038, 250, 150, 0, 3),
+            s_datagrams, limits);
+        Equal(NetworkQueueStatus.Accepted,
+            reliable.Client.TryQueue(Id(NetworkLane.Event), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            reliable.Client.TryQueue(Id(NetworkLane.Event), stackalloc byte[] { 2 }));
+        Equal(NetworkQueueStatus.Accepted,
+            reliable.Client.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 9 }));
+        Drive(reliable, () => reliable.Server.ReceivedQueued == 3, 10_000);
+        AssertReceive(reliable.Server, NetworkLane.Control, stackalloc byte[] { 9 });
+        AssertReceive(reliable.Server, NetworkLane.Event, stackalloc byte[] { 1 });
+        AssertReceive(reliable.Server, NetworkLane.Event, stackalloc byte[] { 2 });
+        Drive(reliable, () => reliable.Client.ReliableQueued == 0, 10_000);
+        True(reliable.Client.GetSnapshot().ReliableRetransmissions > 0);
     }
 
     private static void IndependentWorldStateContainersDoNotCoalesce()

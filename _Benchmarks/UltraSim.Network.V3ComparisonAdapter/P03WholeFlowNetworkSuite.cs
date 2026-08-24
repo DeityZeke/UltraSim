@@ -25,6 +25,11 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--p03h-rated-server-role-sweep", StringComparer.Ordinal))
+        {
+            RunRatedServerRoleSweep(args);
+            return;
+        }
         int denseRecipients = ReadInt(args, "--dense-recipients", 400);
         int denseEntities = ReadInt(args, "--dense-entities", 1_000);
         int sparsePopulation = ReadInt(args, "--sparse-population", 512);
@@ -108,6 +113,83 @@ internal static class P03WholeFlowNetworkSuite
         Console.WriteLine(Path.GetFullPath(output));
     }
 
+    private static void RunRatedServerRoleSweep(string[] args)
+    {
+        int warmup = ReadInt(args, "--warmup", 30);
+        int ticks = ReadInt(args, "--ticks", 270);
+        double stopMilliseconds = ReadDouble(args, "--server-role-stop-p95", 4d);
+        int maximumPopulation = ReadInt(args, "--maximum-population", 4_096);
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/Baselines/network-p0.3h-rated-server-role-sweep.json";
+        if (warmup < 1 || ticks < 10 || stopMilliseconds <= 0 || maximumPopulation < 256)
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        var rows = new List<P03WholeFlowRow>();
+        int executionOrder = 0;
+        RunSeries(
+            Enumerable.Range(0, 7).Select(index => 256 + index * 64),
+            static population => P03NetworkWorkload.Dense(population, 1_000),
+            P03NetworkProfile.DirtyEntitySpatialFanout);
+        RunSeries(
+            Enumerable.Range(0, checked((maximumPopulation - 256) / 128 + 1))
+                .Select(index => 256 + index * 128),
+            static population => P03NetworkWorkload.Sparse(population),
+            P03NetworkProfile.MaintainedEntityRelation);
+
+        var report = new P03WholeFlowReport(
+            "ultrasim-network-p03h-rated-server-role-sweep-v1",
+            DateTimeOffset.UtcNow,
+            ReadGitSha(),
+            Environment.Version.ToString(),
+            Environment.OSVersion.VersionString,
+            Environment.ProcessorCount,
+            Stopwatch.Frequency,
+            new P03WholeFlowScope(
+                "Production-shaped cap-one whole flow. Dense uses DirtyEntitySpatialFanout with " +
+                "1,000 public entities and two-percent spatial dirt; sparse uses " +
+                "MaintainedEntityRelation with one moving public entity per recipient and " +
+                "thirty-five-percent spatial dirt.",
+                "Each series stops after retaining its first completed population with server-role " +
+                $"p95 greater than {stopMilliseconds:F3} ms. Cold construction/bootstrap and " +
+                "semantic verification remain outside timed ticks.",
+                "This is a localhost server-role rating observation, not a public-WAN CCU or " +
+                "latency SLA. p99/max are retained as tail context; p95 is the stop criterion."),
+            ExecutionSeed, warmup, ticks, rows.ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
+        return;
+
+        void RunSeries(
+            IEnumerable<int> populations,
+            Func<int, P03NetworkWorkload> createWorkload,
+            P03NetworkProfile profile)
+        {
+            foreach (int population in populations)
+            {
+                if (population > maximumPopulation) break;
+                P03NetworkWorkload workload = createWorkload(population);
+                Console.WriteLine($"RATED {workload.Id} {profile} frames=1: constructing...");
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                using var harness = new P03WholeFlowHarness(workload, profile, 1);
+                P03WholeFlowRow row = harness.Run(warmup, ticks) with
+                {
+                    ExecutionOrder = executionOrder++,
+                };
+                rows.Add(row);
+                Console.WriteLine($"RATED {workload.Id} {profile}: tick p95 " +
+                    $"{row.Timing.Tick.P95:F3} ms, server p95 " +
+                    $"{row.Timing.ServerRole.P95:F3} ms, p99 " +
+                    $"{row.Timing.ServerRole.P99:F3} ms, max " +
+                    $"{row.Timing.ServerRole.Maximum:F3} ms");
+                if (row.Timing.ServerRole.P95 > stopMilliseconds) break;
+            }
+        }
+    }
+
     private static P03NetworkProfile[] ParseProfiles(string? text)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Equals("all", StringComparison.OrdinalIgnoreCase))
@@ -125,6 +207,13 @@ internal static class P03WholeFlowNetworkSuite
     {
         string? text = ReadText(args, name);
         return text is null ? fallback : int.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static double ReadDouble(string[] args, string name, double fallback)
+    {
+        string? text = ReadText(args, name);
+        return text is null ? fallback : double.Parse(text,
+            System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string? ReadText(string[] args, string name)
@@ -177,12 +266,12 @@ internal readonly record struct P03NetworkWorkload(
     OfflineDirectChunkCadence ChunkCadence)
 {
     internal static P03NetworkWorkload Dense(int recipients, int entities) => new(
-        "dense-400", recipients, entities, Math.Max(1, entities * 2 / 100), false,
+        $"dense-{recipients}", recipients, entities, Math.Max(1, entities * 2 / 100), false,
         GameInterestProfile.Reference, GameChunkInterestProfile.Default,
         OfflineDirectChunkCadence.EvidenceProfile);
 
     internal static P03NetworkWorkload Sparse(int population) => new(
-        "sparse-512", population, population,
+        $"sparse-{population}", population, population,
         Math.Max(1, (int)Math.Round(population * .35, MidpointRounding.AwayFromZero)), true,
         new GameInterestProfile(10_000, 7_500, 7_500, 23_500, 39_500,
             32, 48, 100, 2_000),
@@ -518,7 +607,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
         value.OutboundUnreliableFrames, value.InboundUnreliableFrames,
         value.LaneSelectionPasses, value.ReliableSlotProbes,
         value.IndependentSlotProbes, value.UnreliableSlotProbes,
-        value.ExcludedSelectionProbes);
+        value.ExcludedSelectionProbes, value.EmptySelectionAttempts,
+        value.ReadySelections);
 
     private static NetworkProtocolStageTiming Add(
         NetworkProtocolStageTiming left, NetworkProtocolStageTiming right) => new(
@@ -537,7 +627,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         Add(left.ReliableSlotProbes, right.ReliableSlotProbes),
         Add(left.IndependentSlotProbes, right.IndependentSlotProbes),
         Add(left.UnreliableSlotProbes, right.UnreliableSlotProbes),
-        Add(left.ExcludedSelectionProbes, right.ExcludedSelectionProbes));
+        Add(left.ExcludedSelectionProbes, right.ExcludedSelectionProbes),
+        Add(left.EmptySelectionAttempts, right.EmptySelectionAttempts),
+        Add(left.ReadySelections, right.ReadySelections));
     private static ulong Add(ulong left, ulong right) => ulong.MaxValue - left < right
         ? ulong.MaxValue : left + right;
 }
@@ -1800,7 +1892,9 @@ internal readonly record struct P03ProtocolStage(
     ulong ReliableSlotProbes,
     ulong IndependentSlotProbes,
     ulong UnreliableSlotProbes,
-    ulong ExcludedSelectionProbes);
+    ulong ExcludedSelectionProbes,
+    ulong EmptySelectionAttempts,
+    ulong ReadySelections);
 
 internal readonly record struct P03TransportSummary(
     ulong SecurePackets,

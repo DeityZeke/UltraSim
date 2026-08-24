@@ -99,6 +99,8 @@ public readonly record struct NetworkProtocolLimits(
             (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
             (long)MaximumIndependentUnreliableMessages *
                 (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
+            NetworkReadySelectionMetadata.EstimateBytes(
+                MaximumReliableMessages, MaximumIndependentUnreliableMessages) +
             (long)protocolMessageCount * NetworkUnreliableStreamMetadata.EstimatedBytes +
             (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
                 sizeof(ulong) * 2 + sizeof(byte) + sizeof(int)) +
@@ -137,6 +139,8 @@ public readonly record struct NetworkProtocolLimits(
             (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
             (long)MaximumIndependentUnreliableMessages *
                 (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
+            NetworkReadySelectionMetadata.EstimateBytes(
+                MaximumReliableMessages, MaximumIndependentUnreliableMessages) +
             (long)manifest.Count * NetworkUnreliableStreamMetadata.EstimatedBytes +
             (long)(manifest.Count + 1) * sizeof(int) +
             (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
@@ -226,6 +230,20 @@ internal static class NetworkOutgoingMessageMetadata
     internal const int EstimatedBytes = 32;
 }
 
+internal static class NetworkReadySelectionMetadata
+{
+    internal static long EstimateBytes(
+        int maximumReliableMessages,
+        int maximumIndependentMessages)
+    {
+        int independentWords = checked((maximumIndependentMessages + 63) / 64);
+        return checked(
+            (long)maximumReliableMessages * sizeof(int) +
+            (long)NetworkLaneContracts.Count * sizeof(int) * 3L +
+            (long)NetworkLaneContracts.Count * independentWords * sizeof(ulong));
+    }
+}
+
 internal static class NetworkUnreliableStreamMetadata
 {
     internal const int EstimatedBytes = 56;
@@ -279,7 +297,9 @@ internal readonly record struct NetworkProtocolStageTiming(
     ulong ReliableSlotProbes,
     ulong IndependentSlotProbes,
     ulong UnreliableSlotProbes,
-    ulong ExcludedSelectionProbes);
+    ulong ExcludedSelectionProbes,
+    ulong EmptySelectionAttempts,
+    ulong ReadySelections);
 
 /// <summary>
 /// Cold lifetime counters for the opt-in same-peer unreliable Data aggregate.

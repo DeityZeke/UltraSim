@@ -185,6 +185,7 @@ public sealed class ProtocolLoopback : IDisposable
 /// <summary>One bounded endpoint of the secure N0.3 protocol.</summary>
 public sealed class NetworkProtocolPeer : IDisposable
 {
+    private static readonly uint[] s_priorityBitByLane = CreatePriorityBitByLane();
     private readonly int _ownerThreadId;
     private INetworkDatagramEndpoint _endpoint;
     private readonly NetworkProtocolManifest _manifest;
@@ -203,10 +204,16 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly int[] _reliableCompactOrder;
     private readonly ulong[] _lastSentSteps;
     private readonly int[] _reliableFree;
+    private readonly int[] _reliableNext;
+    private readonly int[] _reliableHeads;
+    private readonly int[] _reliableTails;
     private readonly OutgoingMessage[] _independent;
     private readonly byte[] _independentPayloads;
     private readonly int _independentPayloadStride;
     private readonly int[] _independentFree;
+    private readonly ulong[] _independentReadyWords;
+    private readonly int[] _independentReadyCounts;
+    private readonly int _independentReadyWordCount;
     private readonly SentPacketRecord[] _sentPackets;
     private readonly int[] _sentPacketFree;
     private readonly int[] _sentRecordByFragment;
@@ -238,6 +245,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _receivedCount;
     private int _reliablePayloadTail;
     private int _receivedPayloadTail;
+    private uint _readyPriorityMask;
     private ulong _nextPacketNumber;
     private ulong _sentPacketsCount;
     private ulong _receivedPacketsCount;
@@ -337,6 +345,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _stageIndependentSlotProbes;
     private ulong _stageUnreliableSlotProbes;
     private ulong _stageExcludedSelectionProbes;
+    private ulong _stageEmptySelectionAttempts;
+    private ulong _stageReadySelections;
     private bool _acceptsNewSends = true;
     private bool _disposed;
 
@@ -384,6 +394,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reliableCompactOrder = new int[limits.MaximumReliableMessages];
         _lastSentSteps = new ulong[checked(limits.MaximumReliableMessages * limits.MaximumFragmentsPerMessage)];
         _reliableFree = new int[limits.MaximumReliableMessages];
+        _reliableNext = new int[limits.MaximumReliableMessages];
+        Array.Fill(_reliableNext, -1);
+        _reliableHeads = new int[NetworkLaneContracts.Count];
+        _reliableTails = new int[NetworkLaneContracts.Count];
+        Array.Fill(_reliableHeads, -1);
+        Array.Fill(_reliableTails, -1);
         for (int index = 0; index < _reliableFree.Length; index++) _reliableFree[index] = _reliableFree.Length - 1 - index;
         _reliableFreeCount = _reliableFree.Length;
         _independent = new OutgoingMessage[limits.MaximumIndependentUnreliableMessages];
@@ -394,6 +410,11 @@ public sealed class NetworkProtocolPeer : IDisposable
         for (int index = 0; index < _independentFree.Length; index++)
             _independentFree[index] = _independentFree.Length - 1 - index;
         _independentFreeCount = _independentFree.Length;
+        _independentReadyWordCount = checked(
+            (limits.MaximumIndependentUnreliableMessages + 63) / 64);
+        _independentReadyWords = new ulong[checked(
+            NetworkLaneContracts.Count * _independentReadyWordCount)];
+        _independentReadyCounts = new int[NetworkLaneContracts.Count];
         _sentPackets = new SentPacketRecord[limits.SentPacketCapacity];
         _sentPacketFree = new int[limits.SentPacketCapacity];
         for (int index = 0; index < _sentPacketFree.Length; index++)
@@ -465,6 +486,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _limits.MaximumFragmentsPerMessage).Clear();
             _reliable[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
                 new LaneSequence(sequence), payload.Length, (ushort)fragmentCount, 0);
+            EnqueueReliable(slot, descriptor.Lane);
             _reliableCount++;
             AddRetainedBytes(ref _reliableRetainedBytes, ref _reliableRetainedHighWaterBytes, payload.Length);
         }
@@ -475,6 +497,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             payload.CopyTo(IndependentPayload(slot));
             _independent[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
                 new LaneSequence(sequence), payload.Length, 1, 0);
+            SetIndependentReady(slot, descriptor.Lane);
             _independentCount++;
             AddRetainedBytes(ref _independentRetainedBytes, ref _independentRetainedHighWaterBytes, payload.Length);
             _unreliableStreams[messageSlot].NextSendSequence = sequence + 1;
@@ -492,6 +515,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _unreliableHeads[laneIndex] = messageSlot;
             }
             stream.Pending = true;
+            SetLaneReady(descriptor.Lane);
             stream.NextSendSequence = sequence + 1;
             AddRetainedBytes(ref _unreliableRetainedBytes, ref _unreliableRetainedHighWaterBytes, payload.Length);
         }
@@ -661,6 +685,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         _stageIndependentSlotProbes = 0;
         _stageUnreliableSlotProbes = 0;
         _stageExcludedSelectionProbes = 0;
+        _stageEmptySelectionAttempts = 0;
+        _stageReadySelections = 0;
         _stageTimingEnabled = enabled;
     }
 
@@ -690,7 +716,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             _stageReliableSlotProbes,
             _stageIndependentSlotProbes,
             _stageUnreliableSlotProbes,
-            _stageExcludedSelectionProbes);
+            _stageExcludedSelectionProbes,
+            _stageEmptySelectionAttempts,
+            _stageReadySelections);
     }
 
     /// <summary>
@@ -971,30 +999,46 @@ public sealed class NetworkProtocolPeer : IDisposable
         out int independentSlot,
         out int unreliableSlot)
     {
-        foreach (NetworkLane lane in NetworkLaneContracts.PriorityOrder)
+        uint candidates = _readyPriorityMask;
+        while (candidates != 0)
         {
+            int priorityIndex = BitOperations.TrailingZeroCount(candidates);
+            candidates &= candidates - 1;
+            NetworkLane lane = NetworkLaneContracts.PriorityOrder[priorityIndex];
             if (_stageTimingEnabled)
                 _stageLaneSelectionPasses = SaturatingIncrement(_stageLaneSelectionPasses);
-            int selected = FindReliableHead(lane);
-            if (selected >= 0 && TryFindDueFragment(selected, out fragment))
+            NetworkLaneContract contract = NetworkLaneContracts.Get(lane);
+            if (contract.Delivery == NetworkDeliveryGuarantee.Reliable)
             {
-                reliableSlot = selected;
-                independentSlot = -1;
-                unreliableSlot = -1;
-                return true;
+                int selected = FindReliableHead(lane);
+                if (selected >= 0 && TryFindDueFragment(selected, out fragment))
+                {
+                    RecordReadySelection();
+                    reliableSlot = selected;
+                    independentSlot = -1;
+                    unreliableSlot = -1;
+                    return true;
+                }
+                continue;
             }
-            int independent = FindIndependentPending(lane, excluded);
-            if (independent >= 0)
+            if (contract.Retention == NetworkRetentionPolicy.IndependentState)
             {
-                reliableSlot = -1;
-                fragment = 0;
-                independentSlot = independent;
-                unreliableSlot = -1;
-                return true;
+                int independent = FindIndependentPending(lane, excluded);
+                if (independent >= 0)
+                {
+                    RecordReadySelection();
+                    reliableSlot = -1;
+                    fragment = 0;
+                    independentSlot = independent;
+                    unreliableSlot = -1;
+                    return true;
+                }
+                continue;
             }
             int pending = FindUnreliablePending(lane, excluded);
             if (pending >= 0)
             {
+                RecordReadySelection();
                 reliableSlot = -1;
                 fragment = 0;
                 independentSlot = -1;
@@ -1006,18 +1050,58 @@ public sealed class NetworkProtocolPeer : IDisposable
         fragment = 0;
         independentSlot = -1;
         unreliableSlot = -1;
+        if (_stageTimingEnabled)
+            _stageEmptySelectionAttempts = SaturatingIncrement(_stageEmptySelectionAttempts);
         return false;
     }
 
     private int FindIndependentPending(NetworkLane lane, ReadOnlySpan<UnreliableSelection> excluded)
     {
-        for (int offset = 0; offset < _independent.Length; offset++)
+        int laneIndex = (int)lane;
+        if (_independentReadyCounts[laneIndex] == 0) return -1;
+        int start = _nextIndependentSchedule;
+        int startWord = start >> 6;
+        int startBit = start & 63;
+        int wordBase = checked(laneIndex * _independentReadyWordCount);
+
+        ulong bits = _independentReadyWords[wordBase + startWord] &
+            (ulong.MaxValue << startBit);
+        int selected = FindIndependentReadyBit(bits, startWord, excluded);
+        if (selected >= 0) return selected;
+        for (int word = startWord + 1; word < _independentReadyWordCount; word++)
         {
+            selected = FindIndependentReadyBit(
+                _independentReadyWords[wordBase + word], word, excluded);
+            if (selected >= 0) return selected;
+        }
+        for (int word = 0; word < startWord; word++)
+        {
+            selected = FindIndependentReadyBit(
+                _independentReadyWords[wordBase + word], word, excluded);
+            if (selected >= 0) return selected;
+        }
+        if (startBit != 0)
+        {
+            bits = _independentReadyWords[wordBase + startWord] & ((1UL << startBit) - 1);
+            selected = FindIndependentReadyBit(bits, startWord, excluded);
+            if (selected >= 0) return selected;
+        }
+        return -1;
+    }
+
+    private int FindIndependentReadyBit(
+        ulong bits,
+        int word,
+        ReadOnlySpan<UnreliableSelection> excluded)
+    {
+        while (bits != 0)
+        {
+            int bit = BitOperations.TrailingZeroCount(bits);
+            bits &= bits - 1;
             if (_stageTimingEnabled)
                 _stageIndependentSlotProbes = SaturatingIncrement(_stageIndependentSlotProbes);
-            int index = (_nextIndependentSchedule + offset) % _independent.Length;
-            if (_independent[index].Active && _independent[index].Lane == lane &&
-                !IsExcluded(excluded, index, -1)) return index;
+            int index = checked(word * 64 + bit);
+            if (index < _independent.Length && !IsExcluded(excluded, index, -1)) return index;
         }
         return -1;
     }
@@ -1066,20 +1150,15 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private int FindReliableHead(NetworkLane lane)
     {
-        int selected = -1;
-        ulong sequence = ulong.MaxValue;
-        for (int index = 0; index < _reliable.Length; index++)
-        {
-            if (_stageTimingEnabled)
-                _stageReliableSlotProbes = SaturatingIncrement(_stageReliableSlotProbes);
-            OutgoingMessage candidate = _reliable[index];
-            if (candidate.Active && candidate.Lane == lane && candidate.Sequence.Value < sequence)
-            {
-                selected = index;
-                sequence = candidate.Sequence.Value;
-            }
-        }
-        return selected;
+        if (_stageTimingEnabled)
+            _stageReliableSlotProbes = SaturatingIncrement(_stageReliableSlotProbes);
+        return _reliableHeads[(int)lane];
+    }
+
+    private void RecordReadySelection()
+    {
+        if (_stageTimingEnabled)
+            _stageReadySelections = SaturatingIncrement(_stageReadySelections);
     }
 
     private bool TryFindDueFragment(int slot, out ushort fragment)
@@ -1172,6 +1251,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         stream.Message = default;
         UnreliablePayload(unreliableSlot).Clear();
         _unreliableHeads[(int)lane] = FindNextUnreliablePending(lane);
+        RefreshLaneReady(lane);
     }
 
     private void RecordUnreliableHistogram(bool sent, int frameCount)
@@ -1880,6 +1960,14 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void FreeReliable(int slot)
     {
+        NetworkLane lane = _reliable[slot].Lane;
+        int laneIndex = (int)lane;
+        if (_reliableHeads[laneIndex] != slot)
+            throw new InvalidOperationException(
+                "An ordered reliable lane attempted to retire a non-head message.");
+        _reliableHeads[laneIndex] = _reliableNext[slot];
+        if (_reliableHeads[laneIndex] < 0) _reliableTails[laneIndex] = -1;
+        _reliableNext[slot] = -1;
         int payloadLength = _reliable[slot].Length;
         for (ushort fragment = 0; fragment < _reliable[slot].FragmentCount; fragment++)
             RetireSentRecords(slot, fragment);
@@ -1891,7 +1979,20 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reliableRetainedBytes -= payloadLength;
         _reliableFree[_reliableFreeCount++] = slot;
         _reliableCount--;
+        RefreshLaneReady(lane);
         if (_reliableCount == 0) _reliablePayloadTail = 0;
+    }
+
+    private void EnqueueReliable(int slot, NetworkLane lane)
+    {
+        int laneIndex = (int)lane;
+        int tail = _reliableTails[laneIndex];
+        if (tail < 0)
+            _reliableHeads[laneIndex] = slot;
+        else
+            _reliableNext[tail] = slot;
+        _reliableTails[laneIndex] = slot;
+        SetLaneReady(lane);
     }
 
     private bool TryEnqueueReceived(NetworkLane lane, NetworkMessageId messageId, ushort messageVersion,
@@ -2032,10 +2133,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reliablePayloads.Length +
         (long)(_reliablePayloadOffsets.Length + _reliableCompactOrder.Length) * sizeof(int) +
         (long)_lastSentSteps.Length * sizeof(ulong) +
-        (long)_reliableFree.Length * sizeof(int) +
+        (long)(_reliableFree.Length + _reliableNext.Length + _reliableHeads.Length +
+            _reliableTails.Length) * sizeof(int) +
         (long)_independent.Length * Unsafe.SizeOf<OutgoingMessage>() +
         _independentPayloads.Length +
-        (long)_independentFree.Length * sizeof(int) +
+        (long)(_independentFree.Length + _independentReadyCounts.Length) * sizeof(int) +
+        (long)_independentReadyWords.Length * sizeof(ulong) +
         (long)_sentPackets.Length * Unsafe.SizeOf<SentPacketRecord>() +
         (long)(_sentPacketFree.Length + _sentRecordByFragment.Length) * sizeof(int) +
         (long)_sentPacketMapKeys.Length * sizeof(ulong) +
@@ -2058,12 +2161,60 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void FreeIndependent(int slot)
     {
+        NetworkLane lane = _independent[slot].Lane;
+        ClearIndependentReady(slot, lane);
         int payloadLength = _independent[slot].Length;
         IndependentPayload(slot).Clear();
         _independent[slot] = default;
         _independentRetainedBytes -= payloadLength;
         _independentFree[_independentFreeCount++] = slot;
         _independentCount--;
+    }
+
+    private void SetIndependentReady(int slot, NetworkLane lane)
+    {
+        int laneIndex = (int)lane;
+        int word = checked(laneIndex * _independentReadyWordCount + (slot >> 6));
+        ulong bit = 1UL << (slot & 63);
+        if ((_independentReadyWords[word] & bit) != 0)
+            throw new InvalidOperationException("An IndependentState slot was published twice.");
+        _independentReadyWords[word] |= bit;
+        _independentReadyCounts[laneIndex]++;
+        SetLaneReady(lane);
+    }
+
+    private void ClearIndependentReady(int slot, NetworkLane lane)
+    {
+        int laneIndex = (int)lane;
+        int word = checked(laneIndex * _independentReadyWordCount + (slot >> 6));
+        ulong bit = 1UL << (slot & 63);
+        if ((_independentReadyWords[word] & bit) == 0)
+            throw new InvalidOperationException("An inactive IndependentState slot was retired.");
+        _independentReadyWords[word] &= ~bit;
+        _independentReadyCounts[laneIndex]--;
+        RefreshLaneReady(lane);
+    }
+
+    private void SetLaneReady(NetworkLane lane) =>
+        _readyPriorityMask |= s_priorityBitByLane[(int)lane];
+
+    private void RefreshLaneReady(NetworkLane lane)
+    {
+        int laneIndex = (int)lane;
+        if (_reliableHeads[laneIndex] >= 0 || _independentReadyCounts[laneIndex] != 0 ||
+            _unreliableHeads[laneIndex] >= 0)
+            SetLaneReady(lane);
+        else
+            _readyPriorityMask &= ~s_priorityBitByLane[laneIndex];
+    }
+
+    private static uint[] CreatePriorityBitByLane()
+    {
+        var result = new uint[NetworkLaneContracts.Count];
+        ReadOnlySpan<NetworkLane> priority = NetworkLaneContracts.PriorityOrder;
+        for (int index = 0; index < priority.Length; index++)
+            result[(int)priority[index]] = 1U << index;
+        return result;
     }
 
     private void AddRetainedBytes(ref int current, ref int highWater, int bytes)

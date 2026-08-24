@@ -139,6 +139,14 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
     --warmup=30 --ticks=90 \
     --output=_Benchmarks/results/network-p0.3g-whole-flow-local.json
 
+# P0.3H rated server-role sweep. Each series retains its first completed row
+# above 4 ms p95 and then stops; p99/max are diagnostic context only.
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+    --p03-whole-flow --p03h-rated-server-role-sweep \
+    --warmup=30 --ticks=270 --server-role-stop-p95=4 --maximum-population=4096 \
+    --output=_Benchmarks/results/network-p0.3h-rated-server-role-local.json
+
 # Opt-in causal attribution; diagnostic probes deliberately perturb normal timing.
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
