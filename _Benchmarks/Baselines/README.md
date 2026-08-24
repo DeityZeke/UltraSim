@@ -56,6 +56,10 @@ Useful current anchors can be located by their embedded workload or filename:
   rated whole-flow closure without diagnostic protocol/listener stage timing. It
   records the strict first-failure p95 boundary and supersedes only P0.3H's absolute
   rating, not its ready-selector causal evidence;
+- `network-p0.3k-rated-server-role-*-probes-off-2026-08-24.*` — controlled 16 ms
+  versus 33 ms internal semantic-cadence rated sweeps. The 33 ms capture records the
+  derived `1/1/2` chunk cadence, matched-population CPU/traffic/reservation effects,
+  and the strict first-failure 4 ms server-role boundary;
 
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;

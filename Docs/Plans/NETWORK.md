@@ -1641,6 +1641,25 @@ replace P0.3H's causal selector evidence or change production code.
 Evidence:
 [`network-p0.3j-rated-server-role-probes-off-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3j-rated-server-role-probes-off-2026-08-24.md).
 
+## P0.3K — 33 ms semantic-cadence rated control
+
+P0.3K makes the whole-flow semantic tick duration explicit and reruns the probes-off
+rated sweep at 33 ms against an immediate 16 ms control. Both dense and sparse policies
+resolve to a `1/1/2` Immediate/Near/Far chunk cadence at 33 ms; entity profiles retain
+their exact millisecond/stable-phase eligibility.
+
+Under the unchanged 4 ms server-role criterion, the controlled dense
+`DirtyEntitySpatialFanout` rating moves from 640 to 768, while sparse
+`MaintainedEntityRelation` remains 640. Dense per-tick messages/bytes remain essentially
+unchanged; the gain is an eligibility/burst-shape observation, not a halving of work.
+Sparse CPU remains essentially flat and sends about 9.2% more bytes per measured tick.
+Per-simulated-second wire rate falls for both because the same mutation count is now
+applied 30.3 rather than 62.5 times per second. Reservations are identical at matched
+populations. The unpaced localhost harness does not claim ping/RTT.
+
+Evidence:
+[`network-p0.3k-rated-server-role-33ms-probes-off-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3k-rated-server-role-33ms-probes-off-2026-08-24.md).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
