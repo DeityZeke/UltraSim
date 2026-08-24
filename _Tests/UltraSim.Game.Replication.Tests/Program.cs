@@ -15,6 +15,8 @@ var tests = new (string Name, Action Body)[]
 {
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
+    ("P01DirtyEntityExactWireBudgetAndRecipientOutstandingIsolation", DirtyEntitySpatialFanoutTests.ExactWireBudgetAndRecipientOutstandingIsolation),
+    ("P01DirtyEntitySameRegionMutationKeepsSpatialListsAcyclic", DirtyEntitySpatialFanoutTests.SameRegionEntityMutationKeepsSpatialListsAcyclic),
     ("P01DirtyEntityMovementCleanTopologyRemovalAndReentry", DirtyEntitySpatialFanoutTests.MovementCleanTopologyRemovalAndReentry),
     ("P01DirtyEntityHysteresisHorizonAndDespawn", DirtyEntitySpatialFanoutTests.HysteresisHorizonAndDespawn),
     ("P01DirtyEntityCapacityFailureRetainsFootprint", DirtyEntitySpatialFanoutTests.CapacityFailureRetainsFootprint),
@@ -27,6 +29,7 @@ var tests = new (string Name, Action Body)[]
     ("P01DirtyEntityWarmedPathAllocatesZero", DirtyEntitySpatialFanoutTests.WarmedPathAllocatesZero),
     ("P01DirtyEntityRemoteProtocolPeerConvergesThroughProof", DirtyEntitySpatialFanoutTests.RemoteProtocolPeerConvergesThroughApplicationProof),
     ("P02DirtyChunkWorkShapeAndCleanSteadyState", DirtyChunkSpatialFanoutTests.WorkShapeAndCleanSteadyState),
+    ("P02DirtyChunkRecipientOutstandingIsolationAndReservedMemoryAreExact", DirtyChunkSpatialFanoutTests.RecipientOutstandingIsolationAndReservedMemoryAreExact),
     ("P02DirtyChunkSameChunkRowsCoalesceIntoOneDiscovery", DirtyChunkSpatialFanoutTests.SameChunkRowsCoalesceIntoOneDiscovery),
     ("P02DirtyChunkSpatialCandidatesAvoidFarRecipients", DirtyChunkSpatialFanoutTests.SpatialCandidatesAvoidFarRecipientsAndMatchOracle),
     ("P02DirtyChunkCleanEntryLeaveReentryAndTeleport", DirtyChunkSpatialFanoutTests.CleanEntryLeaveReentryAndTeleportAreFenced),

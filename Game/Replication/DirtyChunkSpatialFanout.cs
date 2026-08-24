@@ -34,7 +34,7 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
     {
         if (MaximumRecipients <= 0 || MaximumRecipientChunkRows <= 0 ||
             MaximumSpatialRegions <= 0 || MaximumDirtyChunks <= 0 ||
-            MaximumOutstandingDeliveries <= 0 || MaximumSnapshotRecords <= 0 ||
+            MaximumOutstandingDeliveries < MaximumRecipients || MaximumSnapshotRecords <= 0 ||
             MaximumDeltaRecords <= 0 || SpatialRegionEdgeMillimeters <= 0 ||
             MaximumDeliveryAgeSteps == 0)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecipients));
@@ -170,15 +170,25 @@ public sealed class DirtyChunkSpatialFanout
     private readonly ChunkInterestProfile _interestProfile;
     private readonly OfflineDirectChunkCadence _cadence;
     private readonly int _subscriptionsPerRecipient;
+    private readonly int _maximumOutstandingDeliveriesPerRecipient;
     private ChunkPublicationStore _source;
     private readonly RecipientSlot[] _recipients;
+    private readonly int[] _recipientOutstandingDeliveries;
     private readonly DirtyChunkRecipientRow[] _rows;
+    private readonly int[] _freeRows;
+    private readonly int[] _rowIndex;
+    private readonly int _rowIndexMask;
+    private readonly int[] _recipientPendingHeads;
+    private readonly int[] _recipientPendingCounts;
     private readonly DeliverySlot[] _deliveries;
     private readonly SpatialRegionKey[] _regionKeys;
     private readonly int[] _regionHeads;
     private readonly byte[] _regionStates;
     private readonly int _regionMask;
     private readonly SpatialChunkKey[] _dirtyKeys;
+    private readonly SpatialChunkKey[] _dirtyIndexKeys;
+    private readonly byte[] _dirtyIndexStates;
+    private readonly int _dirtyIndexMask;
     private readonly ChunkInterestEntry[] _previousInterest;
     private readonly ChunkInterestEntry[] _desiredInterest;
     private readonly OfflineDirectChunkSubscriptionChange[] _changes;
@@ -187,9 +197,12 @@ public sealed class DirtyChunkSpatialFanout
     private readonly ulong[] _candidateStamps;
     private int _recipientCount;
     private int _rowCount;
+    private int _freeRowCount;
     private int _regionCount;
     private int _deliveryCount;
     private int _dirtyCount;
+    private int _dirtyHead;
+    private int _dirtyTail;
     private ulong _nextDeliveryId = 1;
     private PublicationEpoch _observedEpoch;
     private ulong _observedCommit;
@@ -232,8 +245,24 @@ public sealed class DirtyChunkSpatialFanout
         _limits = limits;
         _interestProfile = interestProfile;
         _cadence = cadence;
+        _subscriptionsPerRecipient = Math.Max(1,
+            (limits.MaximumRecipientChunkRows + limits.MaximumRecipients - 1) /
+            limits.MaximumRecipients);
+        _maximumOutstandingDeliveriesPerRecipient = Math.Max(
+            1, limits.MaximumOutstandingDeliveries / limits.MaximumRecipients);
         _recipients = new RecipientSlot[limits.MaximumRecipients];
+        _recipientOutstandingDeliveries = new int[limits.MaximumRecipients];
         _rows = new DirtyChunkRecipientRow[limits.MaximumRecipientChunkRows];
+        _freeRows = new int[limits.MaximumRecipientChunkRows];
+        int rowIndexCapacity = MapCapacity(limits.MaximumRecipientChunkRows);
+        _rowIndex = new int[rowIndexCapacity];
+        _rowIndexMask = rowIndexCapacity - 1;
+        _recipientPendingHeads = new int[limits.MaximumRecipients];
+        _recipientPendingCounts = new int[limits.MaximumRecipients];
+        Array.Fill(_recipientPendingHeads, -1);
+        for (int index = 0; index < _freeRows.Length; index++)
+            _freeRows[index] = _freeRows.Length - index - 1;
+        _freeRowCount = _freeRows.Length;
         _deliveries = new DeliverySlot[limits.MaximumOutstandingDeliveries];
         int mapCapacity = MapCapacity(limits.MaximumSpatialRegions);
         _regionKeys = new SpatialRegionKey[mapCapacity];
@@ -242,16 +271,16 @@ public sealed class DirtyChunkSpatialFanout
         _regionMask = mapCapacity - 1;
         Array.Fill(_regionHeads, -1);
         _dirtyKeys = new SpatialChunkKey[limits.MaximumDirtyChunks];
-        _previousInterest = new ChunkInterestEntry[limits.MaximumRecipientChunkRows];
-        _desiredInterest = new ChunkInterestEntry[limits.MaximumRecipientChunkRows];
-        _changes = new OfflineDirectChunkSubscriptionChange[checked(limits.MaximumRecipientChunkRows * 2)];
+        int dirtyIndexCapacity = MapCapacity(limits.MaximumDirtyChunks);
+        _dirtyIndexKeys = new SpatialChunkKey[dirtyIndexCapacity];
+        _dirtyIndexStates = new byte[dirtyIndexCapacity];
+        _dirtyIndexMask = dirtyIndexCapacity - 1;
+        _previousInterest = new ChunkInterestEntry[_subscriptionsPerRecipient];
+        _desiredInterest = new ChunkInterestEntry[_subscriptionsPerRecipient];
+        _changes = new OfflineDirectChunkSubscriptionChange[checked(_subscriptionsPerRecipient * 2)];
         _snapshotScratch = new WorldPublicRecord[limits.MaximumSnapshotRecords];
         _deltaScratch = new WorldPublicDeltaRecord[limits.MaximumDeltaRecords];
         _candidateStamps = new ulong[limits.MaximumRecipients];
-        int subscriptionsPerRecipient = Math.Max(1,
-            (limits.MaximumRecipientChunkRows + limits.MaximumRecipients - 1) /
-            limits.MaximumRecipients);
-        _subscriptionsPerRecipient = subscriptionsPerRecipient;
         for (int index = 0; index < _recipients.Length; index++)
         {
             _recipients[index].Recipient = CreateRecipient();
@@ -271,8 +300,22 @@ public sealed class DirtyChunkSpatialFanout
         SpatialSpaceId space,
         in WorldPosition anchor,
         ulong cadenceStep)
+        => SetRecipientAnchor(participant, space, anchor, cadenceStep, _changes, out _);
+
+    /// <summary>
+    /// Admits or moves one recipient and returns the exact topology changes published by the
+    /// retained chunk recipient. Failure publishes neither recipient topology nor change rows.
+    /// </summary>
+    public DirtyChunkRecipientUpdateStatus SetRecipientAnchor(
+        ParticipantId participant,
+        SpatialSpaceId space,
+        in WorldPosition anchor,
+        ulong cadenceStep,
+        Span<OfflineDirectChunkSubscriptionChange> changes,
+        out OfflineDirectChunkReconcileResult result)
     {
         EnsureOwner();
+        result = default;
         if (!participant.IsValid || !space.IsValid)
             return DirtyChunkRecipientUpdateStatus.InvalidInput;
         int recipientIndex = FindRecipient(participant);
@@ -298,7 +341,7 @@ public sealed class DirtyChunkSpatialFanout
             return CapacityFailure<DirtyChunkRecipientUpdateStatus>(DirtyChunkRecipientUpdateStatus.CapacityExceeded);
 
         OfflineDirectChunkReconcileStatus status = slot.Recipient.Reconcile(
-            _source, space, anchor, _changes, out OfflineDirectChunkReconcileResult result);
+            _source, space, anchor, changes, out result);
         if (status != OfflineDirectChunkReconcileStatus.Reconciled)
         {
             if (status is OfflineDirectChunkReconcileStatus.SubscriptionCapacityExceeded or
@@ -324,7 +367,7 @@ public sealed class DirtyChunkSpatialFanout
             AddRecipientToRegion(recipientIndex, slot.RegionMapIndex);
 
         _recipientTopologyReconciliations++;
-        ApplyReconciliation(recipientIndex, result);
+        ApplyReconciliation(recipientIndex, changes, result);
         if (result.SourceReset && !isNew)
         {
             for (int subscription = 0; subscription < slot.Recipient.Subscriptions.Length; subscription++)
@@ -347,7 +390,12 @@ public sealed class DirtyChunkSpatialFanout
                 RetireRow(row);
         InvalidateDeliveriesForRecipient(index);
         RemoveRecipientFromRegion(index, slot.RegionMapIndex);
-        slot = new RecipientSlot { Recipient = CreateRecipient() };
+        _recipientPendingHeads[index] = -1;
+        _recipientPendingCounts[index] = 0;
+        _recipientOutstandingDeliveries[index] = 0;
+        OfflineDirectChunkRecipient retainedRecipient = slot.Recipient;
+        retainedRecipient.ResetForReuse();
+        slot = new RecipientSlot { Recipient = retainedRecipient };
         _recipientCount--;
         return true;
     }
@@ -391,11 +439,11 @@ public sealed class DirtyChunkSpatialFanout
             return observation;
         while (_dirtyCount != 0)
         {
-            SpatialChunkKey key = _dirtyKeys[0];
+            SpatialChunkKey key = _dirtyKeys[_dirtyHead];
             DirtyChunkProcessStatus status = ProcessDirtyKey(key, cadenceStep);
             if (status == DirtyChunkProcessStatus.CapacityExceeded)
                 return status;
-            RemoveDirtyAtZero();
+            DequeueDirty(key);
             processed++;
             _dirtyChunksProcessed++;
         }
@@ -451,15 +499,23 @@ public sealed class DirtyChunkSpatialFanout
         if (recipientIndex < 0) return DirtyChunkBuildStatus.UnknownRecipient;
         if (!useKey)
         {
-            for (int index = 0; index < _rows.Length; index++)
+            if (_recipientPendingCounts[recipientIndex] == 0)
+                return DirtyChunkBuildStatus.NoData;
+            for (int index = _recipientPendingHeads[recipientIndex]; index >= 0;)
             {
-                if (!_rows[index].Active || _rows[index].RecipientIndex != recipientIndex ||
-                    !_rows[index].Pending || _rows[index].PendingWasSent)
+                int next = _rows[index].PendingNext;
+                if (_rows[index].PendingWasSent)
+                {
+                    index = next;
                     continue;
+                }
                 DirtyChunkBuildStatus status = TryBuildDeliveryAtRow(
                     participant, recipientIndex, index, cadenceStep, out delivery);
                 if (status is DirtyChunkBuildStatus.NotDue or DirtyChunkBuildStatus.NoData)
+                {
+                    index = next;
                     continue;
+                }
                 return status;
             }
             return DirtyChunkBuildStatus.NoData;
@@ -485,6 +541,9 @@ public sealed class DirtyChunkSpatialFanout
             return DirtyChunkBuildStatus.NoData;
         }
         if (row.PendingWasSent) return DirtyChunkBuildStatus.NoData;
+        if (_recipientOutstandingDeliveries[recipientIndex] >=
+            _maximumOutstandingDeliveriesPerRecipient)
+            return DirtyChunkBuildStatus.CapacityExceeded;
         if (_deliveryCount >= _deliveries.Length || _nextDeliveryId == 0)
             return CapacityFailure<DirtyChunkBuildStatus>(DirtyChunkBuildStatus.CapacityExceeded);
 
@@ -503,7 +562,7 @@ public sealed class DirtyChunkSpatialFanout
         if (status == OfflineDirectChunkReadStatus.NoChanges)
         {
             _recipients[recipientIndex].Recipient.CommitRead();
-            row.Pending = false;
+            DeactivatePending(rowIndex);
             row.PendingWasSent = false;
             row.PendingDeliveryId = 0;
             return DirtyChunkBuildStatus.NoData;
@@ -529,6 +588,7 @@ public sealed class DirtyChunkSpatialFanout
             SentCadenceStep = cadenceStep,
         };
         _deliveryCount++;
+        _recipientOutstandingDeliveries[recipientIndex]++;
         row.PendingWasSent = true;
         row.PendingDeliveryId = deliveryId;
         delivery = new DirtyChunkDelivery(
@@ -581,7 +641,8 @@ public sealed class DirtyChunkSpatialFanout
             return DirtyChunkAppliedProofStatus.Stale;
         }
         ref DeliverySlot delivery = ref _deliveries[deliveryIndex];
-        ref DirtyChunkRecipientRow row = ref _rows[delivery.RowIndex];
+        int rowIndex = delivery.RowIndex;
+        ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
         bool current = row.Active && row.Pending && row.PendingWasSent &&
             row.PendingDeliveryId == deliveryId;
         if (!current)
@@ -606,7 +667,7 @@ public sealed class DirtyChunkSpatialFanout
             OfflineDirectChunkAppliedProofStatus.Duplicate or
             OfflineDirectChunkAppliedProofStatus.Stale)
         {
-            row.Pending = false;
+            DeactivatePending(rowIndex);
             row.PendingWasSent = false;
             row.PendingDeliveryId = 0;
             if (committed == OfflineDirectChunkAppliedProofStatus.Applied)
@@ -657,18 +718,28 @@ public sealed class DirtyChunkSpatialFanout
         ulong absenceReads = 0;
         long reserved = checked(
             (long)_recipients.Length * Unsafe.SizeOf<RecipientSlot>() +
+            (long)_recipientOutstandingDeliveries.Length * sizeof(int) +
             (long)_rows.Length * Unsafe.SizeOf<DirtyChunkRecipientRow>() +
+            (long)_freeRows.Length * sizeof(int) +
+            (long)_rowIndex.Length * sizeof(int) +
+            (long)_recipientPendingHeads.Length * sizeof(int) +
+            (long)_recipientPendingCounts.Length * sizeof(int) +
             (long)_deliveries.Length * Unsafe.SizeOf<DeliverySlot>() +
             (long)_regionKeys.Length * Unsafe.SizeOf<SpatialRegionKey>() +
             (long)_regionHeads.Length * sizeof(int) + _regionStates.Length +
             (long)_dirtyKeys.Length * Unsafe.SizeOf<SpatialChunkKey>() +
+            (long)_dirtyIndexKeys.Length * Unsafe.SizeOf<SpatialChunkKey>() +
+            _dirtyIndexStates.Length +
             (long)_previousInterest.Length * Unsafe.SizeOf<ChunkInterestEntry>() +
             (long)_desiredInterest.Length * Unsafe.SizeOf<ChunkInterestEntry>() +
             (long)_changes.Length * Unsafe.SizeOf<OfflineDirectChunkSubscriptionChange>() +
             (long)_snapshotScratch.Length * Unsafe.SizeOf<WorldPublicRecord>() +
-            (long)_deltaScratch.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>());
+            (long)_deltaScratch.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
+            (long)_candidateStamps.Length * sizeof(ulong));
         for (int index = 0; index < _recipients.Length; index++)
         {
+            reserved = checked(reserved +
+                _recipients[index].Recipient.GetStorageSnapshot().TotalReservedBytes);
             if (!_recipients[index].Active) continue;
             OfflineDirectChunkRecipientSnapshot snapshot = _recipients[index].Recipient.GetSnapshot();
             cadenceDeferrals += snapshot.CadenceDeferrals;
@@ -676,7 +747,6 @@ public sealed class DirtyChunkSpatialFanout
             deltaReads += snapshot.DeltaReads;
             snapshotFallbacks += snapshot.SnapshotFallbacks;
             if (snapshot.ChunkAbsentReads != 0) absenceReads += snapshot.ChunkAbsentReads;
-            reserved = checked(reserved + _recipients[index].Recipient.GetStorageSnapshot().TotalReservedBytes);
         }
         int pending = 0;
         for (int index = 0; index < _rows.Length; index++)
@@ -787,9 +857,11 @@ public sealed class DirtyChunkSpatialFanout
             rowIndex = FindFreeRow();
             _rows[rowIndex] = new DirtyChunkRecipientRow
             {
-                Active = true, Pending = true, RecipientIndex = recipientIndex,
-                Key = key, Tier = tier,
+                Active = true, RecipientIndex = recipientIndex,
+                Key = key, Tier = tier, PendingPrevious = -1, PendingNext = -1,
             };
+            AddRowIndex(rowIndex);
+            ActivatePending(rowIndex);
             _rowCount++;
             _dirtyObligationsCreated++;
             return true;
@@ -807,16 +879,19 @@ public sealed class DirtyChunkSpatialFanout
             row.PendingWasSent = false;
             row.PendingDeliveryId = 0;
         }
-        row.Pending = true;
+        ActivatePending(rowIndex);
         _dirtyObligationCoalesces++;
         return true;
     }
 
-    private void ApplyReconciliation(int recipientIndex, in OfflineDirectChunkReconcileResult result)
+    private void ApplyReconciliation(
+        int recipientIndex,
+        ReadOnlySpan<OfflineDirectChunkSubscriptionChange> changes,
+        in OfflineDirectChunkReconcileResult result)
     {
         for (int index = 0; index < result.ChangeCount; index++)
         {
-            ref readonly OfflineDirectChunkSubscriptionChange change = ref _changes[index];
+            ref readonly OfflineDirectChunkSubscriptionChange change = ref changes[index];
             if (change.Kind == OfflineDirectChunkSubscriptionChangeKind.Left)
             {
                 int row = FindRow(recipientIndex, change.Key);
@@ -830,9 +905,12 @@ public sealed class DirtyChunkSpatialFanout
                     row = FindFreeRow();
                     _rows[row] = new DirtyChunkRecipientRow
                     {
-                        Active = true, Pending = true, RecipientIndex = recipientIndex,
+                        Active = true, RecipientIndex = recipientIndex,
                         Key = change.Key, Tier = change.CurrentTier,
+                        PendingPrevious = -1, PendingNext = -1,
                     };
+                    AddRowIndex(row);
+                    ActivatePending(row);
                     _rowCount++;
                     _incomingCurrentTruthScopesQueued++;
                 }
@@ -860,7 +938,7 @@ public sealed class DirtyChunkSpatialFanout
         int row = FindRow(recipientIndex, key);
         if (row >= 0)
         {
-            _rows[row].Pending = true;
+            ActivatePending(row);
             if (_rows[row].PendingWasSent)
             {
                 InvalidateDelivery(_rows[row].PendingDeliveryId);
@@ -925,18 +1003,100 @@ public sealed class DirtyChunkSpatialFanout
 
     private int FindPendingRow(int recipientIndex, SpatialChunkKey key)
     {
-        for (int index = 0; index < _rows.Length; index++)
-            if (_rows[index].Active && _rows[index].RecipientIndex == recipientIndex &&
-                _rows[index].Key == key && _rows[index].Pending && !_rows[index].PendingWasSent)
-                return index;
-        return -1;
+        int index = FindRow(recipientIndex, key);
+        return index >= 0 && _rows[index].Pending && !_rows[index].PendingWasSent
+            ? index
+            : -1;
+    }
+
+    private void AddRowIndex(int rowIndex)
+    {
+        ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
+        int slot = RowHash(row.RecipientIndex, row.Key) & _rowIndexMask;
+        int firstDeleted = -1;
+        for (int probe = 0; probe < _rowIndex.Length; probe++)
+        {
+            int value = _rowIndex[slot];
+            if (value == 0)
+            {
+                _rowIndex[firstDeleted >= 0 ? firstDeleted : slot] = rowIndex + 1;
+                return;
+            }
+            if (value < 0 && firstDeleted < 0) firstDeleted = slot;
+            slot = (slot + 1) & _rowIndexMask;
+        }
+        if (firstDeleted >= 0)
+        {
+            _rowIndex[firstDeleted] = rowIndex + 1;
+            return;
+        }
+        throw new InvalidOperationException("Dirty-chunk row index capacity diverged from row capacity.");
+    }
+
+    private void RemoveRowIndex(int rowIndex)
+    {
+        ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
+        int slot = RowHash(row.RecipientIndex, row.Key) & _rowIndexMask;
+        for (int probe = 0; probe < _rowIndex.Length; probe++)
+        {
+            int value = _rowIndex[slot];
+            if (value == 0) return;
+            if (value == rowIndex + 1)
+            {
+                _rowIndex[slot] = -1;
+                return;
+            }
+            slot = (slot + 1) & _rowIndexMask;
+        }
+    }
+
+    private void ActivatePending(int rowIndex)
+    {
+        ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
+        if (row.Pending) return;
+        int recipientIndex = row.RecipientIndex;
+        row.Pending = true;
+        row.PendingPrevious = -1;
+        row.PendingNext = _recipientPendingHeads[recipientIndex];
+        if (row.PendingNext >= 0)
+            _rows[row.PendingNext].PendingPrevious = rowIndex;
+        _recipientPendingHeads[recipientIndex] = rowIndex;
+        _recipientPendingCounts[recipientIndex]++;
+    }
+
+    private void DeactivatePending(int rowIndex)
+    {
+        ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
+        if (!row.Pending) return;
+        int recipientIndex = row.RecipientIndex;
+        if (row.PendingPrevious >= 0)
+            _rows[row.PendingPrevious].PendingNext = row.PendingNext;
+        else
+            _recipientPendingHeads[recipientIndex] = row.PendingNext;
+        if (row.PendingNext >= 0)
+            _rows[row.PendingNext].PendingPrevious = row.PendingPrevious;
+        row.Pending = false;
+        row.PendingPrevious = -1;
+        row.PendingNext = -1;
+        _recipientPendingCounts[recipientIndex]--;
     }
 
     private int FindRow(int recipientIndex, SpatialChunkKey key)
     {
-        for (int index = 0; index < _rows.Length; index++)
-            if (_rows[index].Active && _rows[index].RecipientIndex == recipientIndex && _rows[index].Key == key)
-                return index;
+        int slot = RowHash(recipientIndex, key) & _rowIndexMask;
+        for (int probe = 0; probe < _rowIndex.Length; probe++)
+        {
+            int value = _rowIndex[slot];
+            if (value == 0) return -1;
+            if (value > 0)
+            {
+                int rowIndex = value - 1;
+                ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
+                if (row.Active && row.RecipientIndex == recipientIndex && row.Key == key)
+                    return rowIndex;
+            }
+            slot = (slot + 1) & _rowIndexMask;
+        }
         return -1;
     }
 
@@ -945,15 +1105,16 @@ public sealed class DirtyChunkSpatialFanout
         ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
         if (!row.Active) return;
         if (row.PendingWasSent) InvalidateDelivery(row.PendingDeliveryId);
+        DeactivatePending(rowIndex);
+        RemoveRowIndex(rowIndex);
         row = default;
+        _freeRows[_freeRowCount++] = rowIndex;
         _rowCount--;
     }
 
     private int FindFreeRow()
     {
-        for (int index = 0; index < _rows.Length; index++)
-            if (!_rows[index].Active) return index;
-        return -1;
+        return _freeRowCount == 0 ? -1 : _freeRows[--_freeRowCount];
     }
 
     private int FindFreeDelivery()
@@ -998,20 +1159,29 @@ public sealed class DirtyChunkSpatialFanout
             {
                 _rows[index].PendingWasSent = false;
                 _rows[index].PendingDeliveryId = 0;
-                _rows[index].Pending = true;
+                ActivatePending(index);
             }
     }
 
     private void ClearDelivery(int index)
     {
+        int recipientIndex = _deliveries[index].RecipientIndex;
+        if (_deliveries[index].Active)
+            _recipientOutstandingDeliveries[recipientIndex]--;
         _deliveries[index] = default;
         _deliveryCount--;
     }
 
     private bool ContainsDirty(SpatialChunkKey key)
     {
-        for (int index = 0; index < _dirtyCount; index++)
-            if (_dirtyKeys[index] == key) return true;
+        int slot = Hash(key) & _dirtyIndexMask;
+        for (int probe = 0; probe < _dirtyIndexKeys.Length; probe++)
+        {
+            byte state = _dirtyIndexStates[slot];
+            if (state == 0) return false;
+            if (state == 1 && _dirtyIndexKeys[slot] == key) return true;
+            slot = (slot + 1) & _dirtyIndexMask;
+        }
         return false;
     }
 
@@ -1019,15 +1189,62 @@ public sealed class DirtyChunkSpatialFanout
     {
         if (ContainsDirty(key)) { _dirtyChunksCoalescedBeforeDrain++; return; }
         if (_dirtyCount >= _dirtyKeys.Length) throw new InvalidOperationException("Dirty queue preflight diverged.");
-        _dirtyKeys[_dirtyCount++] = key;
+        _dirtyKeys[_dirtyTail] = key;
+        _dirtyTail = (_dirtyTail + 1) % _dirtyKeys.Length;
+        _dirtyCount++;
+        AddDirtyIndex(key);
         _dirtyChunksObserved++;
     }
 
-    private void RemoveDirtyAtZero()
+    private void DequeueDirty(SpatialChunkKey key)
     {
+        _dirtyKeys[_dirtyHead] = default;
+        _dirtyHead = (_dirtyHead + 1) % _dirtyKeys.Length;
         _dirtyCount--;
-        _dirtyKeys.AsSpan(1, _dirtyCount).CopyTo(_dirtyKeys);
-        _dirtyKeys[_dirtyCount] = default;
+        RemoveDirtyIndex(key);
+    }
+
+    private void AddDirtyIndex(SpatialChunkKey key)
+    {
+        int slot = Hash(key) & _dirtyIndexMask;
+        int firstDeleted = -1;
+        for (int probe = 0; probe < _dirtyIndexKeys.Length; probe++)
+        {
+            byte state = _dirtyIndexStates[slot];
+            if (state == 0)
+            {
+                int target = firstDeleted >= 0 ? firstDeleted : slot;
+                _dirtyIndexKeys[target] = key;
+                _dirtyIndexStates[target] = 1;
+                return;
+            }
+            if (state == 2 && firstDeleted < 0) firstDeleted = slot;
+            slot = (slot + 1) & _dirtyIndexMask;
+        }
+        if (firstDeleted >= 0)
+        {
+            _dirtyIndexKeys[firstDeleted] = key;
+            _dirtyIndexStates[firstDeleted] = 1;
+            return;
+        }
+        throw new InvalidOperationException("Dirty-chunk key index capacity diverged from queue capacity.");
+    }
+
+    private void RemoveDirtyIndex(SpatialChunkKey key)
+    {
+        int slot = Hash(key) & _dirtyIndexMask;
+        for (int probe = 0; probe < _dirtyIndexKeys.Length; probe++)
+        {
+            byte state = _dirtyIndexStates[slot];
+            if (state == 0) return;
+            if (state == 1 && _dirtyIndexKeys[slot] == key)
+            {
+                _dirtyIndexStates[slot] = 2;
+                _dirtyIndexKeys[slot] = default;
+                return;
+            }
+            slot = (slot + 1) & _dirtyIndexMask;
+        }
     }
 
     private int FindRecipient(ParticipantId participant)
@@ -1140,6 +1357,28 @@ public sealed class DirtyChunkSpatialFanout
         }
     }
 
+    private static int Hash(in SpatialChunkKey key)
+    {
+        unchecked
+        {
+            uint hash = 2_166_136_261u;
+            hash = (hash ^ (uint)key.Space.Value) * 16_777_619u;
+            hash = (hash ^ (uint)key.Coord.X) * 16_777_619u;
+            hash = (hash ^ (uint)key.Coord.Z) * 16_777_619u;
+            return (int)hash & int.MaxValue;
+        }
+    }
+
+    private static int RowHash(int recipientIndex, in SpatialChunkKey key)
+    {
+        unchecked
+        {
+            uint hash = (uint)Hash(key);
+            hash = (hash ^ (uint)recipientIndex) * 16_777_619u;
+            return (int)hash & int.MaxValue;
+        }
+    }
+
     private static int MapCapacity(int maximum)
     {
         int capacity = 2;
@@ -1178,7 +1417,7 @@ public sealed class DirtyChunkSpatialFanout
         internal bool Active;
     }
 
-    [StructLayout(LayoutKind.Sequential, Size = 40)]
+    [StructLayout(LayoutKind.Sequential, Size = 48)]
     private struct DirtyChunkRecipientRow
     {
         internal int RecipientIndex;
@@ -1188,6 +1427,8 @@ public sealed class DirtyChunkSpatialFanout
         internal bool Pending;
         internal bool PendingWasSent;
         internal ulong PendingDeliveryId;
+        internal int PendingPrevious;
+        internal int PendingNext;
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 64)]

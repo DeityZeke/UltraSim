@@ -1,8 +1,10 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using UltraSim.ECS;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Network;
@@ -12,11 +14,8 @@ internal static class P03FourProfileComparison
 {
     private const int DefaultWarmupTicks = 100;
     private const int DefaultTotalTicks = 5_000;
-    private const int DefaultTimingSamples = 128;
     private const int DrainTicks = 32;
     private const int ByteBudget = 16_384;
-    private const int EntityRecordBytes = 40;
-    private const int ChunkRecordBytes = ChunkPublicationSemanticCodec.RecordBytes;
     private const int MaxEntities = 400;
     private const int MaxRecipients = 16;
     private const int MaxSubscriptionsPerRecipient = 1_024;
@@ -27,14 +26,13 @@ internal static class P03FourProfileComparison
         int requestedRecipients = ReadInt(args, "--recipients=", 8);
         int warmup = ReadInt(args, "--warmup=", DefaultWarmupTicks);
         int totalTicks = ReadInt(args, "--ticks=", DefaultTotalTicks);
-        int samples = ReadInt(args, "--samples=", DefaultTimingSamples);
         string? requestedWorkload = ReadString(args, "--workload=");
         string? requestedProfile = ReadString(args, "--profile=");
         string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "../../../../results/game-p03-four-profile-matrix.json"));
         if (requestedEntities <= 0 || requestedEntities > MaxEntities ||
             requestedRecipients <= 0 || requestedRecipients > MaxRecipients ||
-            warmup < 1 || samples < 3 || totalTicks <= warmup)
+            warmup < 1 || totalTicks <= warmup)
             throw new ArgumentOutOfRangeException(nameof(args));
 
         Workload[] workloads = BuildWorkloads(requestedEntities, requestedRecipients, totalTicks);
@@ -58,14 +56,15 @@ internal static class P03FourProfileComparison
                 .Select(profile =>
                 {
                     Console.WriteLine($"  profile={profile}");
-                    return RunProfile(workload, profile, warmup, samples);
+                    return RunProfile(workload, profile, warmup);
                 })
                 .OrderBy(profile => profile.Profile, StringComparer.Ordinal)
                 .ToArray();
             bool allConverged = profiles.All(profile => profile.Semantic.Converged);
-            bool equivalent = profiles.All(profile =>
-                string.Equals(profile.Semantic.Digest, profiles[0].Semantic.Digest,
-                    StringComparison.Ordinal));
+            bool entityFamilyEquivalent = FamilyEquivalent(
+                profiles, ProfileKind.MaintainedEntityRelation, ProfileKind.DirtyEntitySpatialFanout);
+            bool chunkFamilyEquivalent = FamilyEquivalent(
+                profiles, ProfileKind.ChunkPublication, ProfileKind.DirtyChunkSpatialFanout);
             WorkloadReport report = new(
                 workload.Id,
                 workload.Entities.Length,
@@ -73,16 +72,18 @@ internal static class P03FourProfileComparison
                 workload.Ticks.Length,
                 workload.CommonTraffic,
                 allConverged,
-                equivalent,
+                entityFamilyEquivalent,
+                chunkFamilyEquivalent,
                 profiles);
             reports.Add(report);
             Console.WriteLine(
-                $"  converged={allConverged} equivalent={equivalent} " +
+                $"  converged={allConverged} entity_family={entityFamilyEquivalent} " +
+                $"chunk_family={chunkFamilyEquivalent} " +
                 string.Join(" | ", profiles.Select(profile =>
                     $"{profile.Profile}:p95={profile.Timing.P95Microseconds:F2}us " +
                     $"p99={profile.Timing.P99Microseconds:F2}us " +
-                    $"work={profile.Work.DiscoveryOperations + profile.Work.PublicationReads:N0} " +
-                    $"wire={profile.Work.WireBytes:N0}B")));
+                    $"records={profile.Work.RecordsMaterialized:N0} " +
+                    $"payload={profile.Work.EncodedGamePayloadBytes:N0}B")));
         }
 
         var matrix = new ComparisonReport(
@@ -96,18 +97,22 @@ internal static class P03FourProfileComparison
             new MatrixScope(
                 "All four frozen Game profiles replay the same authoritative entity, recipient, " +
                 "mutation, movement, login/re-entry, and traffic trace. Measurements cover the " +
-                "profile semantic core and a common synthesized client/proof boundary. Timing " +
-                "samples are selected across the measured portion of the full soak trace; the " +
+                "profile semantic core and a payload-derived synthesized client/proof boundary. " +
+                "Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic " +
+                "oracle verification, diagnostics, and cold snapshots run in a separate evidence " +
+                "replay outside the timer. The " +
                 "secure Network transport is held constant but is not included in the timed core " +
                 "figures.",
-                $"Release; {totalTicks} trace ticks; {warmup} warmup ticks; {samples} timing " +
-                "samples selected from the measured window; application proof is immediate " +
+                $"Release; {totalTicks} trace ticks; {warmup} warmup ticks; " +
+                $"{totalTicks - warmup} measured ticks per profile; designated primary event " +
+                "ticks are reported separately; application proof is immediate " +
                 "after each encoded delivery; public/private/Event/Control traffic counts are " +
-                "identical in every profile row. Wire counters count each encoded message once.",
+                "identical in every profile row. Payload counters use canonical Game codec sizes " +
+                "and count each semantic delivery once; transport framing/security are excluded.",
                 "ChunkPublication remains selected; this matrix is evidence only."),
             totalTicks,
             warmup,
-            samples,
+            totalTicks - warmup,
             reports.ToArray());
         string json = JsonSerializer.Serialize(matrix, new JsonSerializerOptions { WriteIndented = true });
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
@@ -118,49 +123,64 @@ internal static class P03FourProfileComparison
     private static ProfileReport RunProfile(
         Workload workload,
         ProfileKind profile,
-        int warmup,
-        int samples)
+        int warmup)
     {
-        using ProfileAdapter adapter = CreateAdapter(workload, profile);
-        adapter.Initialize();
-        for (int tick = 0; tick < warmup; tick++)
-            adapter.Apply(workload.Ticks[tick], tick);
-
-        int measuredTicks = workload.Ticks.Length - warmup;
-        int stride = Math.Max(1, (int)Math.Ceiling(measuredTicks / (double)samples));
-        var timings = new List<double>(Math.Min(samples, measuredTicks));
-        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        for (int tick = warmup; tick < workload.Ticks.Length; tick++)
-        {
-            long started = Stopwatch.GetTimestamp();
-            adapter.Apply(workload.Ticks[tick], tick);
-            if ((tick - warmup) % stride == 0 && timings.Count < samples)
-                timings.Add(Microseconds(Stopwatch.GetTimestamp() - started));
-        }
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
-
+        using ProfileAdapter evidence = CreateAdapter(workload, profile);
+        evidence.DiagnosticsEnabled = true;
+        evidence.Initialize();
+        for (int tick = 0; tick < workload.Ticks.Length; tick++)
+            evidence.ApplyVerified(workload.Ticks[tick], tick);
         int convergenceTicks = 0;
-        while (!adapter.IsConverged && convergenceTicks < DrainTicks)
+        while (!evidence.IsConverged && convergenceTicks < DrainTicks)
         {
             convergenceTicks++;
-            adapter.Drain(workload.Ticks.Length + convergenceTicks);
-            adapter.RefreshSemanticStatus();
+            evidence.Drain(workload.Ticks.Length + convergenceTicks);
+            evidence.RefreshSemanticStatus();
         }
-        adapter.AssertSemanticContract();
-        CumulativeWork work = adapter.GetWork();
+        evidence.AssertSemanticContract();
+        CumulativeWork work = evidence.GetWork();
+
+        using ProfileAdapter timing = CreateAdapter(workload, profile);
+        timing.DiagnosticsEnabled = false;
+        timing.Initialize();
+        for (int tick = 0; tick < warmup; tick++)
+            timing.ApplyTimed(workload.Ticks[tick], tick, measure: false, out _, out _);
+        double[] timings = new double[workload.Ticks.Length - warmup];
+        var events = new List<EventTiming>(workload.PrimaryEventTicks.Length);
+        long allocated = 0;
+        for (int tick = warmup; tick < workload.Ticks.Length; tick++)
+        {
+            timing.ApplyTimed(workload.Ticks[tick], tick, measure: true,
+                out double elapsed, out long tickAllocated);
+            allocated = checked(allocated + tickAllocated);
+            timings[tick - warmup] = elapsed;
+            if (Array.BinarySearch(workload.PrimaryEventTicks, tick) >= 0)
+                events.Add(new EventTiming(tick, elapsed));
+        }
         return new ProfileReport(
             profile.ToString(),
-            new TimingSummary(Stats(timings.ToArray()), allocated),
+            new TimingSummary(Stats(timings), timings.Length, events.ToArray(), allocated),
             work,
-            adapter.GetMemoryBreakdown(work),
+            evidence.GetMemoryBreakdown(work),
             new SemanticSummary(
-                adapter.IsConverged,
+                evidence.IsConverged,
                 convergenceTicks,
-                adapter.SemanticDigest,
-                adapter.DeliveredEntities,
-                adapter.ExpectedEntities,
-                adapter.MaxPending,
-                adapter.MaxOutstanding));
+                evidence.SemanticDigest,
+                evidence.DeliveredEntities,
+                evidence.ExpectedEntities,
+                evidence.MaxPending,
+                evidence.MaxOutstanding));
+    }
+
+    private static bool FamilyEquivalent(
+        ProfileReport[] profiles,
+        ProfileKind first,
+        ProfileKind second)
+    {
+        ProfileReport? left = profiles.FirstOrDefault(item => item.Profile == first.ToString());
+        ProfileReport? right = profiles.FirstOrDefault(item => item.Profile == second.ToString());
+        return left is null || right is null ||
+            string.Equals(left.Semantic.Digest, right.Semantic.Digest, StringComparison.Ordinal);
     }
 
     private static ProfileAdapter CreateAdapter(Workload workload, ProfileKind profile) => profile switch
@@ -188,6 +208,7 @@ internal static class P03FourProfileComparison
             CreateWorkload("edge-corner", entities, recipients, ticks, WorkloadShape.EdgeCorner),
             CreateWorkload("teleport-login-reentry", entities, recipients, ticks, WorkloadShape.TeleportReentry),
             CreateWorkload("synchronized-teleport-stress", entities, recipients, ticks, WorkloadShape.SynchronizedTeleport),
+            CreateWorkload("lifecycle-privacy", entities, recipients, ticks, WorkloadShape.LifecyclePrivacy),
             CreateWorkload("high-dirt-low-movement", entities, recipients, ticks, WorkloadShape.HighDirt),
             CreateWorkload("high-movement-low-dirt", entities, recipients, ticks, WorkloadShape.HighMovement),
         ];
@@ -217,6 +238,7 @@ internal static class P03FourProfileComparison
             }
             else if (shape == WorkloadShape.EdgeCorner)
             {
+                int cycle = index / 16;
                 x = (index % 4) switch
                 {
                     0 => -320_000,
@@ -231,9 +253,19 @@ internal static class P03FourProfileComparison
                     2 => -160_000,
                     _ => 160_000,
                 };
+                x += cycle * 1_000L;
+                z += cycle * 700L;
             }
-            entities[index] = new(index, true, index % 17 != 0, x, z, 1);
+            bool isPublic = index % 17 != 0;
+            entities[index] = new(index, true, isPublic, x, z, 1, 1,
+                isPublic ? 1u : 0u, isPublic ? 1UL : 0UL);
         }
+        var publicPositions = new HashSet<(long X, long Z)>();
+        for (int index = 0; index < entities.Length; index++)
+            if (entities[index].Public &&
+                !publicPositions.Add((entities[index].X, entities[index].Z)))
+                throw new InvalidOperationException(
+                    $"P0.3 workload {id} contains ambiguous public payload positions.");
 
         var recipients = new TraceRecipient[recipientCount];
         for (int index = 0; index < recipients.Length; index++)
@@ -251,6 +283,22 @@ internal static class P03FourProfileComparison
         TraceEntity[] workingEntities = entities.ToArray();
         TraceRecipient[] workingRecipients = recipients.ToArray();
         int measuredEventTick = Math.Max(4, ticks / 3);
+        int firstPublicEntity = Enumerable.Range(0, workingEntities.Length)
+            .Where(index => workingEntities[index].Public)
+            .OrderBy(index => workingRecipients
+                .Where(recipient => recipient.Active)
+                .Select(recipient =>
+                {
+                    long dx = workingEntities[index].X - recipient.X;
+                    long dz = workingEntities[index].Z - recipient.Z;
+                    return dx * dx + dz * dz;
+                })
+                .DefaultIfEmpty(long.MaxValue)
+                .Min())
+            .DefaultIfEmpty(-1)
+            .First();
+        if (firstPublicEntity < 0)
+            throw new InvalidOperationException("P0.3 requires at least one public trace entity.");
 
         var ticksData = new TraceTick[ticks];
         for (int tick = 0; tick < ticks; tick++)
@@ -260,7 +308,7 @@ internal static class P03FourProfileComparison
             switch (shape)
             {
                 case WorkloadShape.OneDirty when tick == Math.Max(4, ticks / 2):
-                    AddMutation(mutations, workingEntities, 0, 1_000, 0);
+                    AddMutation(mutations, workingEntities, firstPublicEntity, 1_000, 0);
                     break;
                 case WorkloadShape.ClusteredDirty:
                     for (int index = 0; index < Math.Min(32, entityCount); index++)
@@ -281,7 +329,7 @@ internal static class P03FourProfileComparison
                     AddMovement(moves, workingRecipients, tick, 500, 375);
                     break;
                 case WorkloadShape.Mixed:
-                    if (tick == measuredEventTick)
+                    if (tick >= measuredEventTick)
                         AddMovement(moves, workingRecipients, tick, 500, 375);
                     if (tick > measuredEventTick)
                         for (int offset = 0; offset < Math.Min(12, entityCount); offset++)
@@ -290,7 +338,7 @@ internal static class P03FourProfileComparison
                                 (tick & 1) == 0 ? 25 : -25);
                     break;
                 case WorkloadShape.Dense:
-                    if (tick == measuredEventTick)
+                    if (tick >= measuredEventTick)
                         AddMovement(moves, workingRecipients, tick, 500, 250);
                     if (tick > measuredEventTick)
                         for (int offset = 0; offset < Math.Min(32, entityCount); offset++)
@@ -321,7 +369,7 @@ internal static class P03FourProfileComparison
                         workingRecipients[0] = new TraceRecipient(0, true, 0, 0);
                     }
                     if (tick == Math.Max(7, ticks / 3 + 3) && entityCount > 0)
-                        AddMutation(mutations, workingEntities, 0, 2_000, 0);
+                        AddMutation(mutations, workingEntities, firstPublicEntity, 2_000, 0);
                     break;
                 case WorkloadShape.SynchronizedTeleport:
                     if (tick == Math.Max(4, ticks / 3))
@@ -344,6 +392,20 @@ internal static class P03FourProfileComparison
                         }
                     }
                     break;
+                case WorkloadShape.LifecyclePrivacy:
+                    if (tick == measuredEventTick)
+                        AddStateMutation(mutations, workingEntities, firstPublicEntity,
+                            present: true, isPublic: false);
+                    else if (tick == measuredEventTick + 1)
+                        AddStateMutation(mutations, workingEntities, firstPublicEntity,
+                            present: true, isPublic: true);
+                    else if (tick == measuredEventTick + 2)
+                        AddStateMutation(mutations, workingEntities, firstPublicEntity,
+                            present: false, isPublic: true);
+                    else if (tick == measuredEventTick + 3)
+                        AddStateMutation(mutations, workingEntities, firstPublicEntity,
+                            present: true, isPublic: true);
+                    break;
                 case WorkloadShape.HighDirt:
                     for (int offset = 0; offset < Math.Max(1, entityCount * 3 / 4); offset++)
                         AddMutation(mutations, workingEntities, (tick * 19 + offset) % entityCount,
@@ -360,13 +422,24 @@ internal static class P03FourProfileComparison
         }
 
         int publicFacts = entities.Count(entity => entity.Present && entity.Public);
+        int[] primaryEventTicks = shape switch
+        {
+            WorkloadShape.OneDirty => [Math.Max(4, ticks / 2)],
+            WorkloadShape.TeleportReentry or WorkloadShape.LifecyclePrivacy =>
+                [measuredEventTick, measuredEventTick + 1, measuredEventTick + 2, measuredEventTick + 3],
+            WorkloadShape.SynchronizedTeleport => [measuredEventTick, measuredEventTick + 1],
+            WorkloadShape.Mixed or WorkloadShape.Dense => [measuredEventTick],
+            WorkloadShape.EdgeCorner or WorkloadShape.HighMovement => [ticks - 1],
+            _ => [],
+        };
         var traffic = new CommonTraffic(
-            PublicFacts: checked(publicFacts + ticksData.Sum(item => item.Mutations.Length)),
+            PublicFacts: checked(publicFacts + ticksData.Sum(item =>
+                item.Mutations.Count(mutation => mutation.Present && mutation.Public))),
             PrivateFacts: checked(entities.Count(entity => !entity.Public) + ticksData.Sum(item =>
-                item.Mutations.Count(mutation => !entities[mutation.EntityIndex].Public))),
+                item.Mutations.Count(mutation => !mutation.Public))),
             EventFacts: checked(ticks * Math.Max(1, recipientCount / 4)),
             ControlFacts: checked(ticks * (recipientCount + 1)));
-        return new Workload(id, entities, recipients, ticksData, traffic);
+        return new Workload(id, entities, recipients, ticksData, primaryEventTicks, traffic);
     }
 
     private static void AddMutation(
@@ -379,7 +452,10 @@ internal static class P03FourProfileComparison
         TraceEntity current = entities[index];
         mutations.Add(new EntityMutation(index, current.X + dx, current.Z + dz,
             current.Present, current.Public));
-        entities[index] = current with { X = current.X + dx, Z = current.Z + dz };
+        entities[index] = AdvanceWorkingPublicLineage(
+            current with { X = current.X + dx, Z = current.Z + dz },
+            current.Present && current.Public,
+            current.Present && current.Public);
     }
 
     private static void AddMovement(
@@ -389,16 +465,64 @@ internal static class P03FourProfileComparison
         long dx,
         long dz)
     {
-        long direction = (tick & 1) == 0 ? 1 : -1;
         for (int index = 0; index < recipients.Length; index++)
         {
             TraceRecipient current = recipients[index];
             if (!current.Active) continue;
-            long nextX = current.X + direction * dx;
-            long nextZ = current.Z + direction * dz;
+            int segment = ((tick + index * 137) / 400) & 7;
+            (int xDirection, int zDirection) = segment switch
+            {
+                0 => (1, 0),
+                1 => (1, 1),
+                2 => (0, 1),
+                3 => (-1, 1),
+                4 => (-1, 0),
+                5 => (-1, -1),
+                6 => (0, -1),
+                _ => (1, -1),
+            };
+            long nextX = current.X + xDirection * dx;
+            long nextZ = current.Z + zDirection * dz;
             moves.Add(new RecipientMove(index, true, nextX, nextZ));
             recipients[index] = new TraceRecipient(index, true, nextX, nextZ);
         }
+    }
+
+    private static void AddStateMutation(
+        List<EntityMutation> mutations,
+        TraceEntity[] entities,
+        int index,
+        bool present,
+        bool isPublic)
+    {
+        TraceEntity current = entities[index];
+        mutations.Add(new EntityMutation(index, current.X, current.Z, present, isPublic));
+        TraceEntity updated = current with
+        {
+            Present = present,
+            Public = isPublic,
+            Generation = !current.Present && present
+                ? checked(current.Generation + 1)
+                : current.Generation,
+        };
+        entities[index] = AdvanceWorkingPublicLineage(
+            updated, current.Present && current.Public, present && isPublic);
+    }
+
+    private static TraceEntity AdvanceWorkingPublicLineage(
+        in TraceEntity prior,
+        bool wasDisclosed,
+        bool isDisclosed)
+    {
+        if (isDisclosed && !wasDisclosed)
+            return prior with
+            {
+                PublicGeneration = checked(prior.PublicGeneration + 1),
+                PublicVersion = 1,
+            };
+        if (wasDisclosed)
+            return prior with { PublicVersion = checked(prior.PublicVersion + 1) };
+        return prior;
     }
 
     private static double Microseconds(long ticks) =>
@@ -515,6 +639,7 @@ internal static class P03FourProfileComparison
         EdgeCorner,
         TeleportReentry,
         SynchronizedTeleport,
+        LifecyclePrivacy,
         HighDirt,
         HighMovement,
     }
@@ -525,7 +650,10 @@ internal static class P03FourProfileComparison
         bool Public,
         long X,
         long Z,
-        ulong Version);
+        ulong Version,
+        uint Generation,
+        uint PublicGeneration,
+        ulong PublicVersion);
 
     private readonly record struct TraceRecipient(int Index, bool Active, long X, long Z);
 
@@ -551,6 +679,7 @@ internal static class P03FourProfileComparison
         TraceEntity[] Entities,
         TraceRecipient[] Recipients,
         TraceTick[] Ticks,
+        int[] PrimaryEventTicks,
         CommonTraffic CommonTraffic);
 
     private readonly record struct CommonTraffic(
@@ -585,7 +714,8 @@ internal static class P03FourProfileComparison
         int TraceTicks,
         CommonTraffic CommonTraffic,
         bool AllProfilesConverged,
-        bool SemanticallyEquivalent,
+        bool EntityFamilyEquivalent,
+        bool ChunkFamilyEquivalent,
         ProfileReport[] Profiles);
 
     private sealed record ProfileReport(
@@ -597,6 +727,8 @@ internal static class P03FourProfileComparison
 
     private readonly record struct TimingSummary(
         StatsSummary Percentiles,
+        int SampleCount,
+        EventTiming[] PrimaryEvents,
         long MeasuredManagedBytes)
     {
         public double P50Microseconds => Percentiles.P50;
@@ -605,6 +737,8 @@ internal static class P03FourProfileComparison
     }
 
     private readonly record struct StatsSummary(double P50, double P95, double P99, double Max);
+
+    private readonly record struct EventTiming(int Tick, double Microseconds);
 
     private readonly record struct SemanticSummary(
         bool Converged,
@@ -616,63 +750,110 @@ internal static class P03FourProfileComparison
         int MaxOutstanding);
 
     private readonly record struct CumulativeWork(
-        ulong DiscoveryOperations,
-        ulong CandidateExamined,
-        ulong TopologyOperations,
-        ulong PublicationReads,
+        ulong DirtyUnitsProcessed,
+        ulong CandidateTests,
+        ulong RecipientReconciliations,
         ulong SourceReads,
         ulong RecordsMaterialized,
-        ulong WireBytes,
-        ulong Deliveries,
-        ulong Proofs,
+        ulong EncodedGamePayloadBytes,
+        ulong EncodedGameMessages,
+        ulong ApplicationProofs,
         int MaxPending,
         int MaxOutstanding,
         long ReservedBytes);
 
     private readonly record struct MemoryBreakdown(
-        long ProfileStorageBytes,
+        long ProfileMechanismReservedBytes,
         long AuthoritativeSourceHistoryBytes,
-        long RecipientKnowledgeBytes,
-        long DirtyWorkBytes,
-        long PendingOutstandingBytes,
-        long ScratchAndSemanticStateBytes);
+        long HarnessSemanticStateBytes,
+        long TotalKnownReservedBytes);
 
     private abstract class ProfileAdapter : IDisposable
     {
         protected readonly Workload Workload;
         protected readonly TraceEntity[] State;
         protected readonly TraceRecipient[] Recipients;
+        private readonly bool _usesChunkInterest;
         private readonly bool[] _appliedPresent;
+        private readonly uint[] _appliedIdentityIndex;
+        private readonly uint[] _appliedIdentityGeneration;
         private readonly ulong[] _appliedVersion;
         private readonly long[] _appliedX;
         private readonly long[] _appliedZ;
+        private readonly SpatialChunkKey[] _lastDeliveredChunk;
+        private readonly bool[] _hasLastDeliveredChunk;
         private readonly int[] _publicSlotEntities;
         private readonly uint[] _publicSlotGenerations;
+        private readonly ChunkInterestEntry[][]? _expectedChunkInterest;
+        private readonly int[]? _expectedChunkInterestCounts;
+        private readonly ChunkInterestEntry[]? _expectedChunkInterestScratch;
         private int _deliveredEntities;
         private int _expectedEntities;
-        private ulong _wireBytes;
-        private ulong _deliveries;
+        private ulong _encodedGamePayloadBytes;
+        private ulong _encodedGameMessages;
         private ulong _proofs;
         private ulong _materializedRecords;
         private int _maxPending;
         private int _maxOutstanding;
 
-        protected ProfileAdapter(Workload workload)
+        protected ProfileAdapter(Workload workload, bool usesChunkInterest)
         {
             Workload = workload;
+            _usesChunkInterest = usesChunkInterest;
             State = workload.Entities.ToArray();
             Recipients = workload.Recipients.ToArray();
             _appliedPresent = new bool[checked(Recipients.Length * State.Length)];
+            _appliedIdentityIndex = new uint[_appliedPresent.Length];
+            _appliedIdentityGeneration = new uint[_appliedPresent.Length];
             _appliedVersion = new ulong[_appliedPresent.Length];
             _appliedX = new long[_appliedPresent.Length];
             _appliedZ = new long[_appliedPresent.Length];
+            _lastDeliveredChunk = new SpatialChunkKey[_appliedPresent.Length];
+            _hasLastDeliveredChunk = new bool[_appliedPresent.Length];
             _publicSlotEntities = Enumerable.Repeat(-1, State.Length).ToArray();
             _publicSlotGenerations = new uint[State.Length];
+            if (usesChunkInterest)
+            {
+                _expectedChunkInterest = new ChunkInterestEntry[Recipients.Length][];
+                _expectedChunkInterestCounts = new int[Recipients.Length];
+                _expectedChunkInterestScratch = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
+                for (int index = 0; index < Recipients.Length; index++)
+                    _expectedChunkInterest[index] = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
+                RefreshAllChunkInterestOracles();
+            }
         }
+
+        internal bool DiagnosticsEnabled { get; set; }
 
         public abstract void Initialize();
 
-        public void Apply(TraceTick tick, int cadenceStep)
+        public void ApplyVerified(TraceTick tick, int cadenceStep)
+        {
+            PrepareTick(tick);
+            ApplyCore(tick, cadenceStep);
+            UpdateSemanticStatus();
+        }
+
+        public void ApplyTimed(
+            TraceTick tick,
+            int cadenceStep,
+            bool measure,
+            out double elapsedMicroseconds,
+            out long allocatedBytes)
+        {
+            PrepareTick(tick);
+            long allocatedBefore = measure ? GC.GetAllocatedBytesForCurrentThread() : 0;
+            long started = measure ? Stopwatch.GetTimestamp() : 0;
+            ApplyCore(tick, cadenceStep);
+            elapsedMicroseconds = measure
+                ? Microseconds(Stopwatch.GetTimestamp() - started)
+                : 0;
+            allocatedBytes = measure
+                ? GC.GetAllocatedBytesForCurrentThread() - allocatedBefore
+                : 0;
+        }
+
+        private void PrepareTick(TraceTick tick)
         {
             for (int index = 0; index < tick.Moves.Length; index++)
             {
@@ -684,16 +865,32 @@ internal static class P03FourProfileComparison
             {
                 EntityMutation mutation = tick.Mutations[index];
                 TraceEntity prior = State[mutation.EntityIndex];
+                bool wasDisclosed = prior.Present && prior.Public;
+                bool isDisclosed = mutation.Present && mutation.Public;
+                uint publicGeneration = isDisclosed && !wasDisclosed
+                    ? checked(prior.PublicGeneration + 1)
+                    : prior.PublicGeneration;
+                ulong publicVersion = isDisclosed && !wasDisclosed
+                    ? 1
+                    : wasDisclosed
+                        ? checked(prior.PublicVersion + 1)
+                        : prior.PublicVersion;
                 State[mutation.EntityIndex] = new(
                     prior.Index,
                     mutation.Present,
                     mutation.Public,
                     mutation.X,
                     mutation.Z,
-                    checked(prior.Version + 1));
+                    checked(prior.Version + 1),
+                    mutation.Present && !prior.Present
+                        ? checked(prior.Generation + 1)
+                        : prior.Generation,
+                    publicGeneration,
+                    publicVersion);
             }
-            ApplyCore(tick, cadenceStep);
-            UpdateSemanticStatus();
+            if (_usesChunkInterest)
+                for (int index = 0; index < tick.Moves.Length; index++)
+                    RefreshChunkInterestOracle(tick.Moves[index].RecipientIndex);
         }
 
         public abstract void Drain(int cadenceStep);
@@ -717,20 +914,46 @@ internal static class P03FourProfileComparison
 
         protected void RecordEntity(
             int recipientIndex,
-            int entityIndex,
+            in ReplicationEntityId identity,
             ulong version,
-            bool present)
+            bool present,
+            long x,
+            long z,
+            int tickMarker)
         {
+            int entityIndex = checked((int)identity.Index);
             if ((uint)recipientIndex >= (uint)Recipients.Length ||
                 (uint)entityIndex >= (uint)State.Length)
-                return;
+                throw new InvalidOperationException("P0.3 entity payload identity exceeded trace capacity.");
+            if (!identity.IsValid || version == 0 ||
+                present && tickMarker != checked((int)version))
+                throw new InvalidOperationException("P0.3 entity payload identity/version/state was invalid.");
             int offset = checked(recipientIndex * State.Length + entityIndex);
             _appliedPresent[offset] = present;
+            _appliedIdentityIndex[offset] = identity.Index;
+            _appliedIdentityGeneration[offset] = identity.Generation;
             _appliedVersion[offset] = version;
-            _appliedX[offset] = present ? State[entityIndex].X : 0;
-            _appliedZ[offset] = present ? State[entityIndex].Z : 0;
+            _appliedX[offset] = present ? x : 0;
+            _appliedZ[offset] = present ? z : 0;
+            if (present)
+            {
+                _lastDeliveredChunk[offset] = ToChunkKey(x, z);
+                _hasLastDeliveredChunk[offset] = true;
+            }
             _materializedRecords++;
         }
+
+        protected void RecordEntity(
+            int recipientIndex,
+            in ReplicationEntityId identity,
+            ulong version,
+            bool present,
+            in ReplicationSpatialPoint position,
+            in GameSimulationState state) =>
+            RecordEntity(recipientIndex, identity, version, present,
+                present ? position.XMillimeters : 0,
+                present ? position.ZMillimeters : 0,
+                present ? state.TickMarker : 0);
 
         protected void RecordChunkRecord(
             int recipientIndex,
@@ -741,21 +964,32 @@ internal static class P03FourProfileComparison
             if (entityIndex < 0)
                 entityIndex = FindEntityIndex(record.Position);
             RememberPublicSlot(record.Id, entityIndex);
-            RecordEntity(recipientIndex, entityIndex,
-                entityIndex >= 0 ? State[entityIndex].Version : record.EntityPublicVersion, present);
+            if (record.PrefabId != GameWorldPublicPrefabIds.Character ||
+                record.Orientation != WorldYaw.Zero ||
+                record.StateFlags != WorldPublicStateFlags.Visible)
+                throw new InvalidOperationException("P0.3 publication payload fields diverged from source truth.");
+            RecordPublicEntity(recipientIndex, entityIndex, record.Id,
+                record.EntityPublicVersion, present,
+                record.Position.GlobalXMillimeters, record.Position.GlobalZMillimeters);
         }
 
         private int FindEntityIndex(in WorldPosition position)
         {
             long x = position.GlobalXMillimeters;
             long z = position.GlobalZMillimeters;
+            int match = -1;
             for (int index = 0; index < State.Length; index++)
             {
                 TraceEntity entity = State[index];
-                if (entity.Present && entity.Public && entity.X == x && entity.Z == z &&
-                    !IsPublicEntityMapped(entityIndex: index))
-                    return index;
+                if (entity.Present && entity.Public && entity.X == x && entity.Z == z)
+                {
+                    if (match >= 0)
+                        throw new InvalidOperationException(
+                            $"P0.3 publication record position ({x},{z}) is ambiguous.");
+                    match = index;
+                }
             }
+            if (match >= 0) return match;
             throw new InvalidOperationException(
                 $"P0.3 publication record position ({x},{z}) has no current trace entity.");
         }
@@ -768,14 +1002,6 @@ internal static class P03FourProfileComparison
             return _publicSlotEntities[id.Index];
         }
 
-        private bool IsPublicEntityMapped(int entityIndex)
-        {
-            for (int index = 0; index < _publicSlotEntities.Length; index++)
-                if (_publicSlotEntities[index] == entityIndex)
-                    return true;
-            return false;
-        }
-
         protected void RecordChunkDelta(
             int recipientIndex,
             in WorldPublicDeltaRecord record)
@@ -786,7 +1012,42 @@ internal static class P03FourProfileComparison
                 return;
             }
             int entityIndex = ResolvePublicSlot(record.Id);
-            RecordEntity(recipientIndex, entityIndex, State[entityIndex].Version, false);
+            if (entityIndex < 0)
+            {
+                // A subscribed chunk may legitimately carry a removal for an identity this
+                // recipient never observed. It is a materialized, semantically empty operation.
+                _materializedRecords++;
+                return;
+            }
+            RecordPublicEntity(recipientIndex, entityIndex, record.Id,
+                record.EntityPublicVersion, false, 0, 0);
+        }
+
+        private void RecordPublicEntity(
+            int recipientIndex,
+            int entityIndex,
+            in WorldPublicEntityId identity,
+            ulong version,
+            bool present,
+            long x,
+            long z)
+        {
+            if ((uint)recipientIndex >= (uint)Recipients.Length ||
+                (uint)entityIndex >= (uint)State.Length || !identity.IsValid || version == 0)
+                throw new InvalidOperationException("P0.3 chunk payload identity/version was invalid.");
+            int offset = checked(recipientIndex * State.Length + entityIndex);
+            _appliedPresent[offset] = present;
+            _appliedIdentityIndex[offset] = identity.Index;
+            _appliedIdentityGeneration[offset] = identity.Generation;
+            _appliedVersion[offset] = version;
+            _appliedX[offset] = present ? x : 0;
+            _appliedZ[offset] = present ? z : 0;
+            if (present)
+            {
+                _lastDeliveredChunk[offset] = ToChunkKey(x, z);
+                _hasLastDeliveredChunk[offset] = true;
+            }
+            _materializedRecords++;
         }
 
         private void RememberPublicSlot(in WorldPublicEntityId id, int entityIndex)
@@ -802,7 +1063,7 @@ internal static class P03FourProfileComparison
             if ((uint)id.Index >= (uint)_publicSlotEntities.Length ||
                 _publicSlotGenerations[id.Index] != id.Generation ||
                 _publicSlotEntities[id.Index] < 0)
-                throw new InvalidOperationException("P0.3 publication removal lost its entity identity.");
+                return -1;
             return _publicSlotEntities[id.Index];
         }
 
@@ -812,9 +1073,13 @@ internal static class P03FourProfileComparison
         {
             for (int entityIndex = 0; entityIndex < State.Length; entityIndex++)
             {
-                if (!State[entityIndex].Present ||
-                    ToChunkKey(State[entityIndex]) != key) continue;
-                RecordEntity(recipientIndex, entityIndex, State[entityIndex].Version, false);
+                int offset = checked(recipientIndex * State.Length + entityIndex);
+                if (!_appliedPresent[offset] || !_hasLastDeliveredChunk[offset] ||
+                    _lastDeliveredChunk[offset] != key) continue;
+                _appliedPresent[offset] = false;
+                _appliedX[offset] = 0;
+                _appliedZ[offset] = 0;
+                _materializedRecords++;
             }
         }
 
@@ -824,7 +1089,12 @@ internal static class P03FourProfileComparison
             {
                 int offset = recipientIndex * State.Length + entityIndex;
                 if (_appliedPresent[offset])
-                    RecordEntity(recipientIndex, entityIndex, State[entityIndex].Version, false);
+                {
+                    _appliedPresent[offset] = false;
+                    _appliedX[offset] = 0;
+                    _appliedZ[offset] = 0;
+                    _materializedRecords++;
+                }
             }
         }
 
@@ -842,18 +1112,25 @@ internal static class P03FourProfileComparison
                 for (int entity = 0; entity < State.Length; entity++)
                 {
                     int offset = recipient * State.Length + entity;
-                    bool expected = ExpectedVisible(Recipients[recipient], State[entity]);
+                    bool expected = ExpectedVisible(recipient, entity);
                     bool actual = Recipients[recipient].Active && _appliedPresent[offset];
+                    ulong expectedVersion = _usesChunkInterest
+                        ? State[entity].PublicVersion
+                        : State[entity].Version;
                     if (actual != expected || actual &&
-                        (_appliedVersion[offset] != State[entity].Version ||
+                        (_appliedVersion[offset] != expectedVersion ||
                          _appliedX[offset] != State[entity].X ||
-                         _appliedZ[offset] != State[entity].Z))
+                         _appliedZ[offset] != State[entity].Z ||
+                         (_usesChunkInterest
+                             ? _appliedIdentityGeneration[offset] != State[entity].PublicGeneration
+                             : _appliedIdentityIndex[offset] != (uint)entity ||
+                               _appliedIdentityGeneration[offset] != State[entity].Generation)))
                         throw new InvalidOperationException(
                             $"P0.3 convergence failed for {GetType().Name}: recipient={recipient}, " +
                             $"entity={entity}, expectedPresent={expected}, actualPresent={actual}, " +
                             $"recipientPosition=({Recipients[recipient].X},{Recipients[recipient].Z}), " +
                             $"entityPosition=({State[entity].X},{State[entity].Z}), " +
-                            $"expectedVersion={State[entity].Version}, actualVersion={_appliedVersion[offset]}, " +
+                            $"expectedVersion={expectedVersion}, actualVersion={_appliedVersion[offset]}, " +
                             $"expectedCount={_expectedEntities}, actualCount={_deliveredEntities}.");
                 }
             }
@@ -862,38 +1139,44 @@ internal static class P03FourProfileComparison
 
         internal void RefreshSemanticStatus() => UpdateSemanticStatus();
 
-        protected ulong Deliveries => _deliveries;
+        protected ulong Deliveries => _encodedGameMessages;
         protected ulong Proofs => _proofs;
-        protected ulong WireBytes => _wireBytes;
+        protected ulong WireBytes => _encodedGamePayloadBytes;
         protected ulong MaterializedRecords => _materializedRecords;
 
         protected MemoryBreakdown BuildMemoryBreakdown(
             long profileStorageBytes,
-            long sourceHistoryBytes,
-            long recipientKnowledgeBytes,
-            long dirtyWorkBytes)
+            long sourceHistoryBytes)
         {
-            long pendingOutstandingBytes = checked((long)(MaxPending + MaxOutstanding) * 64);
             long semanticStateBytes = checked((long)_appliedPresent.Length *
-                (sizeof(byte) + sizeof(ulong) + sizeof(long) + sizeof(long)));
+                (sizeof(byte) + sizeof(uint) + sizeof(uint) + sizeof(ulong) +
+                 sizeof(long) + sizeof(long) + Unsafe.SizeOf<SpatialChunkKey>() + sizeof(byte)) +
+                (long)State.Length * Unsafe.SizeOf<TraceEntity>() +
+                (long)Recipients.Length * Unsafe.SizeOf<TraceRecipient>() +
+                (long)_publicSlotEntities.Length * sizeof(int) +
+                (long)_publicSlotGenerations.Length * sizeof(uint));
+            if (_expectedChunkInterest is not null)
+                semanticStateBytes = checked(semanticStateBytes +
+                    (long)_expectedChunkInterest.Length * MaxSubscriptionsPerRecipient *
+                        Unsafe.SizeOf<ChunkInterestEntry>() +
+                    (long)_expectedChunkInterestCounts!.Length * sizeof(int) +
+                    (long)_expectedChunkInterestScratch!.Length * Unsafe.SizeOf<ChunkInterestEntry>());
             return new(
                 profileStorageBytes,
                 sourceHistoryBytes,
-                recipientKnowledgeBytes,
-                dirtyWorkBytes,
-                pendingOutstandingBytes,
-                semanticStateBytes);
+                semanticStateBytes,
+                checked(profileStorageBytes + sourceHistoryBytes + semanticStateBytes));
         }
 
         protected void RecordMessageBytes(int bytes)
         {
-            _wireBytes = checked(_wireBytes + checked((ulong)bytes));
-            _deliveries++;
+            _encodedGamePayloadBytes = checked(_encodedGamePayloadBytes + checked((ulong)bytes));
+            _encodedGameMessages++;
             _proofs++;
         }
 
-        protected static ReplicationEntityId ReplicationId(int entityIndex) =>
-            new(checked((uint)entityIndex), 1);
+        protected static ReplicationEntityId ReplicationId(in TraceEntity entity) =>
+            new(checked((uint)entity.Index), entity.Generation);
 
         protected static ReplicationSpatialPoint Point(in TraceEntity entity) =>
             new(checked((int)entity.X), checked((int)entity.Z));
@@ -920,6 +1203,14 @@ internal static class P03FourProfileComparison
         protected static SpatialChunkKey ToChunkKey(in TraceEntity entity) =>
             WorldPosition(entity).ToChunkKey(GameWorldState.DefaultSpace);
 
+        private static SpatialChunkKey ToChunkKey(long x, long z)
+        {
+            if (!global::UltraSim.Game.World.WorldPosition.TryFromGlobalMillimeters(
+                    x, 0, z, out WorldPosition position))
+                throw new InvalidOperationException("A delivered P0.3 position exceeded world bounds.");
+            return position.ToChunkKey(GameWorldState.DefaultSpace);
+        }
+
         private void UpdateSemanticStatus()
         {
             _expectedEntities = 0;
@@ -930,15 +1221,22 @@ internal static class P03FourProfileComparison
             {
                 for (int entity = 0; entity < State.Length; entity++)
                 {
-                    bool expected = ExpectedVisible(Recipients[recipient], State[entity]);
+                    bool expected = ExpectedVisible(recipient, entity);
                     int offset = recipient * State.Length + entity;
                     bool actual = Recipients[recipient].Active && _appliedPresent[offset];
+                    ulong expectedVersion = _usesChunkInterest
+                        ? State[entity].PublicVersion
+                        : State[entity].Version;
                     if (expected) _expectedEntities++;
                     if (actual) _deliveredEntities++;
                     if (actual != expected || actual &&
-                        (_appliedVersion[offset] != State[entity].Version ||
+                        (_appliedVersion[offset] != expectedVersion ||
                          _appliedX[offset] != State[entity].X ||
-                         _appliedZ[offset] != State[entity].Z))
+                         _appliedZ[offset] != State[entity].Z ||
+                         (_usesChunkInterest
+                             ? _appliedIdentityGeneration[offset] != State[entity].PublicGeneration
+                             : _appliedIdentityIndex[offset] != (uint)entity ||
+                               _appliedIdentityGeneration[offset] != State[entity].Generation)))
                         equal = false;
                     hash ^= (ulong)(actual ? 1 : 0);
                     hash = unchecked(hash * 1_099_511_628_211UL);
@@ -948,7 +1246,11 @@ internal static class P03FourProfileComparison
                     hash = unchecked(hash * 1_099_511_628_211UL);
                     if (actual)
                     {
-                        hash ^= State[entity].Version;
+                        hash ^= _appliedIdentityIndex[offset];
+                        hash = unchecked(hash * 1_099_511_628_211UL);
+                        hash ^= _appliedIdentityGeneration[offset];
+                        hash = unchecked(hash * 1_099_511_628_211UL);
+                        hash ^= _appliedVersion[offset];
                         hash = unchecked(hash * 1_099_511_628_211UL);
                         hash ^= unchecked((ulong)_appliedX[offset]);
                         hash = unchecked(hash * 1_099_511_628_211UL);
@@ -961,12 +1263,58 @@ internal static class P03FourProfileComparison
             SemanticDigest = hash.ToString("X16");
         }
 
-        private static bool ExpectedVisible(in TraceRecipient recipient, in TraceEntity entity)
+        private bool ExpectedVisible(int recipientIndex, int entityIndex)
         {
+            TraceRecipient recipient = Recipients[recipientIndex];
+            TraceEntity entity = State[entityIndex];
             if (!recipient.Active || !entity.Present || !entity.Public) return false;
+            if (_usesChunkInterest)
+            {
+                SpatialChunkKey key = ToChunkKey(entity);
+                ChunkInterestEntry[] entries = _expectedChunkInterest![recipientIndex];
+                int low = 0;
+                int high = _expectedChunkInterestCounts![recipientIndex] - 1;
+                while (low <= high)
+                {
+                    int middle = low + ((high - low) >> 1);
+                    int comparison = entries[middle].Key.CompareTo(key);
+                    if (comparison == 0) return true;
+                    if (comparison < 0) low = middle + 1; else high = middle - 1;
+                }
+                return false;
+            }
             long dx = entity.X - recipient.X;
             long dz = entity.Z - recipient.Z;
             return dx * dx + dz * dz <= 192_000L * 192_000L;
+        }
+
+        private void RefreshAllChunkInterestOracles()
+        {
+            for (int index = 0; index < Recipients.Length; index++)
+                RefreshChunkInterestOracle(index);
+        }
+
+        private void RefreshChunkInterestOracle(int recipientIndex)
+        {
+            if (!Recipients[recipientIndex].Active)
+            {
+                _expectedChunkInterestCounts![recipientIndex] = 0;
+                return;
+            }
+            ChunkInterestEntry[] current = _expectedChunkInterest![recipientIndex];
+            int currentCount = _expectedChunkInterestCounts![recipientIndex];
+            ChunkInterestQueryStatus status = ChunkInterestQuery.TryQuery(
+                GameWorldState.DefaultSpace,
+                WorldPosition(Recipients[recipientIndex]),
+                GameChunkInterestProfile.Default,
+                current.AsSpan(0, currentCount),
+                _expectedChunkInterestScratch!,
+                out int count,
+                out int required);
+            if (status != ChunkInterestQueryStatus.Success || count != required)
+                throw new InvalidOperationException("P0.3 chunk-interest oracle exceeded its fixed capacity.");
+            _expectedChunkInterestScratch.AsSpan(0, count).CopyTo(current);
+            _expectedChunkInterestCounts[recipientIndex] = count;
         }
     }
 
@@ -975,14 +1323,16 @@ internal static class P03FourProfileComparison
         private readonly GameInterestService _service;
         private readonly GameWorldStateRecord[] _records;
         private readonly bool[] _serviceActive;
+        private readonly bool[] _entityServicePresent;
 
-        internal MaintainedAdapter(Workload workload) : base(workload)
+        internal MaintainedAdapter(Workload workload) : base(workload, usesChunkInterest: false)
         {
             _service = new GameInterestService(new StateEpoch(0xF031),
                 CreateInterestLimits(workload), GameInterestProfile.Reference,
                 GameInterestAdmissionMode.ExactDistance);
             _records = new GameWorldStateRecord[32];
             _serviceActive = new bool[Recipients.Length];
+            _entityServicePresent = new bool[State.Length];
         }
 
         public override void Initialize()
@@ -1004,6 +1354,11 @@ internal static class P03FourProfileComparison
         {
             foreach (RecipientMove move in tick.Moves) ApplyRecipient(move.RecipientIndex, cadenceStep);
             foreach (EntityMutation mutation in tick.Mutations) ApplyEntity(mutation.EntityIndex, cadenceStep);
+            if (DiagnosticsEnabled)
+            {
+                GameInterestSnapshot snapshot = _service.GetSnapshot();
+                NotePending(snapshot.PendingRelationCount, snapshot.OutstandingBundleCount);
+            }
             Drain(cadenceStep);
         }
 
@@ -1019,25 +1374,27 @@ internal static class P03FourProfileComparison
                 for (int index = 0; index < bundle.RecordCount; index++)
                 {
                     GameWorldStateRecord record = _records[index];
-                    RecordEntity(recipientIndex,
-                        checked((int)record.Entity.Index), record.CanonicalVersion, record.IsPresent);
+                    RecordEntity(recipientIndex, record.Entity, record.CanonicalVersion,
+                        record.IsPresent, record.Position, record.SimulationState);
                 }
                 RecordMessageBytes(bundle.EstimatedEncodedBytes);
                 Require(_service.TryAcknowledgeBundle(
                     bundle.Participant, bundle.BundleId, applied: true));
             }
-            GameInterestSnapshot snapshot = _service.GetSnapshot();
-            NotePending(snapshot.PendingRelationCount, snapshot.OutstandingBundleCount);
+            if (DiagnosticsEnabled)
+            {
+                GameInterestSnapshot snapshot = _service.GetSnapshot();
+                NotePending(snapshot.PendingRelationCount, snapshot.OutstandingBundleCount);
+            }
         }
 
         public override CumulativeWork GetWork()
         {
             GameInterestSnapshot snapshot = _service.GetSnapshot();
             return new(
-                snapshot.PendingObligationsCreated,
+                snapshot.UniqueSemanticConstructions,
+                0,
                 snapshot.RelationSequenceAllocations,
-                checked((ulong)(snapshot.RelationCount + snapshot.RegionInterestEdgeCount)),
-                snapshot.SemanticRecordCopies,
                 snapshot.SemanticRecordCopies,
                 snapshot.SemanticRecordCopies,
                 WireBytes,
@@ -1053,9 +1410,7 @@ internal static class P03FourProfileComparison
             GameInterestSnapshot snapshot = _service.GetSnapshot();
             return BuildMemoryBreakdown(
                 snapshot.ReservedBytes,
-                0,
-                checked((long)snapshot.RelationCount * 64),
-                checked((long)snapshot.PendingRelationCount * 32));
+                0);
         }
 
         public override void AssertSemanticContract() => AssertConverged();
@@ -1083,23 +1438,27 @@ internal static class P03FourProfileComparison
         private void ApplyEntity(int index, int cadenceStep)
         {
             TraceEntity entity = State[index];
-            if (!entity.Public) return;
-            GameReplicationHorizon horizon = entity.Public
-                ? GameReplicationHorizon.Far
-                : GameReplicationHorizon.None;
+            if (!entity.Present)
+            {
+                if (_entityServicePresent[index])
+                {
+                    Require(_service.RemoveEntity(
+                        ReplicationId(entity), entity.Version,
+                        checked(cadenceStep * 16L + index)) is
+                        GameInterestUpdateStatus.Success or GameInterestUpdateStatus.StaleVersion);
+                    _entityServicePresent[index] = false;
+                }
+                return;
+            }
             var projected = new GameProjectedEntity(
-                ReplicationId(index), true,
+                ReplicationId(entity), true,
                 new GameSimulationState { TickMarker = checked((int)entity.Version) });
-            if (entity.Present)
-                Require(_service.UpsertEntity(
-                    projected, entity.Version, Point(entity), horizon,
-                    checked(cadenceStep * 16L + index)) is
-                    GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange);
-            else
-                Require(_service.RemoveEntity(
-                    ReplicationId(index), entity.Version,
-                    checked(cadenceStep * 16L + index)) is
-                    GameInterestUpdateStatus.Success or GameInterestUpdateStatus.StaleVersion);
+            Require(_service.UpsertEntity(
+                projected, entity.Version, Point(entity),
+                entity.Public ? GameReplicationHorizon.Far : GameReplicationHorizon.None,
+                checked(cadenceStep * 16L + index)) is
+                GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange);
+            _entityServicePresent[index] = true;
         }
     }
 
@@ -1109,7 +1468,7 @@ internal static class P03FourProfileComparison
         private readonly DirtyEntityDeliveryRecord[] _records;
         private readonly bool[] _serviceActive;
 
-        internal DirtyEntityAdapter(Workload workload) : base(workload)
+        internal DirtyEntityAdapter(Workload workload) : base(workload, usesChunkInterest: false)
         {
             _service = new DirtyEntitySpatialFanout(
                 new StateEpoch(0xF032),
@@ -1151,8 +1510,17 @@ internal static class P03FourProfileComparison
         {
             Require(_service.TryProcessDirtyEntities(cadenceStep * 16L, out _) is
                 DirtyEntityProcessStatus.Success or DirtyEntityProcessStatus.NoData);
+            if (DiagnosticsEnabled)
+            {
+                DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
+                NotePending(snapshot.PendingObligationCount, snapshot.OutstandingBundleCount);
+            }
+            int bundleGuard = 0;
             while (true)
             {
+                if (++bundleGuard > State.Length * Recipients.Length * 2 + 64)
+                    throw new InvalidOperationException(
+                        $"P0.3 dirty-entity drain did not converge at cadence {cadenceStep}: {_service.GetSnapshot()}.");
                 DirtyEntityBuildStatus status = _service.TryBuildNextBundle(
                     cadenceStep * 16L, ByteBudget, _records, out DirtyEntityBundle bundle);
                 if (status == DirtyEntityBuildStatus.NoData) break;
@@ -1160,15 +1528,19 @@ internal static class P03FourProfileComparison
                 for (int index = 0; index < bundle.RecordCount; index++)
                 {
                     DirtyEntityDeliveryRecord record = _records[index];
-                    RecordEntity(ParticipantIndex(bundle.Participant),
-                        checked((int)record.Entity.Index), record.CanonicalVersion, record.IsPresent);
+                    RecordEntity(ParticipantIndex(bundle.Participant), record.Entity,
+                        record.CanonicalVersion, record.IsPresent,
+                        record.Position, record.SimulationState);
                 }
                 RecordMessageBytes(bundle.EstimatedEncodedBytes);
                 Require(_service.TryAcknowledgeBundle(
                     bundle.Participant, bundle.DeliveryBundleId, applied: true));
             }
-            DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
-            NotePending(snapshot.PendingObligationCount, snapshot.OutstandingBundleCount);
+            if (DiagnosticsEnabled)
+            {
+                DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
+                NotePending(snapshot.PendingObligationCount, snapshot.OutstandingBundleCount);
+            }
         }
 
         public override CumulativeWork GetWork()
@@ -1177,7 +1549,6 @@ internal static class P03FourProfileComparison
             return new(
                 snapshot.DirtyEntitiesProcessed,
                 snapshot.CandidateRecipientsExamined,
-                checked((ulong)(snapshot.SpatialRegionCount + snapshot.SemanticKnowledgeRowCount)),
                 snapshot.BundlesBuilt,
                 snapshot.DirtyEntitiesProcessed,
                 MaterializedRecords,
@@ -1194,9 +1565,7 @@ internal static class P03FourProfileComparison
             DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
             return BuildMemoryBreakdown(
                 snapshot.ReservedBytes,
-                0,
-                checked((long)snapshot.SemanticKnowledgeRowCount * 64),
-                checked((long)snapshot.DirtyEntityCount * 32));
+                0);
         }
 
         public override void AssertSemanticContract() => AssertConverged();
@@ -1223,11 +1592,11 @@ internal static class P03FourProfileComparison
         {
             TraceEntity entity = State[index];
             var projected = new GameProjectedEntity(
-                ReplicationId(index), true,
+                ReplicationId(entity), true,
                 new GameSimulationState { TickMarker = checked((int)entity.Version) });
             Require(_service.CommitEntity(
                 new DirtyEntityLatestState(
-                    ReplicationId(index), entity.Version, entity.Present, entity.Public,
+                    ReplicationId(entity), entity.Version, entity.Present, entity.Public,
                     entity.Present ? GameReplicationHorizon.Far : GameReplicationHorizon.None,
                     Point(entity), projected.SimulationState),
                     checked(cadenceStep * 16L + index)) is
@@ -1244,7 +1613,7 @@ internal static class P03FourProfileComparison
         private readonly OfflineDirectChunkSubscriptionChange[] _changes;
         private readonly bool[] _registered;
 
-        internal ChunkPublicationAdapter(Workload workload) : base(workload)
+        internal ChunkPublicationAdapter(Workload workload) : base(workload, usesChunkInterest: true)
         {
             _publication = new PublicationFixture(workload);
             _recipients = new OfflineDirectChunkRecipient[Recipients.Length];
@@ -1256,6 +1625,8 @@ internal static class P03FourProfileComparison
                     Recipients.Length,
                     checked(Recipients.Length * MaxSubscriptionsPerRecipient)));
             _changes = new OfflineDirectChunkSubscriptionChange[MaxSubscriptionsPerRecipient];
+            for (int index = 0; index < _recipients.Length; index++)
+                _recipients[index] = CreateRecipient();
         }
 
         public override void Initialize()
@@ -1272,14 +1643,18 @@ internal static class P03FourProfileComparison
             Require(_scheduler.ObserveCommit(_publication.Source) is
                 ChunkPublicationCommitObservationStatus.Observed or
                 ChunkPublicationCommitObservationStatus.NoNewCommit);
+            if (DiagnosticsEnabled)
+            {
+                ChunkPublicationWorkSchedulerSnapshot snapshot = _scheduler.GetSnapshot();
+                NotePending(snapshot.PendingWorkCount, 0);
+            }
             Drain(cadenceStep);
         }
 
         public override void Drain(int cadenceStep)
         {
-            int pendingBudget = _scheduler.GetSnapshot().PendingWorkCount;
-            while (pendingBudget-- > 0 &&
-                   _scheduler.TryDequeueDue(checked((ulong)cadenceStep), out ChunkPublicationWork work))
+            while (_scheduler.TryDequeueDue(
+                       checked((ulong)cadenceStep), out ChunkPublicationWork work))
             {
                 int recipientIndex = work.Recipient.Index;
                 OfflineDirectChunkRecipient recipient = _recipients[recipientIndex] ??
@@ -1304,23 +1679,26 @@ internal static class P03FourProfileComparison
                 {
                     foreach (WorldPublicRecord record in read.Snapshot)
                         RecordChunkRecord(recipientIndex, record);
-                    RecordMessageBytes(ChunkPublicationSemanticCodec.MeasureSnapshot(read.Snapshot.Length));
+                    RecordMessageBytes(UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(read.Snapshot.Length));
                 }
                 else if (status == OfflineDirectChunkReadStatus.Delta)
                 {
                     foreach (WorldPublicDeltaRecord record in read.Deltas)
                         RecordChunkDelta(recipientIndex, record);
-                    RecordMessageBytes(48 + read.Deltas.Length * ChunkRecordBytes);
+                    RecordMessageBytes(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(read.Deltas.Length));
                 }
                 else if (status == OfflineDirectChunkReadStatus.ChunkAbsent)
                 {
                     ClearChunk(recipientIndex, work.Key);
-                    RecordMessageBytes(48);
+                    RecordMessageBytes(RemoteChunkAbsenceMessageCodec.EncodedSize);
                 }
                 recipient.CommitRead();
             }
-            ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
-            NotePending(scheduler.PendingWorkCount, 0);
+            if (DiagnosticsEnabled)
+            {
+                ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
+                NotePending(scheduler.PendingWorkCount, 0);
+            }
         }
 
         public override CumulativeWork GetWork()
@@ -1337,9 +1715,8 @@ internal static class P03FourProfileComparison
             return new(
                 scheduler.DirtyChunksObserved + scheduler.IncomingQueued,
                 scheduler.DirtyRecipientFanout + scheduler.PendingMembershipsExamined,
-                checked((ulong)(scheduler.MembershipCount + scheduler.SharedChunkCount)),
+                scheduler.IncomingQueued,
                 reads,
-                scheduler.DirtyChunksObserved,
                 MaterializedRecords,
                 WireBytes,
                 Deliveries,
@@ -1354,9 +1731,7 @@ internal static class P03FourProfileComparison
             ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
             return BuildMemoryBreakdown(
                 checked(scheduler.ReservedBytes + RecipientReservedBytes()),
-                _publication.Source.GetSnapshot().ReservedBytes,
-                checked((long)scheduler.MembershipCount * 64),
-                checked((long)scheduler.PendingWorkCount * 32));
+                _publication.Source.GetSnapshot().ReservedBytes);
         }
 
         public override void AssertSemanticContract() => AssertConverged();
@@ -1373,18 +1748,13 @@ internal static class P03FourProfileComparison
                 {
                     Require(_scheduler.RemoveRecipient(_recipientIds[index]));
                     _registered[index] = false;
-                    _recipients[index] = null;
+                    _recipients[index]!.ResetForReuse();
                 }
                 return;
             }
-            if (_recipients[index] is null)
+            if (!_registered[index])
             {
-                var recipient = new OfflineDirectChunkRecipient(
-                    new OfflineDirectChunkRecipientLimits(MaxSubscriptionsPerRecipient, MaxEntities, MaxEntities),
-                    GameChunkInterestProfile.Default,
-                    OfflineDirectChunkCadence.EvidenceProfile);
-                _recipients[index] = recipient;
-                Require(_scheduler.TryRegister(recipient, out _recipientIds[index]));
+                Require(_scheduler.TryRegister(_recipients[index]!, out _recipientIds[index]));
                 _registered[index] = true;
             }
             OfflineDirectChunkRecipient active = _recipients[index]!;
@@ -1409,10 +1779,14 @@ internal static class P03FourProfileComparison
         {
             long reserved = 0;
             for (int index = 0; index < _recipients.Length; index++)
-                if (_recipients[index] is not null)
-                    reserved = checked(reserved + _recipients[index]!.GetStorageSnapshot().TotalReservedBytes);
+                reserved = checked(reserved + _recipients[index]!.GetStorageSnapshot().TotalReservedBytes);
             return reserved;
         }
+
+        private static OfflineDirectChunkRecipient CreateRecipient() => new(
+            new OfflineDirectChunkRecipientLimits(MaxSubscriptionsPerRecipient, MaxEntities, MaxEntities),
+            GameChunkInterestProfile.Default,
+            OfflineDirectChunkCadence.EvidenceProfile);
     }
 
     private sealed class DirtyChunkAdapter : ProfileAdapter
@@ -1420,11 +1794,9 @@ internal static class P03FourProfileComparison
         private readonly PublicationFixture _publication;
         private readonly DirtyChunkSpatialFanout _service;
         private readonly bool[] _serviceActive;
-        private readonly ChunkInterestEntry[][] _knownInterest;
-        private readonly int[] _knownInterestCounts;
-        private readonly ChunkInterestEntry[] _interestScratch;
+        private readonly OfflineDirectChunkSubscriptionChange[] _changes;
 
-        internal DirtyChunkAdapter(Workload workload) : base(workload)
+        internal DirtyChunkAdapter(Workload workload) : base(workload, usesChunkInterest: true)
         {
             _publication = new PublicationFixture(workload);
             _service = new DirtyChunkSpatialFanout(
@@ -1441,11 +1813,7 @@ internal static class P03FourProfileComparison
                 GameChunkInterestProfile.Default,
                 OfflineDirectChunkCadence.EvidenceProfile);
             _serviceActive = new bool[Recipients.Length];
-            _knownInterest = new ChunkInterestEntry[Recipients.Length][];
-            _knownInterestCounts = new int[Recipients.Length];
-            _interestScratch = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
-            for (int index = 0; index < _knownInterest.Length; index++)
-                _knownInterest[index] = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
+            _changes = new OfflineDirectChunkSubscriptionChange[MaxSubscriptionsPerRecipient * 2];
         }
 
         public override void Initialize()
@@ -1467,6 +1835,12 @@ internal static class P03FourProfileComparison
             Require(_service.TryProcessDirtyChunks(
                 checked((ulong)cadenceStep), out _) is
                 DirtyChunkProcessStatus.Success or DirtyChunkProcessStatus.NoData);
+            if (DiagnosticsEnabled)
+            {
+                DirtyChunkSpatialFanoutSnapshot beforeDelivery = _service.GetSnapshot();
+                NotePending(beforeDelivery.PendingChunkObligationCount,
+                    beforeDelivery.OutstandingDeliveryCount);
+            }
             for (int recipientIndex = 0; recipientIndex < Recipients.Length; recipientIndex++)
             {
                 if (!_serviceActive[recipientIndex]) continue;
@@ -1484,27 +1858,33 @@ internal static class P03FourProfileComparison
                     {
                         foreach (WorldPublicRecord record in delivery.Snapshot)
                             RecordChunkRecord(recipientIndex, record);
-                        RecordMessageBytes(ChunkPublicationSemanticCodec.MeasureSnapshot(
+                        RecordMessageBytes(UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
                             delivery.Snapshot.Length));
                     }
                     else if (delivery.Status == OfflineDirectChunkReadStatus.Delta)
                     {
                         foreach (WorldPublicDeltaRecord record in delivery.Deltas)
+                        {
                             RecordChunkDelta(recipientIndex, record);
-                        RecordMessageBytes(48 + delivery.Deltas.Length * ChunkRecordBytes);
+                        }
+                        RecordMessageBytes(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(
+                            delivery.Deltas.Length));
                     }
                     else if (delivery.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
                     {
                         ClearChunk(recipientIndex, delivery.Key);
-                        RecordMessageBytes(48);
+                        RecordMessageBytes(RemoteChunkAbsenceMessageCodec.EncodedSize);
                     }
                     Require(_service.TryAcknowledgeDelivery(
                         participant, delivery.DeliveryId, applied: true) ==
                         DirtyChunkAppliedProofStatus.Applied);
                 }
             }
-            DirtyChunkSpatialFanoutSnapshot snapshot = _service.GetSnapshot();
-            NotePending(snapshot.PendingChunkObligationCount, snapshot.OutstandingDeliveryCount);
+            if (DiagnosticsEnabled)
+            {
+                DirtyChunkSpatialFanoutSnapshot snapshot = _service.GetSnapshot();
+                NotePending(snapshot.PendingChunkObligationCount, snapshot.OutstandingDeliveryCount);
+            }
         }
 
         public override CumulativeWork GetWork()
@@ -1513,11 +1893,9 @@ internal static class P03FourProfileComparison
             return new(
                 snapshot.DirtyChunksProcessed + snapshot.IncomingCurrentTruthScopesQueued,
                 snapshot.CandidateRecipientsExamined,
-                checked((ulong)(snapshot.RecipientChunkKnowledgeRowCount +
-                    snapshot.RecipientSpatialRegionCount)),
-                MaterializedRecords,
+                snapshot.RecipientTopologyReconciliations,
                 snapshot.DirtyChunksObserved,
-                snapshot.PublicationReads + snapshot.DeltaReads,
+                MaterializedRecords,
                 WireBytes,
                 Deliveries,
                 Proofs,
@@ -1531,9 +1909,7 @@ internal static class P03FourProfileComparison
             DirtyChunkSpatialFanoutSnapshot snapshot = _service.GetSnapshot();
             return BuildMemoryBreakdown(
                 snapshot.ReservedBytes,
-                _publication.Source.GetSnapshot().ReservedBytes,
-                checked((long)snapshot.RecipientChunkKnowledgeRowCount * 64),
-                checked((long)(snapshot.DirtyChunkCount + snapshot.PendingChunkObligationCount) * 32));
+                _publication.Source.GetSnapshot().ReservedBytes);
         }
 
         public override void AssertSemanticContract() => AssertConverged();
@@ -1547,46 +1923,21 @@ internal static class P03FourProfileComparison
             {
                 if (_serviceActive[index])
                 {
-                    for (int interest = 0; interest < _knownInterestCounts[index]; interest++)
-                        ClearChunk(index, _knownInterest[index][interest].Key);
-                    _knownInterestCounts[index] = 0;
-                }
-                if (_serviceActive[index])
+                    ClearRecipient(index);
                     Require(_service.RemoveRecipient(Participant(index)));
+                }
                 _serviceActive[index] = false;
                 return;
             }
-            ChunkInterestEntry[] known = _knownInterest[index];
-            ReadOnlySpan<ChunkInterestEntry> previous =
-                known.AsSpan(0, _knownInterestCounts[index]);
-            ChunkInterestQueryStatus query = ChunkInterestQuery.TryQuery(
-                GameWorldState.DefaultSpace,
-                WorldPosition(recipient),
-                GameChunkInterestProfile.Default,
-                previous,
-                _interestScratch,
-                out int interestCount,
-                out int required);
-            Require(query == ChunkInterestQueryStatus.Success && interestCount == required);
-            Require(_service.SetRecipientAnchor(
+            DirtyChunkRecipientUpdateStatus status = _service.SetRecipientAnchor(
                 Participant(index), GameWorldState.DefaultSpace, WorldPosition(recipient),
-                checked((ulong)(index + 1))) is
-                DirtyChunkRecipientUpdateStatus.Reconciled or
+                checked((ulong)(index + 1)), _changes,
+                out OfflineDirectChunkReconcileResult result);
+            Require(status is DirtyChunkRecipientUpdateStatus.Reconciled or
                 DirtyChunkRecipientUpdateStatus.NoChange);
-            for (int oldIndex = 0; oldIndex < previous.Length; oldIndex++)
-            {
-                SpatialChunkKey oldKey = previous[oldIndex].Key;
-                bool retained = false;
-                for (int newIndex = 0; newIndex < interestCount; newIndex++)
-                    if (_interestScratch[newIndex].Key == oldKey)
-                    {
-                        retained = true;
-                        break;
-                    }
-                if (!retained) ClearChunk(index, oldKey);
-            }
-            _interestScratch.AsSpan(0, interestCount).CopyTo(known);
-            _knownInterestCounts[index] = interestCount;
+            for (int changeIndex = 0; changeIndex < result.ChangeCount; changeIndex++)
+                if (_changes[changeIndex].Kind == OfflineDirectChunkSubscriptionChangeKind.Left)
+                    ClearChunk(index, _changes[changeIndex].Key);
             _serviceActive[index] = true;
         }
     }

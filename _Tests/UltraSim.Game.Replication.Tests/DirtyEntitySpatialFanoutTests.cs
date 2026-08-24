@@ -50,6 +50,70 @@ internal static class DirtyEntitySpatialFanoutTests
             $"semantic_rows={dirty.SemanticKnowledgeRowCount} reserved_bytes={dirty.ReservedBytes}");
     }
 
+    internal static void ExactWireBudgetAndRecipientOutstandingIsolation()
+    {
+        DirtyEntitySpatialFanout service = Create(
+            maximumEntities: 4, maximumRecipients: 2,
+            maximumOutstandingBundles: 2, maximumRecordsPerBundle: 2);
+        ParticipantId slow = new(1);
+        ParticipantId healthy = new(2);
+        Check.Equal(DirtyEntityUpdateStatus.Success, service.SetRecipientAnchor(slow, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success, service.SetRecipientAnchor(healthy, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success, service.CommitEntity(Present(0, 1, 0, 0), 0));
+        service.TryProcessDirtyEntities(0, out _);
+
+        int exactBytes = RemoteDirtyEntityStateHeaderCodec.EncodedSize +
+            DirtyEntityDeliveryRecord.MaximumEncodedBytes;
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[2];
+        Check.Equal(DirtyEntityBuildStatus.ByteBudgetTooSmall,
+            service.TryBuildBundle(slow, 0, exactBytes - 1, records, out _));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(slow, 0, exactBytes, records, out DirtyEntityBundle retained));
+        Check.Equal(exactBytes, retained.EstimatedEncodedBytes);
+        Check.Equal(DirtyEntityBuildStatus.OutstandingCapacityExceeded,
+            service.TryBuildBundle(slow, 0, exactBytes, records, out _));
+
+        DirtyEntityDeliveryRecord delivered = records[0];
+        Span<RemoteDirtyEntityRecord> remote = stackalloc RemoteDirtyEntityRecord[1];
+        remote[0] = new RemoteDirtyEntityRecord(
+            delivered.DeliveryId, delivered.Entity.Index, delivered.Entity.Generation,
+            delivered.CanonicalVersion, delivered.IsPresent, (byte)delivered.Horizon,
+            delivered.Position.XMillimeters, delivered.Position.ZMillimeters,
+            delivered.SimulationState.TickMarker, delivered.SimulationState.InputVelocity);
+        Span<byte> encoded = stackalloc byte[exactBytes];
+        Check.True(UltraSimGameProtocol.TryWriteDirtyEntityBundle(
+            encoded, 1, service.StateEpoch.Value, retained.DeliveryBundleId, remote, out int written));
+        Check.Equal(exactBytes, written);
+
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(healthy, 0, exactBytes, records, out DirtyEntityBundle progressed));
+        Check.True(service.TryAcknowledgeBundle(healthy, progressed.DeliveryBundleId, true));
+        Check.True(service.TryAcknowledgeBundle(slow, retained.DeliveryBundleId, true));
+    }
+
+    internal static void SameRegionEntityMutationKeepsSpatialListsAcyclic()
+    {
+        DirtyEntitySpatialFanout service = Create(maximumEntities: 4, maximumRecipients: 1);
+        ParticipantId participant = new(1);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(participant, Point(0, 0), 0));
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[2];
+        for (int step = 1; step <= 256; step++)
+        {
+            Check.Equal(DirtyEntityUpdateStatus.Success,
+                service.CommitEntity(Present(0, checked((ulong)step), step % 50, 0), step));
+            service.TryProcessDirtyEntities(step, out _);
+            Check.True(service.SetRecipientAnchor(
+                    participant, Point(step % 25, 0), step) is
+                DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange);
+            while (service.TryBuildBundle(participant, step, 4_096, records, out DirtyEntityBundle bundle) ==
+                   DirtyEntityBuildStatus.Success)
+                Check.True(service.TryAcknowledgeBundle(
+                    participant, bundle.DeliveryBundleId, applied: true));
+        }
+        Check.Equal(1, service.GetSnapshot().AuthoritativeEntityCount);
+    }
+
     internal static void MovementCleanTopologyRemovalAndReentry()
     {
         DirtyEntitySpatialFanout service = Create(maximumEntities: 8, maximumRecipients: 4);
@@ -611,10 +675,13 @@ internal static class DirtyEntitySpatialFanoutTests
     private static DirtyEntitySpatialFanout Create(
         int maximumEntities,
         int maximumRecipients,
-        int maximumRows = 64) => new(
+        int maximumRows = 64,
+        int maximumOutstandingBundles = 16,
+        int maximumRecordsPerBundle = 8) => new(
         new StateEpoch(1),
         new DirtyEntitySpatialFanoutLimits(
-            maximumEntities, maximumRecipients, 256, maximumRows, 16, 8),
+            maximumEntities, maximumRecipients, 256, maximumRows,
+            maximumOutstandingBundles, maximumRecordsPerBundle),
         new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100));
 
     private static DirtyEntityLatestState Present(int index, ulong version, int x, int z) =>

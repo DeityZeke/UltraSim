@@ -747,6 +747,44 @@ public sealed class OfflineDirectChunkRecipient
     }
 
     /// <summary>
+    /// Clears one retired recipient for bounded pool reuse without reallocating its banks.
+    /// The owner must first invalidate every external delivery ticket; a borrowed read cannot
+    /// be reset because its scratch lifetime is still active.
+    /// </summary>
+    public void ResetForReuse()
+    {
+        EnsureOwner();
+        if (_pendingIndex >= 0)
+            throw new InvalidOperationException("A recipient with a borrowed publication read cannot be reset.");
+        Array.Clear(_subscriptions);
+        Array.Clear(_nextSubscriptions);
+        Array.Clear(_previousInterest);
+        Array.Clear(_desiredInterest);
+        Array.Clear(_snapshotScratch);
+        Array.Clear(_deltaScratch);
+        _subscriptionCount = 0;
+        _sourceEpoch = default;
+        ClearPending();
+        _reconciliations = 0;
+        _enteredSubscriptions = 0;
+        _leftSubscriptions = 0;
+        _tierChanges = 0;
+        _snapshotReads = 0;
+        _chunkAbsentReads = 0;
+        _deltaReads = 0;
+        _noChangeReads = 0;
+        _snapshotFallbacks = 0;
+        _cadenceDeferrals = 0;
+        _lastInterestAnchor = default;
+        _lastInterestSpace = default;
+        _stableInterestMovementBudgetMillimeters = 0;
+        _hasLastInterestAnchor = false;
+        _fullInterestQueries = 0;
+        _stableInterestFastPaths = 0;
+        ResetReconcileAttribution(enabled: false);
+    }
+
+    /// <summary>
     /// Enables or disables opt-in reconciliation attribution and clears every retained counter.
     /// The normal path pays only dormant branch checks while attribution is disabled.
     /// </summary>

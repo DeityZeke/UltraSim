@@ -3,8 +3,9 @@
 Status: `ChunkPublication` is selected as the current UltraSim game public
 replication profile through the Hosted H0.5 dedicated-process gate. The frozen N0
 implementation is retained explicitly as the `MaintainedEntityRelation` profile,
-not as a second Network architecture or deletion candidate. P0.1 also registers
-the concrete `DirtyEntitySpatialFanout` Game profile without selecting it. Terrain / World T0 is
+not as a second Network architecture or deletion candidate. P0.1 and P0.2 also
+register the concrete `DirtyEntitySpatialFanout` and `DirtyChunkSpatialFanout`
+Game profiles without selecting either. Terrain / World T0 is
 accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -16,10 +17,12 @@ remaining server-semantic, deterministic secure-transport, dense-entry, and
 topology-attribution matrix is captured. Representative roaming, mixed public/
 private traffic, and the in-process real shared-socket topology are accepted. The
 separate Hosted H0.5 dedicated-server/independent-client gate is also accepted, so
-N1 is now selected for the current UltraSim game. The three concrete Game-owned
+N1 is now selected for the current UltraSim game. The four concrete Game-owned
 profiles are registered by `GamePublicReplicationProfiles`; no generic AOI interface
 was introduced. DirtyEntity uses dirty-time spatial discovery plus recipient
-topology reconciliation and retains only bounded semantic knowledge/debt.
+topology reconciliation and retains only bounded semantic knowledge/debt. DirtyChunk
+discovers interested recipients from a changed chunk without retaining a reverse
+chunk-to-recipient membership graph.
 
 The separately authorized externally admitted listener/security lifecycle is now
 tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.5 compose transactional
@@ -277,6 +280,12 @@ DirtyEntitySpatialFanout
     dirty-time spatial discovery + recipient topology reconciliation
     entity latest state + bounded semantic knowledge/debt; no persistent R×E graph
 
+DirtyChunkSpatialFanout
+    DirtyChunkSpatialFanout
+    dirty chunk -> spatial recipient discovery at mutation time
+    chunk publication/history + bounded recipient knowledge/debt
+    no maintained chunk -> recipient reverse-membership graph
+
 all profiles
     authoritative source truth
     recipient disclosure
@@ -289,7 +298,7 @@ all profiles
 
 `GamePublicReplicationProfiles` is a finite identity/descriptor catalog, not a
 factory or universal runtime interface. Permanent paired conformance probes execute
-the shared guarantees against both concrete profiles while their detailed hostile,
+the shared guarantees against all concrete profiles while their detailed hostile,
 recovery, and scale suites remain profile-specific. Obsolete N0 milestone naming
 may be cleaned up later; the entity-relation profile itself remains supported.
 
@@ -1269,6 +1278,65 @@ Evidence:
 [`network-hosted-h0.5-dedicated-sharded-2026-08-22.json`](../../_Benchmarks/Baselines/network-hosted-h0.5-dedicated-sharded-2026-08-22.json) and
 [`network-hosted-h0.5-dedicated-sharded-2026-08-22.md`](../../_Benchmarks/Baselines/network-hosted-h0.5-dedicated-sharded-2026-08-22.md).
 
+## P0.3 — four-profile comparison correction
+
+The four-profile experiment compares two policy families rather than pretending
+that their disclosure membership is identical:
+
+```text
+exact entity-point interest
+    MaintainedEntityRelation
+    DirtyEntitySpatialFanout
+
+chunk-AABB interest
+    ChunkPublication
+    DirtyChunkSpatialFanout
+```
+
+The permanent comparison contract requires payload-derived identity, generation,
+version and position correctness; privacy and lifecycle fencing; convergence to
+each profile's declared interest policy; and equal final semantics within each
+family. It does not require exact-entity and chunk-AABB profiles to expose the same
+fringe membership.
+
+The corrected harness uses two fresh replays. The timing replay prepares the
+authoritative trace outside the stopwatch and times only profile reconciliation,
+materialization, canonical Game-payload accounting and immediate application
+proof. Every post-warmup tick is retained, and named sparse-event ticks are
+reported separately. The evidence replay performs semantic verification, cold
+snapshots, memory attribution and diagnostics outside the timer. Work counters
+remain separate primitives; there is no dimensionless cumulative-work score.
+
+P0.1b/P0.2b also close the implementation floor required for comparison:
+
+- Dirty Entity admits against the canonical 25-byte remote header and enforces a
+  bounded per-recipient outstanding quota;
+- Dirty Chunk enforces the same isolation, counts all eager recipient/scratch
+  storage, uses bounded indexed row/dirty/pending containers, and returns its
+  concrete reconciliation changes so the harness does not repeat its interest
+  query;
+- chunk recipients reset preallocated banks for logout/re-entry instead of
+  allocating replacement storage;
+- sustained motion exposed and closed stale-edge/list corruption in the two
+  entity profiles.
+
+The 2026-08-24 5,000-tick candidate rerun uses 100 warmup and 4,900 measured ticks
+per profile across 13 workloads. Every workload converges, both within-family
+digests match, and every measured path reports zero managed allocation.
+
+| Workload | Maintained entity | Dirty entity | Chunk publication | Dirty chunk |
+| --- | ---: | ---: | ---: | ---: |
+| one dirty entity (exact event tick) | 4.60 us | 113.27 us | 3.98 us | 23.92 us |
+| mostly-clean recipient movement p95 | 52.93 us | 225.48 us | 546.80 us | 737.40 us |
+| dense-400 p95 | 1.430 ms | 3.038 ms | 1.113 ms | 1.905 ms |
+| high dirt / low movement p95 | 8.65 us | 2.410 ms | 22.07 us | 819.83 us |
+
+These are Game semantic/payload-boundary observations, not secure transport or
+production CCU claims. The rerun was captured from the intentionally uncommitted
+working tree based on `a631b136`; it is diagnostic evidence, not a frozen baseline.
+A clean committed rerun is required before P0.4 makes any new profile-selection
+decision. Until then `ChunkPublication` remains the selected current-game profile.
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
@@ -1537,9 +1605,13 @@ secure deterministic replay, dense-entry, representative topology, mixed-lane,
 and real shared-socket matrices are captured. Hosted H0.5 closes the dedicated-
 process gate, and `ChunkPublication` is selected for the current game. The N0
 implementation is retained as the explicit `MaintainedEntityRelation` Game profile;
-the selection does not authorize N1.5.
+the selection does not authorize N1.5. P0.1b/P0.2b establish the correctness,
+fairness, bounded-storage and allocation-free lifecycle floor for the two dirty
+profiles. The rebuilt P0.3 harness has a complete dirty-worktree candidate run;
+P0.4 remains held for clean reproducible evidence.
 
-Stop after the profile-extraction/conformance closure. Do not begin N1.5 shared
-encoding, `DirtyEntitySpatialFanout`, 2K/4K, or public-WAN/production-CCU claims.
+Stop after the corrected P0.3 comparison and its clean reproducibility rerun. Do
+not begin P0.4 selection, N1.5 shared encoding, 2K/4K, or public-WAN/production-CCU
+claims from dirty-worktree evidence.
 Do not remove the retained `MaintainedEntityRelation` profile. The separately
 scoped hosted lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.

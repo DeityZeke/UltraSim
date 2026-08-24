@@ -222,6 +222,14 @@ internal static class N1OfflineDirectChunkTests
             Drain(recipient, fixture.Store, step);
         }
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        recipient.ResetForReuse();
+        Equal(0, recipient.GetSnapshot().SubscriptionCount);
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            recipient.Reconcile(fixture.Store, GameWorldState.DefaultSpace, anchor, changes, out _));
+        Drain(recipient, fixture.Store, 102);
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
     internal static void DirtySchedulerSkipsCleanScopesAndFansOutOnce()

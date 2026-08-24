@@ -577,8 +577,11 @@ public sealed class GameInterestService
                 int next = _relations[relation].EntityNext;
                 int recipientIndex = _relations[relation].Recipient;
                 GameInterestTier previousTier = _relations[relation].Tier;
-                int edge = _regionEdgeMap[new RecipientRegionKey(recipientIndex, nextRegion)];
-                SetRelationTierAndPresence(relation, _regionEdges[edge].Tier, nowMilliseconds);
+                if (_regionEdgeMap.TryGetValue(
+                        new RecipientRegionKey(recipientIndex, nextRegion), out int edge))
+                    SetRelationTierAndPresence(relation, _regionEdges[edge].Tier, nowMilliseconds);
+                else
+                    SetRelationAbsent(relation, nowMilliseconds);
                 GameInterestTier currentTier = _relations[relation].Tier;
                 if (_attributionEnabled && currentTier != previousTier)
                 {
@@ -625,8 +628,11 @@ public sealed class GameInterestService
                 if (_attributionEnabled) SaturatingIncrement(ref _attributionExistingRelationVisits);
                 int next = _relations[relation].EntityNext;
                 int recipientIndex = _relations[relation].Recipient;
-                int edge = _regionEdgeMap[new RecipientRegionKey(recipientIndex, nextRegion)];
-                SetRelationTierAndPresence(relation, _regionEdges[edge].Tier, nowMilliseconds);
+                if (_regionEdgeMap.TryGetValue(
+                        new RecipientRegionKey(recipientIndex, nextRegion), out int edge))
+                    SetRelationTierAndPresence(relation, _regionEdges[edge].Tier, nowMilliseconds);
+                else
+                    SetRelationAbsent(relation, nowMilliseconds);
                 relation = next;
             }
         }

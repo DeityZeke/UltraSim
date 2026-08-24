@@ -83,6 +83,38 @@ internal static class DirtyChunkSpatialFanoutTests
         Apply(service, participant, key, 2);
     }
 
+    internal static void RecipientOutstandingIsolationAndReservedMemoryAreExact()
+    {
+        using var fixture = new Fixture(32, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        fixture.Present(1, Position(1, 0, 2_000, 2_000));
+        ChunkInterestProfile interest = new(20_000, 21_000, 21_000, 22_000, 22_000, 24_000);
+        var service = Create(
+            fixture, maximumRecipients: 2, maximumRecipientChunkRows: 128,
+            maximumOutstandingDeliveries: 2, interest: interest);
+        long reservedBeforeAdmission = service.GetSnapshot().ReservedBytes;
+        ParticipantId slow = new(1);
+        ParticipantId healthy = new(2);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(slow, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(healthy, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(reservedBeforeAdmission, service.GetSnapshot().ReservedBytes);
+
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(slow, Key(0, 0), 0, out DirtyChunkDelivery retained));
+        Equal(DirtyChunkBuildStatus.CapacityExceeded,
+            service.TryBuildDelivery(slow, Key(1, 0), 0, out _));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(healthy, Key(0, 0), 0, out DirtyChunkDelivery progressed));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(healthy, progressed.DeliveryId, true));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(slow, retained.DeliveryId, true));
+    }
+
     internal static void SameChunkRowsCoalesceIntoOneDiscovery()
     {
         using var fixture = new Fixture(64, 16);

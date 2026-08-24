@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
 using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
@@ -87,7 +88,7 @@ public readonly record struct DirtyEntitySpatialFanoutLimits(
         if (MaximumSpatialRegions <= 0) throw new ArgumentOutOfRangeException(nameof(MaximumSpatialRegions));
         if (MaximumSemanticKnowledgeRows <= 0)
             throw new ArgumentOutOfRangeException(nameof(MaximumSemanticKnowledgeRows));
-        if (MaximumOutstandingBundles <= 0)
+        if (MaximumOutstandingBundles < MaximumRecipients)
             throw new ArgumentOutOfRangeException(nameof(MaximumOutstandingBundles));
         if (MaximumRecordsPerBundle is <= 0 or > 255)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecordsPerBundle));
@@ -260,6 +261,7 @@ public sealed class DirtyEntitySpatialFanout
     private ulong _attributionRowsRemoved;
     private ulong _attributionRecords;
     private ulong _attributionBytes;
+    private readonly int _maximumOutstandingBundlesPerRecipient;
 
     public DirtyEntitySpatialFanout(
         StateEpoch stateEpoch,
@@ -274,6 +276,8 @@ public sealed class DirtyEntitySpatialFanout
         _stateEpoch = stateEpoch;
         _limits = limits;
         _profile = profile;
+        _maximumOutstandingBundlesPerRecipient = Math.Max(
+            1, limits.MaximumOutstandingBundles / limits.MaximumRecipients);
         _entities = new DirtyEntitySlot[limits.MaximumEntities];
         _recipients = new RecipientSlot[limits.MaximumRecipients];
         _regions = new SpatialRegion[limits.MaximumSpatialRegions];
@@ -402,8 +406,11 @@ public sealed class DirtyEntitySpatialFanout
         EnsureOwnerThread();
         if (!_recipientMap.TryGetValue(participant, out int recipientIndex)) return false;
         int row = _recipients[recipientIndex].RowHead;
+        int rowVisits = 0;
         while (row >= 0)
         {
+            if (++rowVisits > _rows.Length)
+                throw new InvalidOperationException("Dirty-entity recipient row list contains a cycle.");
             int next = _rows[row].RecipientNext;
             RemoveRow(row);
             row = next;
@@ -480,7 +487,8 @@ public sealed class DirtyEntitySpatialFanout
             _dirtyEntities[_dirtyCount++] = entityIndex;
         }
         bool oldActive = slot.Active;
-        if (oldActive) UnlinkEntity(entityIndex);
+        bool retainsRegion = oldActive && value.IsDiscoverable && slot.Region == nextRegion;
+        if (oldActive && !retainsRegion) UnlinkEntity(entityIndex);
         slot.Entity = value.Entity;
         slot.CanonicalVersion = value.CanonicalVersion;
         slot.Active = value.IsDiscoverable;
@@ -488,7 +496,7 @@ public sealed class DirtyEntitySpatialFanout
         slot.Horizon = value.Horizon;
         slot.Position = value.Position;
         slot.Projected = value.SimulationState;
-        if (slot.Active) LinkEntity(entityIndex, nextRegion);
+        if (slot.Active && !retainsRegion) LinkEntity(entityIndex, nextRegion);
         _entityCount += slot.Active ? (oldActive ? 0 : 1) : (oldActive ? -1 : 0);
         SaturatingIncrement(ref _authoritativeChanges);
         if (_attributionEnabled) SaturatingIncrement(ref _attributionDirtyCommits);
@@ -567,10 +575,13 @@ public sealed class DirtyEntitySpatialFanout
         if (!_recipientMap.TryGetValue(participant, out int recipientIndex)) return DirtyEntityBuildStatus.UnknownRecipient;
         if (nowMilliseconds < 0) return DirtyEntityBuildStatus.NoData;
         ExpireBundles(nowMilliseconds);
+        ref RecipientSlot recipient = ref _recipients[recipientIndex];
+        if (recipient.OutstandingBundleCount >= _maximumOutstandingBundlesPerRecipient)
+            return DirtyEntityBuildStatus.OutstandingCapacityExceeded;
         int maximum = Math.Min(_limits.MaximumRecordsPerBundle, destination.Length);
         if (maximum == 0) return DirtyEntityBuildStatus.DestinationTooSmall;
         int estimate = DirtyEntityDeliveryRecord.MaximumEncodedBytes;
-        int available = byteBudget - 13;
+        int available = byteBudget - RemoteDirtyEntityStateHeaderCodec.EncodedSize;
         if (available < estimate) return DirtyEntityBuildStatus.ByteBudgetTooSmall;
         int capacityByBytes = Math.Min(maximum, available / estimate);
         if (capacityByBytes == 0) return DirtyEntityBuildStatus.ByteBudgetTooSmall;
@@ -594,6 +605,7 @@ public sealed class DirtyEntitySpatialFanout
         };
         _bundleMap.Add(bundleId, bundleIndex);
         _bundleCount++;
+        recipient.OutstandingBundleCount++;
         int baseItem = bundleIndex * _limits.MaximumRecordsPerBundle;
         for (int index = 0; index < selectedCount; index++)
         {
@@ -626,7 +638,7 @@ public sealed class DirtyEntitySpatialFanout
         SaturatingIncrement(ref _bundlesBuilt);
         bundle = new DirtyEntityBundle(
             participant, _stateEpoch, bundleId, selectedCount,
-            checked(13 + selectedCount * estimate));
+            checked(RemoteDirtyEntityStateHeaderCodec.EncodedSize + selectedCount * estimate));
         return DirtyEntityBuildStatus.Success;
     }
 
@@ -924,8 +936,11 @@ public sealed class DirtyEntitySpatialFanout
             success &= VisitEntities(currentAnchor, recipientIndex, oldAnchor, currentAnchor, now);
 
         int row = _recipients[recipientIndex].RowHead;
+        int rowVisits = 0;
         while (row >= 0)
         {
+            if (++rowVisits > _rows.Length)
+                throw new InvalidOperationException("Dirty-entity recipient row list contains a cycle.");
             int next = _rows[row].RecipientNext;
             if (_rows[row].Active)
             {
@@ -952,8 +967,11 @@ public sealed class DirtyEntitySpatialFanout
                 if (!TryOffset(center, dx, dz, out ReplicationSpatialRegionId region) ||
                     !_regionMap.TryGetValue(region, out int regionIndex)) continue;
                 int entity = _regions[regionIndex].EntityHead;
+                int entityVisits = 0;
                 while (entity >= 0)
                 {
+                    if (++entityVisits > _entities.Length)
+                        throw new InvalidOperationException("Dirty-entity spatial entity list contains a cycle.");
                     int next = _entities[entity].RegionNext;
                     if (_entityStamp[entity] != _entityDiscoveryStamp)
                     {
@@ -989,8 +1007,11 @@ public sealed class DirtyEntitySpatialFanout
                 if (!_regionMap.TryGetValue(region, out int regionIndex)) continue;
                 if (_attributionEnabled) _attributionCells++;
                 int entity = _regions[regionIndex].EntityHead;
+                int entityVisits = 0;
                 while (entity >= 0)
                 {
+                    if (++entityVisits > _entities.Length)
+                        throw new InvalidOperationException("Dirty-entity spatial entity list contains a cycle.");
                     int next = _entities[entity].RegionNext;
                     if (_entityStamp[entity] != _entityDiscoveryStamp)
                     {
@@ -1212,7 +1233,14 @@ public sealed class DirtyEntitySpatialFanout
         int recipient = _rows[index].Recipient;
         int previous = -1;
         int cursor = _recipients[recipient].RowHead;
-        while (cursor >= 0 && cursor != index) { previous = cursor; cursor = _rows[cursor].RecipientNext; }
+        int visits = 0;
+        while (cursor >= 0 && cursor != index)
+        {
+            if (++visits > _rows.Length)
+                throw new InvalidOperationException("Dirty-entity recipient row list contains a cycle.");
+            previous = cursor;
+            cursor = _rows[cursor].RecipientNext;
+        }
         if (cursor == index)
         {
             if (previous < 0) _recipients[recipient].RowHead = _rows[index].RecipientNext;
@@ -1256,6 +1284,7 @@ public sealed class DirtyEntitySpatialFanout
             _bundleItems[baseItem + itemIndex] = default;
         }
         _bundleMap.Remove(bundle.BundleId);
+        _recipients[bundle.Recipient].OutstandingBundleCount--;
         _bundles[index] = default;
         _freeBundles[_freeBundleCount++] = index;
         _bundleCount--;
@@ -1515,6 +1544,7 @@ public sealed class DirtyEntitySpatialFanout
         internal int RegionPrevious;
         internal int RegionNext;
         internal int RowHead;
+        internal int OutstandingBundleCount;
     }
 
     private struct DirtyRecord
