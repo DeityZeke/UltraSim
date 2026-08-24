@@ -280,7 +280,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
         DrainToConvergence(0, 16_384);
         for (int tick = 1; tick <= warmup; tick++) RunTick(tick, measure: false);
         DrainToConvergence(checked((ulong)warmup + 1), 4_096);
-        ResetMeasurement();
+        ResetMeasurement(ticks);
         P03TransportTotals before = CaptureTransport();
         SharedUdpListenerSnapshot listenerBefore = _host.GetSnapshot().Listener;
         long allocatedBefore = GC.GetTotalAllocatedBytes(true);
@@ -292,6 +292,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         _adapter.Validate();
         P03ProfileCounters profile = _adapter.GetCounters();
         P03ProtocolTiming protocol = CaptureProtocolTiming();
+        SharedUdpProtocolHostSnapshot hostSnapshot = _host.GetSnapshot();
+        long profileServerReserved = _adapter.GetServerReservedBytes();
+        long profileClientReserved = _adapter.GetClientReservedBytes();
         P03TransportSummary transport = P03TransportSummary.Delta(
             after, before, listenerAfter, listenerBefore, _frameCap);
         return new P03WholeFlowRow(
@@ -303,7 +306,10 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 P03Metric.From(_clientApplication), P03Metric.From(_serverRole),
                 P03Metric.From(_clientRole), protocol),
             transport, profile, _adapter.SemanticDigest(), allocated,
-            _adapter.GetReservedBytes(), _host.GetSnapshot().KnownReservedBytes,
+            checked(profileServerReserved + profileClientReserved),
+            profileServerReserved, profileClientReserved,
+            hostSnapshot.KnownReservedBytes, hostSnapshot.KnownServerReservedBytes,
+            hostSnapshot.KnownClientReservedBytes,
             _adapter.IsConverged);
     }
 
@@ -373,8 +379,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
             while (_sessions[index].Server.TryPeekReceived(
                        out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
-                Require(_adapter.ProcessServer(index, in message, payload),
-                    $"Server adapter rejected message {message.MessageId.Value}.");
+                if (!_adapter.ProcessServer(index, in message, payload))
+                    throw new InvalidOperationException(
+                        $"Server adapter rejected message {message.MessageId.Value}.");
                 Require(_sessions[index].Server.TryConsumeReceived(), "Server receive consume failed.");
             }
             _tickServerApplication += Stopwatch.GetTimestamp() - started;
@@ -382,8 +389,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
             while (_sessions[index].Client.TryPeekReceived(
                        out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
-                Require(_adapter.ProcessClient(index, in message, payload),
-                    $"Client adapter rejected message {message.MessageId.Value}.");
+                if (!_adapter.ProcessClient(index, in message, payload))
+                    throw new InvalidOperationException(
+                        $"Client adapter rejected message {message.MessageId.Value}.");
                 Require(_sessions[index].Client.TryConsumeReceived(), "Client receive consume failed.");
             }
             _adapter.ProgressClient(index);
@@ -404,11 +412,15 @@ internal sealed class P03WholeFlowHarness : IDisposable
             $"{_profile}/{_workload.Id} did not converge: {_adapter.DescribeState()}.");
     }
 
-    private void ResetMeasurement()
+    private void ResetMeasurement(int ticks)
     {
         _tick.Clear(); _authority.Clear(); _schedule.Clear(); _pump.Clear();
         _serverApplication.Clear(); _clientApplication.Clear();
         _serverRole.Clear(); _clientRole.Clear();
+        _tick.EnsureCapacity(ticks); _authority.EnsureCapacity(ticks);
+        _schedule.EnsureCapacity(ticks); _pump.EnsureCapacity(ticks);
+        _serverApplication.EnsureCapacity(ticks); _clientApplication.EnsureCapacity(ticks);
+        _serverRole.EnsureCapacity(ticks); _clientRole.EnsureCapacity(ticks);
         for (int index = 0; index < _sessions.Length; index++)
         {
             _sessions[index].Server.ResetStageTiming(true);
@@ -558,7 +570,8 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
     internal abstract bool IsConverged { get; }
     internal abstract void Validate();
     internal abstract string SemanticDigest();
-    internal abstract long GetReservedBytes();
+    internal abstract long GetServerReservedBytes();
+    internal abstract long GetClientReservedBytes();
     internal abstract string DescribeState();
     internal virtual P03ProfileCounters GetCounters() => new(
         ScheduleCalls, ScheduleSuccesses, ClientMessages, ServerProofMessages, 0, 0, 0, 0);
@@ -724,12 +737,18 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
         return hash.ToString("X16");
     }
 
-    internal override long GetReservedBytes()
+    internal override long GetServerReservedBytes()
     {
         long value = _service.GetSnapshot().ReservedBytes;
         for (int index = 0; index < _servers.Length; index++)
-            value = checked(value + _servers[index].GetSnapshot().ReservedBytes +
-                _clients[index].GetSnapshot().ReservedBytes);
+            value = checked(value + _servers[index].GetSnapshot().ReservedBytes);
+        return value;
+    }
+    internal override long GetClientReservedBytes()
+    {
+        long value = 0;
+        for (int index = 0; index < _clients.Length; index++)
+            value = checked(value + _clients[index].GetSnapshot().ReservedBytes);
         return value;
     }
 
@@ -923,12 +942,18 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
         }
         return hash.ToString("X16");
     }
-    internal override long GetReservedBytes()
+    internal override long GetServerReservedBytes()
     {
         long value = _service.GetSnapshot().ReservedBytes;
         for (int index = 0; index < _servers.Length; index++)
-            value = checked(value + _servers[index].GetSnapshot().ReservedBytes +
-                _clients[index].GetSnapshot().ReservedBytes);
+            value = checked(value + _servers[index].GetSnapshot().ReservedBytes);
+        return value;
+    }
+    internal override long GetClientReservedBytes()
+    {
+        long value = 0;
+        for (int index = 0; index < _clients.Length; index++)
+            value = checked(value + _clients[index].GetSnapshot().ReservedBytes);
         return value;
     }
     internal override string DescribeState() => _service.GetSnapshot().ToString();
@@ -991,7 +1016,7 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
             .Select(index => P03WholeFlowHarness.Position(X[index], Z[index])
                 .ToChunkKey(GameWorldState.DefaultSpace))
             .Distinct().Order().ToArray();
-        BoundWorld = CreateWorld(PopulatedKeys, content);
+        BoundWorld = CreateWorld(CollectTerrainKeys(workload, x, z), content);
         Caches = new ClientWorldSemanticCache[workload.Recipients];
         ExpectedCounts = new int[workload.Recipients];
     }
@@ -1018,6 +1043,50 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
         => new(BoundWorld, new ClientWorldSemanticCacheLimits(
             Math.Max(1, maximumResidentChunks), 0, 0,
             UltraSimGameProtocol.MaximumChunkPublicationRecords, Workload.Entities));
+
+    protected void StageEmpty(ClientWorldSemanticCache cache, in SpatialChunkKey key)
+    {
+        if (cache.TryGetResidentHandle(key, out _)) return;
+        P03WholeFlowHarness.Require(cache.TryRequest(
+            key, out ClientSemanticChunkHandle handle, out _), "Client cache request failed.");
+        P03WholeFlowHarness.Require(cache.TryStageFromBaseWorld(
+            handle, [], default, out _), "Client cache empty base staging failed.");
+        P03WholeFlowHarness.Require(cache.TryPublish(handle, out _),
+            "Client cache empty publication failed.");
+    }
+
+    protected void ApplyTopologyChanges(
+        ClientWorldSemanticCache cache,
+        ReadOnlySpan<OfflineDirectChunkSubscriptionChange> changes)
+    {
+        for (int index = 0; index < changes.Length; index++)
+        {
+            ref readonly OfflineDirectChunkSubscriptionChange change = ref changes[index];
+            if (change.Kind == OfflineDirectChunkSubscriptionChangeKind.Left)
+            {
+                if (cache.TryGetResidentHandle(change.Key, out ClientSemanticChunkHandle handle))
+                {
+                    P03WholeFlowHarness.Require(cache.BeginRetire(handle) &&
+                        cache.CompleteRetire(handle), "Client cache retirement failed.");
+                }
+            }
+            else if (change.Kind == OfflineDirectChunkSubscriptionChangeKind.Entered)
+            {
+                StageEmpty(cache, change.Key);
+            }
+        }
+    }
+
+    protected void ApplyBootstrapSnapshot(
+        ClientWorldSemanticCache cache,
+        in ChunkPublicationBatch batch,
+        ReadOnlySpan<WorldPublicRecord> records)
+    {
+        P03WholeFlowHarness.Require(cache.TryGetResidentHandle(
+            batch.Key, out ClientSemanticChunkHandle handle), "Bootstrap chunk was not resident.");
+        P03WholeFlowHarness.Require(cache.TryApplySnapshot(
+            handle, batch, records, out _), "Bootstrap snapshot application failed.");
+    }
 
     protected void StageSnapshot(
         ClientWorldSemanticCache cache,
@@ -1047,6 +1116,48 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
         for (int index = 0; index < count; index++)
             if (Array.BinarySearch(PopulatedKeys, entries[index].Key) >= 0) populated++;
         return populated;
+    }
+
+    protected int CountSubscriptions(long x, long z)
+    {
+        int capacity = Workload.Id.StartsWith("sparse", StringComparison.Ordinal) ? 128 : 1_024;
+        var entries = new ChunkInterestEntry[capacity];
+        ChunkInterestQueryStatus status = ChunkInterestQuery.TryQuery(
+            GameWorldState.DefaultSpace, P03WholeFlowHarness.Position(x, z),
+            Workload.ChunkInterest, [], entries, out int count, out _);
+        P03WholeFlowHarness.Require(status == ChunkInterestQueryStatus.Success,
+            "Chunk subscription count query failed.");
+        return count;
+    }
+
+    protected string? DescribeCacheMismatch(ClientWorldSemanticCache cache)
+    {
+        var infos = new ClientSemanticChunkInfo[cache.Limits.MaximumResidentChunks];
+        if (!cache.TryCopyResidentInfo(infos, out int count, out _))
+            return "resident info destination was too small";
+        for (int index = 0; index < count; index++)
+        {
+            ClientSemanticChunkInfo info = infos[index];
+            if (!cache.TryGetResidentHandle(info.Key, out ClientSemanticChunkHandle handle) ||
+                !cache.TryGetResidentView(handle, out ClientSemanticChunkView view))
+                return $"resident handle/view missing for {info.Key}";
+            ChunkPublicationReadStatus status = Source.TryCopySnapshot(
+                info.Key, _snapshotScratch, out ChunkPublicationBatch batch);
+            if (status == ChunkPublicationReadStatus.ChunkAbsent)
+            {
+                if (!view.PublicRecords.IsEmpty)
+                    return $"source absent but client has {view.PublicRecords.Length} rows at {info.Key}";
+                continue;
+            }
+            if (status != ChunkPublicationReadStatus.Snapshot ||
+                batch.Count != view.PublicRecords.Length ||
+                !_snapshotScratch.AsSpan(0, batch.Count).SequenceEqual(view.PublicRecords))
+                return $"source/client mismatch at {info.Key}: status={status}, " +
+                    $"source={batch.Count}, client={view.PublicRecords.Length}, " +
+                    $"sourceRevision={(batch.Cursor.IsValid ? batch.Cursor.Revision.Value : 0)}, " +
+                    $"clientRevision={(info.PublicationCursor.IsValid ? info.PublicationCursor.Revision.Value : 0)}";
+        }
+        return null;
     }
 
     protected int CountSnapshotSubscriptions(OfflineDirectChunkRecipient recipient)
@@ -1115,6 +1226,31 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
             "Whole-flow WorldPack binding failed.");
         return bound!;
     }
+
+    private static SpatialChunkKey[] CollectTerrainKeys(
+        P03NetworkWorkload workload,
+        ReadOnlySpan<long> x,
+        ReadOnlySpan<long> z)
+    {
+        const long movementAndBoundaryMargin = GameWorldSpatialProfile.WorldChunkEdgeUnits * 4L;
+        long margin = checked(workload.ChunkInterest.FarLeaveRadiusMillimeters +
+            movementAndBoundaryMargin);
+        long minimumX = checked(x.ToArray().Min() - margin);
+        long maximumX = checked(x.ToArray().Max() + margin);
+        long minimumZ = checked(z.ToArray().Min() - margin);
+        long maximumZ = checked(z.ToArray().Max() + margin);
+        WorldPosition minimum = P03WholeFlowHarness.Position(minimumX, minimumZ);
+        WorldPosition maximum = P03WholeFlowHarness.Position(maximumX, maximumZ);
+        int width = checked(maximum.Chunk.X - minimum.Chunk.X + 1);
+        int depth = checked(maximum.Chunk.Z - minimum.Chunk.Z + 1);
+        var keys = new SpatialChunkKey[checked(width * depth)];
+        int written = 0;
+        for (int chunkZ = minimum.Chunk.Z; chunkZ <= maximum.Chunk.Z; chunkZ++)
+            for (int chunkX = minimum.Chunk.X; chunkX <= maximum.Chunk.X; chunkX++)
+                keys[written++] = new SpatialChunkKey(
+                    GameWorldState.DefaultSpace, chunkX, chunkZ);
+        return keys;
+    }
 }
 
 internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBase
@@ -1157,7 +1293,11 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             P03WholeFlowHarness.Require(_scheduler.TryApplyReconciliation(
                 _recipientIds[index], _changes.AsSpan(0, result.ChangeCount), result),
                 "Chunk scheduler setup reconciliation failed.");
-            Caches[index] = CreateCache(CountSnapshotSubscriptions(recipient));
+            Caches[index] = CreateCache(Math.Min(
+                subscriptions, checked(CountSubscriptions(X[index], Z[index]) + 64)));
+            OfflineDirectChunkSubscriptionView initial = recipient.Subscriptions;
+            for (int subscription = 0; subscription < initial.Length; subscription++)
+                StageEmpty(Caches[index], initial[subscription].Interest.Key);
             Bootstrap(index);
             ExpectedCounts[index] = Caches[index].GetSnapshot().KnownPublicIdentities;
             _servers[index] = new RemoteChunkWorldStateServer(
@@ -1179,8 +1319,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             P03WholeFlowHarness.Require(status is OfflineDirectChunkReadStatus.Snapshot or
                 OfflineDirectChunkReadStatus.ChunkAbsent, "Chunk bootstrap read was not current truth.");
             if (status == OfflineDirectChunkReadStatus.Snapshot)
-                StageSnapshot(Caches[recipientIndex], read.Batch.Key,
-                    read.Batch.Cursor, read.Snapshot);
+                ApplyBootstrapSnapshot(Caches[recipientIndex], read.Batch, read.Snapshot);
             recipient.CommitRead();
         }
     }
@@ -1194,6 +1333,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _changes, out OfflineDirectChunkReconcileResult result);
             P03WholeFlowHarness.Require(status == OfflineDirectChunkReconcileStatus.Reconciled,
                 "Chunk recipient movement reconciliation failed.");
+            ApplyTopologyChanges(Caches[index], _changes.AsSpan(0, result.ChangeCount));
             P03WholeFlowHarness.Require(_scheduler.TryApplyReconciliation(
                 _recipientIds[index], _changes.AsSpan(0, result.ChangeCount), result),
                 "Chunk scheduler movement reconciliation failed.");
@@ -1253,8 +1393,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             if (_scheduler.GetSnapshot().PendingWorkCount != 0 || !NetworkQueuesEmpty()) return false;
             for (int index = 0; index < _servers.Length; index++)
                 if (_servers[index].GetSnapshot().OutstandingDeliveries != 0 ||
-                    _clients[index].GetSnapshot().PendingProofs != 0 ||
-                    Caches[index].GetSnapshot().KnownPublicIdentities != ExpectedCounts[index])
+                    _clients[index].GetSnapshot().PendingProofs != 0)
                     return false;
             return true;
         }
@@ -1266,18 +1405,30 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         {
             RemoteChunkWorldStateServerSnapshot server = _servers[index].GetSnapshot();
             RemoteChunkWorldStateClientSnapshot client = _clients[index].GetSnapshot();
-            P03WholeFlowHarness.Require(server.RejectedProofs == 0 && server.MalformedProofs == 0 &&
+            string? mismatch = DescribeCacheMismatch(Caches[index]);
+            P03WholeFlowHarness.Require(mismatch is null,
+                $"ChunkPublication client {index} did not match current source truth: {mismatch}.");
+            P03WholeFlowHarness.Require(server.RejectedProofs == 0 &&
+                server.MalformedProofs <= server.InvalidatedDeliveries &&
                 client.RejectedDeliveries == 0 && client.MalformedDeliveries == 0 &&
                 client.ContradictoryDeliveries == 0,
-                "ChunkPublication remote path rejected semantic state.");
+                $"ChunkPublication remote path rejected semantic state at recipient {index}: " +
+                $"server={server} client={client}.");
         }
     }
-    internal override long GetReservedBytes()
+    internal override long GetServerReservedBytes()
     {
         long value = checked(Source.GetSnapshot().ReservedBytes + _scheduler.GetSnapshot().ReservedBytes);
         for (int index = 0; index < _servers.Length; index++)
             value = checked(value + _recipients[index].GetSnapshot().ReservedBytes +
-                _servers[index].GetSnapshot().ReservedBytes + _clients[index].GetSnapshot().ReservedBytes +
+                _servers[index].GetSnapshot().ReservedBytes);
+        return value;
+    }
+    internal override long GetClientReservedBytes()
+    {
+        long value = 0;
+        for (int index = 0; index < _clients.Length; index++)
+            value = checked(value + _clients[index].GetSnapshot().ReservedBytes +
                 Caches[index].GetSnapshot().ReservedBytes);
         return value;
     }
@@ -1315,12 +1466,15 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
         _changes = new OfflineDirectChunkSubscriptionChange[subscriptions * 2];
         for (int index = 0; index < workload.Recipients; index++)
         {
+            Caches[index] = CreateCache(Math.Min(
+                subscriptions, checked(CountSubscriptions(X[index], Z[index]) + 64)));
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(index), GameWorldState.DefaultSpace,
-                P03WholeFlowHarness.Position(X[index], Z[index]), 0, _changes, out _) ==
+                P03WholeFlowHarness.Position(X[index], Z[index]), 0, _changes,
+                out OfflineDirectChunkReconcileResult result) ==
                 DirtyChunkRecipientUpdateStatus.Reconciled,
                 "DirtyChunk recipient setup failed.");
-            Caches[index] = CreateCache(CountRelevantPopulated(X[index], Z[index]));
+            ApplyTopologyChanges(Caches[index], _changes.AsSpan(0, result.ChangeCount));
         }
         Bootstrap();
         for (int index = 0; index < workload.Recipients; index++)
@@ -1352,7 +1506,7 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
             {
                 DirtyChunkDeliveryEntry entry = bundle.Entries[index];
                 if (entry.Status == OfflineDirectChunkReadStatus.Snapshot)
-                    StageSnapshot(Caches[recipient], entry.Key, entry.Ticket.Cursor,
+                    ApplyBootstrapSnapshot(Caches[recipient], entry.Batch,
                         bundle.Snapshot(in entry));
                 P03WholeFlowHarness.Require(_service.TryAcknowledgeDelivery(
                     bundle.Participant, entry.DeliveryId, true) ==
@@ -1366,12 +1520,16 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
     internal override void ApplyAuthority(int tick, int movedRecipients)
     {
         for (int index = 0; index < movedRecipients; index++)
+        {
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(index), GameWorldState.DefaultSpace,
                 P03WholeFlowHarness.Position(X[index], Z[index]), checked((ulong)tick),
-                _changes, out _) is DirtyChunkRecipientUpdateStatus.Reconciled or
+                _changes, out OfflineDirectChunkReconcileResult result) is
+                DirtyChunkRecipientUpdateStatus.Reconciled or
                 DirtyChunkRecipientUpdateStatus.NoChange,
                 "DirtyChunk recipient movement failed.");
+            ApplyTopologyChanges(Caches[index], _changes.AsSpan(0, result.ChangeCount));
+        }
         CommitMutation(tick);
     }
 
@@ -1414,8 +1572,7 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
                 !NetworkQueuesEmpty()) return false;
             for (int index = 0; index < _servers.Length; index++)
                 if (_servers[index].GetSnapshot().OutstandingDeliveries != 0 ||
-                    _clients[index].GetSnapshot().PendingProofs != 0 ||
-                    Caches[index].GetSnapshot().KnownPublicIdentities != ExpectedCounts[index])
+                    _clients[index].GetSnapshot().PendingProofs != 0)
                     return false;
             return true;
         }
@@ -1427,6 +1584,9 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
         {
             RemoteDirtyChunkSpatialFanoutServerSnapshot server = _servers[index].GetSnapshot();
             RemoteChunkWorldStateClientSnapshot client = _clients[index].GetSnapshot();
+            string? mismatch = DescribeCacheMismatch(Caches[index]);
+            P03WholeFlowHarness.Require(mismatch is null,
+                $"DirtyChunk client {index} did not match current source truth: {mismatch}.");
             P03WholeFlowHarness.Require(server.ApplicationRejections == 0 &&
                 server.MalformedProofs == 0 && client.RejectedDeliveries == 0 &&
                 client.MalformedDeliveries == 0 && client.ContradictoryDeliveries == 0,
@@ -1466,12 +1626,19 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
         _baselineSharedPageMaterializations = core.SharedPageMaterializations;
         _baselineSharedPageHits = core.SharedPageHits;
     }
-    internal override long GetReservedBytes()
+    internal override long GetServerReservedBytes()
     {
         long value = checked(Source.GetSnapshot().ReservedBytes + _service.GetSnapshot().ReservedBytes);
         for (int index = 0; index < _servers.Length; index++)
-            value = checked(value + _servers[index].GetSnapshot().ReservedBytes +
-                _clients[index].GetSnapshot().ReservedBytes + Caches[index].GetSnapshot().ReservedBytes);
+            value = checked(value + _servers[index].GetSnapshot().ReservedBytes);
+        return value;
+    }
+    internal override long GetClientReservedBytes()
+    {
+        long value = 0;
+        for (int index = 0; index < _clients.Length; index++)
+            value = checked(value + _clients[index].GetSnapshot().ReservedBytes +
+                Caches[index].GetSnapshot().ReservedBytes);
         return value;
     }
     internal override string DescribeState()
@@ -1568,7 +1735,11 @@ internal readonly record struct P03WholeFlowRow(
     string SemanticDigest,
     long AllocatedBytes,
     long ProfileReservedBytes,
+    long ProfileServerReservedBytes,
+    long ProfileClientReservedBytes,
     long NetworkReservedBytes,
+    long NetworkServerReservedBytes,
+    long NetworkClientReservedBytes,
     bool Converged);
 
 internal readonly record struct P03WholeFlowTiming(
