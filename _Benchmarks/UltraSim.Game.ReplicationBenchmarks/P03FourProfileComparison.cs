@@ -10,8 +10,9 @@ using UltraSim.Spatial;
 
 internal static class P03FourProfileComparison
 {
-    private const int WarmupTicks = 4;
-    private const int MeasuredTicks = 12;
+    private const int DefaultWarmupTicks = 100;
+    private const int DefaultTotalTicks = 5_000;
+    private const int DefaultTimingSamples = 128;
     private const int DrainTicks = 32;
     private const int ByteBudget = 16_384;
     private const int EntityRecordBytes = 40;
@@ -24,17 +25,19 @@ internal static class P03FourProfileComparison
     {
         int requestedEntities = ReadInt(args, "--entities=", 128);
         int requestedRecipients = ReadInt(args, "--recipients=", 8);
-        int warmup = ReadInt(args, "--warmup=", WarmupTicks);
-        int samples = ReadInt(args, "--samples=", MeasuredTicks);
+        int warmup = ReadInt(args, "--warmup=", DefaultWarmupTicks);
+        int totalTicks = ReadInt(args, "--ticks=", DefaultTotalTicks);
+        int samples = ReadInt(args, "--samples=", DefaultTimingSamples);
         string? requestedWorkload = ReadString(args, "--workload=");
+        string? requestedProfile = ReadString(args, "--profile=");
         string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "../../../../results/game-p03-four-profile-matrix.json"));
         if (requestedEntities <= 0 || requestedEntities > MaxEntities ||
             requestedRecipients <= 0 || requestedRecipients > MaxRecipients ||
-            warmup < 1 || samples < 3)
+            warmup < 1 || samples < 3 || totalTicks <= warmup)
             throw new ArgumentOutOfRangeException(nameof(args));
 
-        Workload[] workloads = BuildWorkloads(requestedEntities, requestedRecipients, warmup + samples);
+        Workload[] workloads = BuildWorkloads(requestedEntities, requestedRecipients, totalTicks);
         if (!string.IsNullOrWhiteSpace(requestedWorkload))
             workloads = workloads.Where(item =>
                 string.Equals(item.Id, requestedWorkload, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -46,8 +49,18 @@ internal static class P03FourProfileComparison
         {
             Console.WriteLine($"P0.3 workload={workload.Id} entities={workload.Entities.Length} " +
                 $"recipients={workload.Recipients.Length} ticks={workload.Ticks.Length}");
-            ProfileReport[] profiles = Enum.GetValues<ProfileKind>()
-                .Select(profile => RunProfile(workload, profile, warmup, samples))
+            ProfileKind[] order = Enum.GetValues<ProfileKind>();
+            if (!string.IsNullOrWhiteSpace(requestedProfile) &&
+                Enum.TryParse(requestedProfile, ignoreCase: true, out ProfileKind selectedProfile))
+                order = [selectedProfile];
+            Shuffle(order, StableHash(workload.Id));
+            ProfileReport[] profiles = order
+                .Select(profile =>
+                {
+                    Console.WriteLine($"  profile={profile}");
+                    return RunProfile(workload, profile, warmup, samples);
+                })
+                .OrderBy(profile => profile.Profile, StringComparer.Ordinal)
                 .ToArray();
             bool allConverged = profiles.All(profile => profile.Semantic.Converged);
             bool equivalent = profiles.All(profile =>
@@ -67,13 +80,15 @@ internal static class P03FourProfileComparison
                 $"  converged={allConverged} equivalent={equivalent} " +
                 string.Join(" | ", profiles.Select(profile =>
                     $"{profile.Profile}:p95={profile.Timing.P95Microseconds:F2}us " +
+                    $"p99={profile.Timing.P99Microseconds:F2}us " +
                     $"work={profile.Work.DiscoveryOperations + profile.Work.PublicationReads:N0} " +
                     $"wire={profile.Work.WireBytes:N0}B")));
         }
 
         var matrix = new ComparisonReport(
-            "ultrasim-game-p03-four-profile-shared-trace-v1",
+            "ultrasim-game-p03-four-profile-shared-trace-v2",
             DateTimeOffset.UtcNow,
+            ReadGitSha(),
             Environment.Version.ToString(),
             Environment.OSVersion.VersionString,
             Environment.ProcessorCount,
@@ -81,13 +96,18 @@ internal static class P03FourProfileComparison
             new MatrixScope(
                 "All four frozen Game profiles replay the same authoritative entity, recipient, " +
                 "mutation, movement, login/re-entry, and traffic trace. Measurements cover the " +
-                "profile semantic core and a common synthesized client/proof boundary; the " +
+                "profile semantic core and a common synthesized client/proof boundary. Timing " +
+                "samples are selected across the measured portion of the full soak trace; the " +
                 "secure Network transport is held constant but is not included in the timed core " +
                 "figures.",
-                "Release; fixed trace cadence; warmup excluded; application proof is immediate " +
-                "after each materialized delivery; public/private/Event/Control traffic counts " +
-                "are identical in every profile row.",
+                $"Release; {totalTicks} trace ticks; {warmup} warmup ticks; {samples} timing " +
+                "samples selected from the measured window; application proof is immediate " +
+                "after each encoded delivery; public/private/Event/Control traffic counts are " +
+                "identical in every profile row. Wire counters count each encoded message once.",
                 "ChunkPublication remains selected; this matrix is evidence only."),
+            totalTicks,
+            warmup,
+            samples,
             reports.ToArray());
         string json = JsonSerializer.Serialize(matrix, new JsonSerializerOptions { WriteIndented = true });
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
@@ -106,14 +126,16 @@ internal static class P03FourProfileComparison
         for (int tick = 0; tick < warmup; tick++)
             adapter.Apply(workload.Ticks[tick], tick);
 
-        var timings = new double[samples];
+        int measuredTicks = workload.Ticks.Length - warmup;
+        int stride = Math.Max(1, (int)Math.Ceiling(measuredTicks / (double)samples));
+        var timings = new List<double>(Math.Min(samples, measuredTicks));
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-        for (int sample = 0; sample < samples; sample++)
+        for (int tick = warmup; tick < workload.Ticks.Length; tick++)
         {
-            int tick = warmup + sample;
             long started = Stopwatch.GetTimestamp();
             adapter.Apply(workload.Ticks[tick], tick);
-            timings[sample] = Microseconds(Stopwatch.GetTimestamp() - started);
+            if ((tick - warmup) % stride == 0 && timings.Count < samples)
+                timings.Add(Microseconds(Stopwatch.GetTimestamp() - started));
         }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
 
@@ -121,15 +143,16 @@ internal static class P03FourProfileComparison
         while (!adapter.IsConverged && convergenceTicks < DrainTicks)
         {
             convergenceTicks++;
-            adapter.Drain(warmup + samples + convergenceTicks);
+            adapter.Drain(workload.Ticks.Length + convergenceTicks);
             adapter.RefreshSemanticStatus();
         }
         adapter.AssertSemanticContract();
         CumulativeWork work = adapter.GetWork();
         return new ProfileReport(
             profile.ToString(),
-            new TimingSummary(Stats(timings), allocated),
+            new TimingSummary(Stats(timings.ToArray()), allocated),
             work,
+            adapter.GetMemoryBreakdown(work),
             new SemanticSummary(
                 adapter.IsConverged,
                 convergenceTicks,
@@ -164,6 +187,7 @@ internal static class P03FourProfileComparison
             CreateWorkload("dense-400", denseEntities, denseRecipients, ticks, WorkloadShape.Dense),
             CreateWorkload("edge-corner", entities, recipients, ticks, WorkloadShape.EdgeCorner),
             CreateWorkload("teleport-login-reentry", entities, recipients, ticks, WorkloadShape.TeleportReentry),
+            CreateWorkload("synchronized-teleport-stress", entities, recipients, ticks, WorkloadShape.SynchronizedTeleport),
             CreateWorkload("high-dirt-low-movement", entities, recipients, ticks, WorkloadShape.HighDirt),
             CreateWorkload("high-movement-low-dirt", entities, recipients, ticks, WorkloadShape.HighMovement),
         ];
@@ -177,12 +201,21 @@ internal static class P03FourProfileComparison
         WorkloadShape shape)
     {
         var entities = new TraceEntity[entityCount];
-        int width = Math.Max(1, (int)Math.Ceiling(Math.Sqrt(entityCount)));
         for (int index = 0; index < entities.Length; index++)
         {
             long x = (index - entityCount / 2) * 64_000L + 24_000L;
             long z = 8_000L;
-            if (shape == WorkloadShape.EdgeCorner)
+            if (shape == WorkloadShape.ClusteredDirty && index < 32)
+            {
+                x = 2_000L + (index % 8) * 1_500L;
+                z = 2_000L + (index / 8) * 1_500L;
+            }
+            else if (shape == WorkloadShape.Dense)
+            {
+                x = (index % 20) * 6_000L - 57_000L;
+                z = (index / 20) * 6_000L - 57_000L;
+            }
+            else if (shape == WorkloadShape.EdgeCorner)
             {
                 x = (index % 4) switch
                 {
@@ -207,11 +240,17 @@ internal static class P03FourProfileComparison
         {
             long x = (index - recipientCount / 2) * 128_000L;
             long z = 0;
+            if (shape == WorkloadShape.Dense)
+            {
+                x = (index % 4) * 32_000L - 48_000L;
+                z = (index / 4) * 32_000L - 48_000L;
+            }
             recipients[index] = new(index, true, x, z);
         }
 
         TraceEntity[] workingEntities = entities.ToArray();
         TraceRecipient[] workingRecipients = recipients.ToArray();
+        int measuredEventTick = Math.Max(4, ticks / 3);
 
         var ticksData = new TraceTick[ticks];
         for (int tick = 0; tick < ticks; tick++)
@@ -220,66 +259,101 @@ internal static class P03FourProfileComparison
             var moves = new List<RecipientMove>();
             switch (shape)
             {
-                case WorkloadShape.OneDirty when tick == 2:
+                case WorkloadShape.OneDirty when tick == Math.Max(4, ticks / 2):
                     AddMutation(mutations, workingEntities, 0, 1_000, 0);
                     break;
                 case WorkloadShape.ClusteredDirty:
                     for (int index = 0; index < Math.Min(32, entityCount); index++)
-                        AddMutation(mutations, workingEntities, index, 750 + tick * 5L, 500);
+                        AddMutation(mutations, workingEntities, index,
+                            (tick & 1) == 0 ? 100 : -100,
+                            (tick & 1) == 0 ? 75 : -75);
                     break;
                 case WorkloadShape.DistributedDirty:
                     for (int offset = 0; offset < Math.Min(16, entityCount); offset++)
                     {
                         int index = (tick * 29 + offset * 17) % entityCount;
-                        AddMutation(mutations, workingEntities, index, 1_000, -750);
+                        AddMutation(mutations, workingEntities, index,
+                            (tick & 1) == 0 ? 100 : -100,
+                            (tick & 1) == 0 ? -75 : 75);
                     }
                     break;
                 case WorkloadShape.Movement:
-                    AddMovement(moves, workingRecipients, tick, 512_000, 0);
+                    AddMovement(moves, workingRecipients, tick, 500, 375);
                     break;
                 case WorkloadShape.Mixed:
-                    if (tick == 0)
-                        AddMovement(moves, workingRecipients, tick, 512_000, 0);
-                    for (int offset = 0; offset < Math.Min(12, entityCount); offset++)
-                        AddMutation(mutations, workingEntities, (tick * 11 + offset * 7) % entityCount, 500, 250);
+                    if (tick == measuredEventTick)
+                        AddMovement(moves, workingRecipients, tick, 500, 375);
+                    if (tick > measuredEventTick)
+                        for (int offset = 0; offset < Math.Min(12, entityCount); offset++)
+                            AddMutation(mutations, workingEntities, (tick * 11 + offset * 7) % entityCount,
+                                (tick & 1) == 0 ? 50 : -50,
+                                (tick & 1) == 0 ? 25 : -25);
                     break;
                 case WorkloadShape.Dense:
-                    for (int offset = 0; offset < Math.Min(32, entityCount); offset++)
-                        AddMutation(mutations, workingEntities, (tick * 13 + offset * 3) % entityCount, 400, 100);
-                    if (tick == 0) AddMovement(moves, workingRecipients, tick, 512_000, 0);
+                    if (tick == measuredEventTick)
+                        AddMovement(moves, workingRecipients, tick, 500, 250);
+                    if (tick > measuredEventTick)
+                        for (int offset = 0; offset < Math.Min(32, entityCount); offset++)
+                            AddMutation(mutations, workingEntities, (tick * 13 + offset * 3) % entityCount,
+                                (tick & 1) == 0 ? 25 : -25,
+                                (tick & 1) == 0 ? 25 : -25);
                     break;
                 case WorkloadShape.EdgeCorner:
-                    AddMovement(moves, workingRecipients, tick, tick % 2 == 0 ? 512_000 : -512_000, 0);
-                    for (int offset = 0; offset < Math.Min(4, entityCount); offset++)
-                        AddMutation(mutations, workingEntities, offset, tick % 2 == 0 ? 800 : -800, 0);
+                    AddMovement(moves, workingRecipients, tick, 500, 375);
+                    if (tick == ticks - 1)
+                        for (int offset = 0; offset < Math.Min(4, entityCount); offset++)
+                            AddMutation(mutations, workingEntities, offset, 800, 0);
                     break;
                 case WorkloadShape.TeleportReentry:
-                    if (tick == 1)
+                    if (tick == Math.Max(4, ticks / 3))
                     {
                         moves.Add(new RecipientMove(0, true, 1_000_000, 1_000_000));
                         workingRecipients[0] = new TraceRecipient(0, true, 1_000_000, 1_000_000);
                     }
-                    if (tick == 2)
+                    if (tick == Math.Max(5, ticks / 3 + 1))
                     {
                         moves.Add(new RecipientMove(0, false, 1_000_000, 1_000_000));
                         workingRecipients[0] = new TraceRecipient(0, false, 1_000_000, 1_000_000);
                     }
-                    if (tick == 3)
+                    if (tick == Math.Max(6, ticks / 3 + 2))
                     {
                         moves.Add(new RecipientMove(0, true, 0, 0));
                         workingRecipients[0] = new TraceRecipient(0, true, 0, 0);
                     }
-                    if (tick == 4 && entityCount > 0)
+                    if (tick == Math.Max(7, ticks / 3 + 3) && entityCount > 0)
                         AddMutation(mutations, workingEntities, 0, 2_000, 0);
+                    break;
+                case WorkloadShape.SynchronizedTeleport:
+                    if (tick == Math.Max(4, ticks / 3))
+                    {
+                        for (int index = 0; index < workingRecipients.Length; index++)
+                        {
+                            if (!workingRecipients[index].Active) continue;
+                            long x = 1_000_000L + index * 2_000L;
+                            long z = 1_000_000L - index * 1_000L;
+                            moves.Add(new RecipientMove(index, true, x, z));
+                            workingRecipients[index] = new TraceRecipient(index, true, x, z);
+                        }
+                    }
+                    if (tick == Math.Max(5, ticks / 3 + 1))
+                    {
+                        for (int index = 0; index < workingRecipients.Length; index++)
+                        {
+                            moves.Add(new RecipientMove(index, true, 0, 0));
+                            workingRecipients[index] = new TraceRecipient(index, true, 0, 0);
+                        }
+                    }
                     break;
                 case WorkloadShape.HighDirt:
                     for (int offset = 0; offset < Math.Max(1, entityCount * 3 / 4); offset++)
-                        AddMutation(mutations, workingEntities, (tick * 19 + offset) % entityCount, 250, 250);
+                        AddMutation(mutations, workingEntities, (tick * 19 + offset) % entityCount,
+                            (tick & 1) == 0 ? 25 : -25,
+                            (tick & 1) == 0 ? 25 : -25);
                     break;
                 case WorkloadShape.HighMovement:
-                    AddMovement(moves, workingRecipients, tick, 512_000, 0);
-                    if ((tick & 3) == 0 && entityCount > 0)
-                        AddMutation(mutations, workingEntities, tick % entityCount, 1_000, 0);
+                    AddMovement(moves, workingRecipients, tick, 500, 375);
+                    if (tick == ticks - 1 && entityCount > 0)
+                        AddMutation(mutations, workingEntities, tick % entityCount, 100, 0);
                     break;
             }
             ticksData[tick] = new TraceTick(mutations.ToArray(), moves.ToArray());
@@ -315,12 +389,13 @@ internal static class P03FourProfileComparison
         long dx,
         long dz)
     {
+        long direction = (tick & 1) == 0 ? 1 : -1;
         for (int index = 0; index < recipients.Length; index++)
         {
             TraceRecipient current = recipients[index];
             if (!current.Active) continue;
-            long nextX = current.X + dx * (index + 1);
-            long nextZ = current.Z + dz * (tick + 1);
+            long nextX = current.X + direction * dx;
+            long nextZ = current.Z + direction * dz;
             moves.Add(new RecipientMove(index, true, nextX, nextZ));
             recipients[index] = new TraceRecipient(index, true, nextX, nextZ);
         }
@@ -331,11 +406,86 @@ internal static class P03FourProfileComparison
 
     private static StatsSummary Stats(double[] values)
     {
+        if (values.Length == 0)
+            throw new InvalidOperationException("P0.3 produced no timing samples.");
         Array.Sort(values);
         return new(
-            values[values.Length / 2],
-            values[(int)Math.Ceiling(values.Length * 0.95) - 1],
+            Percentile(values, 0.50),
+            Percentile(values, 0.95),
+            Percentile(values, 0.99),
             values[^1]);
+    }
+
+    private static double Percentile(double[] values, double percentile)
+    {
+        int index = Math.Clamp((int)Math.Ceiling(values.Length * percentile) - 1, 0, values.Length - 1);
+        return values[index];
+    }
+
+    private static uint StableHash(string value)
+    {
+        uint hash = 2_166_136_261;
+        foreach (char character in value)
+            hash = unchecked((hash ^ character) * 16_777_619);
+        return hash;
+    }
+
+    private static void Shuffle<T>(T[] values, uint seed)
+    {
+        for (int index = values.Length - 1; index > 0; index--)
+        {
+            seed = unchecked(seed * 1_664_525 + 1_013_904_223);
+            int swap = (int)(seed % (uint)(index + 1));
+            (values[index], values[swap]) = (values[swap], values[index]);
+        }
+    }
+
+    private static string ReadGitSha()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("git", "rev-parse HEAD")
+            {
+                WorkingDirectory = FindRepositoryRoot(),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (process is null) return "unavailable";
+            string sha = process.StandardOutput.ReadToEnd().Trim();
+            process.WaitForExit();
+            if (process.ExitCode != 0 || sha.Length == 0) return "unavailable";
+            using var statusProcess = Process.Start(new ProcessStartInfo(
+                "git", "status --porcelain --untracked-files=no")
+            {
+                WorkingDirectory = FindRepositoryRoot(),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (statusProcess is null) return sha;
+            string status = statusProcess.StandardOutput.ReadToEnd();
+            statusProcess.WaitForExit();
+            return status.Length == 0 ? sha : sha + "-dirty";
+        }
+        catch
+        {
+            return "unavailable";
+        }
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, ".git")))
+                return directory.FullName;
+            directory = directory.Parent;
+        }
+        return Directory.GetCurrentDirectory();
     }
 
     private static int ReadInt(string[] args, string prefix, int fallback) =>
@@ -364,6 +514,7 @@ internal static class P03FourProfileComparison
         Dense,
         EdgeCorner,
         TeleportReentry,
+        SynchronizedTeleport,
         HighDirt,
         HighMovement,
     }
@@ -416,11 +567,15 @@ internal static class P03FourProfileComparison
     private sealed record ComparisonReport(
         string WorkloadIdentity,
         DateTimeOffset CapturedAtUtc,
+        string GitSha,
         string Runtime,
         string OperatingSystem,
         int ProcessorCount,
         long StopwatchFrequency,
         MatrixScope Scope,
+        int TraceTicks,
+        int WarmupTicks,
+        int TimingSamples,
         WorkloadReport[] Workloads);
 
     private sealed record WorkloadReport(
@@ -437,17 +592,19 @@ internal static class P03FourProfileComparison
         string Profile,
         TimingSummary Timing,
         CumulativeWork Work,
+        MemoryBreakdown Memory,
         SemanticSummary Semantic);
 
     private readonly record struct TimingSummary(
-        StatsSummary P50P95MaxMicroseconds,
+        StatsSummary Percentiles,
         long MeasuredManagedBytes)
     {
-        public double P50Microseconds => P50P95MaxMicroseconds.P50;
-        public double P95Microseconds => P50P95MaxMicroseconds.P95;
+        public double P50Microseconds => Percentiles.P50;
+        public double P95Microseconds => Percentiles.P95;
+        public double P99Microseconds => Percentiles.P99;
     }
 
-    private readonly record struct StatsSummary(double P50, double P95, double Max);
+    private readonly record struct StatsSummary(double P50, double P95, double P99, double Max);
 
     private readonly record struct SemanticSummary(
         bool Converged,
@@ -472,6 +629,14 @@ internal static class P03FourProfileComparison
         int MaxOutstanding,
         long ReservedBytes);
 
+    private readonly record struct MemoryBreakdown(
+        long ProfileStorageBytes,
+        long AuthoritativeSourceHistoryBytes,
+        long RecipientKnowledgeBytes,
+        long DirtyWorkBytes,
+        long PendingOutstandingBytes,
+        long ScratchAndSemanticStateBytes);
+
     private abstract class ProfileAdapter : IDisposable
     {
         protected readonly Workload Workload;
@@ -479,6 +644,8 @@ internal static class P03FourProfileComparison
         protected readonly TraceRecipient[] Recipients;
         private readonly bool[] _appliedPresent;
         private readonly ulong[] _appliedVersion;
+        private readonly long[] _appliedX;
+        private readonly long[] _appliedZ;
         private readonly int[] _publicSlotEntities;
         private readonly uint[] _publicSlotGenerations;
         private int _deliveredEntities;
@@ -486,6 +653,7 @@ internal static class P03FourProfileComparison
         private ulong _wireBytes;
         private ulong _deliveries;
         private ulong _proofs;
+        private ulong _materializedRecords;
         private int _maxPending;
         private int _maxOutstanding;
 
@@ -496,6 +664,8 @@ internal static class P03FourProfileComparison
             Recipients = workload.Recipients.ToArray();
             _appliedPresent = new bool[checked(Recipients.Length * State.Length)];
             _appliedVersion = new ulong[_appliedPresent.Length];
+            _appliedX = new long[_appliedPresent.Length];
+            _appliedZ = new long[_appliedPresent.Length];
             _publicSlotEntities = Enumerable.Repeat(-1, State.Length).ToArray();
             _publicSlotGenerations = new uint[State.Length];
         }
@@ -530,6 +700,8 @@ internal static class P03FourProfileComparison
 
         public abstract CumulativeWork GetWork();
 
+        public abstract MemoryBreakdown GetMemoryBreakdown(CumulativeWork work);
+
         public abstract void AssertSemanticContract();
 
         public abstract void Dispose();
@@ -555,9 +727,9 @@ internal static class P03FourProfileComparison
             int offset = checked(recipientIndex * State.Length + entityIndex);
             _appliedPresent[offset] = present;
             _appliedVersion[offset] = version;
-            _wireBytes = checked(_wireBytes + EntityRecordBytes);
-            _deliveries++;
-            _proofs++;
+            _appliedX[offset] = present ? State[entityIndex].X : 0;
+            _appliedZ[offset] = present ? State[entityIndex].Z : 0;
+            _materializedRecords++;
         }
 
         protected void RecordChunkRecord(
@@ -571,7 +743,6 @@ internal static class P03FourProfileComparison
             RememberPublicSlot(record.Id, entityIndex);
             RecordEntity(recipientIndex, entityIndex,
                 entityIndex >= 0 ? State[entityIndex].Version : record.EntityPublicVersion, present);
-            _wireBytes = checked(_wireBytes - EntityRecordBytes + ChunkRecordBytes);
         }
 
         private int FindEntityIndex(in WorldPosition position)
@@ -616,7 +787,6 @@ internal static class P03FourProfileComparison
             }
             int entityIndex = ResolvePublicSlot(record.Id);
             RecordEntity(recipientIndex, entityIndex, State[entityIndex].Version, false);
-            _wireBytes = checked(_wireBytes - EntityRecordBytes + ChunkRecordBytes);
         }
 
         private void RememberPublicSlot(in WorldPublicEntityId id, int entityIndex)
@@ -674,7 +844,10 @@ internal static class P03FourProfileComparison
                     int offset = recipient * State.Length + entity;
                     bool expected = ExpectedVisible(Recipients[recipient], State[entity]);
                     bool actual = Recipients[recipient].Active && _appliedPresent[offset];
-                    if (actual != expected || actual && _appliedVersion[offset] != State[entity].Version)
+                    if (actual != expected || actual &&
+                        (_appliedVersion[offset] != State[entity].Version ||
+                         _appliedX[offset] != State[entity].X ||
+                         _appliedZ[offset] != State[entity].Z))
                         throw new InvalidOperationException(
                             $"P0.3 convergence failed for {GetType().Name}: recipient={recipient}, " +
                             $"entity={entity}, expectedPresent={expected}, actualPresent={actual}, " +
@@ -692,8 +865,27 @@ internal static class P03FourProfileComparison
         protected ulong Deliveries => _deliveries;
         protected ulong Proofs => _proofs;
         protected ulong WireBytes => _wireBytes;
+        protected ulong MaterializedRecords => _materializedRecords;
 
-        protected void RecordDeliveryBytes(int bytes)
+        protected MemoryBreakdown BuildMemoryBreakdown(
+            long profileStorageBytes,
+            long sourceHistoryBytes,
+            long recipientKnowledgeBytes,
+            long dirtyWorkBytes)
+        {
+            long pendingOutstandingBytes = checked((long)(MaxPending + MaxOutstanding) * 64);
+            long semanticStateBytes = checked((long)_appliedPresent.Length *
+                (sizeof(byte) + sizeof(ulong) + sizeof(long) + sizeof(long)));
+            return new(
+                profileStorageBytes,
+                sourceHistoryBytes,
+                recipientKnowledgeBytes,
+                dirtyWorkBytes,
+                pendingOutstandingBytes,
+                semanticStateBytes);
+        }
+
+        protected void RecordMessageBytes(int bytes)
         {
             _wireBytes = checked(_wireBytes + checked((ulong)bytes));
             _deliveries++;
@@ -743,11 +935,25 @@ internal static class P03FourProfileComparison
                     bool actual = Recipients[recipient].Active && _appliedPresent[offset];
                     if (expected) _expectedEntities++;
                     if (actual) _deliveredEntities++;
-                    if (actual != expected || actual && _appliedVersion[offset] != State[entity].Version)
+                    if (actual != expected || actual &&
+                        (_appliedVersion[offset] != State[entity].Version ||
+                         _appliedX[offset] != State[entity].X ||
+                         _appliedZ[offset] != State[entity].Z))
                         equal = false;
                     hash ^= (ulong)(actual ? 1 : 0);
                     hash = unchecked(hash * 1_099_511_628_211UL);
-                    if (actual) hash ^= State[entity].Version;
+                    hash ^= unchecked((ulong)recipient);
+                    hash = unchecked(hash * 1_099_511_628_211UL);
+                    hash ^= unchecked((ulong)entity);
+                    hash = unchecked(hash * 1_099_511_628_211UL);
+                    if (actual)
+                    {
+                        hash ^= State[entity].Version;
+                        hash = unchecked(hash * 1_099_511_628_211UL);
+                        hash ^= unchecked((ulong)_appliedX[offset]);
+                        hash = unchecked(hash * 1_099_511_628_211UL);
+                        hash ^= unchecked((ulong)_appliedZ[offset]);
+                    }
                     hash = unchecked(hash * 1_099_511_628_211UL);
                 }
             }
@@ -790,14 +996,14 @@ internal static class P03FourProfileComparison
                 _serviceActive[index] = true;
             }
             for (int index = 0; index < State.Length; index++)
-                ApplyEntity(index);
+                ApplyEntity(index, 0);
             Drain(0);
         }
 
         protected override void ApplyCore(TraceTick tick, int cadenceStep)
         {
-            foreach (RecipientMove move in tick.Moves) ApplyRecipient(move.RecipientIndex);
-            foreach (EntityMutation mutation in tick.Mutations) ApplyEntity(mutation.EntityIndex);
+            foreach (RecipientMove move in tick.Moves) ApplyRecipient(move.RecipientIndex, cadenceStep);
+            foreach (EntityMutation mutation in tick.Mutations) ApplyEntity(mutation.EntityIndex, cadenceStep);
             Drain(cadenceStep);
         }
 
@@ -816,6 +1022,7 @@ internal static class P03FourProfileComparison
                     RecordEntity(recipientIndex,
                         checked((int)record.Entity.Index), record.CanonicalVersion, record.IsPresent);
                 }
+                RecordMessageBytes(bundle.EstimatedEncodedBytes);
                 Require(_service.TryAcknowledgeBundle(
                     bundle.Participant, bundle.BundleId, applied: true));
             }
@@ -841,11 +1048,21 @@ internal static class P03FourProfileComparison
                 snapshot.ReservedBytes);
         }
 
+        public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
+        {
+            GameInterestSnapshot snapshot = _service.GetSnapshot();
+            return BuildMemoryBreakdown(
+                snapshot.ReservedBytes,
+                0,
+                checked((long)snapshot.RelationCount * 64),
+                checked((long)snapshot.PendingRelationCount * 32));
+        }
+
         public override void AssertSemanticContract() => AssertConverged();
 
         public override void Dispose() { }
 
-        private void ApplyRecipient(int index)
+        private void ApplyRecipient(int index, int cadenceStep)
         {
             TraceRecipient recipient = Recipients[index];
             if (!recipient.Active)
@@ -856,14 +1073,14 @@ internal static class P03FourProfileComparison
                 return;
             }
             GameInterestUpdateStatus status = _service.SetRecipientAnchor(
-                Participant(index), Point(recipient), index + 1L);
+                Participant(index), Point(recipient), checked(cadenceStep * 16L + index));
             if (status is not (GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange))
                 throw new InvalidOperationException(
                     $"P0.3 maintained recipient {index} update returned {status} at ({recipient.X},{recipient.Z}).");
             _serviceActive[index] = true;
         }
 
-        private void ApplyEntity(int index)
+        private void ApplyEntity(int index, int cadenceStep)
         {
             TraceEntity entity = State[index];
             if (!entity.Public) return;
@@ -875,11 +1092,13 @@ internal static class P03FourProfileComparison
                 new GameSimulationState { TickMarker = checked((int)entity.Version) });
             if (entity.Present)
                 Require(_service.UpsertEntity(
-                    projected, entity.Version, Point(entity), horizon, index + 1L) is
+                    projected, entity.Version, Point(entity), horizon,
+                    checked(cadenceStep * 16L + index)) is
                     GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange);
             else
                 Require(_service.RemoveEntity(
-                    ReplicationId(index), entity.Version, index + 1L) is
+                    ReplicationId(index), entity.Version,
+                    checked(cadenceStep * 16L + index)) is
                     GameInterestUpdateStatus.Success or GameInterestUpdateStatus.StaleVersion);
         }
     }
@@ -917,14 +1136,14 @@ internal static class P03FourProfileComparison
                 _serviceActive[index] = true;
             }
             for (int index = 0; index < State.Length; index++)
-                ApplyEntity(index);
+                ApplyEntity(index, 0);
             Drain(0);
         }
 
         protected override void ApplyCore(TraceTick tick, int cadenceStep)
         {
-            foreach (RecipientMove move in tick.Moves) ApplyRecipient(move.RecipientIndex);
-            foreach (EntityMutation mutation in tick.Mutations) ApplyEntity(mutation.EntityIndex);
+            foreach (RecipientMove move in tick.Moves) ApplyRecipient(move.RecipientIndex, cadenceStep);
+            foreach (EntityMutation mutation in tick.Mutations) ApplyEntity(mutation.EntityIndex, cadenceStep);
             Drain(cadenceStep);
         }
 
@@ -944,6 +1163,7 @@ internal static class P03FourProfileComparison
                     RecordEntity(ParticipantIndex(bundle.Participant),
                         checked((int)record.Entity.Index), record.CanonicalVersion, record.IsPresent);
                 }
+                RecordMessageBytes(bundle.EstimatedEncodedBytes);
                 Require(_service.TryAcknowledgeBundle(
                     bundle.Participant, bundle.DeliveryBundleId, applied: true));
             }
@@ -960,7 +1180,7 @@ internal static class P03FourProfileComparison
                 checked((ulong)(snapshot.SpatialRegionCount + snapshot.SemanticKnowledgeRowCount)),
                 snapshot.BundlesBuilt,
                 snapshot.DirtyEntitiesProcessed,
-                snapshot.BundlesBuilt * 32,
+                MaterializedRecords,
                 WireBytes,
                 Deliveries,
                 Proofs,
@@ -969,11 +1189,21 @@ internal static class P03FourProfileComparison
                 snapshot.ReservedBytes);
         }
 
+        public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
+        {
+            DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
+            return BuildMemoryBreakdown(
+                snapshot.ReservedBytes,
+                0,
+                checked((long)snapshot.SemanticKnowledgeRowCount * 64),
+                checked((long)snapshot.DirtyEntityCount * 32));
+        }
+
         public override void AssertSemanticContract() => AssertConverged();
 
         public override void Dispose() { }
 
-        private void ApplyRecipient(int index)
+        private void ApplyRecipient(int index, int cadenceStep)
         {
             TraceRecipient recipient = Recipients[index];
             if (!recipient.Active)
@@ -984,12 +1214,12 @@ internal static class P03FourProfileComparison
                 return;
             }
             Require(_service.SetRecipientAnchor(
-                Participant(index), Point(recipient), index + 1L) is
+                Participant(index), Point(recipient), checked(cadenceStep * 16L + index)) is
                 DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange);
             _serviceActive[index] = true;
         }
 
-        private void ApplyEntity(int index)
+        private void ApplyEntity(int index, int cadenceStep)
         {
             TraceEntity entity = State[index];
             var projected = new GameProjectedEntity(
@@ -999,7 +1229,8 @@ internal static class P03FourProfileComparison
                 new DirtyEntityLatestState(
                     ReplicationId(index), entity.Version, entity.Present, entity.Public,
                     entity.Present ? GameReplicationHorizon.Far : GameReplicationHorizon.None,
-                    Point(entity), projected.SimulationState), index + 1L) is
+                    Point(entity), projected.SimulationState),
+                    checked(cadenceStep * 16L + index)) is
                 DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange);
         }
     }
@@ -1073,18 +1304,18 @@ internal static class P03FourProfileComparison
                 {
                     foreach (WorldPublicRecord record in read.Snapshot)
                         RecordChunkRecord(recipientIndex, record);
-                    RecordDeliveryBytes(ChunkPublicationSemanticCodec.MeasureSnapshot(read.Snapshot.Length));
+                    RecordMessageBytes(ChunkPublicationSemanticCodec.MeasureSnapshot(read.Snapshot.Length));
                 }
                 else if (status == OfflineDirectChunkReadStatus.Delta)
                 {
                     foreach (WorldPublicDeltaRecord record in read.Deltas)
                         RecordChunkDelta(recipientIndex, record);
-                    RecordDeliveryBytes(48 + read.Deltas.Length * ChunkRecordBytes);
+                    RecordMessageBytes(48 + read.Deltas.Length * ChunkRecordBytes);
                 }
                 else if (status == OfflineDirectChunkReadStatus.ChunkAbsent)
                 {
                     ClearChunk(recipientIndex, work.Key);
-                    RecordDeliveryBytes(48);
+                    RecordMessageBytes(48);
                 }
                 recipient.CommitRead();
             }
@@ -1096,14 +1327,12 @@ internal static class P03FourProfileComparison
         {
             ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
             ulong reads = 0;
-            ulong records = 0;
             for (int index = 0; index < _recipients.Length; index++)
             {
                 OfflineDirectChunkRecipient? recipient = _recipients[index];
                 if (recipient is null) continue;
                 OfflineDirectChunkRecipientSnapshot snapshot = recipient.GetSnapshot();
                 reads = checked(reads + snapshot.SnapshotReads + snapshot.DeltaReads + snapshot.NoChangeReads);
-                records = checked(records + snapshot.SnapshotReads + snapshot.DeltaReads);
             }
             return new(
                 scheduler.DirtyChunksObserved + scheduler.IncomingQueued,
@@ -1111,13 +1340,23 @@ internal static class P03FourProfileComparison
                 checked((ulong)(scheduler.MembershipCount + scheduler.SharedChunkCount)),
                 reads,
                 scheduler.DirtyChunksObserved,
-                records,
+                MaterializedRecords,
                 WireBytes,
                 Deliveries,
                 Proofs,
                 MaxPending,
                 MaxOutstanding,
                 scheduler.ReservedBytes + RecipientReservedBytes());
+        }
+
+        public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
+        {
+            ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
+            return BuildMemoryBreakdown(
+                checked(scheduler.ReservedBytes + RecipientReservedBytes()),
+                _publication.Source.GetSnapshot().ReservedBytes,
+                checked((long)scheduler.MembershipCount * 64),
+                checked((long)scheduler.PendingWorkCount * 32));
         }
 
         public override void AssertSemanticContract() => AssertConverged();
@@ -1181,6 +1420,9 @@ internal static class P03FourProfileComparison
         private readonly PublicationFixture _publication;
         private readonly DirtyChunkSpatialFanout _service;
         private readonly bool[] _serviceActive;
+        private readonly ChunkInterestEntry[][] _knownInterest;
+        private readonly int[] _knownInterestCounts;
+        private readonly ChunkInterestEntry[] _interestScratch;
 
         internal DirtyChunkAdapter(Workload workload) : base(workload)
         {
@@ -1199,6 +1441,11 @@ internal static class P03FourProfileComparison
                 GameChunkInterestProfile.Default,
                 OfflineDirectChunkCadence.EvidenceProfile);
             _serviceActive = new bool[Recipients.Length];
+            _knownInterest = new ChunkInterestEntry[Recipients.Length][];
+            _knownInterestCounts = new int[Recipients.Length];
+            _interestScratch = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
+            for (int index = 0; index < _knownInterest.Length; index++)
+                _knownInterest[index] = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
         }
 
         public override void Initialize()
@@ -1237,19 +1484,19 @@ internal static class P03FourProfileComparison
                     {
                         foreach (WorldPublicRecord record in delivery.Snapshot)
                             RecordChunkRecord(recipientIndex, record);
-                        RecordDeliveryBytes(ChunkPublicationSemanticCodec.MeasureSnapshot(
+                        RecordMessageBytes(ChunkPublicationSemanticCodec.MeasureSnapshot(
                             delivery.Snapshot.Length));
                     }
                     else if (delivery.Status == OfflineDirectChunkReadStatus.Delta)
                     {
                         foreach (WorldPublicDeltaRecord record in delivery.Deltas)
                             RecordChunkDelta(recipientIndex, record);
-                        RecordDeliveryBytes(48 + delivery.Deltas.Length * ChunkRecordBytes);
+                        RecordMessageBytes(48 + delivery.Deltas.Length * ChunkRecordBytes);
                     }
                     else if (delivery.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
                     {
                         ClearChunk(recipientIndex, delivery.Key);
-                        RecordDeliveryBytes(48);
+                        RecordMessageBytes(48);
                     }
                     Require(_service.TryAcknowledgeDelivery(
                         participant, delivery.DeliveryId, applied: true) ==
@@ -1268,7 +1515,7 @@ internal static class P03FourProfileComparison
                 snapshot.CandidateRecipientsExamined,
                 checked((ulong)(snapshot.RecipientChunkKnowledgeRowCount +
                     snapshot.RecipientSpatialRegionCount)),
-                snapshot.PublicationReads + snapshot.DeltaReads,
+                MaterializedRecords,
                 snapshot.DirtyChunksObserved,
                 snapshot.PublicationReads + snapshot.DeltaReads,
                 WireBytes,
@@ -1277,6 +1524,16 @@ internal static class P03FourProfileComparison
                 MaxPending,
                 MaxOutstanding,
                 snapshot.ReservedBytes);
+        }
+
+        public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
+        {
+            DirtyChunkSpatialFanoutSnapshot snapshot = _service.GetSnapshot();
+            return BuildMemoryBreakdown(
+                snapshot.ReservedBytes,
+                _publication.Source.GetSnapshot().ReservedBytes,
+                checked((long)snapshot.RecipientChunkKnowledgeRowCount * 64),
+                checked((long)(snapshot.DirtyChunkCount + snapshot.PendingChunkObligationCount) * 32));
         }
 
         public override void AssertSemanticContract() => AssertConverged();
@@ -1288,18 +1545,48 @@ internal static class P03FourProfileComparison
             TraceRecipient recipient = Recipients[index];
             if (!recipient.Active)
             {
-                if (_serviceActive[index]) ClearRecipient(index);
+                if (_serviceActive[index])
+                {
+                    for (int interest = 0; interest < _knownInterestCounts[index]; interest++)
+                        ClearChunk(index, _knownInterest[index][interest].Key);
+                    _knownInterestCounts[index] = 0;
+                }
                 if (_serviceActive[index])
                     Require(_service.RemoveRecipient(Participant(index)));
                 _serviceActive[index] = false;
                 return;
             }
-            if (_serviceActive[index]) ClearRecipient(index);
+            ChunkInterestEntry[] known = _knownInterest[index];
+            ReadOnlySpan<ChunkInterestEntry> previous =
+                known.AsSpan(0, _knownInterestCounts[index]);
+            ChunkInterestQueryStatus query = ChunkInterestQuery.TryQuery(
+                GameWorldState.DefaultSpace,
+                WorldPosition(recipient),
+                GameChunkInterestProfile.Default,
+                previous,
+                _interestScratch,
+                out int interestCount,
+                out int required);
+            Require(query == ChunkInterestQueryStatus.Success && interestCount == required);
             Require(_service.SetRecipientAnchor(
                 Participant(index), GameWorldState.DefaultSpace, WorldPosition(recipient),
                 checked((ulong)(index + 1))) is
                 DirtyChunkRecipientUpdateStatus.Reconciled or
                 DirtyChunkRecipientUpdateStatus.NoChange);
+            for (int oldIndex = 0; oldIndex < previous.Length; oldIndex++)
+            {
+                SpatialChunkKey oldKey = previous[oldIndex].Key;
+                bool retained = false;
+                for (int newIndex = 0; newIndex < interestCount; newIndex++)
+                    if (_interestScratch[newIndex].Key == oldKey)
+                    {
+                        retained = true;
+                        break;
+                    }
+                if (!retained) ClearChunk(index, oldKey);
+            }
+            _interestScratch.AsSpan(0, interestCount).CopyTo(known);
+            _knownInterestCounts[index] = interestCount;
             _serviceActive[index] = true;
         }
     }
@@ -1385,7 +1672,10 @@ internal static class P03FourProfileComparison
     {
         int farCells = (192_500 + 16_000 - 1) / 16_000;
         int edgeWidth = farCells * 2 + 1;
-        int maximumEdges = checked(edgeWidth * edgeWidth * workload.Recipients.Length + edgeWidth);
+        // Recipient envelope rebuilds allocate the new region/edge set before retiring the old
+        // one. Reserve two simultaneous envelopes so teleport/re-entry measures the profile,
+        // rather than tripping a harness-only transient-capacity limit.
+        int maximumEdges = checked(edgeWidth * edgeWidth * workload.Recipients.Length * 2 + edgeWidth);
         return new GameInterestLimits(
             workload.Entities.Length,
             workload.Recipients.Length,
