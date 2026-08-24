@@ -550,7 +550,13 @@ public sealed class GameInterestService
         // preserves exact Immediate hysteresis and publishes the new canonical
         // version in the same pass. Any nonviable recipient keeps the general
         // discovery path so a partial graph is never treated as complete.
-        bool stableFarFastPath = !created && previousRegion == nextRegion &&
+        // Coarse-envelope admission guarantees that every current reverse region edge already
+        // owns a relation to a Far entity. Exact-distance admission does not: an entity may cross
+        // the exact Far boundary while remaining in the same coarse region, so it must revisit
+        // current reverse edges to discover newly relevant recipients.
+        bool stableFarFastPath =
+            _admissionMode == GameInterestAdmissionMode.CoarseEnvelope &&
+            !created && previousRegion == nextRegion &&
             previousHorizon == GameReplicationHorizon.Far &&
             horizon == GameReplicationHorizon.Far && _nonviableRecipients == 0;
 

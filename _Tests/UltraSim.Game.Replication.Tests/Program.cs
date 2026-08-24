@@ -79,6 +79,7 @@ var tests = new (string Name, Action Body)[]
     ("ImmediateHysteresisAndRegionBoundariesAreIndependent", ImmediateHysteresisAndRegionBoundariesAreIndependent),
     ("StableFarUpdateUsesOneMaintainedRelationPass", StableFarUpdateUsesOneMaintainedRelationPass),
     ("StableFarFastPathPreservesImmediateHysteresis", StableFarFastPathPreservesImmediateHysteresis),
+    ("ExactDistanceFarEntryWithinOneRegionUsesGeneralDiscovery", ExactDistanceFarEntryWithinOneRegionUsesGeneralDiscovery),
     ("StableFarFastPathRejectsEveryGeneralShape", StableFarFastPathRejectsEveryGeneralShape),
     ("RecipientRegionCrossingUpdatesOnlyEnvelopeDifference", RecipientRegionCrossingUpdatesOnlyEnvelopeDifference),
     ("NewestPendingStateAndPromotionCollapseCorrectly", NewestPendingStateAndPromotionCollapseCorrectly),
@@ -318,6 +319,34 @@ static void StableFarFastPathPreservesImmediateHysteresis()
     Check.Equal(4UL, attribution.FastPathPendingVersionUpdates);
     Check.Equal(0UL, attribution.ReverseRegionEdgeVisits);
     Check.Equal(0UL, attribution.PendingRelationVisits);
+}
+
+static void ExactDistanceFarEntryWithinOneRegionUsesGeneralDiscovery()
+{
+    var service = new GameInterestService(
+        new StateEpoch(7),
+        new GameInterestLimits(8, 1, 128, 128, 8, 8, 8),
+        InterestProfile(),
+        GameInterestAdmissionMode.ExactDistance);
+    ParticipantId participant = new(105);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    GameProjectedEntity entity = Projected(6, 1, 1);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(entity, 1, Millimeters(40_100, 0),
+            GameReplicationHorizon.Far, 0));
+    Check.Equal(0, service.GetSnapshot().RelationCount);
+
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(6, 1, 2), 2, Millimeters(39_400, 0),
+            GameReplicationHorizon.Far, 1));
+    Check.Equal(GameInterestTier.Far,
+        Relation(service, participant, entity.Entity).Tier);
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.Equal(0UL, attribution.StableFarFastPathUpserts);
+    Check.Equal(1UL, attribution.GeneralPathUpserts);
+    Check.True(attribution.ReverseRegionEdgeVisits > 0);
 }
 
 static void StableFarFastPathRejectsEveryGeneralShape()

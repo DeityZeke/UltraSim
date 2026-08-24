@@ -18,12 +18,15 @@ internal static class P03FourProfileComparison
     private const int ByteBudget = 16_384;
     private const int MaxEntities = 400;
     private const int MaxRecipients = 16;
+    private const int MaxScaleEntities = 8_192;
+    private const int MaxScaleRecipients = 8_192;
     private const int MaxSubscriptionsPerRecipient = 1_024;
     private static int _dirtyEntitySpatialRegionEdgeMillimeters = 128_000;
     private static int _dirtyChunkSpatialRegionEdgeMillimeters = 128_000;
 
     internal static void Run(string[] args)
     {
+        bool scaleSuite = Has(args, "--scale-suite");
         int requestedEntities = ReadInt(args, "--entities=", 128);
         int requestedRecipients = ReadInt(args, "--recipients=", 8);
         int warmup = ReadInt(args, "--warmup=", DefaultWarmupTicks);
@@ -36,14 +39,22 @@ internal static class P03FourProfileComparison
         string? requestedProfile = ReadString(args, "--profile=");
         string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "../../../../results/game-p03-four-profile-matrix.json"));
-        if (requestedEntities <= 0 || requestedEntities > MaxEntities ||
-            requestedRecipients <= 0 || requestedRecipients > MaxRecipients ||
+        int maximumEntities = scaleSuite ? MaxScaleEntities : MaxEntities;
+        int maximumRecipients = scaleSuite ? MaxScaleRecipients : MaxRecipients;
+        if (requestedEntities <= 0 || requestedEntities > maximumEntities ||
+            requestedRecipients <= 0 || requestedRecipients > maximumRecipients ||
             warmup < 1 || totalTicks <= warmup ||
             _dirtyEntitySpatialRegionEdgeMillimeters <= 0 ||
             _dirtyChunkSpatialRegionEdgeMillimeters <= 0)
             throw new ArgumentOutOfRangeException(nameof(args));
 
-        Workload[] workloads = BuildWorkloads(requestedEntities, requestedRecipients, totalTicks);
+        Workload[] workloads = scaleSuite
+            ? [BuildScaleWorkload(
+                ReadString(args, "--scale-shape=") ?? "sparse",
+                requestedEntities,
+                requestedRecipients,
+                totalTicks)]
+            : BuildWorkloads(requestedEntities, requestedRecipients, totalTicks);
         if (!string.IsNullOrWhiteSpace(requestedWorkload))
             workloads = workloads.Where(item =>
                 string.Equals(item.Id, requestedWorkload, StringComparison.OrdinalIgnoreCase)).ToArray();
@@ -97,7 +108,9 @@ internal static class P03FourProfileComparison
         }
 
         var matrix = new ComparisonReport(
-            "ultrasim-game-p03-five-profile-shared-trace-v4",
+            scaleSuite
+                ? "ultrasim-game-p03e-five-profile-scale-matrix-v1"
+                : "ultrasim-game-p03-five-profile-shared-trace-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -119,7 +132,12 @@ internal static class P03FourProfileComparison
                 "after each encoded delivery; public/private/Event/Control traffic counts are " +
                 "identical in every profile row. Payload counters use canonical Game codec sizes " +
                 "and count each semantic delivery once; transport framing/security are excluded.",
-                "ChunkPublication remains selected; this matrix is evidence only.",
+                scaleSuite
+                    ? "Scale mode measures the Game replication core and canonical Game-message " +
+                      "bytes. It excludes sockets, security, packetization, and client engine/world " +
+                      "storage; historical full-network V2/V3 timings are contextual controls, " +
+                      "not ratio denominators."
+                    : "ChunkPublication remains selected; this matrix is evidence only.",
                 _dirtyEntitySpatialRegionEdgeMillimeters,
                 _dirtyChunkSpatialRegionEdgeMillimeters),
             totalTicks,
@@ -146,7 +164,9 @@ internal static class P03FourProfileComparison
             evidence.DiagnosticsEnabled = true;
             evidence.Initialize();
             for (int tick = 0; tick < workload.Ticks.Length; tick++)
-                evidence.ApplyVerified(workload.Ticks[tick], tick);
+                evidence.ApplyEvidence(workload.Ticks[tick], tick, workload.VerifyEveryTick);
+            if (!workload.VerifyEveryTick)
+                evidence.RefreshSemanticStatus();
             while (!evidence.IsConverged && convergenceTicks < DrainTicks)
             {
                 convergenceTicks++;
@@ -244,6 +264,143 @@ internal static class P03FourProfileComparison
             CreateWorkload("high-spatial-churn", entities, recipients, ticks, WorkloadShape.HighDirt),
             CreateWorkload("high-movement-low-dirt", entities, recipients, ticks, WorkloadShape.HighMovement),
         ];
+    }
+
+    private static Workload BuildScaleWorkload(
+        string requestedShape,
+        int requestedEntities,
+        int requestedRecipients,
+        int ticks)
+    {
+        return requestedShape.ToLowerInvariant() switch
+        {
+            "dense" => CreateDenseScaleWorkload(
+                requestedEntities == 128 ? 1_000 : requestedEntities,
+                requestedRecipients == 8 ? 400 : requestedRecipients,
+                ticks),
+            "sparse" => CreateSparseScaleWorkload(
+                requestedRecipients,
+                ticks),
+            _ => throw new ArgumentException(
+                $"Unsupported scale shape '{requestedShape}'.", nameof(requestedShape)),
+        };
+    }
+
+    private static Workload CreateDenseScaleWorkload(int entityCount, int recipientCount, int ticks)
+    {
+        var entities = new TraceEntity[entityCount];
+        int width = checked((int)Math.Ceiling(Math.Sqrt(entityCount)));
+        for (int index = 0; index < entityCount; index++)
+            entities[index] = new(
+                index, true, true,
+                checked(2_000L + (index % width) * 4_000L),
+                checked(2_000L + (index / width) * 4_000L),
+                1, 1, 1, 1);
+        var recipients = new TraceRecipient[recipientCount];
+        for (int index = 0; index < recipientCount; index++)
+        {
+            int entity = recipientCount == 1
+                ? 0
+                : checked(index * (entityCount - 1) / (recipientCount - 1));
+            recipients[index] = new(
+                index, true,
+                checked(2_000L + (entity % width) * 4_000L),
+                checked(2_000L + (entity / width) * 4_000L));
+        }
+        TraceEntity[] working = entities.ToArray();
+        int dirtyCount = Math.Max(1, entityCount * 2 / 100);
+        var trace = new TraceTick[ticks];
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            var mutations = new EntityMutation[dirtyCount];
+            int start = checked(tick * dirtyCount % entityCount);
+            for (int offset = 0; offset < dirtyCount; offset++)
+            {
+                int entity = (start + offset) % entityCount;
+                TraceEntity prior = working[entity];
+                long dx = ((tick + entity) & 1) == 0 ? 1 : -1;
+                mutations[offset] = new(entity, checked(prior.X + dx), prior.Z, true, true);
+                working[entity] = prior with
+                {
+                    X = checked(prior.X + dx),
+                    Version = checked(prior.Version + 1),
+                    PublicVersion = checked(prior.PublicVersion + 1),
+                };
+            }
+            trace[tick] = new(mutations, []);
+        }
+        return new Workload(
+            "dense-scale", entities, recipients, trace, [],
+            new CommonTraffic(checked(dirtyCount * ticks), 0, 0, 0),
+            GameInterestProfile.Reference,
+            GameChunkInterestProfile.Default,
+            OfflineDirectChunkCadence.EvidenceProfile,
+            MaxSubscriptionsPerRecipient,
+            VerifyEveryTick: false);
+    }
+
+    private static Workload CreateSparseScaleWorkload(int population, int ticks)
+    {
+        const int width = 64;
+        const long spacing = 12_000;
+        var entities = new TraceEntity[population];
+        var recipients = new TraceRecipient[population];
+        for (int index = 0; index < population; index++)
+        {
+            long x = checked((index % width) * spacing);
+            long z = checked((index / width) * spacing);
+            entities[index] = new(index, true, true, x, z, 1, 1, 1, 1);
+            recipients[index] = new(index, true, x, z);
+        }
+        TraceEntity[] workingEntities = entities.ToArray();
+        TraceRecipient[] workingRecipients = recipients.ToArray();
+        int active = Math.Max(1, checked((int)Math.Round(
+            population * 0.35, MidpointRounding.AwayFromZero)));
+        var trace = new TraceTick[ticks];
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            var mutations = new EntityMutation[active];
+            var moves = new RecipientMove[active];
+            for (int index = 0; index < active; index++)
+            {
+                TraceEntity entity = workingEntities[index];
+                long dx = 10 + (index % 3);
+                long dz = 5 + (index % 2);
+                long x = checked(entity.X + dx);
+                long z = checked(entity.Z + dz);
+                mutations[index] = new(index, x, z, true, true);
+                moves[index] = new(index, true, x, z);
+                workingEntities[index] = entity with
+                {
+                    X = x,
+                    Z = z,
+                    Version = checked(entity.Version + 1),
+                    PublicVersion = checked(entity.PublicVersion + 1),
+                };
+                workingRecipients[index] = workingRecipients[index] with { X = x, Z = z };
+            }
+            trace[tick] = new(mutations, moves);
+        }
+        var entityInterest = new GameInterestProfile(
+            RegionEdgeMillimeters: 10_000,
+            ImmediateEnterRadiusMillimeters: 7_500,
+            ImmediateLeaveRadiusMillimeters: 7_500,
+            NearRadiusMillimeters: 23_500,
+            FarRadiusMillimeters: 39_500,
+            NearIntervalMilliseconds: 32,
+            FarIntervalMilliseconds: 48,
+            ApplicationAckRetryMilliseconds: 100,
+            ApplicationAckTimeoutMilliseconds: 2_000);
+        var chunkInterest = new ChunkInterestProfile(
+            7_500, 7_500, 23_500, 23_500, 39_500, 39_500);
+        return new Workload(
+            "sparse-scale", entities, recipients, trace, [],
+            new CommonTraffic(checked(active * ticks), 0, 0, 0),
+            entityInterest,
+            chunkInterest,
+            new OfflineDirectChunkCadence(1, 2, 3),
+            128,
+            VerifyEveryTick: false);
     }
 
     private static Workload CreateWorkload(
@@ -490,7 +647,13 @@ internal static class P03FourProfileComparison
                 item.Mutations.Count(mutation => !mutation.Public))),
             EventFacts: checked(ticks * Math.Max(1, recipientCount / 4)),
             ControlFacts: checked(ticks * (recipientCount + 1)));
-        return new Workload(id, entities, recipients, ticksData, primaryEventTicks, traffic);
+        return new Workload(
+            id, entities, recipients, ticksData, primaryEventTicks, traffic,
+            GameInterestProfile.Reference,
+            GameChunkInterestProfile.Default,
+            OfflineDirectChunkCadence.EvidenceProfile,
+            MaxSubscriptionsPerRecipient,
+            VerifyEveryTick: true);
     }
 
     private static void AddMutation(
@@ -670,6 +833,9 @@ internal static class P03FourProfileComparison
         args.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?
             [prefix.Length..];
 
+    private static bool Has(string[] args, string value) =>
+        args.Any(candidate => string.Equals(candidate, value, StringComparison.OrdinalIgnoreCase));
+
     private enum ProfileKind : byte
     {
         MaintainedEntityRelation,
@@ -735,7 +901,12 @@ internal static class P03FourProfileComparison
         TraceRecipient[] Recipients,
         TraceTick[] Ticks,
         int[] PrimaryEventTicks,
-        CommonTraffic CommonTraffic);
+        CommonTraffic CommonTraffic,
+        GameInterestProfile EntityInterestProfile,
+        ChunkInterestProfile ChunkInterestProfile,
+        OfflineDirectChunkCadence ChunkCadence,
+        int MaximumSubscriptionsPerRecipient,
+        bool VerifyEveryTick);
 
     private readonly record struct CommonTraffic(
         int PublicFacts,
@@ -874,9 +1045,11 @@ internal static class P03FourProfileComparison
             {
                 _expectedChunkInterest = new ChunkInterestEntry[Recipients.Length][];
                 _expectedChunkInterestCounts = new int[Recipients.Length];
-                _expectedChunkInterestScratch = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
+                _expectedChunkInterestScratch = new ChunkInterestEntry[
+                    workload.MaximumSubscriptionsPerRecipient];
                 for (int index = 0; index < Recipients.Length; index++)
-                    _expectedChunkInterest[index] = new ChunkInterestEntry[MaxSubscriptionsPerRecipient];
+                    _expectedChunkInterest[index] = new ChunkInterestEntry[
+                        workload.MaximumSubscriptionsPerRecipient];
                 RefreshAllChunkInterestOracles();
             }
         }
@@ -890,6 +1063,13 @@ internal static class P03FourProfileComparison
             PrepareTick(tick);
             ApplyCore(tick, cadenceStep);
             UpdateSemanticStatus();
+        }
+
+        public void ApplyEvidence(TraceTick tick, int cadenceStep, bool verify)
+        {
+            PrepareTick(tick);
+            ApplyCore(tick, cadenceStep);
+            if (verify) UpdateSemanticStatus();
         }
 
         public void ApplyTimed(
@@ -1215,7 +1395,8 @@ internal static class P03FourProfileComparison
                 (long)_publicSlotGenerations.Length * sizeof(uint));
             if (_expectedChunkInterest is not null)
                 semanticStateBytes = checked(semanticStateBytes +
-                    (long)_expectedChunkInterest.Length * MaxSubscriptionsPerRecipient *
+                    (long)_expectedChunkInterest.Length *
+                        Workload.MaximumSubscriptionsPerRecipient *
                         Unsafe.SizeOf<ChunkInterestEntry>() +
                     (long)_expectedChunkInterestCounts!.Length * sizeof(int) +
                     (long)_expectedChunkInterestScratch!.Length * Unsafe.SizeOf<ChunkInterestEntry>());
@@ -1343,7 +1524,8 @@ internal static class P03FourProfileComparison
             }
             long dx = entity.X - recipient.X;
             long dz = entity.Z - recipient.Z;
-            return dx * dx + dz * dz <= 192_000L * 192_000L;
+            long radius = Workload.EntityInterestProfile.FarRadiusMillimeters;
+            return dx * dx + dz * dz <= radius * radius;
         }
 
         private void RefreshAllChunkInterestOracles()
@@ -1364,7 +1546,7 @@ internal static class P03FourProfileComparison
             ChunkInterestQueryStatus status = ChunkInterestQuery.TryQuery(
                 GameWorldState.DefaultSpace,
                 WorldPosition(Recipients[recipientIndex]),
-                GameChunkInterestProfile.Default,
+                Workload.ChunkInterestProfile,
                 current.AsSpan(0, currentCount),
                 _expectedChunkInterestScratch!,
                 out int count,
@@ -1386,7 +1568,7 @@ internal static class P03FourProfileComparison
         internal MaintainedAdapter(Workload workload) : base(workload, usesChunkInterest: false)
         {
             _service = new GameInterestService(new StateEpoch(0xF031),
-                CreateInterestLimits(workload), GameInterestProfile.Reference,
+                CreateInterestLimits(workload), workload.EntityInterestProfile,
                 GameInterestAdmissionMode.ExactDistance);
             _records = new GameWorldStateRecord[32];
             _serviceActive = new bool[Recipients.Length];
@@ -1487,7 +1669,7 @@ internal static class P03FourProfileComparison
                 return;
             }
             GameInterestUpdateStatus status = _service.SetRecipientAnchor(
-                Participant(index), Point(recipient), checked(cadenceStep * 16L + index));
+                Participant(index), Point(recipient), checked(cadenceStep * 16L));
             if (status is not (GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange))
                 throw new InvalidOperationException(
                     $"P0.3 maintained recipient {index} update returned {status} at ({recipient.X},{recipient.Z}).");
@@ -1503,7 +1685,7 @@ internal static class P03FourProfileComparison
                 {
                     Require(_service.RemoveEntity(
                         ReplicationId(entity), entity.Version,
-                        checked(cadenceStep * 16L + index)) is
+                        checked(cadenceStep * 16L)) is
                         GameInterestUpdateStatus.Success or GameInterestUpdateStatus.StaleVersion);
                     _entityServicePresent[index] = false;
                 }
@@ -1515,7 +1697,7 @@ internal static class P03FourProfileComparison
             Require(_service.UpsertEntity(
                 projected, entity.Version, Point(entity),
                 entity.Public ? GameReplicationHorizon.Far : GameReplicationHorizon.None,
-                checked(cadenceStep * 16L + index)) is
+                checked(cadenceStep * 16L)) is
                 GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange);
             _entityServicePresent[index] = true;
         }
@@ -1540,9 +1722,9 @@ internal static class P03FourProfileComparison
                 _dirtyEntitySpatialRegionEdgeMillimeters);
             _service = chunkBatched
                 ? new DirtyEntityChunkBatchFanout(
-                    new StateEpoch(0xF033), limits, GameInterestProfile.Reference)
+                    new StateEpoch(0xF033), limits, workload.EntityInterestProfile)
                 : new DirtyEntitySpatialFanout(
-                    new StateEpoch(0xF032), limits, GameInterestProfile.Reference);
+                    new StateEpoch(0xF032), limits, workload.EntityInterestProfile);
             _records = new DirtyEntityDeliveryRecord[32];
             _serviceActive = new bool[Recipients.Length];
         }
@@ -1647,7 +1829,7 @@ internal static class P03FourProfileComparison
                 return;
             }
             Require(_service.SetRecipientAnchor(
-                Participant(index), Point(recipient), checked(cadenceStep * 16L + index)) is
+                Participant(index), Point(recipient), checked(cadenceStep * 16L)) is
                 DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange);
             _serviceActive[index] = true;
         }
@@ -1663,7 +1845,7 @@ internal static class P03FourProfileComparison
                     ReplicationId(entity), entity.Version, entity.Present, entity.Public,
                     entity.Present ? GameReplicationHorizon.Far : GameReplicationHorizon.None,
                     Point(entity), projected.SimulationState),
-                    checked(cadenceStep * 16L + index)) is
+                    checked(cadenceStep * 16L)) is
                 DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange);
         }
     }
@@ -1687,10 +1869,11 @@ internal static class P03FourProfileComparison
                 _publication.Source,
                 new ChunkPublicationWorkSchedulerLimits(
                     Recipients.Length,
-                    checked(Recipients.Length * MaxSubscriptionsPerRecipient)));
-            _changes = new OfflineDirectChunkSubscriptionChange[MaxSubscriptionsPerRecipient];
+                    checked(Recipients.Length * workload.MaximumSubscriptionsPerRecipient)));
+            _changes = new OfflineDirectChunkSubscriptionChange[
+                workload.MaximumSubscriptionsPerRecipient];
             for (int index = 0; index < _recipients.Length; index++)
-                _recipients[index] = CreateRecipient();
+                _recipients[index] = CreateRecipient(workload);
         }
 
         public override void Initialize()
@@ -1848,10 +2031,11 @@ internal static class P03FourProfileComparison
             return reserved;
         }
 
-        private static OfflineDirectChunkRecipient CreateRecipient() => new(
-            new OfflineDirectChunkRecipientLimits(MaxSubscriptionsPerRecipient, MaxEntities, MaxEntities),
-            GameChunkInterestProfile.Default,
-            OfflineDirectChunkCadence.EvidenceProfile);
+        private static OfflineDirectChunkRecipient CreateRecipient(Workload workload) => new(
+            new OfflineDirectChunkRecipientLimits(
+                workload.MaximumSubscriptionsPerRecipient, 64, 64),
+            workload.ChunkInterestProfile,
+            workload.ChunkCadence);
     }
 
     private sealed class DirtyChunkAdapter : ProfileAdapter
@@ -1868,17 +2052,18 @@ internal static class P03FourProfileComparison
                 _publication.Source,
                 new DirtyChunkSpatialFanoutLimits(
                     Recipients.Length,
-                    checked(Recipients.Length * MaxSubscriptionsPerRecipient),
+                    checked(Recipients.Length * workload.MaximumSubscriptionsPerRecipient),
                     16_384,
                     8_192,
                     Math.Max(64, Recipients.Length * 4),
                     64,
                     64,
                     _dirtyChunkSpatialRegionEdgeMillimeters),
-                GameChunkInterestProfile.Default,
-                OfflineDirectChunkCadence.EvidenceProfile);
+                workload.ChunkInterestProfile,
+                workload.ChunkCadence);
             _serviceActive = new bool[Recipients.Length];
-            _changes = new OfflineDirectChunkSubscriptionChange[MaxSubscriptionsPerRecipient * 2];
+            _changes = new OfflineDirectChunkSubscriptionChange[
+                workload.MaximumSubscriptionsPerRecipient * 2];
         }
 
         public override void Initialize()
@@ -2087,7 +2272,9 @@ internal static class P03FourProfileComparison
 
     private static GameInterestLimits CreateInterestLimits(Workload workload)
     {
-        int farCells = (192_500 + 16_000 - 1) / 16_000;
+        GameInterestProfile profile = workload.EntityInterestProfile;
+        int farCells = checked((profile.FarRadiusMillimeters +
+            profile.RegionEdgeMillimeters - 1) / profile.RegionEdgeMillimeters);
         int edgeWidth = farCells * 2 + 1;
         // Recipient envelope rebuilds allocate the new region/edge set before retiring the old
         // one. Reserve two simultaneous envelopes so teleport/re-entry measures the profile,
