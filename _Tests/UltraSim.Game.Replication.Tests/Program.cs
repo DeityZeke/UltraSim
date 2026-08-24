@@ -15,6 +15,7 @@ var tests = new (string Name, Action Body)[]
 {
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
+    ("P01DirtyEntityExistingAudienceAvoidsOldFootprintDiscovery", DirtyEntitySpatialFanoutTests.ExistingAudienceAvoidsOldFootprintDiscovery),
     ("P01DirtyEntityExactWireBudgetAndRecipientOutstandingIsolation", DirtyEntitySpatialFanoutTests.ExactWireBudgetAndRecipientOutstandingIsolation),
     ("P01DirtyEntitySameRegionMutationKeepsSpatialListsAcyclic", DirtyEntitySpatialFanoutTests.SameRegionEntityMutationKeepsSpatialListsAcyclic),
     ("P01DirtyEntityMovementCleanTopologyRemovalAndReentry", DirtyEntitySpatialFanoutTests.MovementCleanTopologyRemovalAndReentry),

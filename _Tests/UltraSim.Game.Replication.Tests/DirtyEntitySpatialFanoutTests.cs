@@ -50,6 +50,51 @@ internal static class DirtyEntitySpatialFanoutTests
             $"semantic_rows={dirty.SemanticKnowledgeRowCount} reserved_bytes={dirty.ReservedBytes}");
     }
 
+    internal static void ExistingAudienceAvoidsOldFootprintDiscovery()
+    {
+        DirtyEntitySpatialFanout service = Create(maximumEntities: 8, maximumRecipients: 4);
+        service.SetRecipientAnchor(new ParticipantId(1), Point(0, 0), 0);
+        service.SetRecipientAnchor(new ParticipantId(2), Point(100_000, 0), 0);
+        service.CommitEntity(Present(0, 1, 0, 0), 0);
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out _));
+
+        DirtyEntitySpatialFanoutSnapshot baseline = service.GetSnapshot();
+        service.CommitEntity(Present(0, 2, 0, 0), 1);
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(1, out _));
+        DirtyEntitySpatialFanoutSnapshot sameFootprint = service.GetSnapshot();
+        Check.Equal(baseline.SpatialRecipientDiscoveryOperations,
+            sameFootprint.SpatialRecipientDiscoveryOperations);
+
+        service.CommitEntity(new DirtyEntityLatestState(
+            new ReplicationEntityId(0, 1), 3, true, true, GameReplicationHorizon.Near,
+            Point(0, 0), new GameSimulationState { TickMarker = 3 }), 2);
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(2, out _));
+        DirtyEntitySpatialFanoutSnapshot shrunk = service.GetSnapshot();
+        Check.Equal(sameFootprint.SpatialRecipientDiscoveryOperations,
+            shrunk.SpatialRecipientDiscoveryOperations);
+
+        service.CommitEntity(new DirtyEntityLatestState(
+            new ReplicationEntityId(0, 1), 4, true, true, GameReplicationHorizon.Near,
+            Point(100_000, 0), new GameSimulationState { TickMarker = 4 }), 3);
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(3, out _));
+        DirtyEntitySpatialFanoutSnapshot moved = service.GetSnapshot();
+        Check.Equal(shrunk.SpatialRecipientDiscoveryOperations + 1,
+            moved.SpatialRecipientDiscoveryOperations);
+
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.RemoveEntity(new ReplicationEntityId(0, 1), 5, 4));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(4, out _));
+        DirtyEntitySpatialFanoutSnapshot despawned = service.GetSnapshot();
+        Check.Equal(moved.SpatialRecipientDiscoveryOperations,
+            despawned.SpatialRecipientDiscoveryOperations);
+        Check.Equal(2, despawned.SemanticKnowledgeRowCount);
+    }
+
     internal static void ExactWireBudgetAndRecipientOutstandingIsolation()
     {
         DirtyEntitySpatialFanout service = Create(

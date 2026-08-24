@@ -181,7 +181,7 @@ public readonly record struct DirtyEntitySpatialFanoutAttributionSnapshot(
 /// while recipient topology changes discover entity cells.  The only retained recipient/entity
 /// rows are semantic knowledge and delivery debt; they are not an AOI membership graph.
 /// </summary>
-public sealed class DirtyEntitySpatialFanout
+public class DirtyEntitySpatialFanout
 {
     public static GamePublicReplicationProfileDescriptor PublicReplicationProfile =>
         GamePublicReplicationProfiles.DirtyEntitySpatialFanout;
@@ -197,6 +197,7 @@ public sealed class DirtyEntitySpatialFanout
     private readonly DirtyBundleState[] _bundles;
     private readonly DirtyBundleItem[] _bundleItems;
     private readonly int[] _selectionScratch;
+    private readonly int[] _entrantRecipientScratch;
     private readonly int[] _dirtyEntities;
     private readonly int[] _freeRecipients;
     private readonly int[] _freeRegions;
@@ -250,7 +251,6 @@ public sealed class DirtyEntitySpatialFanout
     private ulong _bundlesBuilt;
     private ulong _bundlesRejected;
     private ulong _capacityFailures;
-    private int _lastDiscoveryCandidates;
     private bool _attributionEnabled;
     private ulong _attributionDirtyCommits;
     private ulong _attributionDirtyDiscoveries;
@@ -286,6 +286,7 @@ public sealed class DirtyEntitySpatialFanout
         _bundles = new DirtyBundleState[limits.MaximumOutstandingBundles];
         _bundleItems = new DirtyBundleItem[checked(limits.MaximumOutstandingBundles * limits.MaximumRecordsPerBundle)];
         _selectionScratch = new int[limits.MaximumRecordsPerBundle];
+        _entrantRecipientScratch = new int[limits.MaximumRecipients];
         _dirtyEntities = new int[limits.MaximumEntities];
         _freeRecipients = new int[limits.MaximumRecipients];
         _freeRegions = new int[limits.MaximumSpatialRegions];
@@ -309,6 +310,8 @@ public sealed class DirtyEntitySpatialFanout
         _freeRegionCount = _freeRegions.Length;
         _freeRowCount = _freeRows.Length;
         _freeBundleCount = _freeBundles.Length;
+        for (int index = 0; index < _entities.Length; index++)
+            _entities[index].RowHead = -1;
     }
 
     public StateEpoch StateEpoch { get { EnsureOwnerThread(); return _stateEpoch; } }
@@ -321,18 +324,19 @@ public sealed class DirtyEntitySpatialFanout
         EnsureOwnerThread();
         if (!nextEpoch.IsValid || nextEpoch.Value <= _stateEpoch.Value) return false;
         _stateEpoch = nextEpoch;
+        for (int index = 0; index < _bundles.Length; index++)
+            if (_bundles[index].Active) ReleaseBundle(index);
+        for (int index = 0; index < _rows.Length; index++)
+            if (_rows[index].Active) RemoveRow(index);
         for (int index = 0; index < _entities.Length; index++)
         {
             if (_entities[index].Active) UnlinkEntity(index);
             _entities[index] = default;
+            _entities[index].RowHead = -1;
         }
         _entityCount = 0;
         _dirtyCount = 0;
         Array.Clear(_dirtyEntities);
-        for (int index = 0; index < _rows.Length; index++)
-            if (_rows[index].Active) RemoveRow(index);
-        for (int index = 0; index < _bundles.Length; index++)
-            if (_bundles[index].Active) ReleaseBundle(index);
         return true;
     }
 
@@ -804,123 +808,88 @@ public sealed class DirtyEntitySpatialFanout
     private bool ProcessDirtyEntity(int entityIndex, in DirtyEntityLatestState old, long now)
     {
         ref readonly DirtyEntitySlot current = ref _entities[entityIndex];
-        if (!CanProcessDirtyEntity(old, current)) return false;
         if (_attributionEnabled) _attributionDirtyDiscoveries++;
-        _lastDiscoveryCandidates = 0;
-        bool success = true;
-        bool sameFootprint = old.IsDiscoverable && current.Active &&
-            old.Entity == current.Entity && old.Position == current.Position &&
-            old.Horizon == current.Horizon;
-        if (sameFootprint)
-            success &= VisitRecipients(current.Position,
-                Math.Max(HorizonRadius(old.Horizon), HorizonRadius(current.Horizon)),
-                entityIndex, old, current, now);
-        else if (old.IsDiscoverable)
-            success &= VisitRecipients(old.Position, HorizonRadius(old.Horizon), entityIndex, old, current, now);
-        if (!sameFootprint && current.Active)
-            success &= VisitRecipients(current.Position, HorizonRadius(current.Horizon), entityIndex, old, current, now);
-        if (old.IsDiscoverable && current.Active && old.Position != current.Position)
+        int entrantCount = RequiresEntrantDiscovery(old, current)
+            ? DiscoverEntrants(entityIndex, current, _entrantRecipientScratch)
+            : 0;
+        if (entrantCount < 0 || entrantCount > _freeRowCount) return false;
+
+        // The entity-side links are the complete old known/pending audience.  They are
+        // semantic delivery rows we already require for SENT != KNOWN, not a second AOI graph.
+        int row = current.RowHead;
+        int visits = 0;
+        while (row >= 0)
         {
-            // The two broadphase queries above are the complete old/new footprint union.
-            // This branch is intentionally diagnostic only; it makes movement accounting
-            // explicit without introducing a subscriber reverse index.
+            if (++visits > _rows.Length)
+                throw new InvalidOperationException("Dirty-entity entity row list contains a cycle.");
+            int next = _rows[row].EntityNext;
+            if (_attributionEnabled) _attributionRows++;
+            int recipient = _rows[row].Recipient;
+            bool relevant = IsCurrentRelevant(recipient, current, _recipients[recipient].Anchor);
+            if (!EnsureEntityObligation(recipient, entityIndex, current, relevant, now))
+                throw new InvalidOperationException("An existing dirty-entity row unexpectedly required capacity.");
+            row = next;
         }
-        return success;
+
+        for (int index = 0; index < entrantCount; index++)
+            if (!EnsureEntityObligation(
+                    _entrantRecipientScratch[index], entityIndex, current, desiredPresent: true, now))
+                throw new InvalidOperationException("Dirty-entity entrant capacity diverged from discovery preflight.");
+        return true;
     }
 
-    private bool CanProcessDirtyEntity(
+    private bool RequiresEntrantDiscovery(
         in DirtyEntityLatestState old,
         in DirtyEntitySlot current)
     {
-        int needed = 0;
-        NextDiscoveryStamp();
-        if (old.IsDiscoverable)
-            needed = CountDirtyRecipientRows(old.Position, HorizonRadius(old.Horizon), old, current, needed);
-        if (needed <= _freeRowCount && current.Active)
-            needed = CountDirtyRecipientRows(current.Position, HorizonRadius(current.Horizon), old, current, needed);
-        return needed <= _freeRowCount;
+        if (!current.Active) return false;
+        if (!old.IsDiscoverable || old.Entity != current.Entity) return true;
+        if (old.Position != current.Position) return true;
+        return HorizonRadius(current.Horizon) > HorizonRadius(old.Horizon);
     }
 
-    private int CountDirtyRecipientRows(
-        in ReplicationSpatialPoint point,
-        int radius,
-        in DirtyEntityLatestState old,
+    /// <summary>
+    /// Discovers only recipients that can newly acquire this entity. The complete bounded
+    /// result is staged before any retained semantic row is mutated.
+    /// </summary>
+    private int DiscoverEntrants(
+        int entityIndex,
         in DirtyEntitySlot current,
-        int needed)
+        Span<int> destination)
     {
-        ReplicationSpatialRegionId center = ToRegion(point);
-        int cellRadius = CellRadius(radius);
+        _recipientDiscoveryOperations++;
+        NextDiscoveryStamp();
+        int count = 0;
+        ReplicationSpatialRegionId center = ToRegion(current.Position);
+        int cellRadius = CellRadius(HorizonRadius(current.Horizon));
         for (int dx = -cellRadius; dx <= cellRadius; dx++)
             for (int dz = -cellRadius; dz <= cellRadius; dz++)
             {
                 if (!TryOffset(center, dx, dz, out ReplicationSpatialRegionId region) ||
                     !_regionMap.TryGetValue(region, out int regionIndex)) continue;
-                int recipient = _regions[regionIndex].RecipientHead;
-                while (recipient >= 0)
-                {
-                    int next = _recipients[recipient].RegionNext;
-                    if (_recipientStamp[recipient] != _discoveryStamp)
-                    {
-                        _recipientStamp[recipient] = _discoveryStamp;
-                        bool oldRelevant = old.IsDiscoverable &&
-                            IsWithinOld(_recipients[recipient].Anchor, old.Position, old.Horizon);
-                        bool currentRelevant = IsCurrentRelevant(
-                            recipient, current, _recipients[recipient].Anchor);
-                        if ((oldRelevant || currentRelevant) && currentRelevant &&
-                            !_rowMap.ContainsKey(new DirtyRowKey(recipient, checked((uint)current.Entity.Index))))
-                        {
-                            needed++;
-                            if (needed > _freeRowCount) return needed;
-                        }
-                    }
-                    recipient = next;
-                }
-            }
-        return needed;
-    }
-
-    private bool VisitRecipients(
-        in ReplicationSpatialPoint point,
-        int radius,
-        int entityIndex,
-        in DirtyEntityLatestState old,
-        in DirtyEntitySlot current,
-        long now)
-    {
-        _recipientDiscoveryOperations++;
-        NextDiscoveryStamp();
-        ReplicationSpatialRegionId center = ToRegion(point);
-        int cellRadius = CellRadius(radius);
-        for (int dx = -cellRadius; dx <= cellRadius; dx++)
-            for (int dz = -cellRadius; dz <= cellRadius; dz++)
-            {
-                if (!TryOffset(center, dx, dz, out ReplicationSpatialRegionId region)) continue;
-                if (!_regionMap.TryGetValue(region, out int regionIndex)) continue;
                 if (_attributionEnabled) _attributionCells++;
                 int recipient = _regions[regionIndex].RecipientHead;
                 while (recipient >= 0)
                 {
                     int next = _recipients[recipient].RegionNext;
                     _candidateRecipientsExamined++;
-                    _lastDiscoveryCandidates++;
                     if (_attributionEnabled) _attributionCandidates++;
                     if (_recipientStamp[recipient] != _discoveryStamp)
                     {
                         _recipientStamp[recipient] = _discoveryStamp;
-                        bool oldRelevant = old.IsDiscoverable && IsWithinOld(_recipients[recipient].Anchor, old.Position, old.Horizon);
-                        bool currentRelevant = IsCurrentRelevant(
-                            recipient, current, _recipients[recipient].Anchor);
-                        if (oldRelevant || currentRelevant)
+                        DirtyRowKey key = new(recipient, checked((uint)entityIndex));
+                        if (!_rowMap.ContainsKey(key) &&
+                            IsCurrentRelevant(recipient, current, _recipients[recipient].Anchor))
                         {
                             _interestedRecipientsDiscovered++;
-                            if (!EnsureEntityObligation(recipient, entityIndex, current, currentRelevant, now))
-                                return false;
+                            if (count == destination.Length) return -1;
+                            destination[count++] = recipient;
                         }
                     }
                     recipient = next;
                 }
             }
-        return true;
+        return count;
     }
 
     private bool ReconcileRecipient(
@@ -1218,9 +1187,22 @@ public sealed class DirtyEntitySpatialFanout
         uint generation = _rowGenerations[index] == uint.MaxValue ? 0 : _rowGenerations[index] + 1;
         if (generation == 0) { _freeRows[_freeRowCount++] = index; return false; }
         _rowGenerations[index] = generation;
-        row = new DirtyRecord { Active = true, Recipient = recipientIndex, EntityIndex = entityIndex, RecipientNext = -1 };
+        row = new DirtyRecord
+        {
+            Active = true,
+            Recipient = recipientIndex,
+            EntityIndex = entityIndex,
+            RecipientPrevious = -1,
+            RecipientNext = -1,
+            EntityPrevious = -1,
+            EntityNext = -1,
+        };
         row.RecipientNext = _recipients[recipientIndex].RowHead;
+        if (row.RecipientNext >= 0) _rows[row.RecipientNext].RecipientPrevious = index;
         _recipients[recipientIndex].RowHead = index;
+        row.EntityNext = _entities[entityIndex].RowHead;
+        if (row.EntityNext >= 0) _rows[row.EntityNext].EntityPrevious = index;
+        _entities[entityIndex].RowHead = index;
         _rowMap.Add(new DirtyRowKey(recipientIndex, checked((uint)entityIndex)), index);
         _rowCount++;
         if (_attributionEnabled) _attributionRowsCreated++;
@@ -1231,21 +1213,17 @@ public sealed class DirtyEntitySpatialFanout
     {
         if ((uint)index >= (uint)_rows.Length || !_rows[index].Active) return;
         int recipient = _rows[index].Recipient;
-        int previous = -1;
-        int cursor = _recipients[recipient].RowHead;
-        int visits = 0;
-        while (cursor >= 0 && cursor != index)
-        {
-            if (++visits > _rows.Length)
-                throw new InvalidOperationException("Dirty-entity recipient row list contains a cycle.");
-            previous = cursor;
-            cursor = _rows[cursor].RecipientNext;
-        }
-        if (cursor == index)
-        {
-            if (previous < 0) _recipients[recipient].RowHead = _rows[index].RecipientNext;
-            else _rows[previous].RecipientNext = _rows[index].RecipientNext;
-        }
+        int entity = _rows[index].EntityIndex;
+        int recipientPrevious = _rows[index].RecipientPrevious;
+        int recipientNext = _rows[index].RecipientNext;
+        if (recipientPrevious < 0) _recipients[recipient].RowHead = recipientNext;
+        else _rows[recipientPrevious].RecipientNext = recipientNext;
+        if (recipientNext >= 0) _rows[recipientNext].RecipientPrevious = recipientPrevious;
+        int entityPrevious = _rows[index].EntityPrevious;
+        int entityNext = _rows[index].EntityNext;
+        if (entityPrevious < 0) _entities[entity].RowHead = entityNext;
+        else _rows[entityPrevious].EntityNext = entityNext;
+        if (entityNext >= 0) _rows[entityNext].EntityPrevious = entityPrevious;
         _rowMap.Remove(new DirtyRowKey(recipient, checked((uint)_rows[index].EntityIndex)));
         _rows[index] = default;
         _freeRows[_freeRowCount++] = index;
@@ -1415,14 +1393,6 @@ public sealed class DirtyEntitySpatialFanout
         return radius > 0 && DistanceSquared(anchor, entity.Position) <= (Int128)radius * radius;
     }
 
-    private bool IsWithinOld(in ReplicationSpatialPoint anchor, in ReplicationSpatialPoint entity, GameReplicationHorizon horizon)
-    {
-        int radius = horizon == GameReplicationHorizon.Immediate
-            ? _profile.ImmediateLeaveRadiusMillimeters
-            : HorizonRadius(horizon);
-        return radius > 0 && DistanceSquared(anchor, entity) <= (Int128)radius * radius;
-    }
-
     private GameInterestTier DetermineTier(
         in ReplicationSpatialPoint anchor,
         in DirtyEntitySlot entity,
@@ -1478,6 +1448,7 @@ public sealed class DirtyEntitySpatialFanout
         (long)_bundles.Length * Unsafe.SizeOf<DirtyBundleState>() +
         (long)_bundleItems.Length * Unsafe.SizeOf<DirtyBundleItem>() +
         (long)_selectionScratch.Length * sizeof(int) +
+        (long)_entrantRecipientScratch.Length * sizeof(int) +
         (long)_dirtyEntities.Length * sizeof(int) +
         (long)_recipientStamp.Length * sizeof(int) +
         (long)_entityStamp.Length * sizeof(int) +
@@ -1532,6 +1503,7 @@ public sealed class DirtyEntitySpatialFanout
         internal int Region;
         internal int RegionPrevious;
         internal int RegionNext;
+        internal int RowHead;
         internal DirtyEntityLatestState DirtyOld;
     }
 
@@ -1552,7 +1524,10 @@ public sealed class DirtyEntitySpatialFanout
         internal bool Active;
         internal int Recipient;
         internal int EntityIndex;
+        internal int RecipientPrevious;
         internal int RecipientNext;
+        internal int EntityPrevious;
+        internal int EntityNext;
         internal ReplicationEntityId Entity;
         internal ReplicationEntityId KnownEntity;
         internal ulong KnownCanonicalVersion;
