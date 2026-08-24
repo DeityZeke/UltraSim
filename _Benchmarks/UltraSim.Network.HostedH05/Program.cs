@@ -387,6 +387,8 @@ sealed class ServerApplicationFactory(
 
 sealed class ServerApplication : IHostedUdpSessionApplication
 {
+    private const ulong StateRetryServiceSteps = 256;
+    private const int MaximumConcurrentStateAttempts = 4;
     private readonly ServerApplicationFactory _factory;
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _participant;
@@ -549,7 +551,8 @@ sealed class ServerApplication : IHostedUdpSessionApplication
                 PublishNext();
             if (_published != 0 && HasAppliedPublicationCursor() &&
                 !PublishedRevisionIsApplied() &&
-                _serviceStep >= _nextStateRetryStep)
+                _serviceStep >= _nextStateRetryStep &&
+                _chunks.GetSnapshot().OutstandingDeliveries < MaximumConcurrentStateAttempts)
                 RetryLatestState();
             if (!_completionQueued && _controls > _targetTicks &&
                 _published == _targetTicks && PublishedRevisionIsApplied() &&
@@ -607,7 +610,7 @@ sealed class ServerApplication : IHostedUdpSessionApplication
             throw new InvalidOperationException(
                 $"H0.5 publication schedule mismatch: crossing={crossesBoundary}, " +
                 $"kind={dirty.Kind}, status={scheduled}, tick={next}.");
-        _nextStateRetryStep = checked(_serviceStep + 16);
+        _nextStateRetryStep = checked(_serviceStep + StateRetryServiceSteps);
 
         var owner = new RemoteOwnerStateMessage
         {
@@ -671,7 +674,11 @@ sealed class ServerApplication : IHostedUdpSessionApplication
 
     private void RetryLatestState()
     {
-        _nextStateRetryStep = checked(_serviceStep + 16);
+        // Owner service passes are roughly millisecond scheduling opportunities, not authority
+        // ticks. A cold client must not turn delayed application proof into an unbounded stream of
+        // redundant independent-state offers that fills both the delivery ledger and Network
+        // queue. A tiny bounded overlap still proves lost-proof/latest-state recovery.
+        _nextStateRetryStep = checked(_serviceStep + StateRetryServiceSteps);
         RemoteChunkWorldStateScheduleStatus status =
             _chunks.TrySchedule(_key, _serviceStep);
         if (status is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
