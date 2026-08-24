@@ -204,6 +204,7 @@ public class DirtyEntitySpatialFanout
     private readonly DirtyBundleItem[] _bundleItems;
     private readonly int[] _selectionScratch;
     private readonly int[] _entrantRecipientScratch;
+    private readonly int[] _entrantEntityScratch;
     private readonly int[] _dirtyEntities;
     private readonly int[] _freeRecipients;
     private readonly int[] _freeRegions;
@@ -239,7 +240,10 @@ public class DirtyEntitySpatialFanout
     private int _pendingCount;
     private int _bundleCount;
     private int _dirtyCount;
-    private int _nextRecipient;
+    private int _readyRecipientHead = -1;
+    private int _readyRecipientTail = -1;
+    private int _readyRecipientCount;
+    private long _preparedBuildTime = -1;
     private int _discoveryStamp;
     private int _entityDiscoveryStamp;
     private ulong _nextDeliveryBundleId = 1;
@@ -310,6 +314,7 @@ public class DirtyEntitySpatialFanout
         _bundleItems = new DirtyBundleItem[checked(limits.MaximumOutstandingBundles * limits.MaximumRecordsPerBundle)];
         _selectionScratch = new int[limits.MaximumRecordsPerBundle];
         _entrantRecipientScratch = new int[limits.MaximumRecipients];
+        _entrantEntityScratch = new int[limits.MaximumEntities];
         _dirtyEntities = new int[limits.MaximumEntities];
         _freeRecipients = new int[limits.MaximumRecipients];
         _freeRegions = new int[limits.MaximumSpatialRegions];
@@ -380,6 +385,10 @@ public class DirtyEntitySpatialFanout
         }
         _entityCount = 0;
         _dirtyCount = 0;
+        _readyRecipientHead = -1;
+        _readyRecipientTail = -1;
+        _readyRecipientCount = 0;
+        _preparedBuildTime = -1;
         Array.Clear(_dirtyEntities);
         return true;
     }
@@ -406,12 +415,16 @@ public class DirtyEntitySpatialFanout
             {
                 Active = true, Participant = participant, Anchor = anchor,
                 Region = regionIndex, RegionPrevious = -1, RegionNext = -1, RowHead = -1,
+                PendingImmediateHead = -1, PendingNearHead = -1, PendingFarHead = -1,
+                ReadyPrevious = -1, ReadyNext = -1,
             };
             _recipientMap.Add(participant, recipientIndex);
             _recipientCount++;
             LinkRecipient(recipientIndex, regionIndex);
             _topologyReconciliations++;
-            if (!ReconcileRecipient(recipientIndex, anchor, anchor, nowMilliseconds))
+            if (!ReconcileRecipient(
+                    recipientIndex, anchor, anchor, nowMilliseconds,
+                    entrantsStaged: false, stagedEntrantCount: 0))
             {
                 int rollbackRow = _recipients[recipientIndex].RowHead;
                 while (rollbackRow >= 0)
@@ -432,7 +445,9 @@ public class DirtyEntitySpatialFanout
         ref RecipientSlot current = ref _recipients[recipientIndex];
         if (!current.Active) return DirtyEntityUpdateStatus.InvalidInput;
         if (current.Anchor == anchor) return DirtyEntityUpdateStatus.NoChange;
-        if (!CanReconcileRecipient(recipientIndex, anchor)) return CapacityFailure();
+        int entrantCount = DiscoverRecipientEntrants(
+            recipientIndex, anchor, _entrantEntityScratch);
+        if (entrantCount < 0 || entrantCount > _freeRowCount) return CapacityFailure();
         ReplicationSpatialPoint previous = current.Anchor;
         int nextRegion = current.Region;
         if (current.Region != RegionIndex(region))
@@ -444,7 +459,9 @@ public class DirtyEntitySpatialFanout
         }
         current.Anchor = anchor;
         _topologyReconciliations++;
-        return ReconcileRecipient(recipientIndex, previous, anchor, nowMilliseconds)
+        return ReconcileRecipient(
+                recipientIndex, previous, anchor, nowMilliseconds,
+                entrantsStaged: true, stagedEntrantCount: entrantCount)
             ? DirtyEntityUpdateStatus.Success
             : CapacityFailure();
     }
@@ -463,6 +480,7 @@ public class DirtyEntitySpatialFanout
             RemoveRow(row);
             row = next;
         }
+        RemoveReadyRecipient(recipientIndex);
         for (int index = 0; index < _bundles.Length; index++)
             if (_bundles[index].Active && _bundles[index].Recipient == recipientIndex)
                 ReleaseBundle(index);
@@ -774,7 +792,22 @@ public class DirtyEntitySpatialFanout
         bundle = default;
         if (!_recipientMap.TryGetValue(participant, out int recipientIndex)) return DirtyEntityBuildStatus.UnknownRecipient;
         if (nowMilliseconds < 0) return DirtyEntityBuildStatus.NoData;
-        ExpireBundles(nowMilliseconds);
+        PrepareBuildTime(nowMilliseconds);
+        RemoveReadyRecipient(recipientIndex);
+        DirtyEntityBuildStatus status = TryBuildBundleCore(
+            recipientIndex, nowMilliseconds, byteBudget, destination, out bundle);
+        RefreshReadyRecipient(recipientIndex, nowMilliseconds);
+        return status;
+    }
+
+    private DirtyEntityBuildStatus TryBuildBundleCore(
+        int recipientIndex,
+        long nowMilliseconds,
+        int byteBudget,
+        Span<DirtyEntityDeliveryRecord> destination,
+        out DirtyEntityBundle bundle)
+    {
+        bundle = default;
         ref RecipientSlot recipient = ref _recipients[recipientIndex];
         if (recipient.OutstandingBundleCount >= _maximumOutstandingBundlesPerRecipient)
             return DirtyEntityBuildStatus.OutstandingCapacityExceeded;
@@ -837,7 +870,7 @@ public class DirtyEntitySpatialFanout
         }
         SaturatingIncrement(ref _bundlesBuilt);
         bundle = new DirtyEntityBundle(
-            participant, _stateEpoch, bundleId, selectedCount,
+            recipient.Participant, _stateEpoch, bundleId, selectedCount,
             checked(RemoteDirtyEntityStateHeaderCodec.EncodedSize + selectedCount * estimate));
         return DirtyEntityBuildStatus.Success;
     }
@@ -850,14 +883,14 @@ public class DirtyEntitySpatialFanout
     {
         EnsureOwnerThread();
         bundle = default;
-        for (int offset = 0; offset < _recipients.Length; offset++)
+        if (nowMilliseconds < 0) return DirtyEntityBuildStatus.NoData;
+        PrepareBuildTime(nowMilliseconds);
+        while (TryPopReadyRecipient(out int recipientIndex))
         {
-            int index = (_nextRecipient + offset) % _recipients.Length;
-            if (!_recipients[index].Active) continue;
-            DirtyEntityBuildStatus status = TryBuildBundle(
-                _recipients[index].Participant, nowMilliseconds, byteBudget, destination, out bundle);
+            DirtyEntityBuildStatus status = TryBuildBundleCore(
+                recipientIndex, nowMilliseconds, byteBudget, destination, out bundle);
+            RefreshReadyRecipient(recipientIndex, nowMilliseconds);
             if (status == DirtyEntityBuildStatus.NoData) continue;
-            _nextRecipient = (index + 1) % _recipients.Length;
             return status;
         }
         return DirtyEntityBuildStatus.NoData;
@@ -902,6 +935,7 @@ public class DirtyEntitySpatialFanout
                 row.KnownEntity = item.Entity;
                 row.KnownCanonicalVersion = item.CanonicalVersion;
                 row.KnownPresent = item.IsPresent;
+                UnlinkPending(item.RowIndex);
                 row.Pending = false;
                 row.PendingWasSent = false;
                 row.PendingDeliveryId = 0;
@@ -912,10 +946,13 @@ public class DirtyEntitySpatialFanout
             {
                 row.PendingWasSent = false;
                 row.PendingDeliveryId = 0;
+                QueueReadyRecipient(row.Recipient);
             }
         }
         if (applied) _proofsApplied++; else _bundlesRejected++;
+        int recipientIndex = bundle.Recipient;
         ReleaseBundle(bundleIndex);
+        RefreshReadyRecipient(recipientIndex, Math.Max(0, _preparedBuildTime));
         return true;
     }
 
@@ -934,9 +971,12 @@ public class DirtyEntitySpatialFanout
             {
                 row.PendingWasSent = false;
                 row.PendingDeliveryId = 0;
+                QueueReadyRecipient(row.Recipient);
             }
         }
+        int recipientIndex = bundle.Recipient;
         ReleaseBundle(bundleIndex);
+        RefreshReadyRecipient(recipientIndex, Math.Max(0, _preparedBuildTime));
         return true;
     }
 
@@ -1079,14 +1119,18 @@ public class DirtyEntitySpatialFanout
         int recipientIndex,
         in ReplicationSpatialPoint oldAnchor,
         in ReplicationSpatialPoint currentAnchor,
-        long now)
+        long now,
+        bool entrantsStaged = false,
+        int stagedEntrantCount = 0)
     {
-        if (!CanReconcileRecipient(recipientIndex, currentAnchor)) return false;
-        NextEntityDiscoveryStamp();
-        bool success = VisitEntities(oldAnchor, recipientIndex, oldAnchor, currentAnchor, now);
-        if (oldAnchor != currentAnchor)
-            success &= VisitEntities(currentAnchor, recipientIndex, oldAnchor, currentAnchor, now);
+        int entrantCount = entrantsStaged
+            ? stagedEntrantCount
+            : DiscoverRecipientEntrants(recipientIndex, currentAnchor, _entrantEntityScratch);
+        if (entrantCount < 0 || entrantCount > _freeRowCount) return false;
 
+        // Recipient-linked semantic rows are the complete old known/pending audience. Reconcile
+        // them directly, then apply the staged NEW-anchor entrants. Old-anchor spatial discovery
+        // and a second capacity-preflight query would only rediscover rows already owned here.
         int row = _recipients[recipientIndex].RowHead;
         int rowVisits = 0;
         while (row >= 0)
@@ -1100,17 +1144,30 @@ public class DirtyEntitySpatialFanout
                 ref readonly DirtyEntitySlot entity = ref _entities[entityIndex];
                 bool relevant = IsCurrentRelevant(recipientIndex, entity, currentAnchor);
                 if (!EnsureEntityObligation(recipientIndex, entityIndex, entity, relevant, now))
-                { _capacityFailures++; success = false; }
+                    throw new InvalidOperationException(
+                        "Dirty-entity existing recipient audience unexpectedly required capacity.");
             }
             row = next;
         }
-        return success;
+        for (int index = 0; index < entrantCount; index++)
+        {
+            int entityIndex = _entrantEntityScratch[index];
+            if (!EnsureEntityObligation(
+                    recipientIndex, entityIndex, _entities[entityIndex], desiredPresent: true, now))
+                throw new InvalidOperationException(
+                    "Dirty-entity recipient entrant capacity diverged from staged discovery.");
+        }
+        return true;
     }
 
-    private bool CanReconcileRecipient(int recipientIndex, in ReplicationSpatialPoint anchor)
+    private int DiscoverRecipientEntrants(
+        int recipientIndex,
+        in ReplicationSpatialPoint anchor,
+        Span<int> destination)
     {
-        int needed = 0;
+        _entityDiscoveryOperations++;
         NextEntityDiscoveryStamp();
+        int count = 0;
         ReplicationSpatialRegionId center = ToRegion(anchor);
         int cellRadius = CellRadius(_profile.FarRadiusMillimeters);
         for (int dx = -cellRadius; dx <= cellRadius; dx++)
@@ -1132,51 +1189,14 @@ public class DirtyEntitySpatialFanout
                         if (IsCurrentRelevant(recipientIndex, current, anchor) &&
                             !_rowMap.ContainsKey(new DirtyRowKey(recipientIndex, checked((uint)entity))))
                         {
-                            needed++;
-                            if (needed > _freeRowCount) return false;
+                            if (count == destination.Length) return -1;
+                            destination[count++] = entity;
                         }
                     }
                     entity = next;
                 }
             }
-        return true;
-    }
-
-    private bool VisitEntities(
-        in ReplicationSpatialPoint anchor,
-        int recipientIndex,
-        in ReplicationSpatialPoint oldAnchor,
-        in ReplicationSpatialPoint currentAnchor,
-        long now)
-    {
-        _entityDiscoveryOperations++;
-        ReplicationSpatialRegionId center = ToRegion(anchor);
-        int cellRadius = CellRadius(_profile.FarRadiusMillimeters);
-        for (int dx = -cellRadius; dx <= cellRadius; dx++)
-            for (int dz = -cellRadius; dz <= cellRadius; dz++)
-            {
-                if (!TryOffset(center, dx, dz, out ReplicationSpatialRegionId region)) continue;
-                if (!_regionMap.TryGetValue(region, out int regionIndex)) continue;
-                if (_attributionEnabled) _attributionCells++;
-                int entity = _regions[regionIndex].EntityHead;
-                int entityVisits = 0;
-                while (entity >= 0)
-                {
-                    if (++entityVisits > _entities.Length)
-                        throw new InvalidOperationException("Dirty-entity spatial entity list contains a cycle.");
-                    int next = _entities[entity].RegionNext;
-                    if (_entityStamp[entity] != _entityDiscoveryStamp)
-                    {
-                        _entityStamp[entity] = _entityDiscoveryStamp;
-                        ref readonly DirtyEntitySlot current = ref _entities[entity];
-                        bool relevant = IsCurrentRelevant(recipientIndex, current, currentAnchor);
-                        if (!EnsureEntityObligation(recipientIndex, entity, current, relevant, now))
-                        { _capacityFailures++; return false; }
-                    }
-                    entity = next;
-                }
-            }
-        return true;
+        return count;
     }
 
     private bool EnsureEntityObligation(
@@ -1206,6 +1226,7 @@ public class DirtyEntitySpatialFanout
             created.PendingSimulationState = entity.Projected;
             created.PendingTier = DetermineTier(_recipients[recipientIndex].Anchor, entity, GameInterestTier.None);
             created.EligibleAtMilliseconds = DueAt(now, created.PendingTier);
+            LinkPending(rowIndex);
             _pendingCount++;
             _obligationsCreated++;
             _entrantPresents++;
@@ -1226,16 +1247,15 @@ public class DirtyEntitySpatialFanout
             record.PendingHorizon = GameReplicationHorizon.None;
             record.PendingPosition = default;
             record.PendingSimulationState = default;
-            record.PendingTier = GameInterestTier.Immediate;
             if (!sameKnown || record.Pending)
             {
                 if (record.Pending)
                 {
-                    SupersedePending(ref record, now, false, entity);
+                    SupersedePending(rowIndex, now, false, entity);
                 }
                 else if (record.KnownPresent)
                 {
-                    CreatePending(ref record, now, false, entity);
+                    CreatePending(rowIndex, now, false, entity);
                     _leaverRemovals++;
                 }
             }
@@ -1254,11 +1274,11 @@ public class DirtyEntitySpatialFanout
         GameInterestTier tier = DetermineTier(_recipients[recipientIndex].Anchor, entity, record.PendingTier);
         if (!sameKnown)
         {
-            if (!record.Pending) CreatePending(ref record, now, true, entity, tier);
-            else if (record.PendingWasSent) SupersedePending(ref record, now, true, entity, tier);
+            if (!record.Pending) CreatePending(rowIndex, now, true, entity, tier);
+            else if (record.PendingWasSent) SupersedePending(rowIndex, now, true, entity, tier);
             else
             {
-                record.PendingTier = tier;
+                SetPendingTier(rowIndex, tier);
                 _unsentCoalesces++;
             }
         }
@@ -1266,19 +1286,20 @@ public class DirtyEntitySpatialFanout
         {
             // A topology reconciliation can discover that a previously pending value is
             // already the newest truth; retaining the row is harmless, but never demote it.
-            record.PendingTier = tier;
+            SetPendingTier(rowIndex, tier);
         }
         if (!wasDesired && desiredPresent) _entrantPresents++;
         return true;
     }
 
     private void CreatePending(
-        ref DirtyRecord record,
+        int rowIndex,
         long now,
         bool present,
         in DirtyEntitySlot entity,
         GameInterestTier tier = GameInterestTier.Immediate)
     {
+        ref DirtyRecord record = ref _rows[rowIndex];
         if (!record.Pending) _pendingCount++;
         record.Pending = true;
         record.PendingPresent = present;
@@ -1290,25 +1311,28 @@ public class DirtyEntitySpatialFanout
         record.EligibleAtMilliseconds = DueAt(now, record.PendingTier);
         record.PendingDeliveryId = 0;
         record.PendingWasSent = false;
+        LinkPending(rowIndex);
     }
 
     private void SupersedePending(
-        ref DirtyRecord record,
+        int rowIndex,
         long now,
         bool present,
         in DirtyEntitySlot entity,
         GameInterestTier tier = GameInterestTier.Immediate)
     {
+        ref DirtyRecord record = ref _rows[rowIndex];
         if (record.PendingWasSent) _sentSupersessions++; else _unsentCoalesces++;
         record.PendingPresent = present;
         record.PendingCanonicalVersion = entity.CanonicalVersion;
         record.PendingHorizon = present ? entity.Horizon : GameReplicationHorizon.None;
         record.PendingPosition = present ? entity.Position : default;
         record.PendingSimulationState = present ? entity.Projected : default;
-        record.PendingTier = present ? tier : GameInterestTier.Immediate;
+        SetPendingTier(rowIndex, present ? tier : GameInterestTier.Immediate);
         record.EligibleAtMilliseconds = DueAt(now, record.PendingTier);
         record.PendingDeliveryId = 0;
         record.PendingWasSent = false;
+        QueueReadyRecipient(record.Recipient);
     }
 
     private int SelectRows(int recipientIndex, long now, Span<int> destination)
@@ -1316,12 +1340,11 @@ public class DirtyEntitySpatialFanout
         int selected = 0;
         for (GameInterestTier tier = GameInterestTier.Immediate; tier >= GameInterestTier.Far; tier--)
         {
-            int row = _recipients[recipientIndex].RowHead;
+            int row = PendingHead(recipientIndex, tier);
             while (row >= 0)
             {
                 ref readonly DirtyRecord record = ref _rows[row];
-                if (record.Active && record.Pending && !record.PendingWasSent &&
-                    record.PendingTier == tier)
+                if (record.Active && record.Pending && !record.PendingWasSent)
                 {
                     if (record.EligibleAtMilliseconds > now)
                     {
@@ -1330,12 +1353,23 @@ public class DirtyEntitySpatialFanout
                     else if (selected < destination.Length)
                     {
                         destination[selected++] = row;
+                        if (selected == destination.Length) return selected;
                     }
                 }
-                row = record.RecipientNext;
+                row = record.PendingNext;
             }
         }
         return selected;
+    }
+
+    private void PrepareBuildTime(long now)
+    {
+        if (now <= _preparedBuildTime) return;
+        _preparedBuildTime = now;
+        ExpireBundles(now);
+        for (int recipient = 0; recipient < _recipients.Length; recipient++)
+            if (_recipients[recipient].Active && HasEligiblePending(recipient, now))
+                QueueReadyRecipient(recipient);
     }
 
     private void ExpireBundles(long now)
@@ -1347,6 +1381,115 @@ public class DirtyEntitySpatialFanout
             _timedOutDeliveries++;
             ReleaseBundle(index, retry: true);
         }
+    }
+
+    private int PendingHead(int recipientIndex, GameInterestTier tier) => tier switch
+    {
+        GameInterestTier.Immediate => _recipients[recipientIndex].PendingImmediateHead,
+        GameInterestTier.Near => _recipients[recipientIndex].PendingNearHead,
+        GameInterestTier.Far => _recipients[recipientIndex].PendingFarHead,
+        _ => -1,
+    };
+
+    private void SetPendingHead(int recipientIndex, GameInterestTier tier, int head)
+    {
+        switch (tier)
+        {
+            case GameInterestTier.Immediate: _recipients[recipientIndex].PendingImmediateHead = head; break;
+            case GameInterestTier.Near: _recipients[recipientIndex].PendingNearHead = head; break;
+            case GameInterestTier.Far: _recipients[recipientIndex].PendingFarHead = head; break;
+            default: throw new InvalidOperationException("Pending dirty-entity debt requires a tier.");
+        }
+    }
+
+    private void LinkPending(int rowIndex)
+    {
+        ref DirtyRecord row = ref _rows[rowIndex];
+        if (row.PendingLinked) return;
+        int head = PendingHead(row.Recipient, row.PendingTier);
+        row.PendingPrevious = -1;
+        row.PendingNext = head;
+        row.PendingLinked = true;
+        if (head >= 0) _rows[head].PendingPrevious = rowIndex;
+        SetPendingHead(row.Recipient, row.PendingTier, rowIndex);
+        QueueReadyRecipient(row.Recipient);
+    }
+
+    private void UnlinkPending(int rowIndex)
+    {
+        ref DirtyRecord row = ref _rows[rowIndex];
+        if (!row.PendingLinked) return;
+        if (row.PendingPrevious >= 0) _rows[row.PendingPrevious].PendingNext = row.PendingNext;
+        else SetPendingHead(row.Recipient, row.PendingTier, row.PendingNext);
+        if (row.PendingNext >= 0) _rows[row.PendingNext].PendingPrevious = row.PendingPrevious;
+        row.PendingPrevious = -1;
+        row.PendingNext = -1;
+        row.PendingLinked = false;
+    }
+
+    private void SetPendingTier(int rowIndex, GameInterestTier tier)
+    {
+        ref DirtyRecord row = ref _rows[rowIndex];
+        if (row.PendingTier == tier) return;
+        bool linked = row.PendingLinked;
+        if (linked) UnlinkPending(rowIndex);
+        row.PendingTier = tier;
+        if (linked) LinkPending(rowIndex);
+    }
+
+    private bool HasEligiblePending(int recipientIndex, long now)
+    {
+        for (GameInterestTier tier = GameInterestTier.Immediate; tier >= GameInterestTier.Far; tier--)
+            for (int row = PendingHead(recipientIndex, tier); row >= 0; row = _rows[row].PendingNext)
+                if (_rows[row].Active && _rows[row].Pending && !_rows[row].PendingWasSent &&
+                    _rows[row].EligibleAtMilliseconds <= now)
+                    return true;
+        return false;
+    }
+
+    private void QueueReadyRecipient(int recipientIndex)
+    {
+        ref RecipientSlot recipient = ref _recipients[recipientIndex];
+        if (!recipient.Active || recipient.ReadyQueued ||
+            recipient.OutstandingBundleCount >= _maximumOutstandingBundlesPerRecipient)
+            return;
+        recipient.ReadyQueued = true;
+        recipient.ReadyPrevious = _readyRecipientTail;
+        recipient.ReadyNext = -1;
+        if (_readyRecipientTail >= 0) _recipients[_readyRecipientTail].ReadyNext = recipientIndex;
+        else _readyRecipientHead = recipientIndex;
+        _readyRecipientTail = recipientIndex;
+        _readyRecipientCount++;
+    }
+
+    private void RemoveReadyRecipient(int recipientIndex)
+    {
+        ref RecipientSlot recipient = ref _recipients[recipientIndex];
+        if (!recipient.ReadyQueued) return;
+        if (recipient.ReadyPrevious >= 0)
+            _recipients[recipient.ReadyPrevious].ReadyNext = recipient.ReadyNext;
+        else _readyRecipientHead = recipient.ReadyNext;
+        if (recipient.ReadyNext >= 0)
+            _recipients[recipient.ReadyNext].ReadyPrevious = recipient.ReadyPrevious;
+        else _readyRecipientTail = recipient.ReadyPrevious;
+        recipient.ReadyQueued = false;
+        recipient.ReadyPrevious = -1;
+        recipient.ReadyNext = -1;
+        _readyRecipientCount--;
+    }
+
+    private bool TryPopReadyRecipient(out int recipientIndex)
+    {
+        recipientIndex = _readyRecipientHead;
+        if (recipientIndex < 0) return false;
+        RemoveReadyRecipient(recipientIndex);
+        return true;
+    }
+
+    private void RefreshReadyRecipient(int recipientIndex, long now)
+    {
+        if (HasEligiblePending(recipientIndex, now)) QueueReadyRecipient(recipientIndex);
+        else RemoveReadyRecipient(recipientIndex);
     }
 
     private bool TryAllocateRecipient(out int index)
@@ -1395,6 +1538,8 @@ public class DirtyEntitySpatialFanout
     private void RemoveRow(int index)
     {
         if ((uint)index >= (uint)_rows.Length || !_rows[index].Active) return;
+        bool wasPending = _rows[index].Pending;
+        UnlinkPending(index);
         int recipient = _rows[index].Recipient;
         int entity = _rows[index].EntityIndex;
         int recipientPrevious = _rows[index].RecipientPrevious;
@@ -1411,6 +1556,11 @@ public class DirtyEntitySpatialFanout
         _rows[index] = default;
         _freeRows[_freeRowCount++] = index;
         _rowCount--;
+        if (wasPending) _pendingCount--;
+        if (PendingHead(recipient, GameInterestTier.Immediate) < 0 &&
+            PendingHead(recipient, GameInterestTier.Near) < 0 &&
+            PendingHead(recipient, GameInterestTier.Far) < 0)
+            RemoveReadyRecipient(recipient);
         if (_attributionEnabled) _attributionRowsRemoved++;
     }
 
@@ -1441,6 +1591,7 @@ public class DirtyEntitySpatialFanout
             {
                 row.PendingDeliveryId = 0;
                 row.PendingWasSent = false;
+                QueueReadyRecipient(row.Recipient);
             }
             _bundleItems[baseItem + itemIndex] = default;
         }
@@ -1714,6 +1865,7 @@ public class DirtyEntitySpatialFanout
         (long)_bundleItems.Length * Unsafe.SizeOf<DirtyBundleItem>() +
         (long)_selectionScratch.Length * sizeof(int) +
         (long)_entrantRecipientScratch.Length * sizeof(int) +
+        (long)_entrantEntityScratch.Length * sizeof(int) +
         (long)_dirtyEntities.Length * sizeof(int) +
         (long)_recipientStamp.Length * sizeof(int) +
         (long)_entityStamp.Length * sizeof(int) +
@@ -1807,6 +1959,12 @@ public class DirtyEntitySpatialFanout
         internal int RegionNext;
         internal int RowHead;
         internal int OutstandingBundleCount;
+        internal int PendingImmediateHead;
+        internal int PendingNearHead;
+        internal int PendingFarHead;
+        internal int ReadyPrevious;
+        internal int ReadyNext;
+        internal bool ReadyQueued;
     }
 
     private struct DirtyRecord
@@ -1834,6 +1992,9 @@ public class DirtyEntitySpatialFanout
         internal bool PendingWasSent;
         internal ulong PendingDeliveryId;
         internal long PendingSentAtMilliseconds;
+        internal int PendingPrevious;
+        internal int PendingNext;
+        internal bool PendingLinked;
     }
 
     private struct DirtyBundleState

@@ -509,6 +509,7 @@ public sealed class GameInterestService
         }
 
         GameReplicationHorizon previousHorizon = state.Horizon;
+        ReplicationSpatialPoint previousPosition = state.Position;
         ReplicationSpatialRegionId nextRegionId = ToRegion(position);
         if (!TryGetOrCreateRegion(nextRegionId, out int nextRegion))
             return GameInterestUpdateStatus.CapacityExceeded;
@@ -552,20 +553,32 @@ public sealed class GameInterestService
         // discovery path so a partial graph is never treated as complete.
         // Coarse-envelope admission guarantees that every current reverse region edge already
         // owns a relation to a Far entity. Exact-distance admission does not: an entity may cross
-        // the exact Far boundary while remaining in the same coarse region, so it must revisit
-        // current reverse edges to discover newly relevant recipients.
-        bool stableFarFastPath =
+        // the exact Far boundary while remaining in the same coarse region, so positional
+        // updates must revisit current reverse edges. Exact state-only/equal-or-shrinking
+        // footprints are safe because their linked relations already contain the complete old
+        // audience and cannot acquire a new recipient.
+        bool coarseStableFarFastPath =
             _admissionMode == GameInterestAdmissionMode.CoarseEnvelope &&
             !created && previousRegion == nextRegion &&
             previousHorizon == GameReplicationHorizon.Far &&
             horizon == GameReplicationHorizon.Far && _nonviableRecipients == 0;
+        // Exact-distance admission can also skip entrant discovery when the footprint cannot
+        // grow: the position is unchanged and the horizon is equal or smaller. Existing linked
+        // relations are then the complete old audience, including every possible retained or
+        // leaving recipient. Any positional change still takes the general reverse-edge path,
+        // preserving the same-region Far-boundary regression fence.
+        bool exactNoEntrantFastPath =
+            _admissionMode == GameInterestAdmissionMode.ExactDistance &&
+            !created && previousPosition == position && horizon <= previousHorizon &&
+            _nonviableRecipients == 0;
+        bool retainedAudienceFastPath = coarseStableFarFastPath || exactNoEntrantFastPath;
 
         long maintenanceStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         if (_attributionEnabled)
             SaturatingAdd(ref _attributionEntityCanonicalTicks,
                 checked((ulong)(maintenanceStarted - attributionStarted)));
 
-        if (stableFarFastPath)
+        if (retainedAudienceFastPath)
         {
             if (_attributionEnabled)
                 SaturatingIncrement(ref _attributionStableFarFastPathUpserts);
@@ -643,7 +656,7 @@ public sealed class GameInterestService
             }
         }
 
-        if (!stableFarFastPath)
+        if (!retainedAudienceFastPath)
         {
             // Always traverse current reverse region interest on the general
             // path. This is required not only for region entry, but when a
@@ -685,7 +698,7 @@ public sealed class GameInterestService
                 checked((ulong)(Stopwatch.GetTimestamp() - maintenanceStarted)));
             SaturatingAdd(ref _attributionActualRelationChanges, checked((ulong)_lastRelationsChanged));
         }
-        if (stableFarFastPath)
+        if (retainedAudienceFastPath)
             return _nonviableRecipients == 0
                 ? GameInterestUpdateStatus.Success
                 : GameInterestUpdateStatus.RecipientNonviable;

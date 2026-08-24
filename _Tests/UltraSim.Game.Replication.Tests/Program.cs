@@ -15,6 +15,7 @@ var tests = new (string Name, Action Body)[]
 {
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
+    ("P03FDirtyEntityReadyQueueDrainsEligibleRecipientsOnly", DirtyEntitySpatialFanoutTests.ReadyQueueDrainsEligibleRecipientsOnly),
     ("P01DirtyEntityExistingAudienceAvoidsOldFootprintDiscovery", DirtyEntitySpatialFanoutTests.ExistingAudienceAvoidsOldFootprintDiscovery),
     ("P03EDirtyEntityCoarseSpatialEdgesPreserveExactSemantics", DirtyEntitySpatialFanoutTests.CoarseSpatialEdgesPreserveExactSemantics),
     ("P03EDirtyEntityChunkBatchUsesPointDiscoveryForSingleton", DirtyEntitySpatialFanoutTests.ChunkBatchUsesPointDiscoveryForSingleton),
@@ -49,6 +50,8 @@ var tests = new (string Name, Action Body)[]
     ("P02DirtyChunkExistingRecipientExpansionIsTransactional", DirtyChunkSpatialFanoutTests.ExistingRecipientExpansionIsTransactional),
     ("P02DirtyChunkLostProofExpiresAndRetries", DirtyChunkSpatialFanoutTests.LostProofExpiresAndRetries),
     ("P02DirtyChunkDeferredRowDoesNotBlockImmediate", DirtyChunkSpatialFanoutTests.DeferredRowDoesNotBlockImmediate),
+    ("P03FDirtyChunkDeferredReadyRecipientWaitsForNextCadence", DirtyChunkSpatialFanoutTests.DeferredReadyRecipientWaitsForNextCadence),
+    ("P03FDirtyChunkReadyQueueSkipsQuotaBlockedRecipient", DirtyChunkSpatialFanoutTests.ReadyQueueSkipsQuotaBlockedRecipient),
     ("P02DirtyChunkDistributedDirtyWorkShape", DirtyChunkSpatialFanoutTests.DistributedDirtyWorkShape),
     ("P02DirtyChunkMatchesCanonicalChunkPublicationTrace", DirtyChunkSpatialFanoutTests.MatchesCanonicalChunkPublicationTrace),
     ("P02DirtyChunkWarmedPathAllocatesZero", DirtyChunkSpatialFanoutTests.WarmedPathAllocatesZero),
@@ -80,6 +83,7 @@ var tests = new (string Name, Action Body)[]
     ("StableFarUpdateUsesOneMaintainedRelationPass", StableFarUpdateUsesOneMaintainedRelationPass),
     ("StableFarFastPathPreservesImmediateHysteresis", StableFarFastPathPreservesImmediateHysteresis),
     ("ExactDistanceFarEntryWithinOneRegionUsesGeneralDiscovery", ExactDistanceFarEntryWithinOneRegionUsesGeneralDiscovery),
+    ("ExactDistanceStateOnlyAndShrinkUseRetainedAudience", ExactDistanceStateOnlyAndShrinkUseRetainedAudience),
     ("StableFarFastPathRejectsEveryGeneralShape", StableFarFastPathRejectsEveryGeneralShape),
     ("RecipientRegionCrossingUpdatesOnlyEnvelopeDifference", RecipientRegionCrossingUpdatesOnlyEnvelopeDifference),
     ("NewestPendingStateAndPromotionCollapseCorrectly", NewestPendingStateAndPromotionCollapseCorrectly),
@@ -345,6 +349,42 @@ static void ExactDistanceFarEntryWithinOneRegionUsesGeneralDiscovery()
         Relation(service, participant, entity.Entity).Tier);
     GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
     Check.Equal(0UL, attribution.StableFarFastPathUpserts);
+    Check.Equal(1UL, attribution.GeneralPathUpserts);
+    Check.True(attribution.ReverseRegionEdgeVisits > 0);
+}
+
+static void ExactDistanceStateOnlyAndShrinkUseRetainedAudience()
+{
+    var service = new GameInterestService(
+        new StateEpoch(8),
+        new GameInterestLimits(8, 1, 128, 128, 8, 8, 8),
+        InterestProfile(),
+        GameInterestAdmissionMode.ExactDistance);
+    ParticipantId participant = new(106);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    GameProjectedEntity entity = Projected(7, 1, 1);
+    ReplicationSpatialPoint unchanged = Millimeters(39_400, 0);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(entity, 1, unchanged, GameReplicationHorizon.Far, 0));
+    Check.True(Relation(service, participant, entity.Entity).DesiredPresent);
+
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(7, 1, 2), 2, unchanged,
+            GameReplicationHorizon.Far, 1));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(7, 1, 3), 3, unchanged,
+            GameReplicationHorizon.Near, 2));
+    Check.True(!Relation(service, participant, entity.Entity).DesiredPresent);
+
+    // Expansion can acquire a new audience, so it must return to exact discovery.
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(7, 1, 4), 4, unchanged,
+            GameReplicationHorizon.Far, 3));
+    Check.True(Relation(service, participant, entity.Entity).DesiredPresent);
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.Equal(2UL, attribution.StableFarFastPathUpserts);
     Check.Equal(1UL, attribution.GeneralPathUpserts);
     Check.True(attribution.ReverseRegionEdgeVisits > 0);
 }

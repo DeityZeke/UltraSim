@@ -23,10 +23,14 @@ internal static class P03FourProfileComparison
     private const int MaxSubscriptionsPerRecipient = 1_024;
     private static int _dirtyEntitySpatialRegionEdgeMillimeters = 128_000;
     private static int _dirtyChunkSpatialRegionEdgeMillimeters = 128_000;
+    private static bool _serviceEnvelopeEntityCapacity;
 
     internal static void Run(string[] args)
     {
         bool scaleSuite = Has(args, "--scale-suite");
+        _serviceEnvelopeEntityCapacity = string.Equals(
+            ReadString(args, "--capacity-mode="), "service-envelope",
+            StringComparison.OrdinalIgnoreCase);
         int requestedEntities = ReadInt(args, "--entities=", 128);
         int requestedRecipients = ReadInt(args, "--recipients=", 8);
         int warmup = ReadInt(args, "--warmup=", DefaultWarmupTicks);
@@ -109,7 +113,7 @@ internal static class P03FourProfileComparison
 
         var matrix = new ComparisonReport(
             scaleSuite
-                ? "ultrasim-game-p03e-five-profile-scale-matrix-v1"
+                ? "ultrasim-game-p03f-five-profile-scale-matrix-v1"
                 : "ultrasim-game-p03-five-profile-shared-trace-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
@@ -136,7 +140,14 @@ internal static class P03FourProfileComparison
                     ? "Scale mode measures the Game replication core and canonical Game-message " +
                       "bytes. It excludes sockets, security, packetization, and client engine/world " +
                       "storage; historical full-network V2/V3 timings are contextual controls, " +
-                      "not ratio denominators."
+                      "not ratio denominators. Profile-native scheduling/source-operation counters " +
+                      "are diagnostic and are not a common additive work unit; records, messages, " +
+                      "codec bytes, proofs, latency, and reserved bytes are directly comparable. " +
+                      "Entity relation/knowledge capacity is " +
+                      (_serviceEnvelopeEntityCapacity
+                          ? "the bounded scenario service envelope (64 rows/recipient for sparse scale; " +
+                            "full density for dense scale)."
+                          : "the mathematical recipient × entity worst case.")
                     : "ChunkPublication remains selected; this matrix is evidence only.",
                 _dirtyEntitySpatialRegionEdgeMillimeters,
                 _dirtyChunkSpatialRegionEdgeMillimeters),
@@ -981,8 +992,8 @@ internal static class P03FourProfileComparison
         ulong DirtyUnitsProcessed,
         ulong SpatialDiscoveryOperations,
         ulong CandidateTests,
-        ulong RecipientReconciliations,
-        ulong SourceReads,
+        ulong ProfileNativeSchedulingOperations,
+        ulong ProfileNativeSourceOperations,
         ulong RecordsMaterialized,
         ulong EncodedGamePayloadBytes,
         ulong EncodedGameMessages,
@@ -1716,7 +1727,7 @@ internal static class P03FourProfileComparison
                 workload.Entities.Length,
                 workload.Recipients.Length,
                 CreateInterestLimits(workload).MaximumRegions,
-                checked(workload.Entities.Length * workload.Recipients.Length),
+                MaximumEntityKnowledgeRows(workload),
                 Math.Max(64, workload.Recipients.Length * 4),
                 32,
                 _dirtyEntitySpatialRegionEdgeMillimeters);
@@ -2091,44 +2102,39 @@ internal static class P03FourProfileComparison
                 NotePending(beforeDelivery.PendingChunkObligationCount,
                     beforeDelivery.OutstandingDeliveryCount);
             }
-            for (int recipientIndex = 0; recipientIndex < Recipients.Length; recipientIndex++)
+            while (true)
             {
-                if (!_serviceActive[recipientIndex]) continue;
-                ParticipantId participant = Participant(recipientIndex);
-                while (true)
+                DirtyChunkBuildStatus status = _service.TryBuildNextDelivery(
+                    checked((ulong)cadenceStep), out DirtyChunkDelivery delivery);
+                if (status == DirtyChunkBuildStatus.NoData) break;
+                if (status != DirtyChunkBuildStatus.Success)
+                    throw new InvalidOperationException(
+                        $"P0.3 dirty-chunk next build returned {status} at cadence {cadenceStep}.");
+                int recipientIndex = ParticipantIndex(delivery.Participant);
+                if (delivery.Status == OfflineDirectChunkReadStatus.Snapshot)
                 {
-                    DirtyChunkBuildStatus status = _service.TryBuildDelivery(
-                        participant, checked((ulong)cadenceStep), out DirtyChunkDelivery delivery);
-                    if (status == DirtyChunkBuildStatus.NoData) break;
-                    if (status != DirtyChunkBuildStatus.Success)
-                        throw new InvalidOperationException(
-                            $"P0.3 dirty-chunk build returned {status} for recipient {recipientIndex} " +
-                            $"at cadence {cadenceStep}.");
-                    if (delivery.Status == OfflineDirectChunkReadStatus.Snapshot)
-                    {
-                        foreach (WorldPublicRecord record in delivery.Snapshot)
-                            RecordChunkRecord(recipientIndex, record);
-                        RecordMessageBytes(UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
-                            delivery.Snapshot.Length));
-                    }
-                    else if (delivery.Status == OfflineDirectChunkReadStatus.Delta)
-                    {
-                        foreach (WorldPublicDeltaRecord record in delivery.Deltas)
-                        {
-                            RecordChunkDelta(recipientIndex, record);
-                        }
-                        RecordMessageBytes(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(
-                            delivery.Deltas.Length));
-                    }
-                    else if (delivery.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
-                    {
-                        ClearChunk(recipientIndex, delivery.Key);
-                        RecordMessageBytes(RemoteChunkAbsenceMessageCodec.EncodedSize);
-                    }
-                    Require(_service.TryAcknowledgeDelivery(
-                        participant, delivery.DeliveryId, applied: true) ==
-                        DirtyChunkAppliedProofStatus.Applied);
+                    foreach (WorldPublicRecord record in delivery.Snapshot)
+                        RecordChunkRecord(recipientIndex, record);
+                    RecordMessageBytes(UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
+                        delivery.Snapshot.Length));
                 }
+                else if (delivery.Status == OfflineDirectChunkReadStatus.Delta)
+                {
+                    foreach (WorldPublicDeltaRecord record in delivery.Deltas)
+                    {
+                        RecordChunkDelta(recipientIndex, record);
+                    }
+                    RecordMessageBytes(UltraSimGameProtocol.GetChunkDeltaEncodedBytes(
+                        delivery.Deltas.Length));
+                }
+                else if (delivery.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
+                {
+                    ClearChunk(recipientIndex, delivery.Key);
+                    RecordMessageBytes(RemoteChunkAbsenceMessageCodec.EncodedSize);
+                }
+                Require(_service.TryAcknowledgeDelivery(
+                    delivery.Participant, delivery.DeliveryId, applied: true) ==
+                    DirtyChunkAppliedProofStatus.Applied);
             }
             if (DiagnosticsEnabled)
             {
@@ -2285,9 +2291,17 @@ internal static class P03FourProfileComparison
             workload.Recipients.Length,
             Math.Max(16_384, checked(workload.Entities.Length + maximumEdges)),
             checked(maximumEdges + workload.Entities.Length),
-            checked(workload.Entities.Length * workload.Recipients.Length),
+            MaximumEntityKnowledgeRows(workload),
             Math.Max(64, workload.Recipients.Length * 4),
             32);
+    }
+
+    private static int MaximumEntityKnowledgeRows(Workload workload)
+    {
+        int perRecipient = _serviceEnvelopeEntityCapacity && workload.Id == "sparse-scale"
+            ? Math.Min(workload.Entities.Length, 64)
+            : workload.Entities.Length;
+        return checked(perRecipient * workload.Recipients.Length);
     }
 
     private static WorldPosition CreateWorldPosition(in TraceEntity entity)

@@ -276,6 +276,115 @@ internal static class DirtyChunkSpatialFanoutTests
         ApplyAtAvailableStep(service, far, key, 4);
     }
 
+    internal static void DeferredReadyRecipientWaitsForNextCadence()
+    {
+        using var fixture = new Fixture(16, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 2,
+            cadence: new OfflineDirectChunkCadence(1, 2, 4));
+        ParticipantId participant = new(0xD0F3);
+        SpatialChunkKey key = Key(0, 0);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+                Position(10, 0, 0, 0), 0));
+        Equal(DirtyChunkProcessStatus.Success,
+            service.TryProcessDirtyChunks(0, out _));
+        bool initialDrained = false;
+        for (int attempt = 0; attempt < 1_024; attempt++)
+        {
+            DirtyChunkBuildStatus status = service.TryBuildNextDelivery(0, out DirtyChunkDelivery delivery);
+            if (status == DirtyChunkBuildStatus.NoData)
+            {
+                initialDrained = true;
+                break;
+            }
+            Equal(DirtyChunkBuildStatus.Success, status);
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(delivery.Participant, delivery.DeliveryId, true));
+        }
+        True(initialDrained);
+
+        ulong deferredStep = 0;
+        for (ulong step = 1; step < 16; step++)
+        {
+            fixture.Present(0, Position(0, 0, checked(2_000 + (int)step), 2_000));
+            Equal(DirtyChunkProcessStatus.Success,
+                service.TryProcessDirtyChunks(step, out _));
+            DirtyChunkBuildStatus status = service.TryBuildDelivery(
+                participant, key, step, out DirtyChunkDelivery delivery);
+            if (status == DirtyChunkBuildStatus.NotDue)
+            {
+                deferredStep = step;
+                break;
+            }
+            Equal(DirtyChunkBuildStatus.Success, status);
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(participant, delivery.DeliveryId, true));
+        }
+        True(deferredStep != 0);
+
+        // The same cadence step must terminate with no ready work instead of repeatedly
+        // requeueing and rediscovering the same deferred recipient.
+        bool drainedSameStep = false;
+        for (int attempt = 0; attempt < 256; attempt++)
+        {
+            DirtyChunkBuildStatus status = service.TryBuildNextDelivery(
+                deferredStep, out DirtyChunkDelivery delivery);
+            if (status == DirtyChunkBuildStatus.NoData)
+            {
+                drainedSameStep = true;
+                break;
+            }
+            Equal(DirtyChunkBuildStatus.Success, status);
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(delivery.Participant, delivery.DeliveryId, true));
+        }
+        True(drainedSameStep);
+        Equal(DirtyChunkBuildStatus.NoData,
+            service.TryBuildNextDelivery(deferredStep, out _));
+
+        bool delivered = false;
+        for (ulong step = deferredStep + 1; step < deferredStep + 8; step++)
+        {
+            DirtyChunkBuildStatus status = service.TryBuildNextDelivery(step, out DirtyChunkDelivery delivery);
+            if (status == DirtyChunkBuildStatus.NoData) continue;
+            Equal(DirtyChunkBuildStatus.Success, status);
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(participant, delivery.DeliveryId, true));
+            delivered = true;
+            break;
+        }
+        True(delivered);
+    }
+
+    internal static void ReadyQueueSkipsQuotaBlockedRecipient()
+    {
+        using var fixture = new Fixture(16, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(
+            fixture, maximumRecipients: 2, maximumOutstandingDeliveries: 2);
+        ParticipantId alice = new(0xD101);
+        ParticipantId bob = new(0xD102);
+        foreach (ParticipantId participant in new[] { alice, bob })
+            Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+                service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+                    Position(0, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkProcessStatus.Success,
+            service.TryProcessDirtyChunks(0, out _));
+
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildNextDelivery(0, out DirtyChunkDelivery first));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildNextDelivery(0, out DirtyChunkDelivery second));
+        True(first.Participant != second.Participant);
+        Equal(DirtyChunkBuildStatus.NoData,
+            service.TryBuildNextDelivery(0, out _));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(first.Participant, first.DeliveryId, true));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(second.Participant, second.DeliveryId, true));
+    }
+
     internal static void HistoryFallbackCapacityAndEpochRecoveryAreBounded()
     {
         using var fixture = new Fixture(2, 4);

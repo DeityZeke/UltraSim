@@ -8,6 +8,48 @@ namespace UltraSim.Game.Replication.Tests;
 
 internal static class DirtyEntitySpatialFanoutTests
 {
+    internal static void ReadyQueueDrainsEligibleRecipientsOnly()
+    {
+        DirtyEntitySpatialFanout service = Create(
+            maximumEntities: 4, maximumRecipients: 2, maximumRows: 8,
+            maximumOutstandingBundles: 2, maximumRecordsPerBundle: 2);
+        ParticipantId alice = new(1);
+        ParticipantId bob = new(2);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(alice, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(bob, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 1, 0, 0), 0));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out int processed));
+        Check.Equal(1, processed);
+
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[2];
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildNextBundle(0, 4_096, records, out DirtyEntityBundle first));
+        Check.True(first.Participant == alice || first.Participant == bob);
+        // Leave the first recipient at its per-recipient outstanding quota. The ready
+        // scheduler must still reach the healthy peer rather than returning the first
+        // recipient's capacity status or repeatedly selecting it.
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildNextBundle(0, 4_096, records, out DirtyEntityBundle second));
+        Check.True(second.Participant != first.Participant);
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            service.TryBuildNextBundle(0, 4_096, records, out _));
+        Check.True(service.TryAcknowledgeBundle(first.Participant, first.DeliveryBundleId, true));
+        Check.True(service.TryAcknowledgeBundle(second.Participant, second.DeliveryBundleId, true));
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            service.TryBuildNextBundle(0, 4_096, records, out _));
+
+        // Advancing semantic time with no pending work may perform one expiry preparation,
+        // but cannot manufacture another ready recipient.
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            service.TryBuildNextBundle(1, 4_096, records, out _));
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            service.TryBuildNextBundle(1, 4_096, records, out _));
+    }
+
     internal static void WorkShapeAndCleanSteadyState()
     {
         DirtyEntitySpatialFanout service = Create(maximumEntities: 64, maximumRecipients: 4);
