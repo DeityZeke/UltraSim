@@ -162,3 +162,7 @@ ChunkPublication.
 The workload crossover is now visible rather than normalized away. Dirty Entity is the best dense entity-family implementation here and crosses the dense 16 ms gate later than Maintained Entity, but it remains worse in sparse movement because recipient relocation must rediscover possible entity entrants. Entity/chunk batching adds overhead when spatial dirt is distributed rather than clustered. ChunkPublication remains the strongest current-game profile in both scale shapes; DirtyChunk's lack of a retained Chunk-to-Recipient graph is an observable cost, not a harness artifact.
 
 The sparse Maintained stop at 2,432 includes a real p95 cliff (14.606 ms at 2,304 to 22.229 ms at 2,432, while p50 is 15.387 ms). The stop rule is intentionally mechanical, so the sweep did not cherry-pick a retry. This is a measurement boundary, not a production CCU claim.
+
+Follow-up P0.3G evidence isolates Dirty Chunk's remaining equal-lineage materialization
+and one-chunk-message costs without changing this accepted five-profile comparison:
+[`network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md`](network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md).

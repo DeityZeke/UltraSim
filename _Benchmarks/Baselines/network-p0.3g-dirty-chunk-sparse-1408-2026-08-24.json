@@ -1,0 +1,88 @@
+{
+  "WorkloadIdentity": "ultrasim-game-p03g-dirty-chunk-packing-scale-v1",
+  "CapturedAtUtc": "2026-08-24T19:40:57.2057263+00:00",
+  "GitSha": "1bc631c7136c2962fcd9b8d6b0e91f82747a4175",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "Unix 7.1.5.1",
+  "ProcessorCount": 16,
+  "StopwatchFrequency": 1000000000,
+  "Scope": {
+    "MeasurementScope": "Requested Game profiles replay the same authoritative entity, recipient, mutation, movement, login/re-entry, and traffic trace. Measurements cover the profile semantic core and a payload-derived synthesized client/proof boundary. Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic oracle verification, diagnostics, and cold snapshots run in a separate evidence replay outside the timer. The secure Network transport is held constant but is not included in the timed core figures.",
+    "SharedTraceContract": "Release; 320 trace ticks; 10 warmup ticks; 310 measured ticks per profile; designated primary event ticks are reported separately; application proof is immediate after each independently fenced semantic entry; public/private/Event/Control traffic counts are identical in every profile row. Payload counters use canonical Game codec sizes and count each semantic delivery once; transport framing/security are excluded.",
+    "SelectionPolicy": "Scale mode measures the Game replication core and canonical Game-message bytes. It excludes sockets, security, packetization, and client engine/world storage; historical full-network V2/V3 timings are contextual controls, not ratio denominators. Profile-native scheduling/source-operation counters are diagnostic and are not a common additive work unit; records, messages, codec bytes, proofs, latency, and reserved bytes are directly comparable. Entity relation/knowledge capacity is the bounded scenario service envelope (64 rows/recipient for sparse scale; full density for dense scale).",
+    "DirtyEntitySpatialRegionEdgeMillimeters": 128000,
+    "DirtyChunkSpatialRegionEdgeMillimeters": 128000
+  },
+  "TraceTicks": 320,
+  "WarmupTicks": 10,
+  "TimingSamples": 310,
+  "Workloads": [
+    {
+      "Workload": "sparse-scale",
+      "EntityCount": 1408,
+      "RecipientCount": 1408,
+      "TraceTicks": 320,
+      "CommonTraffic": {
+        "PublicFacts": 157760,
+        "PrivateFacts": 0,
+        "EventFacts": 0,
+        "ControlFacts": 0
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "DirtyChunkSpatialFanout",
+          "Timing": {
+            "Percentiles": {
+              "P50": 13950.053,
+              "P95": 14173.522,
+              "P99": 14369.999,
+              "Max": 14451.458
+            },
+            "SampleCount": 310,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 13950.053,
+            "P95Microseconds": 14173.522,
+            "P99Microseconds": 14369.999
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 130834,
+            "SpatialDiscoveryOperations": 88448,
+            "CandidateTests": 19177906,
+            "ProfileNativeSchedulingOperations": 159168,
+            "ProfileNativeSourceOperations": 88448,
+            "RecordsMaterialized": 3582905,
+            "EncodedGamePayloadBytes": 280096603,
+            "EncodedGameMessages": 230747,
+            "ApplicationProofs": 2050311,
+            "MaxPending": 41392,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 50635608,
+            "SharedPageMaterializations": 162908,
+            "SharedPageHits": 1887403,
+            "RecipientBundlesBuilt": 230747,
+            "ChunkEntriesBundled": 2050311
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 50635608,
+            "AuthoritativeSourceHistoryBytes": 2098176,
+            "HarnessSemanticStateBytes": 103569920,
+            "TotalKnownReservedBytes": 156303704
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 3,
+            "Digest": "D692E41887D4AE2C",
+            "DeliveredEntities": 67178,
+            "ExpectedEntities": 67178,
+            "MaxPending": 41392,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    }
+  ]
+}

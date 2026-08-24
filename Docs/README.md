@@ -81,8 +81,9 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Network N1](Plans/NETWORK.md) is selected as the current game's
   `ChunkPublication` profile through N1.4 and the Hosted H0.5 dedicated-process
   closure. Frozen N0 is retained as `MaintainedEntityRelation`; N1.5,
-  `DirtyEntitySpatialFanout`, 2K/4K, and public-WAN/production-CCU claims remain
-  stopped.
+  profile-composition selection, and public-WAN/production-CCU claims remain stopped.
+  P0.3G records an experimental Dirty Chunk delivery-packing floor without changing
+  the selected profile or claiming hosted transport integration.
 
 ## Source-of-truth hierarchy
 

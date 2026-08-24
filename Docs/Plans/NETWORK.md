@@ -9,7 +9,10 @@ Game profiles without selecting either. P0.3D adds the concrete
 `DirtyEntityChunkBatchFanout` experiment without changing entity semantic/wire
 identity or selecting it. P0.3E closes the dirty-discovery broadphase floor; P0.3F
 closes the remaining scheduler/ledger floor and records clean dense/sparse scaling
-through each profile's 16 ms or 4,096-CCU stop. Terrain / World T0 is
+through each profile's 16 ms or 4,096-CCU stop. P0.3G gives the experimental Dirty
+Chunk profile bounded equal-lineage chunk-page reuse and recipient-wide multi-chunk
+semantic envelopes while retaining independent per-chunk application proof and no
+global Chunk-to-Recipient reverse graph. Terrain / World T0 is
 accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -1532,6 +1535,42 @@ network/production CCU claim.
 Evidence:
 [`network-p0.3f-five-profile-dense-sparse-scale-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3f-five-profile-dense-sparse-scale-2026-08-24.md).
 
+## P0.3G — Dirty Chunk page reuse and recipient packing
+
+P0.3G tests the delivery-multiplicity diagnosis exposed by P0.3F without changing
+Dirty Chunk disclosure, knowledge, cursor, proof, cadence, or dirty-time discovery:
+
+- one bounded cache materializes an equal `(source commit, chunk key, applied cursor)`
+  publication result once and reuses its immutable rows across matching recipients;
+- one bounded recipient envelope carries up to 32 unrelated chunk entries under one
+  Game-message header and byte budget;
+- every entry retains an independent delivery ID and application proof. Partial proof,
+  rejection, timeout, leave/re-entry, history recovery, and epoch replacement cannot
+  advance another entry;
+- no global `Chunk -> Recipient` reverse subscriber graph is introduced.
+
+At Dense-400, the same 1,360,000 records and 397,554 chunk proofs now require 54,983
+Game messages rather than 397,554. Only 2,056 source pages are materialized and 395,498
+equal-lineage entries reuse them. P95 falls from 4.906 to 2.737 ms. The sparse 16 ms
+stop moves from 896 to 1,536 recipients, and the dense stop moves from 1,344 to 2,112.
+The additional bounded page/bundle scratch raises Dense-400 profile reservation from
+76.16 to 78.28 MB.
+
+The canonical protocol manifest is now version 12 (generated protocol version 10), with
+message 129 `ultrasim.game.dirty-chunk-bundle` and fingerprint
+`10804745783046976666`. The current hosted Dirty Chunk adapter intentionally remains on
+the accepted one-chunk messages. P0.3G measures the Game semantic boundary with a 16 KiB
+budget; a hosted adoption must instead respect the actual nonfragmenting `WorldState`
+payload ceiling or separately earn a transport contract. This distinction prevents the
+scale result from being misrepresented as one-datagram or full-network evidence.
+
+`ChunkPublication` remains selected. This is a Dirty Chunk contestant-floor result, not
+authorization to retrofit N1.5 page reuse into the selected profile or to make a P0.4
+composition decision.
+
+Evidence:
+[`network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
@@ -1805,10 +1844,12 @@ fairness, bounded-storage and allocation-free lifecycle floor for the two origin
 dirty profiles. P0.3D adds entity-side semantic-audience indexing, coarse occupied
 DirtyChunk recipient buckets, and the fifth chunk-batched DirtyEntity experiment.
 P0.3E closes the shared broadphase floor. P0.3F closes scheduler/ledger scans and
-records the clean five-profile dense/sparse scale boundary. P0.4 is the next explicit
-selection/composition checkpoint.
+records the clean five-profile dense/sparse scale boundary. P0.3G then isolates Dirty
+Chunk's repeated equal-lineage materialization and one-chunk-message costs while keeping
+its proof and discovery semantics. P0.4 is the next explicit selection/composition
+checkpoint.
 
-Stop after the P0.3F comparison and clean reproducibility evidence. Do
+Stop after the P0.3G comparison and clean reproducibility evidence. Do
 not begin N1.5 shared encoding, additional transport/sharded 2K/4K work, or public-WAN/
 production-CCU claims before
 the explicit P0.4 selection decision.

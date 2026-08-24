@@ -39,6 +39,11 @@ Useful current anchors can be located by their embedded workload or filename:
   prior N1.4 adoption matrix it closes current-game profile selection, but it is
   localhost evidence rather than public-WAN, production-CCU, N1.5, 2K/4K, or N0
   deletion authority;
+- `network-p0.3g-dirty-chunk-*-2026-08-24.json` — clean Dirty Chunk-only sparse
+  and dense scale reruns after bounded equal-lineage source-page reuse and recipient
+  multi-chunk semantic packing. Entries retain independent proof and the profile retains
+  dirty-time discovery with no global Chunk-to-Recipient graph. These are Game-core and
+  canonical-codec-byte artifacts, not hosted transport or production-CCU evidence;
 
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;

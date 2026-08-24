@@ -45,7 +45,7 @@ and Network delivery. It depends on the concrete game composition and Runtime;
 
 ## Public replication profiles
 
-`GamePublicReplicationProfiles` names the four concrete profiles and the
+`GamePublicReplicationProfiles` names the five concrete profiles and the
 shared semantic guarantees they must preserve. It deliberately does not hide them
 behind a universal AOI/cursor interface:
 
@@ -71,6 +71,10 @@ DirtyChunkSpatialFanout
     ChunkPublicationStore / chunk revision history; bounded recipient chunk knowledge/debt
     no persistent global Chunk×Recipient reverse subscriber graph
 
+DirtyEntityChunkBatchFanout
+    DirtyEntitySpatialFanout with adaptive chunk-batched entrant discovery
+    entity latest state / entity proof; no persistent R×E AOI graph
+
 all profiles
     -> Game codec and retained semantic ticket
     -> the same bounded Network delivery machinery
@@ -79,7 +83,7 @@ all profiles
 Permanent paired conformance tests exercise authoritative current truth,
 recipient-scoped disclosure, stable identity/lifetime, sent-not-known application
 proof, rejected/lost-work recovery, eventual convergence, and bounded reservation
-for all four profiles. Their internal types and deeper hostile/performance suites
+for all five profiles. Their internal types and deeper hostile/performance suites
 remain separate. `ChunkPublication` remains the selected current-game profile.
 
 ## P0.2 Dirty Chunk Spatial Fanout
@@ -119,6 +123,15 @@ canonical `ChunkPublication` trace equivalence, coalescing, spatial candidates,
 clean entry/leave/re-entry, cadence, capacity transactions, history and epoch
 recovery, source absence, lost-proof retry, snapshot timeout, lane-family
 coexistence, warmed allocation, and an end-to-end protocol peer.
+
+P0.3G adds a bounded profile-local shared-page cache and recipient-wide semantic
+bundle. Equal source-commit/key/base-cursor reads share one immutable materialization;
+up to 32 unrelated chunk entries share one Game envelope, but each entry keeps its own
+delivery ID and proof. The bundle is not a new knowledge unit, and no global
+`Chunk -> Recipient` subscriber index is introduced. The canonical message-129 codec
+is hostile-input transactional. The hosted adapter remains on its accepted single-chunk
+messages until an explicit integration proves the nonfragmenting `WorldState` byte
+ceiling; the P0.3G 16 KiB Game-core benchmark is not UDP evidence.
 
 ## Ownership
 
