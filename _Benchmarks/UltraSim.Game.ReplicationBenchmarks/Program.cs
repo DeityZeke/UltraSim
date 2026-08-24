@@ -13,6 +13,12 @@ if (args.Contains("--n07", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--p03", StringComparer.Ordinal))
+{
+    P03FourProfileComparison.Run(args);
+    return;
+}
+
 int population = ReadInt(args, "--population", 100_000);
 int warmup = ReadInt(args, "--warmup", 4);
 int samples = ReadInt(args, "--samples", 12);
