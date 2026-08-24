@@ -1,5 +1,11 @@
 # Five-profile dense/sparse scale matrix
 
+> **CPU provenance warning (2026-08-24):** a later process audit found an unrelated stale
+> benchmark consuming a full core whose lifetime overlapped these P0.3E captures. Git provenance,
+> semantic convergence, work counts, bytes, and bounded-memory evidence remain valid. CPU timing
+> rows are operationally contaminated and are superseded by the clean P0.3F scheduler-floor
+> matrix; do not use them for controlled ratios or selection.
+
 - Commit: `cb274575fe17a67781af1476fcfacd23282c02a0`
 - Runtime: .NET 8.0.29, Release, tiered compilation and ReadyToRun disabled
 - Host: Unix 7.1.5.1, 16 logical processors

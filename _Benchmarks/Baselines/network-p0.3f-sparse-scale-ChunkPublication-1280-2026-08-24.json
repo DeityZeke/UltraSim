@@ -1,0 +1,84 @@
+{
+  "WorkloadIdentity": "ultrasim-game-p03f-five-profile-scale-matrix-v1",
+  "CapturedAtUtc": "2026-08-24T18:18:25.0970743+00:00",
+  "GitSha": "73a9e74ac14ea36f88d0b8bfb04ea951cdb2eec6",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "Unix 7.1.5.1",
+  "ProcessorCount": 16,
+  "StopwatchFrequency": 1000000000,
+  "Scope": {
+    "MeasurementScope": "All five Game profiles replay the same authoritative entity, recipient, mutation, movement, login/re-entry, and traffic trace. Measurements cover the profile semantic core and a payload-derived synthesized client/proof boundary. Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic oracle verification, diagnostics, and cold snapshots run in a separate evidence replay outside the timer. The secure Network transport is held constant but is not included in the timed core figures.",
+    "SharedTraceContract": "Release; 320 trace ticks; 10 warmup ticks; 310 measured ticks per profile; designated primary event ticks are reported separately; application proof is immediate after each encoded delivery; public/private/Event/Control traffic counts are identical in every profile row. Payload counters use canonical Game codec sizes and count each semantic delivery once; transport framing/security are excluded.",
+    "SelectionPolicy": "Scale mode measures the Game replication core and canonical Game-message bytes. It excludes sockets, security, packetization, and client engine/world storage; historical full-network V2/V3 timings are contextual controls, not ratio denominators. Profile-native scheduling/source-operation counters are diagnostic and are not a common additive work unit; records, messages, codec bytes, proofs, latency, and reserved bytes are directly comparable. Entity relation/knowledge capacity is the bounded scenario service envelope (64 rows/recipient for sparse scale; full density for dense scale).",
+    "DirtyEntitySpatialRegionEdgeMillimeters": 128000,
+    "DirtyChunkSpatialRegionEdgeMillimeters": 128000
+  },
+  "TraceTicks": 320,
+  "WarmupTicks": 10,
+  "TimingSamples": 310,
+  "Workloads": [
+    {
+      "Workload": "sparse-scale",
+      "EntityCount": 1280,
+      "RecipientCount": 1280,
+      "TraceTicks": 320,
+      "CommonTraffic": {
+        "PublicFacts": 143360,
+        "PrivateFacts": 0,
+        "EventFacts": 0,
+        "ControlFacts": 0
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "ChunkPublication",
+          "Timing": {
+            "Percentiles": {
+              "P50": 3467.889,
+              "P95": 3597.058,
+              "P99": 3672.947,
+              "Max": 3716.516
+            },
+            "SampleCount": 310,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 3467.889,
+            "P95Microseconds": 3597.058,
+            "P99Microseconds": 3672.947
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 115247,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 9105281,
+            "ProfileNativeSchedulingOperations": 38447,
+            "ProfileNativeSourceOperations": 1776856,
+            "RecordsMaterialized": 3221801,
+            "EncodedGamePayloadBytes": 283609873,
+            "EncodedGameMessages": 1776856,
+            "ApplicationProofs": 1776856,
+            "MaxPending": 11343,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 44857344
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 44857344,
+            "AuthoritativeSourceHistoryBytes": 1923072,
+            "HarnessSemanticStateBytes": 85962752,
+            "TotalKnownReservedBytes": 132743168
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 3,
+            "Digest": "B09A77E7D9E496B0",
+            "DeliveredEntities": 60548,
+            "ExpectedEntities": 60548,
+            "MaxPending": 11343,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -7,7 +7,9 @@ not as a second Network architecture or deletion candidate. P0.1 and P0.2 also
 register the concrete `DirtyEntitySpatialFanout` and `DirtyChunkSpatialFanout`
 Game profiles without selecting either. P0.3D adds the concrete
 `DirtyEntityChunkBatchFanout` experiment without changing entity semantic/wire
-identity or selecting it. Terrain / World T0 is
+identity or selecting it. P0.3E closes the dirty-discovery broadphase floor; P0.3F
+closes the remaining scheduler/ledger floor and records clean dense/sparse scaling
+through each profile's 16 ms or 4,096-CCU stop. Terrain / World T0 is
 accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -1429,7 +1431,7 @@ is dirty. Debug and Release retain zero-allocation warmed-path coverage, exact p
 disclosure/lifetime conformance, and the five-profile remote codec tests. P0.4 remains
 on hold until the clean 5,000-tick matrix records the state-only/spatial crossover.
 
-The clean `c484efc9` matrix contains 16 workloads, 5 profiles, 100 warmup ticks,
+The Git-clean `c484efc9` matrix contains 16 workloads, 5 profiles, 100 warmup ticks,
 4,900 measured ticks per row, and 392,000 timed profile-ticks. Every workload
 converges, all three entity-family digests and both chunk-family digests match, and
 every timed row reports zero managed allocation.
@@ -1474,6 +1476,61 @@ Artifact SHA-256:
 
 Evidence:
 [`network-p0.3e-five-profile-discovery-floor-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3e-five-profile-discovery-floor-2026-08-24.json).
+
+The semantic/work/byte/memory conclusions above remain valid. A later P0.3F process
+audit found an unrelated stale benchmark consuming a full core whose lifetime overlapped
+the P0.3E scale captures. P0.3E CPU timings are therefore operationally contaminated and
+must not be used for controlled ratios or selection; P0.3F supersedes them as CPU evidence.
+
+## P0.3F — dirty scheduler/ledger floor and scale closure
+
+This pass keeps profile semantics, wire formats, cadence, proof, authority, and Network
+unchanged while removing the remaining profile-local scheduling scans:
+
+- Dirty Entity uses intrusive per-recipient pending-tier rows and a ready-recipient queue;
+  expiry is prepared once per semantic time. Recipient movement stages new-anchor entrants
+  once and walks the already-required semantic rows as the complete old audience;
+- Dirty Chunk uses a bounded delivery free list, delivery-ID index, cadence-aware ready-
+  recipient queue, and one expiration pass per cadence step. It still performs dirty-time
+  recipient discovery and still owns no Chunk-to-Recipient reverse membership graph;
+- exact-distance Maintained Entity uses its retained audience for state-only or same-position
+  horizon contraction. Position changes and horizon expansion retain exact entrant discovery;
+- sparse scale capacity is a declared 64 semantic rows/recipient service envelope rather than
+  an unreachable mathematical Recipient-by-Entity reserve. Dense scale retains the full
+  1,000-row/recipient envelope because that trace can occupy it.
+
+Permanent regressions cover cadence-deferred ready work, quota-blocked-recipient fairness,
+exact state-only/shrink fast paths, exact position/expansion discovery, and all prior semantic,
+remote-codec, loss/recovery, disclosure, lifetime, and allocation-free contracts. All 116 Game
+replication tests pass.
+
+The clean `73a9e74a` scale run contains 250 independent artifacts. Every artifact records the
+exact SHA, zero warmed managed allocation, semantic convergence, and family equivalence. Each
+profile starts at 512 CCU (+128) sparse and 128 CCU (+64) dense, completes its first p95 run over
+16 ms, and stops. A hard 4,096 safety cap applies even below 16 ms.
+
+| Profile | Sparse stop CCU / p95 | Dense stop CCU / p95 |
+| --- | ---: | ---: |
+| MaintainedEntityRelation | 2,432 / 22.229 ms | 2,240 / 17.728 ms |
+| DirtyEntitySpatialFanout | 1,152 / 19.496 ms | 2,880 / 16.118 ms |
+| DirtyEntityChunkBatchFanout | 1,152 / 17.316 ms | 2,560 / 16.055 ms |
+| DirtyChunkSpatialFanout | 896 / 16.894 ms | 1,344 / 16.319 ms |
+| ChunkPublication | 4,096 / 15.076 ms (safety cap) | 3,392 / 16.969 ms |
+
+At dense 400 the corrected clean p95s are 2.634 ms Maintained Entity, 1.850 ms Dirty
+Entity, 2.082 ms entity/chunk batch, 4.906 ms Dirty Chunk, and 1.680 ms ChunkPublication.
+This confirms that the earlier dirty-entity dense result was dominated by avoidable scheduler
+work. It also locates the real crossover: dirty entity is strong under dense state delivery but
+loses to maintained relations during sparse recipient movement; adaptive chunk batching helps
+spatially clustered mutations but adds overhead in the distributed dense trace; Dirty Chunk's
+on-demand recipient discovery remains substantially more expensive than retained ChunkPublication.
+
+`ChunkPublication` remains the selected current-game profile. P0.3F closes the contestant floor
+and scale measurement; it does not authorize N1.5, delete any alternate profile, or make a full-
+network/production CCU claim.
+
+Evidence:
+[`network-p0.3f-five-profile-dense-sparse-scale-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3f-five-profile-dense-sparse-scale-2026-08-24.md).
 
 ## N1.5 — shared semantic packing / chunk page reuse
 
@@ -1747,11 +1804,13 @@ the selection does not authorize N1.5. P0.1b/P0.2b establish the correctness,
 fairness, bounded-storage and allocation-free lifecycle floor for the two original
 dirty profiles. P0.3D adds entity-side semantic-audience indexing, coarse occupied
 DirtyChunk recipient buckets, and the fifth chunk-batched DirtyEntity experiment.
-The rebuilt five-profile harness now has clean reproducible evidence; P0.4 is the
-next selection checkpoint.
+P0.3E closes the shared broadphase floor. P0.3F closes scheduler/ledger scans and
+records the clean five-profile dense/sparse scale boundary. P0.4 is the next explicit
+selection/composition checkpoint.
 
-Stop after the P0.3D comparison and clean reproducibility evidence. Do
-not begin N1.5 shared encoding, 2K/4K, or public-WAN/production-CCU claims before
+Stop after the P0.3F comparison and clean reproducibility evidence. Do
+not begin N1.5 shared encoding, additional transport/sharded 2K/4K work, or public-WAN/
+production-CCU claims before
 the explicit P0.4 selection decision.
 Do not remove the retained `MaintainedEntityRelation` profile. The separately
 scoped hosted lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.
