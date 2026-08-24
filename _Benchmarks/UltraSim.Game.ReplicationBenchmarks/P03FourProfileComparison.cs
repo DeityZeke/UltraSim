@@ -1658,11 +1658,7 @@ internal static class P03FourProfileComparison
                 Proofs,
                 MaxPending,
                 MaxOutstanding,
-                snapshot.ReservedBytes,
-                snapshot.SharedPageMaterializations,
-                snapshot.SharedPageHits,
-                snapshot.RecipientBundlesBuilt,
-                snapshot.ChunkEntriesBundled);
+                snapshot.ReservedBytes);
         }
 
         public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
@@ -2166,7 +2162,11 @@ internal static class P03FourProfileComparison
                 Proofs,
                 MaxPending,
                 MaxOutstanding,
-                snapshot.ReservedBytes);
+                snapshot.ReservedBytes,
+                snapshot.SharedPageMaterializations,
+                snapshot.SharedPageHits,
+                snapshot.RecipientBundlesBuilt,
+                snapshot.ChunkEntriesBundled);
         }
 
         public override MemoryBreakdown GetMemoryBreakdown(CumulativeWork work)
