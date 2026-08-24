@@ -35,6 +35,11 @@ internal static class P03WholeFlowNetworkSuite
         int sparsePopulation = ReadInt(args, "--sparse-population", 512);
         int warmup = ReadInt(args, "--warmup", 30);
         int ticks = ReadInt(args, "--ticks", 90);
+        string? tickMillisecondsText = ReadText(args, "--tick-milliseconds");
+        int tickMilliseconds = tickMillisecondsText is null
+            ? 16
+            : int.Parse(tickMillisecondsText, System.Globalization.CultureInfo.InvariantCulture);
+        bool overrideTickCadence = tickMillisecondsText is not null;
         bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-p0.3g-whole-flow-attribution.json";
@@ -43,13 +48,14 @@ internal static class P03WholeFlowNetworkSuite
         string shape = ReadText(args, "--shape") ?? "all";
         P03NetworkWorkload[] workloads = shape.ToLowerInvariant() switch
         {
-            "dense" => [P03NetworkWorkload.Dense(denseRecipients, denseEntities)],
-            "sparse" => [P03NetworkWorkload.Sparse(sparsePopulation)],
-            "all" => [P03NetworkWorkload.Dense(denseRecipients, denseEntities),
-                P03NetworkWorkload.Sparse(sparsePopulation)],
+            "dense" => [Configure(P03NetworkWorkload.Dense(denseRecipients, denseEntities))],
+            "sparse" => [Configure(P03NetworkWorkload.Sparse(sparsePopulation))],
+            "all" => [Configure(P03NetworkWorkload.Dense(denseRecipients, denseEntities)),
+                Configure(P03NetworkWorkload.Sparse(sparsePopulation))],
             _ => throw new ArgumentException($"Unknown whole-flow shape '{shape}'."),
         };
-        if (warmup < 1 || ticks < 10 || denseRecipients <= 0 || denseEntities <= 0 ||
+        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
+            denseRecipients <= 0 || denseEntities <= 0 ||
             sparsePopulation <= 0 || caps.Any(value => value is not (1 or 4 or 8)))
             throw new ArgumentOutOfRangeException(nameof(args));
 
@@ -89,7 +95,7 @@ internal static class P03WholeFlowNetworkSuite
                 $"{row.Transport.FramesPerDatagram:F2}, wire {row.Transport.WireBytes / 1048576d:F2} MiB");
         }
         var report = new P03WholeFlowReport(
-            "ultrasim-network-p03g-whole-flow-attribution-v2",
+            "ultrasim-network-p03g-whole-flow-attribution-v3",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -108,18 +114,29 @@ internal static class P03WholeFlowNetworkSuite
                 "loss, and slow-client behavior are excluded and remain separate evidence gates.",
                 "A comparison-only manifest negotiates up to eight unreliable frames. Local send " +
                 "caps 1/4/8 are the only A/B policy change; the production manifest remains cap one. " +
-                $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}."),
+                $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
+                $"The internal semantic tick duration was {tickMilliseconds} ms."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
         Console.WriteLine(Path.GetFullPath(output));
+        return;
+
+        P03NetworkWorkload Configure(P03NetworkWorkload workload) => overrideTickCadence
+            ? workload.WithTickDuration(tickMilliseconds)
+            : workload;
     }
 
     private static void RunRatedServerRoleSweep(string[] args)
     {
         int warmup = ReadInt(args, "--warmup", 30);
         int ticks = ReadInt(args, "--ticks", 270);
+        string? tickMillisecondsText = ReadText(args, "--tick-milliseconds");
+        int tickMilliseconds = tickMillisecondsText is null
+            ? 16
+            : int.Parse(tickMillisecondsText, System.Globalization.CultureInfo.InvariantCulture);
+        bool overrideTickCadence = tickMillisecondsText is not null;
         double stopMilliseconds = ReadDouble(args, "--server-role-stop-p95", 4d);
         int maximumPopulation = ReadInt(args, "--maximum-population", 4_096);
         int denseStart = ReadInt(args, "--dense-start", 256);
@@ -129,7 +146,8 @@ internal static class P03WholeFlowNetworkSuite
         bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-p0.3h-rated-server-role-sweep.json";
-        if (warmup < 1 || ticks < 10 || stopMilliseconds <= 0 || denseStart <= 0 ||
+        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
+            stopMilliseconds <= 0 || denseStart <= 0 ||
             sparseStart <= 0 || denseStep <= 0 || sparseStep <= 0 ||
             maximumPopulation < Math.Max(denseStart, sparseStart))
             throw new ArgumentOutOfRangeException(nameof(args));
@@ -139,16 +157,16 @@ internal static class P03WholeFlowNetworkSuite
         RunSeries(
             Enumerable.Range(0, checked((maximumPopulation - denseStart) / denseStep + 1))
                 .Select(index => denseStart + index * denseStep),
-            static population => P03NetworkWorkload.Dense(population, 1_000),
+            population => Configure(P03NetworkWorkload.Dense(population, 1_000)),
             P03NetworkProfile.DirtyEntitySpatialFanout);
         RunSeries(
             Enumerable.Range(0, checked((maximumPopulation - sparseStart) / sparseStep + 1))
                 .Select(index => sparseStart + index * sparseStep),
-            static population => P03NetworkWorkload.Sparse(population),
+            population => Configure(P03NetworkWorkload.Sparse(population)),
             P03NetworkProfile.MaintainedEntityRelation);
 
         var report = new P03WholeFlowReport(
-            "ultrasim-network-p03h-rated-server-role-sweep-v2",
+            "ultrasim-network-p03h-rated-server-role-sweep-v3",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -167,13 +185,17 @@ internal static class P03WholeFlowNetworkSuite
                 "latency SLA. p99/max are retained as tail context; p95 is the stop criterion. " +
                 $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
                 $"Dense starts at {denseStart} by {denseStep}; sparse starts at {sparseStart} by " +
-                $"{sparseStep}."),
+                $"{sparseStep}. The internal semantic tick duration was {tickMilliseconds} ms."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
             new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
         Console.WriteLine(Path.GetFullPath(output));
         return;
+
+        P03NetworkWorkload Configure(P03NetworkWorkload workload) => overrideTickCadence
+            ? workload.WithTickDuration(tickMilliseconds)
+            : workload;
 
         void RunSeries(
             IEnumerable<int> populations,
@@ -278,12 +300,13 @@ internal readonly record struct P03NetworkWorkload(
     bool MoveRecipients,
     GameInterestProfile EntityInterest,
     ChunkInterestProfile ChunkInterest,
-    OfflineDirectChunkCadence ChunkCadence)
+    OfflineDirectChunkCadence ChunkCadence,
+    int TickDurationMilliseconds)
 {
     internal static P03NetworkWorkload Dense(int recipients, int entities) => new(
         $"dense-{recipients}", recipients, entities, Math.Max(1, entities * 2 / 100), false,
         GameInterestProfile.Reference, GameChunkInterestProfile.Default,
-        OfflineDirectChunkCadence.EvidenceProfile);
+        OfflineDirectChunkCadence.EvidenceProfile, 16);
 
     internal static P03NetworkWorkload Sparse(int population) => new(
         $"sparse-{population}", population, population,
@@ -291,7 +314,24 @@ internal readonly record struct P03NetworkWorkload(
         new GameInterestProfile(10_000, 7_500, 7_500, 23_500, 39_500,
             32, 48, 100, 2_000),
         new ChunkInterestProfile(7_500, 7_500, 23_500, 23_500, 39_500, 39_500),
-        new OfflineDirectChunkCadence(1, 2, 3));
+        new OfflineDirectChunkCadence(1, 2, 3), 16);
+
+    internal P03NetworkWorkload WithTickDuration(int tickMilliseconds)
+    {
+        if (tickMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(tickMilliseconds));
+        return this with
+        {
+            TickDurationMilliseconds = tickMilliseconds,
+            ChunkCadence = new OfflineDirectChunkCadence(
+                1,
+                Period(EntityInterest.NearIntervalMilliseconds, tickMilliseconds),
+                Period(EntityInterest.FarIntervalMilliseconds, tickMilliseconds)),
+        };
+    }
+
+    private static uint Period(long intervalMilliseconds, int tickMilliseconds) =>
+        checked((uint)Math.Max(1L,
+            (intervalMilliseconds + tickMilliseconds - 1L) / tickMilliseconds));
 }
 
 internal sealed class P03WholeFlowHarness : IDisposable
@@ -410,6 +450,13 @@ internal sealed class P03WholeFlowHarness : IDisposable
         return new P03WholeFlowRow(
             0, _workload.Id, _profile.ToString(), _frameCap,
             _workload.Recipients, _workload.Entities, _workload.DirtyEntitiesPerTick,
+            new P03CadenceSummary(
+                _workload.TickDurationMilliseconds,
+                _workload.EntityInterest.NearIntervalMilliseconds,
+                _workload.EntityInterest.FarIntervalMilliseconds,
+                _workload.ChunkCadence.ImmediateSteps,
+                _workload.ChunkCadence.NearSteps,
+                _workload.ChunkCadence.FarSteps),
             new P03WholeFlowTiming(
                 P03Metric.From(_tick), P03Metric.From(_authority), P03Metric.From(_schedule),
                 P03Metric.From(_pump), P03Metric.From(_serverApplication),
@@ -757,7 +804,8 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
         for (int recipient = 0; recipient < movedRecipients; recipient++)
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(recipient),
-                P03WholeFlowHarness.Point(X[recipient], Z[recipient]), checked(tick * 16L)) is
+                P03WholeFlowHarness.Point(X[recipient], Z[recipient]),
+                checked(tick * (long)Workload.TickDurationMilliseconds)) is
                 GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange,
                 "Maintained recipient movement failed.");
         int start = checked((tick - 1) * Workload.DirtyEntitiesPerTick % Workload.Entities);
@@ -767,7 +815,8 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
             P03WholeFlowHarness.Require(_service.UpsertEntity(
                 Projected(entity, Versions[entity]), Versions[entity],
                 P03WholeFlowHarness.Point(X[entity], Z[entity]),
-                GameReplicationHorizon.Far, checked(tick * 16L)) is
+                GameReplicationHorizon.Far,
+                checked(tick * (long)Workload.TickDurationMilliseconds)) is
                 GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange,
                 "Maintained entity mutation failed.");
         }
@@ -775,7 +824,7 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
 
     internal override void Schedule(ulong step)
     {
-        long now = checked((long)step * 16L);
+        long now = checked((long)step * Workload.TickDurationMilliseconds);
         for (int recipient = 0; recipient < _servers.Length; recipient++)
             for (int bundle = 0; bundle < 8; bundle++)
             {
@@ -959,7 +1008,8 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
         for (int recipient = 0; recipient < movedRecipients; recipient++)
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(recipient),
-                P03WholeFlowHarness.Point(X[recipient], Z[recipient]), checked(tick * 16L)) is
+                P03WholeFlowHarness.Point(X[recipient], Z[recipient]),
+                checked(tick * (long)Workload.TickDurationMilliseconds)) is
                 DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange,
                 "DirtyEntity recipient movement failed.");
         int start = checked((tick - 1) * Workload.DirtyEntitiesPerTick % Workload.Entities);
@@ -974,14 +1024,15 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
                 P03WholeFlowHarness.ReplicationId(entity), Versions[entity], true, true,
                 GameReplicationHorizon.Far,
                 P03WholeFlowHarness.Point(X[entity], Z[entity]),
-                Projected(entity, Versions[entity]).SimulationState), checked(tick * 16L));
+                Projected(entity, Versions[entity]).SimulationState),
+            checked(tick * (long)Workload.TickDurationMilliseconds));
         P03WholeFlowHarness.Require(status is DirtyEntityUpdateStatus.Success or
             DirtyEntityUpdateStatus.NoChange, "DirtyEntity mutation failed.");
     }
 
     internal override void Schedule(ulong step)
     {
-        long now = checked((long)step * 16L);
+        long now = checked((long)step * Workload.TickDurationMilliseconds);
         for (int recipient = 0; recipient < _servers.Length; recipient++)
             for (int bundle = 0; bundle < 8; bundle++)
             {
@@ -1864,6 +1915,7 @@ internal readonly record struct P03WholeFlowRow(
     int Recipients,
     int Entities,
     int DirtyEntitiesPerTick,
+    P03CadenceSummary Cadence,
     P03WholeFlowTiming Timing,
     P03TransportSummary Transport,
     P03ProfileCounters ProfileCounters,
@@ -1876,6 +1928,14 @@ internal readonly record struct P03WholeFlowRow(
     long NetworkServerReservedBytes,
     long NetworkClientReservedBytes,
     bool Converged);
+
+internal readonly record struct P03CadenceSummary(
+    int TickDurationMilliseconds,
+    long EntityNearIntervalMilliseconds,
+    long EntityFarIntervalMilliseconds,
+    uint ChunkImmediatePeriodTicks,
+    uint ChunkNearPeriodTicks,
+    uint ChunkFarPeriodTicks);
 
 internal readonly record struct P03WholeFlowTiming(
     P03Metric Tick,
