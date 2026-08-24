@@ -12,8 +12,11 @@ closes the remaining scheduler/ledger floor and records clean dense/sparse scali
 through each profile's 16 ms or 4,096-CCU stop. P0.3G gives the experimental Dirty
 Chunk profile bounded equal-lineage chunk-page reuse and recipient-wide multi-chunk
 semantic envelopes while retaining independent per-chunk application proof and no
-global Chunk-to-Recipient reverse graph. Terrain / World T0 is
-accepted/frozen as of 2026-08-21. N1.0's packet-free
+global Chunk-to-Recipient reverse graph. P0.3H replaces repeated Network ready-table
+scans with bounded ready-state selection. P0.3I packs independently meaningful chunk
+application proofs into a
+bounded MTU-safe reverse envelope without changing proof granularity.
+Terrain / World T0 is accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
 ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
@@ -1597,6 +1600,30 @@ separate next experiment.
 
 Evidence:
 [`network-p0.3h-ready-state-selection-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3h-ready-state-selection-2026-08-24.md).
+
+## P0.3I — bounded chunk application-proof envelopes
+
+P0.3I removes the remaining reverse-message multiplication from both chunk-semantic
+profiles. Message 130 carries up to 40 independently meaningful chunk proofs in
+1,377 bytes under the default 1,405-byte nonfragmenting application-message limit.
+Application/publication lineage is shared only in the envelope header; delivery ID,
+chunk, revision, kind, and apply result remain per entry. Servers process entries
+independently, so partial application, rejection, duplicate/stale proof, replay,
+timeout/retry, leave/re-entry, and source replacement retain the accepted meaning.
+
+Across the four causal chunk controls, reverse proof messages fall 75.3-87.1% and
+wire bytes fall 7.1-15.8%. Dense Data datagrams do not fall because cap-eight already
+amortized the scalar proof frames into the same send opportunities; sparse Data
+datagrams fall 10.8-14.7%. Tick p95 improves 2.7-5.7%. This is a useful but bounded
+transport win, not evidence that proof granularity should be collapsed or that chunk
+profiles now match the dynamic entity path.
+
+P0.3I is accepted. `ChunkPublication` remains the current-game public profile;
+DirtyChunk remains an experimental no-reverse-membership control. Entity profiles,
+socket batching, and the 384-CCU rating are unchanged. No rated sweep is repeated.
+
+Evidence:
+[`network-p0.3i-chunk-proof-envelope-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3i-chunk-proof-envelope-2026-08-24.md).
 
 ## N1.5 — shared semantic packing / chunk page reuse
 

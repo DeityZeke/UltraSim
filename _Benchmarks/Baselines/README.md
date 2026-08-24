@@ -48,6 +48,10 @@ Useful current anchors can be located by their embedded workload or filename:
   cap-eight ChunkPublication regression control, and 270-tick <=4 ms server-role
   rated sweep. The selector retains per-lane reliable heads, IndependentState ready
   bitsets, and priority-ready lanes without changing Game or lane semantics;
+- `network-p0.3i-chunk-proof-envelope-*-2026-08-24.*` — accepted MTU-safe
+  reverse proof-message packing for ChunkPublication and DirtyChunk. Entries remain
+  independently fenced and applied; causal and probes-off whole-flow controls retain
+  semantics while separating proof-message, frame, datagram, byte, and CPU effects;
 
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;
