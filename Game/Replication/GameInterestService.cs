@@ -2132,10 +2132,9 @@ public sealed class GameInterestService
         int recipientIndex,
         ReplicationEntityId entity)
     {
-        if (tier == GameInterestTier.Immediate || tier == GameInterestTier.None) return now;
-        long interval = tier == GameInterestTier.Near
-            ? _profile.NearIntervalMilliseconds
-            : _profile.FarIntervalMilliseconds;
+        if (tier == GameInterestTier.None) return now;
+        long interval = InterestInterval(tier);
+        if (interval == 0) return now;
         ulong mixed = _recipients[recipientIndex].Participant.Value;
         mixed ^= ((ulong)entity.Index << 32) | entity.Generation;
         // This is a bit-mixing permutation. Wraparound is the intended unsigned
@@ -2154,14 +2153,21 @@ public sealed class GameInterestService
         int recipientIndex,
         ReplicationEntityId entity)
     {
-        if (tier is GameInterestTier.Immediate or GameInterestTier.None) return now;
+        if (tier == GameInterestTier.None) return now;
+        long interval = InterestInterval(tier);
+        if (interval == 0) return now;
         long next = ComputeEligibleAt(tier, now, recipientIndex, entity);
         if (next > now) return next;
-        long interval = tier == GameInterestTier.Near
-            ? _profile.NearIntervalMilliseconds
-            : _profile.FarIntervalMilliseconds;
         return interval > long.MaxValue - now ? long.MaxValue : now + interval;
     }
+
+    private long InterestInterval(GameInterestTier tier) => tier switch
+    {
+        GameInterestTier.Immediate => _profile.ImmediateIntervalMilliseconds,
+        GameInterestTier.Near => _profile.NearIntervalMilliseconds,
+        GameInterestTier.Far => _profile.FarIntervalMilliseconds,
+        _ => 0,
+    };
 
     private void RetireEntity(int entityIndex, long now)
     {

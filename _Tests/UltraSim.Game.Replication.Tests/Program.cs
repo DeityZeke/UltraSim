@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("P03EDirtyEntityCoarseSpatialEdgesPreserveExactSemantics", DirtyEntitySpatialFanoutTests.CoarseSpatialEdgesPreserveExactSemantics),
     ("P03EDirtyEntityChunkBatchUsesPointDiscoveryForSingleton", DirtyEntitySpatialFanoutTests.ChunkBatchUsesPointDiscoveryForSingleton),
     ("P03EDirtyEntityStateOnlyMutationsAvoidSpatialDiscovery", DirtyEntitySpatialFanoutTests.StateOnlyMutationsAvoidSpatialDiscovery),
+    ("P03KDirtyEntityImmediateCadenceCanBeDeferred", DirtyEntitySpatialFanoutTests.ImmediateCadenceCanBeDeferred),
     ("P03DDirtyEntityChunkBatchCoalescesAndAllocatesZero", DirtyEntitySpatialFanoutTests.ChunkBatchedDiscoveryCoalescesAndAllocatesZero),
     ("P01DirtyEntityExactWireBudgetAndRecipientOutstandingIsolation", DirtyEntitySpatialFanoutTests.ExactWireBudgetAndRecipientOutstandingIsolation),
     ("P01DirtyEntitySameRegionMutationKeepsSpatialListsAcyclic", DirtyEntitySpatialFanoutTests.SameRegionEntityMutationKeepsSpatialListsAcyclic),
@@ -97,6 +98,7 @@ var tests = new (string Name, Action Body)[]
     ("RecipientRegionCrossingUpdatesOnlyEnvelopeDifference", RecipientRegionCrossingUpdatesOnlyEnvelopeDifference),
     ("NewestPendingStateAndPromotionCollapseCorrectly", NewestPendingStateAndPromotionCollapseCorrectly),
     ("UnsentPendingStateCoalescesWithoutMovingCadenceDebt", UnsentPendingStateCoalescesWithoutMovingCadenceDebt),
+    ("ImmediateCadenceCanBeExplicitlyDeferred", ImmediateCadenceCanBeExplicitlyDeferred),
     ("SentPendingStateSupersedesWithoutLosingCadenceOrProofFencing", SentPendingStateSupersedesWithoutLosingCadenceOrProofFencing),
     ("ContinuouslyDirtyNearAndFarStateCannotStarve", ContinuouslyDirtyNearAndFarStateCannotStarve),
     ("SemanticClassTransitionsKeepExplicitRequeueAndLifetimeRules", SemanticClassTransitionsKeepExplicitRequeueAndLifetimeRules),
@@ -530,6 +532,47 @@ static void UnsentPendingStateCoalescesWithoutMovingCadenceDebt()
     Check.Equal(19L, sent.EligibleAtMilliseconds);
     Check.Equal(1UL, service.GetSnapshot().EligibilityDeadlinesAdvancedAfterSend);
     Check.True(service.TryAcknowledgeBundle(participant, bundle.BundleId, applied: true));
+}
+
+static void ImmediateCadenceCanBeExplicitlyDeferred()
+{
+    GameInterestProfile profile = InterestProfile() with
+    {
+        ImmediateIntervalMilliseconds = 32,
+    };
+    var service = new GameInterestService(
+        new StateEpoch(1),
+        new GameInterestLimits(4, 1, 256, 256, 8, 4, 2),
+        profile);
+    ParticipantId participant = new(97);
+    var entity = new ReplicationEntityId(1, 1);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(1, 1, 1), 1, Point(1, 0),
+            GameReplicationHorizon.Far, 0));
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, entity).Tier);
+
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[2];
+    long firstEligible = Relation(service, participant, entity).EligibleAtMilliseconds;
+    Check.True(firstEligible >= 0 && firstEligible < 32);
+    if (firstEligible > 0)
+    {
+        Check.Equal(GameWorldStateBuildStatus.NoData,
+            service.TryBuildBundle(participant, firstEligible - 1, 1_024, records, out _));
+    }
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, firstEligible, 1_024, records,
+            out GameWorldStateBundle first));
+    Check.True(service.TryAcknowledgeBundle(participant, first.BundleId, applied: true));
+
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(1, 1, 2), 2, Point(1, 0),
+            GameReplicationHorizon.Far, firstEligible + 1));
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(participant, firstEligible + 31, 1_024, records, out _));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, firstEligible + 32, 1_024, records, out _));
 }
 
 static void SentPendingStateSupersedesWithoutLosingCadenceOrProofFencing()

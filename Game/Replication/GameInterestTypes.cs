@@ -50,6 +50,13 @@ public readonly record struct GameInterestProfile(
     long ApplicationAckRetryMilliseconds,
     long ApplicationAckTimeoutMilliseconds)
 {
+    /// <summary>
+    /// Optional cadence interval for Immediate debt. Zero preserves the historical behavior:
+    /// Immediate debt is eligible in the current semantic step. A positive value lets a
+    /// Game-owned profile deliberately run Immediate at a slower bounded cadence.
+    /// </summary>
+    public long ImmediateIntervalMilliseconds { get; init; }
+
     public static GameInterestProfile Reference => new(
         RegionEdgeMillimeters: 16_000,
         ImmediateEnterRadiusMillimeters: 5_000,
@@ -71,7 +78,8 @@ public readonly record struct GameInterestProfile(
         if (NearRadiusMillimeters < ImmediateLeaveRadiusMillimeters ||
             FarRadiusMillimeters < NearRadiusMillimeters)
             throw new ArgumentOutOfRangeException(nameof(FarRadiusMillimeters));
-        if (NearIntervalMilliseconds <= 0 || FarIntervalMilliseconds <= 0 ||
+        if (ImmediateIntervalMilliseconds < 0 ||
+            NearIntervalMilliseconds <= 0 || FarIntervalMilliseconds <= 0 ||
             ApplicationAckRetryMilliseconds <= 0 ||
             ApplicationAckTimeoutMilliseconds < ApplicationAckRetryMilliseconds)
             throw new ArgumentOutOfRangeException(nameof(ApplicationAckTimeoutMilliseconds));

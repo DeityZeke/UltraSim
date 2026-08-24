@@ -35,11 +35,14 @@ internal static class P03WholeFlowNetworkSuite
         int sparsePopulation = ReadInt(args, "--sparse-population", 512);
         int warmup = ReadInt(args, "--warmup", 30);
         int ticks = ReadInt(args, "--ticks", 90);
-        string? tickMillisecondsText = ReadText(args, "--tick-milliseconds");
+        string? serverTickMillisecondsText = ReadText(args, "--server-tick-milliseconds");
+        string? tickMillisecondsText = serverTickMillisecondsText ??
+            ReadText(args, "--tick-milliseconds");
         int tickMilliseconds = tickMillisecondsText is null
             ? 16
             : int.Parse(tickMillisecondsText, System.Globalization.CultureInfo.InvariantCulture);
         bool overrideTickCadence = tickMillisecondsText is not null;
+        P03AoICadencePolicy? aoiCadence = ParseAoICadence(ReadText(args, "--aoi-cadence"));
         bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-p0.3g-whole-flow-attribution.json";
@@ -95,7 +98,7 @@ internal static class P03WholeFlowNetworkSuite
                 $"{row.Transport.FramesPerDatagram:F2}, wire {row.Transport.WireBytes / 1048576d:F2} MiB");
         }
         var report = new P03WholeFlowReport(
-            "ultrasim-network-p03g-whole-flow-attribution-v3",
+            "ultrasim-network-p03g-whole-flow-attribution-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -115,7 +118,8 @@ internal static class P03WholeFlowNetworkSuite
                 "A comparison-only manifest negotiates up to eight unreliable frames. Local send " +
                 "caps 1/4/8 are the only A/B policy change; the production manifest remains cap one. " +
                 $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
-                $"The internal semantic tick duration was {tickMilliseconds} ms."),
+                $"The server semantic tick duration was {tickMilliseconds} ms. " +
+                $"AOI cadence was {(aoiCadence?.ToString() ?? "the workload default")}."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
@@ -123,21 +127,27 @@ internal static class P03WholeFlowNetworkSuite
         Console.WriteLine(Path.GetFullPath(output));
         return;
 
-        P03NetworkWorkload Configure(P03NetworkWorkload workload) => overrideTickCadence
-            ? workload.WithTickDuration(tickMilliseconds)
-            : workload;
+        P03NetworkWorkload Configure(P03NetworkWorkload workload) => aoiCadence.HasValue
+            ? workload.WithServerTickAndAoICadence(tickMilliseconds, aoiCadence.Value)
+            : overrideTickCadence
+                ? workload.WithTickDuration(tickMilliseconds)
+                : workload;
     }
 
     private static void RunRatedServerRoleSweep(string[] args)
     {
         int warmup = ReadInt(args, "--warmup", 30);
         int ticks = ReadInt(args, "--ticks", 270);
-        string? tickMillisecondsText = ReadText(args, "--tick-milliseconds");
+        string? serverTickMillisecondsText = ReadText(args, "--server-tick-milliseconds");
+        string? tickMillisecondsText = serverTickMillisecondsText ??
+            ReadText(args, "--tick-milliseconds");
         int tickMilliseconds = tickMillisecondsText is null
             ? 16
             : int.Parse(tickMillisecondsText, System.Globalization.CultureInfo.InvariantCulture);
         bool overrideTickCadence = tickMillisecondsText is not null;
+        P03AoICadencePolicy? aoiCadence = ParseAoICadence(ReadText(args, "--aoi-cadence"));
         double stopMilliseconds = ReadDouble(args, "--server-role-stop-p95", 4d);
+        string stopMetric = ReadText(args, "--stop-metric") ?? "server-role";
         int maximumPopulation = ReadInt(args, "--maximum-population", 4_096);
         int denseStart = ReadInt(args, "--dense-start", 256);
         int denseStep = ReadInt(args, "--dense-step", 64);
@@ -149,7 +159,8 @@ internal static class P03WholeFlowNetworkSuite
         if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
             stopMilliseconds <= 0 || denseStart <= 0 ||
             sparseStart <= 0 || denseStep <= 0 || sparseStep <= 0 ||
-            maximumPopulation < Math.Max(denseStart, sparseStart))
+            maximumPopulation < Math.Max(denseStart, sparseStart) ||
+            stopMetric is not ("server-role" or "tick"))
             throw new ArgumentOutOfRangeException(nameof(args));
 
         var rows = new List<P03WholeFlowRow>();
@@ -166,7 +177,7 @@ internal static class P03WholeFlowNetworkSuite
             P03NetworkProfile.MaintainedEntityRelation);
 
         var report = new P03WholeFlowReport(
-            "ultrasim-network-p03h-rated-server-role-sweep-v3",
+            "ultrasim-network-p03h-rated-server-role-sweep-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -179,13 +190,15 @@ internal static class P03WholeFlowNetworkSuite
                 "MaintainedEntityRelation with one moving public entity per recipient and " +
                 "thirty-five-percent spatial dirt.",
                 "Each series stops after retaining its first completed population with server-role " +
-                $"p95 greater than {stopMilliseconds:F3} ms. Cold construction/bootstrap and " +
+                $"{stopMetric} p95 greater than {stopMilliseconds:F3} ms. " +
+                "Cold construction/bootstrap and " +
                 "semantic verification remain outside timed ticks.",
                 "This is a localhost server-role rating observation, not a public-WAN CCU or " +
                 "latency SLA. p99/max are retained as tail context; p95 is the stop criterion. " +
                 $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
                 $"Dense starts at {denseStart} by {denseStep}; sparse starts at {sparseStart} by " +
-                $"{sparseStep}. The internal semantic tick duration was {tickMilliseconds} ms."),
+                $"{sparseStep}. The server semantic tick duration was {tickMilliseconds} ms. " +
+                $"AOI cadence was {(aoiCadence?.ToString() ?? "the workload default")}."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
@@ -193,9 +206,11 @@ internal static class P03WholeFlowNetworkSuite
         Console.WriteLine(Path.GetFullPath(output));
         return;
 
-        P03NetworkWorkload Configure(P03NetworkWorkload workload) => overrideTickCadence
-            ? workload.WithTickDuration(tickMilliseconds)
-            : workload;
+        P03NetworkWorkload Configure(P03NetworkWorkload workload) => aoiCadence.HasValue
+            ? workload.WithServerTickAndAoICadence(tickMilliseconds, aoiCadence.Value)
+            : overrideTickCadence
+                ? workload.WithTickDuration(tickMilliseconds)
+                : workload;
 
         void RunSeries(
             IEnumerable<int> populations,
@@ -222,10 +237,22 @@ internal static class P03WholeFlowNetworkSuite
                     $"{row.Timing.ServerRole.P95:F3} ms, p99 " +
                     $"{row.Timing.ServerRole.P99:F3} ms, max " +
                     $"{row.Timing.ServerRole.Maximum:F3} ms");
-                if (row.Timing.ServerRole.P95 > stopMilliseconds) break;
+                double observed = stopMetric == "tick"
+                    ? row.Timing.Tick.P95
+                    : row.Timing.ServerRole.P95;
+                if (observed > stopMilliseconds) break;
             }
         }
     }
+
+    private static P03AoICadencePolicy? ParseAoICadence(string? text) =>
+        text?.Trim().ToLowerInvariant() switch
+        {
+            null or "" => null,
+            "0/1/2" or "012" or "default" => P03AoICadencePolicy.Default012,
+            "1/1/2" or "112" or "slower" => P03AoICadencePolicy.Slower112,
+            _ => throw new ArgumentException($"Unknown AOI cadence '{text}'."),
+        };
 
     private static P03NetworkProfile[] ParseProfiles(string? text)
     {
@@ -292,6 +319,12 @@ internal enum P03NetworkProfile : byte
     DirtyChunkSpatialFanout = 5,
 }
 
+internal enum P03AoICadencePolicy : byte
+{
+    Default012 = 1,
+    Slower112 = 2,
+}
+
 internal readonly record struct P03NetworkWorkload(
     string Id,
     int Recipients,
@@ -326,6 +359,30 @@ internal readonly record struct P03NetworkWorkload(
                 1,
                 Period(EntityInterest.NearIntervalMilliseconds, tickMilliseconds),
                 Period(EntityInterest.FarIntervalMilliseconds, tickMilliseconds)),
+        };
+    }
+
+    internal P03NetworkWorkload WithServerTickAndAoICadence(
+        int tickMilliseconds,
+        P03AoICadencePolicy cadence)
+    {
+        if (tickMilliseconds <= 0) throw new ArgumentOutOfRangeException(nameof(tickMilliseconds));
+        long immediateInterval = cadence == P03AoICadencePolicy.Slower112
+            ? checked(2L * tickMilliseconds)
+            : 0;
+        return this with
+        {
+            TickDurationMilliseconds = tickMilliseconds,
+            EntityInterest = EntityInterest with
+            {
+                ImmediateIntervalMilliseconds = immediateInterval,
+                NearIntervalMilliseconds = checked(2L * tickMilliseconds),
+                FarIntervalMilliseconds = checked(3L * tickMilliseconds),
+            },
+            ChunkCadence = new OfflineDirectChunkCadence(
+                cadence == P03AoICadencePolicy.Slower112 ? 2u : 1u,
+                2,
+                3),
         };
     }
 
@@ -451,7 +508,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
             0, _workload.Id, _profile.ToString(), _frameCap,
             _workload.Recipients, _workload.Entities, _workload.DirtyEntitiesPerTick,
             new P03CadenceSummary(
+                $"{_workload.ChunkCadence.ImmediateSteps - 1}/" +
+                $"{_workload.ChunkCadence.NearSteps - 1}/" +
+                $"{_workload.ChunkCadence.FarSteps - 1}",
                 _workload.TickDurationMilliseconds,
+                _workload.EntityInterest.ImmediateIntervalMilliseconds,
                 _workload.EntityInterest.NearIntervalMilliseconds,
                 _workload.EntityInterest.FarIntervalMilliseconds,
                 _workload.ChunkCadence.ImmediateSteps,
@@ -1930,7 +1991,9 @@ internal readonly record struct P03WholeFlowRow(
     bool Converged);
 
 internal readonly record struct P03CadenceSummary(
+    string AoiCadenceSkippedTicks,
     int TickDurationMilliseconds,
+    long EntityImmediateIntervalMilliseconds,
     long EntityNearIntervalMilliseconds,
     long EntityFarIntervalMilliseconds,
     uint ChunkImmediatePeriodTicks,

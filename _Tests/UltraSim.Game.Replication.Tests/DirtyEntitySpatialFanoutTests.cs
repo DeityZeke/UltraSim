@@ -92,6 +92,32 @@ internal static class DirtyEntitySpatialFanoutTests
             $"semantic_rows={dirty.SemanticKnowledgeRowCount} reserved_bytes={dirty.ReservedBytes}");
     }
 
+    internal static void ImmediateCadenceCanBeDeferred()
+    {
+        GameInterestProfile profile = new GameInterestProfile(
+            10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100)
+        {
+            ImmediateIntervalMilliseconds = 32,
+        };
+        var service = new DirtyEntitySpatialFanout(
+            new StateEpoch(1),
+            new DirtyEntitySpatialFanoutLimits(4, 1, 32, 8, 4, 2, 16_000),
+            profile);
+        ParticipantId participant = new(1);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(participant, Point(0, 0), 0));
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 1, 0, 0), 0));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out _));
+
+        Span<DirtyEntityDeliveryRecord> records = stackalloc DirtyEntityDeliveryRecord[2];
+        Check.Equal(DirtyEntityBuildStatus.NoData,
+            service.TryBuildBundle(participant, 31, 4_096, records, out _));
+        Check.Equal(DirtyEntityBuildStatus.Success,
+            service.TryBuildBundle(participant, 32, 4_096, records, out _));
+    }
+
     internal static void ExistingAudienceAvoidsOldFootprintDiscovery()
     {
         DirtyEntitySpatialFanout service = Create(maximumEntities: 8, maximumRecipients: 4);

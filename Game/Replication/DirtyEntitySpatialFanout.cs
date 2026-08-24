@@ -1820,7 +1820,9 @@ public class DirtyEntitySpatialFanout
 
     private long DueAt(long now, GameInterestTier tier) => tier switch
     {
-        GameInterestTier.Immediate => now,
+        GameInterestTier.Immediate => _profile.ImmediateIntervalMilliseconds == 0
+            ? now
+            : checked(now + _profile.ImmediateIntervalMilliseconds),
         GameInterestTier.Near => checked(now + _profile.NearIntervalMilliseconds),
         GameInterestTier.Far => checked(now + _profile.FarIntervalMilliseconds),
         _ => now,
