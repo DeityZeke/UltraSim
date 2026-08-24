@@ -1,5 +1,10 @@
 # P0.3K 33 ms semantic-cadence rated sweep
 
+> Retained historical experiment: this capture changed the semantic clock and derived
+> AOI periods from millisecond intervals. It did **not** independently hold AOI cadence
+> constant while changing the server-step deadline. For that apples-to-apples matrix,
+> see `network-p0.3k-server-tick-aoi-cadence-matrix-2026-08-24.md`.
+
 Date: 2026-08-24
 
 Harness checkpoint: `400e5d50f6187f97851987aae03c213cd79ea411`
