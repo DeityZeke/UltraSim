@@ -122,25 +122,33 @@ internal static class P03WholeFlowNetworkSuite
         int ticks = ReadInt(args, "--ticks", 270);
         double stopMilliseconds = ReadDouble(args, "--server-role-stop-p95", 4d);
         int maximumPopulation = ReadInt(args, "--maximum-population", 4_096);
+        int denseStart = ReadInt(args, "--dense-start", 256);
+        int denseStep = ReadInt(args, "--dense-step", 64);
+        int sparseStart = ReadInt(args, "--sparse-start", 256);
+        int sparseStep = ReadInt(args, "--sparse-step", 128);
+        bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-p0.3h-rated-server-role-sweep.json";
-        if (warmup < 1 || ticks < 10 || stopMilliseconds <= 0 || maximumPopulation < 256)
+        if (warmup < 1 || ticks < 10 || stopMilliseconds <= 0 || denseStart <= 0 ||
+            sparseStart <= 0 || denseStep <= 0 || sparseStep <= 0 ||
+            maximumPopulation < Math.Max(denseStart, sparseStart))
             throw new ArgumentOutOfRangeException(nameof(args));
 
         var rows = new List<P03WholeFlowRow>();
         int executionOrder = 0;
         RunSeries(
-            Enumerable.Range(0, 7).Select(index => 256 + index * 64),
+            Enumerable.Range(0, checked((maximumPopulation - denseStart) / denseStep + 1))
+                .Select(index => denseStart + index * denseStep),
             static population => P03NetworkWorkload.Dense(population, 1_000),
             P03NetworkProfile.DirtyEntitySpatialFanout);
         RunSeries(
-            Enumerable.Range(0, checked((maximumPopulation - 256) / 128 + 1))
-                .Select(index => 256 + index * 128),
+            Enumerable.Range(0, checked((maximumPopulation - sparseStart) / sparseStep + 1))
+                .Select(index => sparseStart + index * sparseStep),
             static population => P03NetworkWorkload.Sparse(population),
             P03NetworkProfile.MaintainedEntityRelation);
 
         var report = new P03WholeFlowReport(
-            "ultrasim-network-p03h-rated-server-role-sweep-v1",
+            "ultrasim-network-p03h-rated-server-role-sweep-v2",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -156,7 +164,10 @@ internal static class P03WholeFlowNetworkSuite
                 $"p95 greater than {stopMilliseconds:F3} ms. Cold construction/bootstrap and " +
                 "semantic verification remain outside timed ticks.",
                 "This is a localhost server-role rating observation, not a public-WAN CCU or " +
-                "latency SLA. p99/max are retained as tail context; p95 is the stop criterion."),
+                "latency SLA. p99/max are retained as tail context; p95 is the stop criterion. " +
+                $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
+                $"Dense starts at {denseStart} by {denseStep}; sparse starts at {sparseStart} by " +
+                $"{sparseStep}."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
@@ -177,7 +188,8 @@ internal static class P03WholeFlowNetworkSuite
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
-                using var harness = new P03WholeFlowHarness(workload, profile, 1);
+                using var harness = new P03WholeFlowHarness(
+                    workload, profile, 1, stageTimingEnabled);
                 P03WholeFlowRow row = harness.Run(warmup, ticks) with
                 {
                     ExecutionOrder = executionOrder++,
