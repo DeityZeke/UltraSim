@@ -33,6 +33,7 @@ var tests = new (string Name, Action Body)[]
     ("P02DirtyChunkRecipientOutstandingIsolationAndReservedMemoryAreExact", DirtyChunkSpatialFanoutTests.RecipientOutstandingIsolationAndReservedMemoryAreExact),
     ("P02DirtyChunkSameChunkRowsCoalesceIntoOneDiscovery", DirtyChunkSpatialFanoutTests.SameChunkRowsCoalesceIntoOneDiscovery),
     ("P02DirtyChunkSpatialCandidatesAvoidFarRecipients", DirtyChunkSpatialFanoutTests.SpatialCandidatesAvoidFarRecipientsAndMatchOracle),
+    ("P02DirtyChunkCoarseOccupiedRecipientBucketsPreserveDiscovery", DirtyChunkSpatialFanoutTests.CoarseOccupiedRecipientBucketsPreserveDiscovery),
     ("P02DirtyChunkCleanEntryLeaveReentryAndTeleport", DirtyChunkSpatialFanoutTests.CleanEntryLeaveReentryAndTeleportAreFenced),
     ("P02DirtyChunkImmediateNearFarCadenceAndCoalescing", DirtyChunkSpatialFanoutTests.ImmediateNearFarCadenceAndDeferredCoalescing),
     ("P02DirtyChunkHistoryCapacityAndEpochRecovery", DirtyChunkSpatialFanoutTests.HistoryFallbackCapacityAndEpochRecoveryAreBounded),

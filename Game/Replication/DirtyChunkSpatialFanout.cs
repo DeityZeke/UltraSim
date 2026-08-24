@@ -27,7 +27,7 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
         MaximumOutstandingDeliveries: 1_024,
         MaximumSnapshotRecords: 64,
         MaximumDeltaRecords: 64,
-        SpatialRegionEdgeMillimeters: 16_000,
+        SpatialRegionEdgeMillimeters: 128_000,
         MaximumDeliveryAgeSteps: 1_024);
 
     internal void Validate()
@@ -158,7 +158,8 @@ public readonly record struct DirtyChunkSpatialFanoutSnapshot(
 /// <summary>
 /// Concrete chunk-granular dirty-time spatial fanout. Authoritative chunk history and cursors are
 /// delegated to the accepted N1 recipient/store types; this object retains only bounded dirty keys,
-/// recipient anchor buckets, and recipient-local semantic obligations.
+/// coarse occupied recipient buckets, and recipient-local semantic obligations. The buckets are a
+/// recipient broadphase, never a retained Chunk-to-Recipient subscriber graph.
 /// </summary>
 public sealed class DirtyChunkSpatialFanout
 {
@@ -821,6 +822,8 @@ public sealed class DirtyChunkSpatialFanout
         FloorDiv(maximumX, _limits.SpatialRegionEdgeMillimeters, out long lastX);
         FloorDiv(minimumZ, _limits.SpatialRegionEdgeMillimeters, out long firstZ);
         FloorDiv(maximumZ, _limits.SpatialRegionEdgeMillimeters, out long lastZ);
+        // Query coarse occupied recipient supercells. Exact retained chunk subscriptions below
+        // remain the disclosure oracle, so changing the broadphase edge cannot change semantics.
         for (long x = firstX; x <= lastX; x++)
         {
             for (long z = firstZ; z <= lastZ; z++)

@@ -19,6 +19,7 @@ internal static class P03FourProfileComparison
     private const int MaxEntities = 400;
     private const int MaxRecipients = 16;
     private const int MaxSubscriptionsPerRecipient = 1_024;
+    private static int _dirtyChunkSpatialRegionEdgeMillimeters = 128_000;
 
     internal static void Run(string[] args)
     {
@@ -26,13 +27,16 @@ internal static class P03FourProfileComparison
         int requestedRecipients = ReadInt(args, "--recipients=", 8);
         int warmup = ReadInt(args, "--warmup=", DefaultWarmupTicks);
         int totalTicks = ReadInt(args, "--ticks=", DefaultTotalTicks);
+        _dirtyChunkSpatialRegionEdgeMillimeters = ReadInt(
+            args, "--dirty-chunk-region-edge=", 128_000);
         string? requestedWorkload = ReadString(args, "--workload=");
         string? requestedProfile = ReadString(args, "--profile=");
         string output = ReadString(args, "--output=") ?? Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "../../../../results/game-p03-four-profile-matrix.json"));
         if (requestedEntities <= 0 || requestedEntities > MaxEntities ||
             requestedRecipients <= 0 || requestedRecipients > MaxRecipients ||
-            warmup < 1 || totalTicks <= warmup)
+            warmup < 1 || totalTicks <= warmup ||
+            _dirtyChunkSpatialRegionEdgeMillimeters <= 0)
             throw new ArgumentOutOfRangeException(nameof(args));
 
         Workload[] workloads = BuildWorkloads(requestedEntities, requestedRecipients, totalTicks);
@@ -1809,7 +1813,7 @@ internal static class P03FourProfileComparison
                     Math.Max(64, Recipients.Length * 4),
                     64,
                     64,
-                    16_000),
+                    _dirtyChunkSpatialRegionEdgeMillimeters),
                 GameChunkInterestProfile.Default,
                 OfflineDirectChunkCadence.EvidenceProfile);
             _serviceActive = new bool[Recipients.Length];

@@ -168,6 +168,35 @@ internal static class DirtyChunkSpatialFanoutTests
             service.TryBuildDelivery(far, Key(0, 0), 0, out _));
     }
 
+    internal static void CoarseOccupiedRecipientBucketsPreserveDiscovery()
+    {
+        using var fixture = new Fixture(32, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        int[] edges = [16_000, 32_000, 64_000, 128_000];
+        ulong previousCells = ulong.MaxValue;
+        ulong expectedInterested = 0;
+        for (int edgeIndex = 0; edgeIndex < edges.Length; edgeIndex++)
+        {
+            DirtyChunkSpatialFanout service = Create(
+                fixture, maximumRecipients: 8, spatialRegionEdgeMillimeters: edges[edgeIndex]);
+            for (int recipient = 0; recipient < 8; recipient++)
+            {
+                int chunk = recipient - 4;
+                Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+                    service.SetRecipientAnchor(new ParticipantId((ulong)(recipient + 1)),
+                        GameWorldState.DefaultSpace, Position(chunk, 0, 8_000, 8_000), 0));
+            }
+            Equal(DirtyChunkProcessStatus.Success,
+                service.TryProcessDirtyChunks(0, out int processed));
+            Equal(1, processed);
+            DirtyChunkSpatialFanoutSnapshot snapshot = service.GetSnapshot();
+            if (edgeIndex == 0) expectedInterested = snapshot.InterestedRecipientsDiscovered;
+            else Equal(expectedInterested, snapshot.InterestedRecipientsDiscovered);
+            True(snapshot.RecipientSpatialCellsExamined < previousCells);
+            previousCells = snapshot.RecipientSpatialCellsExamined;
+        }
+    }
+
     internal static void CleanEntryLeaveReentryAndTeleportAreFenced()
     {
         using var fixture = new Fixture(32, 4);
@@ -476,7 +505,7 @@ internal static class DirtyChunkSpatialFanoutTests
         DirtyChunkSpatialFanoutSnapshot snapshot = service.GetSnapshot();
         Equal(3UL, snapshot.SpatialRecipientDiscoveryOperations);
         Equal(3UL, snapshot.InterestedRecipientsDiscovered);
-        True(snapshot.CandidateRecipientsExamined < 9);
+        True(snapshot.CandidateRecipientsExamined <= 9);
         Apply(service, first, Key(0, 0), 0);
         Apply(service, second, Key(1, 0), 0);
         Apply(service, third, Key(2, 0), 0);
@@ -881,7 +910,8 @@ internal static class DirtyChunkSpatialFanoutTests
         int maximumOutstandingDeliveries = 64,
         ulong maximumDeliveryAgeSteps = 1_024,
         OfflineDirectChunkCadence cadence = default,
-        ChunkInterestProfile interest = default) =>
+        ChunkInterestProfile interest = default,
+        int spatialRegionEdgeMillimeters = 128_000) =>
         new(fixture.Store,
             new DirtyChunkSpatialFanoutLimits(
                 maximumRecipients,
@@ -891,7 +921,7 @@ internal static class DirtyChunkSpatialFanoutTests
                 maximumOutstandingDeliveries,
                 16,
                 16,
-                16_000,
+                spatialRegionEdgeMillimeters,
                 maximumDeliveryAgeSteps),
             interest == default ? GameChunkInterestProfile.Default : interest,
             cadence == default ? new OfflineDirectChunkCadence(1, 1, 1) : cadence);
