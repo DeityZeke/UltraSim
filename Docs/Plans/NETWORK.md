@@ -1326,16 +1326,20 @@ digests match, and every measured path reports zero managed allocation.
 
 | Workload | Maintained entity | Dirty entity | Chunk publication | Dirty chunk |
 | --- | ---: | ---: | ---: | ---: |
-| one dirty entity (exact event tick) | 4.60 us | 113.27 us | 3.98 us | 23.92 us |
-| mostly-clean recipient movement p95 | 52.93 us | 225.48 us | 546.80 us | 737.40 us |
-| dense-400 p95 | 1.430 ms | 3.038 ms | 1.113 ms | 1.905 ms |
-| high dirt / low movement p95 | 8.65 us | 2.410 ms | 22.07 us | 819.83 us |
+| one dirty entity (exact event tick) | 4.76 us | 117.97 us | 5.83 us | 25.61 us |
+| mostly-clean recipient movement p95 | 53.86 us | 230.61 us | 520.04 us | 753.96 us |
+| dense-400 p95 | 1.442 ms | 3.062 ms | 1.106 ms | 1.950 ms |
+| high dirt / low movement p95 | 8.64 us | 2.449 ms | 22.20 us | 801.68 us |
 
 These are Game semantic/payload-boundary observations, not secure transport or
-production CCU claims. The rerun was captured from the intentionally uncommitted
-working tree based on `a631b136`; it is diagnostic evidence, not a frozen baseline.
-A clean committed rerun is required before P0.4 makes any new profile-selection
-decision. Until then `ChunkPublication` remains the selected current-game profile.
+production CCU claims. The reproducible rerun was captured from clean implementation
+checkpoint `e2c466d2`; its artifact SHA-256 is
+`e5645c687a087ac5a00f26eaaf7c4188e3790bd5ebc0bf2469c1b111a2405bb7`.
+This closes the P0.3 measurement hold but does not itself make the P0.4 selection
+decision. Until P0.4, `ChunkPublication` remains the selected current-game profile.
+
+Evidence:
+[`network-p0.3-four-profile-corrected-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3-four-profile-corrected-2026-08-24.json).
 
 ## N1.5 — shared semantic packing / chunk page reuse
 
@@ -1607,11 +1611,11 @@ process gate, and `ChunkPublication` is selected for the current game. The N0
 implementation is retained as the explicit `MaintainedEntityRelation` Game profile;
 the selection does not authorize N1.5. P0.1b/P0.2b establish the correctness,
 fairness, bounded-storage and allocation-free lifecycle floor for the two dirty
-profiles. The rebuilt P0.3 harness has a complete dirty-worktree candidate run;
-P0.4 remains held for clean reproducible evidence.
+profiles. The rebuilt P0.3 harness now has clean reproducible evidence; P0.4 is the
+next selection checkpoint.
 
-Stop after the corrected P0.3 comparison and its clean reproducibility rerun. Do
-not begin P0.4 selection, N1.5 shared encoding, 2K/4K, or public-WAN/production-CCU
-claims from dirty-worktree evidence.
+Stop after the corrected P0.3 comparison and clean reproducibility evidence. Do
+not begin N1.5 shared encoding, 2K/4K, or public-WAN/production-CCU claims before
+the explicit P0.4 selection decision.
 Do not remove the retained `MaintainedEntityRelation` profile. The separately
 scoped hosted lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.
