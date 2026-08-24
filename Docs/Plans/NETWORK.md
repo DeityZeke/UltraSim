@@ -1402,6 +1402,33 @@ is `d0bc4c92d0a30634ec12688f0cbca8942182982c66a2b54426f00c198f318fb4`.
 Evidence:
 [`network-p0.3d-five-profile-discovery-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3d-five-profile-discovery-2026-08-24.json).
 
+## P0.3E — dirty discovery floor closure
+
+The last pre-selection experiment keeps every P0 semantic, wire, proof, cadence,
+authority, and Network contract unchanged while removing three remaining measurement
+asymmetries:
+
+- both dirty-entity profiles now use one configurable occupied-region edge for the
+  existing shared entity/recipient broadphase. Dirty-entity queries still end in exact
+  entity-point and hysteresis tests; recipient movement uses the same exact oracle in
+  the opposite direction. No second spatial index and no maintained Recipient-by-Entity
+  AOI graph were added. Permanent 16/32/64/128 m regressions require identical semantic
+  rows at negative coordinates and radius boundaries. The comparison default remains
+  128 m after the focused 32/64/128 m discovery sweep;
+- `DirtyEntityChunkBatchFanout` is adaptive at the discovery boundary. A dirty chunk
+  containing one discovery-requiring entity uses the ordinary point query. Two or more
+  such entities share the existing chunk-envelope candidate query. State-only changes
+  bypass both routes and walk only existing semantic knowledge/debt rows;
+- the shared trace now pairs one, clustered, and high-rate state-only churn with their
+  spatial-mutation counterparts. The chunk publication fixture changes a real public
+  descriptor field for state-only updates, so every profile receives payload-visible
+  authoritative state rather than a harness-only version increment.
+
+The clean ordinary dirty-entity path also exits before touching scratch when no entity
+is dirty. Debug and Release retain zero-allocation warmed-path coverage, exact proof/
+disclosure/lifetime conformance, and the five-profile remote codec tests. P0.4 remains
+on hold until the clean 5,000-tick matrix records the state-only/spatial crossover.
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,

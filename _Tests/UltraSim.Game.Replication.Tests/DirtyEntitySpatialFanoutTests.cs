@@ -95,6 +95,98 @@ internal static class DirtyEntitySpatialFanoutTests
         Check.Equal(2, despawned.SemanticKnowledgeRowCount);
     }
 
+    internal static void CoarseSpatialEdgesPreserveExactSemantics()
+    {
+        DirtyEntitySemanticKnowledgeSnapshot[]? expected = null;
+        foreach (int edge in new[] { 16_000, 32_000, 64_000, 128_000 })
+        {
+            DirtyEntitySpatialFanout service = Create(
+                maximumEntities: 8, maximumRecipients: 8, spatialRegionEdgeMillimeters: edge);
+            int[] anchors = [0, 39_999, 40_001, -39_999, -40_001, 127_999, -127_999];
+            for (int recipient = 0; recipient < anchors.Length; recipient++)
+                Check.Equal(DirtyEntityUpdateStatus.Success, service.SetRecipientAnchor(
+                    new ParticipantId(checked((uint)recipient + 1)), Point(anchors[recipient], 0), 0));
+
+            service.CommitEntity(Present(0, 1, 0, 0), 0);
+            service.CommitEntity(Present(1, 1, 128_000, 0), 0);
+            service.CommitEntity(Present(2, 1, -128_000, 0), 0);
+            Check.Equal(DirtyEntityProcessStatus.Success,
+                service.TryProcessDirtyEntities(0, out int initialized));
+            Check.Equal(3, initialized);
+
+            Check.True(service.SetRecipientAnchor(
+                    new ParticipantId(3), Point(20_000, 0), 1) is
+                DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange);
+            service.CommitEntity(Present(0, 2, 1_000, 0), 1);
+            Check.Equal(DirtyEntityProcessStatus.Success,
+                service.TryProcessDirtyEntities(1, out int processed));
+            Check.Equal(1, processed);
+
+            var actual = new DirtyEntitySemanticKnowledgeSnapshot[64];
+            int count = service.CopySemanticKnowledge(actual);
+            Array.Resize(ref actual, count);
+            if (expected is null)
+            {
+                expected = actual;
+            }
+            else
+            {
+                Check.Equal(expected.Length, actual.Length);
+                for (int index = 0; index < actual.Length; index++)
+                    Check.Equal(expected[index], actual[index]);
+            }
+        }
+    }
+
+    internal static void ChunkBatchUsesPointDiscoveryForSingleton()
+    {
+        var profile = new GameInterestProfile(
+            16_000, 5_000, 6_000, 20_000, 32_000, 10, 20, 5, 100);
+        var service = new DirtyEntityChunkBatchFanout(
+            new StateEpoch(1),
+            new DirtyEntitySpatialFanoutLimits(4, 2, 64, 16, 4, 4, 16_000),
+            profile);
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.SetRecipientAnchor(new ParticipantId(1), Point(48_000, 0), 0));
+        DirtyEntitySpatialFanoutSnapshot before = service.GetSnapshot();
+        Check.Equal(DirtyEntityUpdateStatus.Success,
+            service.CommitEntity(Present(0, 1, 0, 0), 0));
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out int processed));
+        Check.Equal(1, processed);
+        DirtyEntitySpatialFanoutSnapshot after = service.GetSnapshot();
+        Check.Equal(before.SpatialRecipientDiscoveryOperations + 1,
+            after.SpatialRecipientDiscoveryOperations);
+        Check.Equal(before.CandidateRecipientsExamined, after.CandidateRecipientsExamined);
+        Check.Equal(0, after.SemanticKnowledgeRowCount);
+    }
+
+    internal static void StateOnlyMutationsAvoidSpatialDiscovery()
+    {
+        Verify(Create(maximumEntities: 8, maximumRecipients: 2));
+        Verify(CreateChunkBatch(maximumEntities: 8, maximumRecipients: 2));
+
+        static void Verify(DirtyEntitySpatialFanout service)
+        {
+            service.SetRecipientAnchor(new ParticipantId(1), Point(0, 0), 0);
+            service.CommitEntity(Present(0, 1, 0, 0), 0);
+            service.TryProcessDirtyEntities(0, out _);
+            DirtyEntitySpatialFanoutSnapshot before = service.GetSnapshot();
+            for (ulong version = 2; version <= 32; version++)
+            {
+                service.CommitEntity(Present(0, version, 0, 0), checked((long)version));
+                Check.Equal(DirtyEntityProcessStatus.Success,
+                    service.TryProcessDirtyEntities(checked((long)version), out int processed));
+                Check.Equal(1, processed);
+            }
+            DirtyEntitySpatialFanoutSnapshot after = service.GetSnapshot();
+            Check.Equal(before.SpatialRecipientDiscoveryOperations,
+                after.SpatialRecipientDiscoveryOperations);
+            Check.Equal(before.SpatialEntityDiscoveryOperations,
+                after.SpatialEntityDiscoveryOperations);
+        }
+    }
+
     internal static void ChunkBatchedDiscoveryCoalescesAndAllocatesZero()
     {
         DirtyEntityChunkBatchFanout service = CreateChunkBatch(
@@ -791,11 +883,13 @@ internal static class DirtyEntitySpatialFanoutTests
         int maximumRecipients,
         int maximumRows = 64,
         int maximumOutstandingBundles = 16,
-        int maximumRecordsPerBundle = 8) => new(
+        int maximumRecordsPerBundle = 8,
+        int spatialRegionEdgeMillimeters = 128_000) => new(
         new StateEpoch(1),
         new DirtyEntitySpatialFanoutLimits(
             maximumEntities, maximumRecipients, 256, maximumRows,
-            maximumOutstandingBundles, maximumRecordsPerBundle),
+            maximumOutstandingBundles, maximumRecordsPerBundle,
+            spatialRegionEdgeMillimeters),
         new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100));
 
     private static DirtyEntityChunkBatchFanout CreateChunkBatch(

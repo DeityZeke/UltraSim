@@ -19,6 +19,7 @@ internal static class P03FourProfileComparison
     private const int MaxEntities = 400;
     private const int MaxRecipients = 16;
     private const int MaxSubscriptionsPerRecipient = 1_024;
+    private static int _dirtyEntitySpatialRegionEdgeMillimeters = 128_000;
     private static int _dirtyChunkSpatialRegionEdgeMillimeters = 128_000;
 
     internal static void Run(string[] args)
@@ -27,6 +28,8 @@ internal static class P03FourProfileComparison
         int requestedRecipients = ReadInt(args, "--recipients=", 8);
         int warmup = ReadInt(args, "--warmup=", DefaultWarmupTicks);
         int totalTicks = ReadInt(args, "--ticks=", DefaultTotalTicks);
+        _dirtyEntitySpatialRegionEdgeMillimeters = ReadInt(
+            args, "--dirty-entity-region-edge=", 128_000);
         _dirtyChunkSpatialRegionEdgeMillimeters = ReadInt(
             args, "--dirty-chunk-region-edge=", 128_000);
         string? requestedWorkload = ReadString(args, "--workload=");
@@ -36,6 +39,7 @@ internal static class P03FourProfileComparison
         if (requestedEntities <= 0 || requestedEntities > MaxEntities ||
             requestedRecipients <= 0 || requestedRecipients > MaxRecipients ||
             warmup < 1 || totalTicks <= warmup ||
+            _dirtyEntitySpatialRegionEdgeMillimeters <= 0 ||
             _dirtyChunkSpatialRegionEdgeMillimeters <= 0)
             throw new ArgumentOutOfRangeException(nameof(args));
 
@@ -93,7 +97,7 @@ internal static class P03FourProfileComparison
         }
 
         var matrix = new ComparisonReport(
-            "ultrasim-game-p03-five-profile-shared-trace-v3",
+            "ultrasim-game-p03-five-profile-shared-trace-v4",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -115,7 +119,9 @@ internal static class P03FourProfileComparison
                 "after each encoded delivery; public/private/Event/Control traffic counts are " +
                 "identical in every profile row. Payload counters use canonical Game codec sizes " +
                 "and count each semantic delivery once; transport framing/security are excluded.",
-                "ChunkPublication remains selected; this matrix is evidence only."),
+                "ChunkPublication remains selected; this matrix is evidence only.",
+                _dirtyEntitySpatialRegionEdgeMillimeters,
+                _dirtyChunkSpatialRegionEdgeMillimeters),
             totalTicks,
             warmup,
             totalTicks - warmup,
@@ -222,8 +228,10 @@ internal static class P03FourProfileComparison
         return
         [
             CreateWorkload("stable-world", entities, recipients, ticks, WorkloadShape.Stable),
-            CreateWorkload("one-dirty-entity", entities, recipients, ticks, WorkloadShape.OneDirty),
-            CreateWorkload("many-dirty-one-chunk", entities, recipients, ticks, WorkloadShape.ClusteredDirty),
+            CreateWorkload("one-state-only-dirty", entities, recipients, ticks, WorkloadShape.OneStateDirty),
+            CreateWorkload("one-spatial-dirty", entities, recipients, ticks, WorkloadShape.OneDirty),
+            CreateWorkload("clustered-state-churn", entities, recipients, ticks, WorkloadShape.ClusteredStateChurn),
+            CreateWorkload("clustered-micro-movement", entities, recipients, ticks, WorkloadShape.ClusteredDirty),
             CreateWorkload("distributed-dirty-chunks", entities, recipients, ticks, WorkloadShape.DistributedDirty),
             CreateWorkload("mostly-clean-recipient-movement", entities, recipients, ticks, WorkloadShape.Movement),
             CreateWorkload("active-town-mixed", entities, recipients, ticks, WorkloadShape.Mixed),
@@ -232,7 +240,8 @@ internal static class P03FourProfileComparison
             CreateWorkload("teleport-login-reentry", entities, recipients, ticks, WorkloadShape.TeleportReentry),
             CreateWorkload("synchronized-teleport-stress", entities, recipients, ticks, WorkloadShape.SynchronizedTeleport),
             CreateWorkload("lifecycle-privacy", entities, recipients, ticks, WorkloadShape.LifecyclePrivacy),
-            CreateWorkload("high-dirt-low-movement", entities, recipients, ticks, WorkloadShape.HighDirt),
+            CreateWorkload("high-state-churn", entities, recipients, ticks, WorkloadShape.HighStateChurn),
+            CreateWorkload("high-spatial-churn", entities, recipients, ticks, WorkloadShape.HighDirt),
             CreateWorkload("high-movement-low-dirt", entities, recipients, ticks, WorkloadShape.HighMovement),
         ];
     }
@@ -249,7 +258,8 @@ internal static class P03FourProfileComparison
         {
             long x = (index - entityCount / 2) * 64_000L + 24_000L;
             long z = 8_000L;
-            if (shape == WorkloadShape.ClusteredDirty && index < 32)
+            if ((shape is WorkloadShape.ClusteredDirty or WorkloadShape.ClusteredStateChurn) &&
+                index < 32)
             {
                 x = 2_000L + (index % 8) * 1_500L;
                 z = 2_000L + (index / 8) * 1_500L;
@@ -330,8 +340,18 @@ internal static class P03FourProfileComparison
             var moves = new List<RecipientMove>();
             switch (shape)
             {
+                case WorkloadShape.OneStateDirty when tick == Math.Max(4, ticks / 2):
+                    AddStateMutation(mutations, workingEntities, firstPublicEntity,
+                        workingEntities[firstPublicEntity].Present,
+                        workingEntities[firstPublicEntity].Public);
+                    break;
                 case WorkloadShape.OneDirty when tick == Math.Max(4, ticks / 2):
                     AddMutation(mutations, workingEntities, firstPublicEntity, 1_000, 0);
+                    break;
+                case WorkloadShape.ClusteredStateChurn:
+                    for (int index = 0; index < Math.Min(32, entityCount); index++)
+                        AddStateMutation(mutations, workingEntities, index,
+                            workingEntities[index].Present, workingEntities[index].Public);
                     break;
                 case WorkloadShape.ClusteredDirty:
                     for (int index = 0; index < Math.Min(32, entityCount); index++)
@@ -435,6 +455,14 @@ internal static class P03FourProfileComparison
                             (tick & 1) == 0 ? 25 : -25,
                             (tick & 1) == 0 ? 25 : -25);
                     break;
+                case WorkloadShape.HighStateChurn:
+                    for (int offset = 0; offset < Math.Max(1, entityCount * 3 / 4); offset++)
+                    {
+                        int index = (tick * 19 + offset) % entityCount;
+                        AddStateMutation(mutations, workingEntities, index,
+                            workingEntities[index].Present, workingEntities[index].Public);
+                    }
+                    break;
                 case WorkloadShape.HighMovement:
                     AddMovement(moves, workingRecipients, tick, 500, 375);
                     if (tick == ticks - 1 && entityCount > 0)
@@ -447,7 +475,7 @@ internal static class P03FourProfileComparison
         int publicFacts = entities.Count(entity => entity.Present && entity.Public);
         int[] primaryEventTicks = shape switch
         {
-            WorkloadShape.OneDirty => [Math.Max(4, ticks / 2)],
+            WorkloadShape.OneDirty or WorkloadShape.OneStateDirty => [Math.Max(4, ticks / 2)],
             WorkloadShape.TeleportReentry or WorkloadShape.LifecyclePrivacy =>
                 [measuredEventTick, measuredEventTick + 1, measuredEventTick + 2, measuredEventTick + 3],
             WorkloadShape.SynchronizedTeleport => [measuredEventTick, measuredEventTick + 1],
@@ -654,7 +682,9 @@ internal static class P03FourProfileComparison
     private enum WorkloadShape : byte
     {
         Stable,
+        OneStateDirty,
         OneDirty,
+        ClusteredStateChurn,
         ClusteredDirty,
         DistributedDirty,
         Movement,
@@ -664,6 +694,7 @@ internal static class P03FourProfileComparison
         TeleportReentry,
         SynchronizedTeleport,
         LifecyclePrivacy,
+        HighStateChurn,
         HighDirt,
         HighMovement,
     }
@@ -715,7 +746,9 @@ internal static class P03FourProfileComparison
     private readonly record struct MatrixScope(
         string MeasurementScope,
         string SharedTraceContract,
-        string SelectionPolicy);
+        string SelectionPolicy,
+        int DirtyEntitySpatialRegionEdgeMillimeters,
+        int DirtyChunkSpatialRegionEdgeMillimeters);
 
     private sealed record ComparisonReport(
         string WorkloadIdentity,
@@ -990,7 +1023,7 @@ internal static class P03FourProfileComparison
                 entityIndex = FindEntityIndex(record.Position);
             RememberPublicSlot(record.Id, entityIndex);
             if (record.PrefabId != GameWorldPublicPrefabIds.Character ||
-                record.Orientation != WorldYaw.Zero ||
+                record.Orientation != new WorldYaw(unchecked((ushort)State[entityIndex].Version)) ||
                 record.StateFlags != WorldPublicStateFlags.Visible)
                 throw new InvalidOperationException("P0.3 publication payload fields diverged from source truth.");
             RecordPublicEntity(recipientIndex, entityIndex, record.Id,
@@ -1503,7 +1536,8 @@ internal static class P03FourProfileComparison
                 CreateInterestLimits(workload).MaximumRegions,
                 checked(workload.Entities.Length * workload.Recipients.Length),
                 Math.Max(64, workload.Recipients.Length * 4),
-                32);
+                32,
+                _dirtyEntitySpatialRegionEdgeMillimeters);
             _service = chunkBatched
                 ? new DirtyEntityChunkBatchFanout(
                     new StateEpoch(0xF033), limits, GameInterestProfile.Reference)
@@ -1980,11 +2014,6 @@ internal static class P03FourProfileComparison
         private readonly Entity[] _handles;
         private readonly WorldPublicChange[] _changes;
         private readonly bool[] _touched;
-        private readonly WorldPublicDescriptor _descriptor = new(
-            GameWorldPublicPrefabIds.Character,
-            WorldYaw.Zero,
-            WorldPublicStateFlags.Visible);
-
         internal PublicationFixture(Workload workload)
         {
             _world = new EcsWorld(
@@ -2040,13 +2069,18 @@ internal static class P03FourProfileComparison
                 TraceEntity entity = state[index];
                 _changes[count++] = entity.Present && entity.Public
                     ? WorldPublicChange.Present(_handles[index],
-                        CreateWorldPosition(entity), _descriptor)
+                        CreateWorldPosition(entity), Descriptor(entity))
                     : WorldPublicChange.Absent(_handles[index]);
                 _touched[index] = false;
             }
             if (count != 0)
                 Require(Source.TryCommit(_changes.AsSpan(0, count), out _));
         }
+
+        private static WorldPublicDescriptor Descriptor(in TraceEntity entity) => new(
+            GameWorldPublicPrefabIds.Character,
+            new WorldYaw(unchecked((ushort)entity.Version)),
+            WorldPublicStateFlags.Visible);
 
         public void Dispose() => _world.Dispose();
     }

@@ -5,7 +5,9 @@ namespace UltraSim.Game.Replication;
 /// <summary>
 /// Concrete Entity Dirty Push profile whose semantic unit, recipient knowledge, wire records,
 /// and application proofs remain entity-granular while entrant discovery is coalesced by the
-/// entity's current world chunk. Existing semantic rows supply the complete old audience.
+/// entity's current world chunk. Singleton chunks retain ordinary point discovery; two or more
+/// discovery-requiring entities share one chunk-envelope query. Existing semantic rows supply
+/// the complete old audience.
 /// </summary>
 /// <remarks>
 /// This profile deliberately reuses the accepted dirty-entity semantic store and remote codec.

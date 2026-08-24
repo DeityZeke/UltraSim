@@ -72,7 +72,8 @@ public readonly record struct DirtyEntitySpatialFanoutLimits(
     int MaximumSpatialRegions,
     int MaximumSemanticKnowledgeRows,
     int MaximumOutstandingBundles,
-    int MaximumRecordsPerBundle)
+    int MaximumRecordsPerBundle,
+    int SpatialRegionEdgeMillimeters = 128_000)
 {
     public static DirtyEntitySpatialFanoutLimits Default => new(
         MaximumEntities: 4_096,
@@ -80,7 +81,8 @@ public readonly record struct DirtyEntitySpatialFanoutLimits(
         MaximumSpatialRegions: 16_384,
         MaximumSemanticKnowledgeRows: 262_144,
         MaximumOutstandingBundles: 1_024,
-        MaximumRecordsPerBundle: 32);
+        MaximumRecordsPerBundle: 32,
+        SpatialRegionEdgeMillimeters: 128_000);
 
     internal void Validate()
     {
@@ -93,6 +95,8 @@ public readonly record struct DirtyEntitySpatialFanoutLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumOutstandingBundles));
         if (MaximumRecordsPerBundle is <= 0 or > 255)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecordsPerBundle));
+        if (SpatialRegionEdgeMillimeters <= 0)
+            throw new ArgumentOutOfRangeException(nameof(SpatialRegionEdgeMillimeters));
         _ = checked(MaximumOutstandingBundles * MaximumRecordsPerBundle);
     }
 }
@@ -178,9 +182,10 @@ public readonly record struct DirtyEntitySpatialFanoutAttributionSnapshot(
 /// <summary>
 /// Concrete Game-owned Entity Dirty Push profile.
 ///
-/// The two broadphases are intentionally one-sided: dirty entities discover recipient cells,
-/// while recipient topology changes discover entity cells.  The only retained recipient/entity
-/// rows are semantic knowledge and delivery debt; they are not an AOI membership graph.
+/// The shared occupied-region broadphase is intentionally one-sided per query: dirty entities
+/// discover recipient cells, while recipient topology changes discover entity cells. The only
+/// retained recipient/entity rows are semantic knowledge and delivery debt; they are not an AOI
+/// membership graph. Region-edge selection changes discovery cost, never the exact point oracle.
 /// </summary>
 public class DirtyEntitySpatialFanout
 {
@@ -574,11 +579,12 @@ public class DirtyEntitySpatialFanout
     public DirtyEntityProcessStatus TryProcessDirtyEntities(long nowMilliseconds, out int processed)
     {
         EnsureOwnerThread();
-        if (_chunkBatchedDiscovery)
-            return TryProcessDirtyEntitiesChunkBatched(nowMilliseconds, out processed);
         processed = 0;
         if (nowMilliseconds < 0) return DirtyEntityProcessStatus.NoData;
         int count = _dirtyCount;
+        if (count == 0) return DirtyEntityProcessStatus.NoData;
+        if (_chunkBatchedDiscovery)
+            return TryProcessDirtyEntitiesChunkBatched(nowMilliseconds, out processed);
         for (int index = 0; index < count; index++)
         {
             int entityIndex = _dirtyEntities[index];
@@ -612,13 +618,13 @@ public class DirtyEntitySpatialFanout
         out int processed)
     {
         processed = 0;
-        if (nowMilliseconds < 0) return DirtyEntityProcessStatus.NoData;
         int count = _dirtyCount;
-        if (count == 0) return DirtyEntityProcessStatus.NoData;
         int usedCount = 0;
 
         // First classify discovery-requiring mutations by their current world chunk. Mutations
         // whose old semantic audience is sufficient are completed without any spatial query.
+        // Singleton chunks later use the ordinary point query; batching is only paid where it
+        // can amortize discovery across multiple entities.
         for (int index = 0; index < count; index++)
         {
             int entityIndex = _dirtyEntities[index];
@@ -677,9 +683,16 @@ public class DirtyEntitySpatialFanout
 
     private bool ProcessDirtyEntityBatch(int batchSlot, long now)
     {
+        int head = _batchEntityHeads[batchSlot];
+        if (head >= 0 && _batchEntityNext[head] < 0)
+        {
+            ref readonly DirtyEntitySlot singleton = ref _entities[head];
+            return ProcessDirtyEntity(head, singleton.DirtyOld, now);
+        }
+
         int maximumRadius = 0;
         int entityVisits = 0;
-        for (int entityIndex = _batchEntityHeads[batchSlot]; entityIndex >= 0;
+        for (int entityIndex = head; entityIndex >= 0;
             entityIndex = _batchEntityNext[entityIndex])
         {
             if (++entityVisits > _entities.Length)
@@ -1566,10 +1579,10 @@ public class DirtyEntitySpatialFanout
         long maximumX = checked(((long)key.X + 1L) * chunkEdge + radius);
         long minimumZ = checked((long)key.Z * chunkEdge - radius);
         long maximumZ = checked(((long)key.Z + 1L) * chunkEdge + radius);
-        long firstX = FloorDivide(minimumX, _profile.RegionEdgeMillimeters);
-        long lastX = FloorDivide(maximumX, _profile.RegionEdgeMillimeters);
-        long firstZ = FloorDivide(minimumZ, _profile.RegionEdgeMillimeters);
-        long lastZ = FloorDivide(maximumZ, _profile.RegionEdgeMillimeters);
+        long firstX = FloorDivide(minimumX, _limits.SpatialRegionEdgeMillimeters);
+        long lastX = FloorDivide(maximumX, _limits.SpatialRegionEdgeMillimeters);
+        long firstZ = FloorDivide(minimumZ, _limits.SpatialRegionEdgeMillimeters);
+        long lastZ = FloorDivide(maximumZ, _limits.SpatialRegionEdgeMillimeters);
         for (long x = firstX; x <= lastX; x++)
             for (long z = firstZ; z <= lastZ; z++)
             {
@@ -1595,8 +1608,8 @@ public class DirtyEntitySpatialFanout
     }
 
     private ReplicationSpatialRegionId ToRegion(in ReplicationSpatialPoint point) => new(
-        checked((int)FloorDivide(point.XMillimeters, _profile.RegionEdgeMillimeters)),
-        checked((int)FloorDivide(point.ZMillimeters, _profile.RegionEdgeMillimeters)));
+        checked((int)FloorDivide(point.XMillimeters, _limits.SpatialRegionEdgeMillimeters)),
+        checked((int)FloorDivide(point.ZMillimeters, _limits.SpatialRegionEdgeMillimeters)));
 
     private bool TryOffset(in ReplicationSpatialRegionId center, int dx, int dz, out ReplicationSpatialRegionId result)
     {
@@ -1608,7 +1621,9 @@ public class DirtyEntitySpatialFanout
         return true;
     }
 
-    private int CellRadius(int radius) => checked((radius + _profile.RegionEdgeMillimeters - 1) / _profile.RegionEdgeMillimeters);
+    private int CellRadius(int radius) => checked(
+        (radius + _limits.SpatialRegionEdgeMillimeters - 1) /
+        _limits.SpatialRegionEdgeMillimeters);
 
     private bool IsCurrentRelevant(
         int recipientIndex,
