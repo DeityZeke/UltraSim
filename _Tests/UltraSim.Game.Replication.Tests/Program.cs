@@ -16,6 +16,7 @@ var tests = new (string Name, Action Body)[]
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
     ("P01DirtyEntityExistingAudienceAvoidsOldFootprintDiscovery", DirtyEntitySpatialFanoutTests.ExistingAudienceAvoidsOldFootprintDiscovery),
+    ("P03DDirtyEntityChunkBatchCoalescesAndAllocatesZero", DirtyEntitySpatialFanoutTests.ChunkBatchedDiscoveryCoalescesAndAllocatesZero),
     ("P01DirtyEntityExactWireBudgetAndRecipientOutstandingIsolation", DirtyEntitySpatialFanoutTests.ExactWireBudgetAndRecipientOutstandingIsolation),
     ("P01DirtyEntitySameRegionMutationKeepsSpatialListsAcyclic", DirtyEntitySpatialFanoutTests.SameRegionEntityMutationKeepsSpatialListsAcyclic),
     ("P01DirtyEntityMovementCleanTopologyRemovalAndReentry", DirtyEntitySpatialFanoutTests.MovementCleanTopologyRemovalAndReentry),
@@ -29,6 +30,7 @@ var tests = new (string Name, Action Body)[]
     ("P01DirtyEntityEpochAndProofFencing", DirtyEntitySpatialFanoutTests.EpochAndProofFencing),
     ("P01DirtyEntityWarmedPathAllocatesZero", DirtyEntitySpatialFanoutTests.WarmedPathAllocatesZero),
     ("P01DirtyEntityRemoteProtocolPeerConvergesThroughProof", DirtyEntitySpatialFanoutTests.RemoteProtocolPeerConvergesThroughApplicationProof),
+    ("P03DDirtyEntityChunkBatchRemoteProtocolPeerConvergesThroughProof", DirtyEntitySpatialFanoutTests.ChunkBatchRemoteProtocolPeerConvergesThroughApplicationProof),
     ("P02DirtyChunkWorkShapeAndCleanSteadyState", DirtyChunkSpatialFanoutTests.WorkShapeAndCleanSteadyState),
     ("P02DirtyChunkRecipientOutstandingIsolationAndReservedMemoryAreExact", DirtyChunkSpatialFanoutTests.RecipientOutstandingIsolationAndReservedMemoryAreExact),
     ("P02DirtyChunkSameChunkRowsCoalesceIntoOneDiscovery", DirtyChunkSpatialFanoutTests.SameChunkRowsCoalesceIntoOneDiscovery),
@@ -126,7 +128,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} MaintainedEntityRelation/ChunkPublication/DirtyEntitySpatialFanout/DirtyChunkSpatialFanout game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} five-profile game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

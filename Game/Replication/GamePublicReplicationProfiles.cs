@@ -10,6 +10,7 @@ public enum GamePublicReplicationProfileId : byte
     ChunkPublication = 2,
     DirtyEntitySpatialFanout = 3,
     DirtyChunkSpatialFanout = 4,
+    DirtyEntityChunkBatchFanout = 5,
 }
 
 /// <summary>The spatial membership model owned by one public replication profile.</summary>
@@ -19,6 +20,7 @@ public enum GamePublicReplicationInterestModel : byte
     RecipientChunkSubscription = 2,
     DirtyEntitySpatialDiscovery = 3,
     DirtyChunkSpatialDiscovery = 4,
+    DirtyEntityChunkBatchDiscovery = 5,
 }
 
 /// <summary>The current-state and change-lineage model owned by one public replication profile.</summary>
@@ -91,10 +93,16 @@ public static class GamePublicReplicationProfiles
         GamePublicReplicationSourceModel.ChunkRevisionHistory,
         RequiredGuarantees);
 
+    public static GamePublicReplicationProfileDescriptor DirtyEntityChunkBatchFanout { get; } = new(
+        GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout,
+        GamePublicReplicationInterestModel.DirtyEntityChunkBatchDiscovery,
+        GamePublicReplicationSourceModel.EntityLatestState,
+        RequiredGuarantees);
+
     /// <summary>Selected public replication profile for the current UltraSim game.</summary>
     public static GamePublicReplicationProfileDescriptor Selected => ChunkPublication;
 
-    public static int Count => 4;
+    public static int Count => 5;
 
     public static bool TryGet(
         GamePublicReplicationProfileId id,
@@ -113,6 +121,9 @@ public static class GamePublicReplicationProfiles
                 return true;
             case GamePublicReplicationProfileId.DirtyChunkSpatialFanout:
                 profile = DirtyChunkSpatialFanout;
+                return true;
+            case GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout:
+                profile = DirtyEntityChunkBatchFanout;
                 return true;
             default:
                 profile = default;

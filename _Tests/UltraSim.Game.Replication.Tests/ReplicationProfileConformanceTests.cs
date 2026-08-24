@@ -18,7 +18,7 @@ internal static class ReplicationProfileConformanceTests
 {
     internal static void ExplicitProfilesMeetSharedSemanticContract()
     {
-        Equal(4, GamePublicReplicationProfiles.Count);
+        Equal(5, GamePublicReplicationProfiles.Count);
         Equal(GamePublicReplicationProfiles.Count,
             Enum.GetValues<GamePublicReplicationProfileId>().Length);
         Equal(GamePublicReplicationProfileId.ChunkPublication,
@@ -51,6 +51,13 @@ internal static class ReplicationProfileConformanceTests
         Equal(GamePublicReplicationProfiles.RequiredGuarantees, chunk.Guarantees);
         Equal(GamePublicReplicationProfiles.RequiredGuarantees, dirty.Guarantees);
         Equal(GamePublicReplicationProfiles.RequiredGuarantees, dirtyChunk.Guarantees);
+        True(GamePublicReplicationProfiles.TryGet(
+            GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout,
+            out GamePublicReplicationProfileDescriptor dirtyEntityBatch));
+        Equal(GamePublicReplicationInterestModel.DirtyEntityChunkBatchDiscovery,
+            dirtyEntityBatch.InterestModel);
+        Equal(GamePublicReplicationSourceModel.EntityLatestState, dirtyEntityBatch.SourceModel);
+        Equal(GamePublicReplicationProfiles.RequiredGuarantees, dirtyEntityBatch.Guarantees);
 
         Equal(maintained, GameInterestService.PublicReplicationProfile);
         Equal(maintained, RemoteWorldStateServer.PublicReplicationProfile);
@@ -59,11 +66,13 @@ internal static class ReplicationProfileConformanceTests
         Equal(chunk, RemoteChunkWorldStateServer.PublicReplicationProfile);
         Equal(dirty, DirtyEntitySpatialFanout.PublicReplicationProfile);
         Equal(dirtyChunk, DirtyChunkSpatialFanout.PublicReplicationProfile);
+        Equal(dirtyEntityBatch, DirtyEntityChunkBatchFanout.PublicReplicationProfile);
 
         AssertObservation(CaptureMaintainedEntityRelation());
         AssertObservation(N1OfflineDirectChunkTests.CaptureProfileConformance());
         AssertObservation(CaptureDirtyEntitySpatialFanout());
         AssertObservation(DirtyChunkSpatialFanoutTests.CaptureProfileConformance());
+        AssertObservation(CaptureDirtyEntityChunkBatchFanout());
     }
 
     private static ReplicationProfileConformanceObservation CaptureMaintainedEntityRelation()
@@ -143,12 +152,26 @@ internal static class ReplicationProfileConformanceTests
             service.GetSnapshot().ReservedBytes);
     }
 
-    private static ReplicationProfileConformanceObservation CaptureDirtyEntitySpatialFanout()
+    private static ReplicationProfileConformanceObservation CaptureDirtyEntitySpatialFanout() =>
+        CaptureDirtyEntityFanout(
+            new DirtyEntitySpatialFanout(
+                new StateEpoch(0xD001),
+                new DirtyEntitySpatialFanoutLimits(8, 4, 128, 32, 8, 4),
+                new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100)),
+            GamePublicReplicationProfileId.DirtyEntitySpatialFanout);
+
+    private static ReplicationProfileConformanceObservation CaptureDirtyEntityChunkBatchFanout() =>
+        CaptureDirtyEntityFanout(
+            new DirtyEntityChunkBatchFanout(
+                new StateEpoch(0xD002),
+                new DirtyEntitySpatialFanoutLimits(8, 4, 128, 32, 8, 4),
+                new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100)),
+            GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout);
+
+    private static ReplicationProfileConformanceObservation CaptureDirtyEntityFanout(
+        DirtyEntitySpatialFanout service,
+        GamePublicReplicationProfileId profile)
     {
-        var service = new DirtyEntitySpatialFanout(
-            new StateEpoch(0xD001),
-            new DirtyEntitySpatialFanoutLimits(8, 4, 128, 32, 8, 4),
-            new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100));
         ParticipantId participant = new(0xD001);
         Equal(DirtyEntityUpdateStatus.Success,
             service.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
@@ -190,7 +213,7 @@ internal static class ReplicationProfileConformanceTests
         bool converged = rowCount == 1 && rows[0].KnownCanonicalVersion == 2 && rows[0].KnownPresent;
 
         return new ReplicationProfileConformanceObservation(
-            GamePublicReplicationProfileId.DirtyEntitySpatialFanout,
+            profile,
             currentTruth, disclosure, records[0].Entity == entity, sentDidNotAdvance,
             superseded, converged, service.GetSnapshot().ReservedBytes);
     }
@@ -205,7 +228,8 @@ internal static class ReplicationProfileConformanceTests
         True(observation.Profile is GamePublicReplicationProfileId.MaintainedEntityRelation or
             GamePublicReplicationProfileId.ChunkPublication or
             GamePublicReplicationProfileId.DirtyEntitySpatialFanout or
-            GamePublicReplicationProfileId.DirtyChunkSpatialFanout);
+            GamePublicReplicationProfileId.DirtyChunkSpatialFanout or
+            GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout);
         True(observation.AuthoritativeSourceTruth);
         True(observation.RecipientDisclosure);
         True(observation.StableIdentityAndLifetime);

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Protocol;
+using UltraSim.Game.World;
 using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
@@ -205,6 +206,13 @@ public class DirtyEntitySpatialFanout
     private readonly int[] _freeBundles;
     private readonly int[] _recipientStamp;
     private readonly int[] _entityStamp;
+    private readonly bool _chunkBatchedDiscovery;
+    private readonly DiscoveryChunkKey[] _batchKeys;
+    private readonly int[] _batchEntityHeads;
+    private readonly int[] _batchEntityNext;
+    private readonly byte[] _batchStates;
+    private readonly int[] _batchUsedSlots;
+    private readonly int _batchMask;
     private readonly Dictionary<ParticipantId, int> _recipientMap;
     private readonly Dictionary<ReplicationSpatialRegionId, int> _regionMap;
     private readonly Dictionary<DirtyRowKey, int> _rowMap;
@@ -267,6 +275,15 @@ public class DirtyEntitySpatialFanout
         StateEpoch stateEpoch,
         DirtyEntitySpatialFanoutLimits limits = default,
         GameInterestProfile profile = default)
+        : this(stateEpoch, limits, profile, chunkBatchedDiscovery: false)
+    {
+    }
+
+    protected DirtyEntitySpatialFanout(
+        StateEpoch stateEpoch,
+        DirtyEntitySpatialFanoutLimits limits,
+        GameInterestProfile profile,
+        bool chunkBatchedDiscovery)
     {
         if (!stateEpoch.IsValid) throw new ArgumentException("A valid projection epoch is required.", nameof(stateEpoch));
         if (limits == default) limits = DirtyEntitySpatialFanoutLimits.Default;
@@ -276,6 +293,7 @@ public class DirtyEntitySpatialFanout
         _stateEpoch = stateEpoch;
         _limits = limits;
         _profile = profile;
+        _chunkBatchedDiscovery = chunkBatchedDiscovery;
         _maximumOutstandingBundlesPerRecipient = Math.Max(
             1, limits.MaximumOutstandingBundles / limits.MaximumRecipients);
         _entities = new DirtyEntitySlot[limits.MaximumEntities];
@@ -294,6 +312,27 @@ public class DirtyEntitySpatialFanout
         _freeBundles = new int[limits.MaximumOutstandingBundles];
         _recipientStamp = new int[limits.MaximumRecipients];
         _entityStamp = new int[limits.MaximumEntities];
+        if (chunkBatchedDiscovery)
+        {
+            int batchCapacity = MapCapacity(limits.MaximumEntities);
+            _batchKeys = new DiscoveryChunkKey[batchCapacity];
+            _batchEntityHeads = new int[batchCapacity];
+            _batchStates = new byte[batchCapacity];
+            _batchUsedSlots = new int[limits.MaximumEntities];
+            _batchEntityNext = new int[limits.MaximumEntities];
+            _batchMask = batchCapacity - 1;
+            Array.Fill(_batchEntityHeads, -1);
+            Array.Fill(_batchEntityNext, -1);
+        }
+        else
+        {
+            _batchKeys = [];
+            _batchEntityHeads = [];
+            _batchStates = [];
+            _batchUsedSlots = [];
+            _batchEntityNext = [];
+            _batchMask = 0;
+        }
         _recipientMap = new Dictionary<ParticipantId, int>(limits.MaximumRecipients);
         _regionMap = new Dictionary<ReplicationSpatialRegionId, int>(limits.MaximumSpatialRegions);
         _rowMap = new Dictionary<DirtyRowKey, int>(limits.MaximumSemanticKnowledgeRows);
@@ -535,6 +574,8 @@ public class DirtyEntitySpatialFanout
     public DirtyEntityProcessStatus TryProcessDirtyEntities(long nowMilliseconds, out int processed)
     {
         EnsureOwnerThread();
+        if (_chunkBatchedDiscovery)
+            return TryProcessDirtyEntitiesChunkBatched(nowMilliseconds, out processed);
         processed = 0;
         if (nowMilliseconds < 0) return DirtyEntityProcessStatus.NoData;
         int count = _dirtyCount;
@@ -564,6 +605,148 @@ public class DirtyEntitySpatialFanout
     {
         TryProcessDirtyEntities(nowMilliseconds, out int processed);
         return processed;
+    }
+
+    private DirtyEntityProcessStatus TryProcessDirtyEntitiesChunkBatched(
+        long nowMilliseconds,
+        out int processed)
+    {
+        processed = 0;
+        if (nowMilliseconds < 0) return DirtyEntityProcessStatus.NoData;
+        int count = _dirtyCount;
+        if (count == 0) return DirtyEntityProcessStatus.NoData;
+        int usedCount = 0;
+
+        // First classify discovery-requiring mutations by their current world chunk. Mutations
+        // whose old semantic audience is sufficient are completed without any spatial query.
+        for (int index = 0; index < count; index++)
+        {
+            int entityIndex = _dirtyEntities[index];
+            ref DirtyEntitySlot entity = ref _entities[entityIndex];
+            if (!RequiresEntrantDiscovery(entity.DirtyOld, entity))
+            {
+                if (_attributionEnabled) _attributionDirtyDiscoveries++;
+                ProcessExistingAudience(entityIndex, entity, nowMilliseconds);
+                entity.DirtyQueued = false;
+                processed++;
+                _dirtyProcessed++;
+                continue;
+            }
+
+            DiscoveryChunkKey key = DiscoveryChunkFor(entity.Position);
+            int slot = FindOrCreateBatchSlot(key, _batchUsedSlots, ref usedCount);
+            _batchEntityNext[entityIndex] = _batchEntityHeads[slot];
+            _batchEntityHeads[slot] = entityIndex;
+        }
+
+        int failedCount = 0;
+        for (int used = 0; used < usedCount; used++)
+        {
+            int slot = _batchUsedSlots[used];
+            bool success = ProcessDirtyEntityBatch(slot, nowMilliseconds);
+            for (int entityIndex = _batchEntityHeads[slot]; entityIndex >= 0;)
+            {
+                int next = _batchEntityNext[entityIndex];
+                _batchEntityNext[entityIndex] = -1;
+                if (success)
+                {
+                    _entities[entityIndex].DirtyQueued = false;
+                    processed++;
+                    _dirtyProcessed++;
+                }
+                else
+                {
+                    _dirtyEntities[failedCount++] = entityIndex;
+                }
+                entityIndex = next;
+            }
+            _batchEntityHeads[slot] = -1;
+            _batchKeys[slot] = default;
+            _batchStates[slot] = 0;
+        }
+        Array.Clear(_batchUsedSlots, 0, usedCount);
+        Array.Clear(_dirtyEntities, failedCount, count - failedCount);
+        _dirtyCount = failedCount;
+        if (failedCount != 0)
+        {
+            _capacityFailures++;
+            return DirtyEntityProcessStatus.CapacityExceeded;
+        }
+        return DirtyEntityProcessStatus.Success;
+    }
+
+    private bool ProcessDirtyEntityBatch(int batchSlot, long now)
+    {
+        int maximumRadius = 0;
+        int entityVisits = 0;
+        for (int entityIndex = _batchEntityHeads[batchSlot]; entityIndex >= 0;
+            entityIndex = _batchEntityNext[entityIndex])
+        {
+            if (++entityVisits > _entities.Length)
+                throw new InvalidOperationException("Dirty-entity batch list contains a cycle.");
+            maximumRadius = Math.Max(maximumRadius, HorizonRadius(_entities[entityIndex].Horizon));
+            if (_attributionEnabled) _attributionDirtyDiscoveries++;
+        }
+
+        int candidateCount = DiscoverBatchRecipients(
+            _batchKeys[batchSlot], maximumRadius, _entrantRecipientScratch);
+        if (candidateCount < 0) return false;
+        int needed = 0;
+        for (int entityIndex = _batchEntityHeads[batchSlot]; entityIndex >= 0;
+            entityIndex = _batchEntityNext[entityIndex])
+        {
+            ref readonly DirtyEntitySlot entity = ref _entities[entityIndex];
+            for (int candidate = 0; candidate < candidateCount; candidate++)
+            {
+                int recipient = _entrantRecipientScratch[candidate];
+                if (!_rowMap.ContainsKey(new DirtyRowKey(recipient, checked((uint)entityIndex))) &&
+                    IsCurrentRelevant(recipient, entity, _recipients[recipient].Anchor))
+                {
+                    needed++;
+                    if (needed > _freeRowCount) return false;
+                }
+            }
+        }
+
+        for (int entityIndex = _batchEntityHeads[batchSlot]; entityIndex >= 0;
+            entityIndex = _batchEntityNext[entityIndex])
+        {
+            ref readonly DirtyEntitySlot entity = ref _entities[entityIndex];
+            ProcessExistingAudience(entityIndex, entity, now);
+            for (int candidate = 0; candidate < candidateCount; candidate++)
+            {
+                int recipient = _entrantRecipientScratch[candidate];
+                if (_rowMap.ContainsKey(new DirtyRowKey(recipient, checked((uint)entityIndex))) ||
+                    !IsCurrentRelevant(recipient, entity, _recipients[recipient].Anchor))
+                    continue;
+                _interestedRecipientsDiscovered++;
+                if (!EnsureEntityObligation(recipient, entityIndex, entity, desiredPresent: true, now))
+                    throw new InvalidOperationException(
+                        "Chunk-batched dirty-entity capacity diverged from discovery preflight.");
+            }
+        }
+        return true;
+    }
+
+    private void ProcessExistingAudience(
+        int entityIndex,
+        in DirtyEntitySlot current,
+        long now)
+    {
+        int row = current.RowHead;
+        int visits = 0;
+        while (row >= 0)
+        {
+            if (++visits > _rows.Length)
+                throw new InvalidOperationException("Dirty-entity entity row list contains a cycle.");
+            int next = _rows[row].EntityNext;
+            if (_attributionEnabled) _attributionRows++;
+            int recipient = _rows[row].Recipient;
+            bool relevant = IsCurrentRelevant(recipient, current, _recipients[recipient].Anchor);
+            if (!EnsureEntityObligation(recipient, entityIndex, current, relevant, now))
+                throw new InvalidOperationException("An existing dirty-entity row unexpectedly required capacity.");
+            row = next;
+        }
     }
 
     /// <summary>Builds one bounded recipient bundle; building never advances semantic knowledge.</summary>
@@ -816,20 +999,7 @@ public class DirtyEntitySpatialFanout
 
         // The entity-side links are the complete old known/pending audience.  They are
         // semantic delivery rows we already require for SENT != KNOWN, not a second AOI graph.
-        int row = current.RowHead;
-        int visits = 0;
-        while (row >= 0)
-        {
-            if (++visits > _rows.Length)
-                throw new InvalidOperationException("Dirty-entity entity row list contains a cycle.");
-            int next = _rows[row].EntityNext;
-            if (_attributionEnabled) _attributionRows++;
-            int recipient = _rows[row].Recipient;
-            bool relevant = IsCurrentRelevant(recipient, current, _recipients[recipient].Anchor);
-            if (!EnsureEntityObligation(recipient, entityIndex, current, relevant, now))
-                throw new InvalidOperationException("An existing dirty-entity row unexpectedly required capacity.");
-            row = next;
-        }
+        ProcessExistingAudience(entityIndex, current, now);
 
         for (int index = 0; index < entrantCount; index++)
             if (!EnsureEntityObligation(
@@ -1351,6 +1521,79 @@ public class DirtyEntitySpatialFanout
         else _entityDiscoveryStamp++;
     }
 
+    private DiscoveryChunkKey DiscoveryChunkFor(in ReplicationSpatialPoint point)
+    {
+        int edge = GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        return new(
+            checked((int)FloorDivide(point.XMillimeters, edge)),
+            checked((int)FloorDivide(point.ZMillimeters, edge)));
+    }
+
+    private int FindOrCreateBatchSlot(
+        in DiscoveryChunkKey key,
+        Span<int> usedSlots,
+        ref int usedCount)
+    {
+        int slot = BatchHash(key) & _batchMask;
+        for (int probe = 0; probe < _batchStates.Length; probe++)
+        {
+            if (_batchStates[slot] == 0)
+            {
+                if (usedCount == usedSlots.Length)
+                    throw new InvalidOperationException("Dirty-entity batch capacity diverged from entity capacity.");
+                _batchStates[slot] = 1;
+                _batchKeys[slot] = key;
+                _batchEntityHeads[slot] = -1;
+                usedSlots[usedCount++] = slot;
+                return slot;
+            }
+            if (_batchKeys[slot] == key) return slot;
+            slot = (slot + 1) & _batchMask;
+        }
+        throw new InvalidOperationException("Dirty-entity batch index exhausted its bounded capacity.");
+    }
+
+    private int DiscoverBatchRecipients(
+        in DiscoveryChunkKey key,
+        int radius,
+        Span<int> destination)
+    {
+        _recipientDiscoveryOperations++;
+        NextDiscoveryStamp();
+        int count = 0;
+        long chunkEdge = GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        long minimumX = checked((long)key.X * chunkEdge - radius);
+        long maximumX = checked(((long)key.X + 1L) * chunkEdge + radius);
+        long minimumZ = checked((long)key.Z * chunkEdge - radius);
+        long maximumZ = checked(((long)key.Z + 1L) * chunkEdge + radius);
+        long firstX = FloorDivide(minimumX, _profile.RegionEdgeMillimeters);
+        long lastX = FloorDivide(maximumX, _profile.RegionEdgeMillimeters);
+        long firstZ = FloorDivide(minimumZ, _profile.RegionEdgeMillimeters);
+        long lastZ = FloorDivide(maximumZ, _profile.RegionEdgeMillimeters);
+        for (long x = firstX; x <= lastX; x++)
+            for (long z = firstZ; z <= lastZ; z++)
+            {
+                if (x < int.MinValue || x > int.MaxValue ||
+                    z < int.MinValue || z > int.MaxValue)
+                    continue;
+                if (!_regionMap.TryGetValue(
+                        new ReplicationSpatialRegionId((int)x, (int)z), out int regionIndex))
+                    continue;
+                if (_attributionEnabled) _attributionCells++;
+                for (int recipient = _regions[regionIndex].RecipientHead; recipient >= 0;
+                    recipient = _recipients[recipient].RegionNext)
+                {
+                    _candidateRecipientsExamined++;
+                    if (_attributionEnabled) _attributionCandidates++;
+                    if (_recipientStamp[recipient] == _discoveryStamp) continue;
+                    _recipientStamp[recipient] = _discoveryStamp;
+                    if (count == destination.Length) return -1;
+                    destination[count++] = recipient;
+                }
+            }
+        return count;
+    }
+
     private ReplicationSpatialRegionId ToRegion(in ReplicationSpatialPoint point) => new(
         checked((int)FloorDivide(point.XMillimeters, _profile.RegionEdgeMillimeters)),
         checked((int)FloorDivide(point.ZMillimeters, _profile.RegionEdgeMillimeters)));
@@ -1439,6 +1682,13 @@ public class DirtyEntitySpatialFanout
         return quotient;
     }
 
+    private static long FloorDivide(long value, int divisor)
+    {
+        long quotient = value / divisor;
+        if (value < 0 && value % divisor != 0) quotient--;
+        return quotient;
+    }
+
     private long CalculateReservedBytes() => checked(
         (long)_entities.Length * Unsafe.SizeOf<DirtyEntitySlot>() +
         (long)_recipients.Length * Unsafe.SizeOf<RecipientSlot>() +
@@ -1452,6 +1702,11 @@ public class DirtyEntitySpatialFanout
         (long)_dirtyEntities.Length * sizeof(int) +
         (long)_recipientStamp.Length * sizeof(int) +
         (long)_entityStamp.Length * sizeof(int) +
+        (long)_batchKeys.Length * Unsafe.SizeOf<DiscoveryChunkKey>() +
+        (long)_batchEntityHeads.Length * sizeof(int) +
+        (long)_batchEntityNext.Length * sizeof(int) +
+        _batchStates.Length +
+        (long)_batchUsedSlots.Length * sizeof(int) +
         (long)_freeRecipients.Length * sizeof(int) +
         (long)_freeRegions.Length * sizeof(int) +
         (long)_freeRows.Length * sizeof(int) +
@@ -1463,6 +1718,25 @@ public class DirtyEntitySpatialFanout
 
     private static long DictionaryReservation(int capacity, int keySize) => checked(
         (long)capacity * (sizeof(int) * 3L + keySize + sizeof(int)));
+
+    private static int MapCapacity(int entries)
+    {
+        int capacity = 4;
+        int required = checked(entries * 2);
+        while (capacity < required) capacity = checked(capacity * 2);
+        return capacity;
+    }
+
+    private static int BatchHash(in DiscoveryChunkKey key)
+    {
+        unchecked
+        {
+            uint hash = 2_166_136_261u;
+            hash = (hash ^ (uint)key.X) * 16_777_619u;
+            hash = (hash ^ (uint)key.Z) * 16_777_619u;
+            return (int)hash & int.MaxValue;
+        }
+    }
 
     private void EnsureOwnerThread()
     {
@@ -1481,6 +1755,7 @@ public class DirtyEntitySpatialFanout
     }
 
     private readonly record struct DirtyRowKey(int Recipient, uint EntityIndex);
+    private readonly record struct DiscoveryChunkKey(int X, int Z);
 
     private struct SpatialRegion
     {

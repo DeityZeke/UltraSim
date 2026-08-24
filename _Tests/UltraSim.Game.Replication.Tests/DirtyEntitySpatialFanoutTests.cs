@@ -95,6 +95,68 @@ internal static class DirtyEntitySpatialFanoutTests
         Check.Equal(2, despawned.SemanticKnowledgeRowCount);
     }
 
+    internal static void ChunkBatchedDiscoveryCoalescesAndAllocatesZero()
+    {
+        DirtyEntityChunkBatchFanout service = CreateChunkBatch(
+            maximumEntities: 64, maximumRecipients: 2, maximumRows: 128,
+            maximumRecordsPerBundle: 32);
+        ParticipantId first = new(1);
+        ParticipantId second = new(2);
+        service.SetRecipientAnchor(first, Point(0, 0), 0);
+        service.SetRecipientAnchor(second, Point(20_000, 0), 0);
+        for (int entity = 0; entity < 32; entity++)
+            service.CommitEntity(Present(entity, 1, 1_000 + entity * 100, 1_000), 0);
+        DirtyEntitySpatialFanoutSnapshot before = service.GetSnapshot();
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(0, out int initialized));
+        Check.Equal(32, initialized);
+        DirtyEntitySpatialFanoutSnapshot initial = service.GetSnapshot();
+        Check.Equal(before.SpatialRecipientDiscoveryOperations + 1,
+            initial.SpatialRecipientDiscoveryOperations);
+
+        DirtyEntityDeliveryRecord[] records = new DirtyEntityDeliveryRecord[32];
+        Drain(first, 20);
+        Drain(second, 20);
+        for (int entity = 0; entity < 32; entity++)
+            service.CommitEntity(Present(entity, 2, 1_100 + entity * 100, 1_000), 100);
+        DirtyEntitySpatialFanoutSnapshot beforeMove = service.GetSnapshot();
+        Check.Equal(DirtyEntityProcessStatus.Success,
+            service.TryProcessDirtyEntities(100, out int moved));
+        Check.Equal(32, moved);
+        DirtyEntitySpatialFanoutSnapshot afterMove = service.GetSnapshot();
+        Check.Equal(beforeMove.SpatialRecipientDiscoveryOperations + 1,
+            afterMove.SpatialRecipientDiscoveryOperations);
+        Drain(first, 120);
+        Drain(second, 120);
+
+        for (int warm = 0; warm < 4; warm++) RunPass(warm + 3, 200 + warm * 100);
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        for (int pass = 0; pass < 64; pass++) RunPass(pass + 7, 1_000 + pass * 100);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        Check.Equal(0L, allocated);
+
+        void RunPass(int version, int now)
+        {
+            for (int entity = 0; entity < 32; entity++)
+                Check.Equal(DirtyEntityUpdateStatus.Success,
+                    service.CommitEntity(Present(entity, checked((ulong)version),
+                        1_000 + entity * 100 + (version & 1), 1_000), now));
+            Check.Equal(DirtyEntityProcessStatus.Success,
+                service.TryProcessDirtyEntities(now, out int processed));
+            Check.Equal(32, processed);
+            Drain(first, now + 20);
+            Drain(second, now + 20);
+        }
+
+        void Drain(ParticipantId participant, int now)
+        {
+            while (service.TryBuildBundle(participant, now, 16_384, records,
+                       out DirtyEntityBundle bundle) == DirtyEntityBuildStatus.Success)
+                Check.True(service.TryAcknowledgeBundle(
+                    participant, bundle.DeliveryBundleId, applied: true));
+        }
+    }
+
     internal static void ExactWireBudgetAndRecipientOutstandingIsolation()
     {
         DirtyEntitySpatialFanout service = Create(
@@ -652,7 +714,15 @@ internal static class DirtyEntitySpatialFanoutTests
         Check.True(service.GetSnapshot().ReservedBytes > 0);
     }
 
-    internal static void RemoteProtocolPeerConvergesThroughApplicationProof()
+    internal static void RemoteProtocolPeerConvergesThroughApplicationProof() =>
+        AssertRemoteProtocolPeerConverges(
+            Create(maximumEntities: 4, maximumRecipients: 1));
+
+    internal static void ChunkBatchRemoteProtocolPeerConvergesThroughApplicationProof() =>
+        AssertRemoteProtocolPeerConverges(
+            CreateChunkBatch(maximumEntities: 4, maximumRecipients: 1));
+
+    private static void AssertRemoteProtocolPeerConverges(DirtyEntitySpatialFanout fanout)
     {
         Check.True(ProtocolLoopback.TryCreate(
             NetworkProtocolLimits.Default,
@@ -661,7 +731,6 @@ internal static class DirtyEntitySpatialFanoutTests
             out ProtocolLoopback? created,
             out _, UltraSimGameProtocol.Manifest));
         using ProtocolLoopback loopback = created!;
-        DirtyEntitySpatialFanout fanout = Create(maximumEntities: 4, maximumRecipients: 1);
         ParticipantId participant = new(1);
         fanout.SetRecipientAnchor(participant, Point(0, 0), 0);
         fanout.CommitEntity(Present(0, 1, 0, 0), 0);
@@ -718,6 +787,18 @@ internal static class DirtyEntitySpatialFanoutTests
     }
 
     private static DirtyEntitySpatialFanout Create(
+        int maximumEntities,
+        int maximumRecipients,
+        int maximumRows = 64,
+        int maximumOutstandingBundles = 16,
+        int maximumRecordsPerBundle = 8) => new(
+        new StateEpoch(1),
+        new DirtyEntitySpatialFanoutLimits(
+            maximumEntities, maximumRecipients, 256, maximumRows,
+            maximumOutstandingBundles, maximumRecordsPerBundle),
+        new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100));
+
+    private static DirtyEntityChunkBatchFanout CreateChunkBatch(
         int maximumEntities,
         int maximumRecipients,
         int maximumRows = 64,

@@ -66,7 +66,9 @@ internal static class P03FourProfileComparison
                 .ToArray();
             bool allConverged = profiles.All(profile => profile.Semantic.Converged);
             bool entityFamilyEquivalent = FamilyEquivalent(
-                profiles, ProfileKind.MaintainedEntityRelation, ProfileKind.DirtyEntitySpatialFanout);
+                profiles, ProfileKind.MaintainedEntityRelation,
+                ProfileKind.DirtyEntitySpatialFanout,
+                ProfileKind.DirtyEntityChunkBatchFanout);
             bool chunkFamilyEquivalent = FamilyEquivalent(
                 profiles, ProfileKind.ChunkPublication, ProfileKind.DirtyChunkSpatialFanout);
             WorkloadReport report = new(
@@ -91,7 +93,7 @@ internal static class P03FourProfileComparison
         }
 
         var matrix = new ComparisonReport(
-            "ultrasim-game-p03-four-profile-shared-trace-v2",
+            "ultrasim-game-p03-five-profile-shared-trace-v3",
             DateTimeOffset.UtcNow,
             ReadGitSha(),
             Environment.Version.ToString(),
@@ -99,7 +101,7 @@ internal static class P03FourProfileComparison
             Environment.ProcessorCount,
             Stopwatch.Frequency,
             new MatrixScope(
-                "All four frozen Game profiles replay the same authoritative entity, recipient, " +
+                "All five Game profiles replay the same authoritative entity, recipient, " +
                 "mutation, movement, login/re-entry, and traffic trace. Measurements cover the " +
                 "profile semantic core and a payload-derived synthesized client/proof boundary. " +
                 "Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic " +
@@ -178,13 +180,15 @@ internal static class P03FourProfileComparison
 
     private static bool FamilyEquivalent(
         ProfileReport[] profiles,
-        ProfileKind first,
-        ProfileKind second)
+        params ProfileKind[] family)
     {
-        ProfileReport? left = profiles.FirstOrDefault(item => item.Profile == first.ToString());
-        ProfileReport? right = profiles.FirstOrDefault(item => item.Profile == second.ToString());
-        return left is null || right is null ||
-            string.Equals(left.Semantic.Digest, right.Semantic.Digest, StringComparison.Ordinal);
+        string[] digests = family
+            .Select(kind => profiles.FirstOrDefault(item => item.Profile == kind.ToString()))
+            .Where(report => report is not null)
+            .Select(report => report!.Semantic.Digest)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        return digests.Length <= 1;
     }
 
     private static ProfileAdapter CreateAdapter(Workload workload, ProfileKind profile) => profile switch
@@ -192,6 +196,7 @@ internal static class P03FourProfileComparison
         ProfileKind.MaintainedEntityRelation => new MaintainedAdapter(workload),
         ProfileKind.ChunkPublication => new ChunkPublicationAdapter(workload),
         ProfileKind.DirtyEntitySpatialFanout => new DirtyEntityAdapter(workload),
+        ProfileKind.DirtyEntityChunkBatchFanout => new DirtyEntityAdapter(workload, chunkBatched: true),
         ProfileKind.DirtyChunkSpatialFanout => new DirtyChunkAdapter(workload),
         _ => throw new ArgumentOutOfRangeException(nameof(profile)),
     };
@@ -628,6 +633,7 @@ internal static class P03FourProfileComparison
         MaintainedEntityRelation,
         ChunkPublication,
         DirtyEntitySpatialFanout,
+        DirtyEntityChunkBatchFanout,
         DirtyChunkSpatialFanout,
     }
 
@@ -755,6 +761,7 @@ internal static class P03FourProfileComparison
 
     private readonly record struct CumulativeWork(
         ulong DirtyUnitsProcessed,
+        ulong SpatialDiscoveryOperations,
         ulong CandidateTests,
         ulong RecipientReconciliations,
         ulong SourceReads,
@@ -1398,6 +1405,7 @@ internal static class P03FourProfileComparison
             return new(
                 snapshot.UniqueSemanticConstructions,
                 0,
+                0,
                 snapshot.RelationSequenceAllocations,
                 snapshot.SemanticRecordCopies,
                 snapshot.SemanticRecordCopies,
@@ -1472,18 +1480,21 @@ internal static class P03FourProfileComparison
         private readonly DirtyEntityDeliveryRecord[] _records;
         private readonly bool[] _serviceActive;
 
-        internal DirtyEntityAdapter(Workload workload) : base(workload, usesChunkInterest: false)
+        internal DirtyEntityAdapter(Workload workload, bool chunkBatched = false)
+            : base(workload, usesChunkInterest: false)
         {
-            _service = new DirtyEntitySpatialFanout(
-                new StateEpoch(0xF032),
-                new DirtyEntitySpatialFanoutLimits(
-                    workload.Entities.Length,
-                    workload.Recipients.Length,
-                    CreateInterestLimits(workload).MaximumRegions,
-                    checked(workload.Entities.Length * workload.Recipients.Length),
-                    Math.Max(64, workload.Recipients.Length * 4),
-                    32),
-                GameInterestProfile.Reference);
+            DirtyEntitySpatialFanoutLimits limits = new(
+                workload.Entities.Length,
+                workload.Recipients.Length,
+                CreateInterestLimits(workload).MaximumRegions,
+                checked(workload.Entities.Length * workload.Recipients.Length),
+                Math.Max(64, workload.Recipients.Length * 4),
+                32);
+            _service = chunkBatched
+                ? new DirtyEntityChunkBatchFanout(
+                    new StateEpoch(0xF033), limits, GameInterestProfile.Reference)
+                : new DirtyEntitySpatialFanout(
+                    new StateEpoch(0xF032), limits, GameInterestProfile.Reference);
             _records = new DirtyEntityDeliveryRecord[32];
             _serviceActive = new bool[Recipients.Length];
         }
@@ -1552,6 +1563,7 @@ internal static class P03FourProfileComparison
             DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
             return new(
                 snapshot.DirtyEntitiesProcessed,
+                snapshot.SpatialRecipientDiscoveryOperations,
                 snapshot.CandidateRecipientsExamined,
                 snapshot.BundlesBuilt,
                 snapshot.DirtyEntitiesProcessed,
@@ -1718,6 +1730,7 @@ internal static class P03FourProfileComparison
             }
             return new(
                 scheduler.DirtyChunksObserved + scheduler.IncomingQueued,
+                0,
                 scheduler.DirtyRecipientFanout + scheduler.PendingMembershipsExamined,
                 scheduler.IncomingQueued,
                 reads,
@@ -1896,6 +1909,7 @@ internal static class P03FourProfileComparison
             DirtyChunkSpatialFanoutSnapshot snapshot = _service.GetSnapshot();
             return new(
                 snapshot.DirtyChunksProcessed + snapshot.IncomingCurrentTruthScopesQueued,
+                snapshot.SpatialRecipientDiscoveryOperations,
                 snapshot.CandidateRecipientsExamined,
                 snapshot.RecipientTopologyReconciliations,
                 snapshot.DirtyChunksObserved,
