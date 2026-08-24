@@ -1571,6 +1571,33 @@ composition decision.
 Evidence:
 [`network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md).
 
+## P0.3H — Network ready-state selection floor
+
+P0.3H removes the repeated bounded capacity scans identified by the whole-flow
+attribution without changing any Game profile or Network delivery semantic. Ordered
+reliable messages now retain per-lane intrusive FIFO heads; IndependentState retains
+per-lane occupied-slot bitsets with the existing slot-round-robin start; and one
+priority-ready mask skips empty lanes and impossible delivery kinds. Retransmission
+deadline/loss state is unchanged.
+
+The exact whole-flow A/B improves server-role p95 by 16.8-23.6% across the four entity
+controls and by 21.6% for the cap-eight ChunkPublication regression control. Combined
+selector clocks fall by 92.1-94.0%, while Game messages, proofs, frames, bytes, semantic
+digests, convergence, and zero capacity drops remain identical. The bounded structure
+cost is 268 bytes per protocol peer under the measured limits.
+
+A 270-tick cap-one rated sweep now stops after the first population above 4 ms
+server-role p95. Dense DirtyEntitySpatialFanout retains 384 at 3.274 ms and stops at
+448/4.237 ms. Sparse MaintainedEntityRelation retains 384 at 3.147 ms and stops at
+512/4.456 ms. P99/max remain diagnostic tail context. The measured rating is 384 CCU
+for both shapes; it is not a public-WAN or 16 ms stress claim.
+
+P0.3H is accepted. Entity profiles remain cap one, and chunk proof envelopes remain a
+separate next experiment.
+
+Evidence:
+[`network-p0.3h-ready-state-selection-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3h-ready-state-selection-2026-08-24.md).
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,

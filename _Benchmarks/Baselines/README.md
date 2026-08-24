@@ -44,6 +44,10 @@ Useful current anchors can be located by their embedded workload or filename:
   multi-chunk semantic packing. Entries retain independent proof and the profile retains
   dirty-time discovery with no global Chunk-to-Recipient graph. These are Game-core and
   canonical-codec-byte artifacts, not hosted transport or production-CCU evidence;
+- `network-p0.3h-*-2026-08-24.*` — accepted Network ready-state selection A/B,
+  cap-eight ChunkPublication regression control, and 270-tick <=4 ms server-role
+  rated sweep. The selector retains per-lane reliable heads, IndependentState ready
+  bitsets, and priority-ready lanes without changing Game or lane semantics;
 
 - `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;
