@@ -9,6 +9,8 @@ namespace UltraSim.Game.Replication;
 
 public readonly record struct RemoteDirtyChunkSpatialFanoutServerSnapshot(
     ulong DeliveriesQueued,
+    ulong BundlesQueued,
+    ulong BundleEntriesQueued,
     ulong ApplicationProofs,
     ulong ApplicationRejections,
     ulong MalformedProofs,
@@ -38,6 +40,7 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     private readonly ulong _applicationSessionEpoch;
     private readonly RemoteChunkPublicRecord[] _snapshotRecords;
     private readonly RemoteChunkDeltaRecord[] _deltaRecords;
+    private readonly RemoteDirtyChunkBundleEntry[] _bundleEntries;
     private readonly byte[] _messageScratch;
     private readonly byte[] _snapshotPayload;
     private readonly DeliveryLineage[] _outstanding;
@@ -54,6 +57,8 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     private ulong _snapshotStartedStep;
     private RemoteChunkSnapshotCancelMessage _pendingCancel;
     private ulong _deliveriesQueued;
+    private ulong _bundlesQueued;
+    private ulong _bundleEntriesQueued;
     private ulong _applicationProofs;
     private ulong _applicationRejections;
     private ulong _malformedProofs;
@@ -76,6 +81,7 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         _applicationSessionEpoch = applicationSessionEpoch;
         _snapshotRecords = new RemoteChunkPublicRecord[fanout.Limits.MaximumSnapshotRecords];
         _deltaRecords = new RemoteChunkDeltaRecord[fanout.Limits.MaximumDeltaRecords];
+        _bundleEntries = new RemoteDirtyChunkBundleEntry[fanout.Limits.MaximumChunksPerBundle];
         _messageScratch = new byte[Math.Max(
             UltraSimGameProtocol.MaximumMessageBytes, peer.MaximumUnfragmentedMessageBytes)];
         _snapshotPayload = new byte[UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
@@ -115,6 +121,101 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
             return _lastBuildStatus;
         }
         _deliveriesQueued++;
+        return _lastBuildStatus;
+    }
+
+    /// <summary>
+    /// Queues one MTU-bounded recipient-wide envelope while retaining independent per-chunk
+    /// delivery tickets and proofs. Oversized first entries remain eligible for the existing
+    /// single-delivery/snapshot path.
+    /// </summary>
+    public DirtyChunkBuildStatus TryScheduleBundle(ulong cadenceStep)
+    {
+        EnsureOwner();
+        ExpireOutstandingDeliveries(cadenceStep);
+        _lastProcessStatus = _fanout.TryProcessDirtyChunks(cadenceStep, out _);
+        if (_lastProcessStatus == DirtyChunkProcessStatus.CapacityExceeded)
+            return _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
+        if (_snapshotActive || _pendingCancel.DeliveryId != 0 ||
+            _outstandingCount == _outstanding.Length)
+            return _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
+
+        int available = _outstanding.Length - _outstandingCount;
+        int entryLimit = Math.Min(_bundleEntries.Length, available);
+        if (entryLimit == 0)
+            return _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
+        int byteBudget = _peer.MaximumUnfragmentedMessageBytes;
+        _lastBuildStatus = _fanout.TryBuildBundle(
+            _participant, cadenceStep, byteBudget, out DirtyChunkDeliveryBundle bundle);
+        if (_lastBuildStatus != DirtyChunkBuildStatus.Success) return _lastBuildStatus;
+        if (bundle.Entries.Length > entryLimit)
+        {
+            AbandonBundle(in bundle);
+            return _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
+        }
+
+        int snapshotOffset = 0;
+        int deltaOffset = 0;
+        for (int index = 0; index < bundle.Entries.Length; index++)
+        {
+            DirtyChunkDeliveryEntry entry = bundle.Entries[index];
+            RemoteChunkPublicationKind kind = entry.Status switch
+            {
+                OfflineDirectChunkReadStatus.Snapshot => RemoteChunkPublicationKind.Snapshot,
+                OfflineDirectChunkReadStatus.Delta => RemoteChunkPublicationKind.Delta,
+                OfflineDirectChunkReadStatus.ChunkAbsent => RemoteChunkPublicationKind.Absence,
+                _ => 0,
+            };
+            if (kind == 0)
+            {
+                AbandonBundle(in bundle);
+                return _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
+            }
+            int recordCount = entry.Status == OfflineDirectChunkReadStatus.Snapshot
+                ? entry.SnapshotCount
+                : entry.Status == OfflineDirectChunkReadStatus.Delta ? entry.DeltaCount : 0;
+            int recordOffset = kind == RemoteChunkPublicationKind.Snapshot
+                ? snapshotOffset
+                : kind == RemoteChunkPublicationKind.Delta ? deltaOffset : 0;
+            _bundleEntries[index] = new RemoteDirtyChunkBundleEntry(
+                kind, entry.DeliveryId, entry.Key.Space.Value,
+                entry.Key.Coord.X, entry.Key.Coord.Z,
+                entry.BaseCursor.IsValid ? entry.BaseCursor.Revision.Value : 0,
+                entry.Ticket.Cursor.IsValid ? entry.Ticket.Cursor.Revision.Value : 0,
+                entry.Batch.HistoryFloor.IsValid ? entry.Batch.HistoryFloor.Value : 0,
+                0, checked((ushort)recordCount), recordOffset);
+            if (kind == RemoteChunkPublicationKind.Snapshot)
+            {
+                ReadOnlySpan<WorldPublicRecord> records = bundle.Snapshot(in entry);
+                WriteSnapshotRecords(records, _snapshotRecords.AsSpan(snapshotOffset));
+                snapshotOffset += records.Length;
+            }
+            else if (kind == RemoteChunkPublicationKind.Delta)
+            {
+                ReadOnlySpan<WorldPublicDeltaRecord> records = bundle.Delta(in entry);
+                WriteDeltaRecords(records, _deltaRecords.AsSpan(deltaOffset));
+                deltaOffset += records.Length;
+            }
+        }
+        if (!UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+                _messageScratch, _applicationSessionEpoch, bundle.SourceEpoch.Value,
+                bundle.BundleId, _bundleEntries.AsSpan(0, bundle.Entries.Length),
+                _snapshotRecords.AsSpan(0, snapshotOffset),
+                _deltaRecords.AsSpan(0, deltaOffset), out int written) ||
+            written > _peer.MaximumUnfragmentedMessageBytes ||
+            _peer.TryQueue(RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+        {
+            AbandonBundle(in bundle);
+            ClearBundleScratch(bundle.Entries.Length, snapshotOffset, deltaOffset);
+            return _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
+        }
+        for (int index = 0; index < bundle.Entries.Length; index++)
+            AddOutstanding(bundle.Entries[index].Ticket, cadenceStep);
+        _deliveriesQueued = checked(_deliveriesQueued + (ulong)bundle.Entries.Length);
+        _bundlesQueued++;
+        _bundleEntriesQueued = checked(_bundleEntriesQueued + (ulong)bundle.Entries.Length);
+        ClearBundleScratch(bundle.Entries.Length, snapshotOffset, deltaOffset);
         return _lastBuildStatus;
     }
 
@@ -296,14 +397,29 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     {
         EnsureOwner();
         return new(
-            _deliveriesQueued, _applicationProofs, _applicationRejections, _malformedProofs,
+            _deliveriesQueued, _bundlesQueued, _bundleEntriesQueued,
+            _applicationProofs, _applicationRejections, _malformedProofs,
             _lastBuildStatus, _lastProcessStatus, _outstandingCount,
             _deliveryTimeouts, _snapshotTimeouts, _snapshotActive,
             _pendingCancel.DeliveryId != 0,
             checked((long)_snapshotRecords.Length * Unsafe.SizeOf<RemoteChunkPublicRecord>() +
                 (long)_deltaRecords.Length * Unsafe.SizeOf<RemoteChunkDeltaRecord>() +
+                (long)_bundleEntries.Length * Unsafe.SizeOf<RemoteDirtyChunkBundleEntry>() +
                 _messageScratch.Length + _snapshotPayload.Length +
                 (long)_outstanding.Length * Unsafe.SizeOf<DeliveryLineage>()));
+    }
+
+    private void AbandonBundle(in DirtyChunkDeliveryBundle bundle)
+    {
+        for (int index = 0; index < bundle.Entries.Length; index++)
+            _fanout.AbandonDelivery(_participant, bundle.Entries[index].DeliveryId);
+    }
+
+    private void ClearBundleScratch(int entries, int snapshots, int deltas)
+    {
+        _bundleEntries.AsSpan(0, entries).Clear();
+        _snapshotRecords.AsSpan(0, snapshots).Clear();
+        _deltaRecords.AsSpan(0, deltas).Clear();
     }
 
     private bool TryQueueDelivery(in DirtyChunkDelivery delivery, ulong cadenceStep)
@@ -367,26 +483,41 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
 
     private ReadOnlySpan<RemoteChunkPublicRecord> ToSnapshotRecords(ReadOnlySpan<WorldPublicRecord> records)
     {
+        WriteSnapshotRecords(records, _snapshotRecords);
+        return _snapshotRecords.AsSpan(0, records.Length);
+    }
+
+    private ReadOnlySpan<RemoteChunkDeltaRecord> ToDeltaRecords(ReadOnlySpan<WorldPublicDeltaRecord> records)
+    {
+        WriteDeltaRecords(records, _deltaRecords);
+        return _deltaRecords.AsSpan(0, records.Length);
+    }
+
+    private static void WriteSnapshotRecords(
+        ReadOnlySpan<WorldPublicRecord> records,
+        Span<RemoteChunkPublicRecord> destination)
+    {
         for (int index = 0; index < records.Length; index++)
         {
             WorldPublicRecord record = records[index];
-            _snapshotRecords[index] = new(
+            destination[index] = new(
                 record.Id.Index, record.Id.Generation, record.EntityPublicVersion,
                 record.PrefabId, record.Position.Local.XMillimeters,
                 record.Position.Local.ZMillimeters, record.Position.YMillimeters,
                 record.Orientation.Units, (ushort)record.StateFlags,
                 record.LastChangedRevision.Value);
         }
-        return _snapshotRecords.AsSpan(0, records.Length);
     }
 
-    private ReadOnlySpan<RemoteChunkDeltaRecord> ToDeltaRecords(ReadOnlySpan<WorldPublicDeltaRecord> records)
+    private static void WriteDeltaRecords(
+        ReadOnlySpan<WorldPublicDeltaRecord> records,
+        Span<RemoteChunkDeltaRecord> destination)
     {
         for (int index = 0; index < records.Length; index++)
         {
             WorldPublicDeltaRecord record = records[index];
             WorldPublicRecord current = record.Current;
-            _deltaRecords[index] = new(
+            destination[index] = new(
                 (RemoteChunkPublicOperation)record.Operation,
                 (RemoteChunkPublicFieldMask)record.Fields,
                 record.Id.Index, record.Id.Generation, record.EntityPublicVersion,
@@ -395,7 +526,6 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
                 current.Orientation.Units, (ushort)current.StateFlags,
                 current.LastChangedRevision.Value);
         }
-        return _deltaRecords.AsSpan(0, records.Length);
     }
 
     private static bool Matches(

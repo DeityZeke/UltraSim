@@ -645,6 +645,27 @@ public sealed class DirtyChunkSpatialFanout
     /// Entries may name unrelated chunks; application proof remains per entry rather than per
     /// envelope, so packing cannot manufacture recipient knowledge.
     /// </summary>
+    public DirtyChunkBuildStatus TryBuildBundle(
+        ParticipantId participant,
+        ulong cadenceStep,
+        int byteBudget,
+        out DirtyChunkDeliveryBundle bundle)
+    {
+        EnsureOwner();
+        bundle = default;
+        PrepareCadenceStep(cadenceStep);
+        if (byteBudget <= RemoteDirtyChunkBundleHeaderCodec.EncodedSize || _nextBundleId == 0)
+            return DirtyChunkBuildStatus.CapacityExceeded;
+        int recipientIndex = FindRecipient(participant);
+        if (recipientIndex < 0) return DirtyChunkBuildStatus.UnknownRecipient;
+        RemoveReadyRecipient(recipientIndex);
+        DirtyChunkBuildStatus status = TryBuildBundleCore(
+            recipientIndex, cadenceStep, byteBudget, out bundle);
+        RefreshReadyRecipient(recipientIndex, cadenceStep);
+        return status;
+    }
+
+    /// <summary>Builds the next recipient-wide envelope from the ready-recipient set.</summary>
     public DirtyChunkBuildStatus TryBuildNextBundle(
         ulong cadenceStep,
         int byteBudget,

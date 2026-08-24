@@ -15,6 +15,12 @@ if (args.Contains("--replication-suite", StringComparer.Ordinal))
     return;
 }
 
+if (args.Contains("--p03-whole-flow", StringComparer.Ordinal))
+{
+    P03WholeFlowNetworkSuite.Run(args);
+    return;
+}
+
 AdapterOptions options = AdapterOptions.Parse(args);
 if (options.CadenceSuite)
 {

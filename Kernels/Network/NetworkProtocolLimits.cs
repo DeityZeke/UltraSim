@@ -274,7 +274,12 @@ internal readonly record struct NetworkProtocolStageTiming(
     ulong ReliableCompactionTicks,
     ulong ReceivedCompactionTicks,
     ulong OutboundUnreliableFrames,
-    ulong InboundUnreliableFrames);
+    ulong InboundUnreliableFrames,
+    ulong LaneSelectionPasses,
+    ulong ReliableSlotProbes,
+    ulong IndependentSlotProbes,
+    ulong UnreliableSlotProbes,
+    ulong ExcludedSelectionProbes);
 
 /// <summary>
 /// Cold lifetime counters for the opt-in same-peer unreliable Data aggregate.

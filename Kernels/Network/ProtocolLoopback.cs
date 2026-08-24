@@ -332,6 +332,11 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _receivedCompactionTicks;
     private ulong _stageOutboundUnreliableFrames;
     private ulong _stageInboundUnreliableFrames;
+    private ulong _stageLaneSelectionPasses;
+    private ulong _stageReliableSlotProbes;
+    private ulong _stageIndependentSlotProbes;
+    private ulong _stageUnreliableSlotProbes;
+    private ulong _stageExcludedSelectionProbes;
     private bool _acceptsNewSends = true;
     private bool _disposed;
 
@@ -651,6 +656,11 @@ public sealed class NetworkProtocolPeer : IDisposable
         _receivedCompactionTicks = 0;
         _stageOutboundUnreliableFrames = 0;
         _stageInboundUnreliableFrames = 0;
+        _stageLaneSelectionPasses = 0;
+        _stageReliableSlotProbes = 0;
+        _stageIndependentSlotProbes = 0;
+        _stageUnreliableSlotProbes = 0;
+        _stageExcludedSelectionProbes = 0;
         _stageTimingEnabled = enabled;
     }
 
@@ -675,7 +685,12 @@ public sealed class NetworkProtocolPeer : IDisposable
             _reliableCompactionTicks,
             _receivedCompactionTicks,
             _stageOutboundUnreliableFrames,
-            _stageInboundUnreliableFrames);
+            _stageInboundUnreliableFrames,
+            _stageLaneSelectionPasses,
+            _stageReliableSlotProbes,
+            _stageIndependentSlotProbes,
+            _stageUnreliableSlotProbes,
+            _stageExcludedSelectionProbes);
     }
 
     /// <summary>
@@ -958,6 +973,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     {
         foreach (NetworkLane lane in NetworkLaneContracts.PriorityOrder)
         {
+            if (_stageTimingEnabled)
+                _stageLaneSelectionPasses = SaturatingIncrement(_stageLaneSelectionPasses);
             int selected = FindReliableHead(lane);
             if (selected >= 0 && TryFindDueFragment(selected, out fragment))
             {
@@ -996,6 +1013,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     {
         for (int offset = 0; offset < _independent.Length; offset++)
         {
+            if (_stageTimingEnabled)
+                _stageIndependentSlotProbes = SaturatingIncrement(_stageIndependentSlotProbes);
             int index = (_nextIndependentSchedule + offset) % _independent.Length;
             if (_independent[index].Active && _independent[index].Lane == lane &&
                 !IsExcluded(excluded, index, -1)) return index;
@@ -1020,18 +1039,24 @@ public sealed class NetworkProtocolPeer : IDisposable
         ReadOnlySpan<UnreliableSelection> excluded)
     {
         for (int index = 0; index < _unreliableStreams.Length; index++)
+        {
+            if (_stageTimingEnabled)
+                _stageUnreliableSlotProbes = SaturatingIncrement(_stageUnreliableSlotProbes);
             if (_unreliableStreams[index].Pending && _unreliableStreams[index].Message.Lane == lane &&
                 !IsExcluded(excluded, -1, index)) return index;
+        }
         return -1;
     }
 
-    private static bool IsExcluded(
+    private bool IsExcluded(
         ReadOnlySpan<UnreliableSelection> excluded,
         int independentSlot,
         int unreliableSlot)
     {
         for (int index = 0; index < excluded.Length; index++)
         {
+            if (_stageTimingEnabled)
+                _stageExcludedSelectionProbes = SaturatingIncrement(_stageExcludedSelectionProbes);
             UnreliableSelection selection = excluded[index];
             if (selection.IndependentSlot == independentSlot &&
                 selection.UnreliableSlot == unreliableSlot) return true;
@@ -1045,6 +1070,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         ulong sequence = ulong.MaxValue;
         for (int index = 0; index < _reliable.Length; index++)
         {
+            if (_stageTimingEnabled)
+                _stageReliableSlotProbes = SaturatingIncrement(_stageReliableSlotProbes);
             OutgoingMessage candidate = _reliable[index];
             if (candidate.Active && candidate.Lane == lane && candidate.Sequence.Value < sequence)
             {
@@ -1266,6 +1293,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             else
             {
                 ConsumeUnreliableSelection(new(independentSlot, unreliableSlot));
+                if (_stageTimingEnabled)
+                    _stageOutboundUnreliableFrames = SaturatingIncrement(
+                        _stageOutboundUnreliableFrames);
             }
             return true;
         }

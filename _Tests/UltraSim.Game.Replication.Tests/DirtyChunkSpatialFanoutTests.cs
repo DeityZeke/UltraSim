@@ -1029,6 +1029,97 @@ internal static class DirtyChunkSpatialFanoutTests
         Equal(service.Source.Epoch, info.PublicationCursor.Epoch);
     }
 
+    internal static void RemoteRecipientBundleConvergesWithIndependentProofs()
+    {
+        using var fixture = new Fixture(64, 4);
+        fixture.PresentBatch([
+            Position(0, 0, 2_000, 2_000),
+            Position(1, 0, 2_000, 2_000)]);
+        var service = Create(fixture, maximumRecipients: 1,
+            interest: new ChunkInterestProfile(25_000, 25_000, 25_000, 25_000, 25_000, 25_000));
+        ParticipantId participant = new(0xD306);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472), default,
+            out ProtocolLoopback? created, out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyChunkSpatialFanoutServer(
+            loopback.Server, service, participant, 0xD306);
+        var cache = new ClientWorldSemanticCache(
+            fixture.Bound, new ClientWorldSemanticCacheLimits(8, 32, 16, 16, 32));
+        foreach (SpatialChunkKey key in new[] { Key(0, 0), Key(1, 0) })
+        {
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            True(cache.TryStageFromBaseWorld(handle, [], default, out _));
+            True(cache.TryPublish(handle, out _));
+        }
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xD306, maximumDeltaRecords: 16,
+            maximumPendingProofs: 32);
+
+        for (ulong step = 0; step < 64 && server.GetSnapshot().ApplicationProofs < 2; step++)
+        {
+            DirtyChunkBuildStatus status = server.TryScheduleBundle(step);
+            if (status == DirtyChunkBuildStatus.CapacityExceeded)
+                _ = server.TrySchedule(step);
+            _ = server.TryProgress();
+            loopback.Pump();
+            DrainClient(loopback, client);
+            _ = client.TryProgress();
+            DrainServer(loopback, server);
+        }
+        Equal(2UL, server.GetSnapshot().ApplicationProofs);
+
+        fixture.PresentBatch([
+            Position(0, 0, 2_001, 2_000),
+            Position(1, 0, 2_001, 2_000)]);
+        Equal(DirtyChunkBuildStatus.Success, server.TryScheduleBundle(65));
+        RemoteDirtyChunkSpatialFanoutServerSnapshot queued = server.GetSnapshot();
+        True(queued.BundlesQueued > 0);
+        True(queued.BundleEntriesQueued >= 2);
+        for (int pass = 0; pass < 16 && server.GetSnapshot().ApplicationProofs < 4; pass++)
+        {
+            loopback.Pump();
+            DrainClient(loopback, client);
+            _ = client.TryProgress();
+            DrainServer(loopback, server);
+        }
+        Equal(4UL, server.GetSnapshot().ApplicationProofs);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal(2UL, client.GetSnapshot().AppliedDeltas);
+    }
+
+    internal static void RecipientSpecificBundleCannotDequeueAnotherParticipant()
+    {
+        using var fixture = new Fixture(32, 2);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 2,
+            interest: new ChunkInterestProfile(25_000, 25_000, 25_000, 25_000, 25_000, 25_000));
+        ParticipantId first = new(0xD307);
+        ParticipantId second = new(0xD308);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(second, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildBundle(second, 0, 1_405, out DirtyChunkDeliveryBundle secondBundle));
+        Equal(second, secondBundle.Participant);
+        for (int index = 0; index < secondBundle.Entries.Length; index++)
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(second,
+                    secondBundle.Entries[index].DeliveryId, applied: true));
+
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildBundle(first, 0, 1_405, out DirtyChunkDeliveryBundle firstBundle));
+        Equal(first, firstBundle.Participant);
+    }
+
     internal static void RemoteLostProofRetriesAndDrains()
     {
         using var fixture = new Fixture(32, 4);

@@ -1285,7 +1285,12 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             SaturatingAdd(left.ReliableCompactionTicks, right.ReliableCompactionTicks),
             SaturatingAdd(left.ReceivedCompactionTicks, right.ReceivedCompactionTicks),
             SaturatingAdd(left.OutboundUnreliableFrames, right.OutboundUnreliableFrames),
-            SaturatingAdd(left.InboundUnreliableFrames, right.InboundUnreliableFrames));
+            SaturatingAdd(left.InboundUnreliableFrames, right.InboundUnreliableFrames),
+            SaturatingAdd(left.LaneSelectionPasses, right.LaneSelectionPasses),
+            SaturatingAdd(left.ReliableSlotProbes, right.ReliableSlotProbes),
+            SaturatingAdd(left.IndependentSlotProbes, right.IndependentSlotProbes),
+            SaturatingAdd(left.UnreliableSlotProbes, right.UnreliableSlotProbes),
+            SaturatingAdd(left.ExcludedSelectionProbes, right.ExcludedSelectionProbes));
 
     private static ulong Remaining(ulong total, params ulong[] parts)
     {

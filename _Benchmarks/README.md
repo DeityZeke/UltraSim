@@ -35,7 +35,7 @@ when those systems exist.
 | `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
 | `UltraSim.Network.Comparison` | N0.10 isolated V2/V3 bot matrix coordinator; both process orders and selectable connected-pairs/shared-listener V3 topology. |
 | `UltraSim.Network.V2ComparisonAdapter` | Frozen V2 bot-harness child-process adapter and normalized owner-state evidence. |
-| `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected/shared-UDP bot adapter with bounded pressure, memory, wire, semantic-latency telemetry, cadence/stall acceptance, and V3-only integrated `spread_mix`/`dense_mix`. |
+| `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected/shared-UDP bot adapter with bounded pressure, memory, wire, semantic-latency telemetry, cadence/stall acceptance, V3-only integrated `spread_mix`/`dense_mix`, and the five-profile P0.3G whole-flow Network attribution matrix. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Network.N1Benchmarks` | N1.0 packet-free chunk-recipient controls, N1.1 canonical codecs, N1.2 ordinary transport, N1.3 atomic snapshot recovery, and N1.4 dirty-scheduling/storage/adoption evidence. |
 | `UltraSim.Network.HostedH05` | H0.5 dedicated server plus independent external client processes through hosted admission, connection-owner sharding, H0.3 rebinding, mixed N1 traffic, cross-chunk migration, proof-gated completion, and reconnect. |
@@ -133,6 +133,11 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
     --replication-suite --replication-profile=all --clients=400 \
     --ticks=120 --warmup=30 --dirty-percent=2 \
     --output=_Benchmarks/results/network-v3-spread-dense-local.json
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+    --p03-whole-flow --shape=all --frame-caps=1,4,8 \
+    --warmup=30 --ticks=90 \
+    --output=_Benchmarks/results/network-p0.3g-whole-flow-local.json
 
 # Opt-in causal attribution; diagnostic probes deliberately perturb normal timing.
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \

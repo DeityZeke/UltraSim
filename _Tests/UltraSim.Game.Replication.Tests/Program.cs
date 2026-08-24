@@ -62,6 +62,8 @@ var tests = new (string Name, Action Body)[]
     ("P02DirtyChunkWarmedPathAllocatesZero", DirtyChunkSpatialFanoutTests.WarmedPathAllocatesZero),
     ("P03GDirtyChunkWarmedSharedPageBundleAllocatesZero", DirtyChunkSpatialFanoutTests.WarmedSharedPageBundlePathAllocatesZero),
     ("P02DirtyChunkRemoteNetworkProtocolPeerConverges", DirtyChunkSpatialFanoutTests.RemoteNetworkProtocolPeerConverges),
+    ("P03GDirtyChunkRemoteRecipientBundleConverges", DirtyChunkSpatialFanoutTests.RemoteRecipientBundleConvergesWithIndependentProofs),
+    ("P03GDirtyChunkRecipientSpecificBundleCannotCrossRoute", DirtyChunkSpatialFanoutTests.RecipientSpecificBundleCannotDequeueAnotherParticipant),
     ("P02DirtyChunkRemoteLostProofRetriesAndDrains", DirtyChunkSpatialFanoutTests.RemoteLostProofRetriesAndDrains),
     ("P02DirtyChunkSnapshotTimeoutIsBounded", DirtyChunkSpatialFanoutTests.SnapshotTimeoutIsBounded),
     ("P02DirtyChunkSnapshotCancelBackpressureDoesNotOverlapLifetimes", DirtyChunkSpatialFanoutTests.SnapshotCancelBackpressureDoesNotOverlapLifetimes),

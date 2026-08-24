@@ -38,6 +38,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly WorldPublicDeltaRecord[] _semanticDeltas;
     private readonly RemoteChunkPublicRecord[] _wireSnapshot;
     private readonly WorldPublicRecord[] _semanticSnapshot;
+    private readonly RemoteDirtyChunkBundleEntry[] _bundleEntries;
     private readonly byte[] _snapshotPayload;
     private readonly byte[] _snapshotSegmentScratch;
     private readonly bool[] _snapshotSegments;
@@ -87,6 +88,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _semanticDeltas = new WorldPublicDeltaRecord[maximumDeltaRecords];
         _wireSnapshot = new RemoteChunkPublicRecord[cache.Limits.MaximumPublicRecordsPerChunk];
         _semanticSnapshot = new WorldPublicRecord[cache.Limits.MaximumPublicRecordsPerChunk];
+        _bundleEntries = new RemoteDirtyChunkBundleEntry[
+            UltraSimGameProtocol.MaximumDirtyChunkBundleEntries];
         _snapshotPayload = new byte[UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
             cache.Limits.MaximumPublicRecordsPerChunk)];
         int segmentPayload = peer.MaximumUnfragmentedMessageBytes -
@@ -112,6 +115,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (message.MessageId == RemoteChunkAbsenceMessageCodec.Descriptor.Id)
         {
             ProcessAbsence(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id)
+        {
+            ProcessDirtyChunkBundle(payload);
             return true;
         }
         if (message.MessageId == RemoteChunkSnapshotBeginMessageCodec.Descriptor.Id)
@@ -186,11 +194,218 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 (long)_semanticDeltas.Length * Unsafe.SizeOf<WorldPublicDeltaRecord>() +
                 (long)_wireSnapshot.Length * Unsafe.SizeOf<RemoteChunkPublicRecord>() +
                 (long)_semanticSnapshot.Length * Unsafe.SizeOf<WorldPublicRecord>() +
+                (long)_bundleEntries.Length * Unsafe.SizeOf<RemoteDirtyChunkBundleEntry>() +
                 _snapshotPayload.Length + _snapshotSegmentScratch.Length +
                 _snapshotSegments.Length +
                 (long)_deliveryLineage.Length * Unsafe.SizeOf<DeliveryLineage>() +
                 (long)_proofs.Length * Unsafe.SizeOf<RemoteChunkAppliedMessage>() +
                 _proofScratch.Length));
+    }
+
+    private void ProcessDirtyChunkBundle(ReadOnlySpan<byte> payload)
+    {
+        if (!UltraSimGameProtocol.TryReadDirtyChunkBundle(
+                payload, out RemoteDirtyChunkBundleHeader header, _bundleEntries,
+                _wireSnapshot, _wireDeltas, out int entryCount,
+                out int snapshotCount, out int deltaCount))
+        {
+            SaturatingIncrement(ref _malformedDeliveries);
+            return;
+        }
+        if (header.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            entryCount > _proofs.Length - _proofCount)
+        {
+            SaturatingIncrement(ref _rejectedDeliveries);
+            ClearBundleScratch(entryCount, snapshotCount, deltaCount);
+            return;
+        }
+        for (int index = 0; index < entryCount; index++)
+        {
+            ref readonly RemoteDirtyChunkBundleEntry entry = ref _bundleEntries[index];
+            switch (entry.Kind)
+            {
+                case RemoteChunkPublicationKind.Snapshot:
+                    ApplyBundledSnapshot(header, entry,
+                        _wireSnapshot.AsSpan(entry.RecordOffset, entry.RecordCount));
+                    break;
+                case RemoteChunkPublicationKind.Delta:
+                    ApplyBundledDelta(header, entry,
+                        _wireDeltas.AsSpan(entry.RecordOffset, entry.RecordCount));
+                    break;
+                case RemoteChunkPublicationKind.Absence:
+                    ApplyBundledAbsence(header, entry);
+                    break;
+                default:
+                    throw new InvalidOperationException("A validated dirty-chunk bundle changed kind.");
+            }
+        }
+        ClearBundleScratch(entryCount, snapshotCount, deltaCount);
+    }
+
+    private void ApplyBundledDelta(
+        in RemoteDirtyChunkBundleHeader header,
+        in RemoteDirtyChunkBundleEntry entry,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records)
+    {
+        var epoch = new PublicationEpoch(header.PublicationEpoch);
+        var key = new SpatialChunkKey(
+            new SpatialSpaceId(entry.SpatialSpaceId), entry.ChunkX, entry.ChunkZ);
+        RemoteChunkPublicationApplyStatus status;
+        bool duplicate = false;
+        DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
+        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
+            !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) ||
+            !info.PublicationCursor.IsValid || info.PublicationCursor.Epoch != epoch)
+            status = RemoteChunkPublicationApplyStatus.Rejected;
+        else if ((lineage = CompareLineage(handle, key, epoch, entry.DeliveryId,
+                RemoteChunkPublicationKind.Delta, entry.CurrentRevision, entry.ContentHash)) is
+            DeliveryLineageDecision.Superseded or DeliveryLineageDecision.Duplicate)
+        {
+            status = RemoteChunkPublicationApplyStatus.Applied;
+            duplicate = true;
+        }
+        else if (lineage == DeliveryLineageDecision.Contradictory)
+            status = RemoteChunkPublicationApplyStatus.Contradictory;
+        else if (info.PublicationCursor.Revision.Value >= entry.CurrentRevision)
+        {
+            status = RemoteChunkPublicationApplyStatus.Applied;
+            duplicate = true;
+        }
+        else if (info.PublicationCursor.Revision.Value != entry.BaseRevision ||
+                 !FitsWorldProfile(records))
+            status = RemoteChunkPublicationApplyStatus.Rejected;
+        else
+        {
+            for (int index = 0; index < records.Length; index++)
+                _semanticDeltas[index] = ToSemantic(key, records[index]);
+            var cursor = new ChunkPublicationCursor(
+                epoch, key, new ChunkPublicationRevision(entry.CurrentRevision));
+            var batch = new ChunkPublicationBatch(
+                ChunkPublicationReadStatus.Delta, key, cursor,
+                new ChunkPublicationRevision(entry.HistoryFloor), records.Length, records.Length);
+            status = _cache.TryApplyDelta(handle, batch,
+                    _semanticDeltas.AsSpan(0, records.Length), out ClientSemanticChunkError error)
+                ? RemoteChunkPublicationApplyStatus.Applied
+                : Map(error);
+        }
+        if (status == RemoteChunkPublicationApplyStatus.Applied && !duplicate &&
+            lineage == DeliveryLineageDecision.New)
+            CommitLineage(handle, key, epoch, entry.DeliveryId,
+                RemoteChunkPublicationKind.Delta, entry.CurrentRevision, entry.ContentHash);
+        QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
+            entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, entry.CurrentRevision,
+            RemoteChunkPublicationKind.Delta, status);
+        if (status == RemoteChunkPublicationApplyStatus.Applied)
+        {
+            if (duplicate) SaturatingIncrement(ref _duplicateDeliveries);
+            else SaturatingIncrement(ref _appliedDeltas);
+        }
+        else RecordFailure(status);
+        _semanticDeltas.AsSpan(0, records.Length).Clear();
+    }
+
+    private void ApplyBundledSnapshot(
+        in RemoteDirtyChunkBundleHeader header,
+        in RemoteDirtyChunkBundleEntry entry,
+        ReadOnlySpan<RemoteChunkPublicRecord> records)
+    {
+        var epoch = new PublicationEpoch(header.PublicationEpoch);
+        var key = new SpatialChunkKey(
+            new SpatialSpaceId(entry.SpatialSpaceId), entry.ChunkX, entry.ChunkZ);
+        RemoteChunkPublicationApplyStatus status;
+        DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
+        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle)
+            || !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info) || info.Key != key)
+            status = RemoteChunkPublicationApplyStatus.Rejected;
+        else if ((lineage = CompareLineage(handle, key, epoch, entry.DeliveryId,
+                RemoteChunkPublicationKind.Snapshot, entry.CurrentRevision, entry.ContentHash)) is
+            DeliveryLineageDecision.Superseded or DeliveryLineageDecision.Duplicate)
+        {
+            status = RemoteChunkPublicationApplyStatus.Applied;
+            SaturatingIncrement(ref _supersededDeliveries);
+        }
+        else if (lineage == DeliveryLineageDecision.Contradictory)
+            status = RemoteChunkPublicationApplyStatus.Contradictory;
+        else if (!FitsWorldProfile(records))
+            status = RemoteChunkPublicationApplyStatus.Rejected;
+        else
+        {
+            for (int index = 0; index < records.Length; index++)
+                _semanticSnapshot[index] = ToSemantic(key, records[index]);
+            var cursor = new ChunkPublicationCursor(
+                epoch, key, new ChunkPublicationRevision(entry.CurrentRevision));
+            var batch = new ChunkPublicationBatch(
+                ChunkPublicationReadStatus.Snapshot, key, cursor,
+                new ChunkPublicationRevision(entry.HistoryFloor), records.Length, records.Length);
+            status = _cache.TryApplySnapshot(handle, batch,
+                    _semanticSnapshot.AsSpan(0, records.Length), out ClientSemanticChunkError error)
+                ? RemoteChunkPublicationApplyStatus.Applied
+                : Map(error);
+        }
+        if (status == RemoteChunkPublicationApplyStatus.Applied &&
+            lineage == DeliveryLineageDecision.New)
+        {
+            CommitLineage(handle, key, epoch, entry.DeliveryId,
+                RemoteChunkPublicationKind.Snapshot, entry.CurrentRevision, entry.ContentHash);
+            SaturatingIncrement(ref _appliedSnapshots);
+        }
+        else if (status != RemoteChunkPublicationApplyStatus.Applied)
+        {
+            SaturatingIncrement(ref _rejectedSnapshots);
+            RecordFailure(status);
+        }
+        QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
+            entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, entry.CurrentRevision,
+            RemoteChunkPublicationKind.Snapshot, status);
+        _semanticSnapshot.AsSpan(0, records.Length).Clear();
+    }
+
+    private void ApplyBundledAbsence(
+        in RemoteDirtyChunkBundleHeader header,
+        in RemoteDirtyChunkBundleEntry entry)
+    {
+        var epoch = new PublicationEpoch(header.PublicationEpoch);
+        var key = new SpatialChunkKey(
+            new SpatialSpaceId(entry.SpatialSpaceId), entry.ChunkX, entry.ChunkZ);
+        RemoteChunkPublicationApplyStatus status;
+        DeliveryLineageDecision lineage = DeliveryLineageDecision.New;
+        if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
+            status = RemoteChunkPublicationApplyStatus.Rejected;
+        else if ((lineage = CompareLineage(handle, key, epoch, entry.DeliveryId,
+                RemoteChunkPublicationKind.Absence, 0, 0)) is
+            DeliveryLineageDecision.Superseded or DeliveryLineageDecision.Duplicate)
+        {
+            status = RemoteChunkPublicationApplyStatus.Applied;
+            SaturatingIncrement(ref _supersededDeliveries);
+        }
+        else if (lineage == DeliveryLineageDecision.Contradictory)
+            status = RemoteChunkPublicationApplyStatus.Contradictory;
+        else
+        {
+            var batch = new ChunkPublicationBatch(
+                ChunkPublicationReadStatus.ChunkAbsent, key, default, default, 0, 0);
+            status = _cache.TryApplyChunkAbsent(handle, epoch, batch,
+                    out ClientSemanticChunkError error)
+                ? RemoteChunkPublicationApplyStatus.Applied
+                : Map(error);
+        }
+        if (status == RemoteChunkPublicationApplyStatus.Applied &&
+            lineage == DeliveryLineageDecision.New)
+            CommitLineage(handle, key, epoch, entry.DeliveryId,
+                RemoteChunkPublicationKind.Absence, 0, 0);
+        QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
+            entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, 0,
+            RemoteChunkPublicationKind.Absence, status);
+        if (status == RemoteChunkPublicationApplyStatus.Applied)
+            SaturatingIncrement(ref _appliedAbsences);
+        else RecordFailure(status);
+    }
+
+    private void ClearBundleScratch(int entries, int snapshots, int deltas)
+    {
+        _bundleEntries.AsSpan(0, entries).Clear();
+        _wireSnapshot.AsSpan(0, snapshots).Clear();
+        _wireDeltas.AsSpan(0, deltas).Clear();
     }
 
     private void ProcessDelta(ReadOnlySpan<byte> payload)
