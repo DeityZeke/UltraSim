@@ -1,0 +1,84 @@
+{
+  "WorkloadIdentity": "ultrasim-game-p03e-five-profile-scale-matrix-v1",
+  "CapturedAtUtc": "2026-08-24T17:15:14.8167863+00:00",
+  "GitSha": "cb274575fe17a67781af1476fcfacd23282c02a0",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "Unix 7.1.5.1",
+  "ProcessorCount": 16,
+  "StopwatchFrequency": 1000000000,
+  "Scope": {
+    "MeasurementScope": "All five Game profiles replay the same authoritative entity, recipient, mutation, movement, login/re-entry, and traffic trace. Measurements cover the profile semantic core and a payload-derived synthesized client/proof boundary. Every post-warmup tick is timed in a fresh adapter; trace preparation, semantic oracle verification, diagnostics, and cold snapshots run in a separate evidence replay outside the timer. The secure Network transport is held constant but is not included in the timed core figures.",
+    "SharedTraceContract": "Release; 320 trace ticks; 10 warmup ticks; 310 measured ticks per profile; designated primary event ticks are reported separately; application proof is immediate after each encoded delivery; public/private/Event/Control traffic counts are identical in every profile row. Payload counters use canonical Game codec sizes and count each semantic delivery once; transport framing/security are excluded.",
+    "SelectionPolicy": "Scale mode measures the Game replication core and canonical Game-message bytes. It excludes sockets, security, packetization, and client engine/world storage; historical full-network V2/V3 timings are contextual controls, not ratio denominators.",
+    "DirtyEntitySpatialRegionEdgeMillimeters": 128000,
+    "DirtyChunkSpatialRegionEdgeMillimeters": 128000
+  },
+  "TraceTicks": 320,
+  "WarmupTicks": 10,
+  "TimingSamples": 310,
+  "Workloads": [
+    {
+      "Workload": "sparse-scale",
+      "EntityCount": 2048,
+      "RecipientCount": 2048,
+      "TraceTicks": 320,
+      "CommonTraffic": {
+        "PublicFacts": 229440,
+        "PrivateFacts": 0,
+        "EventFacts": 0,
+        "ControlFacts": 0
+      },
+      "AllProfilesConverged": true,
+      "EntityFamilyEquivalent": true,
+      "ChunkFamilyEquivalent": true,
+      "Profiles": [
+        {
+          "Profile": "MaintainedEntityRelation",
+          "Timing": {
+            "Percentiles": {
+              "P50": 12490.176,
+              "P95": 12802.184,
+              "P99": 14079.682,
+              "Max": 14993.174
+            },
+            "SampleCount": 310,
+            "PrimaryEvents": [],
+            "MeasuredManagedBytes": 0,
+            "P50Microseconds": 12490.176,
+            "P95Microseconds": 12802.184,
+            "P99Microseconds": 14079.682
+          },
+          "Work": {
+            "DirtyUnitsProcessed": 231488,
+            "SpatialDiscoveryOperations": 0,
+            "CandidateTests": 0,
+            "RecipientReconciliations": 3094514,
+            "SourceReads": 3094473,
+            "RecordsMaterialized": 3094473,
+            "EncodedGamePayloadBytes": 137240166,
+            "EncodedGameMessages": 290892,
+            "ApplicationProofs": 290892,
+            "MaxPending": 68528,
+            "MaxOutstanding": 0,
+            "ReservedBytes": 783847388
+          },
+          "Memory": {
+            "ProfileMechanismReservedBytes": 783847388,
+            "AuthoritativeSourceHistoryBytes": 0,
+            "HarnessSemanticStateBytes": 209879040,
+            "TotalKnownReservedBytes": 993726428
+          },
+          "Semantic": {
+            "Converged": true,
+            "DrainTicks": 1,
+            "Digest": "988D63710417054F",
+            "DeliveredEntities": 70896,
+            "ExpectedEntities": 70896,
+            "MaxPending": 68528,
+            "MaxOutstanding": 0
+          }
+        }
+      ]
+    }
+  ]
+}
