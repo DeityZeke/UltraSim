@@ -802,8 +802,8 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
     }
     protected int ExpectedVisible(int recipient)
     {
-        long rx = X[Math.Min(recipient, X.Length - 1)];
-        long rz = Z[Math.Min(recipient, Z.Length - 1)];
+        long rx = RecipientX(recipient);
+        long rz = RecipientZ(recipient);
         long radius = Workload.EntityInterest.FarRadiusMillimeters;
         int count = 0;
         for (int entity = 0; entity < X.Length; entity++)
@@ -814,6 +814,8 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
         }
         return count;
     }
+    protected long RecipientX(int recipient) => X[recipient % X.Length];
+    protected long RecipientZ(int recipient) => Z[recipient % Z.Length];
     protected static GameProjectedEntity Projected(int entity, ulong version) => new(
         P03WholeFlowHarness.ReplicationId(entity), true,
         new GameSimulationState { TickMarker = checked((int)version), InputVelocity = entity });
@@ -838,7 +840,7 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
         for (int recipient = 0; recipient < workload.Recipients; recipient++)
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(recipient),
-                P03WholeFlowHarness.Point(X[recipient], Z[recipient]), 0) ==
+                P03WholeFlowHarness.Point(RecipientX(recipient), RecipientZ(recipient)), 0) ==
                 GameInterestUpdateStatus.Success, "Maintained recipient setup failed.");
         for (int entity = 0; entity < workload.Entities; entity++)
             P03WholeFlowHarness.Require(_service.UpsertEntity(
@@ -865,7 +867,7 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
         for (int recipient = 0; recipient < movedRecipients; recipient++)
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(recipient),
-                P03WholeFlowHarness.Point(X[recipient], Z[recipient]),
+                P03WholeFlowHarness.Point(RecipientX(recipient), RecipientZ(recipient)),
                 checked(tick * (long)Workload.TickDurationMilliseconds)) is
                 GameInterestUpdateStatus.Success or GameInterestUpdateStatus.NoChange,
                 "Maintained recipient movement failed.");
@@ -1047,7 +1049,7 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
         for (int recipient = 0; recipient < workload.Recipients; recipient++)
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(recipient),
-                P03WholeFlowHarness.Point(X[recipient], Z[recipient]), 0) ==
+                P03WholeFlowHarness.Point(RecipientX(recipient), RecipientZ(recipient)), 0) ==
                 DirtyEntityUpdateStatus.Success, "DirtyEntity recipient setup failed.");
         for (int entity = 0; entity < workload.Entities; entity++) CommitEntity(entity, 0);
         _servers = new RemoteDirtyEntitySpatialFanoutServer[sessions.Length];
@@ -1069,7 +1071,7 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
         for (int recipient = 0; recipient < movedRecipients; recipient++)
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(recipient),
-                P03WholeFlowHarness.Point(X[recipient], Z[recipient]),
+                P03WholeFlowHarness.Point(RecipientX(recipient), RecipientZ(recipient)),
                 checked(tick * (long)Workload.TickDurationMilliseconds)) is
                 DirtyEntityUpdateStatus.Success or DirtyEntityUpdateStatus.NoChange,
                 "DirtyEntity recipient movement failed.");
@@ -1523,7 +1525,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 "Chunk scheduler registration failed.");
             P03WholeFlowHarness.Require(recipient.Reconcile(
                 Source, GameWorldState.DefaultSpace,
-                P03WholeFlowHarness.Position(X[index], Z[index]), _changes,
+                P03WholeFlowHarness.Position(RecipientX(index), RecipientZ(index)), _changes,
                 out OfflineDirectChunkReconcileResult result) ==
                 OfflineDirectChunkReconcileStatus.Reconciled,
                 "Chunk recipient setup reconciliation failed.");
@@ -1531,7 +1533,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _recipientIds[index], _changes.AsSpan(0, result.ChangeCount), result),
                 "Chunk scheduler setup reconciliation failed.");
             Caches[index] = CreateCache(Math.Min(
-                subscriptions, checked(CountSubscriptions(X[index], Z[index]) + 64)));
+                subscriptions, checked(CountSubscriptions(RecipientX(index), RecipientZ(index)) + 64)));
             OfflineDirectChunkSubscriptionView initial = recipient.Subscriptions;
             for (int subscription = 0; subscription < initial.Length; subscription++)
                 StageEmpty(Caches[index], initial[subscription].Interest.Key);
@@ -1566,7 +1568,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         for (int index = 0; index < movedRecipients; index++)
         {
             OfflineDirectChunkReconcileStatus status = _servers[index].Reconcile(
-                GameWorldState.DefaultSpace, P03WholeFlowHarness.Position(X[index], Z[index]),
+                GameWorldState.DefaultSpace,
+                P03WholeFlowHarness.Position(RecipientX(index), RecipientZ(index)),
                 _changes, out OfflineDirectChunkReconcileResult result);
             P03WholeFlowHarness.Require(status == OfflineDirectChunkReconcileStatus.Reconciled,
                 "Chunk recipient movement reconciliation failed.");
@@ -1714,10 +1717,10 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
         for (int index = 0; index < workload.Recipients; index++)
         {
             Caches[index] = CreateCache(Math.Min(
-                subscriptions, checked(CountSubscriptions(X[index], Z[index]) + 64)));
+                subscriptions, checked(CountSubscriptions(RecipientX(index), RecipientZ(index)) + 64)));
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(index), GameWorldState.DefaultSpace,
-                P03WholeFlowHarness.Position(X[index], Z[index]), 0, _changes,
+                P03WholeFlowHarness.Position(RecipientX(index), RecipientZ(index)), 0, _changes,
                 out OfflineDirectChunkReconcileResult result) ==
                 DirtyChunkRecipientUpdateStatus.Reconciled,
                 "DirtyChunk recipient setup failed.");
@@ -1770,7 +1773,8 @@ internal sealed class P03DirtyChunkRemoteAdapter : P03ChunkRemoteAdapterBase
         {
             P03WholeFlowHarness.Require(_service.SetRecipientAnchor(
                 P03WholeFlowHarness.Participant(index), GameWorldState.DefaultSpace,
-                P03WholeFlowHarness.Position(X[index], Z[index]), checked((ulong)tick),
+                P03WholeFlowHarness.Position(RecipientX(index), RecipientZ(index)),
+                checked((ulong)tick),
                 _changes, out OfflineDirectChunkReconcileResult result) is
                 DirtyChunkRecipientUpdateStatus.Reconciled or
                 DirtyChunkRecipientUpdateStatus.NoChange,
