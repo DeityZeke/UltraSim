@@ -105,8 +105,20 @@ chunk snapshot/delta/absence and applied-proof messages. `RemoteChunkWorldStateC
 and `ClientWorldSemanticCache` remain profile-neutral. Commit gaps, publication
 history invalidation, source epoch replacement, capacity exhaustion, rejected
 proofs, and stale lineage all fail closed into bounded current-truth recovery.
-`ChunkPublication` remains selected, and P0.2 introduces no generic runtime
-replication interface.
+Every retained delivery has a bounded age. Expiry rearms the matching semantic
+row without advancing knowledge; a later proof for the expired lineage is stale.
+The remote adapter expires the same lineage, drains superseded entries from its
+own ledger, and cancels an in-progress Bulk snapshot through the existing
+snapshot-cancel message. Non-keyed scheduling scans all pending rows when a
+lower-interest row is not due, so deferred Far work cannot head-of-line block an
+eligible Immediate obligation. `ChunkPublication` remains selected, and P0.2
+introduces no generic runtime replication interface.
+
+P0.2 evidence covers clean/dirty work shape, distributed dirty-key discovery,
+canonical `ChunkPublication` trace equivalence, coalescing, spatial candidates,
+clean entry/leave/re-entry, cadence, capacity transactions, history and epoch
+recovery, source absence, lost-proof retry, snapshot timeout, lane-family
+coexistence, warmed allocation, and an end-to-end protocol peer.
 
 ## Ownership
 

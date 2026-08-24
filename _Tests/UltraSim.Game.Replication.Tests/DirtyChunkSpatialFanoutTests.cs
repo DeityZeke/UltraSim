@@ -339,6 +339,159 @@ internal static class DirtyChunkSpatialFanoutTests
             service.TryAcknowledgeDelivery(first, delivery.DeliveryId, true));
     }
 
+    internal static void ExistingRecipientExpansionIsTransactional()
+    {
+        using var fixture = new Fixture(16, 2);
+        var interest = new ChunkInterestProfile(5_000, 5_500, 5_500, 6_000, 6_000, 7_000);
+        var service = Create(fixture, maximumRecipients: 2, maximumRecipientChunkRows: 3,
+            interest: interest);
+        ParticipantId first = new(16);
+        ParticipantId second = new(17);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(1, service.GetSnapshot().RecipientChunkKnowledgeRowCount);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(second, GameWorldState.DefaultSpace,
+                Position(0, 0, 15_500, 8_000), 0));
+        // R2 owns (0,0) and (1,0); R1 owns (0,0). R1's move retains (0,0) and enters (1,0).
+        Equal(3, service.GetSnapshot().RecipientChunkKnowledgeRowCount);
+        Equal(DirtyChunkRecipientUpdateStatus.CapacityExceeded,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+                Position(0, 0, 15_500, 8_000), 1));
+        DirtyChunkSpatialFanoutSnapshot snapshot = service.GetSnapshot();
+        Equal(2, snapshot.RecipientCount);
+        Equal(3, snapshot.RecipientChunkKnowledgeRowCount);
+        Equal(3, snapshot.PendingChunkObligationCount);
+    }
+
+    internal static void LostProofExpiresAndRetries()
+    {
+        using var fixture = new Fixture(16, 2);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumDeliveryAgeSteps: 3);
+        ParticipantId participant = new(18);
+        SpatialChunkKey key = Key(0, 0);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        service.TryProcessDirtyChunks(0, out _);
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(participant, key, 0, out DirtyChunkDelivery lost));
+        Equal(1, service.GetSnapshot().OutstandingDeliveryCount);
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(participant, key, 3, out DirtyChunkDelivery retry));
+        True(retry.DeliveryId != lost.DeliveryId);
+        DirtyChunkSpatialFanoutSnapshot expired = service.GetSnapshot();
+        Equal(1UL, expired.DeliveryTimeouts);
+        Equal(DirtyChunkAppliedProofStatus.Stale,
+            service.TryAcknowledgeDelivery(participant, lost.DeliveryId, applied: true));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(participant, retry.DeliveryId, applied: true));
+        Equal(1UL, service.GetSnapshot().ApplicationProofsApplied);
+    }
+
+    internal static void DeferredRowDoesNotBlockImmediate()
+    {
+        using var fixture = new Fixture(32, 2);
+        fixture.Present(0, Position(-1, 0, 8_000, 8_000));
+        fixture.Present(1, Position(0, 0, 8_000, 8_000));
+        var service = Create(fixture, maximumRecipients: 1,
+            cadence: new OfflineDirectChunkCadence(1, 2, 4),
+            interest: new ChunkInterestProfile(8_000, 8_500, 9_000, 10_000, 14_000, 16_000));
+        ParticipantId participant = new(19);
+        SpatialChunkKey far = Key(-1, 0);
+        SpatialChunkKey immediate = Key(0, 0);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 15_000, 8_000), 0);
+        service.TryProcessDirtyChunks(0, out _);
+        while (service.TryBuildDelivery(participant, 0, out DirtyChunkDelivery initial) ==
+               DirtyChunkBuildStatus.Success)
+            Equal(DirtyChunkAppliedProofStatus.Applied,
+                service.TryAcknowledgeDelivery(participant, initial.DeliveryId, true));
+
+        fixture.PresentBatch([
+            Position(-1, 0, 8_100, 8_000),
+            Position(0, 0, 8_100, 8_000)]);
+        service.TryProcessDirtyChunks(1, out _);
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(participant, 1, out DirtyChunkDelivery delivery));
+        Equal(immediate, delivery.Key);
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(participant, delivery.DeliveryId, true));
+    }
+
+    internal static void DistributedDirtyWorkShape()
+    {
+        using var fixture = new Fixture(32, 8);
+        fixture.PresentBatch([
+            Position(0, 0, 2_000, 2_000),
+            Position(1, 0, 2_000, 2_000),
+            Position(2, 0, 2_000, 2_000)]);
+        var interest = new ChunkInterestProfile(5_000, 5_500, 5_500, 6_000, 6_000, 7_000);
+        var service = Create(fixture, maximumRecipients: 3, interest: interest);
+        ParticipantId first = new(20);
+        ParticipantId second = new(21);
+        ParticipantId third = new(22);
+        service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        service.SetRecipientAnchor(second, GameWorldState.DefaultSpace,
+            Position(1, 0, 8_000, 8_000), 0);
+        service.SetRecipientAnchor(third, GameWorldState.DefaultSpace,
+            Position(2, 0, 8_000, 8_000), 0);
+        Equal(DirtyChunkProcessStatus.Success,
+            service.TryProcessDirtyChunks(0, out int processed));
+        Equal(3, processed);
+        DirtyChunkSpatialFanoutSnapshot snapshot = service.GetSnapshot();
+        Equal(3UL, snapshot.SpatialRecipientDiscoveryOperations);
+        Equal(3UL, snapshot.InterestedRecipientsDiscovered);
+        True(snapshot.CandidateRecipientsExamined < 9);
+        Apply(service, first, Key(0, 0), 0);
+        Apply(service, second, Key(1, 0), 0);
+        Apply(service, third, Key(2, 0), 0);
+    }
+
+    internal static void MatchesCanonicalChunkPublicationTrace()
+    {
+        using var fixture = new Fixture(32, 2);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var interest = new ChunkInterestProfile(5_000, 5_500, 5_500, 6_000, 6_000, 7_000);
+        var cadence = new OfflineDirectChunkCadence(1, 1, 1);
+        var canonical = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(4, 16, 16), interest, cadence);
+        Span<OfflineDirectChunkSubscriptionChange> changes = stackalloc OfflineDirectChunkSubscriptionChange[8];
+        Equal(OfflineDirectChunkReconcileStatus.Reconciled,
+            canonical.Reconcile(fixture.Store, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), changes, out _));
+        var service = Create(fixture, maximumRecipients: 1, cadence: cadence, interest: interest);
+        ParticipantId participant = new(23);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        service.TryProcessDirtyChunks(0, out _);
+        Equal(OfflineDirectChunkReadStatus.Snapshot,
+            canonical.TryBeginRead(fixture.Store, 0, 0, out OfflineDirectChunkRead canonicalFirst));
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(participant, Key(0, 0), 0, out DirtyChunkDelivery dirtyFirst));
+        Equal(canonicalFirst.Status, dirtyFirst.Status);
+        Equal(canonicalFirst.Batch.Cursor, dirtyFirst.Cursor);
+        Equal(canonicalFirst.Snapshot.Length, dirtyFirst.Snapshot.Length);
+        Equal(canonicalFirst.Snapshot[0], dirtyFirst.Snapshot[0]);
+        OfflineDirectChunkDeliveryTicket canonicalTicket = canonical.ReleaseReadForRemote(1);
+        Equal(OfflineDirectChunkAppliedProofStatus.Applied,
+            canonical.CommitAppliedProof(canonicalTicket));
+        Equal(DirtyChunkAppliedProofStatus.Applied,
+            service.TryAcknowledgeDelivery(participant, dirtyFirst.DeliveryId, true));
+
+        fixture.Present(0, Position(0, 0, 2_100, 2_000));
+        canonical.TryBeginRead(fixture.Store, 0, 1, out OfflineDirectChunkRead canonicalSecond);
+        service.TryProcessDirtyChunks(1, out _);
+        Equal(DirtyChunkBuildStatus.Success,
+            service.TryBuildDelivery(participant, Key(0, 0), 1, out DirtyChunkDelivery dirtySecond));
+        Equal(canonicalSecond.Status, dirtySecond.Status);
+        Equal(canonicalSecond.Batch.Cursor, dirtySecond.Cursor);
+        Equal(canonicalSecond.Deltas.Length, dirtySecond.Deltas.Length);
+        Equal(canonicalSecond.Deltas[0], dirtySecond.Deltas[0]);
+    }
+
     internal static void WarmedPathAllocatesZero()
     {
         using var fixture = new Fixture(32, 4);
@@ -405,6 +558,147 @@ internal static class DirtyChunkSpatialFanoutTests
         Equal(service.Source.Epoch, info.PublicationCursor.Epoch);
     }
 
+    internal static void RemoteLostProofRetriesAndDrains()
+    {
+        using var fixture = new Fixture(32, 4);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 1,
+            maximumOutstandingDeliveries: 1, maximumDeliveryAgeSteps: 2,
+            interest: new ChunkInterestProfile(5_000, 5_500, 5_500, 6_000, 6_000, 7_000));
+        ParticipantId participant = new(24);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            default,
+            out ProtocolLoopback? created,
+            out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyChunkSpatialFanoutServer(
+            loopback.Server, service, participant, 0xD204);
+        var cache = new ClientWorldSemanticCache(
+            fixture.Bound, new ClientWorldSemanticCacheLimits(8, 32, 16, 16, 32));
+        True(cache.TryRequest(Key(0, 0), out ClientSemanticChunkHandle residentHandle, out _));
+        True(cache.TryStageFromBaseWorld(residentHandle, [], default, out _));
+        True(cache.TryPublish(residentHandle, out _));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xD204, maximumDeltaRecords: 16, maximumPendingProofs: 16);
+
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(0));
+        True(server.TryProgress());
+        loopback.Pump();
+        loopback.Pump();
+        DrainClient(loopback, client);
+        for (int step = 0; step < 4; step++)
+        {
+            loopback.Pump();
+            DrainClient(loopback, client);
+        }
+        client.TryProgress(); // Application succeeds; its proof remains deliberately undelivered.
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(2));
+        True(server.TryProgress());
+        RemoteDirtyChunkSpatialFanoutServerSnapshot retried = server.GetSnapshot();
+        Equal(1, retried.OutstandingDeliveries);
+        Equal(1UL, retried.DeliveryTimeouts);
+
+        for (int step = 0; step < 8 && server.GetSnapshot().ApplicationProofs == 0; step++)
+        {
+            loopback.Pump();
+            DrainClient(loopback, client); // Repeated semantic truth is a safe duplicate.
+            client.TryProgress();
+            DrainServer(loopback, server); // The old proof is stale at the adapter ledger.
+        }
+        Equal(1UL, server.GetSnapshot().ApplicationProofs);
+        Equal(1UL, service.GetSnapshot().ApplicationProofsApplied);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+    }
+
+    internal static void SnapshotTimeoutIsBounded()
+    {
+        using var fixture = new Fixture(16, 2);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 1,
+            maximumOutstandingDeliveries: 1, maximumDeliveryAgeSteps: 2,
+            interest: new ChunkInterestProfile(5_000, 5_500, 5_500, 6_000, 6_000, 7_000));
+        ParticipantId participant = new(25);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            default,
+            out ProtocolLoopback? created,
+            out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyChunkSpatialFanoutServer(
+            loopback.Server, service, participant, 0xD205);
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(0));
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+        True(server.GetSnapshot().SnapshotTransferActive);
+        Equal(1, server.ExpireOutstandingDeliveries(2));
+        RemoteDirtyChunkSpatialFanoutServerSnapshot expired = server.GetSnapshot();
+        Equal(0, expired.OutstandingDeliveries);
+        Equal(1UL, expired.SnapshotTimeouts);
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(2));
+    }
+
+    internal static void FamiliesCoexistAndPrivateDoesNotLeak()
+    {
+        using var fixture = new Fixture(16, 2);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000));
+        var service = Create(fixture, maximumRecipients: 1);
+        ParticipantId participant = new(26);
+        service.SetRecipientAnchor(participant, GameWorldState.DefaultSpace,
+            Position(0, 0, 8_000, 8_000), 0);
+        True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            default,
+            out ProtocolLoopback? created,
+            out _, UltraSimGameProtocol.Manifest));
+        using ProtocolLoopback loopback = created!;
+        var server = new RemoteDirtyChunkSpatialFanoutServer(
+            loopback.Server, service, participant, 0xD206);
+        Equal(DirtyChunkBuildStatus.Success, server.TrySchedule(0));
+
+        Span<byte> controlPayload = stackalloc byte[RemoteClockAnchorMessageCodec.EncodedSize];
+        RemoteClockAnchorMessage control = new()
+        {
+            ApplicationSessionEpoch = 0xD206, StateEpoch = 1, ClockRevision = 1,
+            EffectiveFromSimulationTick = 0, SimulationFrequencyHz = 60,
+            WorldTimeMicroseconds = 0, WorldTimeFractionQuanta = 0,
+        };
+        True(RemoteClockAnchorMessageCodec.TryWriteExact(controlPayload, in control));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteClockAnchorMessageCodec.Descriptor.Id, controlPayload));
+        Span<byte> eventPayload = stackalloc byte[RemoteApplicationEventMessageCodec.EncodedSize];
+        RemoteApplicationEventMessage applicationEvent = new()
+        {
+            ApplicationSessionEpoch = 0xD206, StateEpoch = 1, Sequence = 1,
+            ParticipantId = participant.Value, Kind = 1, Subject = 2, PayloadHash = 3,
+        };
+        True(RemoteApplicationEventMessageCodec.TryWriteExact(eventPayload, in applicationEvent));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteApplicationEventMessageCodec.Descriptor.Id, eventPayload));
+        loopback.Pump();
+        loopback.Pump();
+        int controlMessages = 0;
+        int eventMessages = 0;
+        while (loopback.Server.TryPeekReceived(
+                   out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+        {
+            if (message.MessageId == RemoteClockAnchorMessageCodec.Descriptor.Id) controlMessages++;
+            if (message.MessageId == RemoteApplicationEventMessageCodec.Descriptor.Id) eventMessages++;
+            True(!server.TryProcess(message, payload));
+            True(loopback.Server.TryConsumeReceived());
+        }
+        Equal(1, controlMessages);
+        Equal(1, eventMessages);
+    }
+
     private static void Apply(DirtyChunkSpatialFanout service, ParticipantId participant,
         SpatialChunkKey key, ulong step)
     {
@@ -457,6 +751,8 @@ internal static class DirtyChunkSpatialFanoutTests
         int maximumRecipients = 4,
         int maximumDirtyChunks = 64,
         int maximumRecipientChunkRows = 4_096,
+        int maximumOutstandingDeliveries = 64,
+        ulong maximumDeliveryAgeSteps = 1_024,
         OfflineDirectChunkCadence cadence = default,
         ChunkInterestProfile interest = default) =>
         new(fixture.Store,
@@ -465,10 +761,11 @@ internal static class DirtyChunkSpatialFanoutTests
                 maximumRecipientChunkRows,
                 512,
                 maximumDirtyChunks,
-                64,
+                maximumOutstandingDeliveries,
                 16,
                 16,
-                16_000),
+                16_000,
+                maximumDeliveryAgeSteps),
             interest == default ? GameChunkInterestProfile.Default : interest,
             cadence == default ? new OfflineDirectChunkCadence(1, 1, 1) : cadence);
 

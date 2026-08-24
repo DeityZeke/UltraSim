@@ -16,7 +16,8 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
     int MaximumOutstandingDeliveries,
     int MaximumSnapshotRecords,
     int MaximumDeltaRecords,
-    int SpatialRegionEdgeMillimeters)
+    int SpatialRegionEdgeMillimeters,
+    ulong MaximumDeliveryAgeSteps = 1_024)
 {
     public static DirtyChunkSpatialFanoutLimits Default => new(
         MaximumRecipients: 256,
@@ -26,14 +27,16 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
         MaximumOutstandingDeliveries: 1_024,
         MaximumSnapshotRecords: 64,
         MaximumDeltaRecords: 64,
-        SpatialRegionEdgeMillimeters: 16_000);
+        SpatialRegionEdgeMillimeters: 16_000,
+        MaximumDeliveryAgeSteps: 1_024);
 
     internal void Validate()
     {
         if (MaximumRecipients <= 0 || MaximumRecipientChunkRows <= 0 ||
             MaximumSpatialRegions <= 0 || MaximumDirtyChunks <= 0 ||
             MaximumOutstandingDeliveries <= 0 || MaximumSnapshotRecords <= 0 ||
-            MaximumDeltaRecords <= 0 || SpatialRegionEdgeMillimeters <= 0)
+            MaximumDeltaRecords <= 0 || SpatialRegionEdgeMillimeters <= 0 ||
+            MaximumDeliveryAgeSteps == 0)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecipients));
         if (MaximumSnapshotRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords ||
             MaximumDeltaRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords)
@@ -149,6 +152,7 @@ public readonly record struct DirtyChunkSpatialFanoutSnapshot(
     ulong CommitGapRecoveries,
     ulong SourceEpochRecoveries,
     ulong CapacityFailures,
+    ulong DeliveryTimeouts,
     long ReservedBytes);
 
 /// <summary>
@@ -209,6 +213,7 @@ public sealed class DirtyChunkSpatialFanout
     private ulong _commitGapRecoveries;
     private ulong _sourceEpochRecoveries;
     private ulong _capacityFailures;
+    private ulong _deliveryTimeouts;
 
     public DirtyChunkSpatialFanout(
         ChunkPublicationStore source,
@@ -289,7 +294,7 @@ public sealed class DirtyChunkSpatialFanout
         if (!TryPreflightReconcile(slot.Recipient, space, anchor, out int desiredCount,
                 out int enters, out int leaves))
             return CapacityFailure<DirtyChunkRecipientUpdateStatus>(DirtyChunkRecipientUpdateStatus.CapacityExceeded);
-        if (_rowCount - (isNew ? 0 : CountRows(recipientIndex)) + enters > _limits.MaximumRecipientChunkRows)
+        if (_rowCount - leaves + enters > _limits.MaximumRecipientChunkRows)
             return CapacityFailure<DirtyChunkRecipientUpdateStatus>(DirtyChunkRecipientUpdateStatus.CapacityExceeded);
 
         OfflineDirectChunkReconcileStatus status = slot.Recipient.Reconcile(
@@ -377,6 +382,7 @@ public sealed class DirtyChunkSpatialFanout
     {
         EnsureOwner();
         processed = 0;
+        ExpireOutstandingDeliveries(cadenceStep);
         if (_source.Epoch != _observedEpoch)
             return DirtyChunkProcessStatus.SourceEpochRequiresRecovery;
         DirtyChunkProcessStatus observation = ObserveSource();
@@ -439,13 +445,38 @@ public sealed class DirtyChunkSpatialFanout
         bool useKey)
     {
         EnsureOwner();
+        ExpireOutstandingDeliveries(cadenceStep);
         delivery = default;
         int recipientIndex = FindRecipient(participant);
         if (recipientIndex < 0) return DirtyChunkBuildStatus.UnknownRecipient;
-        int rowIndex = useKey
-            ? FindPendingRow(recipientIndex, key)
-            : FindPendingRow(recipientIndex);
+        if (!useKey)
+        {
+            for (int index = 0; index < _rows.Length; index++)
+            {
+                if (!_rows[index].Active || _rows[index].RecipientIndex != recipientIndex ||
+                    !_rows[index].Pending || _rows[index].PendingWasSent)
+                    continue;
+                DirtyChunkBuildStatus status = TryBuildDeliveryAtRow(
+                    participant, recipientIndex, index, cadenceStep, out delivery);
+                if (status is DirtyChunkBuildStatus.NotDue or DirtyChunkBuildStatus.NoData)
+                    continue;
+                return status;
+            }
+            return DirtyChunkBuildStatus.NoData;
+        }
+        int rowIndex = FindPendingRow(recipientIndex, key);
         if (rowIndex < 0) return DirtyChunkBuildStatus.NoData;
+        return TryBuildDeliveryAtRow(participant, recipientIndex, rowIndex, cadenceStep, out delivery);
+    }
+
+    private DirtyChunkBuildStatus TryBuildDeliveryAtRow(
+        ParticipantId participant,
+        int recipientIndex,
+        int rowIndex,
+        ulong cadenceStep,
+        out DirtyChunkDelivery delivery)
+    {
+        delivery = default;
         ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
         int subscription = FindSubscription(recipientIndex, row.Key);
         if (subscription < 0)
@@ -495,6 +526,7 @@ public sealed class DirtyChunkSpatialFanout
             RecipientIndex = recipientIndex,
             RowIndex = rowIndex,
             Ticket = ticket,
+            SentCadenceStep = cadenceStep,
         };
         _deliveryCount++;
         row.PendingWasSent = true;
@@ -504,6 +536,35 @@ public sealed class DirtyChunkSpatialFanout
             _snapshotScratch.AsSpan(0, read.Snapshot.Length),
             _deltaScratch.AsSpan(0, read.Deltas.Length));
         return DirtyChunkBuildStatus.Success;
+    }
+
+    /// <summary>
+    /// Rearms sent semantic debt whose application proof did not arrive within the bounded
+    /// delivery age. The old proof is then stale; it can never advance knowledge.
+    /// </summary>
+    public int ExpireOutstandingDeliveries(ulong cadenceStep)
+    {
+        EnsureOwner();
+        int expired = 0;
+        for (int index = 0; index < _deliveries.Length; index++)
+        {
+            if (!_deliveries[index].Active ||
+                cadenceStep < _deliveries[index].SentCadenceStep ||
+                cadenceStep - _deliveries[index].SentCadenceStep < _limits.MaximumDeliveryAgeSteps)
+                continue;
+            ref DeliverySlot delivery = ref _deliveries[index];
+            ref DirtyChunkRecipientRow row = ref _rows[delivery.RowIndex];
+            if (row.Active && row.Pending && row.PendingWasSent &&
+                row.PendingDeliveryId == delivery.Ticket.DeliveryId)
+            {
+                row.PendingWasSent = false;
+                row.PendingDeliveryId = 0;
+            }
+            ClearDelivery(index);
+            expired++;
+            if (_deliveryTimeouts != ulong.MaxValue) _deliveryTimeouts++;
+        }
+        return expired;
     }
 
     /// <summary>Records the only knowledge-changing event: a matching semantic application proof.</summary>
@@ -580,6 +641,12 @@ public sealed class DirtyChunkSpatialFanout
         return true;
     }
 
+    internal bool IsDeliveryActive(ParticipantId participant, ulong deliveryId)
+    {
+        EnsureOwner();
+        return FindDelivery(participant, deliveryId) >= 0;
+    }
+
     public DirtyChunkSpatialFanoutSnapshot GetSnapshot()
     {
         EnsureOwner();
@@ -625,7 +692,7 @@ public sealed class DirtyChunkSpatialFanout
             _dirtyObligationCoalesces, cadenceDeferrals, publicationReads, deltaReads,
             snapshotFallbacks, absenceReads, _applicationProofsApplied,
             _duplicateStaleRejectedProofs, _commitGapRecoveries, _sourceEpochRecoveries,
-            _capacityFailures, reserved);
+            _capacityFailures, _deliveryTimeouts, reserved);
     }
 
     private DirtyChunkProcessStatus ObserveSource()
@@ -853,23 +920,6 @@ public sealed class DirtyChunkSpatialFanout
             if (comparison == 0) return middle;
             if (comparison < 0) low = middle + 1; else high = middle - 1;
         }
-        return -1;
-    }
-
-    private int CountRows(int recipientIndex)
-    {
-        int count = 0;
-        for (int index = 0; index < _rows.Length; index++)
-            if (_rows[index].Active && _rows[index].RecipientIndex == recipientIndex) count++;
-        return count;
-    }
-
-    private int FindPendingRow(int recipientIndex)
-    {
-        for (int index = 0; index < _rows.Length; index++)
-            if (_rows[index].Active && _rows[index].RecipientIndex == recipientIndex &&
-                _rows[index].Pending && !_rows[index].PendingWasSent)
-                return index;
         return -1;
     }
 
@@ -1147,6 +1197,7 @@ public sealed class DirtyChunkSpatialFanout
         internal OfflineDirectChunkDeliveryTicket Ticket;
         internal int RecipientIndex;
         internal int RowIndex;
+        internal ulong SentCadenceStep;
         internal bool Active;
     }
 

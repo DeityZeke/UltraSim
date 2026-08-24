@@ -15,6 +15,10 @@ public readonly record struct RemoteDirtyChunkSpatialFanoutServerSnapshot(
     DirtyChunkBuildStatus LastBuildStatus,
     DirtyChunkProcessStatus LastProcessStatus,
     int OutstandingDeliveries,
+    ulong DeliveryTimeouts,
+    ulong SnapshotTimeouts,
+    bool SnapshotTransferActive,
+    bool SnapshotCancelPending,
     long ReservedBytes);
 
 /// <summary>
@@ -47,10 +51,14 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     private int _snapshotLength;
     private int _snapshotSegmentCount;
     private int _snapshotNextSegment;
+    private ulong _snapshotStartedStep;
+    private RemoteChunkSnapshotCancelMessage _pendingCancel;
     private ulong _deliveriesQueued;
     private ulong _applicationProofs;
     private ulong _applicationRejections;
     private ulong _malformedProofs;
+    private ulong _deliveryTimeouts;
+    private ulong _snapshotTimeouts;
     private DirtyChunkBuildStatus _lastBuildStatus = DirtyChunkBuildStatus.NoData;
     private DirtyChunkProcessStatus _lastProcessStatus = DirtyChunkProcessStatus.NoData;
 
@@ -84,6 +92,7 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     public DirtyChunkBuildStatus TrySchedule(ulong cadenceStep)
     {
         EnsureOwner();
+        ExpireOutstandingDeliveries(cadenceStep);
         _lastProcessStatus = _fanout.TryProcessDirtyChunks(cadenceStep, out _);
         if (_lastProcessStatus == DirtyChunkProcessStatus.CapacityExceeded)
         {
@@ -98,7 +107,7 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         _lastBuildStatus = _fanout.TryBuildDelivery(
             _participant, cadenceStep, out DirtyChunkDelivery delivery);
         if (_lastBuildStatus != DirtyChunkBuildStatus.Success) return _lastBuildStatus;
-        if (!TryQueueDelivery(in delivery))
+        if (!TryQueueDelivery(in delivery, cadenceStep))
         {
             _fanout.AbandonDelivery(_participant, delivery.DeliveryId);
             _lastBuildStatus = DirtyChunkBuildStatus.CapacityExceeded;
@@ -138,6 +147,15 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     public bool TryProgress()
     {
         EnsureOwner();
+        if (_pendingCancel.DeliveryId != 0)
+        {
+            if (!UltraSimGameProtocol.TryWriteChunkSnapshotCancel(
+                    _messageScratch, in _pendingCancel, out int cancelBytes) ||
+                _peer.TryQueue(RemoteChunkSnapshotCancelMessageCodec.Descriptor.Id,
+                    _messageScratch.AsSpan(0, cancelBytes)) != NetworkQueueStatus.Accepted)
+                return false;
+            _pendingCancel = default;
+        }
         if (!_snapshotActive) return true;
         if (!_snapshotBeginQueued)
         {
@@ -209,17 +227,60 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         _snapshotLength = 0;
         _snapshotSegmentCount = 0;
         _snapshotNextSegment = 0;
+        _snapshotStartedStep = 0;
         return true;
+    }
+
+    /// <summary>
+    /// Expires both the adapter's transport ledger and the core's matching semantic delivery
+    /// ledger. Superseded core deliveries are also removed so old lineages cannot consume adapter
+    /// capacity until their proof timeout.
+    /// </summary>
+    public int ExpireOutstandingDeliveries(ulong cadenceStep)
+    {
+        EnsureOwner();
+        int expired = 0;
+        bool snapshotDeliveryExpired = false;
+        if (_snapshotActive)
+        {
+            bool coreGone = !_fanout.IsDeliveryActive(_participant, _snapshotTicket.DeliveryId);
+            bool timedOut = IsExpired(_snapshotStartedStep, cadenceStep);
+            if (coreGone || timedOut)
+            {
+                _fanout.AbandonDelivery(_participant, _snapshotTicket.DeliveryId);
+                if (_snapshotBeginQueued) QueueCancel(_snapshotTicket);
+                ClearSnapshotTransfer();
+                if (timedOut)
+                {
+                    _snapshotTimeouts++;
+                    snapshotDeliveryExpired = true;
+                    expired++;
+                }
+            }
+        }
+        for (int index = 0; index < _outstanding.Length; index++)
+        {
+            if (!_outstanding[index].Active) continue;
+            DeliveryLineage lineage = _outstanding[index];
+            bool coreGone = !_fanout.IsDeliveryActive(_participant, lineage.Ticket.DeliveryId);
+            bool timedOut = IsExpired(lineage.SentCadenceStep, cadenceStep);
+            if (!coreGone && !timedOut) continue;
+            _fanout.AbandonDelivery(_participant, lineage.Ticket.DeliveryId);
+            RemoveOutstanding(index);
+            if (timedOut && !snapshotDeliveryExpired)
+            {
+                _deliveryTimeouts++;
+                expired++;
+            }
+        }
+        return expired;
     }
 
     public bool ReplaceSource(ChunkPublicationStore source)
     {
         EnsureOwner();
         if (!_fanout.ReplaceSource(source)) return false;
-        _snapshotActive = false;
-        _snapshotBeginQueued = false;
-        _snapshotTicket = default;
-        _snapshotHeader = default;
+        CancelActiveSnapshot();
         for (int index = 0; index < _outstanding.Length; index++)
             if (_outstanding[index].Active)
             {
@@ -236,13 +297,15 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         return new(
             _deliveriesQueued, _applicationProofs, _applicationRejections, _malformedProofs,
             _lastBuildStatus, _lastProcessStatus, _outstandingCount,
+            _deliveryTimeouts, _snapshotTimeouts, _snapshotActive,
+            _pendingCancel.DeliveryId != 0,
             checked((long)_snapshotRecords.Length * Unsafe.SizeOf<RemoteChunkPublicRecord>() +
                 (long)_deltaRecords.Length * Unsafe.SizeOf<RemoteChunkDeltaRecord>() +
                 _messageScratch.Length + _snapshotPayload.Length +
                 (long)_outstanding.Length * Unsafe.SizeOf<DeliveryLineage>()));
     }
 
-    private bool TryQueueDelivery(in DirtyChunkDelivery delivery)
+    private bool TryQueueDelivery(in DirtyChunkDelivery delivery, ulong cadenceStep)
     {
         if (delivery.Status == OfflineDirectChunkReadStatus.Snapshot)
         {
@@ -263,7 +326,8 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
                 return false;
             _snapshotTicket = delivery.Ticket;
             _snapshotActive = true;
-            AddOutstanding(delivery.Ticket);
+            _snapshotStartedStep = cadenceStep;
+            AddOutstanding(delivery.Ticket, cadenceStep);
             return true;
         }
 
@@ -296,7 +360,7 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         if (written > _peer.MaximumUnfragmentedMessageBytes ||
             _peer.TryQueue(messageId, _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
             return false;
-        AddOutstanding(delivery.Ticket);
+        AddOutstanding(delivery.Ticket, cadenceStep);
         return true;
     }
 
@@ -357,12 +421,15 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         return -1;
     }
 
-    private void AddOutstanding(in OfflineDirectChunkDeliveryTicket ticket)
+    private void AddOutstanding(in OfflineDirectChunkDeliveryTicket ticket, ulong cadenceStep)
     {
         for (int index = 0; index < _outstanding.Length; index++)
             if (!_outstanding[index].Active)
             {
-                _outstanding[index] = new DeliveryLineage { Active = true, Ticket = ticket };
+                _outstanding[index] = new DeliveryLineage
+                {
+                    Active = true, Ticket = ticket, SentCadenceStep = cadenceStep,
+                };
                 _outstandingCount++;
                 return;
             }
@@ -375,6 +442,44 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
         _outstandingCount--;
     }
 
+    private bool IsExpired(ulong sentStep, ulong cadenceStep) =>
+        cadenceStep >= sentStep &&
+        cadenceStep - sentStep >= _fanout.Limits.MaximumDeliveryAgeSteps;
+
+    private void ClearSnapshotTransfer()
+    {
+        _snapshotActive = false;
+        _snapshotBeginQueued = false;
+        _snapshotTicket = default;
+        _snapshotHeader = default;
+        _snapshotLength = 0;
+        _snapshotSegmentCount = 0;
+        _snapshotNextSegment = 0;
+        _snapshotStartedStep = 0;
+    }
+
+    private void CancelActiveSnapshot()
+    {
+        if (!_snapshotActive) return;
+        _fanout.AbandonDelivery(_participant, _snapshotTicket.DeliveryId);
+        if (_snapshotBeginQueued) QueueCancel(_snapshotTicket);
+        ClearSnapshotTransfer();
+    }
+
+    private void QueueCancel(in OfflineDirectChunkDeliveryTicket ticket)
+    {
+        if (ticket.Status != OfflineDirectChunkReadStatus.Snapshot) return;
+        if (_pendingCancel.DeliveryId != 0 &&
+            _pendingCancel.DeliveryId != ticket.DeliveryId)
+            throw new InvalidOperationException("Only one snapshot cancellation may be retained.");
+        _pendingCancel = new RemoteChunkSnapshotCancelMessage
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            PublicationEpoch = ticket.SourceEpoch.Value,
+            DeliveryId = ticket.DeliveryId,
+        };
+    }
+
     private void EnsureOwner()
     {
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
@@ -384,6 +489,7 @@ public sealed class RemoteDirtyChunkSpatialFanoutServer : IRemoteGameProtocolHan
     private struct DeliveryLineage
     {
         internal OfflineDirectChunkDeliveryTicket Ticket;
+        internal ulong SentCadenceStep;
         internal bool Active;
     }
 }
