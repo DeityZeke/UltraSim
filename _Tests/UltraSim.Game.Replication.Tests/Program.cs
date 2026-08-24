@@ -26,6 +26,18 @@ var tests = new (string Name, Action Body)[]
     ("P01DirtyEntityEpochAndProofFencing", DirtyEntitySpatialFanoutTests.EpochAndProofFencing),
     ("P01DirtyEntityWarmedPathAllocatesZero", DirtyEntitySpatialFanoutTests.WarmedPathAllocatesZero),
     ("P01DirtyEntityRemoteProtocolPeerConvergesThroughProof", DirtyEntitySpatialFanoutTests.RemoteProtocolPeerConvergesThroughApplicationProof),
+    ("P02DirtyChunkWorkShapeAndCleanSteadyState", DirtyChunkSpatialFanoutTests.WorkShapeAndCleanSteadyState),
+    ("P02DirtyChunkSameChunkRowsCoalesceIntoOneDiscovery", DirtyChunkSpatialFanoutTests.SameChunkRowsCoalesceIntoOneDiscovery),
+    ("P02DirtyChunkSpatialCandidatesAvoidFarRecipients", DirtyChunkSpatialFanoutTests.SpatialCandidatesAvoidFarRecipientsAndMatchOracle),
+    ("P02DirtyChunkCleanEntryLeaveReentryAndTeleport", DirtyChunkSpatialFanoutTests.CleanEntryLeaveReentryAndTeleportAreFenced),
+    ("P02DirtyChunkImmediateNearFarCadenceAndCoalescing", DirtyChunkSpatialFanoutTests.ImmediateNearFarCadenceAndDeferredCoalescing),
+    ("P02DirtyChunkHistoryCapacityAndEpochRecovery", DirtyChunkSpatialFanoutTests.HistoryFallbackCapacityAndEpochRecoveryAreBounded),
+    ("P02DirtyChunkCommitGapFailsClosed", DirtyChunkSpatialFanoutTests.CommitGapFailsClosedAndRetainsRecovery),
+    ("P02DirtyChunkSourceAbsenceIsNotAoiLeave", DirtyChunkSpatialFanoutTests.SourceAbsenceIsDistinctFromAoiLeave),
+    ("P02DirtyChunkQueueCapacityRetainsAndRecovers", DirtyChunkSpatialFanoutTests.DirtyQueueCapacityRetainsAndRecovers),
+    ("P02DirtyChunkRecipientCapacityIsTransactional", DirtyChunkSpatialFanoutTests.RecipientReconciliationCapacityIsTransactional),
+    ("P02DirtyChunkWarmedPathAllocatesZero", DirtyChunkSpatialFanoutTests.WarmedPathAllocatesZero),
+    ("P02DirtyChunkRemoteNetworkProtocolPeerConverges", DirtyChunkSpatialFanoutTests.RemoteNetworkProtocolPeerConverges),
     ("NetworkProfileIsExplicitAndLocalProfileRetainsSpatialLifecycle", NetworkProfileIsExplicit),
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),
     ("ChangedConsumersIngressAndWarmedCaptureAreIndependentAndBounded", ChangedConsumersIngressAndAllocation),
@@ -100,7 +112,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} MaintainedEntityRelation/ChunkPublication/DirtyEntitySpatialFanout game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} MaintainedEntityRelation/ChunkPublication/DirtyEntitySpatialFanout/DirtyChunkSpatialFanout game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {

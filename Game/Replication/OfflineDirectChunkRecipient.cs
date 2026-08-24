@@ -679,8 +679,8 @@ public sealed class OfflineDirectChunkRecipient
 
         if (ticket.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
         {
-            if (subscription.AppliedRevision.IsValid) return OfflineDirectChunkAppliedProofStatus.Stale;
-            if (subscription.HasKnowledge) return OfflineDirectChunkAppliedProofStatus.Duplicate;
+            if (subscription.HasKnowledge && !subscription.AppliedRevision.IsValid)
+                return OfflineDirectChunkAppliedProofStatus.Duplicate;
             subscription.AppliedRevision = default;
             subscription.HasKnowledge = true;
             _snapshotReads++;

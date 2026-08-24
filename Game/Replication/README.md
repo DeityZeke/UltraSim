@@ -45,7 +45,7 @@ and Network delivery. It depends on the concrete game composition and Runtime;
 
 ## Public replication profiles
 
-`GamePublicReplicationProfiles` names the three concrete profiles and the
+`GamePublicReplicationProfiles` names the four concrete profiles and the
 shared semantic guarantees they must preserve. It deliberately does not hide them
 behind a universal AOI/cursor interface:
 
@@ -65,6 +65,12 @@ DirtyEntitySpatialFanout
     dirty-time spatial recipient discovery + recipient topology reconciliation
     entity latest state; bounded semantic knowledge/debt, no persistent R×E AOI graph
 
+DirtyChunkSpatialFanout
+    DirtyChunkSpatialFanout
+    dirty-time spatial recipient discovery + recipient-local chunk reconciliation
+    ChunkPublicationStore / chunk revision history; bounded recipient chunk knowledge/debt
+    no persistent global Chunk×Recipient reverse subscriber graph
+
 all profiles
     -> Game codec and retained semantic ticket
     -> the same bounded Network delivery machinery
@@ -73,8 +79,34 @@ all profiles
 Permanent paired conformance tests exercise authoritative current truth,
 recipient-scoped disclosure, stable identity/lifetime, sent-not-known application
 proof, rejected/lost-work recovery, eventual convergence, and bounded reservation
-for all three profiles. Their internal types and deeper hostile/performance suites
+for all four profiles. Their internal types and deeper hostile/performance suites
 remain separate. `ChunkPublication` remains the selected current-game profile.
+
+## P0.2 Dirty Chunk Spatial Fanout
+
+`DirtyChunkSpatialFanout` is a concrete fourth profile, not a replacement for
+the selected `ChunkPublication` profile. Its semantic unit remains `Chunk` and
+its authoritative source remains the shared `ChunkPublicationStore` revision
+history. A source commit contributes bounded dirty `SpatialChunkKey` work; keys
+coalesce before drain, and each drained key performs one bounded recipient-anchor
+spatial discovery. Final tier/membership admission is checked against the exact
+`ChunkInterestQuery` semantics.
+
+Recipient anchor regions contain only current recipient spatial links. They do
+not contain chunk subscriber edges or a persistent `Chunk -> Recipient` reverse
+index. Recipient-local chunk rows retain only bounded scope, cursor, pending
+obligation, and proof lineage state. Recipient movement/admission reconciles
+current truth directly, so a clean-world entry can establish an unchanged chunk
+without dirty polling. AOI leave retires that scope and fences its deliveries;
+it is not encoded as authoritative `ChunkAbsent`.
+
+`RemoteDirtyChunkSpatialFanoutServer` is a thin Game adapter over the existing
+chunk snapshot/delta/absence and applied-proof messages. `RemoteChunkWorldStateClient`
+and `ClientWorldSemanticCache` remain profile-neutral. Commit gaps, publication
+history invalidation, source epoch replacement, capacity exhaustion, rejected
+proofs, and stale lineage all fail closed into bounded current-truth recovery.
+`ChunkPublication` remains selected, and P0.2 introduces no generic runtime
+replication interface.
 
 ## Ownership
 
