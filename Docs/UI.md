@@ -82,3 +82,10 @@ wire intent with an unknown action, wrong source/input contract, absent row, or
 disabled action is contained as a semantic rejection; trusted implementation
 exceptions after that boundary remain fatal rather than being disguised as user
 rejection.
+
+I0.8 consumes this path with the native Godot renderer. Admission supplies the
+authorized actor to an owner-bound Inventory view; native list/button input sends
+move, split, equip, and unequip intent through the generic remote UI protocol.
+The open view resnapshots after save/load generation publication, while a fresh
+authenticated application session reconstructs it after reconnect. Inventory
+remains owner/private state and never enters public spatial replication.

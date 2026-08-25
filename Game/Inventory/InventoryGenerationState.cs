@@ -19,6 +19,7 @@ public enum InventoryMutationStatus : byte
     InvariantViolation = 11,
     ContainerNotEmpty = 12,
     ItemPolicyViolation = 13,
+    UnauthorizedContainer = 14,
 }
 
 /// <summary>Authoritative mutation result plus affected runtime entities for immediate projection.</summary>
@@ -260,6 +261,54 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         if (!Index.TryEquipItem(item, source, owner, slot))
             throw new InvalidOperationException("A prevalidated inventory equip was rejected by the index.");
         return Accept(item, Entity.Null, "Equip accepted.");
+    }
+
+    public InventoryMutationResult Unequip(
+        EcsWorld world,
+        Entity item,
+        Entity owner,
+        InventoryEquipSlot slot,
+        Entity destination)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(item))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The item is stale or missing.");
+        if (!world.IsAlive(owner))
+            return Reject(InventoryMutationStatus.MissingEquipOwner, item, "The equipment owner is missing.");
+        if (!Index.ContainsContainer(destination))
+            return Reject(InventoryMutationStatus.MissingContainer, item, "The destination container is missing.");
+        if (slot.ToCapability() == InventoryEquipSlots.None)
+            return Reject(InventoryMutationStatus.InvalidEquipmentSlot, item, "The equipment slot is invalid.");
+        if (!Index.TryGetLocation(item, out InventoryLocation location) ||
+            location.Parent != owner || location.EquipSlot != slot)
+        {
+            return Reject(InventoryMutationStatus.WrongSource, item,
+                "The item is not equipped by the requested owner and slot.");
+        }
+        if (!Index.TryGetEquipped(owner, slot, out Entity indexed) || indexed != item)
+        {
+            return Reject(InventoryMutationStatus.InvariantViolation, item,
+                "The inventory index equipment relationship is inconsistent.");
+        }
+        if (!world.TryRead(item, _itemLookup, out InventoryItem original))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The item component is missing.");
+        if (original.Parent != owner || original.EquipSlot != slot)
+            return Reject(InventoryMutationStatus.InvariantViolation, item,
+                "ECS and inventory index equipment topology disagree.");
+        if (!Index.CanUnequipItem(item, owner, slot, destination))
+        {
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The destination container cannot accept the equipped item.");
+        }
+
+        InventoryItem unequipped = original;
+        unequipped.Parent = destination;
+        unequipped.EquipSlot = InventoryEquipSlot.None;
+        if (!world.TryWrite(item, _itemLookup, unequipped))
+            throw new InvalidOperationException("A validated inventory unequip rejected its ECS update.");
+        if (!Index.TryUnequipItem(item, owner, slot, destination))
+            throw new InvalidOperationException("A prevalidated inventory unequip was rejected by the index.");
+        return Accept(item, Entity.Null, "Unequip accepted.");
     }
 
     public InventoryMutationResult DestroyItem(EcsWorld world, Entity item)

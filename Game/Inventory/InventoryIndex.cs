@@ -411,6 +411,35 @@ public sealed class InventoryIndex : IDisposable
         return true;
     }
 
+    internal bool CanUnequipItem(
+        Entity item,
+        Entity owner,
+        InventoryEquipSlot slot,
+        Entity destination)
+    {
+        EnsureOperational();
+        return slot == InventoryEquipSlot.MainHand &&
+            _locations.TryGetValue(item, out InventoryLocation location) &&
+            location.Parent == owner && location.EquipSlot == slot &&
+            _equipped.TryGetValue((owner, slot), out Entity equipped) && equipped == item &&
+            CanAddContainedItem(destination);
+    }
+
+    internal bool TryUnequipItem(
+        Entity item,
+        Entity owner,
+        InventoryEquipSlot slot,
+        Entity destination)
+    {
+        EnsureOperational();
+        if (!CanUnequipItem(item, owner, slot, destination))
+            return false;
+        _equipped.Remove((owner, slot));
+        _locations.Remove(item);
+        AddChild(item, destination);
+        return true;
+    }
+
     private void AddChild(Entity item, Entity container)
     {
         ContainerEntry entry = _containers[container];

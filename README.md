@@ -131,6 +131,12 @@ the selected dirty-work scheduler, canonical secure chunk protocol, production
 client semantic cache, and Godot renderer. Spawn, movement, interest leave/re-entry,
 destruction, reconnect/resync, and save/load generation replacement are exercised
 without a benchmark-only world adapter.
+The I0.8 native acceptance likewise consumes the existing private-state path:
+authenticated Admission authorizes an owner-bound backpack, the generic remote
+UI protocol carries granular Inventory move/split/equip/unequip operations, and
+the production Godot renderer presents and submits them. Foreign-container
+rejection, stale/duplicate intent, reconnect, and save/load generation
+resynchronization are permanent gates; Inventory contents never enter public AOI.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
@@ -175,6 +181,7 @@ Start with the [documentation map](Docs/README.md).
 - [Persistence](Docs/PERSISTENCE.md)
 - [UI and client projection](Docs/UI.md)
 - [Game composition](Docs/GAME.md)
+- [Inventory](Game/Inventory/README.md)
 - [ECS](Kernels/ECS/README.md)
 - [Network kernel foundation](Kernels/Network/README.md)
 - [Game replication](Game/Replication/README.md)

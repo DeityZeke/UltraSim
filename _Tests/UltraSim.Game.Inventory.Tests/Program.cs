@@ -25,6 +25,8 @@ var tests = new (string Name, Action Body)[]
     ("MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity", MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity),
     ("AccountingAdmissionAndInventoryShareGameGeneration", AccountingAdmissionAndInventoryShareGameGeneration),
     ("InventoryUiPublishesGranularRowDeltas", InventoryUiPublishesGranularRowDeltas),
+    ("OwnedInventoryUiAuthorizesMoveEquipAndUnequip", OwnedInventoryUiAuthorizesMoveEquipAndUnequip),
+    ("OwnedInventoryUiResynchronizesAfterGenerationReplacement", OwnedInventoryUiResynchronizesAfterGenerationReplacement),
     ("InventoryUiRejectsCrossWorldDurableIdentityAba", InventoryUiRejectsCrossWorldDurableIdentityAba),
     ("InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit", InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit),
     ("InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection", InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection),
@@ -40,7 +42,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} corrected S0.7 Game Inventory tests passed.");
+Console.WriteLine($"All {tests.Length} Game Inventory tests passed.");
 
 static void ClosedGameSchemaOwnsFinalInventoryIds()
 {
@@ -161,7 +163,7 @@ static void OwnerlessWorldContainerIsFirstClass()
 static void MoveSplitEquipAreAtomicAndPolicyDriven()
 {
     using Fixture fixture = CreateFixture();
-    fixture.Use((world, _, game) =>
+    fixture.Use((world, _generationId, game) =>
     {
         InventoryGenerationState state = game.Inventory;
         Assert.True(state.TryCreateOwnedContainer(world, game.Content.Backpack, fixture.Character, 4, out Entity pouch));
@@ -184,6 +186,29 @@ static void MoveSplitEquipAreAtomicAndPolicyDriven()
         Assert.True(state.Index.TryGetEquipped(
             fixture.Character, InventoryEquipSlot.MainHand, out Entity equipped));
         Assert.Equal(fixture.Sword, equipped);
+        Assert.True(state.TryCreateOwnedContainer(
+            world, game.Content.Backpack, fixture.Character, 1, out Entity full));
+        Assert.True(state.TryCreateItem(world, full, game.Content.Bread, 1, out _));
+        Assert.Equal(InventoryMutationStatus.CapacityExceeded, state.Unequip(
+            world,
+            fixture.Sword,
+            fixture.Character,
+            InventoryEquipSlot.MainHand,
+            full).Status);
+        Assert.True(state.Index.TryGetEquipped(
+            fixture.Character, InventoryEquipSlot.MainHand, out equipped));
+        Assert.Equal(fixture.Sword, equipped);
+        Assert.True(state.Unequip(
+            world,
+            fixture.Sword,
+            fixture.Character,
+            InventoryEquipSlot.MainHand,
+            fixture.Backpack).Accepted);
+        Assert.False(state.Index.TryGetEquipped(
+            fixture.Character, InventoryEquipSlot.MainHand, out _));
+        InventoryItem unequipped = ReadItem(world, state, fixture.Sword);
+        Assert.Equal(fixture.Backpack, unequipped.Parent);
+        Assert.Equal(InventoryEquipSlot.None, unequipped.EquipSlot);
         return true;
     });
 }
@@ -422,6 +447,123 @@ static void InventoryUiPublishesGranularRowDeltas()
     Assert.Equal(2, client.GetRows(opened.View, InventoryUi.Items).Length);
 }
 
+static void OwnedInventoryUiAuthorizesMoveEquipAndUnequip()
+{
+    using Fixture fixture = CreateFixture();
+    (Entity pouch, Entity foreignBackpack) = fixture.Use((world, _generationId, game) =>
+    {
+        Assert.True(game.Inventory.TryCreateOwnedContainer(
+            world, game.Content.Backpack, fixture.Character, 8, out Entity pouch));
+        Assert.True(world.TryInstantiate(game.Content.Character, out Entity foreignOwner));
+        Assert.True(game.Inventory.TryCreateOwnedContainer(
+            world, game.Content.Backpack, foreignOwner, 8, out Entity foreignBackpack));
+        _ = world.GetOrAssignPersistentId(pouch);
+        _ = world.GetOrAssignPersistentId(foreignOwner);
+        _ = world.GetOrAssignPersistentId(foreignBackpack);
+        return (pouch, foreignBackpack);
+    });
+
+    var client = new UiClientRuntime(new MemoryRenderer());
+    var link = new LocalSemanticLink(client);
+    using var port = new RecordingInventoryUiPort(link);
+    using var controller = new InventoryUiController(fixture.Runtime.Game, port);
+
+    Assert.False(controller.OpenOwned(foreignBackpack, fixture.Character).Succeeded);
+    Assert.False(controller.OpenOwned(
+        fixture.Backpack, fixture.Character, foreignBackpack).Succeeded);
+    Assert.Equal(0, client.OpenViewCount);
+
+    InventoryUiOpenResult backpack = controller.OpenOwned(
+        fixture.Backpack, fixture.Character, pouch);
+    Assert.True(backpack.Succeeded);
+    UiRowId bread = FindRow(client.GetRows(backpack.View, InventoryUi.Items), "Bread");
+    UiRowId pouchRow = client.GetRows(backpack.View, InventoryUi.TransferDestinations)[0].Id;
+    client.SubmitAction(backpack.View, InventoryUi.Select, bread);
+    client.SubmitAction(backpack.View, InventoryUi.MoveTo, pouchRow);
+    Assert.SequenceEqual(new[] { UiListDeltaKind.Remove }, port.LastListKinds);
+    Assert.Equal(1, client.GetRows(backpack.View, InventoryUi.Items).Length);
+    Assert.Equal(pouch, fixture.Use((world, _, game) =>
+        ReadItem(world, game.Inventory, fixture.Bread).Parent));
+    Assert.True(controller.Close(backpack.View));
+
+    InventoryUiOpenResult pouchView = controller.OpenOwned(
+        pouch, fixture.Character, fixture.Backpack);
+    Assert.True(pouchView.Succeeded);
+    bread = FindRow(client.GetRows(pouchView.View, InventoryUi.Items), "Bread");
+    client.SubmitAction(pouchView.View, InventoryUi.Select, bread);
+    client.SubmitAction(pouchView.View, InventoryUi.Split);
+    Assert.SequenceEqual(
+        new[] { UiListDeltaKind.Update, UiListDeltaKind.Add },
+        port.LastListKinds);
+    Assert.Equal(2, client.GetRows(pouchView.View, InventoryUi.Items).Length);
+    Assert.True(controller.Close(pouchView.View));
+
+    backpack = controller.OpenOwned(
+        fixture.Backpack, fixture.Character, pouch);
+    UiRowId sword = FindRow(client.GetRows(backpack.View, InventoryUi.Items), "Iron Sword");
+    client.SubmitAction(backpack.View, InventoryUi.Select, sword);
+    client.SubmitAction(backpack.View, InventoryUi.Equip);
+    Assert.SequenceEqual(new[] { UiListDeltaKind.Update }, port.LastListKinds);
+    UiListRow equipped = client.GetRows(backpack.View, InventoryUi.Items)
+        .ToArray().Single(row => row.Id == sword);
+    Assert.Equal("Main Hand", equipped.Values[2].Text);
+    Assert.True(fixture.Use((_, _, game) => game.Inventory.Index.TryGetEquipped(
+        fixture.Character, InventoryEquipSlot.MainHand, out Entity item) && item == fixture.Sword));
+
+    client.SubmitAction(backpack.View, InventoryUi.Select, sword);
+    client.SubmitAction(backpack.View, InventoryUi.Unequip);
+    UiListRow unequipped = client.GetRows(backpack.View, InventoryUi.Items)
+        .ToArray().Single(row => row.Id == sword);
+    Assert.Equal("Container", unequipped.Values[2].Text);
+    Assert.False(fixture.Use((_, _, game) => game.Inventory.Index.TryGetEquipped(
+        fixture.Character, InventoryEquipSlot.MainHand, out _)));
+}
+
+static void OwnedInventoryUiResynchronizesAfterGenerationReplacement()
+{
+    using Fixture fixture = CreateFixture();
+    GameSaveResult save = fixture.Persistence.TrySave(
+        new SaveSetContext(1, 1), static capture => capture());
+    if (!save.Succeeded)
+        throw new InvalidOperationException("The game save failed.", save.Failure);
+
+    var client = new UiClientRuntime(new MemoryRenderer());
+    var link = new LocalSemanticLink(client);
+    using var port = new RecordingInventoryUiPort(link);
+    using var controller = new InventoryUiController(fixture.Runtime.Game, port);
+    InventoryUiOpenResult opened = controller.OpenOwned(fixture.Backpack, fixture.Character);
+    Assert.True(opened.Succeeded);
+    Assert.True(fixture.Use((world, _, game) => game.Inventory.Equip(
+        world,
+        fixture.Sword,
+        fixture.Backpack,
+        fixture.Character,
+        InventoryEquipSlot.MainHand).Accepted));
+
+    GameLoadResult load = fixture.Persistence.TryLoad();
+
+    Assert.True(load.Succeeded);
+    Assert.Equal(1, controller.OpenViewCount);
+    Assert.Equal(1, client.OpenViewCount);
+    Assert.Equal("Inventory resynchronized.",
+        client.GetValue(opened.View, InventoryUi.Status).Text);
+    Assert.Equal(2, client.GetRows(opened.View, InventoryUi.Items).Length);
+    UiRowId sword = FindRow(client.GetRows(opened.View, InventoryUi.Items), "Iron Sword");
+    UiListRow restored = client.GetRows(opened.View, InventoryUi.Items)
+        .ToArray().Single(row => row.Id == sword);
+    Assert.Equal("Container", restored.Values[2].Text);
+
+    client.SubmitAction(opened.View, InventoryUi.Select, sword);
+    client.SubmitAction(opened.View, InventoryUi.Equip);
+    Assert.True(fixture.Use((world, _, game) =>
+    {
+        Assert.True(world.TryResolvePersistentEntity(fixture.CharacterId, out Entity character));
+        Assert.True(world.TryResolvePersistentEntity(fixture.SwordId, out Entity item));
+        return game.Inventory.Index.TryGetEquipped(
+            character, InventoryEquipSlot.MainHand, out Entity equipped) && equipped == item;
+    }));
+}
+
 static void InventoryUiRejectsCrossWorldDurableIdentityAba()
 {
     using Fixture fixture = CreateFixture();
@@ -464,8 +606,6 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
             staging.World, candidate, out _));
         transferred = true;
         candidate = null;
-
-        client.SubmitAction(opened.View, InventoryUi.Equip);
 
         Assert.Equal(0, controller.OpenViewCount);
         Assert.Equal(0, client.OpenViewCount);

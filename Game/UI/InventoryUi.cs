@@ -14,33 +14,46 @@ public static class InventoryUi
     public static UiSlotId Title => _contract.Title;
     public static UiSlotId Items => _contract.Items;
     public static UiSlotId Status => _contract.Status;
+    public static UiSlotId TransferLabel => _contract.TransferLabel;
+    public static UiSlotId TransferDestinations => _contract.TransferDestinations;
     public static UiSlotId SplitLabel => _contract.SplitLabel;
     public static UiSlotId EquipLabel => _contract.EquipLabel;
+    public static UiSlotId UnequipLabel => _contract.UnequipLabel;
     public static UiActionId Select => _contract.Select;
+    public static UiActionId MoveTo => _contract.MoveTo;
     public static UiActionId Split => _contract.Split;
     public static UiActionId Equip => _contract.Equip;
+    public static UiActionId Unequip => _contract.Unequip;
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.inventory.gump", version: 3);
+        var source = new UiDefinitionBuilder("game.inventory.gump", version: 4);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference items = source.DeclareSlot("items", UiSlotValueKind.List);
         UiSlotReference status = source.DeclareSlot("status", UiSlotValueKind.Text);
+        UiSlotReference transferLabel = source.DeclareSlot("transfer-label", UiSlotValueKind.Text);
+        UiSlotReference transferDestinations = source.DeclareSlot("transfer-destinations", UiSlotValueKind.List);
         UiSlotReference splitLabel = source.DeclareSlot("split-label", UiSlotValueKind.Text);
         UiSlotReference equipLabel = source.DeclareSlot("equip-label", UiSlotValueKind.Text);
+        UiSlotReference unequipLabel = source.DeclareSlot("unequip-label", UiSlotValueKind.Text);
         UiActionReference select = source.DeclareAction("select", acceptsRowContext: true);
+        UiActionReference moveTo = source.DeclareAction("move-to", acceptsRowContext: true);
         UiActionReference split = source.DeclareAction("split");
         UiActionReference equip = source.DeclareAction("equip");
+        UiActionReference unequip = source.DeclareAction("unequip");
         source.AddCanvas(canvas => canvas.AddVertical(
             "content",
             content =>
             {
                 content.AddText("title", title);
                 content.AddList("items", items, select);
+                content.AddText("transfer-label", transferLabel);
+                content.AddList("transfer-destinations", transferDestinations, moveTo);
                 content.AddHorizontal("actions", actions =>
                 {
                     actions.AddButton("split", split, splitLabel);
                     actions.AddButton("equip", equip, equipLabel);
+                    actions.AddButton("unequip", unequip, unequipLabel);
                 });
                 content.AddText("status", status);
             },
@@ -51,11 +64,16 @@ public static class InventoryUi
             definition.Prepare(title),
             definition.Prepare(items),
             definition.Prepare(status),
+            definition.Prepare(transferLabel),
+            definition.Prepare(transferDestinations),
             definition.Prepare(splitLabel),
             definition.Prepare(equipLabel),
+            definition.Prepare(unequipLabel),
             definition.Prepare(select),
+            definition.Prepare(moveTo),
             definition.Prepare(split),
-            definition.Prepare(equip));
+            definition.Prepare(equip),
+            definition.Prepare(unequip));
     }
 
     private sealed record Contract(
@@ -63,11 +81,16 @@ public static class InventoryUi
         UiSlotId Title,
         UiSlotId Items,
         UiSlotId Status,
+        UiSlotId TransferLabel,
+        UiSlotId TransferDestinations,
         UiSlotId SplitLabel,
         UiSlotId EquipLabel,
+        UiSlotId UnequipLabel,
         UiActionId Select,
+        UiActionId MoveTo,
         UiActionId Split,
-        UiActionId Equip);
+        UiActionId Equip,
+        UiActionId Unequip);
 }
 
 /// <summary>Stable definition-cache identity used by the Inventory server workflow.</summary>
@@ -124,6 +147,7 @@ public sealed class InventoryUiController : IDisposable
             InventoryUi.Definition.Key,
             InventoryUi.Definition.Version,
             InventoryUi.Definition.Hash);
+        _runtime.GenerationPublished += HandleGenerationPublished;
     }
 
     public int OpenViewCount { get { EnsureOperational(); return _sessions.Count; } }
@@ -131,8 +155,31 @@ public sealed class InventoryUiController : IDisposable
     public event Action<Exception>? PresentationFaulted;
     public event Action<Exception>? ObserverFaulted;
 
-    public InventoryUiOpenResult Open(Entity container) => OpenCore(container, hot: false);
-    public InventoryUiOpenResult OpenHot(Entity container) => OpenCore(container, hot: true);
+    public InventoryUiOpenResult Open(Entity container) =>
+        OpenCore(container, hot: false, Entity.Null, Array.Empty<Entity>());
+
+    public InventoryUiOpenResult OpenHot(Entity container) =>
+        OpenCore(container, hot: true, Entity.Null, Array.Empty<Entity>());
+
+    /// <summary>
+    /// Opens an owner-private inventory only when the container and every
+    /// explicit transfer destination are currently owned by the same actor.
+    /// The durable owner relationship is retained and revalidated for every
+    /// authoritative action and generation replacement.
+    /// </summary>
+    public InventoryUiOpenResult OpenOwned(
+        Entity container,
+        Entity owner,
+        params Entity[] transferDestinations) =>
+        OpenCore(container, hot: false, owner,
+            transferDestinations ?? throw new ArgumentNullException(nameof(transferDestinations)));
+
+    public InventoryUiOpenResult OpenOwnedHot(
+        Entity container,
+        Entity owner,
+        params Entity[] transferDestinations) =>
+        OpenCore(container, hot: true, owner,
+            transferDestinations ?? throw new ArgumentNullException(nameof(transferDestinations)));
 
     public bool Close(UiViewInstanceId instance)
     {
@@ -161,13 +208,19 @@ public sealed class InventoryUiController : IDisposable
         return true;
     }
 
-    private InventoryUiOpenResult OpenCore(Entity container, bool hot)
+    private InventoryUiOpenResult OpenCore(
+        Entity container,
+        bool hot,
+        Entity requiredOwner,
+        IReadOnlyList<Entity> transferDestinations)
     {
         EnsureOperational();
-        InventoryProjection projection = CaptureProjection(container);
+        InventoryProjection projection = CaptureProjection(
+            container, requiredOwner, transferDestinations);
         if (!projection.Succeeded)
             return new InventoryUiOpenResult(false, UiViewInstanceId.Invalid, projection.Message);
-        UiModel model = CreateModel(projection.Items, projection.Title, "Ready");
+        UiModel model = CreateModel(
+            projection.Items, projection.Destinations, projection.Title, "Ready");
         UiViewInstanceId instance = hot
             ? _ui.OpenHotView(new UiHotOpenView(_cacheKey, model, sequence: 1))
             : _ui.OpenView(new UiOpenView(_cacheKey, InventoryUi.Definition, model, sequence: 1));
@@ -184,7 +237,13 @@ public sealed class InventoryUiController : IDisposable
             TryCloseDetached(instance);
             throw;
         }
-        _sessions.Add(instance, new Session(instance, projection.Container, model, sequence: 1));
+        _sessions.Add(instance, new Session(
+            instance,
+            projection.Container,
+            projection.RequiredOwner,
+            projection.Destinations,
+            model,
+            sequence: 1));
         return new InventoryUiOpenResult(true, instance, "Inventory opened.");
     }
 
@@ -211,6 +270,7 @@ public sealed class InventoryUiController : IDisposable
             "The inventory action did not complete.");
         UiListPatch[] listPatches = Array.Empty<UiListPatch>();
         bool staleWorld = false;
+        bool authorizationLost = false;
         bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, bool>(
                 (world, _, provider) =>
                 {
@@ -245,6 +305,22 @@ public sealed class InventoryUiController : IDisposable
                             "The inventory container is stale or missing.");
                         return true;
                     }
+                    Entity owner = Entity.Null;
+                    if (session.RequiredOwner.IsValid)
+                    {
+                        if (!TryResolve(world, session.RequiredOwner, out owner) ||
+                            !state.TryGetContainerOwner(world, container, out Entity currentOwner) ||
+                            currentOwner != owner)
+                        {
+                            authorizationLost = true;
+                            result = new InventoryMutationResult(
+                                InventoryMutationStatus.UnauthorizedContainer,
+                                item,
+                                Entity.Null,
+                                "The inventory container is no longer owned by the authorized actor.");
+                            return true;
+                        }
+                    }
 
                     if (request.Action == InventoryUi.Split)
                     {
@@ -267,9 +343,44 @@ public sealed class InventoryUiController : IDisposable
                             ];
                         }
                     }
+                    else if (request.Action == InventoryUi.MoveTo)
+                    {
+                        if (!session.TryGetDestination(request.Row, out PersistentEntityKey destinationKey) ||
+                            !TryResolve(world, destinationKey, out Entity destination) ||
+                            !state.Index.ContainsContainer(destination))
+                        {
+                            result = new InventoryMutationResult(
+                                InventoryMutationStatus.MissingContainer,
+                                item,
+                                Entity.Null,
+                                "The transfer destination is stale or missing.");
+                            return true;
+                        }
+                        if (session.RequiredOwner.IsValid &&
+                            (!state.TryGetContainerOwner(world, destination, out Entity destinationOwner) ||
+                             destinationOwner != owner))
+                        {
+                            authorizationLost = true;
+                            result = new InventoryMutationResult(
+                                InventoryMutationStatus.UnauthorizedContainer,
+                                item,
+                                Entity.Null,
+                                "The transfer destination is no longer owned by the authorized actor.");
+                            return true;
+                        }
+                        result = state.Move(world, item, container, destination);
+                        if (result.Accepted)
+                        {
+                            listPatches =
+                            [UiListPatch.Remove(
+                                InventoryUi.Items,
+                                new UiRowId(session.SelectedItem.Entity.Value))];
+                        }
+                    }
                     else if (request.Action == InventoryUi.Equip)
                     {
-                        if (!state.TryGetContainerOwner(world, container, out Entity owner))
+                        if (!owner.IsValid &&
+                            !state.TryGetContainerOwner(world, container, out owner))
                         {
                             result = new InventoryMutationResult(
                                 InventoryMutationStatus.MissingEquipOwner,
@@ -281,8 +392,53 @@ public sealed class InventoryUiController : IDisposable
                         result = state.Equip(world, item, container, owner, InventoryEquipSlot.MainHand);
                         if (result.Accepted)
                         {
+                            if (session.RequiredOwner.IsValid)
+                            {
+                                if (!state.TryProjectItem(world, item, out InventoryItemView equipped))
+                                    throw new InvalidOperationException(
+                                        "An accepted inventory equip produced an unprojectable result.");
+                                listPatches =
+                                [UiListPatch.Update(InventoryUi.Items, ToRow(equipped))];
+                            }
+                            else
+                            {
+                                listPatches =
+                                [UiListPatch.Remove(
+                                    InventoryUi.Items,
+                                    new UiRowId(session.SelectedItem.Entity.Value))];
+                            }
+                        }
+                    }
+                    else if (request.Action == InventoryUi.Unequip)
+                    {
+                        if (!session.RequiredOwner.IsValid || !owner.IsValid)
+                        {
+                            result = new InventoryMutationResult(
+                                InventoryMutationStatus.UnauthorizedContainer,
+                                item,
+                                Entity.Null,
+                                "Unequip requires an owner-authorized inventory view.");
+                            return true;
+                        }
+                        if (!state.TryReadItem(world, item, out InventoryItem equipped) ||
+                            equipped.EquipSlot == InventoryEquipSlot.None)
+                        {
+                            result = new InventoryMutationResult(
+                                InventoryMutationStatus.WrongSource,
+                                item,
+                                Entity.Null,
+                                "The selected item is not equipped.");
+                            return true;
+                        }
+                        result = state.Unequip(
+                            world, item, owner, equipped.EquipSlot, container);
+                        if (result.Accepted)
+                        {
+                            if (!state.TryProjectItem(world, item, out InventoryItemView contained))
+                                throw new InvalidOperationException(
+                                    "An accepted inventory unequip produced an unprojectable result.");
                             listPatches =
-                            [UiListPatch.Remove(InventoryUi.Items, new UiRowId(session.SelectedItem.Entity.Value))];
+                            [UiListPatch.Update(InventoryUi.Items, ToRow(contained))];
                         }
                     }
                     else
@@ -313,7 +469,7 @@ public sealed class InventoryUiController : IDisposable
                 "The inventory action did not complete.");
         }
 
-        if (staleWorld)
+        if (staleWorld || authorizationLost)
         {
             DetachSession(session, new InvalidOperationException(result.Message));
             NotifyObservers(MutationCompleted, result);
@@ -325,50 +481,123 @@ public sealed class InventoryUiController : IDisposable
 
     private void HandleSelection(Session session, UiRowId row)
     {
-        bool found = false;
+        UiListRow selected = default;
         foreach (UiListRow candidate in session.Model.GetRows(InventoryUi.Items))
         {
             if (candidate.Id == row)
             {
-                found = true;
+                selected = candidate;
                 break;
             }
         }
-        if (!found)
+        if (!selected.Id.IsValid)
         {
             session.SelectedItem = default;
-            PublishStatus(session, "Rejected: The selected inventory row is stale.", enableActions: false);
+            PublishStatus(session, "Rejected: The selected inventory row is stale.",
+                DisabledActionPatches());
             return;
         }
         session.SelectedItem = new PersistentEntityKey(
             session.Container.World,
             new PersistentEntityId(row.Value));
-        PublishStatus(session, "Item selected.", enableActions: true);
+        ReadOnlySpan<UiValue> values = selected.Values;
+        bool equipped = values.Length >= 3 &&
+            string.Equals(values[2].Text, "Main Hand", StringComparison.Ordinal);
+        bool splittable = !equipped && values.Length >= 2 &&
+            values[1].Kind == UiValueKind.Number && values[1].Number > 1;
+        PublishStatus(session, "Item selected.",
+            SelectedActionPatches(
+                splittable,
+                canEquip: !equipped,
+                canUnequip: equipped && session.RequiredOwner.IsValid,
+                canMove: !equipped && session.Destinations.Length != 0));
     }
 
-    private InventoryProjection CaptureProjection(Entity container)
+    private InventoryProjection CaptureProjection(
+        Entity container,
+        Entity requiredOwner,
+        IReadOnlyList<Entity> transferDestinations)
     {
         bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, InventoryProjection>(
-            (world, _, provider) =>
-            {
-                InventoryGenerationState state = provider.Inventory;
-                if (!state.Index.ContainsContainer(container))
-                    return new InventoryProjection(false, default, "", [], "The container is missing.");
-                if (!world.TryGetPersistentId(container, out PersistentEntityId id))
-                    return new InventoryProjection(false, default, "", [], "The container has no durable identity.");
-                if (!state.TryGetContainerDefinition(world, container, out InventoryContainerDefinition definition))
-                    return new InventoryProjection(false, default, "", [], "The container content is unknown.");
-                return new InventoryProjection(
-                    true,
-                    new PersistentEntityKey(world.PersistentWorldId, id),
-                    definition.DisplayName,
-                    state.Snapshot(world, container),
-                    "Inventory opened.");
-            },
+            (world, _, provider) => CaptureProjectionCore(
+                world, provider.Inventory, container, requiredOwner, transferDestinations),
             out InventoryProjection projection);
         return ran
             ? projection
-            : new InventoryProjection(false, default, "", [], "The inventory runtime is not running.");
+            : InventoryProjection.Rejected("The inventory runtime is not running.");
+    }
+
+    private static InventoryProjection CaptureProjectionCore(
+        EcsWorld world,
+        InventoryGenerationState state,
+        Entity container,
+        Entity requiredOwner,
+        IReadOnlyList<Entity> transferDestinations)
+    {
+        if (!state.Index.ContainsContainer(container))
+            return InventoryProjection.Rejected("The container is missing.");
+        if (!world.TryGetPersistentId(container, out PersistentEntityId id))
+            return InventoryProjection.Rejected("The container has no durable identity.");
+        if (!state.TryGetContainerDefinition(world, container, out InventoryContainerDefinition definition))
+            return InventoryProjection.Rejected("The container content is unknown.");
+
+        PersistentEntityKey ownerKey = default;
+        var items = state.Snapshot(world, container).ToList();
+        if (requiredOwner.IsValid)
+        {
+            if (!world.IsAlive(requiredOwner) ||
+                !state.TryGetContainerOwner(world, container, out Entity actualOwner) ||
+                actualOwner != requiredOwner ||
+                !world.TryGetPersistentId(requiredOwner, out PersistentEntityId ownerId))
+            {
+                return InventoryProjection.Rejected(
+                    "The container is not owned by the authorized actor.");
+            }
+            ownerKey = new PersistentEntityKey(world.PersistentWorldId, ownerId);
+            if (state.Index.TryGetEquipped(
+                    requiredOwner, InventoryEquipSlot.MainHand, out Entity equipped))
+            {
+                if (!state.TryProjectItem(world, equipped, out InventoryItemView equippedView))
+                    throw new InvalidOperationException(
+                        "The inventory index contains an unprojectable equipped item.");
+                items.Add(equippedView);
+            }
+        }
+        else if (transferDestinations.Count != 0)
+        {
+            return InventoryProjection.Rejected(
+                "Transfer destinations require an owner-authorized inventory view.");
+        }
+
+        var destinations = new InventoryDestination[transferDestinations.Count];
+        var seen = new HashSet<PersistentEntityId>();
+        for (int index = 0; index < transferDestinations.Count; index++)
+        {
+            Entity destination = transferDestinations[index];
+            if (destination == container || !state.Index.ContainsContainer(destination) ||
+                !state.TryGetContainerOwner(world, destination, out Entity destinationOwner) ||
+                destinationOwner != requiredOwner ||
+                !world.TryGetPersistentId(destination, out PersistentEntityId destinationId) ||
+                !seen.Add(destinationId) ||
+                !state.TryGetContainerDefinition(
+                    world, destination, out InventoryContainerDefinition destinationDefinition))
+            {
+                return InventoryProjection.Rejected(
+                    "A transfer destination is invalid, duplicated, or not owned by the authorized actor.");
+            }
+            destinations[index] = new InventoryDestination(
+                new PersistentEntityKey(world.PersistentWorldId, destinationId),
+                destinationDefinition.DisplayName);
+        }
+        items.Sort(static (left, right) => left.PersistentId.CompareTo(right.PersistentId));
+        return new InventoryProjection(
+            true,
+            new PersistentEntityKey(world.PersistentWorldId, id),
+            ownerKey,
+            definition.DisplayName,
+            items.ToArray(),
+            destinations,
+            "Inventory opened.");
     }
 
     private void PublishResult(Session session, InventoryMutationResult result, UiListPatch[] listPatches)
@@ -397,14 +626,16 @@ public sealed class InventoryUiController : IDisposable
         if (result.Accepted)
         {
             session.SelectedItem = default;
-            SetActionState(session.Model, enabled: false);
+            ApplyActionPatches(session.Model, DisabledActionPatches());
         }
     }
 
-    private void PublishStatus(Session session, string status, bool enableActions)
+    private void PublishStatus(
+        Session session,
+        string status,
+        UiActionStatePatch[] actions)
     {
         ulong sequence = checked(session.Sequence + 1);
-        UiActionStatePatch[] actions = enableActions ? EnabledActionPatches() : DisabledActionPatches();
         var delta = new UiModelDelta(
             InventoryUi.Definition.Handle,
             sequence,
@@ -421,7 +652,7 @@ public sealed class InventoryUiController : IDisposable
         }
         session.Sequence = sequence;
         session.Model.SetText(InventoryUi.Status, status);
-        SetActionState(session.Model, enableActions);
+        ApplyActionPatches(session.Model, actions);
     }
 
     private static void ApplyListPatches(UiModel model, ReadOnlySpan<UiListPatch> patches)
@@ -451,15 +682,23 @@ public sealed class InventoryUiController : IDisposable
         model.ReplaceRows(InventoryUi.Items, rows.ToArray());
     }
 
-    private static UiModel CreateModel(IReadOnlyList<InventoryItemView> items, string title, string status)
+    private static UiModel CreateModel(
+        IReadOnlyList<InventoryItemView> items,
+        IReadOnlyList<InventoryDestination> destinations,
+        string title,
+        string status)
     {
         var model = new UiModel(InventoryUi.Definition);
         model.SetText(InventoryUi.Title, title);
         model.ReplaceRows(InventoryUi.Items, ToRows(items));
         model.SetText(InventoryUi.Status, status);
+        model.SetText(InventoryUi.TransferLabel,
+            destinations.Count == 0 ? "No transfer destinations" : "Move selected item to:");
+        model.ReplaceRows(InventoryUi.TransferDestinations, ToRows(destinations));
         model.SetText(InventoryUi.SplitLabel, "Split");
         model.SetText(InventoryUi.EquipLabel, "Equip");
-        SetActionState(model, enabled: false);
+        model.SetText(InventoryUi.UnequipLabel, "Unequip");
+        ApplyActionPatches(model, DisabledActionPatches());
         return model;
     }
 
@@ -479,6 +718,19 @@ public sealed class InventoryUiController : IDisposable
             UiValue.FromText(item.EquipSlot == InventoryEquipSlot.None ? "Container" : "Main Hand"),
         ]);
 
+    private static UiListRow[] ToRows(IReadOnlyList<InventoryDestination> destinations)
+    {
+        var rows = new UiListRow[destinations.Count];
+        for (int index = 0; index < rows.Length; index++)
+        {
+            InventoryDestination destination = destinations[index];
+            rows[index] = new UiListRow(
+                new UiRowId(destination.Key.Entity.Value),
+                [UiValue.FromText(destination.DisplayName)]);
+        }
+        return rows;
+    }
+
     private static bool TryResolve(EcsWorld world, in PersistentEntityKey key, out Entity entity)
     {
         if (key.World == world.PersistentWorldId)
@@ -487,10 +739,16 @@ public sealed class InventoryUiController : IDisposable
         return false;
     }
 
-    private static UiActionStatePatch[] EnabledActionPatches() =>
+    private static UiActionStatePatch[] SelectedActionPatches(
+        bool canSplit,
+        bool canEquip,
+        bool canUnequip,
+        bool canMove) =>
         [
-            new UiActionStatePatch(InventoryUi.Split, UiActionState.Default),
-            new UiActionStatePatch(InventoryUi.Equip, UiActionState.Default),
+            ActionPatch(InventoryUi.Split, canSplit, "Select a splittable contained stack."),
+            ActionPatch(InventoryUi.Equip, canEquip, "Select a contained equippable item."),
+            ActionPatch(InventoryUi.Unequip, canUnequip, "Select an equipped item."),
+            ActionPatch(InventoryUi.MoveTo, canMove, "Select a contained item and destination."),
         ];
 
     private static UiActionStatePatch[] DisabledActionPatches()
@@ -500,16 +758,113 @@ public sealed class InventoryUiController : IDisposable
         [
             new UiActionStatePatch(InventoryUi.Split, disabled),
             new UiActionStatePatch(InventoryUi.Equip, disabled),
+            new UiActionStatePatch(InventoryUi.Unequip, disabled),
+            new UiActionStatePatch(InventoryUi.MoveTo, disabled),
         ];
     }
 
-    private static void SetActionState(UiModel model, bool enabled)
+    private static UiActionStatePatch ActionPatch(
+        UiActionId action,
+        bool enabled,
+        string unavailableReason) =>
+        new(action, enabled ? UiActionState.Default : new UiActionState(false, unavailableReason));
+
+    private static void ApplyActionPatches(
+        UiModel model,
+        ReadOnlySpan<UiActionStatePatch> patches)
     {
-        UiActionState state = enabled
-            ? UiActionState.Default
-            : new UiActionState(false, "Select an inventory row first.");
-        model.SetActionState(InventoryUi.Split, state);
-        model.SetActionState(InventoryUi.Equip, state);
+        foreach (UiActionStatePatch patch in patches)
+            model.SetActionState(patch.Action, patch.State);
+    }
+
+    private void HandleGenerationPublished(ulong generationId)
+    {
+        if (_disposed)
+            return;
+        foreach (Session session in _sessions.Values.ToArray())
+        {
+            InventoryProjection projection = CaptureReplacementProjection(session);
+            if (!projection.Succeeded)
+            {
+                DetachSession(session, new InvalidOperationException(
+                    $"Inventory view could not rebind to generation {generationId}: {projection.Message}"));
+                continue;
+            }
+
+            UiListRow[] itemRows = ToRows(projection.Items);
+            UiListRow[] destinationRows = ToRows(projection.Destinations);
+            UiActionStatePatch[] actions = DisabledActionPatches();
+            ulong sequence = checked(session.Sequence + 1);
+            var delta = new UiModelDelta(
+                InventoryUi.Definition.Handle,
+                sequence,
+                [
+                    new UiScalarSlotPatch(InventoryUi.Title, UiValue.FromText(projection.Title)),
+                    new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText("Inventory resynchronized.")),
+                    new UiScalarSlotPatch(
+                        InventoryUi.TransferLabel,
+                        UiValue.FromText(destinationRows.Length == 0
+                            ? "No transfer destinations"
+                            : "Move selected item to:")),
+                ],
+                [
+                    UiListPatch.Replace(InventoryUi.Items, itemRows),
+                    UiListPatch.Replace(InventoryUi.TransferDestinations, destinationRows),
+                ],
+                actions);
+            try { _ui.UpdateView(new UiUpdateView(session.Instance, delta)); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                DetachSession(session, exception);
+                continue;
+            }
+            session.Sequence = sequence;
+            session.SelectedItem = default;
+            session.Model.SetText(InventoryUi.Title, projection.Title);
+            session.Model.SetText(InventoryUi.Status, "Inventory resynchronized.");
+            session.Model.SetText(
+                InventoryUi.TransferLabel,
+                destinationRows.Length == 0 ? "No transfer destinations" : "Move selected item to:");
+            session.Model.ReplaceRows(InventoryUi.Items, itemRows);
+            session.Model.ReplaceRows(InventoryUi.TransferDestinations, destinationRows);
+            ApplyActionPatches(session.Model, actions);
+        }
+    }
+
+    private InventoryProjection CaptureReplacementProjection(Session session)
+    {
+        bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, InventoryProjection>(
+            (world, _, provider) =>
+            {
+                if (world.PersistentWorldId != session.Container.World ||
+                    !TryResolve(world, session.Container, out Entity container))
+                {
+                    return InventoryProjection.Rejected(
+                        "The replacement generation does not contain the inventory container.");
+                }
+                Entity owner = Entity.Null;
+                if (session.RequiredOwner.IsValid &&
+                    !TryResolve(world, session.RequiredOwner, out owner))
+                {
+                    return InventoryProjection.Rejected(
+                        "The replacement generation does not contain the inventory owner.");
+                }
+                var destinations = new Entity[session.Destinations.Length];
+                for (int index = 0; index < destinations.Length; index++)
+                {
+                    if (!TryResolve(world, session.Destinations[index].Key, out destinations[index]))
+                    {
+                        return InventoryProjection.Rejected(
+                            "The replacement generation does not contain a transfer destination.");
+                    }
+                }
+                return CaptureProjectionCore(
+                    world, provider.Inventory, container, owner, destinations);
+            },
+            out InventoryProjection projection);
+        return ran
+            ? projection
+            : InventoryProjection.Rejected("The inventory runtime is not running.");
     }
 
     private void DetachSession(Session session, Exception failure)
@@ -586,6 +941,7 @@ public sealed class InventoryUiController : IDisposable
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("Inventory UI is bound to its creating owner thread.");
         _disposed = true;
+        _runtime.GenerationPublished -= HandleGenerationPublished;
         Exception? firstFailure = null;
         foreach (UiViewInstanceId instance in _sessions.Keys.ToArray())
         {
@@ -614,25 +970,59 @@ public sealed class InventoryUiController : IDisposable
 
     private sealed class Session
     {
-        internal Session(UiViewInstanceId instance, PersistentEntityKey container, UiModel model, ulong sequence)
+        internal Session(
+            UiViewInstanceId instance,
+            PersistentEntityKey container,
+            PersistentEntityKey requiredOwner,
+            InventoryDestination[] destinations,
+            UiModel model,
+            ulong sequence)
         {
             Instance = instance;
             Container = container;
+            RequiredOwner = requiredOwner;
+            Destinations = destinations;
             Model = model;
             Sequence = sequence;
         }
 
         internal UiViewInstanceId Instance { get; }
         internal PersistentEntityKey Container { get; }
+        internal PersistentEntityKey RequiredOwner { get; }
+        internal InventoryDestination[] Destinations { get; }
         internal PersistentEntityKey SelectedItem { get; set; }
         internal UiModel Model { get; }
         internal ulong Sequence { get; set; }
+
+        internal bool TryGetDestination(UiRowId row, out PersistentEntityKey destination)
+        {
+            foreach (InventoryDestination candidate in Destinations)
+            {
+                if (candidate.Key.Entity.Value == row.Value)
+                {
+                    destination = candidate.Key;
+                    return true;
+                }
+            }
+            destination = default;
+            return false;
+        }
     }
 
     private readonly record struct InventoryProjection(
         bool Succeeded,
         PersistentEntityKey Container,
+        PersistentEntityKey RequiredOwner,
         string Title,
         InventoryItemView[] Items,
-        string Message);
+        InventoryDestination[] Destinations,
+        string Message)
+    {
+        internal static InventoryProjection Rejected(string message) =>
+            new(false, default, default, "", [], [], message);
+    }
+
+    private readonly record struct InventoryDestination(
+        PersistentEntityKey Key,
+        string DisplayName);
 }

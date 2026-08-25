@@ -43,9 +43,17 @@ Rebuild prepares and validates replacement maps before publication. Property and
 fuzz tests protect donor-link repair.
 
 UI projection is separate again. Split produces semantic row update/add deltas;
-equip produces removal. Retained view identity uses `PersistentEntityKey`
-(world + entity), preventing cross-world numeric-ID ABA after generation
-replacement.
+cross-container move produces a removal from the current view; and owner-private
+equip/unequip updates the retained item row between contained and equipped state.
+`OpenOwned` proves the source and explicit transfer destinations share the
+Admission-authorized owner, then retains and revalidates complete
+`PersistentEntityKey` values (world + entity) for every action and generation
+replacement. This prevents foreign-container disclosure and cross-world numeric-ID
+ABA. The unrestricted `Open` route remains trusted composition for ownerless
+world containers, not remote participant authorization.
+
+The [Inventory subsystem contract](../Game/Inventory/README.md) records the I0.8
+authenticated remote-to-Godot vertical and its private-state boundary.
 
 ## Persistence ownership
 
