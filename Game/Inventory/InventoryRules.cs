@@ -105,8 +105,8 @@ public readonly record struct InventoryPlacement
 /// </summary>
 public readonly record struct InventoryCapacityDimensions(
     int MaximumItemCount,
-    ushort GridWidth = 0,
-    ushort GridHeight = 0,
+    ushort MaximumGridWidth = 0,
+    ushort MaximumGridHeight = 0,
     long MaximumWeightGrams = 0,
     byte MaximumNestingDepth = 0)
 {
@@ -117,25 +117,42 @@ public readonly record struct InventoryCapacityDimensions(
     {
         if (MaximumItemCount <= 0 || MaximumWeightGrams < 0)
             return false;
-        bool hasGrid = GridWidth != 0 || GridHeight != 0;
+        bool hasGrid = MaximumGridWidth != 0 || MaximumGridHeight != 0;
         return mode == InventoryPlacementMode.Grid
-            ? GridWidth != 0 && GridHeight != 0 &&
-                GridWidth <= MaximumGridEdge && GridHeight <= MaximumGridEdge &&
-                checked((int)GridWidth * GridHeight) <= MaximumGridCells
+            ? MaximumGridWidth != 0 && MaximumGridHeight != 0 &&
+                MaximumGridWidth <= MaximumGridEdge && MaximumGridHeight <= MaximumGridEdge &&
+                checked((int)MaximumGridWidth * MaximumGridHeight) <= MaximumGridCells
             : !hasGrid;
     }
 }
+
+/// <summary>
+/// Persistent effective capacity of one concrete container instance. Grid
+/// dimensions are zero for non-Grid placement modes and remain independent
+/// from the item-count limit.
+/// </summary>
+public readonly record struct InventoryInstanceCapacity(
+    int ItemCapacity,
+    ushort GridWidth = 0,
+    ushort GridHeight = 0);
 
 /// <summary>One immutable, compiled container-policy profile.</summary>
 public readonly record struct InventoryRuleProfile(
     InventoryRuleProfileId Id,
     InventoryPlacementMode PlacementMode,
-    InventoryCapacityDimensions Capacity)
+    InventoryCapacityDimensions Capacity,
+    ushort InitialGridWidth = 0,
+    ushort InitialGridHeight = 0)
 {
     public bool IsValid =>
         Id.IsValid &&
         PlacementMode is >= InventoryPlacementMode.Unplaced and <= InventoryPlacementMode.Freeform &&
-        Capacity.IsValidFor(PlacementMode);
+        Capacity.IsValidFor(PlacementMode) &&
+        (PlacementMode == InventoryPlacementMode.Grid
+            ? InitialGridWidth != 0 && InitialGridHeight != 0 &&
+                InitialGridWidth <= Capacity.MaximumGridWidth &&
+                InitialGridHeight <= Capacity.MaximumGridHeight
+            : InitialGridWidth == 0 && InitialGridHeight == 0);
 
     /// <summary>
     /// I0.10 operational floor. Grid placement is authoritative; weight,
@@ -187,7 +204,7 @@ public readonly record struct InventoryEffectiveRules(
 
 /// <summary>
 /// Immutable bounded catalog. It resolves server scope, content profile, and
-/// persistent instance item capacity without turning the profiles into a
+/// persistent instance capacity without turning the profiles into a
 /// universal mutation interface.
 /// </summary>
 public sealed class InventoryRuleCatalog
@@ -247,12 +264,57 @@ public sealed class InventoryRuleCatalog
         int instanceItemCapacity,
         out InventoryEffectiveRules rules)
     {
+        if (!TryGetSelectedProfile(contentProfile, out InventoryRuleProfile profile))
+        {
+            rules = default;
+            return false;
+        }
+        return TryResolveProfile(
+            profile,
+            new InventoryInstanceCapacity(
+                instanceItemCapacity,
+                profile.InitialGridWidth,
+                profile.InitialGridHeight),
+            out rules);
+    }
+
+    public bool TryResolve(
+        InventoryRuleProfileId contentProfile,
+        in InventoryInstanceCapacity instanceCapacity,
+        out InventoryEffectiveRules rules)
+    {
+        if (!TryGetSelectedProfile(contentProfile, out InventoryRuleProfile profile))
+        {
+            rules = default;
+            return false;
+        }
+        return TryResolveProfile(profile, instanceCapacity, out rules);
+    }
+
+    private bool TryGetSelectedProfile(
+        InventoryRuleProfileId contentProfile,
+        out InventoryRuleProfile profile)
+    {
         InventoryRuleProfileId selected = Selection.Scope == InventoryRuleScope.Uniform
             ? Selection.UniformProfile
             : contentProfile;
-        if (!TryGetProfile(selected, out InventoryRuleProfile profile) ||
-            instanceItemCapacity <= 0 ||
-            instanceItemCapacity > profile.Capacity.MaximumItemCount)
+        return TryGetProfile(selected, out profile);
+    }
+
+    private static bool TryResolveProfile(
+        in InventoryRuleProfile profile,
+        in InventoryInstanceCapacity instanceCapacity,
+        out InventoryEffectiveRules rules)
+    {
+        if (instanceCapacity.ItemCapacity <= 0 ||
+            instanceCapacity.ItemCapacity > profile.Capacity.MaximumItemCount ||
+            (profile.PlacementMode == InventoryPlacementMode.Grid
+                ? instanceCapacity.GridWidth == 0 || instanceCapacity.GridHeight == 0 ||
+                    instanceCapacity.GridWidth > profile.Capacity.MaximumGridWidth ||
+                    instanceCapacity.GridHeight > profile.Capacity.MaximumGridHeight ||
+                    checked((int)instanceCapacity.GridWidth * instanceCapacity.GridHeight) >
+                        InventoryCapacityDimensions.MaximumGridCells
+                : instanceCapacity.GridWidth != 0 || instanceCapacity.GridHeight != 0))
         {
             rules = default;
             return false;
@@ -260,9 +322,9 @@ public sealed class InventoryRuleCatalog
         rules = new InventoryEffectiveRules(
             profile.Id,
             profile.PlacementMode,
-            instanceItemCapacity,
-            profile.Capacity.GridWidth,
-            profile.Capacity.GridHeight,
+            instanceCapacity.ItemCapacity,
+            instanceCapacity.GridWidth,
+            instanceCapacity.GridHeight,
             profile.Capacity.MaximumWeightGrams,
             profile.Capacity.MaximumNestingDepth);
         return true;

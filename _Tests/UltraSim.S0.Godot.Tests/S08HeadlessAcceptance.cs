@@ -22,7 +22,7 @@ public partial class S08HeadlessAcceptance : Control
         {
             RunAcceptance();
             RunRemoteInventoryAcceptance();
-            GD.Print("S0.8 / I0.10 GODOT ACCEPTANCE PASS");
+            GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
         catch (Exception exception)

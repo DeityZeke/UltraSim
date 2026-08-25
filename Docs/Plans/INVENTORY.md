@@ -4,7 +4,7 @@
 
 **Status:** living design/architecture note
 
-**Current implementation checkpoint:** `92595d04` — I0.10 authoritative Grid placement
+**Current implementation checkpoint:** I0.11 — dynamic instance capacity
 
 **Remote/private vertical checkpoint:** `0ad93d54` — I0.8 authenticated remote inventory vertical
 
@@ -55,6 +55,7 @@ Inventory state is persisted in ECS components and prefab provenance. The curren
 
 - `InventoryContainer`
   - persistent effective item-count capacity;
+  - persistent current Grid width/height, canonically zero for Unplaced;
 - `InventoryContainerOwner`
   - optional persistent entity-owner relationship;
 - `InventoryItem`
@@ -396,9 +397,9 @@ Reagent pouch  → nested magical Grid bag
 
 Current game content assigns stable distinct rule profiles to Backpack, World Storage, and Grid Backpack. Backpack and World Storage remain operational `Unplaced` profiles; Grid Backpack is an operational 5×5 `Grid` profile.
 
-## 7.2 Profile maximum vs instance item capacity
+## 7.2 Profile maximum vs instance capacity
 
-A compiled rule profile declares capacity maximums. A concrete container instance retains its current persisted item-count capacity.
+A compiled rule profile declares capacity maximums and initial Grid dimensions. A concrete container instance retains its current persisted item-count capacity and Grid dimensions.
 
 The current resolution shape is:
 
@@ -407,12 +408,12 @@ server rule scope
     +
 content-selected profile
     +
-persistent instance item-count capacity
+persistent instance item-count + Grid dimensions
     ↓
 InventoryEffectiveRules
 ```
 
-The instance item count must be positive and no greater than the selected profile's declared maximum.
+The instance item count must be positive and no greater than the selected profile's declared maximum. Grid dimensions must be positive for Grid profiles, zero for non-Grid profiles, and no greater than the selected profile maximum.
 
 This distinction is intentional and is a clean hook for future capacity upgrades:
 
@@ -420,6 +421,10 @@ This distinction is intentional and is a clean hook for future capacity upgrades
 Backpack profile maximum item count = 256
 specific backpack current item count = 8
 later upgraded backpack current item count = 12 / 20 / ...
+
+Grid Backpack profile maximum = 10×10
+specific Grid Backpack current = 5×5
+later upgraded current Grid = 6×5 / 6×6 / ...
 ```
 
 The compiled profile should not be mutated merely because one particular bag receives an enchantment or progression upgrade.
@@ -493,7 +498,7 @@ Weight capacity
 Nesting capacity/policy
 ```
 
-I0.9 encoded these as separate typed profile dimensions: `MaximumItemCount`, `GridWidth`, `GridHeight`, `MaximumWeightGrams`, and `MaximumNestingDepth`. I0.10 makes item-count and Grid/layout capacity operational and independently enforced. A zero weight limit currently means weight is unconstrained/disabled; zero nesting depth forbids nesting. Weight and nesting remain deferred.
+I0.9 encoded these as separate typed profile dimensions: `MaximumItemCount`, `MaximumGridWidth`, `MaximumGridHeight`, `MaximumWeightGrams`, and `MaximumNestingDepth`. I0.10 made item-count and Grid/layout capacity operational and independently enforced. I0.11 persists current item-count and Grid dimensions per container and allows transactional mutation within those maxima. A zero weight limit currently means weight is unconstrained/disabled; zero nesting depth forbids nesting. Weight and nesting remain deferred.
 
 These dimensions may correlate but are not semantically identical.
 
@@ -521,7 +526,10 @@ A sword might consume 1×3 cells while counting as exactly one item. A bag might
 
 ## 9.2 Profile maximums and mutable/effective instance capacity
 
-Long-term effective rules should conceptually resolve from layers such as:
+I0.11 implements the authoritative bottom-line operation: one requested effective
+item-count/Grid capacity is validated against compiled profile maxima and current
+contents, then committed to ECS and the derived index. The future policy chain may
+derive that request from layers such as:
 
 ```text
 compiled base profile
@@ -542,7 +550,7 @@ Examples of independent upgrades:
 - increased allowed nesting depth;
 - reduced effective nested-content carry weight.
 
-A spell or enchantment should modify the concrete bag's effective capacity/state, not rewrite the shared compiled Backpack rule profile.
+A spell or enchantment should request a change to the concrete bag's effective capacity/state, not rewrite the shared compiled Backpack rule profile. Persistent upgrade facts and temporary effect ownership are not part of I0.11.
 
 ---
 
@@ -731,7 +739,9 @@ Never silently delete, destroy, duplicate, or eject authoritative items merely b
 
 ## 13.1 Count/weight shrink
 
-A useful default rule is **grandfathered over-capacity state**:
+I0.11 uses conservative rejection for item-count shrink: the new item-count limit
+must cover every currently contained item identity. Weight is not operational yet.
+A future weight system may earn grandfathered over-capacity state such as:
 
 ```text
 old limit = 30 kg
@@ -742,19 +752,25 @@ new limit = 20 kg
 
 The container becomes over-capacity but retains existing contents. New operations that increase burden are rejected until contents fall within the current limit.
 
-The same principle can apply to item-count capacity.
+Grandfathered item-count debt is not currently implemented.
 
 ## 13.2 Grid shrink is harder
 
 If grid dimensions shrink, items may occupy cells that no longer belong to the active grid.
 
-Candidate future policies include:
+I0.11 selects the conservative policy: Grid shrink is accepted only when every
+current footprint remains within the requested dimensions. Otherwise the complete
+capacity change is rejected and existing capacity remains authoritative.
+
+Possible future policies, if gameplay earns temporary occupied expansion, include:
 
 1. **Permanent-only grid expansion** — temporary effects may modify count/weight but not grid dimensions.
 2. **Grandfathered overflow cells / capacity debt** — existing placements outside the new active region remain temporarily legal, but no new placements may use them; moving an item out permanently releases the overflow.
 3. **Transactional repack** — attempt deterministic repacking into the smaller grid; if impossible, do not complete the shrink or mark explicit unresolved overflow.
 
-The currently favored conceptual direction is grandfathered/capacity-debt behavior because it avoids deleting items, forced world drops, or magical reshuffling. This is not implemented or frozen yet.
+No current mutation repacks, deletes, drops, or moves items implicitly. A future
+overflow/debt policy would be a new explicit semantic checkpoint rather than a
+silent change to I0.11.
 
 ---
 
@@ -1196,13 +1212,13 @@ Do not require the Inventory architecture to know about a future Materials subsy
 
 # 24. Current profile examples in Game content
 
-As of I0.10, Game content owns stable inventory rule profile IDs for at least:
+As of I0.11, Game content owns stable inventory rule profile IDs for at least:
 
 - Backpack;
 - World Storage;
 - Grid Backpack.
 
-Backpack and World Storage resolve to operational `Unplaced` profiles with independent maximum item-count capacities. Grid Backpack resolves to an operational 5×5 `Grid` profile and uses an independently enforced instance item-count capacity (20 in the accepted vertical). Stable profile identity remains independent from presentation.
+Backpack and World Storage resolve to operational `Unplaced` profiles with independent maximum item-count capacities. Grid Backpack has a compiled 10×10 maximum, begins at 5×5, and uses an independently enforced initial item-count capacity of 20. Stable profile identity remains independent from presentation.
 
 Current content compilation validates that selected container rules resolve and are operational before publishing Game content.
 
@@ -1303,15 +1319,24 @@ Explicitly deferred:
 - automatic packing;
 - trade.
 
-## I0.11 — candidate: dynamic capacity/modifier semantics
+## I0.11 — dynamic instance capacity — CLOSED
 
-Once Grid exists, establish how persistent upgrades and temporary effects modify:
+Implemented:
 
-- item-count capacity;
-- grid dimensions;
-- later weight/nesting.
+- persistent current item-count and Grid dimensions;
+- compiled maxima plus initial Grid dimensions;
+- independent growth within profile maxima;
+- conservative item-count/Grid shrink validation;
+- transactional ECS/index publication;
+- save/load/rebuild;
+- explicit owner-private UI refresh and remote Godot reprojection.
 
-Freeze shrink/overflow semantics before temporary grid expansion becomes gameplay-visible.
+Deferred:
+
+- persistent upgrade provenance;
+- temporary effect/modifier stacks;
+- grandfathered overflow/capacity debt;
+- weight and nesting capacity.
 
 ## Later candidates
 
@@ -1364,6 +1389,7 @@ AUTHORITATIVE CONTAINER INSTANCE
     content/profile identity
     owner relationship
     current item-count capacity
+    current Grid dimensions when Grid-backed
     future persistent upgrades/modifiers
 
                 ↓

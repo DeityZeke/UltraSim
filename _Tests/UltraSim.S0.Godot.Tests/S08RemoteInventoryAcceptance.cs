@@ -207,6 +207,21 @@ public partial class S08HeadlessAcceptance
                 InventoryPlacement.Grid(2, 3, 1, 1),
                 "A hostile remote Grid cell intent changed authoritative placement.");
 
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                    (world, generationId, game) => game.Inventory.SetEffectiveCapacity(
+                        world,
+                        ResolveRemoteInventory(world, fixture.GridBackpack),
+                        new InventoryInstanceCapacity(24, 6, 5)).Accepted,
+                    out bool upgraded) && upgraded,
+                "The authoritative remote Grid capacity upgrade was rejected.");
+            Expect(inventory.Refresh(gridView.View, "Backpack upgraded."),
+                "The remote Grid view did not accept its authoritative capacity refresh.");
+            DriveRemote(loopback, bridge, server, () =>
+                client.GetRows(gridView.View, InventoryUi.GridCells).Length == 30 &&
+                client.GetValue(gridView.View, InventoryUi.Status).Text == "Backpack upgraded.");
+            Expect(Find<VBoxContainer>(root, "Element_grid-cells").GetChildCount() == 30,
+                "The native remote Grid did not render its upgraded 6x5 capacity.");
+
             var persistence = new GameRuntimePersistence(
                 runtime.Game,
                 composition,
@@ -216,11 +231,17 @@ public partial class S08HeadlessAcceptance
                 new SaveSetContext(1, 1_700_008_008_001), static capture => capture());
             Expect(saved.Succeeded, "The remote Inventory generation could not save.");
             Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-                    (world, generationId, game) => game.Inventory.Reposition(
-                        world,
-                        ResolveRemoteInventory(world, fixture.GridApple),
-                        ResolveRemoteInventory(world, fixture.GridBackpack),
-                        InventoryPlacement.Grid(4, 4, 1, 1)).Accepted,
+                    (world, generationId, game) =>
+                    {
+                        Entity grid = ResolveRemoteInventory(world, fixture.GridBackpack);
+                        return game.Inventory.Reposition(
+                                world,
+                                ResolveRemoteInventory(world, fixture.GridApple),
+                                grid,
+                                InventoryPlacement.Grid(4, 4, 1, 1)).Accepted &&
+                            game.Inventory.SetEffectiveCapacity(
+                                world, grid, new InventoryInstanceCapacity(30, 8, 8)).Accepted;
+                    },
                     out bool diverged) && diverged,
                 "The remote Inventory save fixture could not diverge.");
 
@@ -230,9 +251,10 @@ public partial class S08HeadlessAcceptance
                 client.GetValue(gridView.View, InventoryUi.Status).Text ==
                 "Inventory resynchronized.");
             Expect(ReadRowPlacement(client, gridView.View, gridApple) == "Grid (2,3) 1×1" &&
+                client.GetRows(gridView.View, InventoryUi.GridCells).Length == 30 &&
                 ReadRemotePlacement(runtime, fixture.GridApple) ==
                     InventoryPlacement.Grid(2, 3, 1, 1),
-                "Generation replacement did not atomically restore and reproject Grid truth.");
+                "Generation replacement did not atomically restore capacity and Grid truth.");
 
             Expect(inventory.Close(gridView.View),
                 "The resynchronized remote Inventory did not close.");
@@ -278,11 +300,28 @@ public partial class S08HeadlessAcceptance
                 !ContainsLabel(reconnectedRoot, "Apple"),
                 "Reconnect did not resynchronize exact private Inventory truth.");
 
+            Expect(reconnectedInventory.Close(resynced.View),
+                "The reconnected Inventory did not close.");
+            DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
+                reconnectedClient.OpenViewCount == 0);
+            InventoryUiOpenResult reconnectedGrid = reconnectedInventory.OpenOwned(
+                gridBackpack, reentered.Entity);
+            Expect(reconnectedGrid.Succeeded,
+                "Reconnect could not authorize the restored Grid Backpack.");
+            DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
+                reconnectedClient.OpenViewCount == 1);
+            Expect(reconnectedClient.GetRows(
+                    reconnectedGrid.View, InventoryUi.GridCells).Length == 30,
+                "Reconnect did not resynchronize the restored 6x5 Grid capacity.");
+            Expect(reconnectedInventory.Close(reconnectedGrid.View),
+                "The reconnected Grid Inventory did not close.");
+            DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
+                reconnectedClient.OpenViewCount == 0);
             RemoteUiClientSnapshot secondClient = reconnectedBridge.GetSnapshot();
             RemoteUiPortSnapshot secondServerUi = reconnectedServer.Ui.GetSnapshot();
             ProtocolLoopbackSnapshot transport = loopback.GetSnapshot();
             GD.Print(
-                $"I0.10 REMOTE INVENTORY METRICS " +
+                $"I0.11 REMOTE INVENTORY METRICS " +
                 $"operations={firstClient.OperationsApplied + secondClient.OperationsApplied} " +
                 $"actions={firstClient.ActionsQueued + secondClient.ActionsQueued} " +
                 $"accepted_actions={firstServerUi.AcceptedActions + secondServerUi.AcceptedActions} " +
@@ -292,10 +331,6 @@ public partial class S08HeadlessAcceptance
                 $"client_network_bytes={transport.Client.ReservedBytes} " +
                 $"server_network_bytes={transport.Server.ReservedBytes} " +
                 $"link_bytes={transport.Datagram.ReservedBytes}");
-            Expect(reconnectedInventory.Close(resynced.View),
-                "The reconnected Inventory did not close.");
-            DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
-                reconnectedClient.OpenViewCount == 0);
             reconnectedServer.Disconnect();
             DriveRemote(loopback, reconnectedBridge, reconnectedServer, () =>
                 reconnectedBridge.GetSnapshot().State == RemoteClientApplicationState.Detached);

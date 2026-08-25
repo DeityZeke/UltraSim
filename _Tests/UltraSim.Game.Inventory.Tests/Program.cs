@@ -19,6 +19,7 @@ var tests = new (string Name, Action Body)[]
     ("ContainerRuleCapacityFailureIsTransactional", ContainerRuleCapacityFailureIsTransactional),
     ("GridPlacementValidatesBoundsOverlapAndIndependentCapacities", GridPlacementValidatesBoundsOverlapAndIndependentCapacities),
     ("GridPlacementMovesRepositionsAndEquipsTransactionally", GridPlacementMovesRepositionsAndEquipsTransactionally),
+    ("InstanceCapacityGrowthAndShrinkAreTransactional", InstanceCapacityGrowthAndShrinkAreTransactional),
     ("GameAggregateRejectsCrossWorldFeatureState", GameAggregateRejectsCrossWorldFeatureState),
     ("FixtureRebuildsDerivedIndexFromEcsTruth", FixtureRebuildsDerivedIndexFromEcsTruth),
     ("ContentAddsThirdItemWithoutInventoryRuleChange", ContentAddsThirdItemWithoutInventoryRuleChange),
@@ -32,6 +33,7 @@ var tests = new (string Name, Action Body)[]
     ("InventoryUiPublishesGranularRowDeltas", InventoryUiPublishesGranularRowDeltas),
     ("OwnedInventoryUiAuthorizesMoveEquipAndUnequip", OwnedInventoryUiAuthorizesMoveEquipAndUnequip),
     ("OwnedInventoryUiRepositionsGridItem", OwnedInventoryUiRepositionsGridItem),
+    ("OwnedInventoryUiRefreshesCapacityUpgrade", OwnedInventoryUiRefreshesCapacityUpgrade),
     ("OwnedInventoryUiResynchronizesAfterGenerationReplacement", OwnedInventoryUiResynchronizesAfterGenerationReplacement),
     ("InventoryUiRejectsCrossWorldDurableIdentityAba", InventoryUiRejectsCrossWorldDurableIdentityAba),
     ("InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit", InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit),
@@ -96,19 +98,36 @@ static void RuleCatalogSeparatesScopeCapacityAndPlacement()
             InventoryPlacementMode.Grid,
             new InventoryCapacityDimensions(
                 MaximumItemCount: 40,
-                GridWidth: 10,
-                GridHeight: 6,
+                MaximumGridWidth: 10,
+                MaximumGridHeight: 6,
                 MaximumWeightGrams: 50_000,
-                MaximumNestingDepth: 2)),
+                MaximumNestingDepth: 2),
+            InitialGridWidth: 4,
+            InitialGridHeight: 3),
     };
     var perContainer = new InventoryRuleCatalog(InventoryRuleSelection.PerContainer, profiles);
     Assert.True(perContainer.TryResolve(gridId, 30, out InventoryEffectiveRules gridRules));
     Assert.Equal(gridId, gridRules.Profile);
     Assert.Equal(InventoryPlacementMode.Grid, gridRules.PlacementMode);
     Assert.Equal(30, gridRules.ItemCapacity);
-    Assert.Equal((ushort)10, gridRules.GridWidth);
+    Assert.Equal((ushort)4, gridRules.GridWidth);
+    Assert.Equal((ushort)3, gridRules.GridHeight);
     Assert.Equal(50_000L, gridRules.MaximumWeightGrams);
     Assert.False(gridRules.IsOperational);
+    Assert.True(perContainer.TryResolve(
+        gridId,
+        new InventoryInstanceCapacity(30, 8, 5),
+        out InventoryEffectiveRules upgradedGrid));
+    Assert.Equal((ushort)8, upgradedGrid.GridWidth);
+    Assert.Equal((ushort)5, upgradedGrid.GridHeight);
+    Assert.False(perContainer.TryResolve(
+        gridId,
+        new InventoryInstanceCapacity(30, 11, 5),
+        out _));
+    Assert.False(perContainer.TryResolve(
+        listId,
+        new InventoryInstanceCapacity(12, 1, 1),
+        out _));
     Assert.False(perContainer.TryResolve(gridId, 41, out _));
 
     var uniform = new InventoryRuleCatalog(InventoryRuleSelection.Uniform(listId), profiles);
@@ -120,6 +139,26 @@ static void RuleCatalogSeparatesScopeCapacityAndPlacement()
         InventoryRuleSelection.Uniform(new InventoryRuleProfileId(99)), profiles));
     Assert.Throws<ArgumentException>(() => _ = new InventoryRuleCatalog(
         InventoryRuleSelection.PerContainer, [profiles[0], profiles[0]]));
+    Assert.Throws<ArgumentException>(() => _ = new InventoryRuleCatalog(
+        InventoryRuleSelection.PerContainer,
+        [new InventoryRuleProfile(
+            new InventoryRuleProfileId(3),
+            InventoryPlacementMode.Grid,
+            new InventoryCapacityDimensions(
+                MaximumItemCount: 20,
+                MaximumGridWidth: 5,
+                MaximumGridHeight: 5))]));
+    Assert.Throws<ArgumentException>(() => _ = new InventoryRuleCatalog(
+        InventoryRuleSelection.PerContainer,
+        [new InventoryRuleProfile(
+            new InventoryRuleProfileId(4),
+            InventoryPlacementMode.Grid,
+            new InventoryCapacityDimensions(
+                MaximumItemCount: 20,
+                MaximumGridWidth: 5,
+                MaximumGridHeight: 5),
+            InitialGridWidth: 6,
+            InitialGridHeight: 5)]));
 }
 
 static void ContentProfilesResolvePerContainerAndUniformPolicy()
@@ -353,6 +392,88 @@ static void GridPlacementMovesRepositionsAndEquipsTransactionally()
     Assert.Equal(InventoryPlacement.Grid(0, 2, 1, 3), rebuilt.Placement);
     Assert.Equal(3, fixture.Inventory.Index.GetItems(grid).Count);
     Assert.True(fixture.Inventory.TryProjectItem(fixture.World, bread, out _));
+}
+
+static void InstanceCapacityGrowthAndShrinkAreTransactional()
+{
+    var limits = new InventoryLimits(8, 128, 64);
+    using PolicyFixture fixture = CreatePolicyFixture(limits, InventoryRuleSelection.PerContainer);
+    Assert.True(fixture.Content.InventoryRules.TryGetProfile(
+        GameInventoryRuleProfileIds.GridBackpack,
+        out InventoryRuleProfile profile));
+    Assert.Equal((ushort)10, profile.Capacity.MaximumGridWidth);
+    Assert.Equal((ushort)10, profile.Capacity.MaximumGridHeight);
+    Assert.Equal((ushort)5, profile.InitialGridWidth);
+    Assert.Equal((ushort)5, profile.InitialGridHeight);
+    Assert.True(fixture.Inventory.TryCreateOwnedContainer(
+        fixture.World,
+        fixture.Content.GridBackpack,
+        fixture.Character,
+        new InventoryInstanceCapacity(2, 5, 5),
+        out Entity grid));
+    Assert.True(fixture.Inventory.TryCreateItem(
+        fixture.World,
+        grid,
+        fixture.Content.IronSword,
+        1,
+        InventoryPlacement.Grid(4, 2, 1, 3),
+        out Entity sword));
+    Assert.True(fixture.Inventory.TryCreateItem(
+        fixture.World,
+        grid,
+        fixture.Content.Bread,
+        2,
+        InventoryPlacement.Grid(0, 0, 1, 1),
+        out _));
+
+    Assert.True(fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, grid, new InventoryInstanceCapacity(3, 6, 5)).Accepted);
+    Assert.True(fixture.Inventory.TryGetEffectiveContainerRules(
+        fixture.World, grid, out InventoryEffectiveRules grown));
+    Assert.Equal(3, grown.ItemCapacity);
+    Assert.Equal((ushort)6, grown.GridWidth);
+    Assert.Equal((ushort)5, grown.GridHeight);
+
+    InventoryMutationResult itemShrink = fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, grid, new InventoryInstanceCapacity(1, 6, 5));
+    Assert.Equal(InventoryMutationStatus.CapacityWouldInvalidateContents, itemShrink.Status);
+    InventoryMutationResult spatialShrink = fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, grid, new InventoryInstanceCapacity(3, 4, 5));
+    Assert.Equal(InventoryMutationStatus.CapacityWouldInvalidateContents, spatialShrink.Status);
+    Assert.True(fixture.Inventory.TryGetEffectiveContainerRules(
+        fixture.World, grid, out InventoryEffectiveRules unchanged));
+    Assert.Equal(grown, unchanged);
+
+    Assert.True(fixture.Inventory.Reposition(
+        fixture.World, sword, grid, InventoryPlacement.Grid(3, 2, 1, 3)).Accepted);
+    Assert.True(fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, grid, new InventoryInstanceCapacity(2, 4, 5)).Accepted);
+    Assert.True(fixture.Inventory.TryGetEffectiveContainerRules(
+        fixture.World, grid, out InventoryEffectiveRules shrunk));
+    Assert.Equal(2, shrunk.ItemCapacity);
+    Assert.Equal((ushort)4, shrunk.GridWidth);
+    Assert.Equal((ushort)5, shrunk.GridHeight);
+
+    InventoryMutationResult aboveProfile = fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, grid, new InventoryInstanceCapacity(2, 11, 5));
+    Assert.Equal(InventoryMutationStatus.InvalidCapacity, aboveProfile.Status);
+    InventoryMutationResult missingGrid = fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, grid, new InventoryInstanceCapacity(2));
+    Assert.Equal(InventoryMutationStatus.InvalidCapacity, missingGrid.Status);
+    Assert.True(fixture.Inventory.TryGetEffectiveContainerRules(
+        fixture.World, grid, out InventoryEffectiveRules final));
+    Assert.Equal(shrunk, final);
+
+    Assert.True(fixture.Inventory.TryCreateOwnedContainer(
+        fixture.World, fixture.Content.Backpack, fixture.Character, 8, out Entity list));
+    Assert.Equal(InventoryMutationStatus.InvalidCapacity, fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, list, new InventoryInstanceCapacity(8, 1, 1)).Status);
+    Assert.True(fixture.Inventory.SetEffectiveCapacity(
+        fixture.World, list, new InventoryInstanceCapacity(12)).Accepted);
+    Assert.True(fixture.Inventory.TryGetEffectiveContainerRules(
+        fixture.World, list, out InventoryEffectiveRules listRules));
+    Assert.Equal(12, listRules.ItemCapacity);
+    Assert.Equal((ushort)0, listRules.GridWidth);
 }
 
 static void GameAggregateRejectsCrossWorldFeatureState()
@@ -864,6 +985,47 @@ static void OwnedInventoryUiRepositionsGridItem()
     Assert.Equal("Grid (2,3) 1×1", row.Values[3].Text);
 }
 
+static void OwnedInventoryUiRefreshesCapacityUpgrade()
+{
+    var composition = new UltraSimGameComposition(new InventoryLimits(16, 64, 32));
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(
+                128,
+                new PersistenceIdentityOptions(new PersistentWorldId(0x70_9192))),
+            WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+        (Entity Owner, Entity Grid)>((world, _, game) =>
+        {
+            Assert.True(world.TryInstantiate(game.Content.Character, out Entity owner));
+            Assert.True(game.Inventory.TryCreateOwnedContainer(
+                world, game.Content.GridBackpack, owner, 20, out Entity grid));
+            return (owner, grid);
+        }, out var fixture));
+
+    var client = new UiClientRuntime(new MemoryRenderer());
+    var link = new LocalSemanticLink(client);
+    using var port = new RecordingInventoryUiPort(link);
+    using var controller = new InventoryUiController(runtime.Game, port);
+    InventoryUiOpenResult opened = controller.OpenOwned(fixture.Grid, fixture.Owner);
+    Assert.True(opened.Succeeded);
+    Assert.Equal(25, client.GetRows(opened.View, InventoryUi.GridCells).Length);
+
+    Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+        (world, _, game) => game.Inventory.SetEffectiveCapacity(
+            world, fixture.Grid, new InventoryInstanceCapacity(24, 6, 5)).Accepted,
+        out bool upgraded));
+    Assert.True(upgraded);
+    Assert.True(controller.Refresh(opened.View, "Backpack upgraded."));
+    Assert.Equal(30, client.GetRows(opened.View, InventoryUi.GridCells).Length);
+    Assert.Equal("Place selected item in 6×5 Grid:",
+        client.GetValue(opened.View, InventoryUi.GridLabel).Text);
+    Assert.Equal("Backpack upgraded.", client.GetValue(opened.View, InventoryUi.Status).Text);
+}
+
 static void OwnedInventoryUiResynchronizesAfterGenerationReplacement()
 {
     using Fixture fixture = CreateFixture();
@@ -1085,6 +1247,8 @@ static void GridPlacementPersistsAndRebuildsAfterGenerationSwap()
                 Assert.True(world.TryInstantiate(game.Content.Character, out Entity owner));
                 Assert.True(game.Inventory.TryCreateOwnedContainer(
                     world, game.Content.GridBackpack, owner, 20, out Entity grid));
+                Assert.True(game.Inventory.SetEffectiveCapacity(
+                    world, grid, new InventoryInstanceCapacity(24, 6, 5)).Accepted);
                 Assert.True(game.Inventory.TryCreateItem(
                     world,
                     grid,
@@ -1106,7 +1270,9 @@ static void GridPlacementPersistsAndRebuildsAfterGenerationSwap()
                 Assert.True(world.TryResolvePersistentEntity(ids.Grid, out Entity grid));
                 Assert.True(world.TryResolvePersistentEntity(ids.Sword, out Entity sword));
                 return game.Inventory.Reposition(
-                    world, sword, grid, InventoryPlacement.Grid(4, 0, 1, 3)).Accepted;
+                    world, sword, grid, InventoryPlacement.Grid(4, 0, 1, 3)).Accepted &&
+                    game.Inventory.SetEffectiveCapacity(
+                        world, grid, new InventoryInstanceCapacity(30, 8, 8)).Accepted;
             }, out bool diverged) && diverged);
         Assert.True(persistence.TryLoad().Succeeded);
         Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
@@ -1116,6 +1282,11 @@ static void GridPlacementPersistsAndRebuildsAfterGenerationSwap()
                 Assert.True(world.TryResolvePersistentEntity(ids.Sword, out Entity sword));
                 Assert.True(game.Inventory.TryProjectItem(world, sword, out InventoryItemView restored));
                 Assert.Equal(InventoryPlacement.Grid(2, 1, 1, 3), restored.Placement);
+                Assert.True(game.Inventory.TryGetEffectiveContainerRules(
+                    world, grid, out InventoryEffectiveRules restoredRules));
+                Assert.Equal(24, restoredRules.ItemCapacity);
+                Assert.Equal((ushort)6, restoredRules.GridWidth);
+                Assert.Equal((ushort)5, restoredRules.GridHeight);
                 Assert.Equal(1, game.Inventory.Index.GetItems(grid).Count);
                 return true;
             }, out bool checkedState));

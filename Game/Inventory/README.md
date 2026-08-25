@@ -63,7 +63,7 @@ Effective rules currently compose:
 ```text
 server scope selection
     -> content-authored profile
-    -> persistent instance item capacity
+    -> persistent instance item-count and Grid dimensions
     -> generation InventoryLimits
 ```
 
@@ -105,7 +105,23 @@ native selection/reposition, hostile cell rejection, save/load resynchronization
 and exact private disclosure without routing Inventory through public AOI.
 
 This checkpoint deliberately does not add automatic packing, weight propagation,
-nested-container topology, physical shelves, viewer selection, instance upgrade
-stacks, or temporary modifiers. Those features must extend the concrete policy
-resolution and transactional Game mutations; they must not turn the catalog into
-a generic inventory-rule interface graph.
+nested-container topology, physical shelves, or viewer selection.
+
+## I0.11 dynamic instance capacity
+
+The compiled Grid Backpack profile now owns a 10×10 maximum and a 5×5 initial
+size. Each persisted `InventoryContainer` retains its current item-count limit and
+current Grid width/height as one atomic capacity vector; Unplaced containers retain
+canonical zero Grid dimensions.
+
+`SetEffectiveCapacity` can grow or shrink item count and Grid dimensions
+independently within the selected profile maximum. Shrink is deliberately
+conservative: it is rejected if the current item count exceeds the requested limit
+or any retained footprint would fall outside the requested Grid. There is no
+automatic packing, deletion, dropping, or grandfathered overflow.
+
+An explicit server-owned UI refresh republishes changed dimensions through the
+existing owner-private semantic path. The native remote acceptance proves a
+5×5→6×5 upgrade, 30-cell Godot presentation, and exact save/load restoration.
+Inventory does not decide why an upgrade occurs; achievements, effects, or admin
+policy remain future Game consumers of this bounded authority operation.

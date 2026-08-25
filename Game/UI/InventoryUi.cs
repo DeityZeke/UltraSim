@@ -222,6 +222,27 @@ public sealed class InventoryUiController : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Republishes authoritative state for one retained view after an external
+    /// Game mutation such as a container-capacity upgrade. This is not a client
+    /// authority path; the caller must have already committed the Game mutation.
+    /// </summary>
+    public bool Refresh(UiViewInstanceId instance, string status = "Inventory refreshed.")
+    {
+        EnsureOperational();
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+        if (!_sessions.TryGetValue(instance, out Session? session))
+            return false;
+        InventoryProjection projection = CaptureReplacementProjection(session);
+        if (!projection.Succeeded)
+        {
+            DetachSession(session, new InvalidOperationException(
+                $"Inventory view could not refresh: {projection.Message}"));
+            return false;
+        }
+        return PublishCompleteProjection(session, projection, status);
+    }
+
     private InventoryUiOpenResult OpenCore(
         Entity container,
         bool hot,
@@ -882,63 +903,63 @@ public sealed class InventoryUiController : IDisposable
                     $"Inventory view could not rebind to generation {generationId}: {projection.Message}"));
                 continue;
             }
-
-            UiListRow[] itemRows = ToRows(projection.Items);
-            UiListRow[] destinationRows = ToRows(projection.Destinations);
-            UiActionStatePatch[] actions = DisabledActionPatches();
-            ulong sequence = checked(session.Sequence + 1);
-            var delta = new UiModelDelta(
-                InventoryUi.Definition.Handle,
-                sequence,
-                [
-                    new UiScalarSlotPatch(InventoryUi.Title, UiValue.FromText(projection.Title)),
-                    new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText("Inventory resynchronized.")),
-                    new UiScalarSlotPatch(
-                        InventoryUi.TransferLabel,
-                        UiValue.FromText(destinationRows.Length == 0
-                            ? "No transfer destinations"
-                            : "Move selected item to:")),
-                    new UiScalarSlotPatch(
-                        InventoryUi.GridLabel,
-                        UiValue.FromText(projection.GridWidth == 0
-                            ? "No Grid placement"
-                            : $"Place selected item in {projection.GridWidth}×{projection.GridHeight} Grid:")),
-                ],
-                [
-                    UiListPatch.Replace(InventoryUi.Items, itemRows),
-                    UiListPatch.Replace(InventoryUi.TransferDestinations, destinationRows),
-                    UiListPatch.Replace(
-                        InventoryUi.GridCells,
-                        ToGridRows(projection.GridWidth, projection.GridHeight)),
-                ],
-                actions);
-            try { _ui.UpdateView(new UiUpdateView(session.Instance, delta)); }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                DetachSession(session, exception);
-                continue;
-            }
-            session.Sequence = sequence;
-            session.SelectedItem = default;
-            session.Model.SetText(InventoryUi.Title, projection.Title);
-            session.Model.SetText(InventoryUi.Status, "Inventory resynchronized.");
-            session.Model.SetText(
-                InventoryUi.TransferLabel,
-                destinationRows.Length == 0 ? "No transfer destinations" : "Move selected item to:");
-            session.GridWidth = projection.GridWidth;
-            session.GridHeight = projection.GridHeight;
-            session.Model.SetText(
-                InventoryUi.GridLabel,
-                projection.GridWidth == 0
-                    ? "No Grid placement"
-                    : $"Place selected item in {projection.GridWidth}×{projection.GridHeight} Grid:");
-            session.Model.ReplaceRows(InventoryUi.Items, itemRows);
-            session.Model.ReplaceRows(InventoryUi.TransferDestinations, destinationRows);
-            session.Model.ReplaceRows(
-                InventoryUi.GridCells,
-                ToGridRows(projection.GridWidth, projection.GridHeight));
-            ApplyActionPatches(session.Model, actions);
+            PublishCompleteProjection(session, projection, "Inventory resynchronized.");
         }
+    }
+
+    private bool PublishCompleteProjection(
+        Session session,
+        in InventoryProjection projection,
+        string status)
+    {
+        UiListRow[] itemRows = ToRows(projection.Items);
+        UiListRow[] destinationRows = ToRows(projection.Destinations);
+        UiActionStatePatch[] actions = DisabledActionPatches();
+        ulong sequence = checked(session.Sequence + 1);
+        string transferLabel = destinationRows.Length == 0
+            ? "No transfer destinations"
+            : "Move selected item to:";
+        string gridLabel = projection.GridWidth == 0
+            ? "No Grid placement"
+            : $"Place selected item in {projection.GridWidth}×{projection.GridHeight} Grid:";
+        var delta = new UiModelDelta(
+            InventoryUi.Definition.Handle,
+            sequence,
+            [
+                new UiScalarSlotPatch(InventoryUi.Title, UiValue.FromText(projection.Title)),
+                new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status)),
+                new UiScalarSlotPatch(InventoryUi.TransferLabel, UiValue.FromText(transferLabel)),
+                new UiScalarSlotPatch(InventoryUi.GridLabel, UiValue.FromText(gridLabel)),
+            ],
+            [
+                UiListPatch.Replace(InventoryUi.Items, itemRows),
+                UiListPatch.Replace(InventoryUi.TransferDestinations, destinationRows),
+                UiListPatch.Replace(
+                    InventoryUi.GridCells,
+                    ToGridRows(projection.GridWidth, projection.GridHeight)),
+            ],
+            actions);
+        try { _ui.UpdateView(new UiUpdateView(session.Instance, delta)); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            DetachSession(session, exception);
+            return false;
+        }
+        session.Sequence = sequence;
+        session.SelectedItem = default;
+        session.Model.SetText(InventoryUi.Title, projection.Title);
+        session.Model.SetText(InventoryUi.Status, status);
+        session.Model.SetText(InventoryUi.TransferLabel, transferLabel);
+        session.GridWidth = projection.GridWidth;
+        session.GridHeight = projection.GridHeight;
+        session.Model.SetText(InventoryUi.GridLabel, gridLabel);
+        session.Model.ReplaceRows(InventoryUi.Items, itemRows);
+        session.Model.ReplaceRows(InventoryUi.TransferDestinations, destinationRows);
+        session.Model.ReplaceRows(
+            InventoryUi.GridCells,
+            ToGridRows(projection.GridWidth, projection.GridHeight));
+        ApplyActionPatches(session.Model, actions);
+        return true;
     }
 
     private InventoryProjection CaptureReplacementProjection(Session session)

@@ -21,7 +21,8 @@ acceptance narratives remain available through git history.
   Accounting, Admission, and Inventory.
 - [Inventory](../Game/Inventory/README.md) — authoritative mutation, owner-private
   UI authorization, the I0.8 remote Godot vertical, the I0.9 container-policy
-  foundation, and I0.10 authoritative Grid placement.
+  foundation, I0.10 authoritative Grid placement, and I0.11 dynamic instance
+  capacity.
 - [Inventory plan/status](Plans/INVENTORY.md) — current accepted Inventory
   contracts plus explicitly deferred placement, capacity, nesting, and viewer work.
 - [Game replication](../Game/Replication/README.md) — canonical projection,

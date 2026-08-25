@@ -365,6 +365,48 @@ public sealed class InventoryIndex : IDisposable
         return false;
     }
 
+    internal bool CanSetContainerRules(
+        Entity container,
+        in InventoryEffectiveRules rules)
+    {
+        EnsureOperational();
+        if (!_containers.TryGetValue(container, out ContainerEntry entry) ||
+            !CanAddContainerRules(rules) ||
+            entry.Rules.Profile != rules.Profile ||
+            entry.Rules.PlacementMode != rules.PlacementMode ||
+            entry.Rules.MaximumWeightGrams != rules.MaximumWeightGrams ||
+            entry.Rules.MaximumNestingDepth != rules.MaximumNestingDepth ||
+            entry.Count > rules.ItemCapacity)
+        {
+            return false;
+        }
+        if (rules.PlacementMode != InventoryPlacementMode.Grid)
+            return true;
+        foreach (Entity item in GetItems(container))
+        {
+            if (_gridPlacements?.TryGetValue(item, out InventoryPlacement placement) != true ||
+                (long)placement.X + placement.Width > rules.GridWidth ||
+                (long)placement.Y + placement.Height > rules.GridHeight)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    internal bool TrySetContainerRules(
+        Entity container,
+        in InventoryEffectiveRules rules)
+    {
+        EnsureOperational();
+        if (!CanSetContainerRules(container, rules))
+            return false;
+        ContainerEntry entry = _containers[container];
+        entry.Rules = rules;
+        _containers[container] = entry;
+        return true;
+    }
+
     internal bool HasContainedItemCapacity(Entity container) =>
         _containers.TryGetValue(container, out ContainerEntry entry) &&
         entry.Count < entry.Rules.ItemCapacity &&
@@ -713,7 +755,11 @@ public sealed class InventoryIndex : IDisposable
         in InventoryContainerDefinition definition,
         InventoryRuleCatalog catalog)
     {
-        if (!catalog.TryResolve(definition.RuleProfile, container.Capacity, out InventoryEffectiveRules rules))
+        var capacity = new InventoryInstanceCapacity(
+            container.Capacity,
+            container.GridWidth,
+            container.GridHeight);
+        if (!catalog.TryResolve(definition.RuleProfile, capacity, out InventoryEffectiveRules rules))
             throw new InvalidOperationException("An inventory container has invalid effective capacity or rule profile.");
         if (!rules.IsOperational)
         {
@@ -722,6 +768,10 @@ public sealed class InventoryIndex : IDisposable
         }
         return rules;
     }
+
+    private bool CanAddContainerRules(in InventoryEffectiveRules rules) =>
+        rules.IsOperational && rules.ItemCapacity > 0 &&
+        rules.ItemCapacity <= _limits.MaximumItemsPerContainer;
 
     private static InventoryItemDefinition ValidateItem(
         EcsWorld world,

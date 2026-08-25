@@ -218,8 +218,10 @@ public sealed class GameContent : IInventoryContentCatalog
                     InventoryPlacementMode.Grid,
                     new InventoryCapacityDimensions(
                         MaximumItemCount: 4_096,
-                        GridWidth: 5,
-                        GridHeight: 5)),
+                        MaximumGridWidth: 10,
+                        MaximumGridHeight: 10),
+                    InitialGridWidth: 5,
+                    InitialGridHeight: 5),
             ]);
         var content = new ContentCatalogBuilder(world.Schema);
         PrefabBuilder character = content.Define(GamePrefabKeys.Character);

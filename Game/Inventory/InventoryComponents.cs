@@ -18,13 +18,15 @@ public enum InventoryEquipSlots : byte
 }
 
 /// <summary>
-/// Persistent effective item-count capacity. Other capacity dimensions belong
-/// to the compiled rule profile; ownership remains an independent fact.
+/// Persistent effective capacity of one concrete container. Grid dimensions
+/// are zero for non-Grid containers and remain independent from item count.
 /// </summary>
-[EcsComponent("game.inventory.container", PersistenceId = 700701)]
+[EcsComponent("game.inventory.container", Version = 2, PersistenceId = 700701)]
 public struct InventoryContainer : IComponent<InventoryContainer>
 {
     public int Capacity;
+    public ushort GridWidth;
+    public ushort GridHeight;
 }
 
 /// <summary>

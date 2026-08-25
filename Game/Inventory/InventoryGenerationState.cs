@@ -22,6 +22,8 @@ public enum InventoryMutationStatus : byte
     UnauthorizedContainer = 14,
     PlacementRequired = 15,
     InvalidPlacement = 16,
+    InvalidCapacity = 17,
+    CapacityWouldInvalidateContents = 18,
 }
 
 /// <summary>Authoritative mutation result plus affected runtime entities for immediate projection.</summary>
@@ -131,6 +133,13 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         out Entity entity) =>
         TryCreateContainerCore(world, prefab, Entity.Null, hasOwner: false, capacity, out entity);
 
+    public bool TryCreateContainer(
+        EcsWorld world,
+        PrefabHandle prefab,
+        in InventoryInstanceCapacity capacity,
+        out Entity entity) =>
+        TryCreateContainerCore(world, prefab, Entity.Null, hasOwner: false, capacity, out entity);
+
     public bool TryCreateOwnedContainer(
         EcsWorld world,
         PrefabHandle prefab,
@@ -152,6 +161,14 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         PrefabHandle prefab,
         Entity owner,
         int capacity,
+        out Entity entity) =>
+        TryCreateContainerCore(world, prefab, owner, hasOwner: true, capacity, out entity);
+
+    public bool TryCreateOwnedContainer(
+        EcsWorld world,
+        PrefabHandle prefab,
+        Entity owner,
+        in InventoryInstanceCapacity capacity,
         out Entity entity) =>
         TryCreateContainerCore(world, prefab, owner, hasOwner: true, capacity, out entity);
 
@@ -643,7 +660,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return false;
     }
 
-    /// <summary>Resolves content policy plus the persistent instance item capacity.</summary>
+    /// <summary>Resolves content policy plus the persistent instance capacity.</summary>
     public bool TryGetEffectiveContainerRules(
         EcsWorld world,
         Entity container,
@@ -656,7 +673,73 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             rules = default;
             return false;
         }
-        return TryResolveOperationalRules(definition, value.Capacity, out rules);
+        return TryResolveOperationalRules(
+            definition,
+            new InventoryInstanceCapacity(value.Capacity, value.GridWidth, value.GridHeight),
+            out rules);
+    }
+
+    /// <summary>
+    /// Transactionally replaces the effective item-count and Grid dimensions of
+    /// one container. Shrink rejects while any retained item would become invalid.
+    /// </summary>
+    public InventoryMutationResult SetEffectiveCapacity(
+        EcsWorld world,
+        Entity container,
+        in InventoryInstanceCapacity capacity)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(container) ||
+            !world.TryRead(container, _containerLookup, out InventoryContainer current) ||
+            !TryGetContainerDefinition(world, container, out InventoryContainerDefinition definition))
+        {
+            return Reject(
+                InventoryMutationStatus.MissingContainer,
+                Entity.Null,
+                "The container is stale, missing, or has unknown content.");
+        }
+        if (!TryResolveOperationalRules(definition, capacity, out InventoryEffectiveRules requested) ||
+            requested.ItemCapacity > Limits.MaximumItemsPerContainer)
+        {
+            return Reject(
+                InventoryMutationStatus.InvalidCapacity,
+                Entity.Null,
+                "The requested capacity is invalid or exceeds the container profile maximum.");
+        }
+        var currentCapacity = new InventoryInstanceCapacity(
+            current.Capacity,
+            current.GridWidth,
+            current.GridHeight);
+        if (!TryResolveOperationalRules(definition, currentCapacity, out InventoryEffectiveRules resolvedCurrent) ||
+            !Index.TryGetContainerRules(container, out InventoryEffectiveRules indexedCurrent) ||
+            resolvedCurrent != indexedCurrent)
+        {
+            return Reject(
+                InventoryMutationStatus.InvariantViolation,
+                Entity.Null,
+                "ECS and inventory index capacity disagree.");
+        }
+        if (requested == resolvedCurrent)
+            return Accept(Entity.Null, Entity.Null, "Container capacity is unchanged.");
+        if (!Index.CanSetContainerRules(container, requested))
+        {
+            return Reject(
+                InventoryMutationStatus.CapacityWouldInvalidateContents,
+                Entity.Null,
+                "The requested capacity would invalidate current contents.");
+        }
+
+        var updated = new InventoryContainer
+        {
+            Capacity = requested.ItemCapacity,
+            GridWidth = requested.GridWidth,
+            GridHeight = requested.GridHeight,
+        };
+        if (!world.TryWrite(container, _containerLookup, updated))
+            throw new InvalidOperationException("A validated container capacity rejected its ECS update.");
+        if (!Index.TrySetContainerRules(container, requested))
+            throw new InvalidOperationException("A validated container capacity was rejected by the index.");
+        return Accept(Entity.Null, Entity.Null, "Container capacity updated.");
     }
 
     public bool TryReadItem(EcsWorld world, Entity item, out InventoryItem value)
@@ -695,8 +778,46 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         entity = Entity.Null;
         if (!prefab.IsValid || prefab.World != world.Id ||
             !_content.TryGetContainer(prefab, out InventoryContainerDefinition definition) ||
-            definition.HasOwner != hasOwner ||
-            !TryResolveOperationalRules(definition, capacity, out InventoryEffectiveRules rules) ||
+            !TryResolveOperationalRules(definition, capacity, out InventoryEffectiveRules rules))
+        {
+            return false;
+        }
+        return TryCreateContainerCore(
+            world, prefab, owner, hasOwner, definition, rules, out entity);
+    }
+
+    private bool TryCreateContainerCore(
+        EcsWorld world,
+        PrefabHandle prefab,
+        Entity owner,
+        bool hasOwner,
+        in InventoryInstanceCapacity capacity,
+        out Entity entity)
+    {
+        EnsureWorld(world);
+        entity = Entity.Null;
+        if (!prefab.IsValid || prefab.World != world.Id ||
+            !_content.TryGetContainer(prefab, out InventoryContainerDefinition definition) ||
+            !TryResolveOperationalRules(definition, capacity, out InventoryEffectiveRules rules))
+        {
+            return false;
+        }
+        return TryCreateContainerCore(
+            world, prefab, owner, hasOwner, definition, rules, out entity);
+    }
+
+    private bool TryCreateContainerCore(
+        EcsWorld world,
+        PrefabHandle prefab,
+        Entity owner,
+        bool hasOwner,
+        in InventoryContainerDefinition definition,
+        in InventoryEffectiveRules rules,
+        out Entity entity)
+    {
+        EnsureWorld(world);
+        entity = Entity.Null;
+        if (definition.Handle != prefab || definition.HasOwner != hasOwner ||
             !Index.CanAddContainer(rules) ||
             (hasOwner && !world.IsAlive(owner)))
         {
@@ -706,7 +827,12 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             return false;
         if (!world.Has(entity, _containerLookup) || world.Has(entity, _ownerLookup) != hasOwner)
             DestroyFailedCreationOrThrow(world, entity, "container content validation");
-        if (!world.TryWrite(entity, _containerLookup, new InventoryContainer { Capacity = rules.ItemCapacity }))
+        if (!world.TryWrite(entity, _containerLookup, new InventoryContainer
+            {
+                Capacity = rules.ItemCapacity,
+                GridWidth = rules.GridWidth,
+                GridHeight = rules.GridHeight,
+            }))
             DestroyFailedCreationOrThrow(world, entity, "container initialization");
         if (hasOwner && !world.TryWrite(entity, _ownerLookup, new InventoryContainerOwner { Owner = owner }))
             DestroyFailedCreationOrThrow(world, entity, "container ownership initialization");
@@ -718,6 +844,13 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
     private bool TryResolveOperationalRules(
         in InventoryContainerDefinition definition,
         int capacity,
+        out InventoryEffectiveRules rules) =>
+        _content.InventoryRules.TryResolve(definition.RuleProfile, capacity, out rules) &&
+        rules.IsOperational;
+
+    private bool TryResolveOperationalRules(
+        in InventoryContainerDefinition definition,
+        in InventoryInstanceCapacity capacity,
         out InventoryEffectiveRules rules) =>
         _content.InventoryRules.TryResolve(definition.RuleProfile, capacity, out rules) &&
         rules.IsOperational;

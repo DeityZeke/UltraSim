@@ -168,8 +168,11 @@ I0.9 adds compiled per-container versus uniform rule selection, separate capacit
 dimensions, and viewer-neutral placement value contracts. I0.10 makes one 5x5
 Grid backpack real: optional persisted instance placement, content-authored item
 footprints, transactional Grid/list/equipment transitions, save/load rebuild, and
-owner-private remote Godot repositioning. Weight, nesting, Slot, Freeform,
-rotation, and automatic packing remain explicitly unsupported.
+owner-private remote Godot repositioning. I0.11 adds independently mutable
+per-instance item-count and Grid dimensions bounded by compiled profile maxima,
+rejects invalidating shrink transactionally, and reprojects upgrades through the
+remote UI. Weight, nesting, Slot, Freeform, rotation, automatic packing, and
+capacity-effect policy remain explicitly unsupported.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
