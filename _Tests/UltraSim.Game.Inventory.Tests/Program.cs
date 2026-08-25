@@ -14,6 +14,9 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("ClosedGameSchemaOwnsFinalInventoryIds", ClosedGameSchemaOwnsFinalInventoryIds),
+    ("RuleCatalogSeparatesScopeCapacityAndPlacement", RuleCatalogSeparatesScopeCapacityAndPlacement),
+    ("ContentProfilesResolvePerContainerAndUniformPolicy", ContentProfilesResolvePerContainerAndUniformPolicy),
+    ("ContainerRuleCapacityFailureIsTransactional", ContainerRuleCapacityFailureIsTransactional),
     ("GameAggregateRejectsCrossWorldFeatureState", GameAggregateRejectsCrossWorldFeatureState),
     ("FixtureRebuildsDerivedIndexFromEcsTruth", FixtureRebuildsDerivedIndexFromEcsTruth),
     ("ContentAddsThirdItemWithoutInventoryRuleChange", ContentAddsThirdItemWithoutInventoryRuleChange),
@@ -60,6 +63,125 @@ static void ClosedGameSchemaOwnsFinalInventoryIds()
     PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();
     Assert.Equal(schema.Id, catalog.Schema.Id);
     Assert.Equal(schema.ComponentCount, catalog.Schema.ComponentCount);
+}
+
+static void RuleCatalogSeparatesScopeCapacityAndPlacement()
+{
+    InventoryPlacement unplaced = InventoryPlacement.Unplaced;
+    InventoryPlacement grid = InventoryPlacement.Grid(2, 3, 4, 5, rotated: true);
+    InventoryPlacement slot = InventoryPlacement.SlotPlacement(new InventoryPlacementSlotId(7));
+    InventoryPlacement freeform = InventoryPlacement.Freeform(-8, 9, 10);
+    Assert.True(unplaced.IsValid && unplaced.IsCompatibleWith(InventoryPlacementMode.Unplaced));
+    Assert.True(grid.IsValid && grid.IsCompatibleWith(InventoryPlacementMode.Grid));
+    Assert.True(slot.IsValid && slot.IsCompatibleWith(InventoryPlacementMode.Slot));
+    Assert.True(freeform.IsValid && freeform.IsCompatibleWith(InventoryPlacementMode.Freeform));
+    Assert.False(InventoryPlacement.Grid(0, 0, 0, 1).IsValid);
+    Assert.False(InventoryPlacement.SlotPlacement(default).IsValid);
+    Assert.False(grid.IsCompatibleWith(InventoryPlacementMode.Freeform));
+
+    var listId = new InventoryRuleProfileId(1);
+    var gridId = new InventoryRuleProfileId(2);
+    var profiles = new[]
+    {
+        new InventoryRuleProfile(
+            listId,
+            InventoryPlacementMode.Unplaced,
+            new InventoryCapacityDimensions(MaximumItemCount: 20)),
+        new InventoryRuleProfile(
+            gridId,
+            InventoryPlacementMode.Grid,
+            new InventoryCapacityDimensions(
+                MaximumItemCount: 40,
+                GridWidth: 10,
+                GridHeight: 6,
+                MaximumWeightGrams: 50_000,
+                MaximumNestingDepth: 2)),
+    };
+    var perContainer = new InventoryRuleCatalog(InventoryRuleSelection.PerContainer, profiles);
+    Assert.True(perContainer.TryResolve(gridId, 30, out InventoryEffectiveRules gridRules));
+    Assert.Equal(gridId, gridRules.Profile);
+    Assert.Equal(InventoryPlacementMode.Grid, gridRules.PlacementMode);
+    Assert.Equal(30, gridRules.ItemCapacity);
+    Assert.Equal((ushort)10, gridRules.GridWidth);
+    Assert.Equal(50_000L, gridRules.MaximumWeightGrams);
+    Assert.False(gridRules.IsOperational);
+    Assert.False(perContainer.TryResolve(gridId, 41, out _));
+
+    var uniform = new InventoryRuleCatalog(InventoryRuleSelection.Uniform(listId), profiles);
+    Assert.True(uniform.TryResolve(gridId, 12, out InventoryEffectiveRules forced));
+    Assert.Equal(listId, forced.Profile);
+    Assert.Equal(InventoryPlacementMode.Unplaced, forced.PlacementMode);
+    Assert.True(forced.IsOperational);
+    Assert.Throws<ArgumentException>(() => _ = new InventoryRuleCatalog(
+        InventoryRuleSelection.Uniform(new InventoryRuleProfileId(99)), profiles));
+    Assert.Throws<ArgumentException>(() => _ = new InventoryRuleCatalog(
+        InventoryRuleSelection.PerContainer, [profiles[0], profiles[0]]));
+}
+
+static void ContentProfilesResolvePerContainerAndUniformPolicy()
+{
+    var limits = new InventoryLimits(8, 1_024, 512);
+    using PolicyFixture perContainer = CreatePolicyFixture(limits, InventoryRuleSelection.PerContainer);
+    Assert.True(perContainer.Content.TryGetContainer(
+        perContainer.Content.Backpack, out InventoryContainerDefinition backpackDefinition));
+    Assert.True(perContainer.Content.TryGetContainer(
+        perContainer.Content.WorldChest, out InventoryContainerDefinition chestDefinition));
+    Assert.Equal(GameInventoryRuleProfileIds.Backpack, backpackDefinition.RuleProfile);
+    Assert.Equal(GameInventoryRuleProfileIds.WorldStorage, chestDefinition.RuleProfile);
+    Assert.Equal(8, backpackDefinition.DefaultCapacity);
+    Assert.Equal(64, chestDefinition.DefaultCapacity);
+    Assert.True(perContainer.Inventory.TryCreateOwnedContainer(
+        perContainer.World,
+        perContainer.Content.Backpack,
+        perContainer.Character,
+        out Entity defaultBackpack));
+    Assert.True(perContainer.Inventory.TryGetEffectiveContainerRules(
+        perContainer.World, defaultBackpack, out InventoryEffectiveRules backpackRules));
+    Assert.Equal(GameInventoryRuleProfileIds.Backpack, backpackRules.Profile);
+    Assert.Equal(8, backpackRules.ItemCapacity);
+    Assert.True(perContainer.Inventory.TryCreateContainer(
+        perContainer.World, perContainer.Content.WorldChest, 300, out Entity chest));
+    Assert.True(perContainer.Inventory.TryGetEffectiveContainerRules(
+        perContainer.World, chest, out InventoryEffectiveRules chestRules));
+    Assert.Equal(GameInventoryRuleProfileIds.WorldStorage, chestRules.Profile);
+    Assert.Equal(300, chestRules.ItemCapacity);
+
+    using PolicyFixture uniform = CreatePolicyFixture(
+        limits,
+        InventoryRuleSelection.Uniform(GameInventoryRuleProfileIds.Backpack));
+    Assert.True(uniform.Inventory.TryCreateContainer(
+        uniform.World, uniform.Content.WorldChest, 64, out Entity uniformChest));
+    Assert.True(uniform.Inventory.TryGetEffectiveContainerRules(
+        uniform.World, uniformChest, out InventoryEffectiveRules uniformRules));
+    Assert.Equal(GameInventoryRuleProfileIds.Backpack, uniformRules.Profile);
+    Assert.Equal(64, uniformRules.ItemCapacity);
+}
+
+static void ContainerRuleCapacityFailureIsTransactional()
+{
+    var limits = new InventoryLimits(8, 1_024, 512);
+    using PolicyFixture perContainer = CreatePolicyFixture(limits, InventoryRuleSelection.PerContainer);
+    int aliveBefore = perContainer.World.AliveCount;
+    int containersBefore = perContainer.Inventory.Index.ContainerCount;
+    Assert.False(perContainer.Inventory.TryCreateOwnedContainer(
+        perContainer.World,
+        perContainer.Content.Backpack,
+        perContainer.Character,
+        257,
+        out Entity rejectedBackpack));
+    Assert.False(rejectedBackpack.IsValid);
+    Assert.Equal(aliveBefore, perContainer.World.AliveCount);
+    Assert.Equal(containersBefore, perContainer.Inventory.Index.ContainerCount);
+
+    using PolicyFixture uniform = CreatePolicyFixture(
+        limits,
+        InventoryRuleSelection.Uniform(GameInventoryRuleProfileIds.Backpack));
+    aliveBefore = uniform.World.AliveCount;
+    Assert.False(uniform.Inventory.TryCreateContainer(
+        uniform.World, uniform.Content.WorldChest, 300, out Entity rejectedChest));
+    Assert.False(rejectedChest.IsValid);
+    Assert.Equal(aliveBefore, uniform.World.AliveCount);
+    Assert.Equal(0, uniform.Inventory.Index.ContainerCount);
 }
 
 static void GameAggregateRejectsCrossWorldFeatureState()
@@ -706,6 +828,10 @@ static void InventoryPersistsAndRebuildsAfterGenerationSwap()
         Assert.True(world.TryResolvePersistentEntity(fixture.SwordId, out Entity sword));
         Assert.True(game.Inventory.TryGetContainerOwner(world, backpack, out Entity owner));
         Assert.Equal(character, owner);
+        Assert.True(game.Inventory.TryGetEffectiveContainerRules(
+            world, backpack, out InventoryEffectiveRules rules));
+        Assert.Equal(GameInventoryRuleProfileIds.Backpack, rules.Profile);
+        Assert.Equal(8, rules.ItemCapacity);
         Assert.Equal(backpack, ReadItem(world, game.Inventory, bread).Parent);
         Assert.Equal(backpack, ReadItem(world, game.Inventory, sword).Parent);
         Assert.Equal(2, game.Inventory.Index.ItemCount);
@@ -941,6 +1067,25 @@ static Fixture CreateFixture()
     return new Fixture(root, runtime, composition, persistence, entities);
 }
 
+static PolicyFixture CreatePolicyFixture(
+    InventoryLimits limits,
+    InventoryRuleSelection selection)
+{
+    var composition = new UltraSimGameComposition(
+        limits,
+        inventoryRuleSelection: selection);
+    GameStaging staging = composition.CreateFresh(
+        limits.MaximumItems + 16,
+        new PersistenceIdentityOptions(new PersistentWorldId(
+            checked((ulong)0x70_9000 + selection.UniformProfile.Value))),
+        limits);
+    staging.World.Seal();
+    staging.World.Initialize();
+    staging.World.BeginRun();
+    Assert.True(staging.World.TryInstantiate(staging.Content.Character, out Entity character));
+    return new PolicyFixture(staging, character);
+}
+
 static void CollectGarbage()
 {
     GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
@@ -1011,6 +1156,29 @@ sealed class Fixture : IDisposable
         Runtime.Dispose();
         if (Directory.Exists(Root))
             Directory.Delete(Root, recursive: true);
+    }
+}
+
+sealed class PolicyFixture : IDisposable
+{
+    private readonly GameStaging _staging;
+
+    internal PolicyFixture(GameStaging staging, Entity character)
+    {
+        _staging = staging;
+        Character = character;
+    }
+
+    internal EcsWorld World => _staging.World;
+    internal InventoryGenerationState Inventory => _staging.Inventory;
+    internal GameContent Content => _staging.Content;
+    internal Entity Character { get; }
+
+    public void Dispose()
+    {
+        _staging.WorldState.Dispose();
+        _staging.Inventory.Dispose();
+        _staging.World.Dispose();
     }
 }
 

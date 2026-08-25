@@ -240,7 +240,6 @@ public sealed class InventoryIndex : IDisposable
                     throw new InvalidOperationException("An inventory item policy exists without an item.");
                 if (hasContainer)
                 {
-                    ValidateContainer(container);
                     if (!world.TryGetPrefabProvenance(entity, out PrefabKey containerKey) ||
                         !content.TryGetContainer(containerKey, out InventoryContainerDefinition definition) ||
                         definition.HasOwner != hasOwner)
@@ -248,7 +247,8 @@ public sealed class InventoryIndex : IDisposable
                         throw new InvalidOperationException(
                             "An inventory container does not match registered content ownership.");
                     }
-                    if (!replacement.TryAddContainer(entity, container.Capacity))
+                    InventoryEffectiveRules rules = ValidateContainer(container, definition, content.InventoryRules);
+                    if (!replacement.TryAddContainer(entity, rules.ItemCapacity))
                         throw new InvalidOperationException("The inventory container index limit was exceeded.");
                     if (hasOwner && (!owner.Owner.IsValid || !world.IsAlive(owner.Owner)))
                     {
@@ -526,10 +526,19 @@ public sealed class InventoryIndex : IDisposable
         replacement._childCount = 0;
     }
 
-    private static void ValidateContainer(in InventoryContainer container)
+    private static InventoryEffectiveRules ValidateContainer(
+        in InventoryContainer container,
+        in InventoryContainerDefinition definition,
+        InventoryRuleCatalog catalog)
     {
-        if (container.Capacity <= 0)
-            throw new InvalidOperationException("An inventory container has invalid capacity.");
+        if (!catalog.TryResolve(definition.RuleProfile, container.Capacity, out InventoryEffectiveRules rules))
+            throw new InvalidOperationException("An inventory container has invalid effective capacity or rule profile.");
+        if (!rules.IsOperational)
+        {
+            throw new InvalidOperationException(
+                "An inventory container selects placement, weight, or nesting semantics that are not operational yet.");
+        }
+        return rules;
     }
 
     private static void ValidateItem(

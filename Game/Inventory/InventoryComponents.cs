@@ -17,7 +17,10 @@ public enum InventoryEquipSlots : byte
     MainHand = 1 << 0,
 }
 
-/// <summary>Persistent container capacity. Ownership is an independent fact.</summary>
+/// <summary>
+/// Persistent effective item-count capacity. Other capacity dimensions belong
+/// to the compiled rule profile; ownership remains an independent fact.
+/// </summary>
 [EcsComponent("game.inventory.container", PersistenceId = 700701)]
 public struct InventoryContainer : IComponent<InventoryContainer>
 {

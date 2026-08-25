@@ -103,9 +103,40 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
     public bool TryCreateContainer(
         EcsWorld world,
         PrefabHandle prefab,
+        out Entity entity)
+    {
+        EnsureWorld(world);
+        if (!_content.TryGetContainer(prefab, out InventoryContainerDefinition definition))
+        {
+            entity = Entity.Null;
+            return false;
+        }
+        return TryCreateContainerCore(
+            world, prefab, Entity.Null, hasOwner: false, definition.DefaultCapacity, out entity);
+    }
+
+    public bool TryCreateContainer(
+        EcsWorld world,
+        PrefabHandle prefab,
         int capacity,
         out Entity entity) =>
         TryCreateContainerCore(world, prefab, Entity.Null, hasOwner: false, capacity, out entity);
+
+    public bool TryCreateOwnedContainer(
+        EcsWorld world,
+        PrefabHandle prefab,
+        Entity owner,
+        out Entity entity)
+    {
+        EnsureWorld(world);
+        if (!_content.TryGetContainer(prefab, out InventoryContainerDefinition definition))
+        {
+            entity = Entity.Null;
+            return false;
+        }
+        return TryCreateContainerCore(
+            world, prefab, owner, hasOwner: true, definition.DefaultCapacity, out entity);
+    }
 
     public bool TryCreateOwnedContainer(
         EcsWorld world,
@@ -404,6 +435,22 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return false;
     }
 
+    /// <summary>Resolves content policy plus the persistent instance item capacity.</summary>
+    public bool TryGetEffectiveContainerRules(
+        EcsWorld world,
+        Entity container,
+        out InventoryEffectiveRules rules)
+    {
+        EnsureWorld(world);
+        if (!world.TryRead(container, _containerLookup, out InventoryContainer value) ||
+            !TryGetContainerDefinition(world, container, out InventoryContainerDefinition definition))
+        {
+            rules = default;
+            return false;
+        }
+        return TryResolveOperationalRules(definition, value.Capacity, out rules);
+    }
+
     public bool TryReadItem(EcsWorld world, Entity item, out InventoryItem value)
     {
         EnsureWorld(world);
@@ -422,7 +469,9 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         entity = Entity.Null;
         if (!prefab.IsValid || prefab.World != world.Id ||
             !_content.TryGetContainer(prefab, out InventoryContainerDefinition definition) ||
-            definition.HasOwner != hasOwner || !Index.CanAddContainer(capacity) ||
+            definition.HasOwner != hasOwner ||
+            !TryResolveOperationalRules(definition, capacity, out InventoryEffectiveRules rules) ||
+            !Index.CanAddContainer(rules.ItemCapacity) ||
             (hasOwner && !world.IsAlive(owner)))
         {
             return false;
@@ -431,14 +480,21 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             return false;
         if (!world.Has(entity, _containerLookup) || world.Has(entity, _ownerLookup) != hasOwner)
             DestroyFailedCreationOrThrow(world, entity, "container content validation");
-        if (!world.TryWrite(entity, _containerLookup, new InventoryContainer { Capacity = capacity }))
+        if (!world.TryWrite(entity, _containerLookup, new InventoryContainer { Capacity = rules.ItemCapacity }))
             DestroyFailedCreationOrThrow(world, entity, "container initialization");
         if (hasOwner && !world.TryWrite(entity, _ownerLookup, new InventoryContainerOwner { Owner = owner }))
             DestroyFailedCreationOrThrow(world, entity, "container ownership initialization");
-        if (!Index.TryAddContainer(entity, capacity))
+        if (!Index.TryAddContainer(entity, rules.ItemCapacity))
             throw new InvalidOperationException("A prevalidated inventory container was rejected by the index.");
         return true;
     }
+
+    private bool TryResolveOperationalRules(
+        in InventoryContainerDefinition definition,
+        int capacity,
+        out InventoryEffectiveRules rules) =>
+        _content.InventoryRules.TryResolve(definition.RuleProfile, capacity, out rules) &&
+        rules.IsOperational;
 
     private bool IsBoundDefinition(in InventoryItemDefinition definition) =>
         definition.Handle.IsValid && definition.Handle.World == _worldId &&

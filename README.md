@@ -137,6 +137,10 @@ UI protocol carries granular Inventory move/split/equip/unequip operations, and
 the production Godot renderer presents and submits them. Foreign-container
 rejection, stale/duplicate intent, reconnect, and save/load generation
 resynchronization are permanent gates; Inventory contents never enter public AOI.
+I0.9 adds compiled per-container versus uniform rule selection, separate capacity
+dimensions, and viewer-neutral placement value contracts. Current gameplay stays
+on the honest unplaced/item-count floor; grid, weight, and nesting profiles fail
+closed until their authoritative item facts and mutations exist.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

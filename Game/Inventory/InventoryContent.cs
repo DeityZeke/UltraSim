@@ -9,6 +9,8 @@ public readonly record struct InventoryContainerDefinition
         PrefabHandle handle,
         PrefabKey key,
         string displayName,
+        int defaultCapacity,
+        InventoryRuleProfileId ruleProfile,
         bool hasOwner)
     {
         if (!handle.IsValid)
@@ -16,15 +18,23 @@ public readonly record struct InventoryContainerDefinition
         if (!key.IsValid)
             throw new ArgumentException("An inventory container definition requires a stable prefab key.", nameof(key));
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        if (defaultCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(defaultCapacity));
+        if (!ruleProfile.IsValid)
+            throw new ArgumentException("A container definition requires an inventory rule profile.", nameof(ruleProfile));
         Handle = handle;
         Key = key;
         DisplayName = displayName;
+        DefaultCapacity = defaultCapacity;
+        RuleProfile = ruleProfile;
         HasOwner = hasOwner;
     }
 
     public PrefabHandle Handle { get; }
     public PrefabKey Key { get; }
     public string DisplayName { get; }
+    public int DefaultCapacity { get; }
+    public InventoryRuleProfileId RuleProfile { get; }
     public bool HasOwner { get; }
 }
 
@@ -76,6 +86,8 @@ public interface IInventoryContentCatalog
 {
     CompiledPrefabCatalog Prefabs { get; }
 
+    InventoryRuleCatalog InventoryRules { get; }
+
     bool TryGetContainer(PrefabHandle handle, out InventoryContainerDefinition definition);
 
     bool TryGetContainer(PrefabKey key, out InventoryContainerDefinition definition);
@@ -97,6 +109,7 @@ public readonly record struct InventoryContainerAuthoring(
     PrefabKey Key,
     string DisplayName,
     int DefaultCapacity,
+    InventoryRuleProfileId RuleProfile,
     bool HasOwner);
 
 /// <summary>Reusable Inventory component authoring for game-owned content.</summary>
@@ -107,17 +120,20 @@ public static class InventoryContent
         PrefabKey key,
         string displayName,
         int defaultCapacity,
+        InventoryRuleProfileId ruleProfile,
         bool hasOwner)
     {
         ArgumentNullException.ThrowIfNull(content);
         if (defaultCapacity <= 0)
             throw new ArgumentOutOfRangeException(nameof(defaultCapacity));
+        if (!ruleProfile.IsValid)
+            throw new ArgumentException("A container requires an inventory rule profile.", nameof(ruleProfile));
         var prefab = content.Define(key);
         prefab.With(new InventoryContainer { Capacity = defaultCapacity });
         if (hasOwner)
             prefab.With(new InventoryContainerOwner { Owner = Entity.Null });
         prefab.DisplayName(displayName);
-        return new InventoryContainerAuthoring(key, displayName, defaultCapacity, hasOwner);
+        return new InventoryContainerAuthoring(key, displayName, defaultCapacity, ruleProfile, hasOwner);
     }
 
     public static InventoryItemAuthoring DefineItem(

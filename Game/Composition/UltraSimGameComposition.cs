@@ -51,12 +51,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
     private readonly int _maximumChunksPerContentArchetype;
     private readonly GameRuntimeProfile _runtimeProfile;
     private readonly WorldPack? _baseWorldPack;
+    private readonly InventoryRuleSelection _inventoryRuleSelection;
 
     public UltraSimGameComposition(
         InventoryLimits? inventoryLimits = null,
         int maximumChunksPerContentArchetype = 16,
         GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local,
-        WorldPack? baseWorldPack = null)
+        WorldPack? baseWorldPack = null,
+        InventoryRuleSelection? inventoryRuleSelection = null)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
@@ -67,6 +69,9 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         _maximumChunksPerContentArchetype = maximumChunksPerContentArchetype;
         _runtimeProfile = runtimeProfile;
         _baseWorldPack = baseWorldPack;
+        _inventoryRuleSelection = inventoryRuleSelection ?? InventoryRuleSelection.PerContainer;
+        if (!_inventoryRuleSelection.IsValid)
+            throw new ArgumentException("The inventory rule selection is invalid.", nameof(inventoryRuleSelection));
         Schema = GameSchema.CreateSchema();
         PersistenceCatalog = GameSchema.CreatePersistenceCatalog(static builder =>
             builder.RegisterHistoricalReader<GameSimulationState>(
@@ -210,7 +215,8 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             world,
             new ContentCompilationOptions(
                 ChunkLayoutOptions.KiB16,
-                maximumChunksPerNewArchetype: _maximumChunksPerContentArchetype));
+                maximumChunksPerNewArchetype: _maximumChunksPerContentArchetype),
+            _inventoryRuleSelection);
         _contentByWorld.Add(world, content);
         return content;
     }

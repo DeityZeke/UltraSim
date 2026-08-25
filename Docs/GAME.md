@@ -19,6 +19,12 @@ Apple, Iron Sword, Backpack, and World Chest. Inventory reasons about facts—it
 quantity, stack policy, equipment capability, container, and relationships—not
 hard-coded item-kind switches.
 
+Container content also selects a stable Inventory rule profile. The server may
+retain those per-container selections or force one uniform profile. Effective
+item-count capacity is validated against content policy and generation limits;
+placement, weight, and nesting have separate typed dimensions rather than
+overloading the legacy capacity integer.
+
 ## Accounting and Admission
 
 Accounting owns durable accounts, characters, and trusted external-identity
@@ -53,7 +59,10 @@ ABA. The unrestricted `Open` route remains trusted composition for ownerless
 world containers, not remote participant authorization.
 
 The [Inventory subsystem contract](../Game/Inventory/README.md) records the I0.8
-authenticated remote-to-Godot vertical and its private-state boundary.
+authenticated remote-to-Godot vertical and the I0.9 rule/placement foundation.
+I0.9 keeps the current unplaced/list presentation operational while future
+grid/slot/freeform, weight, and nesting semantics remain explicit fail-closed
+contracts rather than falsely implemented behavior.
 
 ## Persistence ownership
 

@@ -18,6 +18,13 @@ public static class GamePrefabKeys
     public static readonly PrefabKey WoodlandAnimal = new("game.world.woodland-animal");
 }
 
+/// <summary>Stable compiled inventory policy identities owned by this game content set.</summary>
+public static class GameInventoryRuleProfileIds
+{
+    public static readonly InventoryRuleProfileId Backpack = new(1);
+    public static readonly InventoryRuleProfileId WorldStorage = new(2);
+}
+
 /// <summary>Compact structural terrain identities admitted by the first game world content profile.</summary>
 public static class GameTerrainMaterialIds
 {
@@ -70,6 +77,7 @@ public sealed class GameContent : IInventoryContentCatalog
 
     private GameContent(
         CompiledPrefabCatalog prefabs,
+        InventoryRuleCatalog inventoryRules,
         PrefabHandle character,
         InventoryContainerDefinition backpack,
         InventoryContainerDefinition worldChest,
@@ -80,7 +88,10 @@ public sealed class GameContent : IInventoryContentCatalog
         PrefabHandle woodlandAnimal,
         WorldContentBinding world)
     {
+        ValidateContainerRules(inventoryRules, backpack);
+        ValidateContainerRules(inventoryRules, worldChest);
         Prefabs = prefabs;
+        InventoryRules = inventoryRules;
         Character = character;
         Backpack = backpack.Handle;
         WorldChest = worldChest.Handle;
@@ -115,6 +126,7 @@ public sealed class GameContent : IInventoryContentCatalog
     }
 
     public CompiledPrefabCatalog Prefabs { get; }
+    public InventoryRuleCatalog InventoryRules { get; }
     public PrefabHandle Character { get; }
     public PrefabHandle Backpack { get; }
     public PrefabHandle WorldChest { get; }
@@ -156,9 +168,24 @@ public sealed class GameContent : IInventoryContentCatalog
     public bool TryGetItem(PrefabKey key, out InventoryItemDefinition definition) =>
         _itemsByKey.TryGetValue(key, out definition);
 
-    public static GameContent Compile(EcsWorld world, ContentCompilationOptions options)
+    public static GameContent Compile(
+        EcsWorld world,
+        ContentCompilationOptions options,
+        InventoryRuleSelection? inventoryRuleSelection = null)
     {
         ArgumentNullException.ThrowIfNull(world);
+        var inventoryRules = new InventoryRuleCatalog(
+            inventoryRuleSelection ?? InventoryRuleSelection.PerContainer,
+            [
+                new InventoryRuleProfile(
+                    GameInventoryRuleProfileIds.Backpack,
+                    InventoryPlacementMode.Unplaced,
+                    new InventoryCapacityDimensions(MaximumItemCount: 256)),
+                new InventoryRuleProfile(
+                    GameInventoryRuleProfileIds.WorldStorage,
+                    InventoryPlacementMode.Unplaced,
+                    new InventoryCapacityDimensions(MaximumItemCount: 4_096)),
+            ]);
         var content = new ContentCatalogBuilder(world.Schema);
         PrefabBuilder character = content.Define(GamePrefabKeys.Character);
         character.With(new GameCharacter { Marker = 1 });
@@ -176,7 +203,12 @@ public sealed class GameContent : IInventoryContentCatalog
             GameWorldPublicPrefabIds.Character, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         dormantCharacter.DisplayName("Dormant Character");
         InventoryContainerAuthoring backpackSource = InventoryContent.DefineContainer(
-            content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);
+            content,
+            GamePrefabKeys.Backpack,
+            "Backpack",
+            8,
+            GameInventoryRuleProfileIds.Backpack,
+            hasOwner: true);
         PrefabBuilder worldChest = content.Define(GamePrefabKeys.WorldChest);
         worldChest.With(new InventoryContainer { Capacity = 64 });
         worldChest.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
@@ -184,7 +216,11 @@ public sealed class GameContent : IInventoryContentCatalog
             GameWorldPublicPrefabIds.WorldChest, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         worldChest.DisplayName("World Chest");
         var chestSource = new InventoryContainerAuthoring(
-            GamePrefabKeys.WorldChest, "World Chest", 64, HasOwner: false);
+            GamePrefabKeys.WorldChest,
+            "World Chest",
+            64,
+            GameInventoryRuleProfileIds.WorldStorage,
+            HasOwner: false);
         InventoryItemAuthoring breadSource = InventoryContent.DefineItem(
             content, GamePrefabKeys.Bread, "Bread", maximumQuantity: 20);
         InventoryItemAuthoring swordSource = InventoryContent.DefineItem(
@@ -217,6 +253,7 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryItemDefinition apple = BindItem(compiled, appleSource);
         return new GameContent(
             compiled,
+            inventoryRules,
             compiled.GetHandle(GamePrefabKeys.Character),
             BindContainer(compiled, backpackSource),
             BindContainer(compiled, chestSource),
@@ -253,6 +290,8 @@ public sealed class GameContent : IInventoryContentCatalog
             handle,
             source.Key,
             info.DisplayName ?? source.DisplayName,
+            source.DefaultCapacity,
+            source.RuleProfile,
             source.HasOwner);
     }
 
@@ -268,5 +307,20 @@ public sealed class GameContent : IInventoryContentCatalog
             info.DisplayName ?? source.DisplayName,
             source.MaximumQuantity,
             source.AllowedEquipSlots);
+    }
+
+    private static void ValidateContainerRules(
+        InventoryRuleCatalog rules,
+        in InventoryContainerDefinition definition)
+    {
+        if (!rules.TryResolve(
+                definition.RuleProfile,
+                definition.DefaultCapacity,
+                out InventoryEffectiveRules effective) ||
+            !effective.IsOperational)
+        {
+            throw new InvalidOperationException(
+                $"Container content '{definition.Key.Value}' selects unsupported or invalid inventory rules.");
+        }
     }
 }

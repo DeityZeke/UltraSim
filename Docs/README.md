@@ -19,7 +19,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 - [Game](GAME.md) — concrete game composition, schema/content ownership,
   Accounting, Admission, and Inventory.
 - [Inventory](../Game/Inventory/README.md) — authoritative mutation, owner-private
-  UI authorization, and the I0.8 remote Godot vertical.
+  UI authorization, the I0.8 remote Godot vertical, and the I0.9 container-policy
+  and placement foundation.
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   capture/history, authoritative ingress, WorldState/Events, and the accepted N0
   replication contracts.
