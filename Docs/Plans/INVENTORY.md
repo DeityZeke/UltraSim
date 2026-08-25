@@ -2,10 +2,13 @@
 
 ## UltraSim Inventory — Current Contracts, Design Direction, and Future Semantics
 
-**Status:** living design/architecture note  
-**Current implementation checkpoint:** `b61fc96a` — I0.9 container-policy foundation  
-**Remote/private vertical checkpoint:** `0ad93d54` — I0.8 authenticated remote inventory vertical  
-**Earlier authoritative core:** I0.7 / S0.7 inventory foundation  
+**Status:** living design/architecture note
+
+**Current implementation checkpoint:** `92595d04` — I0.10 authoritative Grid placement
+
+**Remote/private vertical checkpoint:** `0ad93d54` — I0.8 authenticated remote inventory vertical
+
+**Earlier authoritative core:** I0.7 / S0.7 inventory foundation
 
 This document captures the current Inventory implementation and the design direction discussed around it while the details are fresh. It intentionally distinguishes:
 
@@ -58,6 +61,11 @@ Inventory state is persisted in ECS components and prefab provenance. The curren
   - parent relationship;
   - equipment slot;
   - quantity;
+- `InventoryGridPlacement`
+  - optional persistent canonical X/Y for an item contained by a Grid container;
+- `InventoryGridFootprint`
+  - optional immutable content footprint;
+  - canonical absence means 1×1;
 - `InventoryStackPolicy`
   - optional content-authored maximum stack quantity;
 - `InventoryEquipCapability`
@@ -73,6 +81,10 @@ Item runtime/persistent identity
     + Parent
     + EquipSlot
     + Quantity
+    + optional GridPlacement(X,Y), only while Grid-contained
+
+Prefab/content provenance
+    + optional immutable GridFootprint(Width,Height)
 ```
 
 The system should continue avoiding hard-coded switches such as `if item == Sword` inside Inventory rules. New ordinary item types should be content additions, not Inventory code changes.
@@ -121,11 +133,12 @@ Current authoritative mutations include:
 
 - create container;
 - create owned container;
-- create item;
-- move contained item between containers;
-- split stack;
+- create item, with explicit placement when the destination is Grid;
+- move contained item between Grid and Unplaced containers;
+- reposition a Grid-contained item;
+- split stack, with explicit destination placement when required;
 - equip;
-- unequip;
+- unequip, with explicit destination placement when required;
 - destroy item;
 - destroy empty container.
 
@@ -184,6 +197,8 @@ Current tests prove:
 
 - inventory persists across save/load generation replacement;
 - equipped relationships persist and reindex;
+- Grid placement and immutable content footprint persist and reindex;
+- Grid occupancy is rebuilt transactionally from restored ECS truth;
 - derived-index rebuild occurs from restored ECS truth;
 - failed rebuild does not publish a partially valid candidate;
 - retained UI/view identity uses complete durable world + persistent-entity identity to avoid cross-world numeric-ID ABA.
@@ -379,7 +394,7 @@ Bookcase       → physical Grid mapped into 3D shelf transforms
 Reagent pouch  → nested magical Grid bag
 ```
 
-Current game content already assigns stable distinct rule profiles to Backpack and World Storage even though both are still operational `Unplaced` profiles.
+Current game content assigns stable distinct rule profiles to Backpack, World Storage, and Grid Backpack. Backpack and World Storage remain operational `Unplaced` profiles; Grid Backpack is an operational 5×5 `Grid` profile.
 
 ## 7.2 Profile maximum vs instance item capacity
 
@@ -409,11 +424,11 @@ later upgraded backpack current item count = 12 / 20 / ...
 
 The compiled profile should not be mutated merely because one particular bag receives an enchantment or progression upgrade.
 
-## 7.3 Current fail-closed floor
+## 7.3 I0.9 fail-closed floor and I0.10 operational floor
 
-At I0.9, only `Unplaced` + item-count capacity is operational.
+I0.9 closed with only `Unplaced` + item-count capacity operational. I0.10 adds authoritative `Grid` placement and independently enforces item-count capacity, grid bounds, and grid overlap.
 
-`Grid`, `Slot`, `Freeform`, weight limits, and nesting depths are declared typed contracts but fail closed because the authoritative supporting state and mutation logic do not exist yet.
+`Slot`, `Freeform`, weight limits, and nesting depths remain declared typed contracts that fail closed because their authoritative supporting state and mutation logic do not exist yet.
 
 This is deliberate:
 
@@ -434,11 +449,11 @@ Slot
 Freeform
 ```
 
-The current I0.9 `InventoryPlacement` value already has a viewer-neutral shape containing `X/Y/Z`, `Width/Height`, optional stable `Slot`, and `Rotated`. At I0.9 these values are **contract vocabulary only** for the non-Unplaced modes; there is not yet persisted authoritative item placement state or an occupancy index that makes Grid/Slot/Freeform operational.
+The I0.9 `InventoryPlacement` value established a viewer-neutral shape containing `X/Y/Z`, `Width/Height`, optional stable `Slot`, and `Rotated`. I0.10 makes the Grid subset operational through optional persisted `InventoryGridPlacement(X,Y)`, content-authored `InventoryGridFootprint`, and a generation-owned occupancy index. Slot and Freeform remain contract vocabulary only.
 
 `Unplaced` means authoritative inventory truth does not retain a positional placement. It can still be projected as a list, sorted view, search result, etc.
 
-A future Grid item can retain canonical grid coordinates/footprint-compatible placement. A future Freeform item can retain freeform coordinates. Slot placement uses a stable slot identity.
+A Grid item retains canonical X/Y placement while contained by a Grid parent; its prefab supplies the immutable footprint and absence canonically means 1×1. A future Freeform item can retain freeform coordinates. Slot placement uses a stable slot identity.
 
 ## 8.1 Storage semantics and viewer semantics are separate
 
@@ -478,7 +493,7 @@ Weight capacity
 Nesting capacity/policy
 ```
 
-I0.9 already encodes these as separate typed profile dimensions: `MaximumItemCount`, `GridWidth`, `GridHeight`, `MaximumWeightGrams`, and `MaximumNestingDepth`. A zero weight limit currently means weight is unconstrained/disabled; zero nesting depth forbids nesting. Only item-count capacity is operational today.
+I0.9 encoded these as separate typed profile dimensions: `MaximumItemCount`, `GridWidth`, `GridHeight`, `MaximumWeightGrams`, and `MaximumNestingDepth`. I0.10 makes item-count and Grid/layout capacity operational and independently enforced. A zero weight limit currently means weight is unconstrained/disabled; zero nesting depth forbids nesting. Weight and nesting remain deferred.
 
 These dimensions may correlate but are not semantically identical.
 
@@ -743,16 +758,15 @@ The currently favored conceptual direction is grandfathered/capacity-debt behavi
 
 ---
 
-# 14. Grid placement design direction
+# 14. I0.10 authoritative Grid placement — implemented
 
-Grid is the next natural capability to make authoritative after I0.9.
+I0.10 makes one concrete 5×5 Grid Backpack authoritative without changing Unplaced behavior or implementing every future Inventory mechanic.
 
-A real Grid implementation should support:
+The accepted implementation supports:
 
-- configurable width × height;
+- bounded profile-authored width × height, with the current Grid Backpack at 5×5;
 - item footprints independent from stack quantity;
 - canonical X/Y placement;
-- optional rotation if the game/profile enables it;
 - bounds validation;
 - overlap rejection;
 - deterministic reposition;
@@ -762,7 +776,7 @@ A real Grid implementation should support:
 - remote owner-private UI interaction;
 - hostile/stale intent fencing.
 
-Do not automatically implement weight, nesting, gravity, automatic packing, or 3D shelf mapping at the same time.
+Rotation, automatic packing, weight, nesting, gravity, and 3D shelf mapping remain explicitly unsupported.
 
 ## 14.1 Item placement vs item footprint
 
@@ -789,11 +803,11 @@ Bag interior container = 5×5
 
 These facts are intentionally unrelated.
 
-## 14.2 Optional authoritative placement state
+## 14.2 Optional authoritative placement state — implemented
 
 Do not force list-only servers to carry fake grid coordinates.
 
-A future implementation should prefer placement state that only exists when the active container/profile actually requires it, rather than permanently adding meaningless Grid fields to every inventory item.
+`InventoryGridPlacement` exists only while an item is contained by a Grid parent. Unplaced and equipped items carry no fake grid coordinates. `InventoryGridFootprint` is immutable content policy and is not duplicated into the instance placement component.
 
 ---
 
@@ -1182,12 +1196,13 @@ Do not require the Inventory architecture to know about a future Materials subsy
 
 # 24. Current profile examples in Game content
 
-As of I0.9, Game content owns stable inventory rule profile IDs for at least:
+As of I0.10, Game content owns stable inventory rule profile IDs for at least:
 
 - Backpack;
-- World Storage.
+- World Storage;
+- Grid Backpack.
 
-Both currently resolve to operational `Unplaced` profiles with independent maximum item-count capacities. This is intentional: the profile identity exists before the advanced placement mechanics are implemented, so the content identity does not need to change later merely because the profile earns Grid/other semantics.
+Backpack and World Storage resolve to operational `Unplaced` profiles with independent maximum item-count capacities. Grid Backpack resolves to an operational 5×5 `Grid` profile and uses an independently enforced instance item-count capacity (20 in the accepted vertical). Stable profile identity remains independent from presentation.
 
 Current content compilation validates that selected container rules resolve and are operational before publishing Game content.
 
@@ -1219,7 +1234,7 @@ The following should be treated as strong architecture guidance.
 
 ## 25.4 Fail closed
 
-- Unsupported Grid/Weight/Nesting policy must reject before runtime publication.
+- Unsupported Slot/Freeform/Weight/Nesting policy must reject before runtime publication; malformed or unsupported Grid policy must do the same.
 - Capacity/invariant failure must not partially mutate authoritative state.
 - Stale/foreign/duplicate remote intent must not advance authoritative state.
 
@@ -1267,22 +1282,19 @@ The exact order can change when a real gameplay vertical earns something else, b
 - fail-closed unsupported mechanics;
 - instance item-count capacity vs profile maximum.
 
-## I0.10 — likely next: authoritative Grid placement
-
-Prove one real Grid profile end-to-end without adding every future mechanic.
-
-Likely scope:
+## I0.10 — authoritative Grid placement — CLOSED
 
 - authoritative grid placement state;
-- item footprints;
-- width/height;
-- overlap/bounds;
+- immutable content-authored item footprints;
+- bounded profile-authored width/height;
+- transactional overlap/bounds validation;
+- deterministic reposition and Grid ↔ Unplaced/equipment transitions;
 - item-count + spatial capacity;
 - save/load/rebuild;
 - remote/private UI;
 - Unplaced remains unchanged.
 
-Explicitly out of scope for that checkpoint unless earned:
+Explicitly deferred:
 
 - weight;
 - nested bags;
@@ -1291,7 +1303,7 @@ Explicitly out of scope for that checkpoint unless earned:
 - automatic packing;
 - trade.
 
-## I0.11 — likely: dynamic capacity/modifier semantics
+## I0.11 — candidate: dynamic capacity/modifier semantics
 
 Once Grid exists, establish how persistent upgrades and temporary effects modify:
 
@@ -1370,7 +1382,7 @@ DERIVED INVENTORY INDEX
     container membership
     item locations
     equipped lookup
-    future optional grid occupancy
+    optional grid occupancy for Grid-contained items
     future optional nested/subtree weight
 
                 ↓
@@ -1421,4 +1433,3 @@ Useful V2 archaeology/reference:
 - `_Archive/_V2/Server/Inventory/Store/*`
 
 V2 is reference material, not current authority.
-
