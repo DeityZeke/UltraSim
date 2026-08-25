@@ -1,1997 +1,648 @@
-# Network V3: N1 chunk-native world replication plan
+# Network V3: current architecture and accepted replication policy
 
-Status: `ChunkPublication` is selected as the current UltraSim game public
-replication profile through the Hosted H0.5 dedicated-process gate. The frozen N0
-implementation is retained explicitly as the `MaintainedEntityRelation` profile,
-not as a second Network architecture or deletion candidate. P0.1 and P0.2 also
-register the concrete `DirtyEntitySpatialFanout` and `DirtyChunkSpatialFanout`
-Game profiles without selecting either. P0.3D adds the concrete
-`DirtyEntityChunkBatchFanout` experiment without changing entity semantic/wire
-identity or selecting it. P0.3E closes the dirty-discovery broadphase floor; P0.3F
-closes the remaining scheduler/ledger floor and records clean dense/sparse scaling
-through each profile's 16 ms or 4,096-CCU stop. P0.3G gives the experimental Dirty
-Chunk profile bounded equal-lineage chunk-page reuse and recipient-wide multi-chunk
-semantic envelopes while retaining independent per-chunk application proof and no
-global Chunk-to-Recipient reverse graph. P0.3H replaces repeated Network ready-table
-scans with bounded ready-state selection. P0.3I packs independently meaningful chunk
-application proofs into a bounded MTU-safe reverse envelope without changing proof
-granularity.
-P0.3J closes rated server-role measurement with diagnostic stage timing disabled.
-P0.3K records the independent 16/33 ms server-step and AOI-cadence controls. P0.4
-conservatively freezes `ChunkPublication` as the selected dynamic-public profile while
-retaining the entity alternatives and experimental controls; it does not introduce
-per-object profile composition or cross-profile runtime identity transitions.
-Terrain / World T0 is accepted/frozen as of 2026-08-21. N1.0's packet-free
-`OfflineDirectChunkRecipient` is accepted.
-N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
-ordinary delivery are accepted. N1.3 atomic snapshot recovery is implemented and
-accepted. N1.4 dirty-driven work discovery is accepted at `682fcdcd`; mixed-cadence,
-dirty-density, roaming, and the first 512/768/1024 semantic crossover are now
-captured. N1.4 recipient/scheduler storage compaction is accepted. The first
-remaining server-semantic, deterministic secure-transport, dense-entry, and
-topology-attribution matrix is captured. Representative roaming, mixed public/
-private traffic, and the in-process real shared-socket topology are accepted. The
-separate Hosted H0.5 dedicated-server/independent-client gate is also accepted, so
-N1 is now selected for the current UltraSim game. The five concrete Game-owned
-profiles are registered by `GamePublicReplicationProfiles`; no generic AOI interface
-was introduced. DirtyEntity uses dirty-time spatial discovery plus recipient
-topology reconciliation and retains only bounded semantic knowledge/debt. DirtyChunk
-discovers interested recipients from a changed chunk without retaining a reverse
-chunk-to-recipient membership graph. DirtyEntityChunkBatch retains entity-granular
-knowledge/proof/wire semantics but coalesces entrant discovery by current world chunk;
-its entity-side links index the same semantic debt rows already required by
-`SENT != KNOWN`, not a second Recipient-by-Entity AOI graph.
+Status: **accepted / consumption-ready** as of 2026-08-25.
 
-The separately authorized externally admitted listener/security lifecycle is now
-tracked in [Hosted Network H0](HOSTED_NETWORK.md). H0.0-H0.5 compose transactional
-authenticated promotion, explicit path ownership/rebinding, bounded connection-
-owner packet handoff, one dedicated server process, and independent client
-workers. Hosted Network remains Network-generic and does not alter N1 replication
-meaning.
+Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
+comparison program through P0.4, and the first real remote public-actor consumer
+vertical are accepted. `ChunkPublication` is the selected **current-game dynamic
+public** replication profile. `MaintainedEntityRelation` and
+`DirtyEntitySpatialFanout` are retained alternatives;
+`DirtyEntityChunkBatchFanout` and `DirtyChunkSpatialFanout` are retained
+experimental/reference controls.
 
-The completed N0 implementation and its checkpoint history remain in git and in
-immutable `_Benchmarks/Baselines` evidence. This file records the active N1 plan,
-the implemented N1.0-N1.4 stops, and only forward decisions with a concrete owner.
+This document is the current Network/replication architecture contract. Historical
+checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.
+A historical result may explain why a decision was made, but it does not override
+the current contract below.
 
-N0 proved the difficult semantic foundations:
+The separately scoped externally admitted listener/deployment lifecycle is recorded
+in [Hosted Network H0](HOSTED_NETWORK.md). Game-owned profile details and conformance
+live in [Game replication](../../Game/Replication/README.md). The dependency-clean
+mechanism layer is documented in [Network kernel](../../Kernels/Network/README.md).
 
-- authority remains in `ServerRuntime` / game composition;
-- secure ProtocolLoopback and real UDP carry the same application semantics;
-- authenticated Admission/UI, bounded input, owner state, observer WorldState,
-  retained Events, reconnect, baseline recovery, and generation replacement are
-  accepted;
-- latest state coalesces while Events retain facts;
-- sent state is not application-known state;
-- stale/delayed state is fenced by epoch/lifetime/relation/baseline floors;
-- bounded baseline compaction reclaims long-lived client identity knowledge;
-- shared-listener native batching and opt-in unreliable frame aggregation are
-  retained measured mechanisms;
-- Dense-400 reached the accepted <=6 ms server-role usability target in sustained
-  evidence;
-- sparse V3 remains materially behind frozen V2 scale;
-- N0.11 proved that exact per-recipient/entity AOI admission is not the answer in
-  the current relation graph: removing 31.55% of 4K relations and 40.36% of
-  WorldState records doubled interest-update p95 and worsened total server-role
-  p95.
-
-The remaining sparse problem is therefore treated as a world-spatial architecture
-problem, not an invitation to keep tuning packet code.
-
-N0's original shared UDP host remains controlled IPv4 loopback topology, not a
-public WAN acceptor. The separate Hosted H0 milestone has since earned pinned
-deployment identity, listener-lifetime cookie keys, bounded/rate-limited
-unauthenticated admission, amplification limits, promotion, and explicit IPv4
-path rebinding through H0.3. H0.4 now proves generation-fenced, exclusive
-cross-owner packet-memory transfer and a separate-thread secure-protocol canary.
-H0.5 now owns the real-listener/dedicated-process composition. IPv6 and public-
-WAN/deployment hardening remain later Hosted gates; the accepted localhost process
-count is not public remote CCU. Do not fold lifecycle/security policy into N1's
-chunk-replication profile.
-
-N1 tests the original chunk-native AOI model for the current UltraSim game against
-that frozen N0 baseline. It does not make chunks the permanent Network-level AOI
-unit for every game built on the substrate.
-
-The N1 milestone is:
-
-> Reuse T0's packed, revisioned `WorldChunk` publications as the public spatial
-> replication unit. A recipient maintains a small set of chunk subscriptions and
-> revision cursors. First interest receives a complete chunk snapshot; continued
-> interest queries bounded dirty history at tier cadence; history loss falls back
-> to another snapshot. AOI tier changes query frequency rather than retiering
-> every member. Fine public visibility is a client presentation concern. Network
-> remains responsible for bounded delivery, security, application proof, recovery,
-> and per-connection framing—not for rediscovering world membership.
-
-N1 is accepted only if it preserves N0 semantics and materially improves the
-measured sparse production path. If it does not, reject the experiment rather than
-weakening correctness to force a win.
-
-## Frozen principles inherited from N0
+## Finalized principles
 
 ```text
 AUTHORITY DOES NOT MOVE INTO NETWORK.
-CONNECTION IDENTITY IS NOT GAME IDENTITY.
-RUNTIME ENTITY IDENTITY IS NOT WIRE IDENTITY.
-NETWORK IDENTITY IS NOT PERSISTENT IDENTITY.
+GAME SEMANTICS DO NOT MOVE INTO NETWORK.
+AOI IS GAME / REPLICATION POLICY, NOT NETWORK POLICY.
+PRESENTATION DOES NOT OWN GAMEPLAY TRUTH.
 
-CAPTURE/PUBLICATION HAPPENS AFTER AUTHORITY COMMITS.
-NETWORK MOVES SEMANTIC DATA; IT DOES NOT OWN WORLD TRUTH.
-SENT IS NOT KNOWN. APPLIED/ACKNOWLEDGED IS KNOWN.
-LATEST STATE COALESCES. EVENTS RETAIN FACTS.
-BASELINES/SNAPSHOTS PREPARE, VALIDATE, THEN COMMIT.
-LOSS NEVER SILENTLY CHANGES SEMANTICS.
-MEMORY IS BOUNDED.
+CONNECTION IDENTITY != GAME IDENTITY.
+IP/PORT != CONNECTION IDENTITY.
+RUNTIME ENTITY IDENTITY != WIRE IDENTITY.
+WIRE / REPLICATION IDENTITY != PERSISTENCE IDENTITY.
+CLIENT STORAGE IDENTITY != WIRE IDENTITY.
+
+CAPTURE / PUBLICATION HAPPENS AFTER AUTHORITY COMMITS.
+NETWORK MOVES BOUNDED SEMANTIC DATA; IT DOES NOT OWN WORLD TRUTH.
+SENT != KNOWN.
+TRANSPORT ACK != APPLICATION PROOF.
+LATEST STATE COALESCES.
+FACTS / EVENTS RETAIN OCCURRENCE.
+LOSS MUST NOT SILENTLY CHANGE SEMANTICS.
+BASELINES / SNAPSHOTS PREPARE, VALIDATE, THEN COMMIT.
+MEMORY AND WORK ARE BOUNDED.
 
 LANES DEFINE DELIVERY.
 PACKETIZATION IS LAST.
-SECURITY/TRANSPORT DO NOT DEFINE AOI.
-TICK IDENTIFIES AUTHORITY STATE.
-TIME DEFINES DURATION.
-CADENCE IS DELIVERY POLICY.
+SECURITY / TRANSPORT DO NOT DEFINE AOI.
+TICK IS AUTHORITY-STEP IDENTITY.
+DELTA IS ELAPSED SIMULATION TIME.
+FREQUENCY / CADENCE ARE HOST AND DELIVERY POLICY.
 ```
 
-N1 adds:
+These rules apply equally to OfflineDirect evidence, deterministic ProtocolLoopback,
+connected UDP, the shared listener, Hosted H0, and future transports.
 
-```text
-AOI IS GAME/REPLICATION POLICY, NOT NETWORK POLICY.
-THE ACTIVE GAME PROFILE DEFINES ITS SPATIAL SUBSCRIPTION UNIT.
-NETWORK CONSUMES BOUNDED DELIVERY RESULTS; IT DOES NOT OWN AOI REPRESENTATION.
+## Ownership and dependency boundary
 
-A GAME PROFILE MAY USE:
-    RECIPIENT x ENTITY RELATIONS
-    RECIPIENT x CHUNK SUBSCRIPTIONS
-    ANOTHER BOUNDED GAME-OWNED REPRESENTATION
-
-THE CURRENT ULTRASIM N1 CANDIDATE USES WORLD CHUNKS.
-CHUNK TIER CONTROLS QUERY FREQUENCY, NOT PUBLIC STATE TYPE.
-ONE CHUNK PUBLICATION IS SHARED SEMANTIC WORK.
-RECIPIENTS OWN CURSORS, NOT PRIVATE COPIES OF CHUNK HISTORY.
-FIRST INTEREST GETS A SNAPSHOT.
-HISTORY MISS GETS A SNAPSHOT.
-CLIENTS MAY CULL PUBLIC STATE MORE PRECISELY.
-PRIVATE/SECRET STATE NEVER ENTERS A PUBLIC CHUNK PUBLICATION.
-ENTITY IDENTITY SURVIVES CHUNK MIGRATION.
-```
-
-## Accepted Terrain T0 foundations
-
-N1 now consumes these accepted executable T0 contracts:
-
-```text
-SpatialChunkKey / normalized WorldPosition
-ChunkInterestQuery(anchor, rings) -> bounded chunk keys + cadence tier
-ChunkPublicationStore.TryCopySnapshot(key, destination)
-    -> complete revisioned public scope
-ChunkPublicationStore.TryCopyDelta(cursor, destination)
-    -> NoChanges | Delta | SnapshotRequired
-chunk-bound ChunkPublicationCursor
-ChunkPublicationRevision / HistoryFloor
-public identity/lifetime semantics across chunk migration
-ClientWorldSemanticCache atomic local snapshot/delta apply
-separate public vs owner/private/event state
-bounded resident/history capacities
-```
-
-The local T0 consumer remains the semantic oracle. Remote replication must
-reproduce its eventual client state without introducing another definition of
-world relevance.
-
-## Ownership and dependency shape
-
-The target path is:
+The intended production path is:
 
 ```text
 AUTHORITATIVE GAME / WORLD
-
-ECS committed dynamic state
-        |
-        v
-Game/World
-    WorldSpatialIndex
-    ChunkPublicationStore
-    packed current public pages
-    bounded dirty histories
-    chunk overlap query
-        |
-        v
-Game/Replication / Game/Network
-    authorization
-    public vs private/event routing
-    game-owned AOI / interest policy
-    replication source/profile
-    semantic coalescing + application-proof meaning
-    Game codec + retained delivery ticket
-        |
-        v
-    bounded semantic delivery offer
-        |
-        v
+    ECS + game-owned committed state
+            |
+            v
+Game-owned projection / publication
+    authorization and disclosure
+    public vs private vs fact routing
+    AOI / interest policy
+    replication source and recovery semantics
+    semantic coalescing
+    application-proof meaning
+    canonical Game codec + retained semantic ticket
+            |
+            v
+bounded delivery offer
+    ConnectionId
+    NetworkMessageDescriptor / lane
+    bounded bytes
+            |
+            v
 Kernels/Network
-    connection + message descriptor/lane
-    bounded payload admission
-    reliability / independent-unreliable state
-    security
+    connection/session machinery
+    bounded queues and packet ownership
+    lane scheduling
+    reliability / unreliable delivery
+    security / replay
     pacing
-    transport
-        |
-        v
+    fragmentation where the lane permits it
+    UDP / deterministic transport
+            |
+            v
 Client/Network
-        |
-        v
-Client world projection
-        |
-        v
-Godot presentation / precise visibility culling
+    hostile decode boundary
+    semantic application to Client Core
+            |
+            v
+Client Core / Godot presentation
 ```
 
-`Kernels/Network` must not reference `Game/World` types. Game-owned adapters encode
-chunk semantics into dependency-clean Network messages just as N0 game adapters do
-for current WorldState.
+`Kernels/Network` must not reference ECS, `Game/World`, AOI types, inventory,
+accounts, UI meaning, persistence, Godot, or game authority. Game adapters flatten
+all concrete semantics to the same minimal delivery boundary.
 
-N0 and N1 are not intended to remain separate Network architectures. Their
-game-owned interest and replication models differ, but both flatten after Game
-encoding into the same minimal Network delivery boundary:
+Do not introduce a universal `IAoiThing<T...>`, generic cursor hierarchy, or a
+single replication interface merely to hide real differences between profile
+families. Concrete Game profiles may retain different interest, cursor, source,
+recovery, and proof structures.
+
+## Identity domains
+
+Identity domains are explicit and non-interchangeable:
+
+| Identity | Owner | Meaning |
+| --- | --- | --- |
+| endpoint/path | Hosted transport | currently observed IPv4/port path only; never connection or participant identity |
+| `HostedCandidateId` | Hosted admission | generation-fenced pre-session candidate row |
+| `ConnectionId` | Network | server-created generational transport connection identity |
+| `SecurityEpoch` / packet number | Network | cryptographic/replay lifetime and datagram sequence |
+| application session epoch | Game protocol/application binding | authenticated application-session lifetime |
+| `StateEpoch` | Game projection | coherent canonical projection generation |
+| `ReplicationEntityId` | entity-style Game projection | canonical entity-profile wire identity within its lineage |
+| `WorldPublicEntityId` | chunk-publication Game world | dynamic public identity within chunk-publication lineage |
+| `PersistentEntityKey` | persistence | durable world + entity identity |
+| ECS `Entity` | authoritative runtime | generation-local runtime handle |
+| client slot / semantic handle / render slot | Client | private implementation identities |
+
+`WorldPublicEntityId` and `ReplicationEntityId` are deliberately not aliases.
+There is currently no cross-profile logical-object identity/order domain.
+
+## State, facts, and delivery
+
+### Sent is not known
+
+Submitting bytes, receiving a transport ACK, or successfully decrypting a datagram
+does not prove that the owning application semantic committed.
+
+The application owner advances recipient knowledge only after the corresponding
+semantic apply succeeds and a matching authenticated application proof returns.
+Lost proof leaves server knowledge unchanged and is repaired by reconstructible
+retry/current-truth delivery. Duplicate proof is idempotent. Stale proof may not
+advance a newer lineage.
+
+### Latest state versus facts
+
+Latest state may supersede intermediate values when the semantic contract says the
+newest complete value is sufficient. Examples include owner latest-state and public
+world latest-state.
+
+Facts whose occurrence matters do not collapse merely because Network is under
+pressure. Chat messages, purchase/trade results, quest facts, and other retained
+application events use ordered/idempotent fact semantics. Overflow/recovery must be
+explicit.
+
+ECS lifecycle events are not automatically Event-lane application facts. They are
+source evidence from which Game replication derives recoverable projection state.
+
+## Lane contracts
+
+| Lane | Delivery / order | Meaning |
+| --- | --- | --- |
+| Control | reliable ordered | protocol/session/control state and small ordered application control |
+| Input | unreliable sequenced | expiring complete authoritative input samples |
+| OwnerState | unreliable sequenced | latest owner-private state |
+| WorldState | unreliable unordered / independent | reconstructible latest public state containers; Game owns semantic debt and proof |
+| Event | reliable ordered | non-coalescible application facts |
+| Bulk | reliable ordered, fragmentable | bounded definitions, baselines, atomic snapshot bodies, large semantic UI operations |
+| Disposable | unreliable unordered | explicitly disposable presentation-only data |
+
+Network does not infer lane from object type. Game/application protocol declares the
+message descriptor and therefore the delivery contract before packetization.
+
+## Authoritative cadence and Network cadence
+
+The frozen Runtime contract is:
 
 ```text
-EntityRelationAoI                 ChunkPublicationAoI
-        |                                  |
-Entity latest-state source        Chunk revision/history source
-        |                                  |
-        +------------ Game codec ----------+
-                         |
-                         v
-              recipient/connection
-              message descriptor + lane
-              bounded payload bytes
-                         |
-                         v
-                      Network
+Tick       = authoritative step / ordering identity
+Delta      = elapsed simulation time represented by the step
+Frequency  = host execution policy that determines Delta
 ```
 
-The Game adapter retains the semantic ticket. An authenticated application proof
-returns through the Game protocol adapter, which decides whether it advances an
-entity relation, a chunk revision, or another profile-specific knowledge domain.
-Network does not interpret that meaning.
+Fixed 20/30/40/50/60 Hz authority, live cadence changes, and cross-rate save/load
+have permanent correctness coverage. Time-relative behavior uses authoritative
+world time / delta rather than pretending a tick count is duration.
 
-This is an ownership and convergence seam, not a requirement for one generic AOI
-interface. Interest membership and replication-source/cursor semantics may remain
-concrete and different. They meet only at the bounded delivery boundary; do not
-invent an `IAoiThing<TScope, TRevision, ...>` hierarchy to erase those differences.
-
-Keep two Game-owned layers conceptually distinct:
+Network execution is not required to run one-for-one with authority. The
+architecture must remain correct when authority runs faster or slower than Network:
 
 ```text
-AOI / interest policy
-    decides scope membership and entitlement
+authority faster than delivery
+    latest-state debt coalesces to current truth
+    non-coalescible facts remain retained/bounded according to their contract
 
-Replication source/profile
-    decides how current state, change, cursors, and recovery are represented
-
-EntityRelationAoI              ChunkAoI
-    recipient -> entities          recipient -> chunks
-EntityLatestStateReplication   ChunkPublicationReplication
-    entity versions/state          chunk revisions/history
+Network faster than authority
+    empty/maintenance delivery opportunities are allowed
+    no new authoritative truth is invented
 ```
 
-Those pairs need not expose identical internal APIs or cursor models. Only their
-bounded encoded delivery offers converge on Network.
+A future host may choose matched or unmatched server/Network rates. Do not create a
+hidden one-tick-one-pump correctness dependency.
 
-The accepted profile-extraction checkpoint makes this boundary executable without
-renaming or redesigning the frozen implementations:
+### P0.3K server-step / AOI-cadence conclusion
+
+The final P0.3K matrix independently varied 16/33 ms server steps and AOI skipped-
+tick policies `0/1/2` versus `1/1/2`. It used the authenticated whole-flow fixture:
+Game codec, Network queues/lanes, AES-GCM, real shared localhost UDP, client apply,
+reverse proof, and server proof interpretation.
+
+| Server step | AOI | Dense last integrated pass | Sparse last integrated pass |
+| --- | --- | ---: | ---: |
+| 16 ms | 0/1/2 | 704 @ 15.244 ms | 640 @ 12.911 ms |
+| 16 ms | 1/1/2 | 704 @ 15.251 ms | 768 @ 15.816 ms |
+| 33 ms | 0/1/2 | 1,344 @ 32.907 ms | 1,280 @ 30.405 ms |
+| 33 ms | 1/1/2 | 1,280 @ 31.215 ms | 1,280 @ 30.156 ms |
+
+Those are integrated-fixture deadline brackets, **not dedicated-server CCU ratings**.
+The integrated `Tick` includes server plus all synthetic clients in one process.
+Server-role p95 is reported separately in the evidence.
+
+At matched population, 33 ms does not make replication work cheaper per tick.
+Bytes/tick and CPU/tick remain approximately the same; the host gets roughly twice
+the deadline and runs roughly half as many ticks per second. Wire rate per simulated
+second therefore falls by about half. The cost is freshness: the same tick-period
+cadence corresponds to larger wall-clock spacing.
+
+Changing only Immediate from `0/1/2` to `1/1/2` changed traffic by less than 0.4% in
+the measured workloads. It is a semantic freshness policy, not a supported CCU
+optimization claim.
+
+UltraSim continues to tune/build against a 16 ms stress target because it is the
+harder engineering envelope. Production cadence remains configurable (for example
+20/30/40/50 Hz where supported by Runtime policy) and is a gameplay/product choice,
+not a Network correctness assumption.
+
+Evidence:
+[`network-p0.3k-server-tick-aoi-cadence-matrix-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3k-server-tick-aoi-cadence-matrix-2026-08-24.md).
+
+## Public, private, static, and fact domains
+
+Do not collapse these domains because they happen to share a connection:
 
 ```text
-MaintainedEntityRelation
-    GameInterestService
-    RemoteWorldStateServer
-    recipient/entity membership + entity latest-state lineage
+terrain / immutable base
+    WorldPack / deployment content identity
+    snapshot/cache by content revision
 
-ChunkPublication                         selected for the current game
-    OfflineDirectChunkRecipient
-    ChunkPublicationWorkScheduler
-    RemoteChunkWorldStateServer
-    recipient/chunk membership + chunk revision/history lineage
+frozen structural/static content
+    WorldPack/static layer + explicit rare mutable overlay
 
-DirtyEntitySpatialFanout
-    DirtyEntitySpatialFanout
-    RemoteDirtyEntitySpatialFanoutServer
-    dirty-time spatial discovery + recipient topology reconciliation
-    entity latest state + bounded semantic knowledge/debt; no persistent R×E graph
+interior/decor content
+    independently admitted/retired by Game/world policy
 
-DirtyChunkSpatialFanout
-    DirtyChunkSpatialFanout
-    dirty chunk -> spatial recipient discovery at mutation time
-    chunk publication/history + bounded recipient knowledge/debt
-    no maintained chunk -> recipient reverse-membership graph
+current-game dynamic public state
+    selected ChunkPublication profile
 
-all profiles
-    authoritative source truth
-    recipient disclosure
-    stable identity/lifetime
-    application proof (sent != known)
-    impairment recovery
-    eventual semantic convergence
-    bounded memory
+owner/private latest state
+    separately authorized stream / UI projection
+
+application facts
+    Event semantics
+
+control/input
+    authenticated command intent into Game authority
+
+account/session/UI
+    separately authorized application semantics
 ```
 
-`GamePublicReplicationProfiles` is a finite identity/descriptor catalog, not a
-factory or universal runtime interface. Permanent paired conformance probes execute
-the shared guarantees against all concrete profiles while their detailed hostile,
-recovery, and scale suites remain profile-specific. Obsolete N0 milestone naming
-may be cleaned up later; the entity-relation profile itself remains supported.
+A shared `SpatialChunkKey` may index several world layers without forcing them into
+one message, lane, revision domain, or replication profile.
 
-Network does not load terrain files, build meshes, inspect ECS chunks, resolve
-Godot resources, or decide whether a tree is visible behind a wall.
+Inventory is a concrete proof of this boundary: owner-private inventory state uses
+the generic authenticated UI semantic path and never enters public AOI merely
+because it is remotely visible to its owner.
 
-## Remote control ingress handoff
+## Current dynamic-public replication profiles
 
-T0's local controls strengthened the remote-input contract that existed when this
-plan was first drafted. N1 must not route a remote player through the historical
-`InputVelocity` path or create a second Network-specific movement simulation.
+`GamePublicReplicationProfiles` is a finite Game-owned catalog. Every catalog entry
+covers **dynamic public state only**.
 
-The target is:
+| Profile | Source / topology | P0.4 disposition |
+| --- | --- | --- |
+| `ChunkPublication` | recipient/chunk subscriptions + chunk revision/history | **selected current-game dynamic-public profile** |
+| `MaintainedEntityRelation` | maintained recipient/entity relations + entity latest state | retained alternative |
+| `DirtyEntitySpatialFanout` | dirty-time entity recipient discovery + bounded semantic knowledge/debt | retained alternative |
+| `DirtyEntityChunkBatchFanout` | same entity semantics/proof; dirty-time entrant discovery batched by current chunk | experimental/reference |
+| `DirtyChunkSpatialFanout` | dirty-chunk recipient discovery + chunk history; no reverse subscriber graph | experimental/reference |
+
+All preserve the common semantic contract:
 
 ```text
-trusted connection/session authority
-    -> establish exact GameControlSessionEpoch
-
-client semantic control update
-    -> epoch + monotonically increasing sequence
-    -> locomotion mutation: Unchanged | Stop | Direct | Destination
-    -> adjacent actions
-    -> optional facing mutation when that wire consumer is implemented
-
-one game-owned command-admission boundary
-    -> the same GameWorldActions authority used by OfflineDirect
+authoritative source truth
+recipient-scoped disclosure
+stable profile-local identity/lifetime
+sent != known application proof
+bounded impairment recovery
+bounded memory/work
+eventual semantic convergence
 ```
 
-A remote client's process-local epoch counter is not trusted uniqueness. The
-server/session authority must assign or otherwise prove the epoch within the live
-authority lineage, so a restarted client cannot collide with an earlier control
-session. Locomotion, actions, and a future optional facing update compose under
-one epoch/sequence admission boundary; facing must not become an unsequenced side
-RPC that can be replayed independently. This freezes no aim/combat framework and
-does not add remote control messages in N1.0.
+They do **not** share one universal internal API.
 
-## Public spatial state versus other streams
+### P0.4 selection meaning
 
-Chunk-native replication is for **public spatial latest-state**.
+P0.4 deliberately did not convert benchmark winners into a per-object routing table.
+Whole-flow evidence found `DirtyEntitySpatialFanout` strongest in the measured
+Dense/mobile dynamic workload, while `MaintainedEntityRelation` was narrowly strongest
+in the measured sparse moving-recipient workload. Those observations are retained.
+They do not prove that all actors should use one entity profile or that profile
+ownership should switch at runtime.
 
-Good candidates:
+`ChunkPublication` remains selected for the current game's dynamic-public architecture
+because that is the accepted concrete composition. This is not a claim that it is the
+best representation for every future dynamic semantic class.
+
+### Runtime cross-profile transfer is unsupported
+
+One logical object must not be simultaneously published through multiple public
+mechanisms. An old-profile remove plus a new-profile present is not a handoff
+protocol: the current identity domains and clients cannot prove ordering/deduplication
+across them.
+
+If a future gameplay feature earns activation/freezing/dormancy/static
+consolidation across ownership domains, it must first define:
 
 ```text
-public transforms
-public appearance/prefab identity
-public animation/stance state
-public environmental state
-public dropped/world objects
-public NPC/creature state
-public mutable door/world-object state where disclosure is allowed
+stable Game public identity across the relevant domains
+explicit ownership epoch / lineage
+client-side cross-domain ordering and deduplication
+transactional old-owner -> new-owner handoff
 ```
 
-Do not put these into a broadly shared chunk page merely for convenience:
+A dynamic object becoming true static content additionally crosses into
+WorldPack/static or mutable-overlay ownership; it is not merely a replication
+profile switch. None of this meaning belongs in Network.
+
+P0.4 commit: `df7d2ca2`.
+
+## Selected `ChunkPublication` semantics
+
+The selected current-game public profile consumes T0's accepted world contracts:
 
 ```text
-owner inventory
-private stats/skills
-hidden or GM-only entities
-quest-private state
-container contents without authorization
-combat/chat/application facts that must occur in order
-account/session data
+SpatialChunkKey / normalized WorldPosition
+ChunkInterestQuery
+ChunkPublicationStore
+ChunkPublicationCursor
+ChunkPublicationRevision / HistoryFloor
+ClientWorldSemanticCache
 ```
 
-Owner/private latest-state remains a separately authorized stream. Ordered facts
-remain Event semantics. Terrain/static bulk streaming may use related chunk
-identity but does not automatically share the dynamic latest-state cadence or
-lane.
+`ChunkPublicationStore` is **dynamic public** storage. It is not immutable terrain,
+frozen static, or structural WorldPack storage.
 
-## Current chunk-profile recipient state target
+### Recipient state
 
-The hot N1 public-AOI state should scale primarily with **recipient x subscribed
-chunk**, not recipient x visible entity.
+A recipient maintains bounded chunk subscriptions, cadence tier/phase, an applied
+cursor per key, and bounded in-flight proof/recovery lineage. Current+clean scopes
+create zero replication work. Dirty work is discovered through the shared
+`ChunkPublicationWorkScheduler` reverse subscriber index.
 
-Conceptually:
+First interest, invalid knowledge, and history-floor loss recover complete current
+truth. Leaving retires scope membership and invalidates outstanding lineage.
 
-```text
-RecipientChunkCursor
-    SpatialChunkKey
-    LastAppliedRevision
-    CadenceTier
-    Phase / next eligibility
-    bounded in-flight/application-proof metadata
-```
+### Snapshot / delta / absence
 
-The exact layout is measured. The design target is a compact fixed array/set for
-roughly the Immediate/Near/Far chunk window, with no heap node per subscription
-and no per-recipient copy of chunk dirty history.
+Ordinary MTU-admissible deltas and absence use independent-unreliable WorldState.
+A recipient cursor advances only after successful semantic apply and matching
+application proof.
 
-A recipient moving inside the same chunk window does not create/remove entity
-relations. Crossing a chunk boundary changes a small number of chunk subscriptions.
-Near/Far movement normally changes cadence metadata on chunk subscriptions, not
-member topology.
-
-## Chunk interest policy
-
-The current UltraSim N1 chunk profile consumes the T0 chunk-overlap query. It does
-not reintroduce exact recipient/entity distance filtering inside Network. A
-different game-owned AOI profile may legitimately use precise entity relations;
-that choice still remains above the shared Network delivery boundary.
-
-### Immediate
-
-Immediate is the local chunk set selected by the T0 observer footprint. A
-canonical home point belongs to one half-open chunk; a nonzero local footprint
-may intersect two chunks near an edge or up to four near a corner. The complete
-public page of each selected chunk is eligible at Immediate cadence.
-
-### Near / Far
-
-Outer radii select chunk AABBs. Each chunk receives its nearest applicable tier.
-The data schema is unchanged:
-
-```text
-Immediate same chunk public page, highest query cadence
-Near      same chunk public page, lower cadence
-Far       same chunk public page, lower cadence
-Outside   no subscription
-```
-
-This intentionally accepts public false positives inside an admitted chunk.
-N0.11 is permanent evidence that spending server CPU to eliminate coherent
-false-positive rows can lose overall.
-
-The client is free to cull by exact camera distance, view frustum, occlusion, LOD,
-interior visibility, or render budget. Camera state must not become authorization.
-Client world/view distance controls structural presentation capacity only; it
-does not enlarge the server/game-owned Immediate/Near/Far dynamic-public entitlement.
-Structural freshness reconciliation may use a different, likely farther policy,
-but N1 must earn and freeze that policy independently rather than reading a
-graphics slider as replication authority.
-
-## Chunk snapshot semantics
-
-The first time a recipient subscribes to a chunk, or whenever its cursor falls
-behind `HistoryFloor`, the server sends a complete chunk snapshot.
-
-A snapshot descriptor names at minimum:
-
-```text
-ApplicationSessionEpoch / StateEpoch as appropriate
-SpatialSpaceId / SpatialChunkKey
-ChunkPublicationRevision
-snapshot/schema fingerprint
-record count / segment count
-content hash
-optional world/static layer revision references where needed
-```
-
-N1.1 froze canonical chunk snapshot/delta/absence/application-proof messages and
-their bounded schemas. N1.3 retains the canonical snapshot bytes as the private
-body of this reliable ordered Bulk transaction:
+Complete exceptional recovery uses one bounded atomic reliable-Bulk snapshot
+transaction:
 
 ```text
 ChunkSnapshotBegin
-bounded ChunkSnapshotSegment messages
+ChunkSnapshotSegment...
 ChunkSnapshotCommit
-terminal ChunkApplied result
+    -> private validation/staging
+    -> one ClientWorldSemanticCache snapshot publication
+    -> ChunkApplied proof
+
 ChunkSnapshotCancel / timeout
+    -> retire only the matching candidate
 ```
 
-All transaction lifecycle messages currently share the Bulk lane, avoiding a
-cross-lane descriptor/segment race. Ordinary dynamic deltas and absence remain on
-independent-unreliable WorldState. A later encoding optimization may change byte
-packing only through an explicit protocol/schema version; semantic atomicity may
-not be weakened.
+Partial snapshot rows never become live. Snapshot/history capture does not pin
+shared chunk history for one slow recipient.
 
-Applying a snapshot replaces the client's complete corresponding public chunk
-scope at its revision. Delayed pre-snapshot deltas cannot resurrect older rows.
+### Cross-chunk migration
 
-## Chunk delta semantics
+Migration publishes remove in the old chunk and present in the new chunk under the
+same chunk-public identity/lifetime. Messages may reorder.
 
-When a subscription cadence fires:
+The client therefore uses canonical identity/version lineage, not chunk-local row
+position, to reject stale old presents/removes. A snapshot establishes complete
+membership for its chunk only; it does not by itself prove global absence from every
+other chunk.
+
+Permanent coverage includes both migration orders, stale old data, destruction,
+slot/generation reuse, snapshot/delta overlap, leave/re-entry, and source generation
+replacement.
+
+## Real public-actor consumer vertical
+
+Commit `815706b2` composes a real authoritative ECS woodland actor through the
+selected production seams:
 
 ```text
-cursor == current revision
-    -> no semantic payload
-
-cursor covered by retained history
-    -> ask chunk for coalesced dirty set
-    -> encode latest current values + required removals
-
-cursor older than history floor
-    -> snapshot required
+ECS / Game authority
+    -> GameWorldState
+    -> ChunkPublicationStore
+    -> ChunkPublicationWorkScheduler
+    -> RemoteChunkWorldStateServer
+    -> secure canonical Network protocol
+    -> RemoteChunkWorldStateClient
+    -> ClientWorldSemanticCache
+    -> GodotWorldRenderer
 ```
 
-A chunk delta names source/floor/current revisions sufficiently to reject stale or
-misapplied data. It carries public entity identity/lifetime; chunk-local runtime
-row slots are never wire identity.
+The native acceptance proves initial spawn, movement/state replacement, interest
+leave/re-entry, fresh-session reconnect/resync, authoritative destruction, and
+save/load publication-generation replacement.
 
-The chunk owns one bounded dirty history. Network never creates one history per
-recipient.
+That vertical exposed a real decoder bug: a remote remove delta must reconstruct
+`WorldPublicDeltaRecord.Current` as canonical `default`. Identity and public version
+live in the delta fields; inventing a partial `Current` record caused valid removals
+to be rejected. The focused regression is permanent. The fix changes no Network,
+profile, proof, or ownership semantics.
 
-### Application proof
+This consumer vertical is the point at which public replication is treated as
+infrastructure to consume rather than a benchmark project to continue extending.
 
-N0 proved that transport acknowledgement cannot stand in for application
-knowledge. N1 retains that rule.
+## Network ready selection and proof packing
 
-The likely proof is per chunk revision/range rather than per entity relation:
+P0.3H replaced repeated bounded ready-table scans with per-lane reliable FIFO heads,
+IndependentState ready bitsets/counts, and a priority-ready mask. It preserved
+reliability/loss semantics while reducing selector work substantially. The bounded
+cost was 268 bytes per measured peer.
 
-```text
-recipient applied chunk K through revision R
-```
+P0.3I added an MTU-safe envelope carrying up to 40 independently meaningful chunk
+application proofs. Envelope packing does not collapse proof granularity: each entry
+retains its delivery ID, chunk, revision, kind, and application result, and the server
+processes entries independently.
 
-A proof may clear delivery obligations only for data covered by that chunk/revision
-and epoch. Old proof cannot clear a newer revision. Duplicate proof is idempotent.
+These are Network mechanism improvements and are retained regardless of which Game
+public profile is selected.
 
-Application-proof encoding/delivery must remain reconstructible under loss without
-turning every state update into reliable ordered traffic.
+## Performance evidence: what may and may not be claimed
 
-## Cross-chunk entity migration
+Three different envelopes must not be conflated.
 
-Entity movement from chunk A to chunk B is the most important correctness case.
+### 1. Strict server-role rating
 
-Server publication semantics conceptually produce:
+P0.3J repeated the rated authenticated whole-flow sweep with diagnostic stage timing
+disabled. Under the formal `server-role p95 <= 4 ms` criterion:
 
-```text
-A @ revision X
-    entity E lifetime G is no longer present in A
+- Dense `DirtyEntitySpatialFanout`: 640 at 3.969 ms; 704 crossed at 4.900 ms.
+- Sparse `MaintainedEntityRelation`: 512 at 3.032 ms; 640 crossed at 4.081 ms.
 
-B @ revision Y
-    entity E lifetime G is present with current public state
-```
-
-Those messages may be delayed/reordered independently.
-
-The client therefore cannot treat `SpatialChunkKey + local row slot` as entity
-identity. Global canonical replication identity/generation from the game
-projection, or an accepted T0/N1 successor with equivalent lifetime fencing,
-must determine whether an old removal/update is stale.
-
-Permanent tests must cover:
-
-- B-present arriving before A-remove;
-- A-remove arriving before B-present;
-- delayed old A-present after B-present;
-- leave A -> B -> A before slow recipient catches up;
-- entity destruction during migration;
-- canonical slot/lifetime reuse;
-- chunk snapshot on one side while deltas remain in flight on the other;
-- generation/StateEpoch replacement mid-migration.
-
-A chunk snapshot establishes complete membership **for that chunk**, not universal
-absence from every other chunk unless global identity/version evidence proves it.
-
-## Terrain/static streaming relationship
-
-T0 may expose terrain/frozen-static chunk layers whose change frequency is far
-lower than dynamic public state.
-
-N1 should not resend immutable terrain because a dynamic Near cadence fires.
-Treat layer revisions separately:
-
-```text
-terrain/base layer
-    snapshot/cache by content/world-pack revision
-
-frozen static / structural layer
-    snapshot + rare mutable overlay revision
-
-interior/decor layer
-    independently admitted/retired by game/world policy
-
-dynamic public layer
-    regular snapshot/delta cadence
-```
-
-The same `SpatialChunkKey` can index all of them without forcing one message or lane.
-
-Large immutable content transfer may use Bulk and client cache/fingerprint proof.
-The server should prefer proving the client already owns a matching immutable
-world-pack chunk rather than retransmitting bytes when a deployment/content model
-makes that possible.
-
-## N1.0 — freeze T0 handoff and build OfflineDirect chunk oracle
-
-Before a new wire message exists:
-
-- bind one authenticated/entered participant to T0 `ChunkInterestQuery`;
-- maintain fixed recipient chunk subscriptions/cursors;
-- consume `ChunkPublicationStore.TryCopySnapshot` / `TryCopyDelta` directly;
-- apply to the same retained client-world model used by T0;
-- normalize semantic traces so current local T0 oracle and N1 OfflineDirect path
-  end in identical chunk/entity state.
-
-Benchmark chunk subscription mutation separately from current N0
-`GameInterestService` relation maintenance.
-
-**Gate:** movement inside stable chunk window performs no entity-level AOI mutation;
-chunk crossing is bounded; canonical client state matches T0 local oracle; warmed
-hot path allocation is zero.
-
-### N1.0 implementation stop — 2026-08-21
-
-`OfflineDirectChunkRecipient` now implements the packet-free game-owned recipient
-layer. It owns a fixed sorted subscription set, tier/phase/cadence state, and one
-chunk-bound applied cursor per subscription. Reconciliation is complete-or-fail;
-leaves publish before enters; source publication-epoch replacement clears cursor
-knowledge; and reads remain pending until the consumer explicitly commits them.
-Cancelling a pending read cannot advance recipient knowledge.
-
-N1.0 takes an authority-resolved `WorldPosition` anchor; it is not a decoder or
-client-position authorization boundary. N1.1 application integration must derive
-that anchor from the authenticated entered participant's current controlled
-entity rather than accepting a claimed remote coordinate.
-
-The production recipient contains no connection ID, packet, socket, encryption,
-watcher, or client-render state. Tests apply its snapshots/deltas to the existing
-`ClientWorldSemanticCache` and compare that canonical state with the accepted T0
-direct publication path. They cover history-wrap snapshot fallback, publication
-epoch replacement, capacity transactionality, warmed allocation, and both
-cross-chunk orders (`B Present` before `A Remove`, and the reverse) while retaining
-exactly one public identity.
-
-The default 5/96/192 m profile produces 503 subscriptions in the scale fixture;
-one chunk crossing changes 72. At 256 packet-free recipients, stable reconciliation
-measured 42.74 us p95 per recipient and crossing reconciliation 43.50 us p95 per
-recipient, with zero warmed caller-thread allocation. The deliberately broad
-1,024-subscription recipient capacity reserves 187,904 B per recipient
-(48,103,424 B for 256), which is now an explicit pressure target for later N1
-capacity/layout evidence rather than a hidden production claim. Due-cadence reads
-also show that interested absent keys dominate direct snapshot probes; wire N1
-must not translate that oracle behavior into repeated empty payload transmission.
-
-Evidence:
-[`network-n1.0-offline-direct-chunk-recipient-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.0-offline-direct-chunk-recipient-2026-08-21.json).
-
-This accepts no N0 replacement or sparse-CCU improvement claim. N1.0 has no new
-wire schema, application proof, loss/reorder transport, or public WAN work. N1.0
-was accepted at `af493bc6`; N1.1 owns the wire boundary below.
-
-## N1.1 — canonical chunk messages and protocol manifest
-
-Add game-owned chunk snapshot/delta/proof messages. Keep numeric fixed-width or
-bounded variable-width layouts. Chunk-local coordinates should exploit the T0
-format rather than resend unnecessary global high bits for every row.
-
-Candidate row encoding may use:
-
-```text
-entity identity/generation
-local X/Z (often uint16 mm if T0 selected <=64 m chunks)
-quantized/declared Y/orientation
-prefab/public-state fields
-field/change mask where it reduces bytes
-```
-
-Do not memcpy live C# structs onto the wire. Canonical codecs own endian/layout
-and protocol versioning.
-
-Manifest fingerprint changes whenever decode capability changes. Receive
-capability remains distinct from local send-policy choices, following the N0 v11
-aggregation lesson.
-
-**Gate:** canonical round trips, hostile lengths/counts, duplicate IDs, malformed
-revisions, capacity preflight, schema mismatch, and zero partial client mutation.
-
-### N1.1 implementation stop — 2026-08-21
-
-The game protocol now defines four canonical, fixed-endian message families:
-
-```text
-119  ChunkSnapshot   Bulk
-120  ChunkDelta      WorldState
-121  ChunkAbsence    WorldState
-122  ChunkApplied    WorldState
-```
-
-The game manifest is version 10 with fingerprint
-`16305363788555709530`; the chunk semantic schema fingerprint is
-`6148331928277823537`. Snapshot and delta bodies use canonical local `uint16`
-X/Z coordinates beneath one explicit `SpatialSpaceId + ChunkX + ChunkZ`, sorted
-reusable public identity indices, generation/version lineage, and declared
-revision/history floors. Live CLR structs are not copied to the wire.
-
-The first bounded schema admits at most 64 public records in one message, matching
-the accepted default client public-page capacity. Larger pages fail preflight;
-segmented atomic snapshot recovery remains N1.3 work. Decoders reject unknown
-operations/fields/state bits, invalid identities/revisions, duplicate or
-noncanonical IDs, count/length/schema/hash mismatches, trailing bytes, and
-undersized destinations. They validate before publishing decoded rows, so hostile
-input cannot partially mutate the caller's destination. Source/destination
-overlap is rejected transactionally by encoders.
-
-Remote preparation preserves the N0 rule **SENT IS NOT KNOWN**. Encoding releases
-borrowed publication scratch and returns a trusted server-side delivery ticket,
-but does not advance the recipient cursor. Only an authenticated exact application
-proof matching session, publication epoch, delivery ID, chunk key, kind, and
-revision may commit that ticket. Old/duplicate proof is harmless and cannot
-regress newer knowledge; publication-epoch replacement fences outstanding
-tickets. The first absence requires proof and establishes authoritative empty
-knowledge. Repeated due-cadence probes while that key remains absent emit no wire
-payload.
-
-Permanent N1.1 tests cover canonical round trips, hostile corruption/truncation/
-trailing bytes, overlap, capacity transactionality, exact manifest admission,
-send-without-proof, wrong/rejected/stale proof, two outstanding revisions proved
-out of order, absence suppression, encoding retry, and epoch replacement. This is
-still packet-free wire preparation: it adds no socket, encryption, peer, watcher,
-or Network-owned game authority.
-
-The tiering-disabled Release artifact records zero warmed caller-thread allocation.
-For 64 records, snapshot encode/decode measured 12.54/12.83 us p95 at 2,634 B;
-mixed delta encode/decode measured 15.90/15.81 us p95 at 2,834 B. Absence and
-proof are 48 B and 50 B and decoded at 17.36 ns and 19.61 ns p95 respectively.
-The retained N1.0 control still reports 503 subscriptions, 72 changes for a
-one-chunk crossing, and 187,904 B reserved per broad-capacity recipient. These
-are local codec/control observations, not encrypted datagram, WAN, N0-replacement,
-or production-CCU evidence.
-
-Evidence:
-[`network-n1.1-canonical-chunk-codecs-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.1-canonical-chunk-codecs-2026-08-21.json).
-
-N1.1 was accepted at `73ae0b14`. N1.2 owns the real delivery lifecycle below.
-
-## N1.2 — independent-unreliable dynamic chunk deltas
-
-Carry coalescible dynamic chunk deltas through the accepted independent-unreliable
-state path where semantics permit.
-
-Network packetization remains per connection, but semantic packing is shared:
-
-```text
-chunk publication/query once
-    -> one canonical semantic delta
-        -> many recipients needing compatible revision interval may reuse work
-        -> per-peer framing/security/send
-```
-
-Do not implement cross-recipient encoded-byte caching until census proves recipients
-actually share the same revision interval/field subset often enough.
-
-Retain bounded latest-state retry/application proof. A lost delta does not require
-intermediate reconstruction if a later query can coalesce to current state.
-
-**Gate:** deterministic loss/dup/reorder/corruption produces the same eventual
-chunk state as OfflineDirect; no reliable-state head-of-line behavior is
-introduced.
-
-### N1.2 implementation stop — 2026-08-21
-
-`RemoteChunkWorldStateServer` now owns one connection/session's bounded ordinary
-chunk-delivery ledger. `RemoteChunkWorldStateClient` decodes into private fixed
-scratch, applies to the existing production `ClientWorldSemanticCache`
-transactionally, and only then queues `ChunkApplied`. Transport submission and
-transport acknowledgement never advance the recipient cursor.
-
-The server owns monotonic delivery IDs and retains the exact trusted N1.1 ticket
-until a matching authenticated proof arrives or its lineage becomes obsolete.
-Leaves invalidate every outstanding ticket for that chunk before re-entry can
-establish a new subscription lifetime. Publication-store replacement invalidates
-the whole ledger and requires recipient reconciliation against the new epoch.
-Rejected/capacity/contradictory application proofs retire only their exact
-delivery; delayed/duplicate/stale applied proofs cannot regress newer knowledge.
-A lost proof causes a redundant later delivery from the still-applied server
-cursor, which the client recognizes as already covered and proves again.
-
-`WorldState` is independent-unreliable and nonfragmenting. The accepted UDP
-datagram profile provides 1,405 application-message bytes after secure/protocol
-framing. The 82-byte delta header plus 43-byte rows therefore admits exactly 30
-ordinary rows (1,372 bytes); 31 rows require 1,415 bytes and are rejected as
-`PayloadTooLarge` before queueing. A semantic 64-row delta remains valid N1.1
-data, but it is not silently split into partial messages carrying one final
-revision. Complete oversize/history/first-interest recovery belongs to N1.3.
-
-Permanent tests carry actual delta and absence messages through authenticated
-`ProtocolLoopback`, apply them to the real client semantic cache, and return
-application proofs. Deterministic loss, duplication, delay/reorder, corruption,
-lost-proof redundancy, subscription leave/re-entry, publication-epoch replacement,
-and MTU overflow all converge or fail closed without false recipient knowledge.
-Known absence still produces no repeated empty payload.
-
-The evidence artifact records the exact 1,472/1,405-byte datagram/message envelope,
-30-row cap, first rejected size, and a 9,642-byte server-adapter reservation for a
-128-ticket evidence ledger. Retained N1.0/N1.1 timing controls are repeated only
-as same-run context; they are not a controlled performance regression claim.
-This checkpoint does not implement snapshot transfer, UDP redesign, shared
-encoded-byte caching, N0 profile extraction, public-WAN admission, or production scale.
-
-Evidence:
-[`network-n1.2-independent-chunk-delivery-2026-08-21.json`](../../_Benchmarks/Baselines/network-n1.2-independent-chunk-delivery-2026-08-21.json).
-
-This checkpoint was accepted before N1.3 began.
-
-N1.2 was accepted at `4e847c41`. N1.3 owns complete exceptional recovery below.
-
-## N1.3 — atomic chunk snapshot recovery
-
-Implement the selected snapshot transaction over ProtocolLoopback first, then UDP.
-
-Recovery causes:
-
-```text
-first chunk subscription
-history floor overrun
-client cache mismatch
-explicit repair/resync
-StateEpoch/generation replacement as applicable
-```
-
-Snapshot transfer is bounded by T0 maximum public rows/chunk and selected Bulk
-limits. A malicious/stalled recipient cannot pin server chunk history or suppress
-ordinary service forever.
-
-Timeout/cancel follows N0's fail-closed principles. History is owned by the chunk
-and may advance regardless of one slow client; that client snapshots again.
-
-**Gate:** loss/reorder around Begin/segments/Commit, cancellation, timeout,
-history wrap during transfer, post-cutoff changes, delayed old deltas, and warmed
-ordinary-delta path allocation.
-
-### N1.3 implementation stop — 2026-08-22
-
-N1.3 retains the accepted N1.1 canonical full-snapshot bytes as its private
-transaction body. It does not define another public-row schema. Protocol manifest
-version 11 adds four transaction messages:
-
-```text
-123  ChunkSnapshotBegin     Bulk
-124  ChunkSnapshotSegment   Bulk
-125  ChunkSnapshotCommit    Bulk
-126  ChunkSnapshotCancel    Bulk
-```
-
-All four use reliable ordered Bulk. This avoids a cross-lane race where a valid
-segment could arrive before its descriptor. Ordinary delta/absence messages remain
-independent-unreliable WorldState, so a recovery transaction does not impose Bulk
-head-of-line ordering on ordinary dynamic state. The current manifest fingerprint
-is `11204815876809708509`; the accepted chunk semantic schema fingerprint remains
-`6148331928277823537`.
-
-The server captures one complete bounded canonical body and immediately releases
-publication scratch/history. It retains at most one connection-local snapshot
-transaction plus the accepted bounded proof ledger. Begin, MTU-sized byte segments,
-Commit, and reliable Cancel progress under peer backpressure. The delivery ID is
-consumed when the transaction starts, and only the exact later `ChunkApplied`
-proof may advance the recipient cursor. Timeout, leave, source replacement, and
-newer same-key recovery invalidate the older ticket/candidate; none pins shared
-publication history.
-
-The client stages bytes and segment receipt privately, validates the reconstructed
-body through the frozen N1.1 hostile decoder, converts into private semantic
-scratch, and invokes `ClientWorldSemanticCache.TryApplySnapshot` once. No partial
-row becomes live. A per-resident-key delivery lineage fences same-session ordering
-across snapshot, delta, and absence. Therefore a delayed old absence cannot erase
-a newer snapshot, and a delayed old snapshot commit cannot resurrect state after
-a newer absence.
-
-The default 1,472-byte UDP profile admits 1,405 application bytes. A transaction
-segment uses a 30-byte header and up to 1,375 payload bytes. The maximum 64-row
-canonical snapshot is 2,634 bytes and therefore uses two Bulk segments. An
-MTU-oversize ordinary delta, first populated interest, history-floor loss, or an
-explicit repair request can all enter this same complete recovery route.
-
-Permanent tests cover exact first-interest publication, oversize-delta repair,
-private atomic commit, both absence/snapshot reorder directions, timeout/cancel,
-history advancing beyond the captured revision, deterministic loss/duplication/
-delay/corruption, lost-proof retry, and ordinary WorldState progress while Bulk
-recovery is pending. Snapshot capture never extends chunk history lifetime; if
-the committed cutoff has already fallen below the current history floor, another
-snapshot is required.
-
-Evidence:
-[`network-n1.3-atomic-chunk-snapshot-recovery-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.3-atomic-chunk-snapshot-recovery-2026-08-22.json).
-
-This checkpoint was accepted at `ac96ddfe` before N1.4 began. It does not delete
-N0, share encoding across recipients, define public-WAN lifecycle, or make
-production CCU claims.
-
-## Public chunk scheduling target
-
-N1.0 deliberately proves correctness by polling bounded recipient subscriptions.
-That is the oracle, not the intended production discovery scheduler. Interest
-topology and publication dirtiness are independent:
-
-```text
-Incoming
-    first interest
-    re-entry
-    invalid knowledge
-    history recovery
-        -> establish complete current state
-
-Current + clean
-        -> zero replication work
-
-Current + dirty + cadence eligible
-        -> query bounded history from the recipient's applied cursor
-        -> send entity/field-granular delta or recover by snapshot
-
-Leaving
-        -> retire scope membership
-        -> invalidate outstanding delivery lineage
-```
-
-A dirty chunk is one shared publication/scheduling fact, not an instruction to
-send the complete chunk. The retained history still identifies granular public
-entity operations:
-
-```text
-same-chunk movement in K
-    K dirty
-    history: Present/Transform change for P
-
-boundary migration A -> B
-    A dirty: Remove P
-    B dirty: Present P
-```
-
-N1.4 therefore measures replacing relation-driven maintenance with the
-combination of bounded interest changes and shared dirty publication work. It may
-change how due work is discovered without changing the N1.0-N1.3 subscription,
-cursor, wire, proof, or recovery semantics.
-
-## N1.4 — measured AOI-profile scheduling and adoption experiment
-
-Run both paths behind explicit benchmark/config controls:
-
-```text
-N0 entity-relation AOI + entity latest state       frozen game profile/reference
-N1 chunk AOI + chunk publication/history           current game candidate
-
-both
-    -> Game codec + retained semantic ticket
-    -> the same minimal Network delivery mechanisms
-```
-
-Do not remove the maintained entity-relation model when N1 earns production
-adoption. A measured N1 win selects the current UltraSim game's replication
-profile; it does not prohibit another game, spectator mode, or specialized public
-stream from using a different bounded AOI policy.
-
-Canonical profiles must include at least:
-
-```text
-512 / 768 / 1024 sparse crossover region
-2048 stress
-4096 attribution stress
-Dense-400
-chunk-boundary traversal
-chunk-corner traversal
-dense town / static-heavy world
-mixed public/private state
-```
-
-Measure:
-
-- recipient chunk subscriptions;
-- Incoming/Leaving membership and tier changes;
-- Current+clean scopes skipped without a publication query;
-- shared dirty scopes and dirty-to-recipient fanout;
-- cadence-eligible Current+dirty queries;
-- dynamic rows/chunk;
-- chunk revisions and dirty entries;
-- snapshot count/records/bytes;
-- delta queries returning no-change vs changed;
-- delta rows/bytes;
-- application proofs;
-- server world publication time;
-- N1 subscription scheduling time;
-- codec/protocol/listener time;
-- server-role p50/p95/p99;
-- complete tick p50/p95/p99;
-- client apply;
-- memory/reserved bytes;
-- freshness/input-ACK fairness;
-- capacity/nonviable/recovery events.
-
-Compare against frozen V2 only as historical scale context. The primary adoption
-control is accepted N0 on the same current machine/build/workload.
-
-### Adoption criterion
-
-N1 must produce a **material** sparse server-role improvement, not merely fewer
-relations or bytes. A change that improves counters while worsening p95 is
-rejected exactly as N0.11 was.
-
-Do not invent a single percentage before the controlled N1.4 A/B matrix is
-captured, but an N1 production replacement should clearly move the practical
-sparse crossover, not deliver a noisy single-digit gain at the cost of substantial
-complexity.
-
-Dense-400 may not regress outside normal run variance without a measured reason.
-
-### N1.4 dirty-scheduling implementation stop — 2026-08-22
-
-`ChunkPublicationStore` now exposes the sorted affected-chunk keys already
-calculated once by each successful authoritative commit. The borrowed keys remain
-valid only until the next commit and are explicitly shared publication facts, not
-recipient dirty state.
-
-`ChunkPublicationWorkScheduler` maintains a fixed-capacity, generation-fenced
-recipient membership set and chunk-to-recipient reverse index. Accepted topology
-changes create `Incoming` work, leaves remove membership and outstanding work,
-and one observed dirty chunk coalesces one `Dirty` candidate per current
-subscriber. Current scopes with no pending fact cause no publication query.
-Cadence is copied from the accepted recipient subscription; transiently blocked
-work can be requeued without creating another obligation. Source replacement and
-a missed commit observation fail closed by making retained scopes eligible to
-query current truth. The scheduler owns no encoded bytes, socket, connection,
-application proof, or publication history.
-
-Remote scheduling now accepts `SpatialChunkKey` rather than requiring a caller to
-retain a sorted subscription-array index. It still enters the frozen N1.1-N1.3
-encoder, delivery-ticket, transport, and application-proof paths.
-
-The exact chunk-interest query also returns a conservative Manhattan movement
-budget. It is derived from the current enter/leave circle-to-chunk-AABB thresholds
-and capped by the Far hysteresis envelope. Cumulative movement within that budget
-provably cannot change membership or tier, so the recipient can skip rebuilding
-its roughly 500-row topology. Crossing the budget runs the unchanged exact query.
-This is an exact acceleration, not a looser AOI approximation or client-trusted
-position route.
-
-Permanent gates prove:
-
-- clean scopes create zero dirty work;
-- one dirty chunk fans out exactly once to two subscribers and yields granular
-  deltas;
-- topology crossing, leave/re-entry, source replacement, missed-commit refresh,
-  stale recipient generation, and scheduler capacity remain fenced;
-- the scheduler's chunk-key work enters the accepted remote transport adapter;
-- the stable-movement budget agrees with a fresh exact query and forces another
-  exact query immediately beyond its bound;
-- warmed work discovery allocates zero caller-thread bytes.
-
-The first semantic-only observation at 256 recipients records 127,232 current
-memberships (497 per recipient). A one-chunk dirty commit/query/apply fanout was
-230.633 ns p95 per recipient (about 59 us aggregate), while a clean commit
-observation was 1.025 ns per recipient after amortizing the one shared fact.
-Small movement inside the exact stable budget no longer performs the prior full
-query. A real chunk crossing still costs 62.691 us p95 per recipient and remains
-an explicit transition-tail target.
-
-The same observation also records the main pressure honestly: broad recipient
-arrays plus the first reverse-index layout reserve 93,661,096 bytes at 256
-recipients. The same-machine one-entity/256-recipient N0 control retains only one
-relation per recipient and reserves 18,940,132 bytes. These are not equivalent
-production workloads, but they are enough to prohibit an N1 adoption claim or a
-4K extrapolation from the dirty-fanout timing alone. Subscription/cursor and
-reverse-index compaction must be evaluated in the controlled N1.4 profile matrix.
-
-Evidence:
-[`network-n1.4-dirty-publication-scheduling-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-dirty-publication-scheduling-2026-08-22.json),
-[`network-n1.4-n0-shared-one-dirty-256-control-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-256-control-2026-08-22.json).
-
-This is an N1.4 implementation stop, not production adoption. Keep the single
-client snapshot candidate until dense-entry evidence proves a larger bounded
-window is worthwhile. Do not begin N1.5 or normalize N0 as a retained profile
-before review and the controlled matrix.
-
-### N1.4 adoption-diagnostic and first-crossover stop — 2026-08-22
-
-Checkpoint review identified two missing measurements: mixed-cadence pending
-traversal and dirty-density/roaming distributions. The first mixed-cadence probe
-confirmed repeated deferred-prefix rescans in `TryDequeueDue`. The scheduler
-retains the same bounded flat pending array, but now uses one pass marker per
-cadence step. Every pending membership is classified at most once in that pass;
-another no-work call at the same step performs no repeated scan. A permanent gate
-freezes that behavior, and all 65 N0/N1.0-N1.4 Game Replication tests pass.
-
-At 32 recipients and the accepted 1/2/4 evidence cadence, full 497-chunk dirtiness
-dequeues 15,904 obligations while examining 3.489 pending-array entries per work on
-average. The measured drain is 307.497 us p95 and zero-allocation. This is the
-smallest earned correction; no timing wheel, tier queue, or generic scheduler was
-added.
-
-The 256-recipient dirty-density sweep proves the intended workload dependence:
-one shared dirty chunk fans out 256 obligations, while all 497 subscribed scopes
-fan out 127,232 and approach recipient-times-chunk work again. A dispersed control
-with one populated home scope per recipient proves that 256 independently dirty
-chunks fan out only 256 obligations rather than inheriting the shared-anchor
-shape.
-
-The 4,096-step roaming census records a 44.41% stable fast-path rate and 55.59%
-exact-query rate for sustained 100 mm cardinal travel. The exact-query movement
-budget is 63 mm p50 / 499 mm p95. One-millimeter boundary and corner oscillations
-use the fast path for 99.95% of steps after their initial exact reconciliation.
-The shortcut is therefore useful but does not erase sustained-travel interest
-cost.
-
-The first semantic crossover reaches 512/768/1024 recipients. At 1,024, the
-one-shared-dirty-chunk packet-free commit/query/apply path is 619.643 ns p95 per
-recipient (about 635 us aggregate), while synchronized real crossings remain
-97.106 us p95 per recipient. The broad 1,024-subscription recipient plus scheduler
-reservation reaches 387,580,360 bytes. A capacity-sensitivity observation using
-640 declared slots still retains all 503 observed subscriptions and reduces that
-reservation to 242,183,400 bytes, but it remains materially above the 72,632,876 B
-same-machine N0 narrow control. The 640 value is evidence, not a frozen production
-maximum.
-
-This is the next stop condition: do not extrapolate to 2,048/4,096 yet. First
-attribute and compact the recipient subscription/cursor and scheduler reverse-index
-layout without changing accepted interest, publication, wire, recovery, or proof
-semantics. Then rerun the crossover before Dense-400, dense-town/snapshot,
-boundary/corner, mixed-privacy, transport-replay, and sharded-client evidence.
-
-Evidence:
-[`network-n1.4-adoption-diagnostics-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-adoption-diagnostics-2026-08-22.json),
-[`network-n1.4-semantic-crossover-512-1024-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-semantic-crossover-512-1024-2026-08-22.json),
-[`network-n1.4-capacity-sensitivity-1024x640-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-capacity-sensitivity-1024x640-2026-08-22.json), and the matching
-[`512`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-512-control-2026-08-22.json),
-[`768`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-768-control-2026-08-22.json), and
-[`1024`](../../_Benchmarks/Baselines/network-n1.4-n0-shared-one-dirty-1024-control-2026-08-22.json)
-N0 controls. The concise interpretation is retained in
-[`network-n1.4-adoption-diagnostics-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-adoption-diagnostics-2026-08-22.md).
-
-### N1.4 storage-compaction stop — 2026-08-22
-
-The first crossover proved capacity selection alone was insufficient. This pass
-changes storage only and preserves every accepted N1.0-N1.4 interest, publication,
-cursor/history, proof, recovery, cadence, and dirty-work semantic.
-
-Recipient subscription banks now retain one 32-byte private row instead of the
-64-byte public self-validating cursor value. The borrowed public view reconstructs
-its cursor from the recipient-wide publication epoch, retained chunk key, and
-applied revision. Known absence remains explicit knowledge with no applied
-revision. At 1,024 declared slots, recipient reservation falls from 187,904 to
-122,368 bytes.
-
-Scheduler records remove duplicate recipient IDs, chunk keys, and derivable cadence
-state. Exact fixed-capacity attribution records 16-byte recipient, 40-byte
-membership, and 24-byte shared-chunk rows. The two pre-sized dictionaries remained
-the largest removable lines, so they are replaced by bounded open-address indexes
-containing only 4-byte scheduler-slot references. Backward-shift deletion prevents
-tombstone accumulation without adding a generic index framework or assuming a
-small globally shared chunk set.
-
-A permanent 2,000-operation topology-churn gate covers recipient generation reuse,
-random enter/leave transitions, lookup, reverse chunk membership, pending work,
-and drains. All 66 N0/N1.0-N1.4 Game Replication tests pass.
-
-The identical broad 512/768/1024 crossover now reports 221,798,400 combined bytes
-at 1,024 recipients, 42.8% below the prior recorded 387,580,360-byte workload.
-The 640-slot sensitivity case retains all 503 observed subscriptions at
-147,873,792 bytes instead of 242,183,400 bytes. The new attribution counts every
-fixed index slot and excludes only CLR object/array headers; historical dictionary
-accounting was coarser, so these are workload-reservation observations rather than
-process-RSS claims.
-
-Compaction did not close the synchronized topology tail. The broad 1,024 case
-reports 105.577 us p95 per recipient and the 640-slot case 99.573 us; separate
-captures do not justify a formal microarchitectural ratio, but neither demonstrates
-an improvement over the previous roughly 97 us observation.
-
-Stop here for checkpoint review. Do not run 2,048/4,096 and do not begin N1.5.
-If accepted, use this layout for the remaining Dense-400, dense-town/snapshot,
-boundary/corner, mixed-private, transport-replay, and sharded-client adoption
-matrix before deciding whether crossing needs its own optimization.
-
-Evidence:
-[`network-n1.4-storage-compaction-crossover-512-1024-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-crossover-512-1024-2026-08-22.json),
-[`network-n1.4-storage-compaction-capacity-sensitivity-1024x640-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-capacity-sensitivity-1024x640-2026-08-22.json), and
-[`network-n1.4-storage-compaction-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-storage-compaction-2026-08-22.md).
-
-### N1.4 remaining-adoption matrix stop — 2026-08-22
-
-Storage compaction is accepted. The public subscription projection is now a
-non-escaping `ref struct` live view, preserving the old borrowed-lifetime shape.
-Recipient reconciliation also has dormant opt-in phase attribution; normal use
-pays no timestamp cost until evidence explicitly enables it.
-
-The remaining matrix separates evidence levels instead of mixing fake-client CPU
-into a server claim:
-
-```text
-level 1
-    server semantic publication / dirty scheduling / recipient query
-
-level 2
-    secure deterministic protocol replay
-    framing + security + packetization + client apply + application proof
-
-still deferred
-    socket transport and sharded end-to-end clients
-```
-
-The fixed-runtime Dense-400-shaped semantic observation uses 400 distributed
-recipients, 1,000 public entities, 2% dirty entities per authority step, and the
-compacted 640-slot recipient profile. It reports 1.272 ms p95 total server
-semantic work, 1.248 ms p95 scheduling/query, zero measured warmed allocation,
-200,113 retained memberships, and 59,097,920 combined scheduler, recipient, and
-publication reserved bytes. This is encouraging current-game evidence, not a
-controlled full-stack N0/N1 ratio.
-
-The level-2 64-recipient ProtocolLoopback replay reports 2.386 ms p95 for real
-secure protocol, atomic client semantic application, and application proof, with
-zero measured warmed allocation. A 30-populated-chunk town entry at the maximum
-64 public rows per chunk serializes through the intentionally single private
-snapshot candidate and converges in 29.082 ms. It observes 29 expected
-`SnapshotTransferBusy` results and does not justify adding concurrent snapshot
-candidates.
-
-Topology attribution earned two local optimizations without changing the accepted
-interest contract: bounded candidate distance uses exact anchor-relative 64-bit
-math instead of repeated `Int128` point/AABB construction, and an exact query with
-no subscription changes preserves the current bank instead of rebuilding it.
-Changed reconciliation keeps leaves-before-enters while fusing next-bank
-construction with enter/tier-change emission.
-
-The resulting sustained distributed 100 mm movement observation remains just
-outside the existing 4-6 ms server-role usability range at 6.553 ms p95. It runs
-35,478 exact queries and 12,522 stable-budget fast paths across 48,000 recipient
-steps. Synchronized full-chunk cardinal and diagonal jumps remain deliberately
-hostile at 25.490 and 33.615 ms p95; reverse-index mutation, rather than immutable
-storage size, dominates those transition shapes.
-
-Therefore N1.4 work discovery and compact storage remain accepted mechanisms, but
-current-game AOI-profile adoption is not closed. The next evidence must cover a
-representative boundary/corner distribution, mixed public/private service cost,
-and sharded socket clients. Do not run 2,048/4,096 or begin N1.5 merely because
-ordinary dirty-state work is favorable.
-
-Evidence:
-[`network-n1.4-remaining-adoption-matrix-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-remaining-adoption-matrix-2026-08-22.json) and
-[`network-n1.4-remaining-adoption-matrix-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-remaining-adoption-matrix-2026-08-22.md).
-
-### N1.4 final adoption-gates stop — 2026-08-22
-
-The representative transition fixture now disperses 400 recipients across
-independent world regions, assigns independently phased cardinal and diagonal
-headings, and counts genuine boundary, corner, and teleport events separately.
-The ordinary roaming run observes 152 boundary crossings, 116 exact corner
-crossings, no teleports, and at most 241 topology changes in one authority step.
-It reports 5.975 ms p95 total topology work, of which 5.297 ms is recipient
-reconciliation and 0.704 ms scheduler mutation. This is inside the existing
-4-6 ms server-role usability range, narrowly rather than by a large margin.
-
-A separate staggered-fast-travel run includes 400 independently phased teleports
-plus ordinary boundaries/corners. It reports 7.496 ms p95 and at most 3,566
-topology changes per step. The old all-recipient synchronized cardinal/diagonal
-jumps remain hostile controls, not representative capacity claims.
-
-Mixed deterministic replay now combines, per recipient and authority step:
-
-```text
-public chunk delta          WorldState
-owner-private latest state  OwnerState
-retained application fact  Event
-semantic action header      Control, client -> server
-chunk/Event applied proof   WorldState / Control
-```
-
-Across 64 recipients and 60 measured steps, all 3,840 values in each stream
-converge in at most three pump rounds with zero disclosure mismatches and zero
-warmed allocation. Total p95 is 3.364 ms; protocol work remains dominant at
-2.848 ms p95. This is lane/freshness/disclosure evidence, not a complete gameplay
-action-authority benchmark.
-
-The actual intended socket topology is also exercised: 64 real connected loopback
-client sockets feed one real shared server UDP listener using native send/receive
-batching. Public delta/application-proof convergence reports 1.578 ms p95 total,
-1.136 ms p95 inside socket pumps, and zero warmed allocation. Known reservations
-are 11,596,779 server bytes and 8,492,288 client bytes, with configured listener
-and aggregate client socket buffers reported separately.
-
-Hosted H0.5 supplies the previously missing process gate. One dedicated server
-process owns the externally admitted native-batched listener and four connection-
-owner threads; eight independent client processes establish two fresh connection
-phases each through the pinned deployment identity. The run composes the unchanged
-N1 scheduler/server/client adapters with mixed WorldState, OwnerState, Event,
-Control, and application-proof traffic, one chunk-boundary migration and one H0.3
-path rebind per phase. All 16 applications converge with no disclosure mismatch,
-handoff capacity drop, foreign-connection packet loss, or remaining packet lease.
-
-The cumulative N1.4 semantic/representative/mixed/shared-socket evidence plus H0.5
-therefore selects chunk-publication replication for the current UltraSim game.
-This is a Game profile decision, not a Network invariant and not a production CCU
-claim. N0 remains compiled as the comparison/reference implementation until a
-separate profile-extraction gate. That extraction is now complete: the implementation
-is the explicit `MaintainedEntityRelation` profile, while N1 is the selected
-`ChunkPublication` profile. N1.5 and 2K/4K remain unstarted.
-
-Evidence:
-[`network-n1.4-final-adoption-gates-2026-08-22.json`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.json) and
-[`network-n1.4-final-adoption-gates-2026-08-22.md`](../../_Benchmarks/Baselines/network-n1.4-final-adoption-gates-2026-08-22.md), plus
-[`network-hosted-h0.5-dedicated-sharded-2026-08-22.json`](../../_Benchmarks/Baselines/network-hosted-h0.5-dedicated-sharded-2026-08-22.json) and
-[`network-hosted-h0.5-dedicated-sharded-2026-08-22.md`](../../_Benchmarks/Baselines/network-hosted-h0.5-dedicated-sharded-2026-08-22.md).
-
-## P0.3 — corrected four-profile baseline
-
-The four-profile experiment compares two policy families rather than pretending
-that their disclosure membership is identical:
-
-```text
-exact entity-point interest
-    MaintainedEntityRelation
-    DirtyEntitySpatialFanout
-
-chunk-AABB interest
-    ChunkPublication
-    DirtyChunkSpatialFanout
-```
-
-The permanent comparison contract requires payload-derived identity, generation,
-version and position correctness; privacy and lifecycle fencing; convergence to
-each profile's declared interest policy; and equal final semantics within each
-family. It does not require exact-entity and chunk-AABB profiles to expose the same
-fringe membership.
-
-The corrected harness uses two fresh replays. The timing replay prepares the
-authoritative trace outside the stopwatch and times only profile reconciliation,
-materialization, canonical Game-payload accounting and immediate application
-proof. Every post-warmup tick is retained, and named sparse-event ticks are
-reported separately. The evidence replay performs semantic verification, cold
-snapshots, memory attribution and diagnostics outside the timer. Work counters
-remain separate primitives; there is no dimensionless cumulative-work score.
-
-P0.1b/P0.2b also close the implementation floor required for comparison:
-
-- Dirty Entity admits against the canonical 25-byte remote header and enforces a
-  bounded per-recipient outstanding quota;
-- Dirty Chunk enforces the same isolation, counts all eager recipient/scratch
-  storage, uses bounded indexed row/dirty/pending containers, and returns its
-  concrete reconciliation changes so the harness does not repeat its interest
-  query;
-- chunk recipients reset preallocated banks for logout/re-entry instead of
-  allocating replacement storage;
-- sustained motion exposed and closed stale-edge/list corruption in the two
-  entity profiles.
-
-The 2026-08-24 5,000-tick candidate rerun uses 100 warmup and 4,900 measured ticks
-per profile across 13 workloads. Every workload converges, both within-family
-digests match, and every measured path reports zero managed allocation.
-
-| Workload | Maintained entity | Dirty entity | Chunk publication | Dirty chunk |
-| --- | ---: | ---: | ---: | ---: |
-| one dirty entity (exact event tick) | 4.76 us | 117.97 us | 5.83 us | 25.61 us |
-| mostly-clean recipient movement p95 | 53.86 us | 230.61 us | 520.04 us | 753.96 us |
-| dense-400 p95 | 1.442 ms | 3.062 ms | 1.106 ms | 1.950 ms |
-| high dirt / low movement p95 | 8.64 us | 2.449 ms | 22.20 us | 801.68 us |
-
-These are Game semantic/payload-boundary observations, not secure transport or
-production CCU claims. The reproducible rerun was captured from clean implementation
-checkpoint `e2c466d2`; its artifact SHA-256 is
-`e5645c687a087ac5a00f26eaaf7c4188e3790bd5ebc0bf2469c1b111a2405bb7`.
-This closes the P0.3 measurement hold but does not itself make the P0.4 selection
-decision. Until P0.4, `ChunkPublication` remains the selected current-game profile.
-
-Evidence:
-[`network-p0.3-four-profile-corrected-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3-four-profile-corrected-2026-08-24.json).
-
-## P0.3D — dirty discovery lower-bound experiment
-
-The dirty profiles now receive the mechanical discovery floor earned by the corrected
-comparison, without changing their source truth, disclosure, proof, cadence, or wire
-semantics:
-
-- `DirtyEntitySpatialFanout` links each existing semantic knowledge/debt row from both
-  its recipient and entity. Same-footprint state changes, horizon shrink, privacy, and
-  despawn walk the existing entity audience with zero spatial discovery. Movement,
-  spawn, generation replacement, and horizon expansion perform one bounded
-  new-footprint discovery, staged once for transactional capacity admission; the old
-  footprint is never spatially rescanned.
-- `DirtyChunkSpatialFanout` keeps no Chunk-to-Recipient reverse membership. Its dirty
-  query uses coarse occupied recipient supercells followed by the unchanged exact
-  chunk-subscription test. A 32/64/128 m diagnostic sweep selected 128 m for this
-  bounded comparison: distributed-dirty p95 moved approximately 48/21/13 us and
-  high-dirt p95 approximately 240/93/51 us, while dense-400 remained essentially flat.
-- `DirtyEntityChunkBatchFanout` is a fifth concrete profile. It retains entity latest
-  state, Recipient-by-Entity semantic knowledge, entity records, and entity application
-  proof, while grouping entrant discovery by each dirty entity's current world chunk.
-  Existing entity-side semantic rows resolve the complete old audience/removals. It
-  has no chunk publication/history and no reverse chunk subscriber graph.
-
-The five-profile harness disposes and collects the evidence adapter before constructing
-the independent timing adapter, so a profile is not timed under a second copy of its
-bounded reservation. The 2026-08-24 clean run uses 5,000 ticks, 100 warmup ticks, 4,900
-timed ticks per profile, 13 workloads, canonical Game-message byte counts, exact named
-event ticks, and zero managed allocation in all 318,500 timed profile-ticks. All
-workloads converge; all three entity-family digests and both chunk-family digests match.
-
-| Workload | Maintained entity | Dirty entity | Dirty entity / chunk batch | Chunk publication | Dirty chunk |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| one dirty entity (exact event) | 6.35 us | 39.76 us | 37.20 us | 4.65 us | 6.31 us |
-| many dirty / one chunk p95 | 12.95 us | 217.83 us | 24.44 us | 18.40 us | 19.54 us |
-| distributed dirty p95 | 2.21 us | 114.05 us | 124.94 us | 5.93 us | 13.34 us |
-| mostly-clean movement p95 | 54.32 us | 224.37 us | 227.04 us | 499.20 us | 845.32 us |
-| dense-400 p95 | 1.501 ms | 2.765 ms | 2.712 ms | 1.062 ms | 1.909 ms |
-| high dirt / low movement p95 | 8.88 us | 618.03 us | 674.82 us | 23.20 us | 52.19 us |
-
-The batching crossover is visible in work rather than inferred only from noisy wall
-time. In the clustered workload it reduces entity spatial discoveries from 150,120 to
-5,091 (96.6%); dense-400 falls from 100,635 to 62,038 and edge/corner from 123 to 19.
-Distributed-dirty and high-dirt retain the same 75,113 and 450,122 discoveries because
-their dirty entities occupy separate chunks; batching then adds small grouping overhead.
-Thus chunk-batched entity discovery is valuable for spatially coherent mutation, not a
-universal replacement for per-entity discovery or retained relations.
-
-`ChunkPublication` remains selected while P0.4 evaluates the architectural trade rather
-than treating one friendly workload as the verdict. CPU figures are observations from
-one clean run, not a frequency-stable SLA; exact semantic/work/byte/memory results are the
-stronger cross-run evidence. The artifact is from clean checkpoint `bc2b46c6`; SHA-256
-is `d0bc4c92d0a30634ec12688f0cbca8942182982c66a2b54426f00c198f318fb4`.
-
-Evidence:
-[`network-p0.3d-five-profile-discovery-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3d-five-profile-discovery-2026-08-24.json).
-
-## P0.3E — dirty discovery floor closure
-
-The last pre-selection experiment keeps every P0 semantic, wire, proof, cadence,
-authority, and Network contract unchanged while removing three remaining measurement
-asymmetries:
-
-- both dirty-entity profiles now use one configurable occupied-region edge for the
-  existing shared entity/recipient broadphase. Dirty-entity queries still end in exact
-  entity-point and hysteresis tests; recipient movement uses the same exact oracle in
-  the opposite direction. No second spatial index and no maintained Recipient-by-Entity
-  AOI graph were added. Permanent 16/32/64/128 m regressions require identical semantic
-  rows at negative coordinates and radius boundaries. The comparison default remains
-  128 m after the focused 32/64/128 m discovery sweep;
-- `DirtyEntityChunkBatchFanout` is adaptive at the discovery boundary. A dirty chunk
-  containing one discovery-requiring entity uses the ordinary point query. Two or more
-  such entities share the existing chunk-envelope candidate query. State-only changes
-  bypass both routes and walk only existing semantic knowledge/debt rows;
-- the shared trace now pairs one, clustered, and high-rate state-only churn with their
-  spatial-mutation counterparts. The chunk publication fixture changes a real public
-  descriptor field for state-only updates, so every profile receives payload-visible
-  authoritative state rather than a harness-only version increment.
-
-The clean ordinary dirty-entity path also exits before touching scratch when no entity
-is dirty. Debug and Release retain zero-allocation warmed-path coverage, exact proof/
-disclosure/lifetime conformance, and the five-profile remote codec tests. P0.4 remains
-on hold until the clean 5,000-tick matrix records the state-only/spatial crossover.
-
-The Git-clean `c484efc9` matrix contains 16 workloads, 5 profiles, 100 warmup ticks,
-4,900 measured ticks per row, and 392,000 timed profile-ticks. Every workload
-converges, all three entity-family digests and both chunk-family digests match, and
-every timed row reports zero managed allocation.
-
-| Workload | Maintained entity | Dirty entity | Adaptive entity/chunk batch | Chunk publication | Dirty chunk |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| one state-only dirty (exact event) | 4.90 us | 2.67 us | 2.62 us | 6.55 us | 9.19 us |
-| one spatial dirty (exact event) | 2.71 us | 2.33 us | 3.37 us | 3.08 us | 4.23 us |
-| clustered state churn p95 | 13.08 us | 14.33 us | 15.67 us | 18.28 us | 21.14 us |
-| clustered micro-movement p95 | 13.18 us | 26.18 us | 19.13 us | 18.36 us | 20.46 us |
-| high state churn p95 | 9.44 us | 10.52 us | 10.10 us | 23.41 us | 54.21 us |
-| high spatial churn p95 | 9.37 us | 37.54 us | 38.92 us | 23.41 us | 54.29 us |
-| distributed spatial dirt p95 | 2.57 us | 7.98 us | 8.35 us | 5.82 us | 13.60 us |
-| mostly-clean recipient movement p95 | 53.76 us | 28.64 us | 28.54 us | 515.80 us | 736.62 us |
-| dense-400 p95 | 1.397 ms | 2.170 ms | 2.175 ms | 1.088 ms | 1.745 ms |
-
-This separates retained-fanout value from dirty-source truth. In state-only churn,
-both dirty-entity profiles stay near `MaintainedEntityRelation` because the initial
-120 spatial discoveries never increase: existing semantic knowledge/debt rows are the
-complete audience. With clustered movement, adaptive chunk batching reduces discovery
-from 150,120 to 5,091 and improves p95 from 26.18 to 19.13 us. Distributed/high spatial
-churn has no batchable cohort, so adaptive batching falls back to the point query and
-stays within small bookkeeping distance of ordinary dirty entity.
-
-The shared 128 m occupied-region index materially changes the dirty-entity floor. Against
-P0.3D, ordinary dirty-entity p95 moves from approximately 218 to 26 us for clustered
-movement, 114 to 8 us for distributed dirt, 224 to 29 us for mostly-clean recipient
-movement, and 618 to 38 us for high spatial churn. Dense-400 improves only from 2.765 to
-2.170 ms: after discovery is reduced, semantic row/materialization work dominates that
-case. The chunk semantic profiles continue to pay chunk-granular record/byte costs for
-state-only changes, and dirty-chunk discovery continues to rediscover recipients for each
-dirty scope because it intentionally owns no Chunk-to-Recipient reverse graph.
-
-These are Game semantic/payload-boundary observations, not secure-transport or production
-CCU claims. They establish the contestant floor; they do not by themselves change the
-selected current-game `ChunkPublication` profile. P0.4 may now evaluate composition by
-semantic class, but a single entity identity must never be simultaneously owned by two
-public replication profiles.
-
-Artifact SHA-256:
-`84401cf5a478432241b39be4026761b4e38cbbd01d18fb3399e6450c0b011d8c`.
-
-Evidence:
-[`network-p0.3e-five-profile-discovery-floor-2026-08-24.json`](../../_Benchmarks/Baselines/network-p0.3e-five-profile-discovery-floor-2026-08-24.json).
-
-The semantic/work/byte/memory conclusions above remain valid. A later P0.3F process
-audit found an unrelated stale benchmark consuming a full core whose lifetime overlapped
-the P0.3E scale captures. P0.3E CPU timings are therefore operationally contaminated and
-must not be used for controlled ratios or selection; P0.3F supersedes them as CPU evidence.
-
-## P0.3F — dirty scheduler/ledger floor and scale closure
-
-This pass keeps profile semantics, wire formats, cadence, proof, authority, and Network
-unchanged while removing the remaining profile-local scheduling scans:
-
-- Dirty Entity uses intrusive per-recipient pending-tier rows and a ready-recipient queue;
-  expiry is prepared once per semantic time. Recipient movement stages new-anchor entrants
-  once and walks the already-required semantic rows as the complete old audience;
-- Dirty Chunk uses a bounded delivery free list, delivery-ID index, cadence-aware ready-
-  recipient queue, and one expiration pass per cadence step. It still performs dirty-time
-  recipient discovery and still owns no Chunk-to-Recipient reverse membership graph;
-- exact-distance Maintained Entity uses its retained audience for state-only or same-position
-  horizon contraction. Position changes and horizon expansion retain exact entrant discovery;
-- sparse scale capacity is a declared 64 semantic rows/recipient service envelope rather than
-  an unreachable mathematical Recipient-by-Entity reserve. Dense scale retains the full
-  1,000-row/recipient envelope because that trace can occupy it.
-
-Permanent regressions cover cadence-deferred ready work, quota-blocked-recipient fairness,
-exact state-only/shrink fast paths, exact position/expansion discovery, and all prior semantic,
-remote-codec, loss/recovery, disclosure, lifetime, and allocation-free contracts. All 116 Game
-replication tests pass.
-
-The clean `73a9e74a` scale run contains 250 independent artifacts. Every artifact records the
-exact SHA, zero warmed managed allocation, semantic convergence, and family equivalence. Each
-profile starts at 512 CCU (+128) sparse and 128 CCU (+64) dense, completes its first p95 run over
-16 ms, and stops. A hard 4,096 safety cap applies even below 16 ms.
-
-| Profile | Sparse stop CCU / p95 | Dense stop CCU / p95 |
-| --- | ---: | ---: |
-| MaintainedEntityRelation | 2,432 / 22.229 ms | 2,240 / 17.728 ms |
-| DirtyEntitySpatialFanout | 1,152 / 19.496 ms | 2,880 / 16.118 ms |
-| DirtyEntityChunkBatchFanout | 1,152 / 17.316 ms | 2,560 / 16.055 ms |
-| DirtyChunkSpatialFanout | 896 / 16.894 ms | 1,344 / 16.319 ms |
-| ChunkPublication | 4,096 / 15.076 ms (safety cap) | 3,392 / 16.969 ms |
-
-At dense 400 the corrected clean p95s are 2.634 ms Maintained Entity, 1.850 ms Dirty
-Entity, 2.082 ms entity/chunk batch, 4.906 ms Dirty Chunk, and 1.680 ms ChunkPublication.
-This confirms that the earlier dirty-entity dense result was dominated by avoidable scheduler
-work. It also locates the real crossover: dirty entity is strong under dense state delivery but
-loses to maintained relations during sparse recipient movement; adaptive chunk batching helps
-spatially clustered mutations but adds overhead in the distributed dense trace; Dirty Chunk's
-on-demand recipient discovery remains substantially more expensive than retained ChunkPublication.
-
-`ChunkPublication` remains the selected current-game profile. P0.3F closes the contestant floor
-and scale measurement; it does not authorize N1.5, delete any alternate profile, or make a full-
-network/production CCU claim.
-
-Evidence:
-[`network-p0.3f-five-profile-dense-sparse-scale-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3f-five-profile-dense-sparse-scale-2026-08-24.md).
-
-## P0.3G — Dirty Chunk page reuse and recipient packing
-
-P0.3G tests the delivery-multiplicity diagnosis exposed by P0.3F without changing
-Dirty Chunk disclosure, knowledge, cursor, proof, cadence, or dirty-time discovery:
-
-- one bounded cache materializes an equal `(source commit, chunk key, applied cursor)`
-  publication result once and reuses its immutable rows across matching recipients;
-- one bounded recipient envelope carries up to 32 unrelated chunk entries under one
-  Game-message header and byte budget;
-- every entry retains an independent delivery ID and application proof. Partial proof,
-  rejection, timeout, leave/re-entry, history recovery, and epoch replacement cannot
-  advance another entry;
-- no global `Chunk -> Recipient` reverse subscriber graph is introduced.
-
-At Dense-400, the same 1,360,000 records and 397,554 chunk proofs now require 54,983
-Game messages rather than 397,554. Only 2,056 source pages are materialized and 395,498
-equal-lineage entries reuse them. P95 falls from 4.906 to 2.737 ms. The sparse 16 ms
-stop moves from 896 to 1,536 recipients, and the dense stop moves from 1,344 to 2,112.
-The additional bounded page/bundle scratch raises Dense-400 profile reservation from
-76.16 to 78.28 MB.
-
-The canonical protocol manifest is now version 12 (generated protocol version 10), with
-message 129 `ultrasim.game.dirty-chunk-bundle` and fingerprint
-`10804745783046976666`. The current hosted Dirty Chunk adapter intentionally remains on
-the accepted one-chunk messages. P0.3G measures the Game semantic boundary with a 16 KiB
-budget; a hosted adoption must instead respect the actual nonfragmenting `WorldState`
-payload ceiling or separately earn a transport contract. This distinction prevents the
-scale result from being misrepresented as one-datagram or full-network evidence.
-
-`ChunkPublication` remains selected. This is a Dirty Chunk contestant-floor result, not
-authorization to retrofit N1.5 page reuse into the selected profile or to make a P0.4
-composition decision.
-
-Evidence:
-[`network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3g-dirty-chunk-packing-scale-2026-08-24.md).
-
-## P0.3H — Network ready-state selection floor
-
-P0.3H removes the repeated bounded capacity scans identified by the whole-flow
-attribution without changing any Game profile or Network delivery semantic. Ordered
-reliable messages now retain per-lane intrusive FIFO heads; IndependentState retains
-per-lane occupied-slot bitsets with the existing slot-round-robin start; and one
-priority-ready mask skips empty lanes and impossible delivery kinds. Retransmission
-deadline/loss state is unchanged.
-
-The exact whole-flow A/B improves server-role p95 by 16.8-23.6% across the four entity
-controls and by 21.6% for the cap-eight ChunkPublication regression control. Combined
-selector clocks fall by 92.1-94.0%, while Game messages, proofs, frames, bytes, semantic
-digests, convergence, and zero capacity drops remain identical. The bounded structure
-cost is 268 bytes per protocol peer under the measured limits.
-
-A 270-tick cap-one rated sweep now stops after the first population above 4 ms
-server-role p95. Dense DirtyEntitySpatialFanout retains 384 at 3.274 ms and stops at
-448/4.237 ms. Sparse MaintainedEntityRelation retains 384 at 3.147 ms and stops at
-512/4.456 ms. P99/max remain diagnostic tail context. The measured rating is 384 CCU
-for both shapes; it is not a public-WAN or 16 ms stress claim.
-
-P0.3H is accepted. Entity profiles remain cap one, and chunk proof envelopes remain a
-separate next experiment.
-
-Evidence:
-[`network-p0.3h-ready-state-selection-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3h-ready-state-selection-2026-08-24.md).
-
-## P0.3I — bounded chunk application-proof envelopes
-
-P0.3I removes the remaining reverse-message multiplication from both chunk-semantic
-profiles. Message 130 carries up to 40 independently meaningful chunk proofs in
-1,377 bytes under the default 1,405-byte nonfragmenting application-message limit.
-Application/publication lineage is shared only in the envelope header; delivery ID,
-chunk, revision, kind, and apply result remain per entry. Servers process entries
-independently, so partial application, rejection, duplicate/stale proof, replay,
-timeout/retry, leave/re-entry, and source replacement retain the accepted meaning.
-
-Across the four causal chunk controls, reverse proof messages fall 75.3-87.1% and
-wire bytes fall 7.1-15.8%. Dense Data datagrams do not fall because cap-eight already
-amortized the scalar proof frames into the same send opportunities; sparse Data
-datagrams fall 10.8-14.7%. Tick p95 improves 2.7-5.7%. This is a useful but bounded
-transport win, not evidence that proof granularity should be collapsed or that chunk
-profiles now match the dynamic entity path.
-
-P0.3I is accepted. `ChunkPublication` remains the current-game public profile;
-DirtyChunk remains an experimental no-reverse-membership control. Entity profiles,
-socket batching, and the 384-CCU rating are unchanged. No rated sweep is repeated.
-
-Evidence:
-[`network-p0.3i-chunk-proof-envelope-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3i-chunk-proof-envelope-2026-08-24.md).
-
-## P0.3J — probes-off rated server-role closure
-
-P0.3J repeats the 270-tick rated whole-flow sweep with protocol/listener stage timing
-disabled while retaining normal counters, semantic validation, and zero-drop gates.
-Dense DirtyEntity retains 640 at 3.969 ms p95 and stops at 704/4.900 ms. Sparse
-MaintainedEntityRelation retains 512 at 3.032 ms and stops at 640/4.081 ms.
-
-Dense 640 is only 0.031 ms below the formal 4 ms cutoff and is recorded as a narrow
-observed rating, not a comfortable deployment target. P0.3J supersedes P0.3H's
-absolute 384-CCU rating, which included deep diagnostic timing overhead; it does not
-replace P0.3H's causal selector evidence or change production code.
+Dense 640 is a narrow observed rating, not a comfortable production target. These
+are localhost fixture measurements, not public-WAN CCU claims.
 
 Evidence:
 [`network-p0.3j-rated-server-role-probes-off-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3j-rated-server-role-probes-off-2026-08-24.md).
 
-## P0.3K — 33 ms semantic-cadence rated control
+### 2. Integrated tick-deadline envelope
 
-P0.3K makes the whole-flow semantic tick duration explicit and reruns the probes-off
-rated sweep at 33 ms against an immediate 16 ms control. Both dense and sparse policies
-resolve to a `1/1/2` Immediate/Near/Far chunk cadence at 33 ms; entity profiles retain
-their exact millisecond/stable-phase eligibility.
+P0.3K's 16/33 ms rows measure the complete in-process server + synthetic-client tick
+deadline. They are stress/scaling evidence and intentionally allow server-role work
+above 4 ms. Do not call the 704/1,280/1,344 brackets the strict Network rating.
 
-Under the unchanged 4 ms server-role criterion, the controlled dense
-`DirtyEntitySpatialFanout` rating moves from 640 to 768, while sparse
-`MaintainedEntityRelation` remains 640. Dense per-tick messages/bytes remain essentially
-unchanged; the gain is an eligibility/burst-shape observation, not a halving of work.
-Sparse CPU remains essentially flat and sends about 9.2% more bytes per measured tick.
-Per-simulated-second wire rate falls for both because the same mutation count is now
-applied 30.3 rather than 62.5 times per second. Reservations are identical at matched
-populations. The unpaced localhost harness does not claim ping/RTT.
+### 3. Architecture scaling / stress
+
+P0.3F and related Game-core matrices prove how the concrete profile algorithms scale
+before full transport/client cost. For example, P0.3F reached the 4,096 sparse safety
+cap for `ChunkPublication` in its Game-core fixture and showed different dense/sparse
+crossovers among entity profiles. Those results are architecture evidence, not remote
+CCU.
+
+### Whole-flow profile conclusion
+
+The five-profile whole-flow attribution is especially important because it corrected
+a misleading Game-core intuition. Under the measured dynamic workloads:
+
+- Dirty Entity was strongest for Dense/mobile dynamic public state.
+- Maintained Entity was narrowly strongest for sparse moving recipients.
+- Chunk families paid materially more server Game scheduling/codec, client semantic
+  cache apply, and proof work in that dynamic workload.
+- packet aggregation helped chunk traffic but did not erase those semantic costs.
+
+That evidence motivated the conservative P0.4 selection: retain the current concrete
+`ChunkPublication` architecture without inventing unsupported per-object composition.
 
 Evidence:
-[`network-p0.3k-rated-server-role-33ms-probes-off-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3k-rated-server-role-33ms-probes-off-2026-08-24.md).
+[`network-p0.3g-whole-flow-attribution-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3g-whole-flow-attribution-2026-08-24.md).
 
-## P0.4 — conservative dynamic-public profile selection
+## Capacity and failure policy
 
-P0.4 closes the selection/composition hold without manufacturing a per-object composition
-system that the current identities and delivery lineages cannot support.
-
-The finite `GamePublicReplicationProfiles` catalog covers dynamic public state only:
-
-| Profile | P0.4 disposition |
-| --- | --- |
-| `ChunkPublication` | selected current-game dynamic-public profile |
-| `MaintainedEntityRelation` | retained alternative |
-| `DirtyEntitySpatialFanout` | retained alternative |
-| `DirtyEntityChunkBatchFanout` | experimental/reference discovery control |
-| `DirtyChunkSpatialFanout` | experimental/reference no-reverse-membership control |
-
-Terrain/base, frozen structural/static content, and immutable decoration remain owned by
-WorldPack/static layers and their explicit mutable overlays. They may share a
-`SpatialChunkKey` with dynamic publication, but they are not rows in the profile catalog
-and are not silently reassigned to `ChunkPublication`.
-
-The normalized whole-flow evidence retains two workload conclusions: Dirty Entity is
-strongest in the measured dense/mobile dynamic case, while Maintained Entity is narrowly
-strongest for sparse moving recipients. That does not establish a universal semantic-class
-mapping, and P0.4 does not route individual objects between profiles based on runtime load.
-`ChunkPublication` remains the selected current-game architecture, not a claim about every
-future dynamic object.
-
-Runtime ownership transition is unsupported. `WorldPublicEntityId` and
-`ReplicationEntityId` are separate identity/lineage domains, and the current clients do not
-possess a cross-profile ordering or deduplication fence. Consequently, one logical identity
-must not be published simultaneously through multiple public mechanisms, and an old-owner
-remove plus a new-owner present is not a supported handoff protocol.
-
-If gameplay later earns activation, freezing, dormancy, or static consolidation, its
-prerequisite is a stable Game public identity, explicit ownership epoch/lineage, client-side
-cross-profile ordering/deduplication, and transactional old-source/new-source handoff.
-Moving dynamic truth into true static content additionally crosses into WorldPack/static or
-mutable-overlay ownership; it is not merely a replication profile change. None of this
-meaning moves into Network.
-
-P0.4 changes catalog metadata, tests, and documentation only. It changes no source truth,
-interest semantics, wire schema, proof meaning, lane, cadence, performance path, or selected
-runtime implementation. No profile tournament or scale rerun is required.
-
-## N1.5 — shared semantic packing / chunk page reuse
-
-Only after N1.4 proves chunk subscriptions improve the primary architecture,
-measure whether publication can reduce repeated semantic copy/encode work.
-
-Potential progression:
+Every hot or remotely influenceable structure has explicit capacity. Examples include:
 
 ```text
-ECS/public changes
-    -> chunk SoA page updated once
-    -> dirty query identifies rows once per required revision interval
-    -> canonical packed semantic block
-    -> recipient framing/encryption
+connections / candidates / path attempts
+packet slots and owner handoff queues
+reliable flights and reassembly
+independent-state slots
+recipient subscriptions and scheduler membership
+pending application proofs
+snapshot candidates and bytes
+public rows/chunk and resident client chunks
+retained application events
+UI semantic payloads and application operations
 ```
 
-Opportunities include:
+Capacity exhaustion must return a named status, reject admission, trigger bounded
+recovery, or mark the owning session nonviable according to its contract. It must not
+allocate an unbounded fallback collection or silently drop semantic obligations.
 
-- contiguous span copies from SoA/packed staging;
-- chunk-local coordinate encoding;
-- one snapshot encoding reused by many first-time subscribers when application
-  protocol/security boundaries permit;
-- shared immutable terrain/static payloads;
-- scatter/gather or native-send batching only after byte ownership is clear.
+Expected rejection is transactional. Unexpected failure after trusted authoritative
+mutation begins follows the owning authority's terminal/fault policy rather than being
+converted into a domain rejection.
 
-Do not store peer-specific encryption state in chunk pages. Do not make chunks own
-Network packet buffers indefinitely.
+## Security / transport relationship
 
-**Gate:** attribute semantic copy/encode separately and keep only changes that
-improve complete server-role timing.
+Network security establishes and protects a transport/application path. It does not
+authenticate an account or grant Game authority.
 
-## N1.6 — client visibility / interior streaming policy integration
+The accepted lower mechanisms include:
 
-The server's public chunk subscription is deliberately coarse. The client may
-render a smaller exact set.
+- stateless cookie-before-allocation handshake gating;
+- pinned deployment server identity;
+- P-256 ECDH + signed transcript + HKDF;
+- AES-256-GCM established datagrams;
+- independent authenticated replay and reliable-delivery acknowledgement state;
+- lane-scoped reliable ordering;
+- bounded fragmentation/reassembly;
+- deterministic impairment evidence;
+- connected UDP and one shared listener with Linux native batch paths where enabled;
+- Hosted H0 authenticated external admission, IPv4 rebinding, and connection-owner
+  packet handoff.
 
-Game/world policy may also expose separate chunk layers for building interiors or
-decor. The current N1 chunk profile routes those authorized layer subscriptions
-without rebuilding entity relations. Another game-owned profile may represent
-that entitlement differently without changing Network.
+Hosted/deployment claims and exclusions live in `HOSTED_NETWORK.md` and may not be
+inferred from replication benchmarks.
 
-Examples:
+## Protocol versioning policy
 
-```text
-outside cabin
-    structural shell chunks/layers
+Generated Game/Network source is the authority for the current protocol/manifest
+version and fingerprint. Historical N1/P0 evidence records the exact manifest and
+fingerprint used at that checkpoint. Those historical values are **not current
+configuration constants** and should not be copied forward into architecture prose.
 
-enter cabin / near portal
-    same surrounding public chunks
-    + admitted interior/decor layer
+As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 11
+and `UltraSimGameProtocol` constructs manifest version 13. Future schema changes must
+advance the appropriate generated/manifest identity and remain bounded/hostile-input
+transactional.
 
-leave
-    retire interior presentation/cache according to client policy
-```
+## Evidence policy
 
-Interactive/private facts continue through authoritative game paths.
+Accepted Network evidence follows these rules:
 
-**Gate:** no hidden/private state leaks through public chunk cache; entering/leaving
-interiors does not churn unrelated dynamic public rows.
+- semantic correctness before timing;
+- exact workload/configuration recorded;
+- authority, topology, clock, and capacity scope stated;
+- server-role and integrated tick timing separated;
+- p50/p95/p99 plus useful tail context;
+- setup/cold work separated from warmed hot work;
+- managed allocation claims scoped precisely;
+- production memory separated from benchmark/client-observation memory;
+- matched controls for relative claims;
+- run-order/host-noise caveats when relevant;
+- immutable evidence artifacts for accepted/rejected checkpoints;
+- negative results preserved rather than rewritten into success;
+- scaling/stress != strict rating != production deployment claim.
 
-## N1.7 — continuous lifetime and recovery acceptance
+Same-process synthetic clients are useful correctness and conservative integrated
+fixture evidence. They are not, by themselves, remote-client CCU evidence.
 
-After architecture/performance adoption, run a continuous roaming soak with
-bounded telemetry rather than the multi-GiB raw-history benchmark pattern exposed
-by N0.
+## Accepted checkpoint index
 
-The run must exercise:
+This index is intentionally compact. Git history and `_Benchmarks/Baselines` retain
+the full measurements and intermediate hypotheses.
 
-- thousands of chunk crossings;
-- revision-history wraps;
-- repeated snapshots;
-- slow/lossy recipients;
-- client cache retirement/re-entry;
-- entity cross-chunk migration;
-- generation replacement;
-- Event continuity;
-- no unbounded cursor/history growth.
+### N0 foundation
 
-Memory evidence separates production live/reserved state from benchmark
-observation storage.
+N0 established the dependency-clean Network kernel, security, reliable/unreliable
+lane semantics, application binding, controlled input/owner state, maintained public
+WorldState, retained Events, atomic baseline recovery, shared UDP listener/native
+batching, long-lived identity-ledger recovery, and the final exact-AOI negative
+experiment. The maintained implementation is retained as the concrete
+`MaintainedEntityRelation` Game profile.
 
-**Gate:** bounded resident subscriptions/history, zero unexplained debt, exact
-convergence, no increasing low-water across recovery cycles, and documented CPU
-scope.
+N0.11's important negative result remains architectural evidence: reducing exact
+recipient/entity relations and WorldState rows did not improve the complete path
+because maintaining precise moving topology cost more. Do not reopen open-ended N0
+packet/AOI tuning from that result.
 
-## N1 interaction with existing N0 mechanisms
+### N1 chunk-publication path
 
-Retain unless evidence explicitly replaces them:
+- N1.0: bounded packet-free recipient chunk subscriptions/cursors.
+- N1.1: canonical chunk snapshot/delta/absence/proof semantics.
+- N1.2: ordinary independent-unreliable remote delta/absence lifecycle.
+- N1.3: atomic reliable-Bulk snapshot recovery.
+- N1.4: dirty-driven work discovery, exact stable-interest acceleration, bounded
+  cadence traversal, recipient/reverse-index compaction, mixed/shared-socket evidence.
+- Hosted H0.5: dedicated-server/independent-client process gate.
 
-- secure protocol/session ownership;
-- Control/Input/Event/Data/Bulk lane semantics;
-- handshake/manifest fingerprinting;
-- connection epochs and authenticated Admission binding;
-- revisioned owner state and input processing;
-- retained application Events;
-- baseline transaction principles;
-- shared UDP listener and native send/receive batching;
-- independent-unreliable application-proof semantics;
-- opt-in unreliable multi-frame capability;
-- deterministic impairment harnesses;
-- fail-closed capacity/nonviable policies.
+N1.0-N1.4 remain the selected profile's semantic implementation. N1.5 shared
+semantic packing has **not** been authorized.
 
-Chunk-native AOI is not a reason to redesign crypto, socket ownership, login, UI,
-Input, or Events.
+### P0 profile comparison / closure
 
-The N0 `GameInterestService` relation graph remains compiled/reference evidence
-until N1 adoption. After adoption, remove it from production only when all current
-protected tests have an equivalent N1 path or are explicitly historical
-comparison projects.
+- P0.0-P0.2: explicit finite profile catalog and dirty entity/chunk alternatives.
+- P0.3-P0.3F: corrected semantics, broadphase/scheduler floors, dense/sparse Game-core
+  scale evidence.
+- P0.3G: Dirty Chunk equal-lineage page reuse + recipient packing; separate
+  five-profile whole-flow attribution.
+- P0.3H: Network ready-state selection floor.
+- P0.3I: bounded chunk proof envelopes.
+- P0.3J: probes-off strict server-role rating closure.
+- P0.3K: independent server-step/AOI-cadence matrix.
+- P0.4: conservative current-game dynamic-public selection; no runtime composition.
 
-## Capacity model
+## Current stop / forward policy
 
-N1 explicitly bounds:
+Network/replication is now **consumption-ready infrastructure**.
 
-```text
-maximum subscriptions/recipient
-maximum subscription entries globally
-maximum in-flight chunk snapshots/recipient
-maximum snapshot rows/bytes/chunk
-maximum delta rows/bytes/query
-maximum application proofs pending
-maximum chunk messages/datagram
-maximum Bulk bytes/connection
-maximum client resident public chunks
-maximum client public rows/chunk
-```
+Do not begin any of the following merely because the benchmark infrastructure exists:
 
-Chunk history capacity belongs to T0 world publication, not to Network recipient
-count.
+- N1.5 shared encoding/page reuse in the selected profile;
+- another profile tournament;
+- 2K/4K transport/sharded scaling work for its own sake;
+- a generic runtime replication-profile interface;
+- per-object workload-adaptive profile switching;
+- a cross-profile identity/transition framework;
+- public-WAN or production-CCU claims;
+- IPv6 or multi-host connection migration hidden inside unrelated Game work.
 
-When capacity is insufficient, return a named status, snapshot, reject admission,
-or mark the recipient nonviable according to the owning contract. Never allocate
-an unbounded fallback collection in a packet or recipient hot path.
+New Network work should be earned by a real gameplay/client/deployment consumer that
+exposes a correctness, capacity, freshness, or measured performance problem.
 
-## Test matrix
+The first such consumer vertical has already validated public actors, and I0.8 has
+validated a very different owner-private UI/Inventory path over the same lower
+Network machinery. Future gameplay should continue to consume these seams before
+reopening Network architecture.
 
-Permanent N1 coverage includes:
-
-- canonical chunk codec round trips and hostile input;
-- first subscription snapshot;
-- no-change cadence query;
-- dirty coalescing;
-- history-wrap snapshot fallback;
-- chunk enter/leave/tier change;
-- edge/corner subscription sets;
-- cross-chunk migration and every important reorder permutation;
-- destruction/reuse during migration;
-- duplicate/stale application proof;
-- loss/duplication/reorder/corruption;
-- snapshot cancel/timeout/retry;
-- generation/StateEpoch replacement;
-- reconnect/cache reuse only when fingerprints/epochs match;
-- public/private disclosure boundaries;
-- retained Event continuity;
-- Dense and sparse semantic parity;
-- capacity exhaustion;
-- warmed allocation gates;
-- bounded long-lived roaming.
-
-## Benchmark/evidence policy
-
-The N0 evidence discipline remains unchanged:
-
-- fixed authority cadence controls;
-- exact scenario/configuration recorded;
-- canonical semantic hashes before timing claims;
-- server-role and integrated timing separated;
-- p50/p95/p99 plus relevant long-tail samples;
-- bytes/records alone never constitute a performance win;
-- setup/cold allocation separated from warmed hot allocation;
-- benchmark telemetry memory separated from production memory;
-- matched controls and run-order sensitivity where host noise matters;
-- immutable JSON for accepted/rejected checkpoints;
-- negative experiments preserved rather than quietly removed.
-
-N1.4 scale claims require three explicitly separated evidence levels:
-
-```text
-1. Server semantic replication
-   no sockets and no fake-client CPU in the server-role number
-
-2. Server transport replay
-   real Network security/packetization with synthetic or replayed client traffic
-
-3. Full end-to-end sharded clients
-   real sockets plus client decode/apply outside the server process where scale
-   would otherwise hit the same-process bot ceiling
-```
-
-The first level isolates Game replication architecture, the second attributes
-transport cost, and the third proves actual integrated behavior. Same-process bot
-population is useful correctness evidence but is not, by itself, a remote CCU
-claim.
-
-The practical CPU goal remains to leave enough authority budget for the game.
-A workload fitting barely under one 60/62 Hz frame is feasibility, not the same as
-an accepted 4-6 ms server-role target.
-
-## Current UltraSim N1 definition of done
-
-N1 is complete only when:
-
-- T0 chunk publication remains the source of public spatial state;
-- AOI remains explicit Game/Replication policy and the selected UltraSim profile
-  maintains bounded chunk subscriptions/cursors;
-- entity-relation and chunk-publication profiles both flatten through Game codecs
-  into the same minimal Network delivery boundary;
-- first interest and history misses recover through atomic snapshots;
-- continued interest uses bounded coalesced dirty history;
-- production discovery distinguishes Incoming, Current+clean, Current+dirty, and
-  Leaving so unchanged subscriptions require zero replication work;
-- tier changes affect cadence without rewriting member semantic type;
-- cross-chunk migration cannot be corrupted by delayed/reordered data;
-- public/private/Event streams remain distinct;
-- Network kernel remains game/world independent;
-- accepted N0 security/reliability/reconnect semantics remain green;
-- the chunk-native path materially improves sparse server-role scaling on the
-  accepted T0 world profile;
-- Dense-400 does not materially regress;
-- memory remains bounded over continuous roaming/history wrap;
-- production adoption is supported by immutable evidence rather than counters
-  alone.
-
-If chunk-native replication fails the measured adoption gate, preserve T0's world
-architecture anyway, keep the entity-relation game profile as production
-reference, and investigate the next bottleneck from real gameplay profiles rather
-than weakening semantics or creating separate Network stacks.
-
-## Deliberate N1 decisions
-
-Frozen for the current chunk profile through N1.3:
-
-- canonical bounded dynamic snapshot/delta/absence/proof schemas;
-- chunk revision/floor wire widths and schema fingerprint;
-- MTU-safe ordinary-delta admission;
-- reliable-Bulk snapshot transaction and atomic client publication;
-- application proof, not transport submission, advances recipient knowledge.
-
-Still require measured evidence before production adoption:
-
-- whether terrain/static data uses Network messages or deployment cache/content
-  distribution for normal clients;
-- production subscription/scheduling layout and any compaction;
-- whether same-revision semantic encoding can be reused across recipients;
-- local transform quantization;
-- compression thresholds;
-- future capacity/support policy for the retained entity-relation profile;
-- eventual server/world partition ownership boundaries.
-
-None of these decisions may move authority into Network or make private data part
-of the public chunk page.
-
-## Current checkpoint boundary
-
-T0 has accepted the chunk coordinate, packed publication, bounded dirty history,
-local interest query, production client semantic cache, presentation window, and
-launchable woods/cabin vertical. N1.0 connects those contracts to a bounded
-packet-free recipient chunk-cursor layer. N1.1 adds canonical bounded chunk wire
-semantics and application-proof fencing. N1.2 carries MTU-admissible ordinary
-deltas and absences over real independent-unreliable transport with a bounded
-server ticket ledger and atomic production-client application. N1.3 adds bounded
-reliable-Bulk snapshot recovery with private staging and same-key ordering lineage.
-N1.4 adds the shared dirty-work scheduler, exact stable-interest fast path, bounded
-cadence traversal, and compact recipient/reverse-index storage. Its mechanisms are
-accepted through the storage-compaction stop. The first remaining semantic,
-secure deterministic replay, dense-entry, representative topology, mixed-lane,
-and real shared-socket matrices are captured. Hosted H0.5 closes the dedicated-
-process gate, and `ChunkPublication` is selected for the current game. The N0
-implementation is retained as the explicit `MaintainedEntityRelation` Game profile;
-the selection does not authorize N1.5. P0.1b/P0.2b establish the correctness,
-fairness, bounded-storage and allocation-free lifecycle floor for the two original
-dirty profiles. P0.3D adds entity-side semantic-audience indexing, coarse occupied
-DirtyChunk recipient buckets, and the fifth chunk-batched DirtyEntity experiment.
-P0.3E closes the shared broadphase floor. P0.3F closes scheduler/ledger scans and
-records the clean five-profile dense/sparse scale boundary. P0.3G then isolates Dirty
-Chunk's repeated equal-lineage materialization and one-chunk-message costs while keeping
-its proof and discovery semantics. P0.3H-P0.3I close Network ready selection and chunk
-proof-message multiplication; P0.3J-P0.3K record probes-off ratings and independent server/
-AOI cadence controls. P0.4 now closes conservatively: `ChunkPublication` remains selected
-for dynamic-public state, alternatives/experimental controls remain explicit, static layers
-remain outside the profile catalog, and runtime cross-profile ownership transitions remain
-unsupported pending a gameplay-earned identity/lineage design.
-
-Stop after the P0.4 documentation and conformance gate. Do not begin N1.5 shared encoding,
-additional transport/sharded 2K/4K work, public-WAN/production-CCU claims, or a cross-profile
-identity/transition system without new measured or gameplay evidence.
-Do not remove the retained `MaintainedEntityRelation` profile. The separately
-scoped hosted lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.
+The current exclusions and deployment gates for externally admitted UDP remain in
+[HOSTED_NETWORK.md](HOSTED_NETWORK.md).
