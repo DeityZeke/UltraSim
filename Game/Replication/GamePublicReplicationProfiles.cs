@@ -31,6 +31,23 @@ public enum GamePublicReplicationSourceModel : byte
 }
 
 /// <summary>
+/// Semantic domain covered by this catalog. Immutable terrain, frozen structures, and static
+/// decoration remain WorldPack/static-layer content and are intentionally not replication profiles.
+/// </summary>
+public enum GamePublicReplicationDomain : byte
+{
+    DynamicPublicState = 1,
+}
+
+/// <summary>Current-game selection status of one concrete dynamic-public profile.</summary>
+public enum GamePublicReplicationProfileDisposition : byte
+{
+    SelectedCurrentGame = 1,
+    RetainedAlternative = 2,
+    ExperimentalReference = 3,
+}
+
+/// <summary>
 /// Cross-profile semantic guarantees. Concrete profiles retain their own interest, cursor,
 /// recovery, and codec types; these flags do not introduce a generic replication interface.
 /// </summary>
@@ -52,6 +69,8 @@ public readonly record struct GamePublicReplicationProfileDescriptor(
     GamePublicReplicationProfileId Id,
     GamePublicReplicationInterestModel InterestModel,
     GamePublicReplicationSourceModel SourceModel,
+    GamePublicReplicationDomain Domain,
+    GamePublicReplicationProfileDisposition Disposition,
     GamePublicReplicationGuarantee Guarantees);
 
 /// <summary>
@@ -60,6 +79,13 @@ public readonly record struct GamePublicReplicationProfileDescriptor(
 /// </summary>
 public static class GamePublicReplicationProfiles
 {
+    /// <summary>
+    /// Runtime transfer of one logical public object between these profile identity lineages is not
+    /// supported. Such a feature first requires a stable cross-profile Game identity, ownership
+    /// lineage, and client-side cross-profile ordering/deduplication semantics.
+    /// </summary>
+    public static bool RuntimeOwnershipTransitionsSupported => false;
+
     public const GamePublicReplicationGuarantee RequiredGuarantees =
         GamePublicReplicationGuarantee.AuthoritativeSourceTruth |
         GamePublicReplicationGuarantee.RecipientDisclosure |
@@ -73,33 +99,46 @@ public static class GamePublicReplicationProfiles
         GamePublicReplicationProfileId.MaintainedEntityRelation,
         GamePublicReplicationInterestModel.RecipientEntityRelation,
         GamePublicReplicationSourceModel.EntityLatestState,
+        GamePublicReplicationDomain.DynamicPublicState,
+        GamePublicReplicationProfileDisposition.RetainedAlternative,
         RequiredGuarantees);
 
     public static GamePublicReplicationProfileDescriptor ChunkPublication { get; } = new(
         GamePublicReplicationProfileId.ChunkPublication,
         GamePublicReplicationInterestModel.RecipientChunkSubscription,
         GamePublicReplicationSourceModel.ChunkRevisionHistory,
+        GamePublicReplicationDomain.DynamicPublicState,
+        GamePublicReplicationProfileDisposition.SelectedCurrentGame,
         RequiredGuarantees);
 
     public static GamePublicReplicationProfileDescriptor DirtyEntitySpatialFanout { get; } = new(
         GamePublicReplicationProfileId.DirtyEntitySpatialFanout,
         GamePublicReplicationInterestModel.DirtyEntitySpatialDiscovery,
         GamePublicReplicationSourceModel.EntityLatestState,
+        GamePublicReplicationDomain.DynamicPublicState,
+        GamePublicReplicationProfileDisposition.RetainedAlternative,
         RequiredGuarantees);
 
     public static GamePublicReplicationProfileDescriptor DirtyChunkSpatialFanout { get; } = new(
         GamePublicReplicationProfileId.DirtyChunkSpatialFanout,
         GamePublicReplicationInterestModel.DirtyChunkSpatialDiscovery,
         GamePublicReplicationSourceModel.ChunkRevisionHistory,
+        GamePublicReplicationDomain.DynamicPublicState,
+        GamePublicReplicationProfileDisposition.ExperimentalReference,
         RequiredGuarantees);
 
     public static GamePublicReplicationProfileDescriptor DirtyEntityChunkBatchFanout { get; } = new(
         GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout,
         GamePublicReplicationInterestModel.DirtyEntityChunkBatchDiscovery,
         GamePublicReplicationSourceModel.EntityLatestState,
+        GamePublicReplicationDomain.DynamicPublicState,
+        GamePublicReplicationProfileDisposition.ExperimentalReference,
         RequiredGuarantees);
 
-    /// <summary>Selected public replication profile for the current UltraSim game.</summary>
+    /// <summary>
+    /// Selected dynamic-public replication profile for the current UltraSim game. This does not
+    /// select an owner for immutable WorldPack/static layers or every future dynamic semantic class.
+    /// </summary>
     public static GamePublicReplicationProfileDescriptor Selected => ChunkPublication;
 
     public static int Count => 5;

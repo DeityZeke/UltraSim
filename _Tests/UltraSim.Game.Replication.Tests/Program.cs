@@ -14,6 +14,7 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
+    ("P04ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers", ReplicationProfileConformanceTests.ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
     ("P03FDirtyEntityReadyQueueDrainsEligibleRecipientsOnly", DirtyEntitySpatialFanoutTests.ReadyQueueDrainsEligibleRecipientsOnly),
     ("P01DirtyEntityExistingAudienceAvoidsOldFootprintDiscovery", DirtyEntitySpatialFanoutTests.ExistingAudienceAvoidsOldFootprintDiscovery),

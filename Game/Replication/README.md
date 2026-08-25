@@ -24,7 +24,10 @@ socket matrix and Hosted H0.5
 dedicated-process gate select `ChunkPublication` for the current game. The frozen
 N0 implementation is retained and explicitly identified as the
 `MaintainedEntityRelation` Game profile. P0.1 adds the concrete
-`DirtyEntitySpatialFanout` profile below; it is not selected for this game.
+`DirtyEntitySpatialFanout` profile below; it is not selected for this game. P0.4
+conservatively freezes this as a dynamic-public profile selection rather than a
+per-object composition system: immutable terrain/frozen structures remain WorldPack/static
+content, and runtime transfer between profile identity lineages is unsupported.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -47,31 +50,32 @@ and Network delivery. It depends on the concrete game composition and Runtime;
 
 `GamePublicReplicationProfiles` names the five concrete profiles and the
 shared semantic guarantees they must preserve. It deliberately does not hide them
-behind a universal AOI/cursor interface:
+behind a universal AOI/cursor interface. Every entry describes dynamic public state;
+the catalog does not own immutable terrain, frozen structures, or static decoration:
 
 ```text
-MaintainedEntityRelation
+MaintainedEntityRelation                  retained alternative
     GameInterestService + RemoteWorldStateServer
     recipient/entity relations + entity latest state
 
-ChunkPublication                         selected for this game
+ChunkPublication                         selected dynamic-public profile
     OfflineDirectChunkRecipient
     ChunkPublicationWorkScheduler
     RemoteChunkWorldStateServer
     recipient/chunk subscriptions + chunk revision/history
 
-DirtyEntitySpatialFanout
+DirtyEntitySpatialFanout                 retained alternative
     DirtyEntitySpatialFanout + RemoteDirtyEntitySpatialFanoutServer
     dirty-time spatial recipient discovery + recipient topology reconciliation
     entity latest state; bounded semantic knowledge/debt, no persistent R×E AOI graph
 
-DirtyChunkSpatialFanout
+DirtyChunkSpatialFanout                  experimental reference
     DirtyChunkSpatialFanout
     dirty-time spatial recipient discovery + recipient-local chunk reconciliation
     ChunkPublicationStore / chunk revision history; bounded recipient chunk knowledge/debt
     no persistent global Chunk×Recipient reverse subscriber graph
 
-DirtyEntityChunkBatchFanout
+DirtyEntityChunkBatchFanout              experimental reference
     DirtyEntitySpatialFanout with adaptive chunk-batched entrant discovery
     entity latest state / entity proof; no persistent R×E AOI graph
 
@@ -85,6 +89,40 @@ recipient-scoped disclosure, stable identity/lifetime, sent-not-known applicatio
 proof, rejected/lost-work recovery, eventual convergence, and bounded reservation
 for all five profiles. Their internal types and deeper hostile/performance suites
 remain separate. `ChunkPublication` remains the selected current-game profile.
+
+## P0.4 conservative selection
+
+P0.4 freezes the normalized P0.3D-P0.3K evidence without adding per-object profile
+composition. `ChunkPublication` remains selected for the current game's dynamic-public
+architecture; this is not a claim that it is the best representation for every future
+dynamic semantic class. Whole-flow evidence found `DirtyEntitySpatialFanout` strongest
+in the measured dense/mobile dynamic workload and `MaintainedEntityRelation` narrowly
+strongest for sparse moving recipients. Those are retained workload conclusions, not an
+authoritative object-class routing table.
+
+The ownership boundary is:
+
+| State domain | Current owner/status |
+| --- | --- |
+| Terrain/base and frozen structural/static content | immutable `WorldPack` plus its explicit mutable-overlay layers |
+| Dynamic public state | selected `ChunkPublication` profile |
+| Maintained entity relation | retained alternative profile |
+| Dirty entity fanout | retained alternative profile |
+| Dirty entity/chunk-batched discovery | experimental reference |
+| Dirty chunk fanout without reverse membership | experimental reference |
+
+One logical public identity must not be simultaneously published through multiple
+mechanisms. Runtime transfer between profile lineages is deliberately unsupported:
+`WorldPublicEntityId` and `ReplicationEntityId` do not form a shared cross-profile
+identity/order domain, and independent delivery cannot safely infer that an old-owner
+remove and new-owner present describe the same object.
+
+If gameplay later earns activation, freezing, dormancy, or static consolidation, the
+feature must first define a stable Game public identity, an ownership epoch/lineage,
+client-side cross-profile ordering and deduplication, and transactional source handoff.
+A dynamic-entity-to-true-static transition additionally crosses into WorldPack/static or
+mutable-overlay ownership; it is not merely a replication-profile switch. Network remains
+unaware of all of these Game-owned meanings.
 
 ## P0.2 Dirty Chunk Spatial Fanout
 

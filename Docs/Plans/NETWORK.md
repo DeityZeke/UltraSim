@@ -17,6 +17,10 @@ scans with bounded ready-state selection. P0.3I packs independently meaningful c
 application proofs into a bounded MTU-safe reverse envelope without changing proof
 granularity.
 P0.3J closes rated server-role measurement with diagnostic stage timing disabled.
+P0.3K records the independent 16/33 ms server-step and AOI-cadence controls. P0.4
+conservatively freezes `ChunkPublication` as the selected dynamic-public profile while
+retaining the entity alternatives and experimental controls; it does not introduce
+per-object profile composition or cross-profile runtime identity transitions.
 Terrain / World T0 is accepted/frozen as of 2026-08-21. N1.0's packet-free
 `OfflineDirectChunkRecipient` is accepted.
 N1.1 canonical chunk messages/proof semantics and N1.2 independent-unreliable
@@ -1660,6 +1664,50 @@ populations. The unpaced localhost harness does not claim ping/RTT.
 Evidence:
 [`network-p0.3k-rated-server-role-33ms-probes-off-2026-08-24.md`](../../_Benchmarks/Baselines/network-p0.3k-rated-server-role-33ms-probes-off-2026-08-24.md).
 
+## P0.4 — conservative dynamic-public profile selection
+
+P0.4 closes the selection/composition hold without manufacturing a per-object composition
+system that the current identities and delivery lineages cannot support.
+
+The finite `GamePublicReplicationProfiles` catalog covers dynamic public state only:
+
+| Profile | P0.4 disposition |
+| --- | --- |
+| `ChunkPublication` | selected current-game dynamic-public profile |
+| `MaintainedEntityRelation` | retained alternative |
+| `DirtyEntitySpatialFanout` | retained alternative |
+| `DirtyEntityChunkBatchFanout` | experimental/reference discovery control |
+| `DirtyChunkSpatialFanout` | experimental/reference no-reverse-membership control |
+
+Terrain/base, frozen structural/static content, and immutable decoration remain owned by
+WorldPack/static layers and their explicit mutable overlays. They may share a
+`SpatialChunkKey` with dynamic publication, but they are not rows in the profile catalog
+and are not silently reassigned to `ChunkPublication`.
+
+The normalized whole-flow evidence retains two workload conclusions: Dirty Entity is
+strongest in the measured dense/mobile dynamic case, while Maintained Entity is narrowly
+strongest for sparse moving recipients. That does not establish a universal semantic-class
+mapping, and P0.4 does not route individual objects between profiles based on runtime load.
+`ChunkPublication` remains the selected current-game architecture, not a claim about every
+future dynamic object.
+
+Runtime ownership transition is unsupported. `WorldPublicEntityId` and
+`ReplicationEntityId` are separate identity/lineage domains, and the current clients do not
+possess a cross-profile ordering or deduplication fence. Consequently, one logical identity
+must not be published simultaneously through multiple public mechanisms, and an old-owner
+remove plus a new-owner present is not a supported handoff protocol.
+
+If gameplay later earns activation, freezing, dormancy, or static consolidation, its
+prerequisite is a stable Game public identity, explicit ownership epoch/lineage, client-side
+cross-profile ordering/deduplication, and transactional old-source/new-source handoff.
+Moving dynamic truth into true static content additionally crosses into WorldPack/static or
+mutable-overlay ownership; it is not merely a replication profile change. None of this
+meaning moves into Network.
+
+P0.4 changes catalog metadata, tests, and documentation only. It changes no source truth,
+interest semantics, wire schema, proof meaning, lane, cadence, performance path, or selected
+runtime implementation. No profile tournament or scale rerun is required.
+
 ## N1.5 — shared semantic packing / chunk page reuse
 
 Only after N1.4 proves chunk subscriptions improve the primary architecture,
@@ -1935,12 +1983,15 @@ DirtyChunk recipient buckets, and the fifth chunk-batched DirtyEntity experiment
 P0.3E closes the shared broadphase floor. P0.3F closes scheduler/ledger scans and
 records the clean five-profile dense/sparse scale boundary. P0.3G then isolates Dirty
 Chunk's repeated equal-lineage materialization and one-chunk-message costs while keeping
-its proof and discovery semantics. P0.4 is the next explicit selection/composition
-checkpoint.
+its proof and discovery semantics. P0.3H-P0.3I close Network ready selection and chunk
+proof-message multiplication; P0.3J-P0.3K record probes-off ratings and independent server/
+AOI cadence controls. P0.4 now closes conservatively: `ChunkPublication` remains selected
+for dynamic-public state, alternatives/experimental controls remain explicit, static layers
+remain outside the profile catalog, and runtime cross-profile ownership transitions remain
+unsupported pending a gameplay-earned identity/lineage design.
 
-Stop after the P0.3G comparison and clean reproducibility evidence. Do
-not begin N1.5 shared encoding, additional transport/sharded 2K/4K work, or public-WAN/
-production-CCU claims before
-the explicit P0.4 selection decision.
+Stop after the P0.4 documentation and conformance gate. Do not begin N1.5 shared encoding,
+additional transport/sharded 2K/4K work, public-WAN/production-CCU claims, or a cross-profile
+identity/transition system without new measured or gameplay evidence.
 Do not remove the retained `MaintainedEntityRelation` profile. The separately
 scoped hosted lifecycle and its remaining exclusions stay in `HOSTED_NETWORK.md`.

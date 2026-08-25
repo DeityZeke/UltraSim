@@ -16,6 +16,47 @@ internal readonly record struct ReplicationProfileConformanceObservation(
 
 internal static class ReplicationProfileConformanceTests
 {
+    internal static void ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers()
+    {
+        False(GamePublicReplicationProfiles.RuntimeOwnershipTransitionsSupported);
+        Equal(GamePublicReplicationProfileId.ChunkPublication,
+            GamePublicReplicationProfiles.Selected.Id);
+        Equal(GamePublicReplicationProfileDisposition.SelectedCurrentGame,
+            GamePublicReplicationProfiles.Selected.Disposition);
+
+        int selectedCount = 0;
+        int retainedAlternativeCount = 0;
+        int experimentalReferenceCount = 0;
+        foreach (GamePublicReplicationProfileId id in Enum.GetValues<GamePublicReplicationProfileId>())
+        {
+            True(GamePublicReplicationProfiles.TryGet(id, out GamePublicReplicationProfileDescriptor profile));
+            Equal(GamePublicReplicationDomain.DynamicPublicState, profile.Domain);
+            switch (profile.Disposition)
+            {
+                case GamePublicReplicationProfileDisposition.SelectedCurrentGame:
+                    selectedCount++;
+                    Equal(GamePublicReplicationProfileId.ChunkPublication, profile.Id);
+                    break;
+                case GamePublicReplicationProfileDisposition.RetainedAlternative:
+                    retainedAlternativeCount++;
+                    True(profile.Id is GamePublicReplicationProfileId.MaintainedEntityRelation or
+                        GamePublicReplicationProfileId.DirtyEntitySpatialFanout);
+                    break;
+                case GamePublicReplicationProfileDisposition.ExperimentalReference:
+                    experimentalReferenceCount++;
+                    True(profile.Id is GamePublicReplicationProfileId.DirtyChunkSpatialFanout or
+                        GamePublicReplicationProfileId.DirtyEntityChunkBatchFanout);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unknown profile disposition {profile.Disposition}.");
+            }
+        }
+
+        Equal(1, selectedCount);
+        Equal(2, retainedAlternativeCount);
+        Equal(2, experimentalReferenceCount);
+    }
+
     internal static void ExplicitProfilesMeetSharedSemanticContract()
     {
         Equal(5, GamePublicReplicationProfiles.Count);
@@ -34,8 +75,10 @@ internal static class ReplicationProfileConformanceTests
 
         Equal(GamePublicReplicationInterestModel.RecipientEntityRelation, maintained.InterestModel);
         Equal(GamePublicReplicationSourceModel.EntityLatestState, maintained.SourceModel);
+        Equal(GamePublicReplicationDomain.DynamicPublicState, maintained.Domain);
         Equal(GamePublicReplicationInterestModel.RecipientChunkSubscription, chunk.InterestModel);
         Equal(GamePublicReplicationSourceModel.ChunkRevisionHistory, chunk.SourceModel);
+        Equal(GamePublicReplicationDomain.DynamicPublicState, chunk.Domain);
         True(GamePublicReplicationProfiles.TryGet(
             GamePublicReplicationProfileId.DirtyEntitySpatialFanout,
             out GamePublicReplicationProfileDescriptor dirty));
