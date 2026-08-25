@@ -1,153 +1,149 @@
-# Hosted Network H0: externally admitted shared UDP
+# Hosted Network H0: accepted external UDP lifecycle
 
-Status: H0.0-H0.5 are implemented and accepted as the first externally admitted,
-connection-owner-sharded localhost deployment boundary. N1.0-N1.4 replication
-semantics remain unchanged and N1.5 has not started.
+Status: **H0.0-H0.5 accepted / localhost deployment gate closed** as of
+2026-08-25.
 
-This milestone exists to prove the lifecycle between an unknown external UDP path
-and an authenticated UltraSim protocol session. It is not another replication
-profile and it does not move game admission, AOI, or participant identity into
-`Kernels/Network`.
+Hosted H0 is the Network-generic lifecycle between an unknown external UDP path and
+an authenticated UltraSim protocol session. It is not a replication profile, does
+not authenticate a Game account, does not create `ParticipantId`, does not own AOI,
+and does not interpret Game messages.
+
+The current Game dynamic-public profile is `ChunkPublication`, but Hosted Network
+must remain indifferent to that choice. `MaintainedEntityRelation`, dirty-profile
+experiments, owner-private UI/Inventory traffic, retained Events, and future Game
+protocols all flatten into the same authenticated Network/session machinery.
+
+General Network/replication policy is recorded in [Network V3](NETWORK.md).
 
 ## Frozen boundary
 
 ```text
-unknown UDP endpoint
+unknown external UDP endpoint
         |
         v
 Hosted Network
     deployment-owned server identity
     bounded unauthenticated admission
-    cookie / anti-amplification / rate policy
+    stateless cookie / rate / anti-amplification policy
     authenticated transport-session promotion
-    path ownership and rebinding
-    connection-owner packet transfer
+    exact path ownership and authenticated rebinding
+    bounded connection-owner packet handoff
         |
         v
-Game Admission / participant binding
+authenticated Network connection/session
         |
         v
-existing protocol adapters
+Game protocol/application binding
         |
-        +--> N0 entity-relation replication
+        v
+Accounting / Admission / participant authority
         |
-        +--> N1 chunk-publication replication
+        v
+Game-owned replication / UI / Event / Control semantics
 ```
 
-Network identity is not an account, participant, ECS entity, chunk, or IP address.
-An endpoint is only a currently observed transport path. Hosted Network must
-remain indifferent to the active Game replication profile.
+Permanent rules:
 
-The accepted framing, manifest, lanes, secure outer protocol, application-proof
-separation, shared listener, and native batching remain in place. H0 extends the
-lifecycle around them; it does not replace them.
+```text
+IP/PORT != CONNECTION IDENTITY.
+CONNECTION IDENTITY != GAME IDENTITY.
+THE CLIENT DOES NOT CHOOSE A CONNECTION ID.
+THE LISTENER DOES NOT GRANT GAME AUTHORITY.
+UNKNOWN BYTES DO NOT ROUTE TO AN ESTABLISHED PEER.
+COOKIE VALIDATION PRECEDES EXPENSIVE/STATEFUL HANDSHAKE WORK.
+UNAUTHENTICATED RESPONSE MUST NOT AMPLIFY THE TRIGGERING REQUEST.
+PATH REBINDING IS AUTHENTICATED AND TRANSACTIONAL.
+PACKET MEMORY HAS ONE OWNER AT A TIME.
+HOSTED NETWORK CONTAINS NO AOI OR GAME-SEMANTIC VOCABULARY.
+```
 
-## H0.0/H0.1 implementation stop
+## Deployment identity and trust
 
-`HostedUdpAdmissionHost` now owns the first externally sourced server boundary:
+The server uses a caller/deployment-owned `NetworkServerIdentity`. The Hosted host
+retains it for handshake signatures but does not own/dispose the deployment key.
 
-- the caller supplies an explicit IPv4 bind endpoint and a deployment-owned
-  `NetworkServerIdentity`;
-- clients can copy/pin the server public key through an explicit bounded copy;
-- no self-trusted or in-process client is constructed by this host;
-- the listener owns one random 256-bit cookie key for its lifetime and clears it
-  on disposal;
-- a canonical `ClientHello` from an unknown path receives only a stateless cookie
-  challenge whose MAC is literally bound to protocol manifest version/fingerprint,
-  client nonce/key, source IPv4/port, and
-  current monotonic time bucket;
-- challenges are limited per source IPv4 address and bucket by a fixed-capacity,
-  stale-reusable table;
-- a challenge is emitted only when its bytes do not exceed the triggering hello,
-  making the H0.1 unauthenticated response factor at most 1:1;
-- current and immediately previous cookie buckets validate; older cookies fail;
-- no endpoint route, `ConnectionId`, ECDH object, protocol peer, or Game session
-  is allocated before cookie validation;
-- validated candidates occupy fixed nonce/public-key rows, deduplicate by source
-  path, fail closed at capacity, and expire on a monotonic deadline;
-- malformed, invalid-cookie, rate-limited, capacity-dropped, refreshed, and timed-
-  out work is separately observable;
-- normal shared-loopback hosts retain their old unknown-path drop behavior.
+Clients receive/pin the server public key out of band. Hosted construction never
+creates a self-trusted client and never silently changes an empty key into
+trust-on-first-use. Controlled in-process tests may use explicitly named self-trusted
+helpers outside the external Hosted boundary.
 
-The focused H0.1 tests prove stateless pre-cookie behavior, public-key pin copy,
-previous-bucket acceptance, stale-cookie rejection, candidate deduplication,
-candidate and rate capacity, timeout reclamation, non-amplification, malformed
-flood containment, and zero warmed allocation for a 64-hello receive/challenge
-pass.
+The handshake authenticates the pinned server endpoint/transport transcript. Game
+account/participant authentication remains an application protocol above the secure
+connection.
 
-The admission-only constructor retains this exact H0.1 stop for isolated evidence.
-The H0.2 constructor additionally receives explicit protocol limits and enables
-authenticated promotion.
+## H0.0/H0.1 — stateless unknown-path admission
 
-## H0.2 implementation stop — authenticated candidate promotion
-
-`HostedUdpAdmissionHost` now promotes a validated candidate through the existing
-handshake cryptography and protocol manifest into the existing
-`NetworkProtocolPeer` machinery. `HostedUdpProtocolClient` supplies the matching
-external-process-capable client side without constructing or self-trusting a
-server identity.
+`HostedUdpAdmissionHost` owns the first externally sourced server boundary.
 
 Accepted behavior:
 
-- `HostedCandidateId(slot,generation)` fences candidate-slot reuse;
-- validated credentials become immutable while a candidate is `Promoting`;
-- duplicate identical key exchanges reuse the same candidate, reserved
-  `ConnectionId`, ECDH result, transcript, master secret, signature, and cached
-  `ServerKeyExchange` flight;
-- different credentials on that path cannot mutate an in-flight promotion;
-- ECDH/signature work occurs only after cookie validation, and malformed keys,
-  signer failure, capacity pressure, timeout, or invalid finish publish no route
-  or secure session;
-- the deployment owns the `NetworkServerIdentity`; the host retains it for
-  transcript signatures but never disposes it;
-- a valid `ClientFinish` registers the exact IPv4/port path, advances the reserved
-  connection, creates the server peer, and publishes one session as one
-  transaction;
-- terminal success is committed locally before `ServerFinish` is submitted; a
-  rejected or lost first terminal flight leaves the one established session in
-  place, and a repeated `ClientFinish` resends its cached acknowledgement;
-- the client pins the deployment public key out of band and verifies the canonical
-  manifest-bound transcript before proving possession of the derived secret;
-- duplicate `ClientFinish` on the established path resends the cached
-  `ServerFinish` without creating another candidate, route, connection, ECDH key,
-  or peer;
-- protocol mismatch, signature failure, malformed finish, timeout, and capacity
-  pressure publish no partial session;
-- the promoted session exposes only transport/session identity to the Server
-  adapter; Game Admission still creates/binds `ParticipantId` separately;
-- established traffic uses the existing lanes, replay windows, pacing, batching,
-  drain, and application-proof contracts.
+- the caller supplies an explicit IPv4 bind endpoint and deployment identity;
+- the listener owns one random 256-bit cookie key for its lifetime and clears it on
+  disposal;
+- an unknown canonical `ClientHello` may receive only a stateless cookie challenge;
+- the cookie MAC is bound to protocol manifest version/fingerprint, client nonce/key,
+  source IPv4/port, and monotonic time bucket;
+- current and immediately previous cookie buckets validate; older cookies fail;
+- challenge generation is rate-limited per source IPv4/bucket through fixed capacity;
+- challenge bytes do not exceed the triggering hello, keeping unauthenticated
+  amplification at or below 1:1;
+- no route, `ConnectionId`, ECDH object, protocol peer, Game session, account, or
+  participant is allocated before cookie validation;
+- cookie-validated candidates occupy bounded generation-fenced rows, deduplicate
+  by source path/credentials as specified, expire on monotonic deadlines, and fail
+  closed at capacity;
+- malformed, stale-cookie, rate-limited, capacity-dropped, refreshed, and timed-out
+  work remains separately observable.
 
-The permanent H0.2 acceptance uses independent client/server sockets and proves
-the pre-finish zero-route boundary, bidirectional secure application traffic,
-candidate reuse/conflict fencing, malformed-key and invalid-finish rollback,
-timeout and connection-capacity reclamation, duplicate-finish recovery, scalar/
-native receive parity, terminal-send failure recovery without a second session,
-an immediate canonical `ServerFinish` after exactly one raw `ClientFinish`, caller-
-owned signer lifetime, literal cookie-manifest binding, and zero warmed managed
-allocation for secure delivery.
+The admission-only constructor intentionally retains this boundary for focused
+security evidence.
 
-Path ownership is deliberately strict in H0.2. Only the exact path established by
-the handshake routes to the secure peer. No endpoint change is interpreted as
-rebinding, and an IP endpoint is still not connection or participant identity.
+## H0.2 — authenticated candidate promotion
 
-Do not create a second secure packet format or a hosted-only replication path.
+A cookie-validated candidate may enter the existing manifest-bound handshake and
+be promoted transactionally into one existing `NetworkProtocolPeer`.
 
-## H0.3 implementation stop — authenticated path ownership
+Accepted behavior:
 
-H0.3 freezes one concrete IPv4 endpoint-change policy without making an endpoint
-the connection identity:
+- `HostedCandidateId(slot,generation)` fences candidate reuse;
+- credentials become immutable while a candidate is promoting;
+- duplicate identical key exchanges reuse the candidate, reserved `ConnectionId`,
+  ECDH result, transcript/master secret, signature, and cached server flight;
+- conflicting credentials on the same path cannot mutate an in-flight promotion;
+- ECDH/signature work occurs only after cookie validation;
+- malformed keys, signer failure, capacity pressure, timeout, or invalid finish
+  publish no route/secure session;
+- only a valid client secret-possession proof transactionally registers the exact
+  path, establishes the reserved `ConnectionId`, creates the server peer, and
+  publishes one session;
+- terminal success is committed locally before the terminal server flight is sent;
+- a rejected/lost first terminal flight does not create another session;
+- repeated exact `ClientFinish` resends the cached terminal acknowledgement;
+- the client verifies the pinned-server canonical transcript and proves possession
+  of the derived secret;
+- promoted sessions expose transport/application-session identity upward; Game
+  Admission still creates/binds `ParticipantId` separately;
+- established traffic reuses the normal lanes, replay, pacing, batching, drain, and
+  application-proof contracts.
+
+No Hosted-specific secure packet format or replication path exists.
+
+## H0.3 — authenticated IPv4 path ownership / rebinding
+
+An endpoint is a mutable transport path, not connection identity.
+
+The accepted rebinding lifecycle is:
 
 ```text
-established connection C owns path A / generation G
+connection C owns path A / path generation G
         |
-authenticated Request arrives from unregistered path B
+authenticated Request from unregistered path B
         |
 one bounded pending attempt for C
         |
-server Challenge bound to B + attempt + generation G'
+server Challenge bound to B + attempt + new generation
         |
-client Proof from B
+client Proof from exactly B
         |
 atomic listener route A -> B
         |
@@ -156,196 +152,240 @@ server Commit on B
 
 Accepted behavior:
 
-- ordinary or malformed bytes from an unknown path never route to or mutate the
-  established secure peer;
-- a dedicated 256-bit path key is derived from the authenticated handshake master,
-  exact connection/security identity, and protocol manifest, then retained only
-  by the transport session endpoints;
-- Request, Challenge, Proof, and Commit are canonical manifest-bound HMAC flights;
-  the 91-byte Request proves session-key possession before the server emits the
-  134-byte Challenge;
-- every established session owns at most one pending attempt, bounded by existing
-  session capacity, with a monotonic attempt floor, generation-fenced replacement,
-  and the existing validated-candidate timeout as its deadline;
-- the Challenge records the server-observed replacement IPv4/port. Proof must
-  return from that exact path and echo the attempt, generation, nonce, challenge,
-  and path binding under authentication;
-- the original path remains current while Request/Challenge is pending. A valid
-  Proof commits the listener route change and `HostedPathGeneration` first, then
-  sends Commit; it never allocates a second connection or secure peer;
-- a lost/rejected Commit leaves the new path authoritative. Repeated exact Proof
-  on that now-known path resends the cached Commit and converges the client;
-- server timeout and client cancellation before Proof leave the current route
-  untouched. Once Proof has been sent, the client cannot safely infer ownership
-  from a missing Commit; terminal timeout fails the client transport closed instead
-  of falling back to a potentially retired path;
-- stale generation, stale attempt, wrong-path, corrupt, or delayed proofs cannot
-  reclaim ownership;
-- the client swaps the existing secure peer to its new connected UDP endpoint only
-  after authenticating Commit. Existing lane, packet-number, replay, congestion,
-  and application state survive unchanged;
-- queued native server datagrams for the old endpoint are discarded before the
-  route moves, so no retained send is submitted to a retired path;
-- retirement clears the path key and all pending/cached path-control material;
-- IPv6 remains a named follow-up and is not inferred from this exact seven-byte
-  IPv4 path binding.
+- ordinary/malformed bytes from an unknown path never route to or mutate the secure
+  peer;
+- one dedicated 256-bit path key is derived from authenticated handshake material,
+  connection/security identity, and protocol manifest;
+- Request/Challenge/Proof/Commit are canonical manifest-bound authenticated control
+  flights;
+- each established session owns at most one pending rebinding attempt, bounded by
+  session capacity and monotonic timeout;
+- the challenge records the server-observed replacement IPv4/port; proof must return
+  from that exact path with the exact attempt/generation/nonce/challenge binding;
+- the old path remains authoritative until proof succeeds;
+- valid proof commits listener route + `HostedPathGeneration` before terminal Commit;
+- the connection/security/replay/lane/application state is retained; rebinding never
+  allocates a second connection/peer;
+- lost/rejected Commit leaves the new path authoritative and exact duplicate Proof
+  can recover the terminal flight;
+- timeout/cancel before Proof leaves the old path untouched;
+- once Proof has been sent, missing terminal confirmation cannot safely imply the old
+  path remains valid; terminal client failure closes rather than guessing;
+- stale generation/attempt, wrong-path, corrupt, or delayed proofs cannot reclaim
+  ownership;
+- native datagrams queued for the old endpoint are discarded before route movement;
+- retirement clears path-key and pending/cached path-control material.
 
-The permanent H0.3 acceptance proves repeated rebinding with one connection/peer,
-bidirectional secure traffic after the move, local-commit recovery after a lost
-Commit, stale/wrong-path rejection after later generations, timeout preservation
-of the old path, scalar/native receive parity, fixed canonical flight sizes, and
-zero warmed managed allocation for ordinary secure delivery after rebinding.
+The current binding is explicitly IPv4. IPv6 is future reviewed work, not an
+implicit extension of the accepted path encoding.
 
-## H0.4 implementation stop — connection-owner sharding
+## H0.4 — connection-owner packet-memory handoff
 
-Separate listener/socket ownership from connection/protocol ownership without
+H0.4 separates listener/socket ownership from connection/protocol ownership without
 sharing mutable packet buffers.
 
 ```text
-listener-owned packet slot
-    -> transactional ownership transfer
-    -> bounded connection-owner ingress
-    -> authenticate/process
-    -> release to the owning pool
+listener-owned fixed packet slot
+        |
+transactional exclusive transfer token
+        |
+connection-owner ingress queue
+        |
+authenticate / process on owning thread
+        |
+owner->listener egress transfer
+        |
+release slot to owning pool
 ```
 
-Required evidence includes full/closed/stale destination queues, owner failure,
-shutdown, connection migration/reuse fencing, no double release, and zero warmed
-allocation on the admitted handoff. Do not pass shared packet objects between
-owners and do not teach the handoff about Game messages.
+`HostedUdpConnectionOwnerHandoff` freezes these rules:
 
-`HostedUdpConnectionOwnerHandoff` now provides the concrete bounded mechanism:
+- `HostedConnectionOwnerId` and `HostedPacketTransferId` are generation-fenced;
+- listener thread is sole ingress producer / egress consumer;
+- each registered owner thread is sole ingress consumer / egress producer for its
+  fixed queues;
+- one fixed payload slab owns packet bytes; transfer moves exclusive ownership,
+  never a shared mutable packet object;
+- the receiver obtains a read-only span while it owns the transfer;
+- exact `ConnectionId` generation binds to exactly one owner generation;
+- binding/migration/unbinding fail while packets for that connection remain queued
+  or acquired;
+- ingress queue, egress queue, and global packet-capacity failure are separate and
+  transactional;
+- failed offer publishes neither bytes nor a transfer token;
+- owner close/reclaim rules require explicit quiescence/failure handling;
+- stale/foreign/returned/double-released transfer identities cannot regain packet
+  ownership;
+- listener may route a clear connection claim to an owner queue but does not
+  validate H0.3 HMAC/path authority; the owning secure endpoint does;
+- path-control output returns through the same bounded owner->listener mechanism;
+- the handoff contains no Game, participant, AOI, replication-profile, or UI
+  vocabulary.
 
-- `HostedConnectionOwnerId` and `HostedPacketTransferId` are fixed eight-byte,
-  generation-fenced identities;
-- the listener thread is the sole ingress producer and egress consumer, while
-  every registered connection thread is the sole ingress consumer and egress
-  producer for its fixed queues;
-- one fixed payload slab owns all packet bytes. Publication moves an exclusive
-  slot token between owners; the receiver obtains only a read-only span, and
-  release clears the slot before it returns to listener capacity;
-- exact `ConnectionId` generation maps to one exact owner generation. Binding,
-  migration, and unbinding fail while any packet for that connection remains
-  queued or acquired;
-- ingress/egress queue capacity and global packet capacity fail separately and
-  transactionally. A failed offer publishes neither bytes nor a transfer token;
-- graceful owner close requires zero bindings and leases. After the failed owner
-  thread has stopped, the listener can explicitly reclaim its bounded bindings,
-  queued packets, and acquired leases; reuse advances owner generation;
-- stale, foreign, returned, or double-released transfer identities cannot regain
-  packet ownership;
-- an H0.3 Request/Proof clear `ConnectionId` may select an owner queue, but the
-  listener does not validate the HMAC or authorize a route change. The connection
-  owner receives the exact observed path binding and performs path-key validation;
-  authenticated path-control output returns through the owner-to-listener queue;
-- `HostedUdpConnectionOwnerEndpoint` proves an existing `NetworkProtocolPeer`
-  can own protocol/crypto state on a separate thread while listener-owned packet
-  memory crosses the bounded handoff in both directions;
-- the handoff contains no Game, participant, AOI, N0, or N1 vocabulary.
+This is intra-server-process ownership machinery. It is not multi-host or
+server-process connection migration.
 
-The permanent acceptance covers ingress/egress exclusivity, full queues, packet
-pressure, graceful and failed-owner close, generation reuse, connection migration
-and reuse, exact no-double-release behavior, clear-ID-with-invalid-HMAC rejection,
-valid owner-authenticated H0.3 challenge production, a separate-thread secure
-protocol request/response, and zero warmed managed allocation. The measured
-two-owner/16-packet/512-byte test reservation is 9,184 bytes.
+## H0.5 — dedicated server process and independent clients
 
-H0.4 freezes the cross-owner mechanism and secure-protocol ownership canary. The
-accepted H0.0-H0.3 host remains the single-owner behavioral control. H0.5 must
-compose this mechanism with the real external listener and dedicated process
-topology; H0.4 does not claim that sharded deployment result in advance.
-
-## H0.5 implementation stop — dedicated server and independent clients
-
-H0.5 composes the accepted mechanisms without adding a hosted-only protocol or
-replication adapter:
+H0.5 composes the accepted mechanisms into the first realistic deployment topology
+without creating another protocol stack:
 
 ```text
 dedicated server process
     listener thread
-        external admission / socket / path table / packet slab
+        external admission
+        native/shared UDP socket
+        route/path table
+        packet slab
             |
             v
     fixed connection-owner threads
         NetworkProtocolPeer
-        unchanged N1 scheduler + RemoteChunkWorldStateServer
+        caller-supplied application adapter
 
 independent client processes
     HostedUdpProtocolClient
-    unchanged RemoteChunkWorldStateClient + semantic cache
+    existing Client/Network application adapters
 ```
 
-The owner runtime is fixed-capacity and Network-generic. Promotion constructs the
-secure peer and caller-supplied application adapter on the selected owner thread.
-The listener routes an untrusted clear connection claim to that owner but never
-authenticates H0.3 path control or interprets Game/AOI state. Owner-produced secure
-and path-control datagrams return through the same exclusive packet slab.
+The listener remains Network-generic. Promotion constructs the secure peer and
+application adapter on the selected owner thread. Owner-produced secure/path-control
+datagrams return through the exclusive H0.4 slab.
 
-The first multi-connection run found and permanently corrected an important
-composition bug: an owner queue is shared by all of that owner's connections, so
-an individual peer may not drain and discard foreign leases. The owner now
-demultiplexes each acquired ingress lease once, stages it only into the exact
-generation-matching peer, and releases it after that peer consumes it. The
-permanent two-client/one-owner regression freezes this rule.
+A key composition bug was found and permanently fixed during H0.5: an owner queue is
+shared by all connections assigned to that owner, so one peer may not drain/discard
+foreign leases. The owner runtime acquires each lease once, demultiplexes it to the
+exact generation-matching peer, and releases it only after that peer consumes it.
 
-Permanent H0.5 Network acceptance additionally proves:
+Permanent H0.5 acceptance proves:
 
-- two promoted sessions carry secure application traffic through one owner;
-- listener-thread access to an owner-bound peer is rejected;
-- normal H0.3 Request/Challenge/Proof/Commit completes across the split;
-- a lost first Commit recovers through an exact duplicate Proof on the newly
-  authoritative path;
-- explicit session retirement waits for owner-thread quiescence, releases the
-  generation-fenced connection binding, and makes capacity reusable;
-- all packet leases and owner queues drain back to zero;
-- host disposal requests worker stop, observes thread join/quiescence, and only
-  then invokes failed-owner reclamation.
+- multiple promoted sessions share one owner without cross-connection lease loss;
+- listener-thread access to owner-bound peers is rejected;
+- H0.3 Request/Challenge/Proof/Commit completes across the owner split;
+- lost first Commit recovers through exact duplicate Proof on the newly authoritative
+  path;
+- session retirement waits for owner-thread quiescence, releases the generation-
+  fenced binding, and makes capacity reusable;
+- packet leases and owner queues drain to zero;
+- host disposal requests worker stop, observes join/quiescence, then performs any
+  required failed-owner reclamation.
 
-The dedicated-process harness launches one server process and independent client
-worker processes. Each connection uses real cookie admission, deployment-key
-pinning, promotion, secure lanes, the shared native-batched listener, and the H0.4
-handoff. The Game adapter uses the existing N1.4 work scheduler and
-`RemoteChunkWorldStateServer`; the client uses the existing production semantic
-cache and `RemoteChunkWorldStateClient`. Per phase it carries public WorldState,
-owner-private latest state, retained Event, client Control, chunk/Event application
-proofs, one cross-chunk public-identity migration, and one concurrent authenticated
-path rebind. A second fresh connection phase proves reconnect without trusting
-client-local session identity.
+### Dedicated-process evidence
 
-Evidence remains separated into:
+The accepted H0.5 harness uses:
 
-1. server semantic replication;
-2. server transport/security/packetization;
-3. client decode/application;
-4. end-to-end freshness and process/socket cost.
+- one dedicated server process;
+- four connection-owner threads;
+- eight independent client processes;
+- two fresh connection phases per client;
+- 24 authoritative updates per phase;
+- real cookie admission and deployment-key pinning;
+- authenticated promotion and secure lanes;
+- the shared native-batched listener and H0.4 handoff;
+- public WorldState, owner-private latest state, retained Event, client Control,
+  application proofs, one public cross-chunk migration, and one authenticated path
+  rebind per phase.
 
-The accepted run uses eight independent client processes, four connection-owner
-threads, two fresh connection phases per client, and 24 authoritative updates per
-phase. All 16 applications, 16 path rebinds, 384 public updates, 384 owner states,
-384 retained Events, and final proof-gated completion markers converge with zero
-disclosure mismatch, zero handoff capacity drop, and zero packet lease remaining.
-The exact observation and split timings are retained in the immutable H0.5 JSON/
-Markdown artifacts.
+All 16 application sessions/reconnect phases and 16 rebinds converged; the accepted
+run recorded 384 public updates, 384 owner states, 384 retained Events, no disclosure
+mismatch, no handoff capacity drop, and no packet lease remaining.
 
-This closes the process-topology gate for selecting N1 as the current game's
-public replication profile. It does not establish public-WAN policy, production
-CCU, IPv6, multi-host/server-process connection migration, production admission
-rate values, or permission to remove the retained `MaintainedEntityRelation`
-profile. H0.4 remains intra-server-process
-thread-owner machinery; independent processes in H0.5 are the dedicated server
-and client workers.
+This closed the process-topology gate used when `ChunkPublication` was selected as
+the current game's dynamic-public profile. It did **not** establish a public-WAN or
+production-CCU deployment claim.
 
-H0.5 proves process, socket, and owner-thread composition. N1.2 and N1.3 remain
-the authoritative deterministic impairment evidence for ordinary delivery and
-snapshot recovery: loss, duplication, delay/reorder, corruption, lost proofs,
-history recovery, and epoch/subscription replacement all converge or fail closed
-there through the same authenticated protocol and semantic cache used by H0.5.
-H0.5 additionally proves lost H0.3 Commit recovery across the owner split; it does
-not claim to repeat every N1 impairment permutation in the process harness.
+## Game/replication independence
 
-## Current stop
+Hosted H0 proved the lower deployment lifecycle with the then-selected N1 adapter,
+but Hosted Network does not own N1 semantics.
 
-Stop after H0.5 and the Game-owned replication-profile extraction. Do not begin
-N1.5 shared packing, `DirtyEntitySpatialFanout`, 2K/4K, claim public-WAN readiness/
-production CCU, remove `MaintainedEntityRelation`, or generalize the owner handoff
-into server-process migration without a separately reviewed checkpoint.
+The current Game-owned public profile catalog contains five concrete dynamic-public
+profiles. They all flatten to the same Network session/lane boundary. Owner-private
+Inventory/UI traffic also uses the same lower authenticated protocol without entering
+public AOI.
+
+Later real-consumer acceptances (the ECS woodland actor and remote Inventory UI)
+strengthen application composition but do not widen H0.5's deployment claims. In
+particular, they do not turn localhost process evidence into WAN readiness.
+
+## Security and failure policy
+
+Expected remote rejection is transactional. Before secure/application publication,
+malformed input, stale identity, failed authentication, rate/capacity pressure, and
+invalid path control must leave no partial route/session authority.
+
+Once a terminal ownership change is committed locally (successful promotion or
+rebinding), loss of the terminal network flight does not roll back authoritative
+local ownership. Recovery uses the exact cached/reconstructible terminal protocol
+semantics or fails closed.
+
+Unauthenticated traffic must never allocate unbounded memory, trigger unbounded
+cryptographic work, or create amplification beyond the accepted policy.
+
+## Current exclusions / non-claims
+
+H0.5 is an accepted localhost deployment/process gate. The following remain
+**explicitly unclaimed**:
+
+- public-WAN readiness;
+- production remote CCU;
+- production admission/rate-limit values;
+- IPv6 admission/rebinding;
+- multi-host or cross-server-process live connection migration;
+- DDoS-provider / edge-proxy integration;
+- NAT traversal / relay service;
+- global load balancing / matchmaking;
+- automatic server-owner failover;
+- external certificate/PKI lifecycle beyond deployment-key pinning;
+- permission to infer account/participant identity from connection/path identity.
+
+Do not hide any of these inside unrelated replication, gameplay, or performance work.
+Each requires a separately reviewed deployment/security checkpoint.
+
+## Performance / evidence interpretation
+
+Hosted process/socket evidence is kept separate from Game semantic profile evidence.
+A valid report states which work is included:
+
+```text
+Game semantic replication
+Network protocol/security/packetization
+listener/socket work
+client decode/application
+process/scheduler overhead
+end-to-end freshness
+```
+
+Same-process or localhost results are not WAN latency/RTT measurements. The accepted
+H0.5 client count is a topology correctness gate, not a production capacity number.
+
+Deterministic N1.2/N1.3 impairment tests remain the authoritative loss/dup/reorder/
+corruption/snapshot-recovery evidence for the selected chunk client/server semantics.
+H0.5 did not need to repeat every deterministic impairment permutation in separate
+processes.
+
+## Current stop / forward policy
+
+Hosted Network is consumption-ready for local/dedicated application development.
+Do not reopen Hosted architecture merely to extend benchmark scale.
+
+New Hosted work must be earned by a concrete deployment requirement such as:
+
+- public remote/WAN exposure;
+- IPv6;
+- deployment-rate policy;
+- NAT/relay requirements;
+- multi-host ownership/migration;
+- demonstrated listener/owner capacity or security pressure.
+
+Until then:
+
+- keep H0.0-H0.5 semantics frozen;
+- keep endpoint identity separate from connection identity;
+- keep connection identity separate from Game identity;
+- keep Game/AOI semantics out of the listener/handoff;
+- retain bounded packet ownership and transactional admission/rebinding;
+- do not claim production CCU or WAN readiness from localhost evidence.
+
+Full checkpoint history and measurements remain in git and the accepted Hosted
+baseline artifacts under `_Benchmarks/Baselines`.
