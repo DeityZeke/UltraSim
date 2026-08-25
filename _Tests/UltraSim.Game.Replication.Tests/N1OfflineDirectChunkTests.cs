@@ -1138,6 +1138,35 @@ internal static class N1OfflineDirectChunkTests
             server.TrySchedule(occupied, 11));
     }
 
+    internal static void RemoteRemovalDeltaUsesCanonicalEmptyCurrent()
+    {
+        using var fixture = new Fixture(historyCapacity: 16, entityCount: 1);
+        SpatialChunkKey key = Key(0, 0);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.WoodlandAnimal);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        int occupied = FindSubscription(recipient, key);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 78,
+            new RemoteChunkWorldStateTransportLimits(8));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 78, maximumDeltaRecords: 8, maximumPendingProofs: 8);
+
+        fixture.Remove(0);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 1));
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+
+        Equal(1UL, client.GetSnapshot().AppliedDeltas);
+        Equal(0UL, client.GetSnapshot().RejectedDeliveries);
+        True(cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle));
+        True(cache.TryGetResidentView(handle, out ClientSemanticChunkView view));
+        Equal(0, view.PublicRecords.Length);
+        Equal(recipient.Subscriptions[occupied].Cursor, view.Info.PublicationCursor);
+    }
+
     internal static void CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth()
     {
         using var fixture = new Fixture(historyCapacity: 64);
@@ -2167,6 +2196,9 @@ internal static class N1OfflineDirectChunkTests
             WorldPublicChange change = WorldPublicChange.Present(_entities[entity], position, descriptor);
             True(Store.TryCommit([change], out _));
         }
+
+        internal void Remove(int entity) =>
+            True(Store.TryCommit([WorldPublicChange.Absent(_entities[entity])], out _));
 
         internal void CommitEmpty() => True(Store.TryCommit([], out _));
 

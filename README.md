@@ -126,6 +126,11 @@ retained Direct/Destination authority and cadence semantics are closed, and
 application. Human acceptance and the broad performance matrix closed T0. Network
 N1 is now selected through the Hosted H0.5 remote-process gate; the current profile
 seam and paired conformance tests live in `Game/Replication`.
+The native T0.10 acceptance now also composes one real ECS woodland actor through
+the selected dirty-work scheduler, canonical secure chunk protocol, production
+client semantic cache, and Godot renderer. Spawn, movement, interest leave/re-entry,
+destruction, reconnect/resync, and save/load generation replacement are exercised
+without a benchmark-only world adapter.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

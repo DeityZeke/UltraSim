@@ -903,8 +903,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 new WorldYaw(record.OrientationUnits),
                 (WorldPublicStateFlags)record.StateFlags,
                 new ChunkPublicationRevision(record.LastChangedRevision))
-            : new WorldPublicRecord(
-                id, record.EntityPublicVersion, 0, default, default, default, default);
+            : default;
         return new WorldPublicDeltaRecord(
             operation,
             (WorldPublicFieldMask)record.Fields,

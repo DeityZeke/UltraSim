@@ -134,6 +134,7 @@ var tests = new (string Name, Action Body)[]
     ("N11RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence", N1OfflineDirectChunkTests.RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence),
     ("N11RejectedProofAndEpochReplacementNeverAdvanceKnowledge", N1OfflineDirectChunkTests.RejectedProofAndEpochReplacementNeverAdvanceKnowledge),
     ("N12WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof", N1OfflineDirectChunkTests.WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof),
+    ("N12RemoteRemovalDeltaUsesCanonicalEmptyCurrent", N1OfflineDirectChunkTests.RemoteRemovalDeltaUsesCanonicalEmptyCurrent),
     ("N12CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth", N1OfflineDirectChunkTests.CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth),
     ("N12ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge", N1OfflineDirectChunkTests.ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge),
     ("N12OversizeWorldStateDeltaFailsClosedAtDatagramBoundary", N1OfflineDirectChunkTests.OversizeWorldStateDeltaFailsClosedAtDatagramBoundary),

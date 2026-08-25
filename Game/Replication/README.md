@@ -90,6 +90,24 @@ proof, rejected/lost-work recovery, eventual convergence, and bounded reservatio
 for all five profiles. Their internal types and deeper hostile/performance suites
 remain separate. `ChunkPublication` remains the selected current-game profile.
 
+## Real public-actor consumer vertical
+
+The T0.10 native Godot acceptance now joins the previously separate real-consumer
+seams. A joined ECS woodland actor is published by `GameWorldState`, discovered by
+`ChunkPublicationWorkScheduler`, carried by `RemoteChunkWorldStateServer` through
+the secure canonical protocol, atomically applied by `RemoteChunkWorldStateClient`
+to `ClientWorldSemanticCache`, and presented by `GodotWorldRenderer`. The fixture
+covers movement/state replacement, interest leave and re-entry, authoritative
+destruction, a fresh-session resync, and publication-epoch replacement through a
+real save/load generation swap.
+
+That composition exposed and permanently regresses one decoder-boundary defect:
+a remote remove operation must reconstruct `WorldPublicDeltaRecord.Current` as
+the canonical default value. Identity and public version remain in the delta's
+own fields; inventing a partial current record causes the semantic cache to reject
+an otherwise valid authoritative removal. This correction changes no profile,
+proof, Network, or ownership semantics.
+
 ## P0.4 conservative selection
 
 P0.4 freezes the normalized P0.3D-P0.3K evidence without adding per-object profile

@@ -17,6 +17,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
         {
             RunAcceptance();
             RunJoinedInputAuthorityAcceptance();
+            RunRemotePublicActorAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
