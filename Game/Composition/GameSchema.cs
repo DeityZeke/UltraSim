@@ -40,7 +40,9 @@ public struct GameCabinDoorState : IComponent<GameCabinDoorState>
     typeof(WorldPublicComponent),
     typeof(GameCabinDoorState),
     typeof(InventoryEquipCapability),
-    typeof(InventoryStackPolicy))]
+    typeof(InventoryStackPolicy),
+    typeof(InventoryGridPlacement),
+    typeof(InventoryGridFootprint))]
 public static partial class GameSchema
 {
 }

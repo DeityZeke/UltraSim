@@ -49,6 +49,7 @@ public readonly record struct InventoryIndexSnapshot(
     int ContainerCount,
     int ItemCount,
     int ContainedItemCount,
+    int GridPlacedItemCount,
     int ChildNodeCapacity,
     long KnownChildStorageBytes,
     int MaximumContainers,
@@ -135,6 +136,7 @@ public sealed class InventoryIndex : IDisposable
     private Dictionary<Entity, ContainerEntry> _containers;
     private Dictionary<Entity, InventoryLocation> _locations;
     private Dictionary<(Entity Owner, InventoryEquipSlot Slot), Entity> _equipped;
+    private Dictionary<Entity, InventoryPlacement>? _gridPlacements;
     private Entity[] _childEntities;
     private int[] _childNext;
     private int[] _childPrevious;
@@ -187,6 +189,20 @@ public sealed class InventoryIndex : IDisposable
         return _equipped.TryGetValue((owner, slot), out item);
     }
 
+    public bool TryGetPlacement(Entity item, out InventoryPlacement placement)
+    {
+        EnsureOperational();
+        if (_gridPlacements?.TryGetValue(item, out placement) == true)
+            return true;
+        if (_locations.TryGetValue(item, out _))
+        {
+            placement = InventoryPlacement.Unplaced;
+            return true;
+        }
+        placement = default;
+        return false;
+    }
+
     public InventoryIndexSnapshot CaptureSnapshot()
     {
         EnsureOperational();
@@ -194,6 +210,7 @@ public sealed class InventoryIndex : IDisposable
             _containers.Count,
             _locations.Count,
             _childCount,
+            _gridPlacements?.Count ?? 0,
             _childEntities.Length,
             checked((long)_childEntities.Length *
                 (Unsafe.SizeOf<Entity>() + (sizeof(int) * 2))),
@@ -213,6 +230,8 @@ public sealed class InventoryIndex : IDisposable
         in ComponentLookup<InventoryItem> itemLookup,
         in ComponentLookup<InventoryStackPolicy> stackLookup,
         in ComponentLookup<InventoryEquipCapability> equipLookup,
+        in ComponentLookup<InventoryGridPlacement> gridPlacementLookup,
+        in ComponentLookup<InventoryGridFootprint> gridFootprintLookup,
         IInventoryContentCatalog content)
     {
         EnsureOperational();
@@ -222,7 +241,8 @@ public sealed class InventoryIndex : IDisposable
 
         var replacement = new InventoryIndex(_limits);
         int maximumEntities = world.Options.EntityCapacity.MaximumEntities;
-        var items = new List<(Entity Entity, InventoryItem Value)>(_limits.MaximumItems);
+        var items = new List<(Entity Entity, InventoryItem Value, InventoryPlacement Placement,
+            InventoryItemDefinition Definition)>(_limits.MaximumItems);
         try
         {
             for (uint index = 0; index < unchecked((uint)maximumEntities); index++)
@@ -234,9 +254,12 @@ public sealed class InventoryIndex : IDisposable
                 bool hasItem = world.TryRead(entity, itemLookup, out InventoryItem item);
                 bool hasStackPolicy = world.TryRead(entity, stackLookup, out _);
                 bool hasEquipCapability = world.TryRead(entity, equipLookup, out _);
+                bool hasGridPlacement = world.TryRead(
+                    entity, gridPlacementLookup, out InventoryGridPlacement gridPlacement);
+                bool hasGridFootprint = world.TryRead(entity, gridFootprintLookup, out _);
                 if (hasOwner && !hasContainer)
                     throw new InvalidOperationException("An inventory owner relationship exists without a container.");
-                if ((hasStackPolicy || hasEquipCapability) && !hasItem)
+                if ((hasStackPolicy || hasEquipCapability || hasGridPlacement || hasGridFootprint) && !hasItem)
                     throw new InvalidOperationException("An inventory item policy exists without an item.");
                 if (hasContainer)
                 {
@@ -248,7 +271,7 @@ public sealed class InventoryIndex : IDisposable
                             "An inventory container does not match registered content ownership.");
                     }
                     InventoryEffectiveRules rules = ValidateContainer(container, definition, content.InventoryRules);
-                    if (!replacement.TryAddContainer(entity, rules.ItemCapacity))
+                    if (!replacement.TryAddContainer(entity, rules))
                         throw new InvalidOperationException("The inventory container index limit was exceeded.");
                     if (hasOwner && (!owner.Owner.IsValid || !world.IsAlive(owner.Owner)))
                     {
@@ -259,23 +282,35 @@ public sealed class InventoryIndex : IDisposable
                 {
                     if (items.Count >= _limits.MaximumItems)
                         throw new InvalidOperationException("The inventory item index limit was exceeded.");
-                    ValidateItem(world, entity, item, stackLookup, equipLookup, content);
-                    items.Add((entity, item));
+                    InventoryItemDefinition definition = ValidateItem(
+                        world, entity, item, stackLookup, equipLookup, gridFootprintLookup, content);
+                    if (item.EquipSlot != InventoryEquipSlot.None && hasGridPlacement)
+                        throw new InvalidOperationException("An equipped item retains Grid placement state.");
+                    InventoryPlacement placement = hasGridPlacement
+                        ? InventoryPlacement.Grid(
+                            gridPlacement.X,
+                            gridPlacement.Y,
+                            definition.Footprint.Width,
+                            definition.Footprint.Height)
+                        : InventoryPlacement.Unplaced;
+                    items.Add((entity, item, placement, definition));
                 }
             }
 
-            foreach ((Entity entity, InventoryItem item) in items)
+            foreach ((Entity entity, InventoryItem item, InventoryPlacement placement,
+                InventoryItemDefinition definition) in items)
             {
                 if (!item.Parent.IsValid || !world.IsAlive(item.Parent))
                     throw new InvalidOperationException("An inventory item references a stale parent.");
                 if (item.EquipSlot == InventoryEquipSlot.None)
                 {
-                    if (!replacement.TryAddItem(entity, item))
+                    if (!replacement.TryAddItem(entity, item, placement, definition.Footprint))
                         throw new InvalidOperationException("A contained item exceeds an inventory index limit.");
                 }
                 else
                 {
-                    if (!replacement.TryAddItem(entity, item))
+                    if (!replacement.TryAddItem(
+                            entity, item, InventoryPlacement.Unplaced, definition.Footprint))
                         throw new InvalidOperationException("Two inventory items occupy the same equipment slot.");
                 }
             }
@@ -288,16 +323,17 @@ public sealed class InventoryIndex : IDisposable
         }
     }
 
-    internal bool CanAddContainer(int capacity) =>
+    internal bool CanAddContainer(in InventoryEffectiveRules rules) =>
         _containers.Count < _limits.MaximumContainers &&
-        capacity > 0 && capacity <= _limits.MaximumItemsPerContainer;
+        rules.IsOperational && rules.ItemCapacity > 0 &&
+        rules.ItemCapacity <= _limits.MaximumItemsPerContainer;
 
-    internal bool TryAddContainer(Entity container, int capacity)
+    internal bool TryAddContainer(Entity container, in InventoryEffectiveRules rules)
     {
         EnsureOperational();
-        if (_containers.ContainsKey(container) || !CanAddContainer(capacity))
+        if (_containers.ContainsKey(container) || !CanAddContainer(rules))
             return false;
-        _containers.Add(container, new ContainerEntry(capacity));
+        _containers.Add(container, new ContainerEntry(rules));
         return true;
     }
 
@@ -314,7 +350,64 @@ public sealed class InventoryIndex : IDisposable
         _locations.Count < _limits.MaximumItems &&
         _childCount < _childEntities.Length &&
         _containers.TryGetValue(container, out ContainerEntry entry) &&
-        entry.Count < entry.Capacity;
+        entry.Rules.PlacementMode == InventoryPlacementMode.Unplaced &&
+        entry.Count < entry.Rules.ItemCapacity;
+
+    internal bool TryGetContainerRules(Entity container, out InventoryEffectiveRules rules)
+    {
+        EnsureOperational();
+        if (_containers.TryGetValue(container, out ContainerEntry entry))
+        {
+            rules = entry.Rules;
+            return true;
+        }
+        rules = default;
+        return false;
+    }
+
+    internal bool HasContainedItemCapacity(Entity container) =>
+        _containers.TryGetValue(container, out ContainerEntry entry) &&
+        entry.Count < entry.Rules.ItemCapacity &&
+        _childCount < _childEntities.Length;
+
+    internal bool CanPlaceContainedItem(
+        Entity item,
+        Entity container,
+        in InventoryPlacement placement,
+        in InventoryItemFootprint footprint,
+        bool itemAlreadyIndexed)
+    {
+        EnsureOperational();
+        if (!placement.IsValid || !footprint.IsValid ||
+            !_containers.TryGetValue(container, out ContainerEntry entry) ||
+            (!itemAlreadyIndexed && (_locations.Count >= _limits.MaximumItems ||
+                _childCount >= _childEntities.Length)) ||
+            (!itemAlreadyIndexed && entry.Count >= entry.Rules.ItemCapacity))
+        {
+            return false;
+        }
+        if (entry.Rules.PlacementMode == InventoryPlacementMode.Unplaced)
+            return placement.Mode == InventoryPlacementMode.Unplaced;
+        if (entry.Rules.PlacementMode != InventoryPlacementMode.Grid ||
+            placement.Mode != InventoryPlacementMode.Grid || placement.Rotated ||
+            placement.Width != footprint.Width || placement.Height != footprint.Height ||
+            (long)placement.X + footprint.Width > entry.Rules.GridWidth ||
+            (long)placement.Y + footprint.Height > entry.Rules.GridHeight)
+        {
+            return false;
+        }
+        foreach (Entity other in GetItems(container))
+        {
+            if (other == item)
+                continue;
+            if (_gridPlacements?.TryGetValue(other, out InventoryPlacement occupied) != true ||
+                RectanglesOverlap(placement, occupied))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     internal bool CanAddItem(Entity item, in InventoryItem value)
     {
@@ -342,6 +435,31 @@ public sealed class InventoryIndex : IDisposable
         return true;
     }
 
+    internal bool TryAddItem(
+        Entity item,
+        in InventoryItem value,
+        in InventoryPlacement placement,
+        in InventoryItemFootprint footprint)
+    {
+        EnsureOperational();
+        if (_locations.ContainsKey(item) || _locations.Count >= _limits.MaximumItems)
+            return false;
+        if (value.EquipSlot == InventoryEquipSlot.None)
+        {
+            if (!CanPlaceContainedItem(item, value.Parent, placement, footprint, itemAlreadyIndexed: false))
+                return false;
+            AddChild(item, value.Parent);
+            if (placement.Mode == InventoryPlacementMode.Grid)
+                AddGridPlacement(item, placement);
+        }
+        else
+        {
+            _equipped.Add((value.Parent, value.EquipSlot), item);
+            _locations.Add(item, new InventoryLocation(value.Parent, value.EquipSlot));
+        }
+        return true;
+    }
+
     internal bool CanRemoveItem(Entity item, in InventoryItem value)
     {
         EnsureOperational();
@@ -359,11 +477,32 @@ public sealed class InventoryIndex : IDisposable
         if (!CanRemoveItem(item, value))
             return false;
         if (value.EquipSlot == InventoryEquipSlot.None)
+        {
+            _gridPlacements?.Remove(item);
             RemoveChild(_locations[item]);
+        }
         else
             _equipped.Remove((value.Parent, value.EquipSlot));
         _locations.Remove(item);
         return true;
+    }
+
+    internal bool CanMoveItem(
+        Entity item,
+        Entity source,
+        Entity destination,
+        in InventoryPlacement placement,
+        in InventoryItemFootprint footprint)
+    {
+        EnsureOperational();
+        if (!_locations.TryGetValue(item, out InventoryLocation location) ||
+            location.Parent != source || location.EquipSlot != InventoryEquipSlot.None ||
+            !IsExactChild(location.ChildNode, item, source) ||
+            !_containers.TryGetValue(destination, out ContainerEntry destinationEntry))
+            return false;
+        return CanPlaceContainedItem(
+            item, destination, placement, footprint, itemAlreadyIndexed: true) &&
+            (source == destination || destinationEntry.Count < destinationEntry.Rules.ItemCapacity);
     }
 
     internal bool CanMoveItem(Entity item, Entity source, Entity destination)
@@ -372,9 +511,14 @@ public sealed class InventoryIndex : IDisposable
         if (!_locations.TryGetValue(item, out InventoryLocation location) ||
             location.Parent != source || location.EquipSlot != InventoryEquipSlot.None ||
             !IsExactChild(location.ChildNode, item, source) ||
-            !_containers.TryGetValue(destination, out ContainerEntry destinationEntry))
+            !_containers.TryGetValue(source, out ContainerEntry sourceEntry) ||
+            sourceEntry.Rules.PlacementMode != InventoryPlacementMode.Unplaced ||
+            !_containers.TryGetValue(destination, out ContainerEntry destinationEntry) ||
+            destinationEntry.Rules.PlacementMode != InventoryPlacementMode.Unplaced)
+        {
             return false;
-        return source == destination || destinationEntry.Count < destinationEntry.Capacity;
+        }
+        return source == destination || destinationEntry.Count < destinationEntry.Rules.ItemCapacity;
     }
 
     internal bool TryMoveItem(Entity item, Entity source, Entity destination)
@@ -387,6 +531,31 @@ public sealed class InventoryIndex : IDisposable
         RemoveChild(_locations[item]);
         _locations.Remove(item);
         AddChild(item, destination);
+        return true;
+    }
+
+    internal bool TryMoveItem(
+        Entity item,
+        Entity source,
+        Entity destination,
+        in InventoryPlacement placement,
+        in InventoryItemFootprint footprint)
+    {
+        EnsureOperational();
+        if (!CanMoveItem(item, source, destination, placement, footprint))
+            return false;
+        if (source == destination)
+        {
+            if (placement.Mode == InventoryPlacementMode.Grid)
+                SetGridPlacement(item, placement);
+            return true;
+        }
+        _gridPlacements?.Remove(item);
+        RemoveChild(_locations[item]);
+        _locations.Remove(item);
+        AddChild(item, destination);
+        if (placement.Mode == InventoryPlacementMode.Grid)
+            AddGridPlacement(item, placement);
         return true;
     }
 
@@ -406,6 +575,7 @@ public sealed class InventoryIndex : IDisposable
         if (!CanEquipItem(item, source, owner, slot))
             return false;
         RemoveChild(_locations[item]);
+        _gridPlacements?.Remove(item);
         _equipped.Add((owner, slot), item);
         _locations[item] = new InventoryLocation(owner, slot);
         return true;
@@ -415,28 +585,38 @@ public sealed class InventoryIndex : IDisposable
         Entity item,
         Entity owner,
         InventoryEquipSlot slot,
-        Entity destination)
+        Entity destination,
+        in InventoryPlacement placement,
+        in InventoryItemFootprint footprint)
     {
         EnsureOperational();
         return slot == InventoryEquipSlot.MainHand &&
             _locations.TryGetValue(item, out InventoryLocation location) &&
             location.Parent == owner && location.EquipSlot == slot &&
             _equipped.TryGetValue((owner, slot), out Entity equipped) && equipped == item &&
-            CanAddContainedItem(destination);
+            _childCount < _childEntities.Length &&
+            _containers.TryGetValue(destination, out ContainerEntry destinationEntry) &&
+            destinationEntry.Count < destinationEntry.Rules.ItemCapacity &&
+            CanPlaceContainedItem(
+                item, destination, placement, footprint, itemAlreadyIndexed: true);
     }
 
     internal bool TryUnequipItem(
         Entity item,
         Entity owner,
         InventoryEquipSlot slot,
-        Entity destination)
+        Entity destination,
+        in InventoryPlacement placement,
+        in InventoryItemFootprint footprint)
     {
         EnsureOperational();
-        if (!CanUnequipItem(item, owner, slot, destination))
+        if (!CanUnequipItem(item, owner, slot, destination, placement, footprint))
             return false;
         _equipped.Remove((owner, slot));
         _locations.Remove(item);
         AddChild(item, destination);
+        if (placement.Mode == InventoryPlacementMode.Grid)
+            AddGridPlacement(item, placement);
         return true;
     }
 
@@ -513,6 +693,7 @@ public sealed class InventoryIndex : IDisposable
         _containers = replacement._containers;
         _locations = replacement._locations;
         _equipped = replacement._equipped;
+        _gridPlacements = replacement._gridPlacements;
         _childEntities = replacement._childEntities;
         _childNext = replacement._childNext;
         _childPrevious = replacement._childPrevious;
@@ -520,6 +701,7 @@ public sealed class InventoryIndex : IDisposable
         replacement._containers = null!;
         replacement._locations = null!;
         replacement._equipped = null!;
+        replacement._gridPlacements = null;
         replacement._childEntities = null!;
         replacement._childNext = null!;
         replacement._childPrevious = null!;
@@ -536,17 +718,18 @@ public sealed class InventoryIndex : IDisposable
         if (!rules.IsOperational)
         {
             throw new InvalidOperationException(
-                "An inventory container selects placement, weight, or nesting semantics that are not operational yet.");
+                "An inventory container selects unsupported placement, weight, or nesting semantics.");
         }
         return rules;
     }
 
-    private static void ValidateItem(
+    private static InventoryItemDefinition ValidateItem(
         EcsWorld world,
         Entity entity,
         in InventoryItem item,
         in ComponentLookup<InventoryStackPolicy> stackLookup,
         in ComponentLookup<InventoryEquipCapability> equipLookup,
+        in ComponentLookup<InventoryGridFootprint> gridFootprintLookup,
         IInventoryContentCatalog content)
     {
         if (!world.TryGetPrefabProvenance(entity, out PrefabKey key) ||
@@ -560,7 +743,12 @@ public sealed class InventoryIndex : IDisposable
         InventoryEquipSlots allowed = InventoryEquipSlots.None;
         if (world.TryRead(entity, equipLookup, out InventoryEquipCapability equip))
             allowed = equip.AllowedSlots;
+        InventoryItemFootprint footprint = world.TryRead(
+            entity, gridFootprintLookup, out InventoryGridFootprint gridFootprint)
+            ? new InventoryItemFootprint(gridFootprint.Width, gridFootprint.Height)
+            : InventoryItemFootprint.OneCell;
         if (maximumQuantity != definition.MaximumQuantity || allowed != definition.AllowedEquipSlots ||
+            footprint != definition.Footprint ||
             item.Quantity <= 0 || item.Quantity > maximumQuantity ||
             item.EquipSlot is not (InventoryEquipSlot.None or InventoryEquipSlot.MainHand) ||
             (item.EquipSlot != InventoryEquipSlot.None &&
@@ -568,6 +756,7 @@ public sealed class InventoryIndex : IDisposable
         {
             throw new InvalidOperationException("An inventory item disagrees with its compiled content policy.");
         }
+        return definition;
     }
 
     private void EnsureOwner(EcsWorld world)
@@ -592,22 +781,42 @@ public sealed class InventoryIndex : IDisposable
         _containers?.Clear();
         _locations?.Clear();
         _equipped?.Clear();
+        _gridPlacements?.Clear();
         _childCount = 0;
     }
 
     private struct ContainerEntry
     {
-        internal ContainerEntry(int capacity)
+        internal ContainerEntry(in InventoryEffectiveRules rules)
         {
-            Capacity = capacity;
+            Rules = rules;
             Head = -1;
             Tail = -1;
             Count = 0;
         }
 
-        internal int Capacity;
+        internal InventoryEffectiveRules Rules;
         internal int Head;
         internal int Tail;
         internal int Count;
     }
+
+    private void AddGridPlacement(Entity item, in InventoryPlacement placement)
+    {
+        _gridPlacements ??= [];
+        _gridPlacements.Add(item, placement);
+    }
+
+    private void SetGridPlacement(Entity item, in InventoryPlacement placement)
+    {
+        if (_gridPlacements is null || !_gridPlacements.ContainsKey(item))
+            throw new InvalidOperationException("The Grid placement index is missing an existing item.");
+        _gridPlacements[item] = placement;
+    }
+
+    private static bool RectanglesOverlap(
+        in InventoryPlacement left,
+        in InventoryPlacement right) =>
+        left.X < right.X + right.Width && right.X < left.X + left.Width &&
+        left.Y < right.Y + right.Height && right.Y < left.Y + left.Height;
 }

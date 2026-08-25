@@ -110,13 +110,18 @@ public readonly record struct InventoryCapacityDimensions(
     long MaximumWeightGrams = 0,
     byte MaximumNestingDepth = 0)
 {
+    public const ushort MaximumGridEdge = 64;
+    public const int MaximumGridCells = 4_096;
+
     public bool IsValidFor(InventoryPlacementMode mode)
     {
         if (MaximumItemCount <= 0 || MaximumWeightGrams < 0)
             return false;
         bool hasGrid = GridWidth != 0 || GridHeight != 0;
         return mode == InventoryPlacementMode.Grid
-            ? GridWidth != 0 && GridHeight != 0
+            ? GridWidth != 0 && GridHeight != 0 &&
+                GridWidth <= MaximumGridEdge && GridHeight <= MaximumGridEdge &&
+                checked((int)GridWidth * GridHeight) <= MaximumGridCells
             : !hasGrid;
     }
 }
@@ -133,11 +138,11 @@ public readonly record struct InventoryRuleProfile(
         Capacity.IsValidFor(PlacementMode);
 
     /// <summary>
-    /// I0.9 operational floor. Later checkpoints may earn the other declared
-    /// dimensions once item weight, nesting, and placement are authoritative.
+    /// I0.10 operational floor. Grid placement is authoritative; weight,
+    /// nesting, Slot, and Freeform remain declared but fail closed.
     /// </summary>
     public bool IsOperational =>
-        PlacementMode == InventoryPlacementMode.Unplaced &&
+        PlacementMode is InventoryPlacementMode.Unplaced or InventoryPlacementMode.Grid &&
         Capacity.MaximumWeightGrams == 0 &&
         Capacity.MaximumNestingDepth == 0;
 }
@@ -173,8 +178,10 @@ public readonly record struct InventoryEffectiveRules(
 {
     public bool IsOperational =>
         Profile.IsValid && ItemCapacity > 0 &&
-        PlacementMode == InventoryPlacementMode.Unplaced &&
-        GridWidth == 0 && GridHeight == 0 &&
+        PlacementMode is InventoryPlacementMode.Unplaced or InventoryPlacementMode.Grid &&
+        (PlacementMode == InventoryPlacementMode.Grid
+            ? GridWidth != 0 && GridHeight != 0
+            : GridWidth == 0 && GridHeight == 0) &&
         MaximumWeightGrams == 0 && MaximumNestingDepth == 0;
 }
 

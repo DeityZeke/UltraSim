@@ -51,6 +51,28 @@ public struct InventoryItem : IComponent<InventoryItem>
     public int Quantity;
 }
 
+/// <summary>
+/// Optional persistent placement of one contained item in a Grid container.
+/// Footprint is immutable content policy and is deliberately not duplicated here.
+/// </summary>
+[EcsComponent("game.inventory.grid-placement", PersistenceId = 700706)]
+public struct InventoryGridPlacement : IComponent<InventoryGridPlacement>
+{
+    public ushort X;
+    public ushort Y;
+}
+
+/// <summary>
+/// Optional immutable content footprint. Absence canonically means one cell;
+/// presence makes larger item shapes part of prefab/persistence identity.
+/// </summary>
+[EcsComponent("game.inventory.grid-footprint", PersistenceId = 700707)]
+public struct InventoryGridFootprint : IComponent<InventoryGridFootprint>
+{
+    public ushort Width;
+    public ushort Height;
+}
+
 /// <summary>Optional content-authored stack limit for an item prefab.</summary>
 [EcsComponent("game.inventory.stack-policy", PersistenceId = 700704)]
 public struct InventoryStackPolicy : IComponent<InventoryStackPolicy>

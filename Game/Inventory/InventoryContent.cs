@@ -2,6 +2,13 @@ using UltraSim.ECS;
 
 namespace UltraSim.Game.Inventory;
 
+/// <summary>Immutable content footprint consumed only by Grid placement policy.</summary>
+public readonly record struct InventoryItemFootprint(ushort Width, ushort Height)
+{
+    public static InventoryItemFootprint OneCell => new(1, 1);
+    public bool IsValid => Width != 0 && Height != 0;
+}
+
 /// <summary>Cold content descriptor for a compiled container prefab.</summary>
 public readonly record struct InventoryContainerDefinition
 {
@@ -49,7 +56,8 @@ public readonly record struct InventoryItemDefinition
         PrefabKey key,
         string displayName,
         int maximumQuantity,
-        InventoryEquipSlots allowedEquipSlots)
+        InventoryEquipSlots allowedEquipSlots,
+        InventoryItemFootprint footprint)
     {
         if (!handle.IsValid)
             throw new ArgumentException("An inventory item definition requires a compiled prefab handle.", nameof(handle));
@@ -62,12 +70,15 @@ public readonly record struct InventoryItemDefinition
             throw new ArgumentOutOfRangeException(nameof(allowedEquipSlots));
         if (allowedEquipSlots != InventoryEquipSlots.None && maximumQuantity != 1)
             throw new ArgumentException("Equippable inventory items must be non-stackable.", nameof(maximumQuantity));
+        if (!footprint.IsValid)
+            throw new ArgumentException("An inventory item requires a valid Grid footprint.", nameof(footprint));
 
         Handle = handle;
         Key = key;
         DisplayName = displayName;
         MaximumQuantity = maximumQuantity;
         AllowedEquipSlots = allowedEquipSlots;
+        Footprint = footprint;
     }
 
     public PrefabHandle Handle { get; }
@@ -75,6 +86,7 @@ public readonly record struct InventoryItemDefinition
     public string DisplayName { get; }
     public int MaximumQuantity { get; }
     public InventoryEquipSlots AllowedEquipSlots { get; }
+    public InventoryItemFootprint Footprint { get; }
     public bool IsStackable => MaximumQuantity > 1;
 }
 
@@ -95,6 +107,11 @@ public interface IInventoryContentCatalog
     bool TryGetItem(PrefabHandle handle, out InventoryItemDefinition definition);
 
     bool TryGetItem(PrefabKey key, out InventoryItemDefinition definition);
+
+    bool TryGetGridPlacementTransitions(
+        PrefabHandle item,
+        out ArchetypeTransition addPlacement,
+        out ArchetypeTransition removePlacement);
 }
 
 /// <summary>Single cold source of item policy used for prefab data and bound metadata.</summary>
@@ -102,7 +119,8 @@ public readonly record struct InventoryItemAuthoring(
     PrefabKey Key,
     string DisplayName,
     int MaximumQuantity,
-    InventoryEquipSlots AllowedEquipSlots);
+    InventoryEquipSlots AllowedEquipSlots,
+    InventoryItemFootprint Footprint);
 
 /// <summary>Single cold source of container policy used for prefab data and bound metadata.</summary>
 public readonly record struct InventoryContainerAuthoring(
@@ -141,7 +159,8 @@ public static class InventoryContent
         PrefabKey key,
         string displayName,
         int maximumQuantity,
-        InventoryEquipSlots allowedEquipSlots = InventoryEquipSlots.None)
+        InventoryEquipSlots allowedEquipSlots = InventoryEquipSlots.None,
+        InventoryItemFootprint footprint = default)
     {
         ArgumentNullException.ThrowIfNull(content);
         if (maximumQuantity <= 0)
@@ -150,6 +169,10 @@ public static class InventoryContent
             throw new ArgumentOutOfRangeException(nameof(allowedEquipSlots));
         if (allowedEquipSlots != InventoryEquipSlots.None && maximumQuantity != 1)
             throw new ArgumentException("Equippable inventory items must be non-stackable.", nameof(maximumQuantity));
+        if (footprint == default)
+            footprint = InventoryItemFootprint.OneCell;
+        if (!footprint.IsValid)
+            throw new ArgumentException("An inventory item requires a valid Grid footprint.", nameof(footprint));
 
         var prefab = content.Define(key);
         prefab.With(new InventoryItem
@@ -162,7 +185,15 @@ public static class InventoryContent
             prefab.With(new InventoryStackPolicy { MaximumQuantity = maximumQuantity });
         if (allowedEquipSlots != InventoryEquipSlots.None)
             prefab.With(new InventoryEquipCapability { AllowedSlots = allowedEquipSlots });
+        if (footprint != InventoryItemFootprint.OneCell)
+        {
+            prefab.With(new InventoryGridFootprint
+            {
+                Width = footprint.Width,
+                Height = footprint.Height,
+            });
+        }
         prefab.DisplayName(displayName);
-        return new InventoryItemAuthoring(key, displayName, maximumQuantity, allowedEquipSlots);
+        return new InventoryItemAuthoring(key, displayName, maximumQuantity, allowedEquipSlots, footprint);
     }
 }

@@ -1992,7 +1992,7 @@ static void AssertSharedTerrainEdgeWithDifferentBases(int elevationOffset)
 static void PositionComponentIsPersistedCanonicalAuthority()
 {
     ComponentSchema schema = GameSchema.CreateSchema();
-    Equal(10, schema.ComponentCount);
+    Equal(12, schema.ComponentCount);
     ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
     True(position.IsValid);
     PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();

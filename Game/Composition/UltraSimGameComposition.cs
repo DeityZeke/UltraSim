@@ -189,6 +189,7 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         new EntityCapacity(entityCapacity),
         maximumArchetypes: 32,
         maximumPreparedPlans: 40,
+        maximumPreparedTransitions: 4,
         maximumStructuralCommands: runtimeProfile switch
         {
             GameRuntimeProfile.Local => 0,

@@ -10,6 +10,7 @@ public static class GamePrefabKeys
     public static readonly PrefabKey Character = new("game.character.default");
     public static readonly PrefabKey CharacterDormant = new("game.character.dormant");
     public static readonly PrefabKey Backpack = new("game.container.backpack");
+    public static readonly PrefabKey GridBackpack = new("game.container.grid-backpack");
     public static readonly PrefabKey WorldChest = new("game.container.world-chest");
     public static readonly PrefabKey Bread = new("game.item.bread");
     public static readonly PrefabKey IronSword = new("game.item.iron-sword");
@@ -23,6 +24,7 @@ public static class GameInventoryRuleProfileIds
 {
     public static readonly InventoryRuleProfileId Backpack = new(1);
     public static readonly InventoryRuleProfileId WorldStorage = new(2);
+    public static readonly InventoryRuleProfileId GridBackpack = new(3);
 }
 
 /// <summary>Compact structural terrain identities admitted by the first game world content profile.</summary>
@@ -74,26 +76,31 @@ public sealed class GameContent : IInventoryContentCatalog
     private readonly Dictionary<PrefabKey, InventoryItemDefinition> _itemsByKey;
     private readonly Dictionary<PrefabHandle, InventoryContainerDefinition> _containersByHandle;
     private readonly Dictionary<PrefabKey, InventoryContainerDefinition> _containersByKey;
+    private readonly Dictionary<ArchetypeHandle, GridPlacementTransitions> _gridPlacementTransitions;
 
     private GameContent(
         CompiledPrefabCatalog prefabs,
         InventoryRuleCatalog inventoryRules,
         PrefabHandle character,
         InventoryContainerDefinition backpack,
+        InventoryContainerDefinition gridBackpack,
         InventoryContainerDefinition worldChest,
         InventoryItemDefinition bread,
         InventoryItemDefinition ironSword,
         InventoryItemDefinition apple,
         PrefabHandle cabinDoor,
         PrefabHandle woodlandAnimal,
-        WorldContentBinding world)
+        WorldContentBinding world,
+        Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions)
     {
         ValidateContainerRules(inventoryRules, backpack);
+        ValidateContainerRules(inventoryRules, gridBackpack);
         ValidateContainerRules(inventoryRules, worldChest);
         Prefabs = prefabs;
         InventoryRules = inventoryRules;
         Character = character;
         Backpack = backpack.Handle;
+        GridBackpack = gridBackpack.Handle;
         WorldChest = worldChest.Handle;
         Bread = bread;
         IronSword = ironSword;
@@ -101,6 +108,7 @@ public sealed class GameContent : IInventoryContentCatalog
         CabinDoor = cabinDoor;
         WoodlandAnimal = woodlandAnimal;
         World = world;
+        _gridPlacementTransitions = gridPlacementTransitions;
         _itemsByHandle = new Dictionary<PrefabHandle, InventoryItemDefinition>(3)
         {
             [bread.Handle] = bread,
@@ -113,14 +121,16 @@ public sealed class GameContent : IInventoryContentCatalog
             [ironSword.Key] = ironSword,
             [apple.Key] = apple,
         };
-        _containersByHandle = new Dictionary<PrefabHandle, InventoryContainerDefinition>(2)
+        _containersByHandle = new Dictionary<PrefabHandle, InventoryContainerDefinition>(3)
         {
             [backpack.Handle] = backpack,
+            [gridBackpack.Handle] = gridBackpack,
             [worldChest.Handle] = worldChest,
         };
-        _containersByKey = new Dictionary<PrefabKey, InventoryContainerDefinition>(2)
+        _containersByKey = new Dictionary<PrefabKey, InventoryContainerDefinition>(3)
         {
             [backpack.Key] = backpack,
+            [gridBackpack.Key] = gridBackpack,
             [worldChest.Key] = worldChest,
         };
     }
@@ -129,6 +139,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public InventoryRuleCatalog InventoryRules { get; }
     public PrefabHandle Character { get; }
     public PrefabHandle Backpack { get; }
+    public PrefabHandle GridBackpack { get; }
     public PrefabHandle WorldChest { get; }
     public InventoryItemDefinition Bread { get; }
     public InventoryItemDefinition IronSword { get; }
@@ -168,6 +179,23 @@ public sealed class GameContent : IInventoryContentCatalog
     public bool TryGetItem(PrefabKey key, out InventoryItemDefinition definition) =>
         _itemsByKey.TryGetValue(key, out definition);
 
+    public bool TryGetGridPlacementTransitions(
+        PrefabHandle item,
+        out ArchetypeTransition addPlacement,
+        out ArchetypeTransition removePlacement)
+    {
+        if (item.IsValid && item.World == Prefabs.WorldId &&
+            _gridPlacementTransitions.TryGetValue(item.TargetArchetype, out GridPlacementTransitions route))
+        {
+            addPlacement = route.Add;
+            removePlacement = route.Remove;
+            return true;
+        }
+        addPlacement = default;
+        removePlacement = default;
+        return false;
+    }
+
     public static GameContent Compile(
         EcsWorld world,
         ContentCompilationOptions options,
@@ -185,6 +213,13 @@ public sealed class GameContent : IInventoryContentCatalog
                     GameInventoryRuleProfileIds.WorldStorage,
                     InventoryPlacementMode.Unplaced,
                     new InventoryCapacityDimensions(MaximumItemCount: 4_096)),
+                new InventoryRuleProfile(
+                    GameInventoryRuleProfileIds.GridBackpack,
+                    InventoryPlacementMode.Grid,
+                    new InventoryCapacityDimensions(
+                        MaximumItemCount: 4_096,
+                        GridWidth: 5,
+                        GridHeight: 5)),
             ]);
         var content = new ContentCatalogBuilder(world.Schema);
         PrefabBuilder character = content.Define(GamePrefabKeys.Character);
@@ -209,6 +244,13 @@ public sealed class GameContent : IInventoryContentCatalog
             8,
             GameInventoryRuleProfileIds.Backpack,
             hasOwner: true);
+        InventoryContainerAuthoring gridBackpackSource = InventoryContent.DefineContainer(
+            content,
+            GamePrefabKeys.GridBackpack,
+            "Grid Backpack",
+            20,
+            GameInventoryRuleProfileIds.GridBackpack,
+            hasOwner: true);
         PrefabBuilder worldChest = content.Define(GamePrefabKeys.WorldChest);
         worldChest.With(new InventoryContainer { Capacity = 64 });
         worldChest.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
@@ -228,7 +270,8 @@ public sealed class GameContent : IInventoryContentCatalog
             GamePrefabKeys.IronSword,
             "Iron Sword",
             maximumQuantity: 1,
-            InventoryEquipSlots.MainHand);
+            InventoryEquipSlots.MainHand,
+            new InventoryItemFootprint(1, 3));
         // Third item deliberately proves content expansion without changing
         // InventoryGenerationState or InventoryIndex.
         InventoryItemAuthoring appleSource = InventoryContent.DefineItem(
@@ -251,11 +294,17 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryItemDefinition bread = BindItem(compiled, breadSource);
         InventoryItemDefinition sword = BindItem(compiled, swordSource);
         InventoryItemDefinition apple = BindItem(compiled, appleSource);
+        Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions =
+            PrepareGridPlacementTransitions(
+                world,
+                options,
+                [bread, sword, apple]);
         return new GameContent(
             compiled,
             inventoryRules,
             compiled.GetHandle(GamePrefabKeys.Character),
             BindContainer(compiled, backpackSource),
+            BindContainer(compiled, gridBackpackSource),
             BindContainer(compiled, chestSource),
             bread,
             sword,
@@ -277,7 +326,8 @@ public sealed class GameContent : IInventoryContentCatalog
                 GameWorldStaticDefinitionIds.CabinRoof,
                 GameWorldStaticDefinitionIds.Shelf,
                 GameWorldStaticDefinitionIds.Book,
-            ]));
+            ]),
+            gridPlacementTransitions);
     }
 
     private static InventoryContainerDefinition BindContainer(
@@ -306,8 +356,40 @@ public sealed class GameContent : IInventoryContentCatalog
             source.Key,
             info.DisplayName ?? source.DisplayName,
             source.MaximumQuantity,
-            source.AllowedEquipSlots);
+            source.AllowedEquipSlots,
+            source.Footprint);
     }
+
+    private static Dictionary<ArchetypeHandle, GridPlacementTransitions> PrepareGridPlacementTransitions(
+        EcsWorld world,
+        ContentCompilationOptions options,
+        IReadOnlyList<InventoryItemDefinition> items)
+    {
+        var result = new Dictionary<ArchetypeHandle, GridPlacementTransitions>();
+        ComponentId placementId = GameSchema.GetComponentId<InventoryGridPlacement>();
+        Span<ComponentId> sourceSignature = stackalloc ComponentId[world.Schema.ComponentCount];
+        foreach (InventoryItemDefinition item in items)
+        {
+            ArchetypeHandle source = item.Handle.TargetArchetype;
+            if (result.ContainsKey(source))
+                continue;
+            int sourceCount = world.CopyArchetypeSignature(source, sourceSignature);
+            var signature = new ComponentId[sourceCount + 1];
+            sourceSignature[..sourceCount].CopyTo(signature);
+            signature[sourceCount] = placementId;
+            Array.Sort(signature);
+            ArchetypeHandle destination = world.RegisterArchetype(
+                signature, options.Layout, options.MaximumChunksPerNewArchetype);
+            result.Add(source, new GridPlacementTransitions(
+                world.PrepareTransition(source, destination),
+                world.PrepareTransition(destination, source)));
+        }
+        return result;
+    }
+
+    private readonly record struct GridPlacementTransitions(
+        ArchetypeTransition Add,
+        ArchetypeTransition Remove);
 
     private static void ValidateContainerRules(
         InventoryRuleCatalog rules,

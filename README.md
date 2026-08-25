@@ -138,9 +138,11 @@ the production Godot renderer presents and submits them. Foreign-container
 rejection, stale/duplicate intent, reconnect, and save/load generation
 resynchronization are permanent gates; Inventory contents never enter public AOI.
 I0.9 adds compiled per-container versus uniform rule selection, separate capacity
-dimensions, and viewer-neutral placement value contracts. Current gameplay stays
-on the honest unplaced/item-count floor; grid, weight, and nesting profiles fail
-closed until their authoritative item facts and mutations exist.
+dimensions, and viewer-neutral placement value contracts. I0.10 makes one 5x5
+Grid backpack real: optional persisted instance placement, content-authored item
+footprints, transactional Grid/list/equipment transitions, save/load rebuild, and
+owner-private remote Godot repositioning. Weight, nesting, Slot, Freeform,
+rotation, and automatic packing remain explicitly unsupported.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

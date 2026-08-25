@@ -20,6 +20,8 @@ public enum InventoryMutationStatus : byte
     ContainerNotEmpty = 12,
     ItemPolicyViolation = 13,
     UnauthorizedContainer = 14,
+    PlacementRequired = 15,
+    InvalidPlacement = 16,
 }
 
 /// <summary>Authoritative mutation result plus affected runtime entities for immediate projection.</summary>
@@ -39,7 +41,8 @@ public readonly record struct InventoryItemView(
     PrefabKey Prefab,
     string DisplayName,
     InventoryEquipSlot EquipSlot,
-    int Quantity);
+    int Quantity,
+    InventoryPlacement Placement);
 
 /// <summary>Generation-owned capability exposing the derived Inventory state paired with its ECS world.</summary>
 public interface IInventoryGenerationStateProvider
@@ -60,6 +63,8 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
     private readonly ComponentLookup<InventoryItem> _itemLookup;
     private readonly ComponentLookup<InventoryStackPolicy> _stackLookup;
     private readonly ComponentLookup<InventoryEquipCapability> _equipLookup;
+    private readonly ComponentLookup<InventoryGridPlacement> _gridPlacementLookup;
+    private readonly ComponentLookup<InventoryGridFootprint> _gridFootprintLookup;
     private bool _disposed;
 
     public InventoryGenerationState(
@@ -77,6 +82,8 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         _itemLookup = world.PrepareLookup<InventoryItem>();
         _stackLookup = world.PrepareLookup<InventoryStackPolicy>();
         _equipLookup = world.PrepareLookup<InventoryEquipCapability>();
+        _gridPlacementLookup = world.PrepareLookup<InventoryGridPlacement>();
+        _gridFootprintLookup = world.PrepareLookup<InventoryGridFootprint>();
         Limits = limits ?? InventoryLimits.Default;
         Limits.Validate();
         Index = new InventoryIndex(Limits);
@@ -97,6 +104,8 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             _itemLookup,
             _stackLookup,
             _equipLookup,
+            _gridPlacementLookup,
+            _gridFootprintLookup,
             _content);
     }
 
@@ -177,9 +186,58 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return true;
     }
 
+    public bool TryCreateItem(
+        EcsWorld world,
+        Entity parent,
+        in InventoryItemDefinition definition,
+        int quantity,
+        in InventoryPlacement placement,
+        out Entity entity)
+    {
+        EnsureWorld(world);
+        entity = Entity.Null;
+        if (!IsBoundDefinition(definition) || quantity <= 0 || quantity > definition.MaximumQuantity ||
+            !world.IsAlive(parent) || !world.Has(parent, _containerLookup) ||
+            !Index.CanPlaceContainedItem(
+                Entity.Null, parent, placement, definition.Footprint, itemAlreadyIndexed: false))
+        {
+            return false;
+        }
+        if (!world.TryInstantiate(definition.Handle, out entity))
+            return false;
+        ValidateInstantiatedItemOrThrow(world, entity, definition);
+        if (placement.Mode == InventoryPlacementMode.Grid &&
+            !TryTransitionPlacement(world, entity, definition, add: true))
+        {
+            DestroyRejectedCreationOrThrow(world, ref entity);
+            return false;
+        }
+        if (placement.Mode == InventoryPlacementMode.Grid &&
+            !world.TryWrite(entity, _gridPlacementLookup, ToComponent(placement)))
+            DestroyFailedCreationOrThrow(world, entity, "Grid placement initialization");
+        var value = new InventoryItem
+        {
+            Parent = parent,
+            EquipSlot = InventoryEquipSlot.None,
+            Quantity = quantity,
+        };
+        if (!world.TryWrite(entity, _itemLookup, value))
+            DestroyFailedCreationOrThrow(world, entity, "item initialization");
+        if (!Index.TryAddItem(entity, value, placement, definition.Footprint))
+            throw new InvalidOperationException("A prevalidated inventory item was rejected by the index.");
+        return true;
+    }
+
     public InventoryMutationResult Move(EcsWorld world, Entity item, Entity source, Entity destination)
     {
         EnsureWorld(world);
+        if (Index.TryGetContainerRules(source, out InventoryEffectiveRules sourceRules) &&
+            Index.TryGetContainerRules(destination, out InventoryEffectiveRules destinationRules) &&
+            (sourceRules.PlacementMode != InventoryPlacementMode.Unplaced ||
+             destinationRules.PlacementMode != InventoryPlacementMode.Unplaced))
+        {
+            return Move(world, item, source, destination, InventoryPlacement.Unplaced);
+        }
         if (!world.IsAlive(item))
             return Reject(InventoryMutationStatus.MissingItem, item, "The item is stale or missing.");
         if (!Index.ContainsContainer(source) || !Index.ContainsContainer(destination))
@@ -197,8 +255,15 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         if (source == destination)
             return Accept(item, Entity.Null, "The item is already in the destination container.");
         if (!Index.CanMoveItem(item, source, destination))
+        {
+            if (Index.TryGetContainerRules(destination, out InventoryEffectiveRules rules) &&
+                rules.PlacementMode == InventoryPlacementMode.Grid)
+            {
+                return Reject(InventoryMutationStatus.PlacementRequired, item,
+                    "The destination requires explicit Grid placement.");
+            }
             return Reject(InventoryMutationStatus.CapacityExceeded, item, "The destination container is full.");
-
+        }
         InventoryItem moved = value;
         moved.Parent = destination;
         if (!world.TryWrite(item, _itemLookup, moved))
@@ -208,7 +273,85 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return Accept(item, Entity.Null, "Move accepted.");
     }
 
+    public InventoryMutationResult Move(
+        EcsWorld world,
+        Entity item,
+        Entity source,
+        Entity destination,
+        in InventoryPlacement placement)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(item))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The item is stale or missing.");
+        if (!Index.ContainsContainer(source) || !Index.ContainsContainer(destination))
+            return Reject(InventoryMutationStatus.MissingContainer, item, "The source or destination container is missing.");
+        if (!Index.TryGetLocation(item, out InventoryLocation location))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The item is not indexed.");
+        if (location.Parent != source)
+            return Reject(InventoryMutationStatus.WrongSource, item, "The item is not in the requested source container.");
+        if (location.EquipSlot != InventoryEquipSlot.None)
+            return Reject(InventoryMutationStatus.ItemAlreadyEquipped, item, "An equipped item cannot be moved as a container item.");
+        if (!world.TryRead(item, _itemLookup, out InventoryItem value))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The item component is missing.");
+        if (value.Parent != source || value.EquipSlot != InventoryEquipSlot.None)
+            return Reject(InventoryMutationStatus.InvariantViolation, item, "ECS and inventory index topology disagree.");
+        if (!TryGetDefinition(world, item, out InventoryItemDefinition definition))
+            return Reject(InventoryMutationStatus.ItemPolicyViolation, item, "The item content is unknown.");
+        if (!Index.TryGetContainerRules(source, out InventoryEffectiveRules sourceRules) ||
+            !Index.TryGetContainerRules(destination, out InventoryEffectiveRules destinationRules))
+        {
+            return Reject(InventoryMutationStatus.MissingContainer, item, "The source or destination rules are missing.");
+        }
+        if (!placement.IsCompatibleWith(destinationRules.PlacementMode))
+            return Reject(InventoryMutationStatus.PlacementRequired, item, "The destination requires a compatible placement.");
+        if (source != destination && !Index.HasContainedItemCapacity(destination))
+            return Reject(InventoryMutationStatus.CapacityExceeded, item, "The destination container is full.");
+        if (!Index.CanMoveItem(item, source, destination, placement, definition.Footprint))
+            return Reject(InventoryMutationStatus.InvalidPlacement, item, "The destination placement is out of bounds, occupied, or full.");
+
+        bool sourceGrid = sourceRules.PlacementMode == InventoryPlacementMode.Grid;
+        bool destinationGrid = destinationRules.PlacementMode == InventoryPlacementMode.Grid;
+        if (source == destination && Index.TryGetPlacement(item, out InventoryPlacement current) &&
+            current == placement)
+        {
+            return Accept(item, Entity.Null, "The item is already at the requested placement.");
+        }
+
+        if (sourceGrid != destinationGrid &&
+            !TryTransitionPlacement(world, item, definition, add: destinationGrid))
+        {
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The destination ECS placement capacity was exhausted.");
+        }
+
+        InventoryItem moved = value;
+        moved.Parent = destination;
+        if (!world.TryWrite(item, _itemLookup, moved))
+            throw new InvalidOperationException("A validated inventory move rejected its ECS update.");
+        if (destinationGrid && !world.TryWrite(item, _gridPlacementLookup, ToComponent(placement)))
+            throw new InvalidOperationException("A validated inventory move rejected its Grid placement update.");
+        if (!Index.TryMoveItem(item, source, destination, placement, definition.Footprint))
+            throw new InvalidOperationException("A prevalidated inventory move was rejected by the index.");
+        return Accept(item, Entity.Null, source == destination ? "Reposition accepted." : "Move accepted.");
+    }
+
+    public InventoryMutationResult Reposition(
+        EcsWorld world,
+        Entity item,
+        Entity container,
+        in InventoryPlacement placement) =>
+        Move(world, item, container, container, placement);
+
     public InventoryMutationResult Split(EcsWorld world, Entity item, Entity source, Entity destination, int quantity)
+        => Split(world, item, source, destination, quantity, InventoryPlacement.Unplaced);
+
+    public InventoryMutationResult Split(
+        EcsWorld world,
+        Entity item,
+        Entity source,
+        Entity destination,
+        int quantity,
+        in InventoryPlacement placement)
     {
         EnsureWorld(world);
         if (quantity <= 0)
@@ -227,11 +370,33 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             return Reject(InventoryMutationStatus.ItemPolicyViolation, item, "The item content is not stackable.");
         if (quantity >= original.Quantity)
             return Reject(InventoryMutationStatus.InvalidQuantity, item, "Split quantity must leave a positive source stack.");
-        if (!Index.CanAddContainedItem(destination))
+        if (!Index.TryGetContainerRules(destination, out InventoryEffectiveRules destinationRules) ||
+            !placement.IsCompatibleWith(destinationRules.PlacementMode))
+        {
+            return Reject(InventoryMutationStatus.PlacementRequired, item,
+                "The split destination requires a compatible placement.");
+        }
+        if (!Index.HasContainedItemCapacity(destination))
             return Reject(InventoryMutationStatus.CapacityExceeded, item, "The destination container is full.");
+        if (!Index.CanPlaceContainedItem(
+                Entity.Null, destination, placement, definition.Footprint, itemAlreadyIndexed: false))
+        {
+            return Reject(InventoryMutationStatus.InvalidPlacement, item,
+                "The split destination placement is out of bounds, occupied, or full.");
+        }
         if (!world.TryInstantiate(definition.Handle, out Entity created))
             return Reject(InventoryMutationStatus.CapacityExceeded, item, "The inventory entity capacity was exhausted.");
         ValidateInstantiatedItemOrThrow(world, created, definition);
+        bool destinationGrid = destinationRules.PlacementMode == InventoryPlacementMode.Grid;
+        if (destinationGrid && !TryTransitionPlacement(world, created, definition, add: true))
+        {
+            DestroyRejectedCreationOrThrow(world, ref created);
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The split destination ECS placement capacity was exhausted.");
+        }
+        if (destinationGrid &&
+            !world.TryWrite(created, _gridPlacementLookup, ToComponent(placement)))
+            DestroyFailedCreationOrThrow(world, created, "split-item Grid placement");
 
         InventoryItem sourceAfter = original;
         sourceAfter.Quantity -= quantity;
@@ -242,7 +407,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             DestroyFailedCreationOrThrow(world, created, "split-item initialization");
         if (!world.TryWrite(item, _itemLookup, sourceAfter))
             throw new InvalidOperationException("A validated split source rejected its quantity update.");
-        if (!Index.TryAddItem(created, split))
+        if (!Index.TryAddItem(created, split, placement, definition.Footprint))
             throw new InvalidOperationException("A prevalidated inventory split was rejected by the index.");
         return Accept(item, created, "Split accepted.");
     }
@@ -281,8 +446,17 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         }
         if (original.Quantity != 1)
             return Reject(InventoryMutationStatus.InvalidQuantity, item, "Only a single item may be equipped.");
+        if (!TryGetDefinition(world, item, out InventoryItemDefinition definition))
+            return Reject(InventoryMutationStatus.ItemPolicyViolation, item, "The item content is unknown.");
         if (!Index.CanEquipItem(item, source, owner, slot))
             return Reject(InventoryMutationStatus.InvariantViolation, item, "The inventory index cannot prove the equipment mutation.");
+
+        if (world.Has(item, _gridPlacementLookup) &&
+            !TryTransitionPlacement(world, item, definition, add: false))
+        {
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The equipment ECS capacity was exhausted.");
+        }
 
         InventoryItem equipped = original;
         equipped.Parent = owner;
@@ -299,7 +473,16 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         Entity item,
         Entity owner,
         InventoryEquipSlot slot,
-        Entity destination)
+        Entity destination) =>
+        Unequip(world, item, owner, slot, destination, InventoryPlacement.Unplaced);
+
+    public InventoryMutationResult Unequip(
+        EcsWorld world,
+        Entity item,
+        Entity owner,
+        InventoryEquipSlot slot,
+        Entity destination,
+        in InventoryPlacement placement)
     {
         EnsureWorld(world);
         if (!world.IsAlive(item))
@@ -326,18 +509,39 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         if (original.Parent != owner || original.EquipSlot != slot)
             return Reject(InventoryMutationStatus.InvariantViolation, item,
                 "ECS and inventory index equipment topology disagree.");
-        if (!Index.CanUnequipItem(item, owner, slot, destination))
+        if (!TryGetDefinition(world, item, out InventoryItemDefinition definition) ||
+            !Index.TryGetContainerRules(destination, out InventoryEffectiveRules destinationRules))
         {
-            return Reject(InventoryMutationStatus.CapacityExceeded, item,
-                "The destination container cannot accept the equipped item.");
+            return Reject(InventoryMutationStatus.ItemPolicyViolation, item,
+                "The item or destination content policy is unknown.");
         }
+        if (!placement.IsCompatibleWith(destinationRules.PlacementMode))
+            return Reject(InventoryMutationStatus.PlacementRequired, item,
+                "The unequip destination requires a compatible placement.");
+        if (!Index.HasContainedItemCapacity(destination))
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The destination container cannot accept another item.");
+        if (!Index.CanUnequipItem(
+                item, owner, slot, destination, placement, definition.Footprint))
+        {
+            return Reject(InventoryMutationStatus.InvalidPlacement, item,
+                "The destination placement is out of bounds, occupied, or full.");
+        }
+
+        bool destinationGrid = destinationRules.PlacementMode == InventoryPlacementMode.Grid;
+        if (destinationGrid && !TryTransitionPlacement(world, item, definition, add: true))
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The destination ECS placement capacity was exhausted.");
 
         InventoryItem unequipped = original;
         unequipped.Parent = destination;
         unequipped.EquipSlot = InventoryEquipSlot.None;
         if (!world.TryWrite(item, _itemLookup, unequipped))
             throw new InvalidOperationException("A validated inventory unequip rejected its ECS update.");
-        if (!Index.TryUnequipItem(item, owner, slot, destination))
+        if (destinationGrid && !world.TryWrite(item, _gridPlacementLookup, ToComponent(placement)))
+            throw new InvalidOperationException("A validated inventory unequip rejected its Grid placement update.");
+        if (!Index.TryUnequipItem(
+                item, owner, slot, destination, placement, definition.Footprint))
             throw new InvalidOperationException("A prevalidated inventory unequip was rejected by the index.");
         return Accept(item, Entity.Null, "Unequip accepted.");
     }
@@ -403,7 +607,11 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             definition.Key,
             definition.DisplayName,
             value.EquipSlot,
-            value.Quantity);
+            value.Quantity,
+            world.TryRead(item, _gridPlacementLookup, out InventoryGridPlacement grid)
+                ? InventoryPlacement.Grid(
+                    grid.X, grid.Y, definition.Footprint.Width, definition.Footprint.Height)
+                : InventoryPlacement.Unplaced);
         return true;
     }
 
@@ -457,6 +665,24 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return world.TryRead(item, _itemLookup, out value);
     }
 
+    public bool TryCreateGridPlacement(
+        EcsWorld world,
+        Entity item,
+        int x,
+        int y,
+        out InventoryPlacement placement)
+    {
+        EnsureWorld(world);
+        if (x < 0 || y < 0 || !TryGetDefinition(world, item, out InventoryItemDefinition definition))
+        {
+            placement = default;
+            return false;
+        }
+        placement = InventoryPlacement.Grid(
+            x, y, definition.Footprint.Width, definition.Footprint.Height);
+        return placement.IsValid;
+    }
+
     private bool TryCreateContainerCore(
         EcsWorld world,
         PrefabHandle prefab,
@@ -471,7 +697,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             !_content.TryGetContainer(prefab, out InventoryContainerDefinition definition) ||
             definition.HasOwner != hasOwner ||
             !TryResolveOperationalRules(definition, capacity, out InventoryEffectiveRules rules) ||
-            !Index.CanAddContainer(rules.ItemCapacity) ||
+            !Index.CanAddContainer(rules) ||
             (hasOwner && !world.IsAlive(owner)))
         {
             return false;
@@ -484,7 +710,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             DestroyFailedCreationOrThrow(world, entity, "container initialization");
         if (hasOwner && !world.TryWrite(entity, _ownerLookup, new InventoryContainerOwner { Owner = owner }))
             DestroyFailedCreationOrThrow(world, entity, "container ownership initialization");
-        if (!Index.TryAddContainer(entity, rules.ItemCapacity))
+        if (!Index.TryAddContainer(entity, rules))
             throw new InvalidOperationException("A prevalidated inventory container was rejected by the index.");
         return true;
     }
@@ -522,15 +748,49 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         InventoryEquipSlots allowed = world.TryRead(entity, _equipLookup, out InventoryEquipCapability equip)
             ? equip.AllowedSlots
             : InventoryEquipSlots.None;
-        if (maximum != definition.MaximumQuantity || allowed != definition.AllowedEquipSlots)
+        InventoryItemFootprint footprint = world.TryRead(
+            entity, _gridFootprintLookup, out InventoryGridFootprint gridFootprint)
+            ? new InventoryItemFootprint(gridFootprint.Width, gridFootprint.Height)
+            : InventoryItemFootprint.OneCell;
+        if (maximum != definition.MaximumQuantity || allowed != definition.AllowedEquipSlots ||
+            footprint != definition.Footprint ||
+            world.Has(entity, _gridPlacementLookup))
             DestroyFailedCreationOrThrow(world, entity, "item policy validation");
     }
+
+    private bool TryTransitionPlacement(
+        EcsWorld world,
+        Entity item,
+        in InventoryItemDefinition definition,
+        bool add)
+    {
+        if (!_content.TryGetGridPlacementTransitions(
+                definition.Handle, out ArchetypeTransition addRoute, out ArchetypeTransition removeRoute))
+        {
+            return false;
+        }
+        return world.TryTransition(item, add ? addRoute : removeRoute);
+    }
+
+    private static InventoryGridPlacement ToComponent(in InventoryPlacement placement) => new()
+    {
+        X = checked((ushort)placement.X),
+        Y = checked((ushort)placement.Y),
+    };
 
     private static void DestroyFailedCreationOrThrow(EcsWorld world, Entity entity, string operation)
     {
         if (entity.IsValid && !world.TryDestroy(entity))
             throw new InvalidOperationException($"Inventory {operation} failed and its entity could not be reclaimed.");
         throw new InvalidOperationException($"Compiled inventory content rejected {operation}.");
+    }
+
+    private static void DestroyRejectedCreationOrThrow(EcsWorld world, ref Entity entity)
+    {
+        Entity rejected = entity;
+        entity = Entity.Null;
+        if (rejected.IsValid && !world.TryDestroy(rejected))
+            throw new InvalidOperationException("A rejected inventory creation could not reclaim its entity.");
     }
 
     private void EnsureWorld(EcsWorld world)

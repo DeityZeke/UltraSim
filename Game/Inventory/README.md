@@ -5,8 +5,8 @@ item location, quantity, and equipment relationships; `InventoryIndex` is a
 generation-local derived accelerator rebuilt from ECS truth after restore.
 
 Container storage semantics are independent from their viewer. A list UI does
-not imply authoritative list positions, and future grid/freeform viewers do not
-change item identity or owner-private authorization.
+not imply authoritative list positions, and Grid/freeform viewers do not change
+item identity or owner-private authorization.
 
 Mutations are transactional Game operations. `Move`, `Split`, `Equip`, and
 `Unequip` validate complete source/destination topology and capacity before
@@ -53,9 +53,10 @@ actor's inventory.
 
 `InventoryRuleCatalog` is immutable compiled Game policy. A server selects either
 content-authored per-container profiles or one explicit uniform profile. The
-current content set assigns separate stable profiles to backpacks and world
-storage; both intentionally use `Unplaced`, so existing list projection retains
-no fake authoritative list/grid coordinates.
+current content set assigns separate stable profiles to ordinary backpacks and
+world storage; both intentionally use `Unplaced`, so existing list projection
+retains no fake authoritative list/grid coordinates. `GridBackpack` selects the
+operational Grid profile described below.
 
 Effective rules currently compose:
 
@@ -68,12 +69,42 @@ server scope selection
 
 Item count, grid dimensions, weight, and nesting are distinct capacity fields.
 `InventoryPlacement` likewise defines tagged `Unplaced`, `Grid`, `Slot`, and
-`Freeform` values without viewer or Godot vocabulary. Only unplaced/item-count
-profiles are operational in I0.9. A selected grid, weight, or nesting profile
-fails closed during content binding, creation, or rebuild until authoritative
-item footprint/weight/nesting state and corresponding mutations are earned.
+`Freeform` values without viewer or Godot vocabulary. I0.9 closed on the
+unplaced/item-count floor. Weight, nesting, Slot, and Freeform profiles still fail
+closed until their authoritative facts and mutations are earned.
 
-This checkpoint deliberately does not add grid occupancy, weight propagation,
+## I0.10 authoritative Grid placement
+
+One concrete `GridBackpack` profile now operates as a 5×5 Grid with a separately
+enforced item-count capacity. Immutable item footprint is prefab policy: absence
+of `InventoryGridFootprint` canonically means 1×1, while the sword carries a
+persisted 1×3 content footprint. Stack quantity never multiplies footprint.
+
+Instance location is optional authoritative state:
+
+```text
+Unplaced/equipped item
+    InventoryItem only
+
+Grid-contained item
+    InventoryItem
+    + InventoryGridPlacement(X,Y)
+```
+
+Cold composition derives placement-bearing archetypes from each complete item
+shape and prepares generation-fenced add/remove routes before world seal. Grid
+creation, reposition, Grid↔Unplaced movement, equip/unequip, split with explicit
+placement, persistence, and rebuild all use the same transactional authority.
+Bounds, overlap, item count, and ECS structural capacity reject before publishing
+domain state; automatic packing and rotation are intentionally absent.
+
+The owner-private UI exposes the 5×5 cells through the generic UI semantic
+protocol. The server derives the selected item's footprint from compiled content;
+the client submits only a bounded cell choice. The remote Godot acceptance proves
+native selection/reposition, hostile cell rejection, save/load resynchronization,
+and exact private disclosure without routing Inventory through public AOI.
+
+This checkpoint deliberately does not add automatic packing, weight propagation,
 nested-container topology, physical shelves, viewer selection, instance upgrade
 stacks, or temporary modifiers. Those features must extend the concrete policy
 resolution and transactional Game mutations; they must not turn the catalog into

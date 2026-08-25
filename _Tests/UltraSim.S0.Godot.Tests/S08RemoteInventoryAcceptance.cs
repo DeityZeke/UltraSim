@@ -68,7 +68,7 @@ public partial class S08HeadlessAcceptance
                     new ParticipantId(88), out AdmissionResult admitted) && admitted.IsEntered,
                 "Remote Inventory authority did not retain the entered participant.");
             Entity alice = admitted.Entity;
-            (Entity backpack, Entity pouch, Entity foreignBackpack) = ResolveRemoteContainers(
+            (Entity backpack, Entity pouch, Entity gridBackpack, Entity foreignBackpack) = ResolveRemoteContainers(
                 runtime, fixture);
 
             inventory = new InventoryUiController(runtime.Game, server.Ui);
@@ -173,6 +173,40 @@ public partial class S08HeadlessAcceptance
                 !TryReadRemoteEquipped(runtime, fixture.Alice, fixture.Sword),
                 "Stale, duplicate, or foreign remote intent changed authoritative Inventory state.");
 
+            Expect(inventory.Close(opened.View), "The remote Backpack did not close before Grid placement.");
+            DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 0);
+            InventoryUiOpenResult gridView = inventory.OpenOwned(gridBackpack, alice);
+            Expect(gridView.Succeeded, "The authorized remote Grid Backpack did not open.");
+            DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 1);
+            root = GetNode<Control>($"UiView_{gridView.View.Value}");
+            Expect(client.GetRows(gridView.View, InventoryUi.GridCells).Length == 25,
+                "The remote Grid view did not project its 5x5 placement cells.");
+            UiRowId gridApple = FindRow(client.GetRows(gridView.View, InventoryUi.Items), "Apple");
+            ClickRemoteRow(root, "Element_items", gridApple);
+            DriveRemote(loopback, bridge, server, () =>
+                client.GetActionState(gridView.View, InventoryUi.PlaceAt).Enabled);
+            ClickRemoteRow(root, "Element_grid-cells", new UiRowId(18));
+            DriveRemote(loopback, bridge, server, () =>
+                ReadRowPlacement(client, gridView.View, gridApple) == "Grid (2,3) 1×1");
+            Expect(ReadRemotePlacement(runtime, fixture.GridApple) ==
+                InventoryPlacement.Grid(2, 3, 1, 1),
+                "The native remote Grid placement did not commit authoritative truth.");
+            ulong acceptedBefore = server.Ui.GetSnapshot().AcceptedActions;
+            QueueRawRemoteAction(
+                loopback.Client,
+                8_001,
+                new UiActionRequest(
+                    gridView.View,
+                    InventoryUi.Definition.Handle,
+                    InventoryUi.PlaceAt,
+                    new UiRowId(999),
+                    clientSequence: 1_000));
+            DriveRemote(loopback, bridge, server, () =>
+                server.Ui.GetSnapshot().AcceptedActions > acceptedBefore);
+            Expect(ReadRemotePlacement(runtime, fixture.GridApple) ==
+                InventoryPlacement.Grid(2, 3, 1, 1),
+                "A hostile remote Grid cell intent changed authoritative placement.");
+
             var persistence = new GameRuntimePersistence(
                 runtime.Game,
                 composition,
@@ -182,25 +216,25 @@ public partial class S08HeadlessAcceptance
                 new SaveSetContext(1, 1_700_008_008_001), static capture => capture());
             Expect(saved.Succeeded, "The remote Inventory generation could not save.");
             Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-                    (world, generationId, game) => game.Inventory.Equip(
+                    (world, generationId, game) => game.Inventory.Reposition(
                         world,
-                        ResolveRemoteInventory(world, fixture.Sword),
-                        ResolveRemoteInventory(world, fixture.Backpack),
-                        ResolveRemoteInventory(world, fixture.Alice),
-                        InventoryEquipSlot.MainHand).Accepted,
+                        ResolveRemoteInventory(world, fixture.GridApple),
+                        ResolveRemoteInventory(world, fixture.GridBackpack),
+                        InventoryPlacement.Grid(4, 4, 1, 1)).Accepted,
                     out bool diverged) && diverged,
                 "The remote Inventory save fixture could not diverge.");
 
             GameLoadResult loaded = persistence.TryLoad();
             Expect(loaded.Succeeded, "The remote Inventory generation could not reload.");
             DriveRemote(loopback, bridge, server, () =>
-                client.GetValue(opened.View, InventoryUi.Status).Text ==
+                client.GetValue(gridView.View, InventoryUi.Status).Text ==
                 "Inventory resynchronized.");
-            Expect(ReadRowState(client, opened.View, sword) == "Container" &&
-                !TryReadRemoteEquipped(runtime, fixture.Alice, fixture.Sword),
-                "Generation replacement did not atomically restore and reproject Inventory truth.");
+            Expect(ReadRowPlacement(client, gridView.View, gridApple) == "Grid (2,3) 1×1" &&
+                ReadRemotePlacement(runtime, fixture.GridApple) ==
+                    InventoryPlacement.Grid(2, 3, 1, 1),
+                "Generation replacement did not atomically restore and reproject Grid truth.");
 
-            Expect(inventory.Close(opened.View),
+            Expect(inventory.Close(gridView.View),
                 "The resynchronized remote Inventory did not close.");
             DriveRemote(loopback, bridge, server, () => client.OpenViewCount == 0);
             inventory.Dispose();
@@ -229,7 +263,7 @@ public partial class S08HeadlessAcceptance
             Expect(reconnectedServer.Admission.TryGetSession(
                     new ParticipantId(89), out AdmissionResult reentered) && reentered.IsEntered,
                 "The reconnected Inventory participant did not re-enter authority.");
-            (backpack, pouch, foreignBackpack) = ResolveRemoteContainers(runtime, fixture);
+            (backpack, pouch, gridBackpack, foreignBackpack) = ResolveRemoteContainers(runtime, fixture);
             using var reconnectedInventory = new InventoryUiController(
                 runtime.Game, reconnectedServer.Ui);
             InventoryUiOpenResult resynced = reconnectedInventory.OpenOwned(
@@ -248,7 +282,7 @@ public partial class S08HeadlessAcceptance
             RemoteUiPortSnapshot secondServerUi = reconnectedServer.Ui.GetSnapshot();
             ProtocolLoopbackSnapshot transport = loopback.GetSnapshot();
             GD.Print(
-                $"I0.8 REMOTE INVENTORY METRICS " +
+                $"I0.10 REMOTE INVENTORY METRICS " +
                 $"operations={firstClient.OperationsApplied + secondClient.OperationsApplied} " +
                 $"actions={firstClient.ActionsQueued + secondClient.ActionsQueued} " +
                 $"accepted_actions={firstServerUi.AcceptedActions + secondServerUi.AcceptedActions} " +
@@ -301,12 +335,23 @@ public partial class S08HeadlessAcceptance
                 Expect(game.Inventory.TryCreateOwnedContainer(
                     world, game.Content.Backpack, alice, 8, out Entity pouch),
                     "The remote Inventory fixture could not create Pouch.");
+                Expect(game.Inventory.TryCreateOwnedContainer(
+                    world, game.Content.GridBackpack, alice, 20, out Entity gridBackpack),
+                    "The remote Inventory fixture could not create Grid Backpack.");
                 Expect(game.Inventory.TryCreateItem(
                     world, backpack, game.Content.Bread, 5, out Entity bread),
                     "The remote Inventory fixture could not create Bread.");
                 Expect(game.Inventory.TryCreateItem(
                     world, backpack, game.Content.IronSword, 1, out Entity sword),
                     "The remote Inventory fixture could not create Iron Sword.");
+                Expect(game.Inventory.TryCreateItem(
+                    world,
+                    gridBackpack,
+                    game.Content.Apple,
+                    3,
+                    InventoryPlacement.Grid(0, 0, 1, 1),
+                    out Entity gridApple),
+                    "The remote Inventory fixture could not create Grid Apple.");
                 Expect(world.TryInstantiate(game.Content.Character, out Entity bob),
                     "The remote Inventory fixture could not create Bob.");
                 Expect(game.Inventory.TryCreateOwnedContainer(
@@ -319,8 +364,10 @@ public partial class S08HeadlessAcceptance
                 PersistentEntityId aliceId = world.GetOrAssignPersistentId(alice);
                 PersistentEntityId backpackId = world.GetOrAssignPersistentId(backpack);
                 PersistentEntityId pouchId = world.GetOrAssignPersistentId(pouch);
+                PersistentEntityId gridBackpackId = world.GetOrAssignPersistentId(gridBackpack);
                 PersistentEntityId breadId = world.GetOrAssignPersistentId(bread);
                 PersistentEntityId swordId = world.GetOrAssignPersistentId(sword);
+                PersistentEntityId gridAppleId = world.GetOrAssignPersistentId(gridApple);
                 _ = world.GetOrAssignPersistentId(bob);
                 PersistentEntityId foreignBackpackId = world.GetOrAssignPersistentId(foreignBackpack);
                 _ = world.GetOrAssignPersistentId(foreignItem);
@@ -341,8 +388,10 @@ public partial class S08HeadlessAcceptance
                     aliceId,
                     backpackId,
                     pouchId,
+                    gridBackpackId,
                     breadId,
                     swordId,
+                    gridAppleId,
                     foreignBackpackId);
             }, out RemoteInventoryFixture result),
             "The remote Inventory fixture did not populate authority.");
@@ -448,6 +497,19 @@ public partial class S08HeadlessAcceptance
         return string.Empty;
     }
 
+    private static string ReadRowPlacement(
+        UiClientRuntime client,
+        UiViewInstanceId view,
+        UiRowId row)
+    {
+        foreach (UiListRow candidate in client.GetRows(view, InventoryUi.Items))
+        {
+            if (candidate.Id == row && candidate.Values.Length >= 4)
+                return candidate.Values[3].Text ?? string.Empty;
+        }
+        return string.Empty;
+    }
+
     private static void QueueRawRemoteAction(
         NetworkProtocolPeer client,
         ulong applicationSessionEpoch,
@@ -473,15 +535,16 @@ public partial class S08HeadlessAcceptance
             "The hostile remote Inventory action did not enter Network.");
     }
 
-    private static (Entity Backpack, Entity Pouch, Entity ForeignBackpack)
+    private static (Entity Backpack, Entity Pouch, Entity GridBackpack, Entity ForeignBackpack)
         ResolveRemoteContainers(ServerRuntime runtime, RemoteInventoryFixture fixture)
     {
         Expect(runtime.Game.TryUseActiveGeneration(
             (world, generationId) => (
                 ResolveRemoteInventory(world, fixture.Backpack),
                 ResolveRemoteInventory(world, fixture.Pouch),
+                ResolveRemoteInventory(world, fixture.GridBackpack),
                 ResolveRemoteInventory(world, fixture.ForeignBackpack)),
-            out (Entity Backpack, Entity Pouch, Entity ForeignBackpack) result),
+            out (Entity Backpack, Entity Pouch, Entity GridBackpack, Entity ForeignBackpack) result),
             "The remote Inventory containers did not resolve.");
         return result;
     }
@@ -499,6 +562,22 @@ public partial class S08HeadlessAcceptance
                 return value;
             }, out InventoryItem result),
             "The authoritative remote Inventory item read did not run.");
+        return result;
+    }
+
+    private static InventoryPlacement ReadRemotePlacement(
+        ServerRuntime runtime,
+        PersistentEntityId item)
+    {
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, InventoryPlacement>(
+            (world, generationId, game) =>
+            {
+                Entity entity = ResolveRemoteInventory(world, item);
+                Expect(game.Inventory.TryProjectItem(world, entity, out InventoryItemView view),
+                    "The authoritative remote Grid item was unavailable.");
+                return view.Placement;
+            }, out InventoryPlacement result),
+            "The authoritative remote Grid placement read did not run.");
         return result;
     }
 
@@ -555,7 +634,9 @@ public partial class S08HeadlessAcceptance
         PersistentEntityId Alice,
         PersistentEntityId Backpack,
         PersistentEntityId Pouch,
+        PersistentEntityId GridBackpack,
         PersistentEntityId Bread,
         PersistentEntityId Sword,
+        PersistentEntityId GridApple,
         PersistentEntityId ForeignBackpack);
 }

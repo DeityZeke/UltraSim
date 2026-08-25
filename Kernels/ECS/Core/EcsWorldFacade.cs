@@ -231,6 +231,25 @@ public sealed partial class EcsWorld : IDisposable
         return false;
     }
 
+    /// <summary>Copies one registered archetype's canonical component signature.</summary>
+    /// <remarks>
+    /// This is cold composition work for preparing derived structural shapes.
+    /// The destination must cover the complete signature; no borrowed storage escapes.
+    /// </remarks>
+    public int CopyArchetypeSignature(
+        ArchetypeHandle archetype,
+        Span<ComponentId> destination)
+    {
+        EnsureOwnerThread();
+        ReadOnlySpan<ComponentId> signature = _core
+            .GetArchetypeStorage(ValidateArchetype(archetype, nameof(archetype)))
+            .Signature;
+        if (destination.Length < signature.Length)
+            throw new ArgumentException("The destination cannot hold the archetype signature.", nameof(destination));
+        signature.CopyTo(destination);
+        return signature.Length;
+    }
+
     /// <summary>Prepares a bounded world-owned structural route between two archetypes.</summary>
     /// <remarks>
     /// Preparation validates and binds the route before sealing. Using the returned
