@@ -25,6 +25,10 @@ acceptance narratives remain available through git history.
   capacity.
 - [Inventory plan/status](Plans/INVENTORY.md) — current accepted Inventory
   contracts plus explicitly deferred placement, capacity, nesting, and viewer work.
+- [Chat](../Game/Chat/README.md) — packet-free authoritative spatial speech,
+  command interception, exact hearing, and retained occurrence semantics.
+- [Chat plan/status](Plans/CHAT.md) — accepted C0.0 contracts and the deliberately
+  deferred remote, routed-channel, moderation, and extensibility checkpoints.
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   five concrete dynamic-public profiles, selected `ChunkPublication` semantics,
   P0.4 conservative selection, and the real public-actor consumer vertical.
@@ -121,6 +125,8 @@ consumer/deployment need earns them.
   explicitly stopped/future work; it is not a pre-selection candidate plan.
 - [Hosted Network H0](Plans/HOSTED_NETWORK.md) records the accepted H0.0-H0.5 local/
   dedicated lifecycle plus explicit deployment gates still unclaimed.
+- [Chat C0](Plans/CHAT.md) records accepted packet-free C0.0 semantics and the
+  stopped C0.1+ remote/presentation/channel work.
 
 ## Source-of-truth hierarchy
 

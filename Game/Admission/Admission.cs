@@ -136,6 +136,35 @@ public sealed class AdmissionService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Transactionally copies every currently entered participant. This is a
+    /// trusted Game-policy census; it does not expose a client-controlled
+    /// recipient list or transfer Admission ownership to the consumer.
+    /// </summary>
+    public bool TryCopyEntered(Span<AdmissionResult> destination, out int count)
+    {
+        EnsureOperational();
+        count = 0;
+        foreach (Session session in _sessions.Values)
+        {
+            ReconcileSession(session);
+            if (session.Stage == AdmissionStage.Entered)
+                count++;
+        }
+        if (destination.Length < count)
+            return false;
+
+        int written = 0;
+        foreach (Session session in _sessions.Values)
+        {
+            if (session.Stage == AdmissionStage.Entered)
+                destination[written++] = session.Snapshot();
+        }
+        InsertionSortByParticipant(destination[..written]);
+        count = written;
+        return true;
+    }
+
     public AdmissionResult JoinAccountless(ParticipantId participant)
     {
         EnsureOperational();
@@ -795,6 +824,22 @@ public sealed class AdmissionService : IDisposable
         {
             try { observer(failure); }
             catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
+    }
+
+    private static void InsertionSortByParticipant(Span<AdmissionResult> sessions)
+    {
+        for (int index = 1; index < sessions.Length; index++)
+        {
+            AdmissionResult value = sessions[index];
+            int destination = index;
+            while (destination > 0 &&
+                sessions[destination - 1].Participant.CompareTo(value.Participant) > 0)
+            {
+                sessions[destination] = sessions[destination - 1];
+                destination--;
+            }
+            sessions[destination] = value;
         }
     }
 

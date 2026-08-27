@@ -1,0 +1,170 @@
+using UltraSim.ECS;
+using UltraSim.Game.Admission;
+
+namespace UltraSim.Game.Chat;
+
+/// <summary>Current Game-owned spatial speech modes.</summary>
+public enum GameSpeechMode : byte
+{
+    Whisper = 1,
+    Say = 2,
+    Yell = 3,
+}
+
+/// <summary>Exact current-game X/Z hearing radii in authoritative millimeters.</summary>
+public readonly record struct GameSpeechDistanceProfile(
+    int WhisperMillimeters,
+    int SayMillimeters,
+    int YellMillimeters)
+{
+    public static GameSpeechDistanceProfile Default => new(2_000, 15_000, 30_000);
+
+    public bool IsValid => WhisperMillimeters > 0 &&
+        WhisperMillimeters < SayMillimeters && SayMillimeters < YellMillimeters;
+
+    public int GetRadius(GameSpeechMode mode) => mode switch
+    {
+        GameSpeechMode.Whisper => WhisperMillimeters,
+        GameSpeechMode.Say => SayMillimeters,
+        GameSpeechMode.Yell => YellMillimeters,
+        _ => 0,
+    };
+}
+
+/// <summary>Bounded storage and work limits for one packet-free Chat oracle.</summary>
+public readonly record struct GameChatLimits(
+    int MaximumParticipants,
+    int MaximumCandidateChunks,
+    int MaximumCandidateEntities,
+    int MaximumRecipientsPerSpeech,
+    int MaximumRetainedSpeechFacts,
+    int MaximumTextUtf8Bytes,
+    int MaximumCommands)
+{
+    public static GameChatLimits Default => new(
+        MaximumParticipants: 256,
+        MaximumCandidateChunks: 25,
+        MaximumCandidateEntities: 4_096,
+        MaximumRecipientsPerSpeech: 256,
+        MaximumRetainedSpeechFacts: 64,
+        MaximumTextUtf8Bytes: 256,
+        MaximumCommands: 8);
+
+    public void Validate(GameSpeechDistanceProfile profile)
+    {
+        if (!profile.IsValid)
+            throw new ArgumentException("The speech-distance profile is invalid.", nameof(profile));
+        if (MaximumParticipants <= 0 || MaximumCandidateChunks <= 0 ||
+            MaximumCandidateEntities <= 0 || MaximumRecipientsPerSpeech <= 0 ||
+            MaximumRetainedSpeechFacts <= 0 || MaximumTextUtf8Bytes <= 0 ||
+            MaximumCommands < 2 || MaximumRecipientsPerSpeech > MaximumParticipants ||
+            MaximumCandidateEntities < MaximumParticipants)
+        {
+            throw new ArgumentOutOfRangeException(nameof(GameChatLimits));
+        }
+
+        long edge = World.GameWorldSpatialProfile.WorldChunkEdgeUnits;
+        long maximumAxisChunks = checked((long)profile.YellMillimeters * 2 / edge + 2);
+        if (checked(maximumAxisChunks * maximumAxisChunks) > MaximumCandidateChunks)
+        {
+            throw new ArgumentOutOfRangeException(nameof(MaximumCandidateChunks),
+                "Candidate-chunk capacity cannot cover the configured Yell radius.");
+        }
+        _ = checked(MaximumRetainedSpeechFacts * MaximumRecipientsPerSpeech);
+    }
+}
+
+/// <summary>Monotonic identity of one independently meaningful accepted speech occurrence.</summary>
+public readonly struct GameSpeechFactId : IEquatable<GameSpeechFactId>, IComparable<GameSpeechFactId>
+{
+    public GameSpeechFactId(ulong value)
+    {
+        if (value == 0)
+            throw new ArgumentOutOfRangeException(nameof(value));
+        Value = value;
+    }
+
+    public ulong Value { get; }
+    public bool IsValid => Value != 0;
+    public int CompareTo(GameSpeechFactId other) => Value.CompareTo(other.Value);
+    public bool Equals(GameSpeechFactId other) => Value == other.Value;
+    public override bool Equals(object? obj) => obj is GameSpeechFactId other && Equals(other);
+    public override int GetHashCode() => Value.GetHashCode();
+    public override string ToString() => IsValid ? $"Speech({Value})" : "Speech(Invalid)";
+    public static bool operator ==(GameSpeechFactId left, GameSpeechFactId right) => left.Equals(right);
+    public static bool operator !=(GameSpeechFactId left, GameSpeechFactId right) => !left.Equals(right);
+}
+
+/// <summary>One accepted server-created spatial speech occurrence.</summary>
+public readonly record struct GameSpeechFact(
+    GameSpeechFactId Id,
+    ulong GenerationId,
+    ulong SimulationTick,
+    ParticipantId Speaker,
+    Entity SpeakerEntity,
+    GameSpeechMode Mode,
+    string Text)
+{
+    public bool IsValid => Id.IsValid && GenerationId != 0 && Speaker.IsValid &&
+        SpeakerEntity.IsValid && Mode is >= GameSpeechMode.Whisper and <= GameSpeechMode.Yell &&
+        !string.IsNullOrWhiteSpace(Text);
+}
+
+/// <summary>Expected semantic outcome of one trusted packet-free text submission.</summary>
+public enum GameChatSubmissionStatus : byte
+{
+    SpeechAccepted = 0,
+    CommandSucceeded = 1,
+    EmptyText = 2,
+    MalformedUnicode = 3,
+    TextTooLong = 4,
+    InvalidSpeechMode = 5,
+    InvalidParticipant = 6,
+    ParticipantNotEntered = 7,
+    RuntimeUnavailable = 8,
+    GenerationMismatch = 9,
+    MissingSpeaker = 10,
+    MissingSpeakerPosition = 11,
+    SpatialIndexUnavailable = 12,
+    RecipientRegistryIncomplete = 13,
+    CandidateChunkCapacityExceeded = 14,
+    CandidateEntityCapacityExceeded = 15,
+    RecipientCapacityExceeded = 16,
+    SpeechRetentionCapacityExceeded = 17,
+    SpeechSequenceExhausted = 18,
+    UnknownCommand = 19,
+    InvalidCommandSyntax = 20,
+    Faulted = 21,
+}
+
+/// <summary>Speech fact or private command response produced by one submission.</summary>
+public readonly record struct GameChatSubmissionResult(
+    GameChatSubmissionStatus Status,
+    GameSpeechFact Speech,
+    int RecipientCount,
+    string? PrivateReply)
+{
+    public bool AcceptedSpeech => Status == GameChatSubmissionStatus.SpeechAccepted;
+    public bool CommandSucceeded => Status == GameChatSubmissionStatus.CommandSucceeded;
+    public bool IsCommandResult => Status is GameChatSubmissionStatus.CommandSucceeded or
+        GameChatSubmissionStatus.UnknownCommand or GameChatSubmissionStatus.InvalidCommandSyntax;
+}
+
+/// <summary>Bounded diagnostics for packet-free Chat semantics and work.</summary>
+public readonly record struct GameChatSnapshot(
+    int EnteredParticipants,
+    bool RecipientRegistryComplete,
+    int PendingSpeechFacts,
+    int PendingRecipientDeliveries,
+    int PendingSpeechHighWater,
+    long Submissions,
+    long AcceptedSpeech,
+    long SuccessfulCommands,
+    long RejectedSubmissions,
+    long CandidateChunksExamined,
+    long CandidateEntitiesCopied,
+    long ExactDistanceTests,
+    long RecipientDeliveries,
+    long ParticipantCensuses,
+    long ParticipantCapacityFailures,
+    long KnownArrayReservedBytes);

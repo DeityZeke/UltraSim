@@ -173,6 +173,13 @@ per-instance item-count and Grid dimensions bounded by compiled profile maxima,
 rejects invalidating shrink transactionally, and reprojects upgrades through the
 remote UI. Weight, nesting, Slot, Freeform, rotation, automatic packing, and
 capacity-effect policy remain explicitly unsupported.
+
+Chat C0.0 adds a third concrete Game semantic without changing Network: trusted
+entered actors can produce bounded packet-free Whisper/Say/Yell occurrences using
+current authoritative world position and exact X/Z hearing. Commands are
+intercepted before speech; `/help` and `/where` return private results. Remote
+protocol, client state, and Godot presentation remain deliberately deferred to
+C0.1.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

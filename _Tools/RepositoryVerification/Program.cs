@@ -33,6 +33,7 @@ string[] testProjects =
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
     "_Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj",
     "_Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj",
+    "_Tests/UltraSim.Game.Chat.Tests/UltraSim.Game.Chat.Tests.csproj",
     "_Tests/UltraSim.Game.Inventory.Tests/UltraSim.Game.Inventory.Tests.csproj",
     "_Tests/UltraSim.S0.Integration.Tests/UltraSim.S0.Integration.Tests.csproj",
 ];
@@ -152,6 +153,15 @@ static void VerifyArchitecture(string root)
             "Kernels/UI/UltraSim.UI.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
+        ["Game/Chat/UltraSim.Game.Chat.csproj"] =
+        [
+            "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/ECS/UltraSim.ECS.csproj",
+            "Kernels/Spatial/UltraSim.Spatial.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+        ],
         ["Game/UI/UltraSim.Game.UI.csproj"] =
         [
             "Game/Inventory/UltraSim.Game.Inventory.csproj",
@@ -261,6 +271,7 @@ static void VerifyDocumentation(string root)
         "Docs/UI.md",
         "Docs/GAME.md",
         "Docs/Plans/NETWORK.md",
+        "Docs/Plans/CHAT.md",
         "Docs/Plans/TERRAIN.md",
         "Kernels/ECS/README.md",
         "Kernels/ECS/EXECUTION.md",
@@ -275,6 +286,7 @@ static void VerifyDocumentation(string root)
         "Client/_Godot/README.md",
         "Client/Playable.Godot/README.md",
         "Game/World/README.md",
+        "Game/Chat/README.md",
         "Game/Replication/README.md",
         "_Benchmarks/README.md",
         "_Benchmarks/Baselines/README.md",
@@ -297,10 +309,10 @@ static void VerifyDocumentation(string root)
         ["Docs/README.md"] =
         [
             "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
-            "Docs/Plans/NETWORK.md", "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
+            "Docs/Plans/CHAT.md", "Docs/Plans/NETWORK.md", "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
             "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
-            "Game/Replication/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
+            "Game/Chat/README.md", "Game/Replication/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =
         [
