@@ -1,7 +1,9 @@
 # Chat
 
-Chat is authoritative Game semantics. C0.0 deliberately stops before Game
-protocol messages, Client Core state, Network delivery, or Godot presentation.
+Chat is authoritative Game semantics. C0.0 owns packet-free interpretation and
+hearing; C0.1 carries those accepted semantics through the authenticated Game
+protocol, bounded client state, and Godot presentation without moving Chat into
+the Network kernel.
 
 The packet-free `GameChatService` accepts only a trusted entered
 `ParticipantId`, bounded text, and one of `Whisper`, `Say`, or `Yell`. Admission
@@ -46,6 +48,29 @@ speech. C0.0 implements only:
 There is intentionally no generalized permission/RBAC, scripting, moderation,
 channel, direct-message, history, or event-bus framework.
 
+## Remote consumer
+
+C0.1 adds three bounded Game messages: sequenced `chat-submit` on reliable Event,
+recipient-relative `chat-occurrence` on reliable Event, and explicit
+`chat-applied` proof on Control. Submission contains only application-session
+epoch, sequence, speech mode, and at most 256 canonical UTF-8 bytes. The server
+derives participant, actor, display label, position, range, audience, and optional
+`WorldPublicEntityId` presentation anchor.
+
+`RemoteChatDeliveryService` transactionally moves a complete C0.0 audience into
+a fixed delivery ledger only after every recipient has a live registered session
+and quota. Each recipient has independent ordered debt and application proof;
+packet acknowledgement never retires it. A bounded concrete Admission-source
+census allows hosted sessions with separate Admission owners to participate
+without a global identity registry.
+
+`ClientChatState` is an engine-neutral bounded append-only feed. It fences
+application/generation lineage, applies duplicates idempotently, rejects gaps and
+malformed facts, and may evict the oldest already-applied presentation row. The
+playable Godot client supplies an always-available feed, mode selector, text
+entry/focus isolation, private command/error rows, and a presentation-only
+four-second overhead label when the public actor anchor is resident.
+
 ## Checkpoint boundary
 
 C0.0 and its C0.0a review hardening are accepted with packet-free tests for authority, exact hearing, current
@@ -55,7 +80,9 @@ census, rejection/session reconciliation, fail-closed default results, and zero
 warmed allocation on ordinary speech discovery.
 
 C0.1 remote protocol, application proof, `ClientChatState`, and Godot feed/bubbles
-remain stopped pending review. Its composition must size `MaximumParticipants`
+are accepted. Composition must size `MaximumParticipants`
 against the server's admitted-session capacity; the C0.0 default of 256 is an
 oracle default, not a production CCU ceiling. `MaximumRecipientsPerSpeech` remains
-an independent complete-audience bound. See [the Chat plan](../../Docs/Plans/CHAT.md).
+an independent complete-audience bound. C0.2 routed channels and later moderation,
+history, social, and privileged-command policy remain stopped. See
+[the Chat plan](../../Docs/Plans/CHAT.md).

@@ -1,10 +1,10 @@
 # UltraSim Chat + Commands
 
-**Status:** C0.0 + C0.0a accepted; C0.1+ stopped forward context
+**Status:** C0.0 + C0.0a + C0.1 accepted; C0.2+ stopped forward context
 
 **Prepared after:** Inventory I0.11 (`305e40f4`)
 
-**Accepted checkpoint:** C0.0 — packet-free authoritative speech + command oracle
+**Accepted checkpoint:** C0.1 — authenticated remote speech + command consumer vertical
 
 This document preserves the intended Chat/Commands semantics before implementation pressure causes speech, channels, commands, Network delivery, and presentation to be collapsed into one subsystem.
 
@@ -34,7 +34,10 @@ They may share input parsing and presentation surfaces where useful, but they do
 
 # 1. Archaeology and lessons
 
-The active V3 implementation now contains only the packet-free C0.0 Chat oracle.
+The active V3 implementation contains the packet-free C0.0 Chat oracle and the
+C0.1 authenticated remote/Game/client/Godot consumer vertical. Routed channels,
+moderation, history, social policy, and privileged-command extensibility remain
+forward context only.
 Relevant historical references for the deliberately deferred work are:
 
 - `_Archive/References/runuo-2.7`
@@ -687,9 +690,13 @@ Report:
 
 ---
 
-## C0.1 — authenticated remote speech + command vertical
+## C0.1 — authenticated remote speech + command vertical — ACCEPTED
 
-Begin only after C0.0 review.
+C0.1 reuses C0.0 unchanged as the authority and adds a narrow three-message Game
+protocol family. Reliable transport preserves message occurrence; only explicit
+client semantic application retires recipient debt. Hosted applications attach
+their concrete Admission owners to one bounded Chat census for their session
+lifetime, so connection/session identity still never becomes participant authority.
 
 Goal:
 
@@ -770,6 +777,13 @@ speech goes only to exact authoritative audience
 ```
 
 No public-CCU/performance tournament yet.
+
+Accepted evidence covers canonical hostile codecs, trusted authenticated-session
+binding, exact two-recipient speech, private `/where` and unknown-command feedback,
+duplicate submission fencing, independent recipient proof, complete-audience
+capacity failure, bounded rate rejection before a second speech, authority-
+generation fencing, deterministic loss/duplication/reordering convergence, bounded
+client feed semantics, and the playable Godot feed/public-anchor smoke path.
 
 ---
 

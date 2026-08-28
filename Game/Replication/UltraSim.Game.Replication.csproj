@@ -16,6 +16,7 @@
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
     <ProjectReference Include="../Accounting/UltraSim.Game.Accounting.csproj" />
     <ProjectReference Include="../Admission/UltraSim.Game.Admission.csproj" />
+    <ProjectReference Include="../Chat/UltraSim.Game.Chat.csproj" />
     <ProjectReference Include="../Composition/UltraSim.Game.Composition.csproj" />
     <ProjectReference Include="../Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../Protocol/UltraSim.Game.Protocol.csproj" />

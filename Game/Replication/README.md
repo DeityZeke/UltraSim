@@ -46,6 +46,22 @@ boundary; it does not freeze capture for already admitted participants.
 and Network delivery. It depends on the concrete game composition and Runtime;
 `Kernels/Network` remains independent of ECS, Game, Server, UI, and Client.
 
+## Remote Chat occurrence delivery
+
+Chat C0.1 consumes the packet-free `GameChatService` through a bounded
+`RemoteChatDeliveryService`. One accepted C0.0 speech audience is preflighted and
+handed off completely into independent recipient debts; it is never partially
+consumed. Reliable Event transport preserves the occurrence, while the Control
+proof advances only the exact recipient delivery after `ClientChatState` applies
+it. Lost proof retries the same delivery and speech-fact identities. Private
+command/error output uses the same recipient-relative occurrence contract without
+becoming public speech.
+
+The adapter derives participant authority from the authenticated application
+session and attaches each concrete Admission owner to Chat's bounded census for
+that session lifetime. Network receives only message descriptor, lane, and bytes;
+it learns no participant, command, hearing, audience, or presentation semantics.
+
 ## Public replication profiles
 
 `GamePublicReplicationProfiles` names the five concrete profiles and the

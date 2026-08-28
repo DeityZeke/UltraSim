@@ -57,6 +57,14 @@ while earlier realization is notionally pending, reversal, reset, and bounded
 desired membership. This is a portability seam, not a renderer interface or mod
 API.
 
+`ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
+are ordered, append-only occurrences rather than latest state: session/server
+generation and recipient sequence fence application, exact duplicates are
+idempotent, gaps and malformed facts reject, and only a successful apply may be
+proved upstream. Its fixed ring may evict an old already-applied presentation row
+without changing server application knowledge. It owns no speech routing,
+authoritative history, public-actor residency, or overhead-bubble lifetime.
+
 T0.10 adds the first engine-neutral playable input seam. A concrete engine
 captures raw axes, action-map state, and focus into `ClientWorldInputSample`.
 `ClientWorldInputSequencer` then owns finite-value validation, focus suppression,

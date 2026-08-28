@@ -131,12 +131,17 @@ static void VerifyArchitecture(string root)
         ["Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",
+            "Client/Network/UltraSim.Client.Network.csproj",
             "Client/_Godot/UltraSim.Client.Godot.csproj",
             "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Chat/UltraSim.Game.Chat.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Inventory/UltraSim.Game.Inventory.csproj",
             "Game/Persistence/UltraSim.Game.Persistence.csproj",
+            "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Game/Replication/UltraSim.Game.Replication.csproj",
             "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
@@ -199,6 +204,7 @@ static void VerifyArchitecture(string root)
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
             "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Chat/UltraSim.Game.Chat.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",

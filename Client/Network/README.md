@@ -134,6 +134,18 @@ non-coalescible application facts use the retained Event path instead.
 semantics and application proof. A state baseline or public-world resync cannot
 silently erase independently retained facts.
 
+## Chat occurrences
+
+`RemoteChatClient` is the C0.1 authenticated consumer for reliable,
+non-coalescible spatial speech and private command/error rows. It submits only
+session epoch, monotonic sequence, speech mode, and bounded text. Incoming
+occurrences commit to `ClientChatState` before an explicit Control-lane proof is
+queued; duplicates re-prove the same delivery without appending twice, while a
+rejected semantic occurrence never advances server knowledge.
+
+The optional `WorldPublicEntityId` is presentation-only. A missing resident actor
+suppresses an overhead bubble but never suppresses the feed occurrence.
+
 ## Current stop
 
 Client/Network is consumption-ready. New adapters should be added only for a concrete

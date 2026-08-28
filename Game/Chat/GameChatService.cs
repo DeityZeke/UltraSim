@@ -19,12 +19,12 @@ namespace UltraSim.Game.Chat;
 public sealed class GameChatService : IDisposable
 {
     private readonly ServerGameFacet _runtime;
-    private readonly AdmissionService _admission;
     private readonly GameChatLimits _limits;
     private readonly GameSpeechDistanceProfile _speechProfile;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly GameChatCommandRegistry _commands;
     private readonly AdmissionResult[] _admissionScratch;
+    private readonly AdmissionBinding[] _admissions;
     private readonly Dictionary<ParticipantId, AdmissionResult> _entered;
     private readonly Dictionary<Entity, ParticipantId> _participantsByEntity;
     private readonly SpatialChunkKey[] _chunkScratch;
@@ -65,7 +65,7 @@ public sealed class GameChatService : IDisposable
         GameSpeechDistanceProfile speechProfile = default)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
-        _admission = admission ?? throw new ArgumentNullException(nameof(admission));
+        ArgumentNullException.ThrowIfNull(admission);
         if (limits == default)
             limits = GameChatLimits.Default;
         if (speechProfile == default)
@@ -75,6 +75,7 @@ public sealed class GameChatService : IDisposable
         _speechProfile = speechProfile;
         _commands = new GameChatCommandRegistry(limits.MaximumCommands);
         _admissionScratch = new AdmissionResult[limits.MaximumParticipants];
+        _admissions = new AdmissionBinding[limits.MaximumParticipants];
         _entered = new Dictionary<ParticipantId, AdmissionResult>(limits.MaximumParticipants);
         _participantsByEntity = new Dictionary<Entity, ParticipantId>(limits.MaximumParticipants);
         _entered.EnsureCapacity(limits.MaximumParticipants);
@@ -87,8 +88,7 @@ public sealed class GameChatService : IDisposable
         _speechRecipients = new ParticipantId[checked(
             limits.MaximumRetainedSpeechFacts * limits.MaximumRecipientsPerSpeech)];
         _submitOperation = SubmitInsideGeneration;
-        _admission.Entered += HandleAdmissionEntered;
-        _admission.Rejected += HandleAdmissionRejected;
+        AddAdmission(admission, primary: true);
         _runtime.GenerationPublished += HandleGenerationPublished;
         _ = RefreshEnteredParticipantsCore();
     }
@@ -98,6 +98,44 @@ public sealed class GameChatService : IDisposable
     public char PlayerCommandPrefix => GameChatCommandRegistry.PlayerPrefix;
     public int CommandCount => _commands.Count;
     public int PendingSpeechCount { get { EnsureOperational(); return _speechCount; } }
+
+    /// <summary>
+    /// Adds one concrete authoritative Admission owner to the bounded Chat
+    /// census. Hosted application sessions use one lease each; disposal removes
+    /// the source once no lease remains.
+    /// </summary>
+    public GameChatAdmissionRegistration AttachAdmission(AdmissionService admission)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(admission);
+        int slot = FindAdmission(admission);
+        if (slot < 0)
+        {
+            Exception? priorFault = _fault;
+            slot = AddAdmission(admission, primary: false);
+            if (!RefreshEnteredParticipantsCore())
+            {
+                RemoveAdmission(slot);
+                _fault = priorFault;
+                if (!RefreshEnteredParticipantsCore())
+                    throw new InvalidOperationException(
+                        "Chat could not restore its prior Admission census after rejected attachment.");
+                throw new InvalidOperationException("The Admission source exceeds Chat participant capacity.");
+            }
+        }
+        _admissions[slot].Leases = checked(_admissions[slot].Leases + 1);
+        return new GameChatAdmissionRegistration(this, admission);
+    }
+
+    /// <summary>Reads one current trusted entered binding without exposing mutable registry state.</summary>
+    public bool TryGetEnteredParticipant(ParticipantId participant, out AdmissionResult session)
+    {
+        EnsureOperational();
+        if (_entered.TryGetValue(participant, out session) && session.IsEntered)
+            return true;
+        session = default;
+        return false;
+    }
 
     /// <summary>
     /// Refreshes the trusted entered-participant registry from Admission. This is
@@ -179,6 +217,21 @@ public sealed class GameChatService : IDisposable
         return true;
     }
 
+    /// <summary>Peeks the oldest retained occurrence for transactional remote handoff.</summary>
+    public bool TryPeekNextSpeech(out GameSpeechFact fact, out int recipientCount)
+    {
+        EnsureOperational();
+        if (_speechCount == 0)
+        {
+            fact = default;
+            recipientCount = 0;
+            return false;
+        }
+        fact = _speechFacts[_speechHead];
+        recipientCount = _speechRecipientCounts[_speechHead];
+        return fact.IsValid && recipientCount > 0;
+    }
+
     /// <summary>
     /// Consumes the oldest retained packet-free occurrence after atomically
     /// copying its complete recipient set.
@@ -218,6 +271,7 @@ public sealed class GameChatService : IDisposable
         EnsureOperational();
         long reserved = 0;
         reserved = checked(reserved + (long)_admissionScratch.Length * Unsafe.SizeOf<AdmissionResult>());
+        reserved = checked(reserved + (long)_admissions.Length * Unsafe.SizeOf<AdmissionBinding>());
         reserved = checked(reserved + (long)_chunkScratch.Length * Unsafe.SizeOf<SpatialChunkKey>());
         reserved = checked(reserved + (long)_candidateScratch.Length * Unsafe.SizeOf<Entity>());
         reserved = checked(reserved + (long)_recipientScratch.Length * Unsafe.SizeOf<ParticipantId>());
@@ -249,8 +303,13 @@ public sealed class GameChatService : IDisposable
         if (_disposed)
             return;
         _disposed = true;
-        _admission.Entered -= HandleAdmissionEntered;
-        _admission.Rejected -= HandleAdmissionRejected;
+        for (int index = 0; index < _admissions.Length; index++)
+        {
+            AdmissionService? admission = _admissions[index].Service;
+            if (admission is null) continue;
+            admission.Entered -= HandleAdmissionEntered;
+            admission.Rejected -= HandleAdmissionRejected;
+        }
         _runtime.GenerationPublished -= HandleGenerationPublished;
         _entered.Clear();
         _participantsByEntity.Clear();
@@ -488,31 +547,37 @@ public sealed class GameChatService : IDisposable
     private bool RefreshEnteredParticipantsCore()
     {
         _participantCensuses++;
-        if (!_admission.TryCopyEntered(_admissionScratch, out int count))
-        {
-            _recipientRegistryComplete = false;
-            _participantCapacityFailures++;
-            return false;
-        }
-
         _entered.Clear();
         _participantsByEntity.Clear();
-        for (int index = 0; index < count; index++)
+        int total = 0;
+        for (int source = 0; source < _admissions.Length; source++)
+        {
+            AdmissionService? admission = _admissions[source].Service;
+            if (admission is null) continue;
+            if (!admission.TryCopyEntered(_admissionScratch.AsSpan(total), out int count) ||
+                count > _admissionScratch.Length - total)
+            {
+                _recipientRegistryComplete = false;
+                _participantCapacityFailures++;
+                return false;
+            }
+            total += count;
+        }
+        for (int index = 0; index < total; index++)
         {
             AdmissionResult session = _admissionScratch[index];
             if (!session.IsEntered || !session.Participant.IsValid || !session.Entity.IsValid ||
-                _entered.ContainsKey(session.Participant) ||
-                _participantsByEntity.ContainsKey(session.Entity))
+                _entered.ContainsKey(session.Participant) || _participantsByEntity.ContainsKey(session.Entity))
             {
                 _fault ??= new InvalidOperationException(
-                    "Admission published contradictory entered-participant bindings.");
+                    "Admission sources published contradictory entered-participant bindings.");
                 _recipientRegistryComplete = false;
                 return false;
             }
             _entered.Add(session.Participant, session);
             _participantsByEntity.Add(session.Entity, session.Participant);
         }
-        _admissionScratch.AsSpan(0, count).Clear();
+        _admissionScratch.AsSpan(0, total).Clear();
         _recipientRegistryComplete = true;
         return true;
     }
@@ -550,7 +615,11 @@ public sealed class GameChatService : IDisposable
     {
         if (_disposed)
             return;
-        try { _ = UpdateParticipant(result); }
+        try
+        {
+            _ = result;
+            _ = RefreshEnteredParticipantsCore();
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _fault ??= exception; }
     }
 
@@ -560,18 +629,11 @@ public sealed class GameChatService : IDisposable
             return;
         try
         {
-            // Rejected reports an operation outcome. It is not necessarily a
-            // transition of an existing session: duplicate join attempts are
-            // rejected while the original entered session remains authoritative.
-            if (_admission.TryGetSession(result.Participant, out AdmissionResult current) &&
-                current.IsEntered)
-            {
-                if (!UpdateParticipant(current))
-                    _recipientRegistryComplete = false;
-                return;
-            }
-            if (_entered.Remove(result.Participant, out AdmissionResult prior))
-                _participantsByEntity.Remove(prior.Entity);
+            // Rejected is an operation outcome, not a lifecycle transition.
+            // Reconcile the complete bounded authoritative census because the
+            // affected participant may belong to any attached Admission owner.
+            _ = result;
+            _ = RefreshEnteredParticipantsCore();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -583,8 +645,24 @@ public sealed class GameChatService : IDisposable
     {
         if (_disposed)
             return;
-        try { _ = RefreshEnteredParticipantsCore(); }
+        try
+        {
+            // A retained occurrence contains generation-local ECS/public lineage.
+            // It must never cross an authority-generation replacement.
+            ClearRetainedSpeech();
+            _ = RefreshEnteredParticipantsCore();
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _fault ??= exception; }
+    }
+
+    private void ClearRetainedSpeech()
+    {
+        _speechFacts.AsSpan().Clear();
+        _speechRecipientCounts.AsSpan().Clear();
+        _speechRecipients.AsSpan().Clear();
+        _speechHead = 0;
+        _speechCount = 0;
+        _pendingRecipientDeliveries = 0;
     }
 
     private bool TryFindSpeechSlot(GameSpeechFactId fact, out int slot)
@@ -605,6 +683,61 @@ public sealed class GameChatService : IDisposable
         }
         slot = -1;
         return false;
+    }
+
+    internal void ReleaseAdmission(AdmissionService admission)
+    {
+        EnsureOwnerThread();
+        if (_disposed) return;
+        int slot = FindAdmission(admission);
+        if (slot < 0 || _admissions[slot].Leases == 0)
+            return;
+        _admissions[slot].Leases--;
+        if (_admissions[slot].Leases == 0 && !_admissions[slot].Primary)
+        {
+            RemoveAdmission(slot);
+            _ = RefreshEnteredParticipantsCore();
+        }
+    }
+
+    private int AddAdmission(AdmissionService admission, bool primary)
+    {
+        int existing = FindAdmission(admission);
+        if (existing >= 0) return existing;
+        for (int index = 0; index < _admissions.Length; index++)
+        {
+            if (_admissions[index].Service is not null) continue;
+            _admissions[index] = new AdmissionBinding(admission, primary, 0);
+            admission.Entered += HandleAdmissionEntered;
+            admission.Rejected += HandleAdmissionRejected;
+            return index;
+        }
+        throw new InvalidOperationException("The bounded Chat Admission-source table is full.");
+    }
+
+    private int FindAdmission(AdmissionService admission)
+    {
+        for (int index = 0; index < _admissions.Length; index++)
+            if (ReferenceEquals(_admissions[index].Service, admission)) return index;
+        return -1;
+    }
+
+    private void RemoveAdmission(int slot)
+    {
+        AdmissionService? admission = _admissions[slot].Service;
+        if (admission is null) return;
+        admission.Entered -= HandleAdmissionEntered;
+        admission.Rejected -= HandleAdmissionRejected;
+        _admissions[slot] = default;
+    }
+
+    private struct AdmissionBinding
+    {
+        internal AdmissionBinding(AdmissionService service, bool primary, int leases) =>
+            (Service, Primary, Leases) = (service, primary, leases);
+        internal AdmissionService? Service;
+        internal bool Primary;
+        internal int Leases;
     }
 
     private Span<ParticipantId> RecipientBlock(int slot, int count) =>

@@ -1,16 +1,21 @@
 using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
+using UltraSim.Client.Network;
 using UltraSim.ECS;
 using UltraSim.Game.Admission;
+using UltraSim.Game.Chat;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.Persistence;
+using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
+using UltraSim.Network;
 
 namespace UltraSim.Client.Playable.Godot;
 
@@ -51,9 +56,15 @@ public partial class PlayableWorldClient : Node3D
     private readonly ClientPresentationChange[] _presentationChanges = new ClientPresentationChange[18];
     private readonly WorldPublicRecord[] _publicRows = new WorldPublicRecord[MaximumPublicRows];
     private readonly ClientSemanticHash[] _semanticHashesBeforeRefresh = new ClientSemanticHash[25];
+    private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
+    private readonly ClientSemanticChunkInfo[] _chatChunkInfo = new ClientSemanticChunkInfo[25];
     private Camera3D? _camera;
     private Label? _status;
     private Label? _details;
+    private RichTextLabel? _chatFeed;
+    private LineEdit? _chatInput;
+    private OptionButton? _chatMode;
+    private Label? _overheadSpeech;
     private WorldPosition _player;
     private ClientControlWorldPoint _pointerPoint;
     private bool _pointerPointValid;
@@ -71,6 +82,15 @@ public partial class PlayableWorldClient : Node3D
     private string _lastOutcome = "Ready";
     private ulong _saveSequence;
     private bool _initialized;
+    private GameChatService? _chatAuthority;
+    private RemoteChatDeliveryService? _chatDelivery;
+    private RemoteChatServerSession? _chatServer;
+    private RemoteChatClient? _chatClient;
+    private ClientChatState? _chatState;
+    private ProtocolLoopback? _chatLoopback;
+    private ulong _chatAppliedPresentationCount;
+    private WorldPublicEntityId _overheadAnchor;
+    private ulong _overheadExpiresAtMilliseconds;
 
     public override void _Ready()
     {
@@ -109,8 +129,10 @@ public partial class PlayableWorldClient : Node3D
         try
         {
             UpdatePointerWorldPoint();
+            PumpChat();
             ClientWorldInputSample physical = GodotWorldInput.Capture(
-                GodotWorldInputMap.Default, GetWindow().HasFocus());
+                GodotWorldInputMap.Default,
+                GetWindow().HasFocus() && (_chatInput is null || !_chatInput.HasFocus()));
             ClientHorizontalCameraBasis basis = CameraBasis();
             ClientControlProfileDecision decision = EvaluateProfile(physical, basis);
             if (decision.SelectionRequested)
@@ -130,6 +152,7 @@ public partial class PlayableWorldClient : Node3D
                 facingRequiresAcceptedLocomotion);
             _runtime.Tick();
             SynchronizeProjection();
+            UpdateChatPresentation();
             UpdateCamera();
             UpdateHud();
         }
@@ -150,6 +173,26 @@ public partial class PlayableWorldClient : Node3D
 
     public override void _Input(InputEvent inputEvent)
     {
+        if (inputEvent is InputEventKey chatKey && chatKey.Pressed && !chatKey.Echo &&
+            chatKey.Keycode is global::Godot.Key.Enter or global::Godot.Key.KpEnter)
+        {
+            if (_chatInput is not null && !_chatInput.HasFocus())
+            {
+                _chatInput.GrabFocus();
+                GetViewport().SetInputAsHandled();
+            }
+            return;
+        }
+        if (_chatInput?.HasFocus() == true)
+        {
+            if (inputEvent is InputEventKey escape && escape.Pressed && !escape.Echo &&
+                escape.Keycode == global::Godot.Key.Escape)
+            {
+                _chatInput.ReleaseFocus();
+                GetViewport().SetInputAsHandled();
+            }
+            return;
+        }
         switch (inputEvent)
         {
             case InputEventMouseButton mouse:
@@ -189,6 +232,10 @@ public partial class PlayableWorldClient : Node3D
 
     public override void _ExitTree()
     {
+        _chatServer?.Dispose();
+        _chatDelivery?.Dispose();
+        _chatAuthority?.Dispose();
+        _chatLoopback?.Dispose();
         _renderer?.Dispose();
         _admission?.Dispose();
         _runtime?.Dispose();
@@ -219,6 +266,8 @@ public partial class PlayableWorldClient : Node3D
                 out _entities))
             throw new InvalidOperationException("The woods/cabin world could not populate.");
         _runtime.Tick();
+
+        StartChat(entered.Participant);
 
         string saveRoot = ProjectSettings.GlobalizePath("user://t0-10-saves");
         _persistence = new GameRuntimePersistence(
@@ -716,6 +765,8 @@ public partial class PlayableWorldClient : Node3D
             _camera.Position.DistanceTo(orbitCamera) < 0.001f))
             throw new InvalidOperationException("Control profile switches did not realize distinct camera modes.");
 
+        ProbePlayableChat();
+
         ProbeMovementFacing(
             ControlProfile.OrbitCommand,
             GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MinimumAxisMagnitude, 0),
@@ -818,6 +869,31 @@ public partial class PlayableWorldClient : Node3D
                 throw new InvalidOperationException(
                     $"{profile} did not face its accepted movement direction.");
         }
+    }
+
+    private void ProbePlayableChat()
+    {
+        if (_chatState is null || _chatFeed is null || _overheadSpeech is null)
+            throw new InvalidOperationException("Playable Chat presentation was not composed.");
+        ulong before = _chatState.GetSnapshot().Applied;
+        SubmitChat("playable speech");
+        for (int step = 0; step < 2_048 && _chatState.GetSnapshot().Applied == before; step++)
+            PumpChat();
+        if (_chatState.GetSnapshot().Applied != before + 1)
+            throw new InvalidOperationException("Playable spatial speech did not apply.");
+        UpdateChatPresentation();
+        if (!_chatFeed.Text.Contains("playable speech", StringComparison.Ordinal) ||
+            !_overheadAnchor.IsValid || !TryFindPublicAnchor(_overheadAnchor, out _))
+            throw new InvalidOperationException("Playable speech did not reach feed and public-anchor presentation.");
+
+        before = _chatState.GetSnapshot().Applied;
+        SubmitChat("/where");
+        for (int step = 0; step < 2_048 && _chatState.GetSnapshot().Applied == before; step++)
+            PumpChat();
+        UpdateChatPresentation();
+        if (_chatState.GetSnapshot().Applied != before + 1 ||
+            !_chatFeed.Text.Contains("Where:", StringComparison.Ordinal))
+            throw new InvalidOperationException("Playable private /where result did not reach Chat.");
     }
 
     private WorldYaw ReadPlayerOrientation()
@@ -985,12 +1061,205 @@ public partial class PlayableWorldClient : Node3D
                 "1/F1 Orbit • 2/F2 third-person • 3/F3 fixed iso move/look • F5 save • F9 load",
         });
 
+        var chatPanel = new PanelContainer
+        {
+            OffsetLeft = 16,
+            OffsetTop = 650,
+            OffsetRight = 590,
+            OffsetBottom = 890,
+        };
+        layer.AddChild(chatPanel);
+        var chatStack = new VBoxContainer();
+        chatPanel.AddChild(chatStack);
+        chatStack.AddChild(new Label { Text = "Chat", ThemeTypeVariation = "HeaderSmall" });
+        _chatFeed = new RichTextLabel
+        {
+            BbcodeEnabled = false,
+            CustomMinimumSize = new Vector2(540, 145),
+            ScrollFollowing = true,
+        };
+        chatStack.AddChild(_chatFeed);
+        var chatEntry = new HBoxContainer();
+        chatStack.AddChild(chatEntry);
+        _chatMode = new OptionButton { CustomMinimumSize = new Vector2(100, 0) };
+        _chatMode.AddItem("Whisper", (int)ClientChatSpeechMode.Whisper);
+        _chatMode.AddItem("Say", (int)ClientChatSpeechMode.Say);
+        _chatMode.AddItem("Yell", (int)ClientChatSpeechMode.Yell);
+        _chatMode.Select(1);
+        chatEntry.AddChild(_chatMode);
+        _chatInput = new LineEdit
+        {
+            PlaceholderText = "Enter chat or /help /where",
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MaxLength = UltraSimGameProtocol.MaximumChatTextUtf8Bytes,
+        };
+        _chatInput.TextSubmitted += SubmitChat;
+        chatEntry.AddChild(_chatInput);
+        _overheadSpeech = new Label
+        {
+            Visible = false,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        layer.AddChild(_overheadSpeech);
+
         void AddProfileButton(string text, ControlProfile profile)
         {
             var button = new Button { Text = text };
             button.Pressed += () => SetProfile(profile);
             profiles.AddChild(button);
         }
+    }
+
+    private void StartChat(ParticipantId participant)
+    {
+        if (_runtime is null || _admission is null)
+            throw new InvalidOperationException("Chat requires active Game authority and Admission.");
+        GameChatLimits chatLimits = GameChatLimits.Default with
+        {
+            MaximumParticipants = 8,
+            MaximumRecipientsPerSpeech = 8,
+        };
+        _chatAuthority = new GameChatService(_runtime.Game, _admission, chatLimits);
+        if (!ProtocolLoopback.TryCreate(
+                NetworkProtocolLimits.Default,
+                new DeterministicDatagramLimits(2_048, 1_472),
+                default,
+                out ProtocolLoopback? loopback,
+                out _,
+                UltraSimGameProtocol.Manifest))
+            throw new InvalidOperationException("The playable Chat protocol path could not establish.");
+        _chatLoopback = loopback;
+        _chatDelivery = new RemoteChatDeliveryService(
+            _runtime.Game,
+            _chatAuthority,
+            RemoteChatServerLimits.Default with
+            {
+                MaximumSessions = 8,
+                MaximumPendingDeliveries = 64,
+                MaximumPendingDeliveriesPerSession = 16,
+            });
+        const ulong applicationSessionEpoch = 0xC0_1001;
+        _chatServer = _chatDelivery.Register(
+            loopback!.Server, participant, applicationSessionEpoch);
+        _chatState = new ClientChatState(
+            applicationSessionEpoch,
+            new ClientChatLimits(64, 256, 128));
+        _chatClient = new RemoteChatClient(
+            loopback.Client, applicationSessionEpoch, _chatState);
+    }
+
+    private void SubmitChat(string text)
+    {
+        if (_chatInput is null || _chatClient is null)
+            return;
+        ClientChatSpeechMode mode = _chatMode is null
+            ? ClientChatSpeechMode.Say
+            : (ClientChatSpeechMode)_chatMode.GetSelectedId();
+        if (_chatClient.TrySubmit(text, mode))
+        {
+            _chatInput.Clear();
+            _chatInput.ReleaseFocus();
+            _lastOutcome = "Chat submitted";
+        }
+        else
+        {
+            _lastOutcome = "Chat input rejected or transport busy";
+        }
+    }
+
+    private void PumpChat()
+    {
+        if (_chatLoopback is null || _chatServer is null || _chatClient is null)
+            return;
+        _ = _chatServer.TryProgress();
+        _ = _chatClient.TryProgress();
+        _chatLoopback.Pump();
+        Drain(_chatLoopback.Server, _chatServer);
+        Drain(_chatLoopback.Client, _chatClient);
+
+        static void Drain(NetworkProtocolPeer peer, IRemoteGameProtocolHandler handler)
+        {
+            while (peer.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+            {
+                _ = handler.TryProcess(in message, payload);
+                _ = peer.TryConsumeReceived();
+            }
+        }
+    }
+
+    private void UpdateChatPresentation()
+    {
+        if (_chatState is null || _chatFeed is null)
+            return;
+        ClientChatStateSnapshot snapshot = _chatState.GetSnapshot();
+        if (snapshot.Applied != _chatAppliedPresentationCount)
+        {
+            int count = _chatState.CopyRecent(_chatRows);
+            int first = Math.Max(0, count - 8);
+            var lines = new string[count - first];
+            for (int index = first; index < count; index++)
+            {
+                ClientChatOccurrence row = _chatRows[index];
+                string prefix = row.Kind == ClientChatOccurrenceKind.SpatialSpeech
+                    ? $"[{row.SpeechMode}] {row.DisplayLabel}: "
+                    : $"[{row.DisplayLabel}] ";
+                lines[index - first] = prefix + row.Text;
+            }
+            _chatFeed.Text = string.Join('\n', lines);
+            if (count != 0)
+            {
+                ClientChatOccurrence newest = _chatRows[count - 1];
+                if (newest.IsSpatial && newest.PublicAnchor.IsValid)
+                {
+                    _overheadAnchor = newest.PublicAnchor;
+                    _overheadExpiresAtMilliseconds = checked(Time.GetTicksMsec() + 4_000);
+                    if (_overheadSpeech is not null) _overheadSpeech.Text = newest.Text;
+                }
+            }
+            _chatAppliedPresentationCount = snapshot.Applied;
+        }
+
+        if (_overheadSpeech is null || _camera is null || _cache is null ||
+            !_overheadAnchor.IsValid || Time.GetTicksMsec() >= _overheadExpiresAtMilliseconds ||
+            !TryFindPublicAnchor(_overheadAnchor, out WorldPosition position))
+        {
+            if (_overheadSpeech is not null) _overheadSpeech.Visible = false;
+            return;
+        }
+        Vector3 world = new(
+            (position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
+            (position.YMillimeters - _player.YMillimeters) * 0.001f + 2.4f,
+            (position.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f);
+        if (_camera.IsPositionBehind(world))
+        {
+            _overheadSpeech.Visible = false;
+            return;
+        }
+        Vector2 screen = _camera.UnprojectPosition(world);
+        _overheadSpeech.Position = screen - new Vector2(_overheadSpeech.Size.X * 0.5f, 24);
+        _overheadSpeech.Visible = true;
+    }
+
+    private bool TryFindPublicAnchor(WorldPublicEntityId id, out WorldPosition position)
+    {
+        if (_cache is not null && _cache.TryCopyResidentInfo(
+                _chatChunkInfo, out int count, out _))
+        {
+            for (int chunk = 0; chunk < count; chunk++)
+            {
+                if (!_cache.TryGetResidentView(_chatChunkInfo[chunk].Handle, out ClientSemanticChunkView view))
+                    continue;
+                foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+                {
+                    if (record.Id != id) continue;
+                    position = record.Position;
+                    return true;
+                }
+            }
+        }
+        position = default;
+        return false;
     }
 
     private void UpdateHud()

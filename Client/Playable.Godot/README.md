@@ -29,6 +29,14 @@ keys. Middle-mouse drag and wheel zoom affect Orbit/ThirdPerson but are locked i
 IndependentMoveLook. E uses the selected cabin door/chest, F5 saves, and F9
 restores.
 
+The C0.1 Chat panel is always available at the lower left. Enter focuses the
+bounded text field; choosing Whisper/Say/Yell and submitting uses the canonical
+Game protocol and `ClientChatState`. While the field has focus, gameplay movement
+input is suppressed. `/help` and `/where` appear as private system rows. Spatial
+speech also shows a short presentation-only overhead label when its public actor
+anchor is currently resident; otherwise the feed remains authoritative for what
+the client applied.
+
 The player starts just south of a recognizable 8 m x 6 m openable cabin. The
 thin wall segments, trees, shelf, closed door, and chest use authoritative
 world bounds: ordinary Direct movement stops against them, opening the door

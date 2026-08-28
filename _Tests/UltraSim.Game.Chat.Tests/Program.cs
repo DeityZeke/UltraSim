@@ -1,10 +1,15 @@
 using System.Reflection;
+using UltraSim.Client.Core;
+using UltraSim.Client.Network;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Chat;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
 using UltraSim.Game.World;
+using UltraSim.Network;
 using UltraSim.Server.Runtime;
 
 var tests = new (string Name, Action Body)[]
@@ -25,7 +30,16 @@ var tests = new (string Name, Action Body)[]
     ("RejectedAdmissionOperationCannotEvictEnteredParticipant", RejectedAdmissionOperationCannotEvictEnteredParticipant),
     ("ActualAdmissionRejectionRemovesEnteredParticipant", ActualAdmissionRejectionRemovesEnteredParticipant),
     ("ExistingAdmissionsAreCensusedAndWorldMismatchRejects", ExistingAdmissionsAreCensusedAndWorldMismatchRejects),
+    ("MultipleAdmissionOwnersFormOneBoundedCensus", MultipleAdmissionOwnersFormOneBoundedCensus),
     ("WarmedSpeechDiscoveryAllocatesZero", WarmedSpeechDiscoveryAllocatesZero),
+    ("RemoteChatCodecAndClientStateFailClosed", RemoteChatCodecAndClientStateFailClosed),
+    ("RemoteSpeechAndPrivateCommandsConverge", RemoteSpeechAndPrivateCommandsConverge),
+    ("RemoteRecipientProofsAdvanceIndependently", RemoteRecipientProofsAdvanceIndependently),
+    ("RemoteDuplicateSubmissionCannotRepeatAuthority", RemoteDuplicateSubmissionCannotRepeatAuthority),
+    ("LostApplicationProofRetriesSameOccurrence", LostApplicationProofRetriesSameOccurrence),
+    ("RemoteAudienceHandoffCapacityIsAtomic", RemoteAudienceHandoffCapacityIsAtomic),
+    ("RemoteRateLimitRejectsBeforeSecondSpeech", RemoteRateLimitRejectsBeforeSecondSpeech),
+    ("RemoteSpeechConvergesUnderLossDuplicateAndReorder", RemoteSpeechConvergesUnderLossDuplicateAndReorder),
 };
 
 foreach ((string name, Action body) in tests)
@@ -33,7 +47,212 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Chat C0.0 tests passed.");
+Console.WriteLine($"All {tests.Length} Chat C0.0-C0.1 tests passed.");
+
+static void RemoteChatCodecAndClientStateFailClosed()
+{
+    byte[] bytes = new byte[UltraSimGameProtocol.MaximumChatMessageBytes];
+    Assert.True(UltraSimGameProtocol.TryWriteChatSubmission(
+        bytes, 7, 1, (byte)GameSpeechMode.Say, "hello", out int written));
+    Assert.True(UltraSimGameProtocol.TryReadChatSubmission(
+        bytes.AsSpan(0, written), out RemoteChatSubmitHeader submission, out string text));
+    Assert.Equal(7UL, submission.ApplicationSessionEpoch);
+    Assert.Equal("hello", text);
+    bytes[written++] = 0;
+    Assert.False(UltraSimGameProtocol.TryReadChatSubmission(
+        bytes.AsSpan(0, written), out _, out _));
+
+    var invalidAnchor = new RemoteChatOccurrenceHeader
+    {
+        ApplicationSessionEpoch = 7,
+        ServerGenerationId = 10,
+        DeliveryId = 1,
+        RecipientSequence = 1,
+        SpeechFactId = 1,
+        PublicEntityIndex = 9,
+        PublicEntityGeneration = 0,
+        Kind = RemoteChatOccurrenceKind.SpatialSpeech,
+        SpeechMode = (byte)GameSpeechMode.Say,
+    };
+    Assert.False(UltraSimGameProtocol.TryWriteChatOccurrence(
+        bytes, in invalidAnchor, "Player 1", "invalid anchor", out _));
+
+    var state = new ClientChatState(7, new ClientChatLimits(1, 256, 128));
+    var first = new ClientChatOccurrence(
+        10, 1, 1, 1, 20,
+        ClientChatOccurrenceKind.SpatialSpeech, ClientChatSpeechMode.Say,
+        default, "Player 1", "first");
+    Assert.Equal(ClientChatApplyStatus.Applied, state.TryApply(in first));
+    Assert.Equal(ClientChatApplyStatus.Duplicate, state.TryApply(in first));
+    var gap = first with { DeliveryId = 2, RecipientSequence = 3, Text = "gap" };
+    Assert.Equal(ClientChatApplyStatus.Rejected, state.TryApply(in gap));
+    var newer = first with
+    {
+        ServerGenerationId = 11,
+        DeliveryId = 3,
+        RecipientSequence = 1,
+        SpeechFactId = 2,
+        Text = "new generation",
+    };
+    Assert.Equal(ClientChatApplyStatus.Applied, state.TryApply(in newer));
+    Assert.Equal(1, state.GetSnapshot().RetainedOccurrences);
+    Assert.Equal(ClientChatApplyStatus.Rejected, state.TryApply(in first));
+}
+
+static void MultipleAdmissionOwnersFormOneBoundedCensus()
+{
+    using var fixture = new ChatFixture(
+        GameChatLimits.Default with
+        {
+            MaximumParticipants = 4,
+            MaximumRecipientsPerSpeech = 4,
+            MaximumCandidateEntities = 16,
+        },
+        entityCapacity: 16);
+    ParticipantId first = fixture.Enter(1, At(0, 0));
+    using AdmissionService secondAdmission = fixture.CreateAdmission();
+    AdmissionResult second = secondAdmission.JoinAccountless(new ParticipantId(2));
+    Assert.True(second.IsEntered);
+    TestRuntime.SetPosition(fixture.Runtime, second.Entity, At(1_000, 0));
+    fixture.Runtime.Tick();
+    using GameChatAdmissionRegistration registration = fixture.Chat.AttachAdmission(secondAdmission);
+    Assert.Equal(2, fixture.Chat.GetSnapshot().EnteredParticipants);
+    GameChatSubmissionResult speech = fixture.Chat.Submit(first, "two admissions");
+    Assert.True(speech.AcceptedSpeech);
+    Assert.Equal(2, speech.RecipientCount);
+}
+
+static void RemoteSpeechAndPrivateCommandsConverge()
+{
+    using var fixture = new RemoteChatFixture();
+    Assert.True(fixture.FirstClient.TrySubmit("hello nearby", ClientChatSpeechMode.Say));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 2);
+    ClientChatOccurrence[] first = fixture.CopyFirst();
+    ClientChatOccurrence[] second = fixture.CopySecond();
+    Assert.Equal(1, first.Length);
+    Assert.Equal(1, second.Length);
+    Assert.Equal("hello nearby", first[0].Text);
+    Assert.Equal(ClientChatOccurrenceKind.SpatialSpeech, first[0].Kind);
+    Assert.True(first[0].PublicAnchor.IsValid);
+    Assert.Equal(first[0].SpeechFactId, second[0].SpeechFactId);
+
+    Assert.True(fixture.FirstClient.TrySubmit("/where", ClientChatSpeechMode.Say));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 3);
+    first = fixture.CopyFirst();
+    second = fixture.CopySecond();
+    Assert.Equal(2, first.Length);
+    Assert.Equal(1, second.Length);
+    Assert.Equal(ClientChatOccurrenceKind.PrivateSystem, first[1].Kind);
+    Assert.True(first[1].Text.StartsWith("Where:", StringComparison.Ordinal));
+
+    Assert.True(fixture.FirstClient.TrySubmit("/not-a-command", ClientChatSpeechMode.Say));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 4);
+    first = fixture.CopyFirst();
+    Assert.Equal(ClientChatOccurrenceKind.PrivateError, first[2].Kind);
+    Assert.Equal(1, fixture.Authority.Chat.GetSnapshot().AcceptedSpeech);
+}
+
+static void RemoteRecipientProofsAdvanceIndependently()
+{
+    using var fixture = new RemoteChatFixture();
+    Assert.True(fixture.FirstClient.TrySubmit("independent", ClientChatSpeechMode.Yell));
+    fixture.DriveFirstUntil(() => fixture.FirstState.GetSnapshot().RetainedOccurrences == 1 &&
+        fixture.Service.GetSnapshot().PendingDeliveries == 1);
+    Assert.Equal(0, fixture.SecondState.GetSnapshot().RetainedOccurrences);
+    Assert.Equal(1UL, fixture.Service.GetSnapshot().DeliveriesApplied);
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 2);
+    Assert.Equal(1, fixture.SecondState.GetSnapshot().RetainedOccurrences);
+}
+
+static void RemoteDuplicateSubmissionCannotRepeatAuthority()
+{
+    using var fixture = new RemoteChatFixture();
+    Assert.True(fixture.FirstClient.TrySubmit("once", ClientChatSpeechMode.Say));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 2);
+    byte[] payload = new byte[UltraSimGameProtocol.MaximumChatMessageBytes];
+    Assert.True(UltraSimGameProtocol.TryWriteChatSubmission(
+        payload, fixture.FirstEpoch, 1, (byte)GameSpeechMode.Say, "once", out int written));
+    Assert.Equal(NetworkQueueStatus.Accepted, fixture.FirstLoop.Client.TryQueue(
+        RemoteChatSubmitHeaderCodec.Descriptor.Id, payload.AsSpan(0, written)));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DuplicateSubmissions == 1);
+    Assert.Equal(1, fixture.Authority.Chat.GetSnapshot().AcceptedSpeech);
+    Assert.Equal(2UL, fixture.Service.GetSnapshot().DeliveriesApplied);
+}
+
+static void LostApplicationProofRetriesSameOccurrence()
+{
+    using var fixture = new RemoteChatFixture();
+    Assert.True(fixture.FirstClient.TrySubmit("retry same fact", ClientChatSpeechMode.Say));
+    fixture.ReceiveFirstSubmissionOnly();
+    Assert.Equal(2, fixture.Service.GetSnapshot().PendingDeliveries);
+
+    fixture.DeliverFirstWithoutReturningProof();
+    Assert.Equal(1, fixture.FirstState.GetSnapshot().RetainedOccurrences);
+    Assert.Equal(0UL, fixture.Service.GetSnapshot().DeliveriesApplied);
+    ClientChatOccurrence original = fixture.CopyFirst()[0];
+
+    fixture.AdvanceTime(1_001);
+    fixture.QueueFirstRetry();
+    Assert.Equal(1UL, fixture.Service.GetSnapshot().DeliveryRetries);
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 2);
+
+    ClientChatOccurrence[] rows = fixture.CopyFirst();
+    Assert.Equal(1, rows.Length);
+    Assert.Equal(original.DeliveryId, rows[0].DeliveryId);
+    Assert.Equal(original.SpeechFactId, rows[0].SpeechFactId);
+    Assert.True(fixture.FirstState.GetSnapshot().Duplicates >= 1);
+}
+
+static void RemoteAudienceHandoffCapacityIsAtomic()
+{
+    RemoteChatServerLimits limits = RemoteChatServerLimits.Default with
+    {
+        MaximumSessions = 2,
+        MaximumPendingDeliveries = 1,
+        MaximumPendingDeliveriesPerSession = 1,
+    };
+    using var fixture = new RemoteChatFixture(limits);
+    Assert.True(fixture.FirstClient.TrySubmit("all or none", ClientChatSpeechMode.Say));
+    fixture.DriveSteps(64);
+    Assert.Equal(1, fixture.Authority.Chat.PendingSpeechCount);
+    Assert.Equal(0, fixture.Service.GetSnapshot().PendingDeliveries);
+    Assert.Equal(0, fixture.FirstState.GetSnapshot().RetainedOccurrences);
+    Assert.Equal(0, fixture.SecondState.GetSnapshot().RetainedOccurrences);
+}
+
+static void RemoteRateLimitRejectsBeforeSecondSpeech()
+{
+    RemoteChatServerLimits limits = RemoteChatServerLimits.Default with
+    {
+        MaximumSessions = 2,
+        MaximumPendingDeliveries = 8,
+        MaximumPendingDeliveriesPerSession = 4,
+        MaximumSubmissionsPerRateWindow = 1,
+        RateWindowMilliseconds = 10_000,
+    };
+    using var fixture = new RemoteChatFixture(limits);
+    Assert.True(fixture.FirstClient.TrySubmit("first", ClientChatSpeechMode.Say));
+    Assert.True(fixture.FirstClient.TrySubmit("second", ClientChatSpeechMode.Say));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 3);
+    Assert.Equal(1, fixture.Authority.Chat.GetSnapshot().AcceptedSpeech);
+    Assert.Equal(1UL, fixture.Service.GetSnapshot().RateRejections);
+    ClientChatOccurrence[] rows = fixture.CopyFirst();
+    Assert.Equal(2, rows.Length);
+    Assert.Equal(ClientChatOccurrenceKind.PrivateError, rows[1].Kind);
+}
+
+static void RemoteSpeechConvergesUnderLossDuplicateAndReorder()
+{
+    using var fixture = new RemoteChatFixture(
+        impairment: new NetworkImpairmentOptions(0xC001_0001, 220, 180, 0, 6));
+    for (int index = 0; index < 4; index++)
+        Assert.True(fixture.FirstClient.TrySubmit($"loss-{index}", ClientChatSpeechMode.Say));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 8, 200_000);
+    Assert.Equal(4, fixture.CopyFirst().Length);
+    Assert.Equal(4, fixture.CopySecond().Length);
+    Assert.True(fixture.FirstLoop.GetSnapshot().Datagram.Dropped > 0 ||
+        fixture.SecondLoop.GetSnapshot().Datagram.Dropped > 0);
+}
 
 static void DefaultsAndAuthoritySurfaceAreExplicit()
 {
@@ -54,6 +273,15 @@ static void DefaultsAndAuthoritySurfaceAreExplicit()
     Assert.False(parameters.Contains(typeof(Entity)));
     Assert.False(parameters.Contains(typeof(WorldPosition)));
     Assert.False(parameters.Any(static type => type.IsArray));
+
+    string[] remoteFields = typeof(RemoteChatSubmitHeader)
+        .GetFields(BindingFlags.Instance | BindingFlags.Public)
+        .Select(static field => field.Name)
+        .OrderBy(static name => name, StringComparer.Ordinal)
+        .ToArray();
+    Assert.SequenceEqual(
+        new[] { "ApplicationSessionEpoch", "SpeechMode", "SubmissionSequence" },
+        remoteFields);
 
     using var fixture = new ChatFixture();
     Assert.Equal('/', fixture.Chat.PlayerCommandPrefix);
@@ -421,6 +649,8 @@ sealed class ChatFixture : IDisposable
     internal AdmissionService Admission { get; }
     internal GameChatService Chat { get; }
 
+    internal AdmissionService CreateAdmission() => new(Runtime.Game, _composition);
+
     internal ParticipantId Enter(ulong value, in WorldPosition position)
     {
         var participant = new ParticipantId(value);
@@ -502,6 +732,188 @@ sealed class ChatFixture : IDisposable
         Chat.Dispose();
         Admission.Dispose();
         Runtime.Dispose();
+    }
+}
+
+sealed class RemoteChatFixture : IDisposable
+{
+    private const ulong FirstApplicationEpoch = 0xC001;
+    private const ulong SecondApplicationEpoch = 0xC002;
+    private readonly RemoteChatServerSession _firstServer;
+    private readonly RemoteChatServerSession _secondServer;
+    private readonly ClientChatOccurrence[] _copyScratch = new ClientChatOccurrence[16];
+    private long _now = 1_000;
+
+    internal RemoteChatFixture(
+        RemoteChatServerLimits? remoteLimits = null,
+        NetworkImpairmentOptions impairment = default)
+    {
+        Authority = new ChatFixture(
+            GameChatLimits.Default with
+            {
+                MaximumParticipants = 2,
+                MaximumRecipientsPerSpeech = 2,
+                MaximumCandidateEntities = 8,
+            },
+            entityCapacity: 16);
+        FirstParticipant = Authority.Enter(1, Position(0, 0));
+        SecondParticipant = Authority.Enter(2, Position(1_000, 0));
+        Assert.True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            impairment,
+            out ProtocolLoopback? first,
+            out _,
+            UltraSimGameProtocol.Manifest));
+        Assert.True(ProtocolLoopback.TryCreate(
+            NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, 1_472),
+            impairment,
+            out ProtocolLoopback? second,
+            out _,
+            UltraSimGameProtocol.Manifest));
+        FirstLoop = first!;
+        SecondLoop = second!;
+        Service = new RemoteChatDeliveryService(
+            Authority.Runtime.Game,
+            Authority.Chat,
+            remoteLimits ?? RemoteChatServerLimits.Default with
+            {
+                MaximumSessions = 2,
+                MaximumPendingDeliveries = 16,
+                MaximumPendingDeliveriesPerSession = 8,
+            });
+        _firstServer = Service.Register(
+            FirstLoop.Server, FirstParticipant, FirstApplicationEpoch, () => _now);
+        _secondServer = Service.Register(
+            SecondLoop.Server, SecondParticipant, SecondApplicationEpoch, () => _now);
+        FirstState = new ClientChatState(
+            FirstApplicationEpoch, new ClientChatLimits(16, 256, 128));
+        SecondState = new ClientChatState(
+            SecondApplicationEpoch, new ClientChatLimits(16, 256, 128));
+        FirstClient = new RemoteChatClient(FirstLoop.Client, FirstApplicationEpoch, FirstState);
+        SecondClient = new RemoteChatClient(SecondLoop.Client, SecondApplicationEpoch, SecondState);
+    }
+
+    internal ChatFixture Authority { get; }
+    internal ProtocolLoopback FirstLoop { get; }
+    internal ProtocolLoopback SecondLoop { get; }
+    internal RemoteChatDeliveryService Service { get; }
+    internal ParticipantId FirstParticipant { get; }
+    internal ParticipantId SecondParticipant { get; }
+    internal ClientChatState FirstState { get; }
+    internal ClientChatState SecondState { get; }
+    internal RemoteChatClient FirstClient { get; }
+    internal RemoteChatClient SecondClient { get; }
+    internal ulong FirstEpoch => FirstApplicationEpoch;
+
+    internal ClientChatOccurrence[] CopyFirst() => Copy(FirstState);
+    internal ClientChatOccurrence[] CopySecond() => Copy(SecondState);
+
+    internal void DriveUntil(Func<bool> complete, int maximumSteps = 20_000)
+    {
+        for (int step = 0; step < maximumSteps; step++)
+        {
+            if (complete()) return;
+            PumpFirst();
+            PumpSecond();
+        }
+        throw new InvalidOperationException("Remote Chat fixture did not converge.");
+    }
+
+    internal void DriveFirstUntil(Func<bool> complete, int maximumSteps = 20_000)
+    {
+        for (int step = 0; step < maximumSteps; step++)
+        {
+            if (complete()) return;
+            PumpFirst();
+        }
+        throw new InvalidOperationException("First remote Chat recipient did not converge.");
+    }
+
+    internal void DriveSteps(int count)
+    {
+        for (int step = 0; step < count; step++)
+        {
+            PumpFirst();
+            PumpSecond();
+        }
+    }
+
+    internal void ReceiveFirstSubmissionOnly()
+    {
+        for (int step = 0; step < 1_000; step++)
+        {
+            FirstLoop.Pump();
+            Drain(FirstLoop.Server, _firstServer);
+            if (Service.GetSnapshot().PendingDeliveries != 0) return;
+        }
+        throw new InvalidOperationException("The first Chat submission did not reach authority.");
+    }
+
+    internal void DeliverFirstWithoutReturningProof()
+    {
+        Assert.True(_firstServer.TryProgress());
+        for (int step = 0; step < 1_000; step++)
+        {
+            FirstLoop.Pump();
+            Drain(FirstLoop.Client, FirstClient);
+            if (FirstState.GetSnapshot().RetainedOccurrences != 0) return;
+        }
+        throw new InvalidOperationException("The first Chat occurrence did not reach Client Core.");
+    }
+
+    internal void AdvanceTime(long milliseconds) => _now = checked(_now + milliseconds);
+
+    internal void QueueFirstRetry() => Assert.True(_firstServer.TryProgress());
+
+    public void Dispose()
+    {
+        _firstServer.Dispose();
+        _secondServer.Dispose();
+        Service.Dispose();
+        FirstLoop.Dispose();
+        SecondLoop.Dispose();
+        Authority.Dispose();
+    }
+
+    private void PumpFirst()
+    {
+        _ = _firstServer.TryProgress();
+        _ = FirstClient.TryProgress();
+        FirstLoop.Pump();
+        Drain(FirstLoop.Server, _firstServer);
+        Drain(FirstLoop.Client, FirstClient);
+    }
+
+    private void PumpSecond()
+    {
+        _ = _secondServer.TryProgress();
+        _ = SecondClient.TryProgress();
+        SecondLoop.Pump();
+        Drain(SecondLoop.Server, _secondServer);
+        Drain(SecondLoop.Client, SecondClient);
+    }
+
+    private ClientChatOccurrence[] Copy(ClientChatState state)
+    {
+        int count = state.CopyRecent(_copyScratch);
+        return _copyScratch[..count].ToArray();
+    }
+
+    private static void Drain(NetworkProtocolPeer peer, IRemoteGameProtocolHandler handler)
+    {
+        while (peer.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+        {
+            Assert.True(handler.TryProcess(in message, payload));
+            Assert.True(peer.TryConsumeReceived());
+        }
+    }
+
+    private static WorldPosition Position(long x, long z)
+    {
+        Assert.True(WorldPosition.TryFromGlobalMillimeters(x, 0, z, out WorldPosition position));
+        return position;
     }
 }
 

@@ -46,6 +46,20 @@ public enum RemoteApplicationEventApplyStatus : byte
     CapacityExceeded = 2,
 }
 
+public enum RemoteChatOccurrenceKind : byte
+{
+    SpatialSpeech = 1,
+    PrivateSystem = 2,
+    PrivateError = 3,
+}
+
+public enum RemoteChatApplyStatus : byte
+{
+    Applied = 1,
+    Rejected = 2,
+    CapacityExceeded = 3,
+}
+
 [NetworkProtocol(11)]
 public static partial class GeneratedUltraSimGameProtocol
 {
@@ -292,6 +306,42 @@ public partial struct RemoteApplicationEventAppliedMessage
     public RemoteApplicationEventApplyStatus Status;
 }
 
+/// <summary>One authenticated, sequenced Chat submission. Text follows this header.</summary>
+[NetworkMessage(131, "ultrasim.game.chat-submit", 1, NetworkLane.Event)]
+public partial struct RemoteChatSubmitHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong SubmissionSequence;
+    public byte SpeechMode;
+}
+
+/// <summary>One recipient-relative, non-coalescible Chat occurrence. Label and text follow.</summary>
+[NetworkMessage(132, "ultrasim.game.chat-occurrence", 1, NetworkLane.Event)]
+public partial struct RemoteChatOccurrenceHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong ServerGenerationId;
+    public ulong DeliveryId;
+    public ulong RecipientSequence;
+    public ulong SpeechFactId;
+    public ulong SimulationTick;
+    public uint PublicEntityIndex;
+    public uint PublicEntityGeneration;
+    public RemoteChatOccurrenceKind Kind;
+    public byte SpeechMode;
+}
+
+/// <summary>Explicit semantic application result for one independently retained Chat occurrence.</summary>
+[NetworkMessage(133, "ultrasim.game.chat-applied", 1, NetworkLane.Control)]
+public partial struct RemoteChatAppliedMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong ServerGenerationId;
+    public ulong DeliveryId;
+    public ulong RecipientSequence;
+    public RemoteChatApplyStatus Status;
+}
+
 /// <summary>One complete present or absent dynamic-state operation.</summary>
 public readonly record struct RemoteWorldStateRecord(
     ulong RelationSequence,
@@ -334,6 +384,9 @@ public static partial class UltraSimGameProtocol
     public const int MaximumInputRedundancy = 3;
     public const int MaximumWorldStateRecords = 64;
     public const int MaximumDirtyEntityRecords = 64;
+    public const int MaximumChatTextUtf8Bytes = 256;
+    public const int MaximumChatDisplayLabelUtf8Bytes = 128;
+    public const int MaximumChatMessageBytes = 512;
     public const ulong WorldStateBaselineSchemaFingerprint = 0x5553_5742_4C30_3031UL;
 
     /// <summary>Default semantic UI payload bound after reserving the largest application envelope.</summary>
@@ -342,7 +395,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 13,
+        version: 14,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -375,6 +428,11 @@ public static partial class UltraSimGameProtocol
                 { MaximumEncodedBytes = RemoteDirtyEntityStateHeaderCodec.EncodedSize +
                     MaximumDirtyEntityRecords * RemoteDirtyEntityRecord.EncodedSize },
             RemoteDirtyEntityStateAppliedMessageCodec.Descriptor,
+            RemoteChatSubmitHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumChatMessageBytes },
+            RemoteChatOccurrenceHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumChatMessageBytes },
+            RemoteChatAppliedMessageCodec.Descriptor,
             RemoteChunkSnapshotHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = RemoteChunkSnapshotHeaderCodec.EncodedSize +
                     MaximumChunkPublicationRecords * RemoteChunkPublicRecord.EncodedSize },
@@ -396,6 +454,113 @@ public static partial class UltraSimGameProtocol
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;
+
+    public static bool TryWriteChatSubmission(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong submissionSequence,
+        byte speechMode,
+        string text,
+        out int written)
+    {
+        written = 0;
+        if (applicationSessionEpoch == 0 || submissionSequence == 0 || speechMode is < 1 or > 3)
+            return false;
+        var writer = new NetworkPacketWriter(destination);
+        var header = new RemoteChatSubmitHeader
+        {
+            ApplicationSessionEpoch = applicationSessionEpoch,
+            SubmissionSequence = submissionSequence,
+            SpeechMode = speechMode,
+        };
+        if (!RemoteChatSubmitHeaderCodec.TryWrite(ref writer, in header) ||
+            !writer.TryWriteBoundedUtf8(text, MaximumChatTextUtf8Bytes) ||
+            writer.WrittenCount > MaximumChatMessageBytes)
+            return false;
+        written = writer.WrittenCount;
+        return true;
+    }
+
+    public static bool TryReadChatSubmission(
+        ReadOnlySpan<byte> source,
+        out RemoteChatSubmitHeader header,
+        out string text)
+    {
+        header = default;
+        text = string.Empty;
+        if (source.Length > MaximumChatMessageBytes) return false;
+        var reader = new NetworkPacketReader(source);
+        if (!RemoteChatSubmitHeaderCodec.TryRead(ref reader, out RemoteChatSubmitHeader staged) ||
+            staged.ApplicationSessionEpoch == 0 || staged.SubmissionSequence == 0 ||
+            staged.SpeechMode is < 1 or > 3 ||
+            !reader.TryReadBoundedUtf8Bytes(MaximumChatTextUtf8Bytes, out ReadOnlySpan<byte> bytes) ||
+            bytes.IsEmpty || !reader.IsComplete)
+            return false;
+        header = staged;
+        text = System.Text.Encoding.UTF8.GetString(bytes);
+        return true;
+    }
+
+    public static bool TryWriteChatOccurrence(
+        Span<byte> destination,
+        in RemoteChatOccurrenceHeader header,
+        string displayLabel,
+        string text,
+        out int written)
+    {
+        written = 0;
+        bool spatial = header.Kind == RemoteChatOccurrenceKind.SpatialSpeech;
+        bool canonicalAnchor = header.PublicEntityGeneration != 0 || header.PublicEntityIndex == 0;
+        if (header.ApplicationSessionEpoch == 0 || header.ServerGenerationId == 0 ||
+            header.DeliveryId == 0 || header.RecipientSequence == 0 ||
+            header.Kind is < RemoteChatOccurrenceKind.SpatialSpeech or > RemoteChatOccurrenceKind.PrivateError ||
+            !canonicalAnchor ||
+            (spatial
+                ? header.SpeechFactId == 0 || header.SpeechMode is < 1 or > 3
+                : header.SpeechFactId != 0 || header.SpeechMode != 0 ||
+                    header.PublicEntityIndex != 0 || header.PublicEntityGeneration != 0))
+            return false;
+        var writer = new NetworkPacketWriter(destination);
+        if (!RemoteChatOccurrenceHeaderCodec.TryWrite(ref writer, in header) ||
+            !writer.TryWriteBoundedUtf8(displayLabel, MaximumChatDisplayLabelUtf8Bytes) ||
+            !writer.TryWriteBoundedUtf8(text, MaximumChatTextUtf8Bytes) ||
+            writer.WrittenCount > MaximumChatMessageBytes)
+            return false;
+        written = writer.WrittenCount;
+        return true;
+    }
+
+    public static bool TryReadChatOccurrence(
+        ReadOnlySpan<byte> source,
+        out RemoteChatOccurrenceHeader header,
+        out string displayLabel,
+        out string text)
+    {
+        header = default;
+        displayLabel = text = string.Empty;
+        if (source.Length > MaximumChatMessageBytes) return false;
+        var reader = new NetworkPacketReader(source);
+        if (!RemoteChatOccurrenceHeaderCodec.TryRead(ref reader, out RemoteChatOccurrenceHeader staged) ||
+            !reader.TryReadBoundedUtf8Bytes(MaximumChatDisplayLabelUtf8Bytes, out ReadOnlySpan<byte> labelBytes) ||
+            !reader.TryReadBoundedUtf8Bytes(MaximumChatTextUtf8Bytes, out ReadOnlySpan<byte> textBytes) ||
+            labelBytes.IsEmpty || textBytes.IsEmpty || !reader.IsComplete)
+            return false;
+        bool spatial = staged.Kind == RemoteChatOccurrenceKind.SpatialSpeech;
+        bool canonicalAnchor = staged.PublicEntityGeneration != 0 || staged.PublicEntityIndex == 0;
+        if (staged.ApplicationSessionEpoch == 0 || staged.ServerGenerationId == 0 ||
+            staged.DeliveryId == 0 || staged.RecipientSequence == 0 ||
+            staged.Kind is < RemoteChatOccurrenceKind.SpatialSpeech or > RemoteChatOccurrenceKind.PrivateError ||
+            !canonicalAnchor ||
+            (spatial
+                ? staged.SpeechFactId == 0 || staged.SpeechMode is < 1 or > 3
+                : staged.SpeechFactId != 0 || staged.SpeechMode != 0 ||
+                    staged.PublicEntityIndex != 0 || staged.PublicEntityGeneration != 0))
+            return false;
+        header = staged;
+        displayLabel = System.Text.Encoding.UTF8.GetString(labelBytes);
+        text = System.Text.Encoding.UTF8.GetString(textBytes);
+        return true;
+    }
 
     public static bool TryWriteAuthenticationRequest(
         Span<byte> destination,

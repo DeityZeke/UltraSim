@@ -360,6 +360,31 @@ public sealed class ChunkPublicationStore
         }
     }
 
+    /// <summary>
+    /// Resolves the current Game-owned public presentation lineage for one live
+    /// ECS entity. The returned identity is presentation scope only; it is not
+    /// a durable, participant, or Network identity.
+    /// </summary>
+    public bool TryGetPublicEntityId(Entity entity, out WorldPublicEntityId id)
+    {
+        EnsureOwner();
+        if (entity.IsValid && entity.Index < _entityMap.Length)
+        {
+            ref readonly EntityMap map = ref _entityMap[entity.Index];
+            if (map.Occupied && map.Entity == entity)
+            {
+                ref readonly PublicSlot slot = ref _slots[map.PublicSlot];
+                if (slot.Active && slot.Entity == entity)
+                {
+                    id = new WorldPublicEntityId(checked((uint)map.PublicSlot), slot.Generation);
+                    return true;
+                }
+            }
+        }
+        id = default;
+        return false;
+    }
+
     public bool TryCommit(
         ReadOnlySpan<WorldPublicChange> changes,
         out ChunkPublicationCommitError error)

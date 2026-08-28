@@ -8,6 +8,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Chat;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.Persistence;
 using UltraSim.Game.Protocol;
@@ -92,6 +93,7 @@ internal static class Program
             ("ApplicationEventWorkingCapacityAndAcknowledgementBackpressureRecover", ApplicationEventWorkingCapacityAndAcknowledgementBackpressureRecover),
             ("ApplicationEventDuplicateRetryRetiresPendingAcknowledgement", ApplicationEventDuplicateRetryRetiresPendingAcknowledgement),
             ("ApplicationEventApplicationTimeoutIsBounded", ApplicationEventApplicationTimeoutIsBounded),
+            ("AuthenticatedRemoteChatUsesTrustedApplicationParticipant", AuthenticatedRemoteChatUsesTrustedApplicationParticipant),
             ("BaselineCancellationRetiresPendingAcknowledgement", BaselineCancellationRetiresPendingAcknowledgement),
             ("ControlledEpochRebindClearsAuthorityAndSequenceExhaustsFailClosed", ControlledEpochRebindClearsAuthorityAndSequenceExhaustsFailClosed),
         };
@@ -2024,6 +2026,65 @@ static void ApplicationEventContinuitySurvivesResnapshotAndImpairment()
     Equal(1UL, eventClient.GetSnapshot().Duplicates);
     True(fixture.Loopback!.GetSnapshot().Datagram.Dropped > 0,
         "The Event recovery proof did not actually encounter deterministic loss.");
+}
+
+static void AuthenticatedRemoteChatUsesTrustedApplicationParticipant()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    fixture.TickRuntime();
+    ParticipantId participant = new(41);
+    GameChatLimits chatLimits = GameChatLimits.Default with
+    {
+        MaximumParticipants = 8,
+        MaximumRecipientsPerSpeech = 8,
+    };
+    using var chat = new GameChatService(fixture.ServerGame, fixture.Server!.Admission, chatLimits);
+    using var delivery = new RemoteChatDeliveryService(
+        fixture.ServerGame,
+        chat,
+        RemoteChatServerLimits.Default with
+        {
+            MaximumSessions = 8,
+            MaximumPendingDeliveries = 64,
+            MaximumPendingDeliveriesPerSession = 8,
+        });
+    using RemoteChatServerSession server = delivery.Register(
+        fixture.ServerPeer, fixture.Server.Admission, participant, fixture.ApplicationSessionEpoch);
+    var state = new ClientChatState(
+        fixture.ApplicationSessionEpoch,
+        new ClientChatLimits(8, 256, 128));
+    var client = new RemoteChatClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, state);
+    fixture.Server.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    True(client.TrySubmit("authenticated", ClientChatSpeechMode.Say));
+    for (int step = 0; step < 50_000 && delivery.GetSnapshot().DeliveriesApplied != 1; step++)
+    {
+        _ = server.TryProgress();
+        _ = client.TryProgress();
+        fixture.DriveNetworkSteps(1);
+    }
+    Equal(1UL, delivery.GetSnapshot().DeliveriesApplied);
+    var rows = new ClientChatOccurrence[4];
+    Equal(1, state.CopyRecent(rows));
+    Equal("authenticated", rows[0].Text);
+    True(rows[0].PublicAnchor.IsValid);
+    Equal("Alice", rows[0].DisplayLabel);
+
+    True(client.TrySubmit("/where", ClientChatSpeechMode.Say));
+    for (int step = 0; step < 50_000 && delivery.GetSnapshot().DeliveriesApplied != 2; step++)
+    {
+        _ = server.TryProgress();
+        _ = client.TryProgress();
+        fixture.DriveNetworkSteps(1);
+    }
+    Equal(2UL, delivery.GetSnapshot().DeliveriesApplied);
+    Equal(2, state.CopyRecent(rows));
+    Equal(ClientChatOccurrenceKind.PrivateSystem, rows[1].Kind);
+    True(rows[1].Text.StartsWith("Where:", StringComparison.Ordinal));
+    Equal(1L, chat.GetSnapshot().AcceptedSpeech);
 }
 
 static void ApplicationEventCapacityFailureIsExplicitlyNonviable()

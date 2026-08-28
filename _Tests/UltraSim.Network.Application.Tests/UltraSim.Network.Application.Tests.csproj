@@ -13,6 +13,7 @@
     <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/Chat/UltraSim.Game.Chat.csproj" />
     <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Game/Protocol/UltraSim.Game.Protocol.csproj" />
     <ProjectReference Include="../../Game/Persistence/UltraSim.Game.Persistence.csproj" />
