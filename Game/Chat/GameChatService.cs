@@ -127,7 +127,7 @@ public sealed class GameChatService : IDisposable
         if (mode is < GameSpeechMode.Whisper or > GameSpeechMode.Yell)
             return Reject(GameChatSubmissionStatus.InvalidSpeechMode, "The speech mode is invalid.");
         GameChatSubmissionStatus textStatus = ValidateText(text, _limits.MaximumTextUtf8Bytes);
-        if (textStatus != GameChatSubmissionStatus.SpeechAccepted)
+        if (textStatus != GameChatSubmissionStatus.None)
             return Reject(textStatus, TextFailure(textStatus));
         if (!_recipientRegistryComplete && !RefreshEnteredParticipantsCore())
         {
@@ -558,8 +558,25 @@ public sealed class GameChatService : IDisposable
     {
         if (_disposed)
             return;
-        if (_entered.Remove(result.Participant, out AdmissionResult prior))
-            _participantsByEntity.Remove(prior.Entity);
+        try
+        {
+            // Rejected reports an operation outcome. It is not necessarily a
+            // transition of an existing session: duplicate join attempts are
+            // rejected while the original entered session remains authoritative.
+            if (_admission.TryGetSession(result.Participant, out AdmissionResult current) &&
+                current.IsEntered)
+            {
+                if (!UpdateParticipant(current))
+                    _recipientRegistryComplete = false;
+                return;
+            }
+            if (_entered.Remove(result.Participant, out AdmissionResult prior))
+                _participantsByEntity.Remove(prior.Entity);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _fault ??= exception;
+        }
     }
 
     private void HandleGenerationPublished(ulong generationId)
@@ -629,7 +646,7 @@ public sealed class GameChatService : IDisposable
             return GameChatSubmissionStatus.EmptyText;
         return utf8Bytes > maximumUtf8Bytes
             ? GameChatSubmissionStatus.TextTooLong
-            : GameChatSubmissionStatus.SpeechAccepted;
+            : GameChatSubmissionStatus.None;
     }
 
     private static string TextFailure(GameChatSubmissionStatus status) => status switch

@@ -113,28 +113,29 @@ public readonly record struct GameSpeechFact(
 /// <summary>Expected semantic outcome of one trusted packet-free text submission.</summary>
 public enum GameChatSubmissionStatus : byte
 {
-    SpeechAccepted = 0,
-    CommandSucceeded = 1,
-    EmptyText = 2,
-    MalformedUnicode = 3,
-    TextTooLong = 4,
-    InvalidSpeechMode = 5,
-    InvalidParticipant = 6,
-    ParticipantNotEntered = 7,
-    RuntimeUnavailable = 8,
-    GenerationMismatch = 9,
-    MissingSpeaker = 10,
-    MissingSpeakerPosition = 11,
-    SpatialIndexUnavailable = 12,
-    RecipientRegistryIncomplete = 13,
-    CandidateChunkCapacityExceeded = 14,
-    CandidateEntityCapacityExceeded = 15,
-    RecipientCapacityExceeded = 16,
-    SpeechRetentionCapacityExceeded = 17,
-    SpeechSequenceExhausted = 18,
-    UnknownCommand = 19,
-    InvalidCommandSyntax = 20,
-    Faulted = 21,
+    None = 0,
+    SpeechAccepted = 1,
+    CommandSucceeded = 2,
+    EmptyText = 3,
+    MalformedUnicode = 4,
+    TextTooLong = 5,
+    InvalidSpeechMode = 6,
+    InvalidParticipant = 7,
+    ParticipantNotEntered = 8,
+    RuntimeUnavailable = 9,
+    GenerationMismatch = 10,
+    MissingSpeaker = 11,
+    MissingSpeakerPosition = 12,
+    SpatialIndexUnavailable = 13,
+    RecipientRegistryIncomplete = 14,
+    CandidateChunkCapacityExceeded = 15,
+    CandidateEntityCapacityExceeded = 16,
+    RecipientCapacityExceeded = 17,
+    SpeechRetentionCapacityExceeded = 18,
+    SpeechSequenceExhausted = 19,
+    UnknownCommand = 20,
+    InvalidCommandSyntax = 21,
+    Faulted = 22,
 }
 
 /// <summary>Speech fact or private command response produced by one submission.</summary>
@@ -144,10 +145,13 @@ public readonly record struct GameChatSubmissionResult(
     int RecipientCount,
     string? PrivateReply)
 {
-    public bool AcceptedSpeech => Status == GameChatSubmissionStatus.SpeechAccepted;
-    public bool CommandSucceeded => Status == GameChatSubmissionStatus.CommandSucceeded;
-    public bool IsCommandResult => Status is GameChatSubmissionStatus.CommandSucceeded or
-        GameChatSubmissionStatus.UnknownCommand or GameChatSubmissionStatus.InvalidCommandSyntax;
+    public bool AcceptedSpeech => Status == GameChatSubmissionStatus.SpeechAccepted &&
+        Speech.IsValid && RecipientCount > 0 && PrivateReply is null;
+    public bool CommandSucceeded => Status == GameChatSubmissionStatus.CommandSucceeded &&
+        !Speech.IsValid && RecipientCount == 0 && PrivateReply is not null;
+    public bool IsCommandResult => CommandSucceeded ||
+        (Status is GameChatSubmissionStatus.UnknownCommand or GameChatSubmissionStatus.InvalidCommandSyntax &&
+            !Speech.IsValid && RecipientCount == 0 && PrivateReply is not null);
 }
 
 /// <summary>Bounded diagnostics for packet-free Chat semantics and work.</summary>

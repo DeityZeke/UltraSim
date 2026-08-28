@@ -48,10 +48,14 @@ channel, direct-message, history, or event-bus framework.
 
 ## Checkpoint boundary
 
-C0.0 is accepted with packet-free tests for authority, exact hearing, current
+C0.0 and its C0.0a review hardening are accepted with packet-free tests for authority, exact hearing, current
 movement, ordered occurrence retention, command interception, Unicode/text
 bounds, complete-or-reject fanout, generation/world fencing, preexisting Admission
-census, and zero warmed allocation on ordinary speech discovery.
+census, rejection/session reconciliation, fail-closed default results, and zero
+warmed allocation on ordinary speech discovery.
 
 C0.1 remote protocol, application proof, `ClientChatState`, and Godot feed/bubbles
-remain stopped pending review. See [the Chat plan](../../Docs/Plans/CHAT.md).
+remain stopped pending review. Its composition must size `MaximumParticipants`
+against the server's admitted-session capacity; the C0.0 default of 256 is an
+oracle default, not a production CCU ceiling. `MaximumRecipientsPerSpeech` remains
+an independent complete-audience bound. See [the Chat plan](../../Docs/Plans/CHAT.md).

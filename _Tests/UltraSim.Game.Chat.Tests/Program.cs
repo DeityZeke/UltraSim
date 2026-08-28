@@ -10,6 +10,7 @@ using UltraSim.Server.Runtime;
 var tests = new (string Name, Action Body)[]
 {
     ("DefaultsAndAuthoritySurfaceAreExplicit", DefaultsAndAuthoritySurfaceAreExplicit),
+    ("DefaultAndMalformedSuccessResultsFailClosed", DefaultAndMalformedSuccessResultsFailClosed),
     ("PlainTextBecomesSayAndOccurrencesRemainOrdered", PlainTextBecomesSayAndOccurrencesRemainOrdered),
     ("HelpAndWhereArePrivateCommands", HelpAndWhereArePrivateCommands),
     ("UnknownAndMalformedCommandsNeverBecomeSpeech", UnknownAndMalformedCommandsNeverBecomeSpeech),
@@ -21,6 +22,8 @@ var tests = new (string Name, Action Body)[]
     ("RecipientCapacityFailurePublishesNoPartialFact", RecipientCapacityFailurePublishesNoPartialFact),
     ("CandidateCapacityFailurePublishesNoPartialFact", CandidateCapacityFailurePublishesNoPartialFact),
     ("RetentionCapacityNeverOverwritesAnOccurrence", RetentionCapacityNeverOverwritesAnOccurrence),
+    ("RejectedAdmissionOperationCannotEvictEnteredParticipant", RejectedAdmissionOperationCannotEvictEnteredParticipant),
+    ("ActualAdmissionRejectionRemovesEnteredParticipant", ActualAdmissionRejectionRemovesEnteredParticipant),
     ("ExistingAdmissionsAreCensusedAndWorldMismatchRejects", ExistingAdmissionsAreCensusedAndWorldMismatchRejects),
     ("WarmedSpeechDiscoveryAllocatesZero", WarmedSpeechDiscoveryAllocatesZero),
 };
@@ -55,6 +58,30 @@ static void DefaultsAndAuthoritySurfaceAreExplicit()
     using var fixture = new ChatFixture();
     Assert.Equal('/', fixture.Chat.PlayerCommandPrefix);
     Assert.Equal(2, fixture.Chat.CommandCount);
+}
+
+static void DefaultAndMalformedSuccessResultsFailClosed()
+{
+    GameChatSubmissionResult empty = default;
+    Assert.Equal(GameChatSubmissionStatus.None, empty.Status);
+    Assert.False(empty.AcceptedSpeech);
+    Assert.False(empty.CommandSucceeded);
+    Assert.False(empty.IsCommandResult);
+
+    var malformedSpeech = new GameChatSubmissionResult(
+        GameChatSubmissionStatus.SpeechAccepted,
+        default,
+        0,
+        null);
+    Assert.False(malformedSpeech.AcceptedSpeech);
+
+    var malformedCommand = new GameChatSubmissionResult(
+        GameChatSubmissionStatus.CommandSucceeded,
+        default,
+        0,
+        null);
+    Assert.False(malformedCommand.CommandSucceeded);
+    Assert.False(malformedCommand.IsCommandResult);
 }
 
 static void PlainTextBecomesSayAndOccurrencesRemainOrdered()
@@ -275,6 +302,38 @@ static void RetentionCapacityNeverOverwritesAnOccurrence()
     Assert.Equal(second.Speech.Id, consumed.Id);
 }
 
+static void RejectedAdmissionOperationCannotEvictEnteredParticipant()
+{
+    using var fixture = new ChatFixture();
+    ParticipantId speaker = fixture.Enter(1, At(0, 0));
+    ParticipantId listener = fixture.Enter(2, At(1_000, 0));
+
+    AdmissionResult duplicate = fixture.Admission.JoinAccountless(speaker);
+    Assert.True(duplicate.IsRejected);
+    Assert.Equal(AdmissionRejection.DuplicateParticipant, duplicate.Rejection);
+    Assert.True(fixture.Admission.TryGetSession(speaker, out AdmissionResult retained));
+    Assert.True(retained.IsEntered);
+    Assert.Equal(2, fixture.Chat.GetSnapshot().EnteredParticipants);
+
+    GameChatSubmissionResult speech = fixture.Chat.Submit(speaker, "still entered");
+    Assert.True(speech.AcceptedSpeech);
+    Assert.SequenceEqual(new[] { speaker, listener }, fixture.CopyRecipients(speech.Speech.Id));
+}
+
+static void ActualAdmissionRejectionRemovesEnteredParticipant()
+{
+    using var fixture = new ChatFixture();
+    ParticipantId participant = fixture.Enter(1, At(0, 0));
+    fixture.ReplaceGeneration();
+
+    Assert.True(fixture.Admission.TryGetSession(participant, out AdmissionResult rejected));
+    Assert.True(rejected.IsRejected);
+    Assert.Equal(AdmissionRejection.GenerationReplaced, rejected.Rejection);
+    Assert.Equal(0, fixture.Chat.GetSnapshot().EnteredParticipants);
+    Assert.Equal(GameChatSubmissionStatus.ParticipantNotEntered,
+        fixture.Chat.Submit(participant, "old authority").Status);
+}
+
 static void ExistingAdmissionsAreCensusedAndWorldMismatchRejects()
 {
     var firstComposition = new UltraSimGameComposition();
@@ -395,6 +454,40 @@ sealed class ChatFixture : IDisposable
                 game.WorldState.TrySetPosition(world, animal, requested),
             out bool created) && created);
         Runtime.Tick();
+    }
+
+    internal void ReplaceGeneration()
+    {
+        GameStaging staging = _composition.CreateFresh(
+            64,
+            new PersistenceIdentityOptions(new PersistentWorldId(0xC0_0001)));
+        GameGenerationState? candidate = null;
+        bool published = false;
+        try
+        {
+            staging.World.Seal();
+            staging.World.Initialize();
+            staging.World.BeginRun();
+            candidate = new GameGenerationState(
+                new AccountingStore(),
+                staging.Inventory,
+                staging.Content,
+                staging.WorldState,
+                staging.SimulationLookup,
+                staging.Replication,
+                staging.WorldActions);
+            Assert.True(Runtime.Game.TryPublishPreparedGeneration(staging.World, candidate, out _));
+            published = true;
+            candidate = null;
+        }
+        finally
+        {
+            if (!published)
+            {
+                candidate?.Dispose();
+                staging.World.Dispose();
+            }
+        }
     }
 
     internal ParticipantId[] CopyRecipients(GameSpeechFactId fact)

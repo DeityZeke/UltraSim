@@ -1,6 +1,6 @@
 # UltraSim Chat + Commands
 
-**Status:** C0.0 accepted; C0.1+ stopped forward context
+**Status:** C0.0 + C0.0a accepted; C0.1+ stopped forward context
 
 **Prepared after:** Inventory I0.11 (`305e40f4`)
 
@@ -573,6 +573,12 @@ There are currently no external users/saves requiring backward compatibility dur
 
 ## C0.0 — packet-free authoritative speech + command oracle — ACCEPTED
 
+C0.0a review hardening makes default submission results fail closed and treats
+Admission rejection notifications as operation outcomes that must be reconciled
+against the current authoritative session. A failed duplicate join therefore
+cannot evict an existing entered speaker, while a real session rejection still
+removes that authority.
+
 Goal:
 
 > Prove the Game semantics of text interpretation, trusted speaker authority, exact bounded spatial hearing, occurrence retention, and command interception before adding a wire message.
@@ -715,6 +721,11 @@ bounded raw text
 Do not include trusted ParticipantId, Entity, CharacterId, SenderName, WorldPosition, range, recipient list, public identity, or permissions.
 
 The server derives those.
+
+C0.1 composition must explicitly size `MaximumParticipants` against the server's
+admitted-session capacity. The C0.0 default of 256 is an oracle default, not a
+production Chat CCU limit. `MaximumRecipientsPerSpeech` remains independently
+bounded and may be smaller than total admitted population.
 
 Duplicate/stale submission must not execute a command or create a speech fact twice.
 
