@@ -54,6 +54,9 @@ public readonly record struct ClientChatOccurrence(
     string Text)
 {
     public bool IsSpatial => Kind == ClientChatOccurrenceKind.SpatialSpeech;
+    public bool CanPresentOverhead(ulong residentServerGenerationId) =>
+        IsSpatial && PublicAnchor.IsValid && residentServerGenerationId != 0 &&
+        ServerGenerationId == residentServerGenerationId;
 }
 
 public readonly record struct ClientChatStateSnapshot(
@@ -78,7 +81,7 @@ public sealed class ClientChatState
     private readonly ClientChatLimits _limits;
     private readonly ClientChatOccurrence[] _rows;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
-    private ulong _generationId;
+    private ulong _latestOriginGenerationId;
     private ulong _nextRecipientSequence = 1;
     private int _head;
     private int _count;
@@ -106,19 +109,6 @@ public sealed class ClientChatState
             SaturatingIncrement(ref _rejected);
             return ClientChatApplyStatus.Rejected;
         }
-        if (_generationId != 0 && occurrence.ServerGenerationId < _generationId)
-        {
-            SaturatingIncrement(ref _rejected);
-            return ClientChatApplyStatus.Rejected;
-        }
-        if (occurrence.ServerGenerationId > _generationId)
-        {
-            Array.Clear(_rows);
-            _head = 0;
-            _count = 0;
-            _generationId = occurrence.ServerGenerationId;
-            _nextRecipientSequence = 1;
-        }
         if (occurrence.RecipientSequence < _nextRecipientSequence)
         {
             SaturatingIncrement(ref _duplicates);
@@ -140,6 +130,8 @@ public sealed class ClientChatState
         int slot = (_head + _count) % _rows.Length;
         _rows[slot] = occurrence;
         _count++;
+        _latestOriginGenerationId = Math.Max(
+            _latestOriginGenerationId, occurrence.ServerGenerationId);
         _nextRecipientSequence = occurrence.RecipientSequence == ulong.MaxValue
             ? 0
             : occurrence.RecipientSequence + 1;
@@ -163,7 +155,7 @@ public sealed class ClientChatState
     {
         EnsureOwnerThread();
         return new ClientChatStateSnapshot(
-            _applicationSessionEpoch, _generationId, _nextRecipientSequence, _count,
+            _applicationSessionEpoch, _latestOriginGenerationId, _nextRecipientSequence, _count,
             _applied, _duplicates, _rejected, _evictions,
             (long)_rows.Length * System.Runtime.CompilerServices.Unsafe.SizeOf<ClientChatOccurrence>());
     }

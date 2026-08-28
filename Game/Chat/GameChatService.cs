@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using UltraSim.ECS;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
@@ -18,6 +19,8 @@ namespace UltraSim.Game.Chat;
 /// </remarks>
 public sealed class GameChatService : IDisposable
 {
+    private const int MaximumDisplayLabelUtf8Bytes = 128;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly ServerGameFacet _runtime;
     private readonly GameChatLimits _limits;
     private readonly GameSpeechDistanceProfile _speechProfile;
@@ -27,6 +30,7 @@ public sealed class GameChatService : IDisposable
     private readonly AdmissionBinding[] _admissions;
     private readonly Dictionary<ParticipantId, AdmissionResult> _entered;
     private readonly Dictionary<Entity, ParticipantId> _participantsByEntity;
+    private readonly Dictionary<ParticipantId, string> _fallbackDisplayLabels;
     private readonly SpatialChunkKey[] _chunkScratch;
     private readonly Entity[] _candidateScratch;
     private readonly ParticipantId[] _recipientScratch;
@@ -78,8 +82,10 @@ public sealed class GameChatService : IDisposable
         _admissions = new AdmissionBinding[limits.MaximumParticipants];
         _entered = new Dictionary<ParticipantId, AdmissionResult>(limits.MaximumParticipants);
         _participantsByEntity = new Dictionary<Entity, ParticipantId>(limits.MaximumParticipants);
+        _fallbackDisplayLabels = new Dictionary<ParticipantId, string>(limits.MaximumParticipants);
         _entered.EnsureCapacity(limits.MaximumParticipants);
         _participantsByEntity.EnsureCapacity(limits.MaximumParticipants);
+        _fallbackDisplayLabels.EnsureCapacity(limits.MaximumParticipants);
         _chunkScratch = new SpatialChunkKey[limits.MaximumCandidateChunks];
         _candidateScratch = new Entity[limits.MaximumCandidateEntities];
         _recipientScratch = new ParticipantId[limits.MaximumRecipientsPerSpeech];
@@ -98,6 +104,10 @@ public sealed class GameChatService : IDisposable
     public char PlayerCommandPrefix => GameChatCommandRegistry.PlayerPrefix;
     public int CommandCount => _commands.Count;
     public int PendingSpeechCount { get { EnsureOperational(); return _speechCount; } }
+    public ulong LatestAcceptedSpeechSequence
+    {
+        get { EnsureOperational(); return _nextSpeechSequence - 1; }
+    }
 
     /// <summary>
     /// Adds one concrete authoritative Admission owner to the bounded Chat
@@ -313,6 +323,7 @@ public sealed class GameChatService : IDisposable
         _runtime.GenerationPublished -= HandleGenerationPublished;
         _entered.Clear();
         _participantsByEntity.Clear();
+        _fallbackDisplayLabels.Clear();
         _speechFacts.AsSpan().Clear();
         _speechRecipients.AsSpan().Clear();
         _speechRecipientCounts.AsSpan().Clear();
@@ -519,6 +530,9 @@ public sealed class GameChatService : IDisposable
                 "The speech occurrence sequence is exhausted.");
         }
 
+        string displayLabel = ResolveDisplayLabel(game, speaker);
+        _ = game.WorldState.Publications.TryGetPublicEntityId(
+            speaker.Entity, out WorldPublicEntityId publicAnchor);
         var fact = new GameSpeechFact(
             new GameSpeechFactId(_nextSpeechSequence),
             generationId,
@@ -526,7 +540,9 @@ public sealed class GameChatService : IDisposable
             speaker.Participant,
             speaker.Entity,
             mode,
-            text);
+            text,
+            displayLabel,
+            publicAnchor);
         int slot = (_speechHead + _speechCount) % _speechFacts.Length;
         _recipientScratch.AsSpan(0, recipientCount).CopyTo(RecipientBlock(slot, recipientCount));
         _speechFacts[slot] = fact;
@@ -549,6 +565,7 @@ public sealed class GameChatService : IDisposable
         _participantCensuses++;
         _entered.Clear();
         _participantsByEntity.Clear();
+        _fallbackDisplayLabels.Clear();
         int total = 0;
         for (int source = 0; source < _admissions.Length; source++)
         {
@@ -576,6 +593,8 @@ public sealed class GameChatService : IDisposable
             }
             _entered.Add(session.Participant, session);
             _participantsByEntity.Add(session.Entity, session.Participant);
+            _fallbackDisplayLabels.Add(
+                session.Participant, $"Player {session.Participant.Value}");
         }
         _admissionScratch.AsSpan(0, total).Clear();
         _recipientRegistryComplete = true;
@@ -608,6 +627,7 @@ public sealed class GameChatService : IDisposable
         }
         _entered[session.Participant] = session;
         _participantsByEntity[session.Entity] = session.Participant;
+        _fallbackDisplayLabels[session.Participant] = $"Player {session.Participant.Value}";
         return true;
     }
 
@@ -647,22 +667,32 @@ public sealed class GameChatService : IDisposable
             return;
         try
         {
-            // A retained occurrence contains generation-local ECS/public lineage.
-            // It must never cross an authority-generation replacement.
-            ClearRetainedSpeech();
+            // Accepted speech is Event history. Generation-local public identity
+            // is retained only as presentation metadata and may fail to realize
+            // an overhead bubble after replacement; it does not erase the fact.
             _ = RefreshEnteredParticipantsCore();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException) { _fault ??= exception; }
     }
 
-    private void ClearRetainedSpeech()
+    private string ResolveDisplayLabel(
+        IGameGenerationStateProvider game,
+        in AdmissionResult speaker)
     {
-        _speechFacts.AsSpan().Clear();
-        _speechRecipientCounts.AsSpan().Clear();
-        _speechRecipients.AsSpan().Clear();
-        _speechHead = 0;
-        _speechCount = 0;
-        _pendingRecipientDeliveries = 0;
+        if (speaker.CharacterId.IsValid &&
+            game.Accounting.TryGetCharacter(speaker.CharacterId, out var character) &&
+            IsCanonicalBoundedUtf8(character.DisplayName, MaximumDisplayLabelUtf8Bytes))
+            return character.DisplayName;
+        if (_fallbackDisplayLabels.TryGetValue(speaker.Participant, out string? fallback))
+            return fallback;
+        throw new InvalidOperationException("An entered Chat speaker lost its bounded display label.");
+    }
+
+    private static bool IsCanonicalBoundedUtf8(string value, int maximumBytes)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        try { return StrictUtf8.GetByteCount(value) <= maximumBytes; }
+        catch (EncoderFallbackException) { return false; }
     }
 
     private bool TryFindSpeechSlot(GameSpeechFactId fact, out int slot)

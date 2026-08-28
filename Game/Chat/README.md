@@ -1,7 +1,7 @@
 # Chat
 
 Chat is authoritative Game semantics. C0.0 owns packet-free interpretation and
-hearing; C0.1 carries those accepted semantics through the authenticated Game
+hearing; C0.1/C0.1a carry those accepted semantics through the authenticated Game
 protocol, bounded client state, and Godot presentation without moving Chat into
 the Network kernel.
 
@@ -34,7 +34,9 @@ recipient, or retention overflow rejects without truncation or partial delivery.
 
 Every accepted speech is an independently sequenced occurrence with its complete
 recipient set retained in a bounded FIFO until the packet-free consumer copies and
-consumes it. Speech never coalesces as latest state.
+consumes it. The canonical server-derived display label and optional public actor
+anchor are captured at acceptance. Speech never coalesces as latest state, and an
+authority-generation replacement does not erase an already accepted occurrence.
 
 ## Commands
 
@@ -57,16 +59,24 @@ epoch, sequence, speech mode, and at most 256 canonical UTF-8 bytes. The server
 derives participant, actor, display label, position, range, audience, and optional
 `WorldPublicEntityId` presentation anchor.
 
-`RemoteChatDeliveryService` transactionally moves a complete C0.0 audience into
-a fixed delivery ledger only after every recipient has a live registered session
-and quota. Each recipient has independent ordered debt and application proof;
-packet acknowledgement never retires it. A bounded concrete Admission-source
-census allows hosted sessions with separate Admission owners to participate
-without a global identity registry.
+`RemoteChatDeliveryService` transactionally moves a complete live C0.0 audience
+into a fixed delivery ledger only after every live recipient has a registered
+session and quota. The ledger is a fixed row array with an O(1) free list and one
+intrusive FIFO head/tail/count per application session; idle progress does not scan
+the global row capacity. Each recipient has independent ordered debt and
+application proof; packet acknowledgement never retires it. Terminal session loss
+explicitly abandons that session's unproved obligations without counting them as
+applied, and cannot permanently head-of-line block surviving recipients or later
+speech. A reconnect starts a new application-session lineage and never inherits
+old debt.
 
 `ClientChatState` is an engine-neutral bounded append-only feed. It fences
-application/generation lineage, applies duplicates idempotently, rejects gaps and
-malformed facts, and may evict the oldest already-applied presentation row. The
+application-session lineage, applies duplicates idempotently, rejects gaps and
+malformed facts, and may evict the oldest already-applied presentation row. Its
+recipient sequence remains monotonic across Game generation replacement, and
+already-applied rows survive replacement. Origin generation is presentation
+metadata: an old occurrence still reaches the feed, but its public anchor cannot
+produce overhead speech against a different resident world generation. The
 playable Godot client supplies an always-available feed, mode selector, text
 entry/focus isolation, private command/error rows, and a presentation-only
 four-second overhead label when the public actor anchor is resident.
@@ -79,7 +89,8 @@ bounds, complete-or-reject fanout, generation/world fencing, preexisting Admissi
 census, rejection/session reconciliation, fail-closed default results, and zero
 warmed allocation on ordinary speech discovery.
 
-C0.1 remote protocol, application proof, `ClientChatState`, and Godot feed/bubbles
+C0.1 remote protocol, application proof, `ClientChatState`, and Godot feed/bubbles,
+plus C0.1a occurrence-lineage, intrusive-ledger, and terminal-abandonment hardening,
 are accepted. Composition must size `MaximumParticipants`
 against the server's admitted-session capacity; the C0.0 default of 256 is an
 oracle default, not a production CCU ceiling. `MaximumRecipientsPerSpeech` remains

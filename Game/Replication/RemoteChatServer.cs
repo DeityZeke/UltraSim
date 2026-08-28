@@ -34,6 +34,7 @@ public readonly record struct RemoteChatServerLimits(
 public readonly record struct RemoteChatDeliveryServiceSnapshot(
     int RegisteredSessions,
     int PendingDeliveries,
+    int FreeDeliveryRows,
     int PendingHighWater,
     ulong AcceptedSubmissions,
     ulong DuplicateSubmissions,
@@ -44,6 +45,9 @@ public readonly record struct RemoteChatDeliveryServiceSnapshot(
     ulong DeliveryRetries,
     ulong MalformedProofs,
     ulong HandOffBackpressure,
+    ulong DeliveryRowsExamined,
+    ulong HandoffPreflights,
+    ulong TerminalAbandonments,
     long KnownArrayReservedBytes);
 
 /// <summary>
@@ -58,7 +62,11 @@ public sealed class RemoteChatDeliveryService : IDisposable
     private readonly RemoteChatServerSession?[] _sessions;
     private readonly DeliveryRow[] _deliveries;
     private readonly ParticipantId[] _recipientScratch;
+    private readonly HandoffRecipient[] _handoffRecipients;
+    private readonly TerminalRecipient[] _terminalRecipients;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private int _freeDeliveryHead;
+    private int _freeDeliveryCount;
     private int _sessionCount;
     private int _deliveryCount;
     private int _deliveryHighWater;
@@ -72,6 +80,14 @@ public sealed class RemoteChatDeliveryService : IDisposable
     private ulong _deliveryRetries;
     private ulong _malformedProofs;
     private ulong _handoffBackpressure;
+    private ulong _deliveryRowsExamined;
+    private ulong _handoffPreflights;
+    private ulong _terminalAbandonments;
+    private GameSpeechFact _handoffFact;
+    private int _handoffRecipientCount;
+    private ulong _lastObservedSpeechSequence;
+    private bool _handoffCandidateValid;
+    private bool _handoffDirty = true;
     private bool _disposed;
 
     public RemoteChatDeliveryService(
@@ -93,7 +109,12 @@ public sealed class RemoteChatDeliveryService : IDisposable
         _sessions = new RemoteChatServerSession[limits.MaximumSessions];
         _deliveries = new DeliveryRow[limits.MaximumPendingDeliveries];
         _recipientScratch = new ParticipantId[chat.Limits.MaximumRecipientsPerSpeech];
-        _runtime.GenerationPublished += HandleGenerationPublished;
+        _handoffRecipients = new HandoffRecipient[chat.Limits.MaximumRecipientsPerSpeech];
+        _terminalRecipients = new TerminalRecipient[limits.MaximumSessions];
+        for (int index = 0; index < _deliveries.Length; index++)
+            _deliveries[index].Next = index + 1 < _deliveries.Length ? index + 1 : -1;
+        _freeDeliveryHead = 0;
+        _freeDeliveryCount = _deliveries.Length;
     }
 
     public RemoteChatServerSession Register(
@@ -151,6 +172,8 @@ public sealed class RemoteChatDeliveryService : IDisposable
             admissionRegistration);
         _sessions[slot] = session;
         _sessionCount++;
+        RebindPendingRecipient(session);
+        _handoffDirty = true;
         return session;
     }
 
@@ -160,58 +183,19 @@ public sealed class RemoteChatDeliveryService : IDisposable
     public bool TryHandoffPendingSpeech()
     {
         EnsureOperational();
-        if (!_chat.TryPeekNextSpeech(out GameSpeechFact fact, out int recipientCount))
-            return true;
-        if (recipientCount > _recipientScratch.Length ||
-            !_chat.TryCopyRecipients(fact.Id, _recipientScratch, out int copied) || copied != recipientCount)
-            throw new InvalidOperationException("C0.0 changed one retained audience during remote preflight.");
-        if (_deliveryCount > _deliveries.Length - recipientCount ||
-            _nextDeliveryId == 0 || _nextDeliveryId > ulong.MaxValue - (ulong)recipientCount)
-            return HandOffBlocked();
-        for (int index = 0; index < recipientCount; index++)
-        {
-            int session = FindSession(_recipientScratch[index]);
-            if (session < 0 || _sessions[session]!.IsNonviable ||
-                CountDeliveries(_recipientScratch[index]) >= _limits.MaximumPendingDeliveriesPerSession ||
-                _sessions[session]!.NextRecipientSequence == 0)
-                return HandOffBlocked();
-        }
-        if (!TryResolvePresentation(in fact, out string displayLabel, out WorldPublicEntityId anchor))
-            return HandOffBlocked();
-        if (!_chat.TryConsumeNextSpeech(
-                _recipientScratch, out GameSpeechFact consumed, out int consumedRecipients) ||
-            consumed != fact || consumedRecipients != recipientCount)
-            throw new InvalidOperationException("C0.0 occurrence handoff was not transactional.");
-
-        for (int index = 0; index < recipientCount; index++)
-        {
-            RemoteChatServerSession session = _sessions[FindSession(_recipientScratch[index])]!;
-            AddDelivery(new DeliveryRow(
-                session,
-                _nextDeliveryId++,
-                session.TakeRecipientSequence(),
-                fact.Id.Value,
-                fact.GenerationId,
-                fact.SimulationTick,
-                RemoteChatOccurrenceKind.SpatialSpeech,
-                (byte)fact.Mode,
-                anchor,
-                displayLabel,
-                fact.Text));
-        }
-        return true;
+        _handoffDirty = true;
+        return ProgressHandoff();
     }
 
     internal bool QueuePrivate(RemoteChatServerSession session, string text, bool error)
     {
         EnsureOperational();
         if (session.IsNonviable || string.IsNullOrWhiteSpace(text) ||
-            CountDeliveries(session.Participant) >= _limits.MaximumPendingDeliveriesPerSession ||
-            _deliveryCount == _deliveries.Length || _nextDeliveryId == 0 ||
+            session.PendingDeliveryCount >= _limits.MaximumPendingDeliveriesPerSession ||
+            _freeDeliveryCount == 0 || _nextDeliveryId == 0 ||
             session.NextRecipientSequence == 0 || !TryReadGeneration(out ulong generationId))
             return false;
-        AddDelivery(new DeliveryRow(
-            session,
+        AddDelivery(session, new DeliveryRow(
             _nextDeliveryId++,
             session.TakeRecipientSequence(),
             0,
@@ -228,9 +212,11 @@ public sealed class RemoteChatDeliveryService : IDisposable
     internal bool TrySchedule(RemoteChatServerSession session, long now)
     {
         EnsureOperational();
-        _ = TryHandoffPendingSpeech();
-        int slot = FindOldestDelivery(session);
+        ObserveNewSpeech();
+        if (_handoffDirty) _ = ProgressHandoff();
+        int slot = session.DeliveryHead;
         if (slot < 0) return true;
+        SaturatingIncrement(ref _deliveryRowsExamined);
         ref DeliveryRow row = ref _deliveries[slot];
         if (row.AwaitingApplication && now - row.LastQueuedMilliseconds < _limits.ApplicationRetryMilliseconds)
             return true;
@@ -266,19 +252,20 @@ public sealed class RemoteChatDeliveryService : IDisposable
     internal bool ProcessProof(RemoteChatServerSession session, in RemoteChatAppliedMessage proof)
     {
         EnsureOperational();
-        int slot = FindDelivery(session, proof.DeliveryId);
+        int slot = session.DeliveryHead;
         if (slot < 0 || proof.ApplicationSessionEpoch != session.ApplicationSessionEpoch)
             return MalformedProof();
         ref DeliveryRow row = ref _deliveries[slot];
-        if (proof.ServerGenerationId != row.ServerGenerationId ||
+        if (proof.DeliveryId != row.DeliveryId ||
+            proof.ServerGenerationId != row.ServerGenerationId ||
             proof.RecipientSequence != row.RecipientSequence ||
             proof.Status is < RemoteChatApplyStatus.Applied or > RemoteChatApplyStatus.CapacityExceeded)
             return MalformedProof();
         if (proof.Status == RemoteChatApplyStatus.Applied)
         {
-            row = default;
-            _deliveryCount--;
+            ReleaseHead(session, abandoned: false);
             SaturatingIncrement(ref _deliveriesApplied);
+            _handoffDirty = true;
         }
         else
         {
@@ -299,18 +286,17 @@ public sealed class RemoteChatDeliveryService : IDisposable
     internal void Unregister(RemoteChatServerSession session)
     {
         EnsureOwnerThread();
-        for (int index = 0; index < _deliveries.Length; index++)
-        {
-            if (!ReferenceEquals(_deliveries[index].Session, session)) continue;
-            _deliveries[index] = default;
-            _deliveryCount--;
-        }
+        RecordTerminalRecipient(session.Participant);
+        MarkPendingRecipientTerminal(session);
+        while (session.DeliveryHead >= 0)
+            ReleaseHead(session, abandoned: true);
         for (int index = 0; index < _sessions.Length; index++)
         {
             if (!ReferenceEquals(_sessions[index], session)) continue;
             _sessions[index] = null;
             _sessionCount--;
             session.ReleaseAdmissionRegistration();
+            _handoffDirty = true;
             return;
         }
     }
@@ -321,19 +307,21 @@ public sealed class RemoteChatDeliveryService : IDisposable
         long bytes = checked(
             (long)_sessions.Length * IntPtr.Size +
             (long)_deliveries.Length * Unsafe.SizeOf<DeliveryRow>() +
-            (long)_recipientScratch.Length * Unsafe.SizeOf<ParticipantId>());
+            (long)_recipientScratch.Length * Unsafe.SizeOf<ParticipantId>() +
+            (long)_handoffRecipients.Length * Unsafe.SizeOf<HandoffRecipient>() +
+            (long)_terminalRecipients.Length * Unsafe.SizeOf<TerminalRecipient>());
         return new RemoteChatDeliveryServiceSnapshot(
-            _sessionCount, _deliveryCount, _deliveryHighWater,
+            _sessionCount, _deliveryCount, _freeDeliveryCount, _deliveryHighWater,
             _acceptedSubmissions, _duplicateSubmissions, _rejectedSubmissions, _rateRejections,
             _deliveriesQueued, _deliveriesApplied, _deliveryRetries, _malformedProofs,
-            _handoffBackpressure, bytes);
+            _handoffBackpressure, _deliveryRowsExamined, _handoffPreflights,
+            _terminalAbandonments, bytes);
     }
 
     public void Dispose()
     {
         EnsureOwnerThread();
         if (_disposed) return;
-        _runtime.GenerationPublished -= HandleGenerationPublished;
         _disposed = true;
         for (int index = 0; index < _sessions.Length; index++)
             _sessions[index]?.DetachFromService();
@@ -341,57 +329,145 @@ public sealed class RemoteChatDeliveryService : IDisposable
         Array.Clear(_deliveries);
         _sessionCount = 0;
         _deliveryCount = 0;
-    }
-
-    private bool TryResolvePresentation(
-        in GameSpeechFact fact,
-        out string displayLabel,
-        out WorldPublicEntityId anchor)
-    {
-        GameSpeechFact staged = fact;
-        PresentationResolution resolution = default;
-        bool ran = _runtime.TryUseActiveGeneration<IGameGenerationStateProvider, PresentationResolution>(
-            (world, generationId, game) =>
-            {
-                if (generationId != staged.GenerationId || !world.IsAlive(staged.SpeakerEntity))
-                    return default;
-                string label = $"Player {staged.Speaker.Value}";
-                if (_chat.TryGetEnteredParticipant(staged.Speaker, out AdmissionResult entered) &&
-                    entered.GenerationId == generationId && entered.CharacterId.IsValid &&
-                    game.Accounting.TryGetCharacter(entered.CharacterId, out var character))
-                    label = character.DisplayName;
-                _ = game.WorldState.Publications.TryGetPublicEntityId(staged.SpeakerEntity, out WorldPublicEntityId id);
-                return new PresentationResolution(label, id, true);
-            }, out resolution);
-        displayLabel = resolution.Label ?? string.Empty;
-        anchor = resolution.Anchor;
-        return ran && resolution.Valid;
+        _freeDeliveryCount = 0;
     }
 
     private bool TryReadGeneration(out ulong generationId) =>
         _runtime.TryUseActiveGeneration(static (_, generation) => generation, out generationId) &&
         generationId != 0;
 
-    private void HandleGenerationPublished(ulong generationId)
+    private void ObserveNewSpeech()
     {
-        if (_disposed) return;
-        Array.Clear(_deliveries);
-        _deliveryCount = 0;
-        for (int index = 0; index < _sessions.Length; index++)
-            _sessions[index]?.ResetDeliveryLineage();
+        ulong latest = _chat.LatestAcceptedSpeechSequence;
+        if (latest == _lastObservedSpeechSequence) return;
+        _lastObservedSpeechSequence = latest;
+        _handoffDirty = true;
     }
 
-    private void AddDelivery(in DeliveryRow row)
+    private bool ProgressHandoff()
     {
-        for (int index = 0; index < _deliveries.Length; index++)
+        ObserveNewSpeech();
+        while (_handoffDirty)
         {
-            if (_deliveries[index].DeliveryId != 0) continue;
-            _deliveries[index] = row;
-            _deliveryCount++;
-            _deliveryHighWater = Math.Max(_deliveryHighWater, _deliveryCount);
-            return;
+            _handoffDirty = false;
+            if (!EnsureHandoffCandidate()) return true;
+
+            int liveRecipients = 0;
+            for (int index = 0; index < _handoffRecipientCount; index++)
+            {
+                ref HandoffRecipient recipient = ref _handoffRecipients[index];
+                if (recipient.Terminal) continue;
+                if (recipient.Session is null)
+                    recipient.Session = TryFindSession(recipient.Participant);
+                if (recipient.Session is null || recipient.Session.IsNonviable ||
+                    recipient.Session.PendingDeliveryCount >=
+                        _limits.MaximumPendingDeliveriesPerSession ||
+                    recipient.Session.NextRecipientSequence == 0)
+                    return HandOffBlocked();
+                liveRecipients++;
+            }
+            if (_freeDeliveryCount < liveRecipients || _nextDeliveryId == 0 ||
+                _nextDeliveryId > ulong.MaxValue - (ulong)liveRecipients)
+                return HandOffBlocked();
+
+            if (!_chat.TryConsumeNextSpeech(
+                    _recipientScratch, out GameSpeechFact consumed, out int consumedRecipients) ||
+                consumed != _handoffFact || consumedRecipients != _handoffRecipientCount)
+                throw new InvalidOperationException("C0.0 occurrence handoff was not transactional.");
+
+            for (int index = 0; index < _handoffRecipientCount; index++)
+            {
+                ref HandoffRecipient recipient = ref _handoffRecipients[index];
+                if (recipient.Terminal) continue;
+                RemoteChatServerSession session = recipient.Session ??
+                    throw new InvalidOperationException("A preflighted Chat recipient lost its session.");
+                AddDelivery(session, new DeliveryRow(
+                    _nextDeliveryId++,
+                    session.TakeRecipientSequence(),
+                    consumed.Id.Value,
+                    consumed.GenerationId,
+                    consumed.SimulationTick,
+                    RemoteChatOccurrenceKind.SpatialSpeech,
+                    (byte)consumed.Mode,
+                    consumed.PublicAnchor,
+                    consumed.DisplayLabel,
+                    consumed.Text));
+            }
+            ClearTerminalRecipientsThrough(consumed.Id.Value);
+            ClearHandoffCandidate();
+            _handoffDirty = true;
         }
-        throw new InvalidOperationException("A preflighted Chat delivery slot disappeared.");
+        return false;
+    }
+
+    private bool EnsureHandoffCandidate()
+    {
+        if (_handoffCandidateValid) return true;
+        if (!_chat.TryPeekNextSpeech(out GameSpeechFact fact, out int recipientCount))
+            return false;
+        if (recipientCount > _handoffRecipients.Length ||
+            !_chat.TryCopyRecipients(fact.Id, _recipientScratch, out int copied) ||
+            copied != recipientCount)
+            throw new InvalidOperationException("C0.0 changed one retained audience during remote preflight.");
+        SaturatingIncrement(ref _handoffPreflights);
+        _handoffFact = fact;
+        _handoffRecipientCount = recipientCount;
+        _handoffCandidateValid = true;
+        for (int index = 0; index < recipientCount; index++)
+        {
+            ParticipantId participant = _recipientScratch[index];
+            bool terminal = IsTerminalFor(participant, fact.Id.Value);
+            _handoffRecipients[index] = new HandoffRecipient(
+                participant,
+                terminal ? null : TryFindSession(participant),
+                terminal);
+            if (terminal) SaturatingIncrement(ref _terminalAbandonments);
+        }
+        return true;
+    }
+
+    private void ClearHandoffCandidate()
+    {
+        _handoffRecipients.AsSpan(0, _handoffRecipientCount).Clear();
+        _handoffFact = default;
+        _handoffRecipientCount = 0;
+        _handoffCandidateValid = false;
+    }
+
+    private void AddDelivery(RemoteChatServerSession session, in DeliveryRow row)
+    {
+        if (_freeDeliveryHead < 0)
+            throw new InvalidOperationException("A preflighted Chat delivery slot disappeared.");
+        int slot = _freeDeliveryHead;
+        _freeDeliveryHead = _deliveries[slot].Next;
+        _freeDeliveryCount--;
+        _deliveries[slot] = row;
+        _deliveries[slot].Next = -1;
+        if (session.DeliveryTail < 0)
+            session.DeliveryHead = slot;
+        else
+            _deliveries[session.DeliveryTail].Next = slot;
+        session.DeliveryTail = slot;
+        session.PendingDeliveryCount++;
+        _deliveryCount++;
+        _deliveryHighWater = Math.Max(_deliveryHighWater, _deliveryCount);
+    }
+
+    private void ReleaseHead(RemoteChatServerSession session, bool abandoned)
+    {
+        int slot = session.DeliveryHead;
+        if (slot < 0)
+            throw new InvalidOperationException("Chat attempted to release an empty session FIFO.");
+        int next = _deliveries[slot].Next;
+        session.DeliveryHead = next;
+        if (next < 0) session.DeliveryTail = -1;
+        session.PendingDeliveryCount--;
+        _deliveries[slot] = default;
+        _deliveries[slot].Next = _freeDeliveryHead;
+        _freeDeliveryHead = slot;
+        _freeDeliveryCount++;
+        _deliveryCount--;
+        if (abandoned) SaturatingIncrement(ref _terminalAbandonments);
     }
 
     private int FindSession(ParticipantId participant)
@@ -408,34 +484,74 @@ public sealed class RemoteChatDeliveryService : IDisposable
         return -1;
     }
 
-    private int CountDeliveries(ParticipantId participant)
+    private RemoteChatServerSession? TryFindSession(ParticipantId participant)
     {
-        int count = 0;
-        for (int index = 0; index < _deliveries.Length; index++)
-            if (_deliveries[index].Session?.Participant == participant) count++;
-        return count;
+        int session = FindSession(participant);
+        return session < 0 ? null : _sessions[session];
     }
 
-    private int FindOldestDelivery(RemoteChatServerSession session)
+    private void RebindPendingRecipient(RemoteChatServerSession session)
     {
-        int best = -1;
-        ulong sequence = ulong.MaxValue;
-        for (int index = 0; index < _deliveries.Length; index++)
+        if (!_handoffCandidateValid) return;
+        for (int index = 0; index < _handoffRecipientCount; index++)
         {
-            ref readonly DeliveryRow row = ref _deliveries[index];
-            if (!ReferenceEquals(row.Session, session) || row.RecipientSequence >= sequence) continue;
-            best = index;
-            sequence = row.RecipientSequence;
+            ref HandoffRecipient recipient = ref _handoffRecipients[index];
+            if (recipient.Participant == session.Participant && !recipient.Terminal &&
+                recipient.Session is null)
+                recipient.Session = session;
         }
-        return best;
     }
 
-    private int FindDelivery(RemoteChatServerSession session, ulong deliveryId)
+    private void MarkPendingRecipientTerminal(RemoteChatServerSession session)
     {
-        for (int index = 0; index < _deliveries.Length; index++)
-            if (_deliveries[index].DeliveryId == deliveryId &&
-                ReferenceEquals(_deliveries[index].Session, session)) return index;
-        return -1;
+        if (!_handoffCandidateValid) return;
+        for (int index = 0; index < _handoffRecipientCount; index++)
+        {
+            ref HandoffRecipient recipient = ref _handoffRecipients[index];
+            if (!ReferenceEquals(recipient.Session, session) || recipient.Terminal) continue;
+            recipient.Session = null;
+            recipient.Terminal = true;
+            SaturatingIncrement(ref _terminalAbandonments);
+        }
+    }
+
+    private void RecordTerminalRecipient(ParticipantId participant)
+    {
+        if (!_chat.TryPeekNextSpeech(out _, out _))
+            return;
+        ulong through = _chat.LatestAcceptedSpeechSequence;
+        for (int index = 0; index < _terminalRecipients.Length; index++)
+        {
+            ref TerminalRecipient entry = ref _terminalRecipients[index];
+            if (entry.Participant == participant)
+            {
+                entry.ThroughSpeechFactId = Math.Max(entry.ThroughSpeechFactId, through);
+                return;
+            }
+            if (entry.Participant.IsValid) continue;
+            entry = new TerminalRecipient(participant, through);
+            return;
+        }
+        throw new InvalidOperationException("The bounded Chat terminal-recipient table is full.");
+    }
+
+    private bool IsTerminalFor(ParticipantId participant, ulong speechFactId)
+    {
+        for (int index = 0; index < _terminalRecipients.Length; index++)
+        {
+            ref readonly TerminalRecipient entry = ref _terminalRecipients[index];
+            if (entry.Participant == participant)
+                return speechFactId <= entry.ThroughSpeechFactId;
+        }
+        return false;
+    }
+
+    private void ClearTerminalRecipientsThrough(ulong speechFactId)
+    {
+        for (int index = 0; index < _terminalRecipients.Length; index++)
+            if (_terminalRecipients[index].Participant.IsValid &&
+                _terminalRecipients[index].ThroughSpeechFactId <= speechFactId)
+                _terminalRecipients[index] = default;
     }
 
     private bool HandOffBlocked()
@@ -467,13 +583,29 @@ public sealed class RemoteChatDeliveryService : IDisposable
         if (value != ulong.MaxValue) value++;
     }
 
-    private readonly record struct PresentationResolution(
-        string? Label, WorldPublicEntityId Anchor, bool Valid);
+    private struct HandoffRecipient
+    {
+        internal HandoffRecipient(
+            ParticipantId participant,
+            RemoteChatServerSession? session,
+            bool terminal) =>
+            (Participant, Session, Terminal) = (participant, session, terminal);
+        internal ParticipantId Participant;
+        internal RemoteChatServerSession? Session;
+        internal bool Terminal;
+    }
+
+    private struct TerminalRecipient
+    {
+        internal TerminalRecipient(ParticipantId participant, ulong throughSpeechFactId) =>
+            (Participant, ThroughSpeechFactId) = (participant, throughSpeechFactId);
+        internal ParticipantId Participant;
+        internal ulong ThroughSpeechFactId;
+    }
 
     private struct DeliveryRow
     {
         internal DeliveryRow(
-            RemoteChatServerSession session,
             ulong deliveryId,
             ulong recipientSequence,
             ulong speechFactId,
@@ -485,7 +617,6 @@ public sealed class RemoteChatDeliveryService : IDisposable
             string displayLabel,
             string text)
         {
-            Session = session;
             DeliveryId = deliveryId;
             RecipientSequence = recipientSequence;
             SpeechFactId = speechFactId;
@@ -496,8 +627,8 @@ public sealed class RemoteChatDeliveryService : IDisposable
             PublicAnchor = publicAnchor;
             DisplayLabel = displayLabel;
             Text = text;
+            Next = -1;
         }
-        internal RemoteChatServerSession? Session;
         internal ulong DeliveryId;
         internal ulong RecipientSequence;
         internal ulong SpeechFactId;
@@ -510,6 +641,7 @@ public sealed class RemoteChatDeliveryService : IDisposable
         internal string Text;
         internal long LastQueuedMilliseconds;
         internal bool AwaitingApplication;
+        internal int Next;
     }
 }
 
@@ -554,6 +686,9 @@ public sealed class RemoteChatServerSession : IRemoteGameProtocolHandler, IRemot
     internal byte[] MessageScratch { get; }
     internal ulong NextRecipientSequence => _nextRecipientSequence;
     internal bool IsNonviable => _nonviable;
+    internal int DeliveryHead { get; set; } = -1;
+    internal int DeliveryTail { get; set; } = -1;
+    internal int PendingDeliveryCount { get; set; }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
@@ -597,12 +732,6 @@ public sealed class RemoteChatServerSession : IRemoteGameProtocolHandler, IRemot
         ulong value = _nextRecipientSequence;
         _nextRecipientSequence = value == ulong.MaxValue ? 0 : value + 1;
         return value;
-    }
-
-    internal void ResetDeliveryLineage()
-    {
-        _nextRecipientSequence = 1;
-        _nonviable = false;
     }
 
     internal void MarkNonviable() => _nonviable = true;

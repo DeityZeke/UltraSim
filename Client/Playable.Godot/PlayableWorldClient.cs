@@ -90,6 +90,7 @@ public partial class PlayableWorldClient : Node3D
     private ProtocolLoopback? _chatLoopback;
     private ulong _chatAppliedPresentationCount;
     private WorldPublicEntityId _overheadAnchor;
+    private ulong _overheadOriginGenerationId;
     private ulong _overheadExpiresAtMilliseconds;
 
     public override void _Ready()
@@ -1210,11 +1211,18 @@ public partial class PlayableWorldClient : Node3D
             if (count != 0)
             {
                 ClientChatOccurrence newest = _chatRows[count - 1];
-                if (newest.IsSpatial && newest.PublicAnchor.IsValid)
+                ulong residentGenerationId = ReadActiveGenerationId();
+                if (newest.CanPresentOverhead(residentGenerationId))
                 {
                     _overheadAnchor = newest.PublicAnchor;
+                    _overheadOriginGenerationId = newest.ServerGenerationId;
                     _overheadExpiresAtMilliseconds = checked(Time.GetTicksMsec() + 4_000);
                     if (_overheadSpeech is not null) _overheadSpeech.Text = newest.Text;
+                }
+                else if (newest.IsSpatial)
+                {
+                    _overheadAnchor = default;
+                    _overheadOriginGenerationId = 0;
                 }
             }
             _chatAppliedPresentationCount = snapshot.Applied;
@@ -1222,6 +1230,7 @@ public partial class PlayableWorldClient : Node3D
 
         if (_overheadSpeech is null || _camera is null || _cache is null ||
             !_overheadAnchor.IsValid || Time.GetTicksMsec() >= _overheadExpiresAtMilliseconds ||
+            _overheadOriginGenerationId != ReadActiveGenerationId() ||
             !TryFindPublicAnchor(_overheadAnchor, out WorldPosition position))
         {
             if (_overheadSpeech is not null) _overheadSpeech.Visible = false;
@@ -1239,6 +1248,14 @@ public partial class PlayableWorldClient : Node3D
         Vector2 screen = _camera.UnprojectPosition(world);
         _overheadSpeech.Position = screen - new Vector2(_overheadSpeech.Size.X * 0.5f, 24);
         _overheadSpeech.Visible = true;
+    }
+
+    private ulong ReadActiveGenerationId()
+    {
+        if (_runtime is null || !_runtime.Game.TryUseActiveGeneration(
+                static (_, generationId) => generationId, out ulong generationId))
+            return 0;
+        return generationId;
     }
 
     private bool TryFindPublicAnchor(WorldPublicEntityId id, out WorldPosition position)

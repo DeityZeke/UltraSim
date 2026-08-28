@@ -1,10 +1,10 @@
 # UltraSim Chat + Commands
 
-**Status:** C0.0 + C0.0a + C0.1 accepted; C0.2+ stopped forward context
+**Status:** C0.0 + C0.0a + C0.1 + C0.1a accepted; C0.2+ stopped forward context
 
 **Prepared after:** Inventory I0.11 (`305e40f4`)
 
-**Accepted checkpoint:** C0.1 — authenticated remote speech + command consumer vertical
+**Accepted checkpoint:** C0.1a — occurrence lineage and bounded delivery-work closure
 
 This document preserves the intended Chat/Commands semantics before implementation pressure causes speech, channels, commands, Network delivery, and presentation to be collapsed into one subsystem.
 
@@ -35,7 +35,7 @@ They may share input parsing and presentation surfaces where useful, but they do
 # 1. Archaeology and lessons
 
 The active V3 implementation contains the packet-free C0.0 Chat oracle and the
-C0.1 authenticated remote/Game/client/Godot consumer vertical. Routed channels,
+C0.1/C0.1a authenticated remote/Game/client/Godot consumer vertical. Routed channels,
 moderation, history, social policy, and privileged-command extensibility remain
 forward context only.
 Relevant historical references for the deliberately deferred work are:
@@ -770,7 +770,7 @@ loss/dup/reorder converges
 lost application proof recovers without inventing another occurrence
 client apply failure does not advance server knowledge
 reconnect does not trust client-local sequence identity
-generation replacement fences old speaker/public lineage
+generation replacement preserves accepted occurrence/proof lineage while fencing old public presentation anchors
 overhead presentation absence does not erase feed fact
 command output is private to caller
 speech goes only to exact authoritative audience
@@ -784,6 +784,37 @@ duplicate submission fencing, independent recipient proof, complete-audience
 capacity failure, bounded rate rejection before a second speech, authority-
 generation fencing, deterministic loss/duplication/reordering convergence, bounded
 client feed semantics, and the playable Godot feed/public-anchor smoke path.
+
+## C0.1a — occurrence lineage and delivery-work closure — ACCEPTED
+
+C0.1a freezes Chat occurrence lifetime independently from Game world-generation
+lifetime. At authoritative acceptance a spatial speech fact captures its canonical
+server-derived display label, optional public presentation anchor, and origin
+generation. Generation replacement does not erase accepted C0.0 facts, handed-off
+recipient debt, recipient sequence, or already-applied bounded client feed rows.
+An old-generation fact still applies and is proved; its anchor is presentation-only
+and produces feed-only fallback when it is incompatible with the resident public
+world generation.
+
+The bounded remote delivery store is a fixed `DeliveryRow[]` with an O(1) free
+list. Each application session owns an intrusive FIFO head, tail, and pending count.
+Allocation, append, oldest lookup, ordinary proof retirement, and idle discovery
+are O(1); session retirement is O(that session's bounded pending debt). Normal
+proof validation is against the exact FIFO head and never searches the global
+delivery capacity.
+
+Complete-audience atomicity remains in force for live recipients. A terminally
+ended application session explicitly abandons its pending or not-yet-handed-off
+obligations without reporting them Applied. Generation-fenced terminal cutoffs
+prevent reconnects from inheriting that obsolete delivery lineage, while surviving
+recipients can receive the original fact and the global C0.0 FIFO continues.
+Diagnostics separately count terminal abandonment, delivery rows examined, and
+complete handoff preflights.
+
+Default-capacity evidence uses 256 sessions and 16,384 global delivery rows. One
+idle progression round examines zero delivery rows; one active session among the
+idle population examines exactly its one FIFO head. The known fixed-array
+reservation for that configuration is 1,325,056 bytes.
 
 ---
 
@@ -931,6 +962,11 @@ C0.1
     authenticated remote speech/command vertical
     bounded Client Core state
     real Godot feed + overhead speech
+
+C0.1a
+    occurrence lifetime independent from Game generation
+    O(1) session delivery queues over bounded global storage
+    explicit terminal-session abandonment
 
 then, if no gameplay pressure requires channels/moderation immediately:
     STOP

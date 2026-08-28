@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Game.Admission;
+using UltraSim.Game.World;
 
 namespace UltraSim.Game.Chat;
 
@@ -103,11 +104,13 @@ public readonly record struct GameSpeechFact(
     ParticipantId Speaker,
     Entity SpeakerEntity,
     GameSpeechMode Mode,
-    string Text)
+    string Text,
+    string DisplayLabel,
+    WorldPublicEntityId PublicAnchor)
 {
     public bool IsValid => Id.IsValid && GenerationId != 0 && Speaker.IsValid &&
         SpeakerEntity.IsValid && Mode is >= GameSpeechMode.Whisper and <= GameSpeechMode.Yell &&
-        !string.IsNullOrWhiteSpace(Text);
+        !string.IsNullOrWhiteSpace(Text) && !string.IsNullOrWhiteSpace(DisplayLabel);
 }
 
 /// <summary>Expected semantic outcome of one trusted packet-free text submission.</summary>
