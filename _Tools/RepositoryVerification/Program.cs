@@ -176,11 +176,14 @@ static void VerifyArchitecture(string root)
         ],
         ["Game/World/UltraSim.Game.World.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj", "Kernels/Spatial/UltraSim.Spatial.csproj"],
+        ["Game/Physics/UltraSim.Game.Physics.csproj"] =
+            ["Game/World/UltraSim.Game.World.csproj"],
         ["Game/Composition/UltraSim.Game.Composition.csproj"] =
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Inventory/UltraSim.Game.Inventory.csproj",
+            "Game/Physics/UltraSim.Game.Physics.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj",
             "Kernels/ECS/UltraSim.ECS.csproj",
@@ -278,6 +281,7 @@ static void VerifyDocumentation(string root)
         "Docs/GAME.md",
         "Docs/Plans/NETWORK.md",
         "Docs/Plans/CHAT.md",
+        "Docs/Plans/PHYSICS.md",
         "Docs/Plans/TERRAIN.md",
         "Kernels/ECS/README.md",
         "Kernels/ECS/EXECUTION.md",
@@ -293,6 +297,7 @@ static void VerifyDocumentation(string root)
         "Client/Playable.Godot/README.md",
         "Game/World/README.md",
         "Game/Chat/README.md",
+        "Game/Physics/README.md",
         "Game/Replication/README.md",
         "_Benchmarks/README.md",
         "_Benchmarks/Baselines/README.md",
@@ -315,10 +320,12 @@ static void VerifyDocumentation(string root)
         ["Docs/README.md"] =
         [
             "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
-            "Docs/Plans/CHAT.md", "Docs/Plans/NETWORK.md", "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
+            "Docs/Plans/CHAT.md", "Docs/Plans/NETWORK.md", "Docs/Plans/PHYSICS.md",
+            "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
             "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
-            "Game/Chat/README.md", "Game/Replication/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
+            "Game/Chat/README.md", "Game/Physics/README.md", "Game/Replication/README.md",
+            "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =
         [

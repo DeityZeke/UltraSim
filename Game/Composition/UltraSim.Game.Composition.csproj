@@ -18,6 +18,7 @@
     <ProjectReference Include="../Accounting/UltraSim.Game.Accounting.csproj" />
     <ProjectReference Include="../Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../Inventory/UltraSim.Game.Inventory.csproj" />
+    <ProjectReference Include="../Physics/UltraSim.Game.Physics.csproj" />
     <ProjectReference Include="../World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
   </ItemGroup>

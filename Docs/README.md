@@ -29,6 +29,10 @@ acceptance narratives remain available through git history.
   command interception, exact hearing, and retained occurrence semantics.
 - [Chat plan/status](Plans/CHAT.md) — accepted C0.0 contracts and the deliberately
   deferred remote, routed-channel, moderation, and extensibility checkpoints.
+- [UltraSim Simple Physics](../Game/Physics/README.md) — the concrete generation-owned
+  P0.0 endpoint resolver and its deliberately narrow current behavior.
+- [Physics plan/status](Plans/PHYSICS.md) — accepted P0.0 ownership extraction plus
+  explicitly unstarted sweep, support/step, occupancy, and provider canaries.
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   five concrete dynamic-public profiles, selected `ChunkPublication` semantics,
   P0.4 conservative selection, and the real public-actor consumer vertical.
@@ -127,6 +131,8 @@ consumer/deployment need earns them.
   dedicated lifecycle plus explicit deployment gates still unclaimed.
 - [Chat C0](Plans/CHAT.md) records accepted packet-free C0.0 semantics and the
   stopped C0.1+ remote/presentation/channel work.
+- [Physics P0](Plans/PHYSICS.md) records the P0.0 Simple Physics extraction and
+  the stopped P0.1+ behavior/provider work.
 
 ## Source-of-truth hierarchy
 

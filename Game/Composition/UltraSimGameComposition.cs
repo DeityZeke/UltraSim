@@ -3,6 +3,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Physics;
 using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
 
@@ -88,14 +89,15 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         GameContent content = CompileContent(generation.World);
         (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
             PrepareSimulation(generation.World, _runtimeProfile);
+        GameWorldState worldState = CreateWorldState(generation.World, content);
         generation.SetGameState(new GameGenerationState(
             new AccountingStore(),
             new InventoryGenerationState(generation.World, content, _inventoryLimits),
             content,
-            CreateWorldState(generation.World, content),
+            worldState,
             simulation,
             replication,
-            new GameWorldActions(generation.World)));
+            CreateWorldActions(generation.World, worldState)));
     }
 
     public GameStaging CreateStaging(
@@ -111,12 +113,13 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             GameContent content = CompileContent(world);
             (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
                 PrepareSimulation(world, _runtimeProfile);
+            var worldState = new GameWorldState(world);
             return new GameStaging(
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                new GameWorldState(world),
-                new GameWorldActions(world),
+                worldState,
+                CreateWorldActions(world, worldState),
                 simulation,
                 replication);
         }
@@ -138,12 +141,13 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             GameContent content = CompileContent(world);
             (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
                 PrepareSimulation(world, _runtimeProfile);
+            GameWorldState worldState = CreateWorldState(world, content);
             return new GameStaging(
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                CreateWorldState(world, content),
-                new GameWorldActions(world),
+                worldState,
+                CreateWorldActions(world, worldState),
                 simulation,
                 replication);
         }
@@ -229,6 +233,15 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
             !_baseWorldPack.TryBind(content.World, out bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"WorldPack could not bind to compiled game content: {error}.");
         return new GameWorldState(world, bound);
+    }
+
+    private static GameWorldActions CreateWorldActions(
+        EcsWorld world,
+        GameWorldState worldState)
+    {
+        var projection = new GamePlayableCollisionProjection(world);
+        var physics = new UltraSimSimplePhysics(worldState);
+        return new GameWorldActions(world, physics, projection);
     }
 
     private static (ComponentLookup<GameSimulationState>, GameReplicationBindings?) PrepareSimulation(

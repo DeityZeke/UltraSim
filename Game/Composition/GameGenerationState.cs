@@ -1,6 +1,7 @@
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Physics;
 using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
 
@@ -16,6 +17,8 @@ public interface IGameGenerationStateProvider :
     GameWorldState WorldState { get; }
 
     GameWorldActions WorldActions { get; }
+
+    UltraSimSimplePhysics SimplePhysics { get; }
 
     bool TryReadSimulationState(
         EcsWorld world,
@@ -64,6 +67,9 @@ public sealed class GameGenerationState :
     public GameWorldState WorldState { get; }
     public GameWorldActions WorldActions => _worldActions ??
         throw new InvalidOperationException("World actions are unavailable before generation initialization.");
+
+    /// <summary>Concrete generation-owned authoritative P0.0 endpoint resolver.</summary>
+    public UltraSimSimplePhysics SimplePhysics => WorldActions.SimplePhysics;
 
     /// <summary>Gets generation-bound replication capabilities when the network profile was selected.</summary>
     public GameReplicationBindings? Replication { get; }

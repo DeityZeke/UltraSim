@@ -144,6 +144,13 @@ must define what reduced/dormant operation means and how it reconciles elapsed
 authoritative world time before it earns an implementation. Arbitrary scheduler
 tick skipping is not a simulation model.
 
+Physics P0.0 extracts the accepted T0.10 endpoint collision from `GameWorldActions` into the
+generation-owned concrete [`UltraSimSimplePhysics`](../Game/Physics/README.md) capability.
+Locomotion still owns Direct/Destination interpretation and Game still commits `WorldPosition`.
+The playable composition separately projects cabin-door/chest state into effective blocking bounds,
+so Simple Physics depends on prepared World truth rather than gameplay prefab/state meaning. P0.0
+adds no sweep, support/step, relocation occupancy, native provider, or general physics API.
+
 Temporal work likewise belongs to its domain. The authoritative facts may name
 an effective/due world time, while a reconstructible index identifies what is
 ready for service. Processing time, semantic due time, expiry, and preferred

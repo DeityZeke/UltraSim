@@ -10,6 +10,7 @@ using UltraSim.Game.Composition;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.Input;
 using UltraSim.Game.Persistence;
+using UltraSim.Game.Physics;
 using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Server.Hosting;
@@ -25,15 +26,18 @@ var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
+Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
 Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
 Run("PlayableDestinationProgressIsCadenceIndependent", PlayableDestinationProgressCadenceMatrix, results);
 Run("LocomotionUpdatesComposeAndSupersede", LocomotionUpdateSemantics, results);
 Run("AuthoritativeRelocationCancelsOperationalLocomotion", AuthoritativeRelocationCancelsLocomotion, results);
+Run("AuthoritativeRelocationPreservesTerrainOnlyOccupancy", OccupiedRelocationRemainsAccepted, results);
 Run("IndependentMoveLookKeepsWorldMovementAndFacingSeparate", IndependentMoveLookKeepsWorldMovementAndFacingSeparate, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
+Run("DynamicCollisionProjectionCapacityFailsClosed", DynamicCollisionProjectionCapacityFailsClosed, results);
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
 Run("AccountlessAdmissionAndPersistence", AccountlessRoundTrip, results);
 Run("AuthoritativeClockRoundTripsAcrossHostCadences", AuthoritativeClockRoundTripsAcrossHostCadences, results);
@@ -578,6 +582,115 @@ static TestMetrics PlayableAuthorityBlocksCabinDoorWallsAndChest()
     }
 }
 
+static TestMetrics SimplePhysicsGenerationReplacement()
+{
+    const ulong persistentWorld = 0x80_1075;
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(persistentWorld))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, UltraSimSimplePhysics>(
+            (_, _, game) => game.SimplePhysics,
+            out UltraSimSimplePhysics? initialPhysics),
+        "The initial generation had no Simple Physics capability.");
+    Expect(!typeof(UltraSimSimplePhysics).Assembly.GetReferencedAssemblies().Any(
+            static assembly => assembly.Name == "UltraSim.Game.Composition"),
+        "The Simple Physics project depends on playable Game composition meaning.");
+
+    GameStaging staging = composition.CreateFresh(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(persistentWorld)));
+    ComponentLookup<GameCabinDoorState> doorLookup =
+        staging.World.PrepareLookup<GameCabinDoorState>();
+    GameGenerationState? candidate = null;
+    bool published = false;
+    PersistentEntityId playerId = default;
+    try
+    {
+        staging.World.Seal();
+        staging.World.Initialize();
+        staging.World.BeginRun();
+        Entity player = Entity.Null;
+        Entity door = Entity.Null;
+        Expect(WorldPosition.TryFromGlobalMillimeters(
+                16_000, 1_000, 8_500, out WorldPosition playerStart) &&
+            staging.World.TryInstantiate(staging.Content.Character, out player) &&
+            staging.WorldState.TrySetPosition(staging.World, player, playerStart) &&
+            staging.World.TryInstantiate(staging.Content.CabinDoor, out door) &&
+            staging.WorldState.TrySetPosition(
+                staging.World, door, GamePlayableWorld.DoorPosition) &&
+            staging.World.TryWrite(
+                door, doorLookup, new GameCabinDoorState { IsOpen = 1 }) &&
+            staging.WorldState.TryReadPublic(
+                staging.World, door, out WorldPublicDescriptor doorPublic) &&
+            staging.WorldState.TrySetPublic(
+                staging.World,
+                door,
+                doorPublic with { Orientation = WorldYaw.QuarterTurn }),
+            "The replacement generation's canonical open-door state could not be prepared.");
+        playerId = staging.World.GetOrAssignPersistentId(player);
+
+        candidate = new GameGenerationState(
+            new AccountingStore(),
+            staging.Inventory,
+            staging.Content,
+            staging.WorldState,
+            staging.SimulationLookup,
+            staging.Replication,
+            staging.WorldActions);
+        Expect(runtime.Game.TryPublishPreparedGeneration(
+                staging.World, candidate, out _),
+            "The open-door replacement generation could not publish.");
+        published = true;
+        candidate = null;
+    }
+    finally
+    {
+        if (!published)
+        {
+            candidate?.Dispose();
+            staging.World.Dispose();
+        }
+    }
+
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, UltraSimSimplePhysics>(
+            (_, _, game) => game.SimplePhysics,
+            out UltraSimSimplePhysics? replacementPhysics) &&
+        !ReferenceEquals(initialPhysics, replacementPhysics),
+        "Generation replacement reused the prior Simple Physics capability.");
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, playerId, input.ControlSession);
+    Expect(input.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(
+                    0, GamePlayerCommand.MaximumAxisMagnitude),
+                GamePlayerActions.None,
+                true),
+            out GamePlayerCommand direct) &&
+        link.ApplyCommand(direct).Locomotion == GameWorldActionStatus.Accepted,
+        "The replacement generation could not retain northward Direct motion.");
+    for (int step = 0; step < 8; step++)
+        host.Tick();
+    WorldPosition throughOpenDoor = link.ReadPosition();
+    Expect(throughOpenDoor.GlobalZMillimeters > 9_100,
+        $"The rebuilt open-door projection remained physically blocking: {throughOpenDoor}.");
+
+    return new TestMetrics(
+        HashText($"{initialPhysics!.ReservedBytes}:{replacementPhysics!.ReservedBytes}:" +
+            throughOpenDoor),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "A replacement generation owns fresh Simple Physics/projection state rebuilt from canonical open-door ECS truth; the Physics project has no Composition dependency.",
+        InputCommands: input.Snapshot().CommandsProduced);
+}
+
 static TestMetrics PlayableMovementCadenceMatrix()
 {
     int[] frequencies = [20, 60, 120];
@@ -1089,6 +1202,49 @@ static TestMetrics AuthoritativeRelocationCancelsLocomotion()
     }
 }
 
+static TestMetrics OccupiedRelocationRemainsAccepted()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1375))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x1375));
+    Expect(entered.IsEntered, "The occupied-relocation actor could not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The occupied-relocation fixture could not populate.");
+    host.Tick();
+
+    WorldPosition requested = GamePlayableWorld.ChestPosition;
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolveInWorld(world, entities.PlayerId);
+                GameWorldActionStatus status = game.WorldActions.RelocateActor(
+                    world, game.WorldState, actor, requested, out WorldPosition relocated);
+                Expect(status == GameWorldActionStatus.Accepted,
+                    $"P0.0 made occupied relocation stricter: {status}.");
+                return relocated;
+            }, out WorldPosition relocated) &&
+        relocated == GamePlayableWorld.ChestPosition,
+        "Terrain-only relocation did not preserve the occupied chest endpoint.");
+    host.Tick();
+    Expect(ReadWorldPosition(runtime.Game, entities.PlayerId) == relocated,
+        "The occupied relocation did not remain canonical after the next step.");
+
+    return new TestMetrics(
+        HashText(relocated.ToString()),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "P0.0 deliberately preserves terrain-valid relocation into an occupied chest endpoint; first-class relocation occupancy remains P0.1.");
+}
+
 static TestMetrics IndependentMoveLookKeepsWorldMovementAndFacingSeparate()
 {
     WorldPack pack = GamePlayableWorld.CreateWorldPack();
@@ -1221,6 +1377,65 @@ static TestMetrics ContradictoryRestoredDoorFailsClosed()
         HashText("contradictory-door-rejected"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "Private generation admission rejects persisted open state with closed public orientation.");
+}
+
+static TestMetrics DynamicCollisionProjectionCapacityFailsClosed()
+{
+    const ulong persistentWorld = 0x80_2050;
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var runtime = new ServerRuntime(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(persistentWorld))));
+    runtime.Initialize();
+    runtime.Start();
+
+    GameStaging staging = composition.CreateFresh(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(persistentWorld)));
+    staging.World.Seal();
+    staging.World.Initialize();
+    staging.World.BeginRun();
+    for (int index = 0; index <= 16; index++)
+    {
+        Expect(staging.Inventory.TryCreateContainer(
+                staging.World, staging.Content.WorldChest, 1, out Entity chest) &&
+            WorldPosition.TryFromGlobalMillimeters(
+                4_000 + index * 100L,
+                1_000,
+                4_000,
+                out WorldPosition position) &&
+            staging.WorldState.TrySetPosition(staging.World, chest, position),
+            $"Dynamic blocker {index} could not be prepared.");
+    }
+
+    var candidate = new GameGenerationState(
+        new AccountingStore(),
+        staging.Inventory,
+        staging.Content,
+        staging.WorldState,
+        staging.SimulationLookup,
+        staging.Replication,
+        staging.WorldActions);
+    bool rejected = false;
+    try
+    {
+        _ = runtime.Game.TryPublishPreparedGeneration(staging.World, candidate, out _);
+    }
+    catch (InvalidOperationException exception)
+    {
+        rejected = exception.Message.Contains(
+            "dynamic-blocker set is full", StringComparison.Ordinal);
+    }
+    Expect(rejected && runtime.State == ServerRuntimeState.Running,
+        "A 17th projected dynamic blocker published partial physical truth or faulted authority.");
+
+    return new TestMetrics(
+        HashText("dynamic-collision-capacity-rejected"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "The generation-owned 16-entry effective dynamic collision projection rejects a 17th blocker before publication.");
 }
 
 static TestMetrics ControlSessionLineageFencesRetainedDirect()

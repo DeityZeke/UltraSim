@@ -1,10 +1,10 @@
 # Physics P0: injected authoritative motion plan
 
-Status: deferred forward plan. Terrain / World T0 and the launchable local client
-established the first concrete collision and locomotion evidence. Network N1 and
-Hosted H0 have since accepted the chunk-native replication and remote-control/
-process handoff gates. Physics P0 remains deferred until it is separately
-authorized; replication-profile extraction does not start physics implicitly.
+Status: P0.0 implementation/evidence checkpoint. Terrain / World T0 and the
+launchable local client established the first concrete collision and locomotion
+evidence. P0.0 has now extracted that exact endpoint behavior into generation-owned
+UltraSim Simple Physics without adding richer physical semantics. P0.1 support,
+sweep, clearance, and first-class occupancy remain unstarted.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
@@ -97,15 +97,90 @@ T0.10 already proved enough physical behavior to justify this system:
 That implementation is accepted **prototype evidence**, not the final ownership
 model.
 
-The current T0 path still contains playable-world-specific collision policy inside
-`GameWorldActions`, including concrete actor dimensions and a bounded dynamic-
-blocker set for the cabin door/chest. Physics P0 should preserve the proven
-behavior while moving physical resolution behind the smallest earned provider
-boundary.
+Before P0.0, the T0 path still contained playable-world-specific collision policy
+inside `GameWorldActions`, including concrete actor dimensions and a bounded
+dynamic-blocker set for the cabin door/chest. P0.0 preserved that behavior while
+moving physical resolution behind the smallest earned concrete boundary.
 
 Do not rewrite the world, terrain, collision bounds, locomotion, or publication
 architecture merely to create a new namespace. Extract only what has earned
 independent ownership.
+
+## P0.0 implementation checkpoint — 2026-08-28
+
+P0.0 extracts the accepted T0.10 endpoint resolver without changing its physical
+meaning.
+
+The executable ownership shape is now:
+
+```text
+GameWorldActions
+    command/control lineage
+    retained Direct / Destination
+    fixed-point desired endpoint
+        |
+        +--> GamePlayableCollisionProjection
+        |        cabin door/chest Game state
+        |            -> complete effective blocking bounds
+        |
+        v
+UltraSimSimplePhysics
+    prepared terrain height
+    complete static/Multi bounds query
+    effective dynamic blocking bounds
+        |
+        v
+SimpleMotionResult
+    Resolved / Blocked / OutsidePreparedWorld
+        |
+        v
+GameWorldActions
+    Direct/Destination blocked policy
+    authoritative WorldPosition commit
+```
+
+[`Game/Physics`](../../Game/Physics/README.md) is a concrete project depending on
+`Game/World`. It contains `SimplePhysicsBody`, `SimpleMotionRequest`,
+`SimpleMotionResult`, and `UltraSimSimplePhysics`. It does not reference
+`Game/Composition`, ECS entity identity, playable prefab constants, door state,
+Network, Godot, or another native backend. No public universal physics/provider
+interface was introduced.
+
+The Game-owned projection remains deliberately finite. It retains at most sixteen
+door/chest entities and reconstructs their effective bounds from current canonical
+ECS state. Closed doors contribute bounds, open doors do not, and chests contribute
+bounds. Contradictory door state fails closed. Generation initialization rebuilds
+the projection; neither it nor the resolver's 64-hit static-query scratch is
+persistence truth.
+
+Exact preserved behavior includes:
+
+- the 300 mm X/Z-radius, 1,800 mm-high upright playable body;
+- 16 candidate static chunks and 64 complete-or-fail hit rows;
+- all-or-nothing endpoint occupancy, with no sweep or substeps;
+- retained blocked Direct and retired blocked straight-line Destination;
+- unchanged fixed-point remainder and 20/60/120 Hz movement results;
+- locomotion commit before current-world Spatial/publication maintenance;
+- terrain-only relocation that may still enter occupied geometry and cancels
+  retained locomotion;
+- zero warmed caller-thread allocation.
+
+The added dynamic-bound scratch raises the measured 128-slot playable aggregate
+`GameWorldActions` reservation from 13,568 B to 14,336 B. This 768 B is sixteen
+fixed `WorldStaticBounds` rows; it does not scale with active motion or allocate
+on the hot path.
+
+The accepted Release artifact is
+[`physics-p0.0-simple-seam-2026-08-28.json`](../../_Benchmarks/Baselines/physics-p0.0-simple-seam-2026-08-28.json).
+Its canonical integrated world hash is unchanged from the same-turn pre-extraction
+baseline. The measured integrated tick remained neutral within ordinary run noise:
+43.211 us mean / 52.270 us p95 before, and 43.203 us mean / 53.059 us p95 after.
+Both observations report 0 B warmed allocation. These are semantic-extraction
+regression observations, not a claim that P0.0 improves Physics throughput.
+
+P0.0 does not claim continuous collision, relocation occupancy, support/step,
+sliding, actor collision, gravity, navigation, Godot Physics, Jolt, or provider
+replaceability. Those remain later, separately reviewed checkpoints.
 
 ## RunUO archaeology
 

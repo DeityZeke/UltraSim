@@ -193,6 +193,12 @@ Useful current anchors can be located by their embedded workload or filename:
   equal X/Z after one authoritative second at 20/60/120 Hz, then exact arrival,
   without claiming pathfinding, control-profile, launchable-client, or N1
   completion;
+- `physics-p0.0-simple-seam-*` — the semantic-extraction rerun after moving the
+  accepted endpoint resolver into concrete generation-owned UltraSim Simple
+  Physics. It preserves the integrated canonical hash, 20/60/120 Hz motion,
+  effective door/chest collision, terrain-only relocation, bounded failure, and
+  0 B warmed allocation. It is not sweep, relocation occupancy, support/step,
+  native-backend, provider-replaceability, or richer-physics evidence;
 - `terrain-t0-acceptance-matrix-closure-*` and
   `terrain-t0.10-acceptance-closure-*` — cumulative T0.0-T0.10 profile mapping
   plus the current final Release integrated/native rerun. They freeze the

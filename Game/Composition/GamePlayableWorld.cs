@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using UltraSim.ECS;
 using UltraSim.Game.Input;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Physics;
 using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
@@ -58,9 +59,10 @@ public sealed class GameWorldActions
 {
     private const int ActorCollisionRadiusMillimeters = 300;
     private const int ActorCollisionHeightMillimeters = 1_800;
-    private const int StaticCollisionCandidateChunks = 16;
-    private const int StaticCollisionHitCapacity = 64;
-    private const int PlayableDynamicBlockerCapacity = 16;
+    private static readonly SimplePhysicsBody s_actorBody = new(
+        ActorCollisionRadiusMillimeters,
+        ActorCollisionRadiusMillimeters,
+        ActorCollisionHeightMillimeters);
 
     private enum RetainedLocomotionKind : byte
     {
@@ -75,6 +77,8 @@ public sealed class GameWorldActions
     private readonly WorldId _worldId;
     private readonly ComponentLookup<GameCharacter> _character;
     private readonly ComponentLookup<GameCabinDoorState> _door;
+    private readonly UltraSimSimplePhysics _physics;
+    private readonly GamePlayableCollisionProjection _collisionProjection;
     private readonly ulong[] _controlEpochs;
     private readonly ulong[] _lastSequences;
     private readonly uint[] _controlGenerations;
@@ -91,14 +95,17 @@ public sealed class GameWorldActions
     private readonly long[] _movementRemainderZ;
     private readonly Entity[] _activeLocomotion;
     private readonly int[] _activeLocomotionPositions;
-    private readonly WorldStaticQueryHit[] _staticCollisionHits;
-    private readonly Entity[] _playableDynamicBlockers;
     private int _activeLocomotionCount;
-    private int _playableDynamicBlockerCount;
 
-    internal GameWorldActions(EcsWorld world)
+    internal GameWorldActions(
+        EcsWorld world,
+        UltraSimSimplePhysics physics,
+        GamePlayableCollisionProjection collisionProjection)
     {
         ArgumentNullException.ThrowIfNull(world);
+        _physics = physics ?? throw new ArgumentNullException(nameof(physics));
+        _collisionProjection = collisionProjection ??
+            throw new ArgumentNullException(nameof(collisionProjection));
         _worldId = world.Id;
         _character = world.PrepareLookup<GameCharacter>();
         _door = world.PrepareLookup<GameCabinDoorState>();
@@ -118,18 +125,18 @@ public sealed class GameWorldActions
         _movementRemainderZ = new long[_lastSequences.Length];
         _activeLocomotion = new Entity[_lastSequences.Length];
         _activeLocomotionPositions = new int[_lastSequences.Length];
-        _staticCollisionHits = new WorldStaticQueryHit[StaticCollisionHitCapacity];
-        _playableDynamicBlockers = new Entity[PlayableDynamicBlockerCapacity];
     }
 
     /// <summary>Known fixed backing reserved for control lineage and retained locomotion.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
         ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
          (sizeof(long) * 8) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)) +
-        (long)_staticCollisionHits.Length * Unsafe.SizeOf<WorldStaticQueryHit>() +
-        (long)_playableDynamicBlockers.Length * Unsafe.SizeOf<Entity>());
+        _physics.ReservedBytes + _collisionProjection.ReservedBytes);
 
     public int ActiveLocomotionCount => _activeLocomotionCount;
+
+    /// <summary>The concrete generation-owned P0.0 endpoint resolver.</summary>
+    public UltraSimSimplePhysics SimplePhysics => _physics;
 
     /// <summary>
     /// Establishes or replaces the trusted operational control lineage for one actor. Replacing a
@@ -343,17 +350,13 @@ public sealed class GameWorldActions
 
         long nextX = checked(current.GlobalXMillimeters + deltaX);
         long nextZ = checked(current.GlobalZMillimeters + deltaZ);
-        if (!TryResolveTerrainPosition(worldState, current.YMillimeters, nextX, nextZ, out WorldPosition position))
+        SimpleMotionResult physical = ResolveMotion(world, worldState, actor, current, nextX, nextZ);
+        if (!physical.WasResolved)
         {
-            // Direct remains current while this step is blocked by prepared-world bounds.
+            // Direct remains retained at prepared-world limits, query pressure, or geometry.
             return true;
         }
-        if (!CanOccupy(world, worldState, actor, position))
-        {
-            // Direct remains retained while the actor presses against authoritative geometry.
-            return true;
-        }
-        SetAuthoritativePosition(world, worldState, actor, position);
+        SetAuthoritativePosition(world, worldState, actor, physical.Position);
         return true;
     }
 
@@ -386,20 +389,15 @@ public sealed class GameWorldActions
         long nextZ = checked(_destinationStartZ[index] +
             (long)((Int128)routeZ * progress / routeLength));
 
-        if (!TryResolveTerrainPosition(worldState, current.YMillimeters, nextX, nextZ, out WorldPosition position))
+        SimpleMotionResult physical = ResolveMotion(world, worldState, actor, current, nextX, nextZ);
+        if (!physical.WasResolved)
         {
-            // A previously admitted straight-line destination became impossible in prepared truth.
+            // T0.10 Destination is a straight route. Prepared-world failure or physical
+            // obstruction makes it impossible and stops it; pathfinding remains future work.
             ClearLocomotion(index);
             return false;
         }
-        if (!CanOccupy(world, worldState, actor, position))
-        {
-            // T0.10 Destination is a straight route. Static obstruction makes that route
-            // impossible and stops it; navigation/pathfinding remains future work.
-            ClearLocomotion(index);
-            return false;
-        }
-        SetAuthoritativePosition(world, worldState, actor, position);
+        SetAuthoritativePosition(world, worldState, actor, physical.Position);
         _destinationProgress[index] = progress;
         if (reached)
         {
@@ -426,6 +424,20 @@ public sealed class GameWorldActions
         return WorldPosition.TryFromGlobalMillimeters(globalX, terrainY, globalZ, out position);
     }
 
+    private SimpleMotionResult ResolveMotion(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in WorldPosition current,
+        long nextX,
+        long nextZ)
+    {
+        bool complete = _collisionProjection.TryCapture(
+            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        var request = new SimpleMotionRequest(current, nextX, nextZ, s_actorBody);
+        return _physics.ResolveEndpoint(request, dynamicBounds, complete);
+    }
+
     private static void SetAuthoritativePosition(
         EcsWorld world,
         GameWorldState worldState,
@@ -439,106 +451,12 @@ public sealed class GameWorldActions
         }
     }
 
-    private bool CanOccupy(
-        EcsWorld world,
-        GameWorldState worldState,
-        Entity actor,
-        in WorldPosition position)
-    {
-        WorldStaticBounds actorBounds = ActorBounds(position);
-        if (!worldState.TryQueryStaticBounds(
-                actorBounds,
-                StaticCollisionCandidateChunks,
-                _staticCollisionHits,
-                out int staticCount,
-                out _,
-                out _))
-        {
-            // Expected bounded query pressure fails closed. No partial collision result
-            // is ever interpreted as a clear route.
-            return false;
-        }
-        for (int index = 0; index < staticCount; index++)
-        {
-            if ((_staticCollisionHits[index].Flags & WorldStaticFlags.Collidable) != 0)
-                return false;
-        }
-
-        for (int index = 0; index < _playableDynamicBlockerCount; index++)
-        {
-            Entity blocker = _playableDynamicBlockers[index];
-            if (blocker == actor || !world.IsAlive(blocker) ||
-                !worldState.TryReadPosition(world, blocker, out WorldPosition blockerPosition) ||
-                !worldState.TryReadPublic(world, blocker, out WorldPublicDescriptor descriptor))
-                continue;
-
-            WorldStaticBounds blockerBounds;
-            switch (descriptor.PrefabId)
-            {
-                case GameWorldPublicPrefabIds.CabinDoor:
-                    if (!world.TryRead(blocker, _door, out GameCabinDoorState door) ||
-                        door.IsOpen is not (0 or 1))
-                        return false;
-                    if (door.IsOpen != 0)
-                        continue;
-                    blockerBounds = Bounds(
-                        blockerPosition,
-                        halfExtentX: 800,
-                        halfExtentZ: 110,
-                        height: 2_100);
-                    break;
-                case GameWorldPublicPrefabIds.WorldChest:
-                    blockerBounds = Bounds(
-                        blockerPosition,
-                        halfExtentX: 600,
-                        halfExtentZ: 400,
-                        height: 800);
-                    break;
-                default:
-                    continue;
-            }
-            if (blockerBounds.Intersects(actorBounds))
-                return false;
-        }
-        return true;
-    }
-
-    private static WorldStaticBounds ActorBounds(in WorldPosition position) => Bounds(
-        position,
-        ActorCollisionRadiusMillimeters,
-        ActorCollisionRadiusMillimeters,
-        ActorCollisionHeightMillimeters);
-
-    private static WorldStaticBounds Bounds(
-        in WorldPosition position,
-        int halfExtentX,
-        int halfExtentZ,
-        int height) => new(
-        position.GlobalXMillimeters - halfExtentX,
-        position.YMillimeters,
-        position.GlobalZMillimeters - halfExtentZ,
-        position.GlobalXMillimeters + halfExtentX + 1L,
-        position.YMillimeters + height,
-        position.GlobalZMillimeters + halfExtentZ + 1L);
-
     internal void RegisterPlayableDynamicBlocker(
         EcsWorld world,
         GameWorldState worldState,
         Entity blocker)
     {
-        EnsureWorld(world, worldState);
-        if (!world.IsAlive(blocker) ||
-            !worldState.TryReadPosition(world, blocker, out _) ||
-            !worldState.TryReadPublic(world, blocker, out WorldPublicDescriptor descriptor) ||
-            descriptor.PrefabId is not (
-                GameWorldPublicPrefabIds.CabinDoor or GameWorldPublicPrefabIds.WorldChest))
-            throw new ArgumentException("The entity is not a supported playable-world blocker.", nameof(blocker));
-        for (int index = 0; index < _playableDynamicBlockerCount; index++)
-            if (_playableDynamicBlockers[index] == blocker)
-                return;
-        if (_playableDynamicBlockerCount >= _playableDynamicBlockers.Length)
-            throw new InvalidOperationException("The bounded playable dynamic-blocker set is full.");
-        _playableDynamicBlockers[_playableDynamicBlockerCount++] = blocker;
+        _collisionProjection.Register(world, worldState, blocker);
     }
 
     private GameWorldActionStatus ToggleCabinDoorCore(
@@ -695,27 +613,7 @@ public sealed class GameWorldActions
 
     internal void ValidateRestoredDoorConsistency(EcsWorld world, GameWorldState worldState)
     {
-        EnsureWorld(world, worldState);
-        _playableDynamicBlockerCount = 0;
-        for (uint index = 0; index < (uint)_lastSequences.Length; index++)
-        {
-            if (!world.TryGetEntity(index, out Entity entity))
-                continue;
-            if (worldState.TryReadPublic(world, entity, out WorldPublicDescriptor publicDescriptor) &&
-                publicDescriptor.PrefabId is
-                    GameWorldPublicPrefabIds.CabinDoor or GameWorldPublicPrefabIds.WorldChest)
-                RegisterPlayableDynamicBlocker(world, worldState, entity);
-            if (!world.TryRead(entity, _door, out GameCabinDoorState state))
-                continue;
-            if (state.IsOpen is not (0 or 1) ||
-                !worldState.TryReadPublic(world, entity, out WorldPublicDescriptor descriptor) ||
-                descriptor.PrefabId != GameWorldPublicPrefabIds.CabinDoor ||
-                descriptor.Orientation != DoorOrientation(state.IsOpen != 0))
-            {
-                throw new InvalidOperationException(
-                    $"Cabin door {entity} has contradictory persisted/public state.");
-            }
-        }
+        _collisionProjection.RebuildAndValidate(world, worldState);
     }
 
     private static int IntegrateAxis(short value, long stepQuanta, ref long remainder)
