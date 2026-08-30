@@ -25,6 +25,31 @@ public readonly record struct SimpleMotionRequest(
     public bool IsValid => Body.IsValid;
 }
 
+/// <summary>One first-class physical legality query for an upright body at a target location.</summary>
+public readonly record struct SimpleOccupancyRequest(
+    WorldPosition Target,
+    SimplePhysicsBody Body)
+{
+    public bool IsValid => Body.IsValid;
+}
+
+/// <summary>Physical endpoint legality supported by the P0.1a occupancy seam.</summary>
+public enum SimpleOccupancyStatus : byte
+{
+    None = 0,
+    Clear,
+    Blocked,
+    OutsidePreparedWorld,
+}
+
+/// <summary>A terrain-resolved legal position or a fail-closed occupancy result.</summary>
+public readonly record struct SimpleOccupancyResult(
+    SimpleOccupancyStatus Status,
+    WorldPosition Position)
+{
+    public bool CanOccupy => Status == SimpleOccupancyStatus.Clear;
+}
+
 /// <summary>Physical outcome supported by the extracted P0.0 endpoint resolver.</summary>
 public enum SimpleMotionStatus : byte
 {
@@ -81,15 +106,49 @@ public sealed class UltraSimSimplePhysics
                 request.TargetXMillimeters,
                 request.Current.YMillimeters,
                 request.TargetZMillimeters,
-                out WorldPosition candidate) ||
-            !_world.TrySampleBaseTerrainHeight(candidate, out int terrainY) ||
-            !WorldPosition.TryFromGlobalMillimeters(
-                request.TargetXMillimeters,
-                terrainY,
-                request.TargetZMillimeters,
-                out WorldPosition resolved))
+                out WorldPosition target))
         {
             return new SimpleMotionResult(SimpleMotionStatus.OutsidePreparedWorld, default);
+        }
+
+        SimpleOccupancyResult occupancy = ProbeOccupancy(
+            new SimpleOccupancyRequest(target, request.Body),
+            dynamicBlockingBounds,
+            dynamicProjectionComplete);
+        return occupancy.Status switch
+        {
+            SimpleOccupancyStatus.Clear =>
+                new SimpleMotionResult(SimpleMotionStatus.Resolved, occupancy.Position),
+            SimpleOccupancyStatus.Blocked =>
+                new SimpleMotionResult(SimpleMotionStatus.Blocked, default),
+            SimpleOccupancyStatus.OutsidePreparedWorld =>
+                new SimpleMotionResult(SimpleMotionStatus.OutsidePreparedWorld, default),
+            _ => throw new InvalidOperationException("Simple Physics produced no occupancy result."),
+        };
+    }
+
+    /// <summary>
+    /// Resolves prepared terrain at the requested X/Z and tests whether the complete supplied body
+    /// may legally occupy that endpoint. This is a query only; it owns no Game mutation or policy.
+    /// </summary>
+    public SimpleOccupancyResult ProbeOccupancy(
+        in SimpleOccupancyRequest request,
+        ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
+        bool dynamicProjectionComplete)
+    {
+        if (!request.IsValid)
+            throw new ArgumentException(
+                "A valid Simple Physics occupancy request is required.", nameof(request));
+
+        if (!_world.TrySampleBaseTerrainHeight(request.Target, out int terrainY) ||
+            !WorldPosition.TryFromGlobalMillimeters(
+                request.Target.GlobalXMillimeters,
+                terrainY,
+                request.Target.GlobalZMillimeters,
+                out WorldPosition resolved))
+        {
+            return new SimpleOccupancyResult(
+                SimpleOccupancyStatus.OutsidePreparedWorld, default);
         }
 
         WorldStaticBounds bodyBounds = Bounds(resolved, request.Body);
@@ -103,25 +162,25 @@ public sealed class UltraSimSimplePhysics
         {
             // Complete-or-fail query pressure is physical blockage at this seam. A partial
             // candidate set is never interpreted as a clear route.
-            return new SimpleMotionResult(SimpleMotionStatus.Blocked, default);
+            return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
         }
 
         for (int index = 0; index < staticCount; index++)
         {
             if ((_staticHits[index].Flags & WorldStaticFlags.Collidable) != 0)
-                return new SimpleMotionResult(SimpleMotionStatus.Blocked, default);
+                return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
         }
 
         if (!dynamicProjectionComplete)
-            return new SimpleMotionResult(SimpleMotionStatus.Blocked, default);
+            return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
         for (int index = 0; index < dynamicBlockingBounds.Length; index++)
         {
             if (!dynamicBlockingBounds[index].IsValid ||
                 dynamicBlockingBounds[index].Intersects(bodyBounds))
-                return new SimpleMotionResult(SimpleMotionStatus.Blocked, default);
+                return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
         }
 
-        return new SimpleMotionResult(SimpleMotionStatus.Resolved, resolved);
+        return new SimpleOccupancyResult(SimpleOccupancyStatus.Clear, resolved);
     }
 
     private static WorldStaticBounds Bounds(

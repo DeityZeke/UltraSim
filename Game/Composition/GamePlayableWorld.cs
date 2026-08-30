@@ -38,6 +38,7 @@ public enum GameWorldActionStatus : byte
     OutOfRange,
     OutsidePreparedWorld,
     InvariantViolation,
+    Blocked,
 }
 
 /// <summary>Admission and independently composed effects of one player command.</summary>
@@ -407,23 +408,6 @@ public sealed class GameWorldActions
         return true;
     }
 
-    private static bool TryResolveTerrainPosition(
-        GameWorldState worldState,
-        int currentY,
-        long globalX,
-        long globalZ,
-        out WorldPosition position)
-    {
-        if (!WorldPosition.TryFromGlobalMillimeters(
-                globalX, currentY, globalZ, out WorldPosition candidate) ||
-            !worldState.TrySampleBaseTerrainHeight(candidate, out int terrainY))
-        {
-            position = default;
-            return false;
-        }
-        return WorldPosition.TryFromGlobalMillimeters(globalX, terrainY, globalZ, out position);
-    }
-
     private SimpleMotionResult ResolveMotion(
         EcsWorld world,
         GameWorldState worldState,
@@ -551,8 +535,9 @@ public sealed class GameWorldActions
 
     /// <summary>
     /// Performs one explicit authoritative positional discontinuity. A successful relocation
-    /// resolves the prepared terrain height and terminates operational Direct/Destination intent,
-    /// so the next locomotion step cannot pull the actor back onto an obsolete route.
+    /// resolves physical endpoint occupancy and terminates operational Direct/Destination intent,
+    /// so the next locomotion step cannot pull the actor back onto an obsolete route. Rejection
+    /// leaves both canonical position and retained locomotion unchanged.
     /// </summary>
     public GameWorldActionStatus RelocateActor(
         EcsWorld world,
@@ -566,13 +551,19 @@ public sealed class GameWorldActions
         if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
             !worldState.TryReadPosition(world, actor, out _))
             return GameWorldActionStatus.MissingActor;
-        if (!TryResolveTerrainPosition(
-                worldState,
-                requested.YMillimeters,
-                requested.GlobalXMillimeters,
-                requested.GlobalZMillimeters,
-                out relocated))
+
+        bool projectionComplete = _collisionProjection.TryCapture(
+            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        SimpleOccupancyResult occupancy = _physics.ProbeOccupancy(
+            new SimpleOccupancyRequest(requested, s_actorBody),
+            dynamicBounds,
+            projectionComplete);
+        if (occupancy.Status == SimpleOccupancyStatus.OutsidePreparedWorld)
             return GameWorldActionStatus.OutsidePreparedWorld;
+        if (!occupancy.CanOccupy)
+            return GameWorldActionStatus.Blocked;
+
+        relocated = occupancy.Position;
         if (!worldState.TrySetPosition(world, actor, relocated))
             return GameWorldActionStatus.InvariantViolation;
 
@@ -798,6 +789,7 @@ public static class GamePlayableWorld
     public const int ChunkCount = 25;
 
     public static WorldPosition PlayerStart => FromGlobal(15_500, 7_000);
+    public static WorldPosition ClearCrossChunkPosition => FromGlobal(18_000, 7_000);
     public static WorldPosition DoorPosition => FromGlobal(16_000, 9_000);
     public static WorldPosition ChestPosition => FromGlobal(18_000, 12_000);
     public static WorldPosition AnimalPosition => FromGlobal(8_000, 4_000);

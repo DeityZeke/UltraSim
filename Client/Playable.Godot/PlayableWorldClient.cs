@@ -783,7 +783,7 @@ public partial class PlayableWorldClient : Node3D
         SetProfile(ControlProfile.OrbitCommand);
 
         int before = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
-        RelocateControlledActor(GamePlayableWorld.ChestPosition);
+        RelocateControlledActor(GamePlayableWorld.ClearCrossChunkPosition);
         _runtime.Tick();
         SynchronizeProjection();
         DrainRenderer();

@@ -148,8 +148,10 @@ Physics P0.0 extracts the accepted T0.10 endpoint collision from `GameWorldActio
 generation-owned concrete [`UltraSimSimplePhysics`](../Game/Physics/README.md) capability.
 Locomotion still owns Direct/Destination interpretation and Game still commits `WorldPosition`.
 The playable composition separately projects cabin-door/chest state into effective blocking bounds,
-so Simple Physics depends on prepared World truth rather than gameplay prefab/state meaning. P0.0
-adds no sweep, support/step, relocation occupancy, native provider, or general physics API.
+so Simple Physics depends on prepared World truth rather than gameplay prefab/state meaning. P0.1a
+adds a first-class occupancy probe and makes authoritative relocation reject blocked endpoints
+transactionally. Neither checkpoint adds sweep, support/step, native providers, or a general physics
+API.
 
 Temporal work likewise belongs to its domain. The authoritative facts may name
 an effective/due world time, while a reconstructible index identifies what is

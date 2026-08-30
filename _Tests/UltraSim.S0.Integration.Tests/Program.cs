@@ -27,13 +27,14 @@ Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, res
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
+Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
 Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
 Run("PlayableDestinationProgressIsCadenceIndependent", PlayableDestinationProgressCadenceMatrix, results);
 Run("LocomotionUpdatesComposeAndSupersede", LocomotionUpdateSemantics, results);
 Run("AuthoritativeRelocationCancelsOperationalLocomotion", AuthoritativeRelocationCancelsLocomotion, results);
-Run("AuthoritativeRelocationPreservesTerrainOnlyOccupancy", OccupiedRelocationRemainsAccepted, results);
+Run("AuthoritativeRelocationRejectsBlockedTargetsTransactionally", BlockedRelocationIsTransactional, results);
 Run("IndependentMoveLookKeepsWorldMovementAndFacingSeparate", IndependentMoveLookKeepsWorldMovementAndFacingSeparate, results);
 Run("ControlSessionLineageFencesRetainedDirect", ControlSessionLineageFencesRetainedDirect, results);
 Run("ContradictoryRestoredDoorFailsClosed", ContradictoryRestoredDoorFailsClosed, results);
@@ -691,6 +692,114 @@ static TestMetrics SimplePhysicsGenerationReplacement()
         InputCommands: input.Snapshot().CommandsProduced);
 }
 
+static TestMetrics SimplePhysicsOccupancy()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1080))));
+    host.Start();
+
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, long>(
+            (_, _, game) =>
+            {
+                var body = new SimplePhysicsBody(300, 300, 1_800);
+                Expect(!default(SimpleOccupancyResult).CanOccupy,
+                    "A default occupancy result was interpreted as clear.");
+                bool invalidRejected = false;
+                try
+                {
+                    _ = game.SimplePhysics.ProbeOccupancy(
+                        default, ReadOnlySpan<WorldStaticBounds>.Empty, true);
+                }
+                catch (ArgumentException)
+                {
+                    invalidRejected = true;
+                }
+                Expect(invalidRejected, "A default occupancy request did not fail closed.");
+
+                var clearRequest = new SimpleOccupancyRequest(
+                    GamePlayableWorld.PlayerStart, body);
+                SimpleOccupancyResult clear = game.SimplePhysics.ProbeOccupancy(
+                    clearRequest, ReadOnlySpan<WorldStaticBounds>.Empty, true);
+                Expect(clear.CanOccupy &&
+                    clear.Position.YMillimeters == GamePlayableWorld.PlayerStart.YMillimeters,
+                    $"A clear first-class occupancy probe did not resolve canonical terrain: {clear}.");
+
+                SimpleMotionResult sameEndpoint = game.SimplePhysics.ResolveEndpoint(
+                    new SimpleMotionRequest(
+                        GamePlayableWorld.PlayerStart,
+                        GamePlayableWorld.PlayerStart.GlobalXMillimeters,
+                        GamePlayableWorld.PlayerStart.GlobalZMillimeters,
+                        body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(sameEndpoint.WasResolved && sameEndpoint.Position == clear.Position,
+                    "Motion and first-class occupancy disagreed on the same clear endpoint.");
+
+                Expect(WorldPosition.TryFromGlobalMillimeters(
+                        16_000, 1_000, 15_000, out WorldPosition wallTarget),
+                    "The static-wall occupancy target could not be represented.");
+                SimpleOccupancyResult staticBlocked = game.SimplePhysics.ProbeOccupancy(
+                    new SimpleOccupancyRequest(wallTarget, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(staticBlocked.Status == SimpleOccupancyStatus.Blocked,
+                    "A collidable prepared cabin wall was occupiable.");
+
+                WorldPosition clearPosition = clear.Position;
+                WorldStaticBounds projectedBlocker = new(
+                    clearPosition.GlobalXMillimeters - 100,
+                    clearPosition.YMillimeters,
+                    clearPosition.GlobalZMillimeters - 100,
+                    clearPosition.GlobalXMillimeters + 101,
+                    clearPosition.YMillimeters + 1_000,
+                    clearPosition.GlobalZMillimeters + 101);
+                ReadOnlySpan<WorldStaticBounds> oneDynamicBlocker = [projectedBlocker];
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        clearRequest, oneDynamicBlocker, true).Status ==
+                    SimpleOccupancyStatus.Blocked,
+                    "An intersecting projected dynamic bound was occupiable.");
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        clearRequest, ReadOnlySpan<WorldStaticBounds>.Empty, false).Status ==
+                    SimpleOccupancyStatus.Blocked,
+                    "An incomplete dynamic projection was interpreted as clear.");
+
+                Expect(WorldPosition.TryFromGlobalMillimeters(
+                        1_000_000, 0, 1_000_000, out WorldPosition unprepared),
+                    "The outside-prepared-world occupancy target could not be represented.");
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(unprepared, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true).Status == SimpleOccupancyStatus.OutsidePreparedWorld,
+                    "An unprepared occupancy target was not distinguished from physical blockage.");
+
+                for (int index = 0; index < 16; index++)
+                    _ = game.SimplePhysics.ProbeOccupancy(
+                        clearRequest, ReadOnlySpan<WorldStaticBounds>.Empty, true);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 1_000; index++)
+                {
+                    SimpleOccupancyResult result = game.SimplePhysics.ProbeOccupancy(
+                        clearRequest, ReadOnlySpan<WorldStaticBounds>.Empty, true);
+                    if (!result.CanOccupy)
+                        throw new InvalidOperationException("The warmed occupancy target changed.");
+                }
+                return GC.GetAllocatedBytesForCurrentThread() - before;
+            },
+            out long allocated) && allocated == 0,
+        $"Warmed first-class occupancy allocated {allocated} caller bytes.");
+
+    return new TestMetrics(
+        HashText("first-class-occupancy-clear-blocked-outside"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
+        "First-class occupancy shares motion endpoint legality, distinguishes prepared-world failure, fails closed on static/dynamic pressure, and allocates 0 B warmed.");
+}
+
 static TestMetrics PlayableMovementCadenceMatrix()
 {
     int[] frequencies = [20, 60, 120];
@@ -1202,7 +1311,7 @@ static TestMetrics AuthoritativeRelocationCancelsLocomotion()
     }
 }
 
-static TestMetrics OccupiedRelocationRemainsAccepted()
+static TestMetrics BlockedRelocationIsTransactional()
 {
     WorldPack pack = GamePlayableWorld.CreateWorldPack();
     var composition = new UltraSimGameComposition(
@@ -1222,27 +1331,78 @@ static TestMetrics OccupiedRelocationRemainsAccepted()
         "The occupied-relocation fixture could not populate.");
     host.Tick();
 
-    WorldPosition requested = GamePlayableWorld.ChestPosition;
-    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
-            (world, _, game) =>
-            {
-                Entity actor = ResolveInWorld(world, entities.PlayerId);
-                GameWorldActionStatus status = game.WorldActions.RelocateActor(
-                    world, game.WorldState, actor, requested, out WorldPosition relocated);
-                Expect(status == GameWorldActionStatus.Accepted,
-                    $"P0.0 made occupied relocation stricter: {status}.");
-                return relocated;
-            }, out WorldPosition relocated) &&
-        relocated == GamePlayableWorld.ChestPosition,
-        "Terrain-only relocation did not preserve the occupied chest endpoint.");
-    host.Tick();
-    Expect(ReadWorldPosition(runtime.Game, entities.PlayerId) == relocated,
-        "The occupied relocation did not remain canonical after the next step.");
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    Expect(input.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(
+                    0, GamePlayerCommand.MaximumAxisMagnitude),
+                GamePlayerActions.None,
+                true),
+            out GamePlayerCommand direct) &&
+        link.ApplyCommand(direct).Locomotion == GameWorldActionStatus.Accepted &&
+        ReadActiveLocomotionCount(runtime.Game) == 1,
+        "Direct was not retained before rejected relocation.");
+
+    WorldPosition original = link.ReadPosition();
+    Expect(Relocate(GamePlayableWorld.ChestPosition) == GameWorldActionStatus.Blocked,
+        "The occupied chest endpoint did not reject relocation.");
+    Expect(WorldPosition.TryFromGlobalMillimeters(
+            16_000, 1_000, 15_000, out WorldPosition wallTarget) &&
+        Relocate(wallTarget) == GameWorldActionStatus.Blocked,
+        "The prepared cabin wall endpoint did not reject relocation.");
+    Expect(Relocate(GamePlayableWorld.DoorPosition) == GameWorldActionStatus.Blocked,
+        "The closed cabin door endpoint did not reject relocation.");
+    Expect(WorldPosition.TryFromGlobalMillimeters(
+            1_000_000, 0, 1_000_000, out WorldPosition unprepared) &&
+        Relocate(unprepared) == GameWorldActionStatus.OutsidePreparedWorld,
+        "The unprepared relocation target did not preserve its distinct failure.");
+    Expect(link.ReadPosition() == original && ReadActiveLocomotionCount(runtime.Game) == 1,
+        "Rejected relocation changed position or retired retained locomotion.");
+
+    Expect(input.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Unchanged,
+                GamePlayerActions.Interact,
+                true),
+            out GamePlayerCommand openDoor) &&
+        link.ApplyCommand(openDoor, entities.CabinDoorId).Interaction ==
+            GameWorldActionStatus.Accepted,
+        "The nearby cabin door could not open before clear relocation.");
+    Expect(Relocate(GamePlayableWorld.DoorPosition) == GameWorldActionStatus.Accepted &&
+        link.ReadPosition() == GamePlayableWorld.DoorPosition &&
+        ReadActiveLocomotionCount(runtime.Game) == 0,
+        "A clear relocation did not commit terrain truth and retire retained locomotion.");
 
     return new TestMetrics(
-        HashText(relocated.ToString()),
+        HashText($"{original}:{link.ReadPosition()}"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        "P0.0 deliberately preserves terrain-valid relocation into an occupied chest endpoint; first-class relocation occupancy remains P0.1.");
+        "P0.1a rejects static/dynamic/unprepared relocation transactionally, preserves retained locomotion on failure, and commits/cancels only a clear endpoint.",
+        InputCommands: input.Snapshot().CommandsProduced);
+
+    GameWorldActionStatus Relocate(in WorldPosition requested)
+    {
+        WorldPosition target = requested;
+        Expect(runtime.Game.TryUseActiveGeneration<
+                IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, _, game) =>
+                {
+                    GameWorldActionStatus status = game.WorldActions.RelocateActor(
+                        world,
+                        game.WorldState,
+                        ResolveInWorld(world, entities.PlayerId),
+                        target,
+                        out WorldPosition relocated);
+                    if (status != GameWorldActionStatus.Accepted)
+                        Expect(relocated == default,
+                            "Rejected relocation exposed a partially resolved position.");
+                    return status;
+                },
+                out GameWorldActionStatus status),
+            "Relocation had no active generation.");
+        return status;
+    }
 }
 
 static TestMetrics IndependentMoveLookKeepsWorldMovementAndFacingSeparate()

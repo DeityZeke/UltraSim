@@ -1,10 +1,10 @@
 # Physics P0: injected authoritative motion plan
 
-Status: P0.0 implementation/evidence checkpoint. Terrain / World T0 and the
-launchable local client established the first concrete collision and locomotion
-evidence. P0.0 has now extracted that exact endpoint behavior into generation-owned
-UltraSim Simple Physics without adding richer physical semantics. P0.1 support,
-sweep, clearance, and first-class occupancy remain unstarted.
+Status: P0.1a implementation/evidence checkpoint. P0.0 extracted the accepted
+endpoint behavior into generation-owned UltraSim Simple Physics. P0.1a now adds
+first-class endpoint occupancy and makes authoritative relocation its first Game
+consumer. Sweep, support, step, clearance, sliding, and actor collision remain
+unstarted.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
@@ -181,6 +181,71 @@ regression observations, not a claim that P0.0 improves Physics throughput.
 P0.0 does not claim continuous collision, relocation occupancy, support/step,
 sliding, actor collision, gravity, navigation, Godot Physics, Jolt, or provider
 replaceability. Those remain later, separately reviewed checkpoints.
+
+## P0.1a implementation checkpoint — 2026-08-30
+
+P0.1a adds one behavior capability without widening the resolver into a character
+controller or provider abstraction.
+
+The concrete seam now exposes adjacent queries:
+
+```text
+ResolveEndpoint(SimpleMotionRequest)
+    desired locomotion endpoint
+        |
+        v
+ProbeOccupancy(SimpleOccupancyRequest)
+    target + fixed upright body
+        |
+        v
+shared endpoint legality
+    prepared terrain resolution
+    complete static/Multi query
+    complete effective dynamic projection
+        |
+        v
+Clear / Blocked / OutsidePreparedWorld
+```
+
+`ProbeOccupancy` is mutation-free and fail-closed. A default request is invalid, a
+default result is not clear, incomplete static/dynamic input is blocked, and an
+unprepared location remains distinguishable from collision. Motion delegates to
+the same implementation rather than maintaining a second physical oracle.
+
+`GameWorldActions.RelocateActor` is the first consumer. Its transaction is:
+
+```text
+validate current actor
+    -> capture complete Game-owned dynamic bounds
+    -> probe target occupancy
+
+blocked / outside prepared world
+    -> return Blocked / OutsidePreparedWorld
+    -> position unchanged
+    -> retained Direct/Destination unchanged
+
+clear
+    -> commit terrain-resolved WorldPosition
+    -> retire retained Direct/Destination
+```
+
+The actor remains excluded from its own projected bounds. Closed doors, chests,
+and prepared static walls reject relocation; an open doorway accepts it. The
+existing motion result, body dimensions, query capacities, generation rebuild,
+and fixed reservation remain unchanged.
+
+The accepted Release artifact is
+[`physics-p0.1a-occupancy-relocation-2026-08-30.json`](../../_Benchmarks/Baselines/physics-p0.1a-occupancy-relocation-2026-08-30.json).
+It reports all twenty integrated gates passing, unchanged canonical motion/world
+hashes, 0 B warmed motion and direct occupancy allocation, and the unchanged
+14,336 B aggregate `GameWorldActions` reservation. The integrated observation was
+44.571 us mean / 55.149 us p95 versus the P0.0 artifact's 43.203 us mean /
+53.059 us p95; this small single-run movement is retained as regression context,
+not presented as a causal throughput change.
+
+P0.1a does not add sweep, substeps, thin-wall guarantees, support categories,
+step-up/down, low-ceiling semantics beyond current AABB overlap, sliding,
+depenetration, actor collision, gravity, spawn policy, or alternate providers.
 
 ## RunUO archaeology
 
@@ -1268,18 +1333,36 @@ Before adding richer behavior:
 **Gate:** T0 canonical gameplay remains unchanged using UltraSim Simple through the
 new seam.
 
-### P0.1 — support, step, clearance, occupancy
+### P0.1a — first-class occupancy and authoritative relocation
 
-Earn the first true Simple Physics behavior beyond T0:
+Add only:
 
-- first-class occupancy query;
+- a first-class bounded occupancy query sharing motion endpoint legality;
+- explicit clear/blocked/outside-prepared-world results;
+- occupancy-aware authoritative relocation;
+- transactional failure that preserves position and retained locomotion.
+
+**Gate:** clear, static-blocked, dynamic-blocked, unprepared, and relocation
+lineage scenarios pass with zero warmed occupancy allocation.
+
+### P0.1b — swept movement and corner behavior
+
+Earn continuous movement semantics separately:
+
+- thin-blocker/high-speed sweep evidence;
+- no diagonal corner cutting;
+- bounded deterministic candidate work;
+- preserved Direct/Destination Game policy.
+
+### P0.1c — support, step, and clearance if gameplay earns them
+
+Only after concrete movement requirements justify them, consider:
+
 - explicit support versus blocking;
 - body height/footprint profile;
 - bounded step-up;
 - grounded step-down rule if required;
 - low-ceiling clearance;
-- no diagonal corner cutting;
-- thin-blocker/swept-motion evidence.
 
 **Gate:** conformance scenarios pass at accepted 20/60/120 Hz semantics with
 bounded zero-allocation warmed Simple hot paths.

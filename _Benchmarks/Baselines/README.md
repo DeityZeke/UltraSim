@@ -199,6 +199,11 @@ Useful current anchors can be located by their embedded workload or filename:
   effective door/chest collision, terrain-only relocation, bounded failure, and
   0 B warmed allocation. It is not sweep, relocation occupancy, support/step,
   native-backend, provider-replaceability, or richer-physics evidence;
+- `physics-p0.1a-occupancy-relocation-*` — first-class clear/blocked/unprepared
+  occupancy over the same endpoint oracle plus the intentional relocation behavior
+  change. Blocked relocation preserves position and retained locomotion; a clear
+  relocation commits and retires locomotion. It remains endpoint-only evidence,
+  not sweep, support/step, actor-collision, spawn-policy, or provider evidence;
 - `terrain-t0-acceptance-matrix-closure-*` and
   `terrain-t0.10-acceptance-closure-*` — cumulative T0.0-T0.10 profile mapping
   plus the current final Release integrated/native rerun. They freeze the
