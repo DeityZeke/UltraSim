@@ -932,6 +932,65 @@ For example, one X/Z footprint may eventually contain a mountain surface at
 heightfield remains the cheap common case; it is not required to encode all
 three surfaces.
 
+### Future structural-surface semantic axes
+
+The future sparse-surface schema must not collapse unrelated meaning into one
+material enumeration. Surface existence, material, effective physical behavior,
+observer perception, and mutable Game state are independent axes:
+
+```text
+topology       whether an authored/current structural surface exists
+material       what an existing surface is made of and normally looks like
+physics        blocking, support, projectile, LOS, and sound behavior
+perception     what a particular observer is allowed or caused to perceive
+Game state     durability, damage, revealed/dispelled, destroyed, and similar facts
+```
+
+An absent or `None` surface means **topological absence**. It is not a transparent,
+non-colliding, or special-purpose material. Conversely, an authored surface may be
+rendered but non-blocking, hidden but blocking, or changed by Game state without
+changing the meaning of its material ID.
+
+Examples remain compositions of those axes rather than new terrain materials:
+
+```text
+literal hole
+    topology absent; no render, collision, support, or occlusion
+
+pure illusion wall
+    physical topology absent; observer-specific presentation/occlusion may show a wall
+
+intact breakable stone wall
+    topology present; stone material; rendered/occluding/blocking; mutable HP
+
+destroyed breakable wall
+    authored source retained; effective render/collision/occlusion absent
+
+invisible barrier
+    effective physical blocker; presentation may be absent
+```
+
+Game derives consumer-specific effective projections from authored truth plus
+mutable state. Physics consumes effective physical geometry; rendering consumes
+effective presentation; navigation and occlusion consume their own declared
+projections. None of those consumers interprets `illusion`, `secret wall`, HP,
+damage, spell, or reveal rules on behalf of Game.
+
+If sparse authored surfaces become individually mutable, each such surface must
+have stable World-owned identity within its content/world lineage (conceptually
+`WorldSurfaceId`). A chunk slot, array row, mesh triangle number, renderer handle,
+or ECS entity is not that durable identity. A compact durable overlay may key
+state such as HP/destroyed/revealed by this identity without requiring one ECS
+entity per surface. Behavior complex enough to earn an ECS entity may associate
+one explicitly, but surface identity and ECS identity remain distinct.
+
+Observer-specific perception never changes canonical physical truth. A client
+with True Sight may receive a different presentation projection from another
+observer while both remain governed by the same authoritative physical opening.
+This principle does not add the identity, sparse-surface schema, mutable state,
+per-recipient disclosure protocol, renderer behavior, or navigation/occlusion
+system in T0; each still requires a separately reviewed implementation checkpoint.
+
 The base-surface layout is two dense planes per 16 m `TerrainChunk`:
 
 ```
@@ -3050,6 +3109,10 @@ The first mutable overlay format must distinguish:
 - logical Multi instance additions/removals/variants;
 
 - schema/content version.
+
+A later structural-surface overlay extension must additionally key surface
+state/replacement by durable World surface identity. It must not retrofit mutable
+meaning onto material IDs or persist pack rows/triangle slots as identity.
 
 A complete prepared chunk is `base + durable overlay`, validated before resident
 publication. Compaction of long overlay histories is a persistence concern and

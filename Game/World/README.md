@@ -230,6 +230,17 @@ main-chunk order. The frozen top-level 48-byte terrain chunk row remains
 unchanged. A future sparse additional structural-surface section can likewise be
 added without changing any accepted section, but no such surface schema exists.
 
+That future schema must keep surface topology, material, effective physical
+behavior, observer perception, and mutable Game state distinct. An absent/`None`
+surface is topological absence, not a transparent or non-colliding material.
+Stateful authored surfaces will require stable World-owned identity rather than
+using chunk rows, triangle indices, render handles, or ECS entities as durable
+identity. A durable overlay may retain divergence such as damaged/destroyed state
+against that identity, while Game derives separate physical, presentation,
+occlusion, and navigation projections. These are frozen design constraints only:
+the current WorldPack and overlay formats do not yet implement sparse mutable
+surfaces or observer-specific perception.
+
 Opening is bounded by `WorldPackLimits` before proportional allocation. The
 reader validates geometry, content fingerprint, all checked offsets/counts,
 canonical ordering, section and pack hashes, material/height payloads, and

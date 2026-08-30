@@ -571,6 +571,25 @@ closed state does.
 Physics should receive the effective physical projection. It should not inspect
 game-specific types like `CabinDoor` to decide whether they block.
 
+The same rule applies to future stateful or perceived world surfaces. Physics
+must not interpret terrain material IDs as a combined topology/Game-state enum,
+and it must not know that a surface is an illusion, secret wall, breakable wall,
+spell effect, or damaged object. Game combines immutable authored truth with its
+mutable state and supplies only the resulting physical geometry/behavior:
+
+```text
+combat / spell / interaction / world state
+        -> Game surface state
+        -> effective physical projection
+        -> Physics
+```
+
+A physically absent surface may still have an observer-specific presentation or
+occlusion projection. A physically present blocker may be hidden from rendering.
+Those perception decisions do not enter the authoritative Physics world and do
+not alter canonical physical truth. Stable identity and persistence for mutable
+surfaces belong to World/Game, not to provider-native bodies or geometry slots.
+
 ## Traversal profile
 
 RunUO mixed creature/game properties directly into movement code. UltraSim should
