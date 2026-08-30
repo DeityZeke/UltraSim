@@ -136,7 +136,7 @@ public sealed class GameWorldActions
 
     public int ActiveLocomotionCount => _activeLocomotionCount;
 
-    /// <summary>The concrete generation-owned P0.0 endpoint resolver.</summary>
+    /// <summary>The concrete generation-owned P0.1b swept motion/occupancy resolver.</summary>
     public UltraSimSimplePhysics SimplePhysics => _physics;
 
     /// <summary>
@@ -419,7 +419,7 @@ public sealed class GameWorldActions
         bool complete = _collisionProjection.TryCapture(
             world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
         var request = new SimpleMotionRequest(current, nextX, nextZ, s_actorBody);
-        return _physics.ResolveEndpoint(request, dynamicBounds, complete);
+        return _physics.ResolveMotion(request, dynamicBounds, complete);
     }
 
     private static void SetAuthoritativePosition(

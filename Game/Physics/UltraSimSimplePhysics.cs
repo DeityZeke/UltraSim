@@ -15,7 +15,7 @@ public readonly record struct SimplePhysicsBody(
         HeightMillimeters > 0;
 }
 
-/// <summary>One all-or-nothing endpoint request from Game locomotion.</summary>
+/// <summary>One all-or-nothing swept request from Game locomotion.</summary>
 public readonly record struct SimpleMotionRequest(
     WorldPosition Current,
     long TargetXMillimeters,
@@ -50,7 +50,7 @@ public readonly record struct SimpleOccupancyResult(
     public bool CanOccupy => Status == SimpleOccupancyStatus.Clear;
 }
 
-/// <summary>Physical outcome supported by the extracted P0.0 endpoint resolver.</summary>
+/// <summary>Physical outcome supported by the Simple swept resolver.</summary>
 public enum SimpleMotionStatus : byte
 {
     None = 0,
@@ -59,7 +59,7 @@ public enum SimpleMotionStatus : byte
     OutsidePreparedWorld,
 }
 
-/// <summary>One realized endpoint or a fail-closed reason for no movement.</summary>
+/// <summary>One realized target or a fail-closed reason for no movement.</summary>
 public readonly record struct SimpleMotionResult(
     SimpleMotionStatus Status,
     WorldPosition Position)
@@ -68,12 +68,12 @@ public readonly record struct SimpleMotionResult(
 }
 
 /// <summary>
-/// Generation-owned authoritative endpoint resolver for the accepted T0.10 physical behavior.
+/// Generation-owned authoritative motion/occupancy resolver for the accepted physical behavior.
 /// It understands terrain and already-projected physical bounds, never Game prefab/state meaning.
 /// </summary>
 /// <remarks>
-/// P0.0 deliberately performs endpoint occupancy only. It does not sweep, substep, slide,
-/// depenetrate, step, or provide a general rigid-body/provider abstraction.
+/// P0.1b performs one exact linear swept-AABB blocker test and remains all-or-nothing. It does not
+/// substep, slide, depenetrate, step, resolve continuous support, or provide a provider abstraction.
 /// </remarks>
 public sealed class UltraSimSimplePhysics
 {
@@ -91,10 +91,10 @@ public sealed class UltraSimSimplePhysics
         (long)_staticHits.Length * Unsafe.SizeOf<WorldStaticQueryHit>();
 
     /// <summary>
-    /// Resolves current prepared terrain and tests the resulting body endpoint against complete
+    /// Resolves prepared terrain at the target and tests the complete linear body sweep against
     /// prepared static geometry and one complete Game-owned dynamic blocking projection.
     /// </summary>
-    public SimpleMotionResult ResolveEndpoint(
+    public SimpleMotionResult ResolveMotion(
         in SimpleMotionRequest request,
         ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
         bool dynamicProjectionComplete)
@@ -111,20 +111,18 @@ public sealed class UltraSimSimplePhysics
             return new SimpleMotionResult(SimpleMotionStatus.OutsidePreparedWorld, default);
         }
 
-        SimpleOccupancyResult occupancy = ProbeOccupancy(
-            new SimpleOccupancyRequest(target, request.Body),
+        if (!TryResolveTerrain(target, out WorldPosition resolved))
+            return new SimpleMotionResult(SimpleMotionStatus.OutsidePreparedWorld, default);
+
+        WorldStaticBounds currentBounds = Bounds(request.Current, request.Body);
+        WorldStaticBounds targetBounds = Bounds(resolved, request.Body);
+        return IsSweepClear(
+            currentBounds,
+            targetBounds,
             dynamicBlockingBounds,
-            dynamicProjectionComplete);
-        return occupancy.Status switch
-        {
-            SimpleOccupancyStatus.Clear =>
-                new SimpleMotionResult(SimpleMotionStatus.Resolved, occupancy.Position),
-            SimpleOccupancyStatus.Blocked =>
-                new SimpleMotionResult(SimpleMotionStatus.Blocked, default),
-            SimpleOccupancyStatus.OutsidePreparedWorld =>
-                new SimpleMotionResult(SimpleMotionStatus.OutsidePreparedWorld, default),
-            _ => throw new InvalidOperationException("Simple Physics produced no occupancy result."),
-        };
+            dynamicProjectionComplete)
+            ? new SimpleMotionResult(SimpleMotionStatus.Resolved, resolved)
+            : new SimpleMotionResult(SimpleMotionStatus.Blocked, default);
     }
 
     /// <summary>
@@ -140,20 +138,46 @@ public sealed class UltraSimSimplePhysics
             throw new ArgumentException(
                 "A valid Simple Physics occupancy request is required.", nameof(request));
 
-        if (!_world.TrySampleBaseTerrainHeight(request.Target, out int terrainY) ||
-            !WorldPosition.TryFromGlobalMillimeters(
-                request.Target.GlobalXMillimeters,
-                terrainY,
-                request.Target.GlobalZMillimeters,
-                out WorldPosition resolved))
+        if (!TryResolveTerrain(request.Target, out WorldPosition resolved))
         {
             return new SimpleOccupancyResult(
                 SimpleOccupancyStatus.OutsidePreparedWorld, default);
         }
 
         WorldStaticBounds bodyBounds = Bounds(resolved, request.Body);
+        return IsSweepClear(
+            bodyBounds,
+            bodyBounds,
+            dynamicBlockingBounds,
+            dynamicProjectionComplete)
+            ? new SimpleOccupancyResult(SimpleOccupancyStatus.Clear, resolved)
+            : new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
+    }
+
+    private bool TryResolveTerrain(in WorldPosition target, out WorldPosition resolved)
+    {
+        if (!_world.TrySampleBaseTerrainHeight(target, out int terrainY) ||
+            !WorldPosition.TryFromGlobalMillimeters(
+                target.GlobalXMillimeters,
+                terrainY,
+                target.GlobalZMillimeters,
+                out resolved))
+        {
+            resolved = default;
+            return false;
+        }
+        return true;
+    }
+
+    private bool IsSweepClear(
+        in WorldStaticBounds currentBounds,
+        in WorldStaticBounds targetBounds,
+        ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
+        bool dynamicProjectionComplete)
+    {
+        WorldStaticBounds queryBounds = Union(currentBounds, targetBounds);
         if (!_world.TryQueryStaticBounds(
-                bodyBounds,
+                queryBounds,
                 StaticCollisionCandidateChunks,
                 _staticHits,
                 out int staticCount,
@@ -162,26 +186,155 @@ public sealed class UltraSimSimplePhysics
         {
             // Complete-or-fail query pressure is physical blockage at this seam. A partial
             // candidate set is never interpreted as a clear route.
-            return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
+            return false;
         }
 
         for (int index = 0; index < staticCount; index++)
         {
-            if ((_staticHits[index].Flags & WorldStaticFlags.Collidable) != 0)
-                return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
+            if ((_staticHits[index].Flags & WorldStaticFlags.Collidable) != 0 &&
+                SweptIntersects(currentBounds, targetBounds, _staticHits[index].Bounds))
+                return false;
         }
 
         if (!dynamicProjectionComplete)
-            return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
+            return false;
         for (int index = 0; index < dynamicBlockingBounds.Length; index++)
         {
             if (!dynamicBlockingBounds[index].IsValid ||
-                dynamicBlockingBounds[index].Intersects(bodyBounds))
-                return new SimpleOccupancyResult(SimpleOccupancyStatus.Blocked, default);
+                SweptIntersects(currentBounds, targetBounds, dynamicBlockingBounds[index]))
+                return false;
         }
 
-        return new SimpleOccupancyResult(SimpleOccupancyStatus.Clear, resolved);
+        return true;
     }
+
+    private static WorldStaticBounds Union(
+        in WorldStaticBounds left,
+        in WorldStaticBounds right) => new(
+        Math.Min(left.MinimumXMillimeters, right.MinimumXMillimeters),
+        Math.Min(left.MinimumYMillimeters, right.MinimumYMillimeters),
+        Math.Min(left.MinimumZMillimeters, right.MinimumZMillimeters),
+        Math.Max(left.MaximumXExclusiveMillimeters, right.MaximumXExclusiveMillimeters),
+        Math.Max(left.MaximumYExclusiveMillimeters, right.MaximumYExclusiveMillimeters),
+        Math.Max(left.MaximumZExclusiveMillimeters, right.MaximumZExclusiveMillimeters));
+
+    private static bool SweptIntersects(
+        in WorldStaticBounds current,
+        in WorldStaticBounds target,
+        in WorldStaticBounds obstacle)
+    {
+        Int128 lowerNumerator = 0;
+        Int128 lowerDenominator = 1;
+        Int128 upperNumerator = 1;
+        Int128 upperDenominator = 1;
+
+        if (!ConstrainAxis(
+                current.MinimumXMillimeters,
+                current.MaximumXExclusiveMillimeters,
+                target.MinimumXMillimeters - current.MinimumXMillimeters,
+                obstacle.MinimumXMillimeters,
+                obstacle.MaximumXExclusiveMillimeters,
+                ref lowerNumerator,
+                ref lowerDenominator,
+                ref upperNumerator,
+                ref upperDenominator) ||
+            !ConstrainAxis(
+                current.MinimumYMillimeters,
+                current.MaximumYExclusiveMillimeters,
+                target.MinimumYMillimeters - current.MinimumYMillimeters,
+                obstacle.MinimumYMillimeters,
+                obstacle.MaximumYExclusiveMillimeters,
+                ref lowerNumerator,
+                ref lowerDenominator,
+                ref upperNumerator,
+                ref upperDenominator) ||
+            !ConstrainAxis(
+                current.MinimumZMillimeters,
+                current.MaximumZExclusiveMillimeters,
+                target.MinimumZMillimeters - current.MinimumZMillimeters,
+                obstacle.MinimumZMillimeters,
+                obstacle.MaximumZExclusiveMillimeters,
+                ref lowerNumerator,
+                ref lowerDenominator,
+                ref upperNumerator,
+                ref upperDenominator))
+        {
+            return false;
+        }
+
+        return CompareFractions(
+            lowerNumerator,
+            lowerDenominator,
+            upperNumerator,
+            upperDenominator) < 0;
+    }
+
+    private static bool ConstrainAxis(
+        long movingMinimum,
+        long movingMaximumExclusive,
+        long velocity,
+        long obstacleMinimum,
+        long obstacleMaximumExclusive,
+        ref Int128 lowerNumerator,
+        ref Int128 lowerDenominator,
+        ref Int128 upperNumerator,
+        ref Int128 upperDenominator)
+    {
+        if (velocity == 0)
+        {
+            return movingMinimum < obstacleMaximumExclusive &&
+                movingMaximumExclusive > obstacleMinimum;
+        }
+
+        Int128 entryNumerator;
+        Int128 exitNumerator;
+        Int128 denominator;
+        if (velocity > 0)
+        {
+            denominator = velocity;
+            entryNumerator = (Int128)obstacleMinimum - movingMaximumExclusive;
+            exitNumerator = (Int128)obstacleMaximumExclusive - movingMinimum;
+        }
+        else
+        {
+            denominator = -(Int128)velocity;
+            entryNumerator = (Int128)movingMinimum - obstacleMaximumExclusive;
+            exitNumerator = (Int128)movingMaximumExclusive - obstacleMinimum;
+        }
+
+        if (CompareFractions(
+                entryNumerator,
+                denominator,
+                lowerNumerator,
+                lowerDenominator) > 0)
+        {
+            lowerNumerator = entryNumerator;
+            lowerDenominator = denominator;
+        }
+        if (CompareFractions(
+                exitNumerator,
+                denominator,
+                upperNumerator,
+                upperDenominator) < 0)
+        {
+            upperNumerator = exitNumerator;
+            upperDenominator = denominator;
+        }
+
+        return CompareFractions(
+            lowerNumerator,
+            lowerDenominator,
+            upperNumerator,
+            upperDenominator) < 0;
+    }
+
+    private static int CompareFractions(
+        Int128 leftNumerator,
+        Int128 leftDenominator,
+        Int128 rightNumerator,
+        Int128 rightDenominator) =>
+        (leftNumerator * rightDenominator).CompareTo(
+            rightNumerator * leftDenominator);
 
     private static WorldStaticBounds Bounds(
         in WorldPosition position,

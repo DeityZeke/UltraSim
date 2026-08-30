@@ -150,8 +150,9 @@ Locomotion still owns Direct/Destination interpretation and Game still commits `
 The playable composition separately projects cabin-door/chest state into effective blocking bounds,
 so Simple Physics depends on prepared World truth rather than gameplay prefab/state meaning. P0.1a
 adds a first-class occupancy probe and makes authoritative relocation reject blocked endpoints
-transactionally. Neither checkpoint adds sweep, support/step, native providers, or a general physics
-API.
+transactionally. P0.1b adds bounded exact swept-AABB blocking so clear endpoints cannot tunnel
+through thin static/dynamic geometry or diagonal corners. It remains all-or-nothing and adds no
+support/step, sliding, native providers, or general physics API.
 
 Temporal work likewise belongs to its domain. The authoritative facts may name
 an effective/due world time, while a reconstructible index identifies what is

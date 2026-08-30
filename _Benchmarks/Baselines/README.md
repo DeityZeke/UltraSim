@@ -204,6 +204,12 @@ Useful current anchors can be located by their embedded workload or filename:
   change. Blocked relocation preserves position and retained locomotion; a clear
   relocation commits and retires locomotion. It remains endpoint-only evidence,
   not sweep, support/step, actor-collision, spawn-policy, or provider evidence;
+- `physics-p0.1b-swept-motion-*` — bounded exact swept-AABB blocking over the
+  existing upright body and prepared static/projected-dynamic bounds. It proves
+  thin-static/dynamic tunneling prevention, bidirectional diagonal-corner blocking,
+  half-open contact, exact broadphase filtering, Direct/Destination policy, bounded
+  failure, and 0 B warmed allocation. It is not support/step, sliding, continuous
+  terrain-support, actor-collision, or provider evidence;
 - `terrain-t0-acceptance-matrix-closure-*` and
   `terrain-t0.10-acceptance-closure-*` — cumulative T0.0-T0.10 profile mapping
   plus the current final Release integrated/native rerun. They freeze the

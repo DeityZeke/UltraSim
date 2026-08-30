@@ -30,9 +30,10 @@ acceptance narratives remain available through git history.
 - [Chat plan/status](Plans/CHAT.md) — accepted C0.0 contracts and the deliberately
   deferred remote, routed-channel, moderation, and extensibility checkpoints.
 - [UltraSim Simple Physics](../Game/Physics/README.md) — the concrete generation-owned
-  P0.0-P0.1a endpoint resolver and first-class occupancy query.
+  P0.0-P0.1b resolver, first-class occupancy, and bounded swept blocker test.
 - [Physics plan/status](Plans/PHYSICS.md) — accepted P0.0 ownership extraction and
-  P0.1a relocation occupancy, with sweep, support/step, and providers unstarted.
+  P0.1a relocation occupancy plus P0.1b swept movement, with support/step and
+  providers unstarted.
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   five concrete dynamic-public profiles, selected `ChunkPublication` semantics,
   P0.4 conservative selection, and the real public-actor consumer vertical.
@@ -132,7 +133,8 @@ consumer/deployment need earns them.
 - [Chat C0](Plans/CHAT.md) records accepted packet-free C0.0 semantics and the
   stopped C0.1+ remote/presentation/channel work.
 - [Physics P0](Plans/PHYSICS.md) records the P0.0 Simple Physics extraction,
-  P0.1a occupancy-aware relocation, and stopped P0.1b+ behavior/provider work.
+  P0.1a occupancy-aware relocation, P0.1b swept blocking, and stopped P0.1c+
+  behavior/provider work.
 
 ## Source-of-truth hierarchy
 

@@ -28,6 +28,8 @@ Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectan
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
+Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
+Run("SweptMotionPreservesDirectAndDestinationPolicy", SweptMotionPreservesGamePolicy, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
 Run("PlayableDestinationIsLatchedCadenceIndependentAndExact", PlayableDestinationCadenceMatrix, results);
@@ -730,7 +732,7 @@ static TestMetrics SimplePhysicsOccupancy()
                     clear.Position.YMillimeters == GamePlayableWorld.PlayerStart.YMillimeters,
                     $"A clear first-class occupancy probe did not resolve canonical terrain: {clear}.");
 
-                SimpleMotionResult sameEndpoint = game.SimplePhysics.ResolveEndpoint(
+                SimpleMotionResult sameEndpoint = game.SimplePhysics.ResolveMotion(
                     new SimpleMotionRequest(
                         GamePlayableWorld.PlayerStart,
                         GamePlayableWorld.PlayerStart.GlobalXMillimeters,
@@ -798,6 +800,208 @@ static TestMetrics SimplePhysicsOccupancy()
         HashText("first-class-occupancy-clear-blocked-outside"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
         "First-class occupancy shares motion endpoint legality, distinguishes prepared-world failure, fails closed on static/dynamic pressure, and allocates 0 B warmed.");
+}
+
+static TestMetrics SimplePhysicsSweptMotion()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1081))));
+    host.Start();
+
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, long>(
+            (_, _, game) =>
+            {
+                var body = new SimplePhysicsBody(300, 300, 1_800);
+                WorldPosition staticStart = At(13_500, 7_000);
+                WorldPosition staticTarget = At(13_500, 11_000);
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(staticTarget, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true).CanOccupy,
+                    "The thin-static sweep target was not independently clear.");
+                Expect(Move(staticStart, staticTarget).Status == SimpleMotionStatus.Blocked,
+                    "A 4 m request tunneled through the 300 mm cabin wall.");
+
+                WorldPosition cornerOutside = At(11_000, 8_000);
+                WorldPosition cornerInside = At(13_000, 10_000);
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(cornerOutside, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true).CanOccupy &&
+                    game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(cornerInside, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true).CanOccupy,
+                    "The diagonal-corner sweep endpoints were not independently clear.");
+                Expect(Move(cornerOutside, cornerInside).Status == SimpleMotionStatus.Blocked &&
+                    Move(cornerInside, cornerOutside).Status == SimpleMotionStatus.Blocked,
+                    "Diagonal motion cut through the cabin corner in one direction.");
+
+                WorldPosition dynamicStart = At(13_000, 7_000);
+                WorldPosition dynamicTarget = At(19_000, 7_000);
+                long minimumY = Math.Min(
+                    dynamicStart.YMillimeters, dynamicTarget.YMillimeters) - 100L;
+                long maximumY = Math.Max(
+                    dynamicStart.YMillimeters, dynamicTarget.YMillimeters) +
+                    body.HeightMillimeters + 100L;
+                var thinDynamic = new WorldStaticBounds(
+                    15_999, minimumY, 6_500,
+                    16_001, maximumY, 7_500);
+                ReadOnlySpan<WorldStaticBounds> thinDynamicSpan = [thinDynamic];
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(dynamicTarget, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true).CanOccupy,
+                    "The thin-dynamic sweep target was not independently clear.");
+                Expect(Move(dynamicStart, dynamicTarget, thinDynamicSpan).Status ==
+                        SimpleMotionStatus.Blocked &&
+                    Move(dynamicTarget, dynamicStart, thinDynamicSpan).Status ==
+                        SimpleMotionStatus.Blocked,
+                    "A request tunneled through a 2 mm projected dynamic blocker.");
+
+                var exactTouch = new WorldStaticBounds(
+                    15_999, minimumY, 7_301,
+                    16_001, maximumY, 7_500);
+                ReadOnlySpan<WorldStaticBounds> exactTouchSpan = [exactTouch];
+                Expect(Move(dynamicStart, dynamicTarget, exactTouchSpan).WasResolved,
+                    "Half-open swept bounds treated exact boundary contact as overlap.");
+
+                WorldPosition diagonalStart = At(13_000, 7_000);
+                WorldPosition diagonalTarget = At(19_000, 8_000);
+                var offPath = new WorldStaticBounds(
+                    12_900, minimumY, 7_900,
+                    13_100, maximumY, 8_100);
+                ReadOnlySpan<WorldStaticBounds> offPathSpan = [offPath];
+                Expect(Move(diagonalStart, diagonalTarget, offPathSpan).WasResolved,
+                    "The swept broadphase rectangle became a false physical collision.");
+
+                WorldPosition capacityStart = At(-30_000, 7_000);
+                WorldPosition capacityTarget = At(30_000, 7_000);
+                Expect(Move(capacityStart, capacityTarget).Status == SimpleMotionStatus.Blocked,
+                    "A sweep exceeding bounded static candidate coverage did not fail closed.");
+
+                WorldPosition warmTarget = At(14_000, 7_000);
+                for (int index = 0; index < 16; index++)
+                    _ = Move(dynamicStart, warmTarget);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 1_000; index++)
+                {
+                    if (!Move(dynamicStart, warmTarget).WasResolved)
+                        throw new InvalidOperationException("The warmed clear sweep changed.");
+                }
+                return GC.GetAllocatedBytesForCurrentThread() - before;
+
+                WorldPosition At(long x, long z)
+                {
+                    if (!WorldPosition.TryFromGlobalMillimeters(x, 0, z, out WorldPosition seed) ||
+                        !game.WorldState.TrySampleBaseTerrainHeight(seed, out int y) ||
+                        !WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition position))
+                    {
+                        throw new InvalidOperationException(
+                            $"The swept-motion fixture position {x}/{z} was not prepared.");
+                    }
+                    return position;
+                }
+
+                SimpleMotionResult Move(
+                    in WorldPosition current,
+                    in WorldPosition target,
+                    ReadOnlySpan<WorldStaticBounds> dynamicBounds = default) =>
+                    game.SimplePhysics.ResolveMotion(
+                        new SimpleMotionRequest(
+                            current,
+                            target.GlobalXMillimeters,
+                            target.GlobalZMillimeters,
+                            body),
+                        dynamicBounds,
+                        true);
+            },
+            out long allocated) && allocated == 0,
+        $"Warmed swept Simple Physics allocated {allocated} caller bytes.");
+
+    return new TestMetrics(
+        HashText("swept-static-dynamic-corner-exact"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
+        "Exact integer swept-AABB motion blocks thin static/dynamic tunneling and diagonal corners, avoids broadphase false positives, fails closed at capacity, and allocates 0 B warmed.");
+}
+
+static TestMetrics SweptMotionPreservesGamePolicy()
+{
+    WorldPack pack = GamePlayableWorld.CreateWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(
+            new PersistenceIdentityOptions(new PersistentWorldId(0x80_1082)),
+            frequencyHz: 1));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0x1082));
+    Expect(entered.IsEntered, "The swept-policy actor could not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The swept-policy fixture could not populate.");
+    host.Tick();
+
+    Expect(WorldPosition.TryFromGlobalMillimeters(
+            13_500, 0, 7_000, out WorldPosition startRequest),
+        "The swept-policy start was not representable.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, _, game) => game.WorldActions.RelocateActor(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                startRequest,
+                out WorldPosition _),
+            out GameWorldActionStatus relocation) &&
+        relocation == GameWorldActionStatus.Accepted,
+        "The swept-policy actor could not reach its clear start.");
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    WorldPosition start = link.ReadPosition();
+    Send(GameLocomotionUpdate.CreateDirect(0, GamePlayerCommand.MaximumAxisMagnitude));
+    host.Tick();
+    WorldPosition directBlocked = link.ReadPosition();
+    Expect(directBlocked == start && ReadActiveLocomotionCount(runtime.Game) == 1,
+        $"A one-second Direct tunneled through the thin wall or lost retention: {directBlocked}.");
+
+    Send(GameLocomotionUpdate.CreateDestination(13_500, 13_000));
+    host.Tick();
+    WorldPosition destinationBlocked = link.ReadPosition();
+    Expect(destinationBlocked == start && ReadActiveLocomotionCount(runtime.Game) == 0,
+        $"A one-step Destination tunneled through the thin wall or remained retained: {destinationBlocked}.");
+
+    return new TestMetrics(
+        HashText($"{start}:{directBlocked}:{destinationBlocked}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "At a deliberately large one-second step, swept blocking preserves Game policy: Direct remains retained while the impossible straight Destination retires.",
+        InputCommands: input.Snapshot().CommandsProduced);
+
+    void Send(in GameLocomotionUpdate locomotion)
+    {
+        Expect(input.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    locomotion,
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand command),
+            $"The swept-policy {locomotion.Kind} command could not be formed.");
+        GamePlayerCommandResult result = link.ApplyCommand(command);
+        Expect(result.Locomotion == GameWorldActionStatus.Accepted,
+            $"The swept-policy {locomotion.Kind} command was not accepted: {result.Locomotion}.");
+    }
 }
 
 static TestMetrics PlayableMovementCadenceMatrix()

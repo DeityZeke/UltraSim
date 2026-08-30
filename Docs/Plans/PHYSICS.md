@@ -1,10 +1,10 @@
 # Physics P0: injected authoritative motion plan
 
-Status: P0.1a implementation/evidence checkpoint. P0.0 extracted the accepted
-endpoint behavior into generation-owned UltraSim Simple Physics. P0.1a now adds
-first-class endpoint occupancy and makes authoritative relocation its first Game
-consumer. Sweep, support, step, clearance, sliding, and actor collision remain
-unstarted.
+Status: P0.1b implementation/evidence checkpoint. P0.0 extracted the accepted
+endpoint behavior into generation-owned UltraSim Simple Physics and P0.1a added
+first-class occupancy-aware relocation. P0.1b now adds bounded exact swept blocker
+collision. Support, step, clearance, sliding, continuous terrain support, and actor
+collision remain unstarted.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
@@ -187,7 +187,7 @@ replaceability. Those remain later, separately reviewed checkpoints.
 P0.1a adds one behavior capability without widening the resolver into a character
 controller or provider abstraction.
 
-The concrete seam now exposes adjacent queries:
+At that checkpoint the concrete seam exposed adjacent queries:
 
 ```text
 ResolveEndpoint(SimpleMotionRequest)
@@ -246,6 +246,92 @@ not presented as a causal throughput change.
 P0.1a does not add sweep, substeps, thin-wall guarantees, support categories,
 step-up/down, low-ceiling semantics beyond current AABB overlap, sliding,
 depenetration, actor collision, gravity, spawn policy, or alternate providers.
+
+## P0.1b implementation checkpoint — 2026-08-30
+
+P0.1b changes blocker collision intentionally while retaining the same body,
+authoritative target-terrain resolution, Game-owned dynamic projection, bounded
+scratch, and Direct/Destination policy.
+
+The motion entry point is now named `ResolveMotion`. It builds the upright body
+bounds at the current canonical position and terrain-resolved target, queries one
+complete union broadphase, and exact-tests each collidable candidate over the
+linear request:
+
+```text
+body A ------------------------------> body B
+        bounded union broadphase
+                    |
+                    v
+        exact swept-AABB intervals
+        static/Multi + projected dynamic bounds
+                    |
+          +---------+---------+
+          |                   |
+       no hit              any hit / pressure
+          |                   |
+       Resolved              Blocked
+```
+
+The interval solver keeps time as rational values and compares cross-products in
+`Int128`. It does not use floating point, millimeter substeps, or a rectangular
+broadphase as the final collision answer. Half-open world bounds retain their
+existing semantics: exact boundary contact is not overlap. Both positive and
+negative motion use the same calculation, so diagonal cabin-corner traversal is
+blocked in either direction. A deliberately off-path dynamic bound inside the
+union rectangle remains clear after the exact test.
+
+Occupancy is the zero-displacement use of the same `IsSweepClear` physical
+legality implementation. Motion and occupancy therefore still share terrain,
+static-query, projected-dynamic, capacity, and overlap semantics rather than
+growing separate physical oracles.
+
+The result remains deliberately all-or-nothing:
+
+```text
+clear complete sweep
+    -> commit requested terrain-resolved target
+
+blocked sweep / incomplete query
+    -> realize no partial displacement
+    -> Direct remains retained
+    -> impossible straight Destination retires
+```
+
+There is no time-of-impact/contact payload, partial advance, sliding, or
+depenetration. Terrain is authoritatively sampled at the target as before; P0.1b
+does not claim continuous support, void/gap traversal, steps, or grounding along
+the segment.
+
+Permanent regressions prove:
+
+- a clear endpoint 4 m beyond the 300 mm cabin wall cannot tunnel through it;
+- a 2 mm projected dynamic blocker cannot be crossed in either X direction;
+- both endpoints around the cabin corner are clear but the diagonal sweep blocks
+  in both directions;
+- exact half-open contact remains clear;
+- a candidate inside only the union rectangle does not become a false hit;
+- broadphase coverage beyond the fixed capacity fails closed;
+- a deliberately large one-second Game step keeps blocked Direct retained and
+  retires blocked straight Destination;
+- accepted 20/60/120 Hz locomotion/canonical results remain unchanged;
+- 1,000 warmed clear sweeps allocate 0 B.
+
+The accepted Release artifact is
+[`physics-p0.1b-swept-motion-2026-08-30.json`](../../_Benchmarks/Baselines/physics-p0.1b-swept-motion-2026-08-30.json).
+It reports all twenty-two integrated gates passing, the unchanged canonical
+`B764...F220` playable-world hash, 0 B warmed motion/occupancy/sweep allocation,
+and the unchanged 14,336 B aggregate `GameWorldActions` reservation. Its retained
+integrated observation is 47.387 us mean / 70.489 us p95 versus P0.1a's 44.571 us
+mean / 55.149 us p95. Three additional clean Release observations measured
+47.077-49.511 us mean and 70.519-72.839 us p95, so the higher tail is recorded as
+real checkpoint context rather than hidden as one-run noise. The absolute cost is
+accepted for the new continuous blocker guarantee; it is not presented as a
+throughput improvement or as evidence for later support/response features.
+
+P0.1b does not add support categories, step-up/down, low-ceiling behavior beyond
+the existing swept AABB, sliding, contact response, depenetration, continuous
+terrain support, actor collision, gravity, navigation, or alternate providers.
 
 ## RunUO archaeology
 
