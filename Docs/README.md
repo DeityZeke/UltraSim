@@ -51,6 +51,16 @@ acceptance narratives remain available through git history.
   bounded render residency, grouping, and floating origin.
 - [Launchable T0.10 client](../Client/Playable.Godot/README.md) — real
   OfflineDirect woods/cabin application, controls, and save location.
+- [Client shell/composition plan](Plans/CLIENT.md) — the real-client reconstruction
+  roadmap: Single Player/Online/Complete/Contentless compositions, local-vs-remote
+  semantic parity, human-scale presentation calibration, nameplates/chat, layered
+  settings, server-recommended control/camera profiles, server-composed UI, and
+  explicit executable-extension trust boundaries.
+- [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
+  content identity, Default/Replace/Add layering, passive-content validation,
+  server/content cache ownership, source-independent local/self-hosted/external
+  byte delivery, Cabin local-vs-remote parity, and the deferred precompiled
+  WASM/.NET executable-extension model.
 
 ## ECS
 
@@ -135,6 +145,12 @@ consumer/deployment need earns them.
 - [Physics P0](Plans/PHYSICS.md) records the P0.0 Simple Physics extraction,
   P0.1a occupancy-aware relocation, P0.1b swept blocking, and stopped P0.1c+
   behavior/provider work.
+- [Client F0](Plans/CLIENT.md) records the frozen real-client shell/composition,
+  settings/control-profile, world-presentation, server-composed UI, and parity
+  roadmap leading into repository extraction readiness.
+- [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
+  cache, hosting/source, Default/Replace/Add, Cabin parity, Contentless Online, and
+  explicitly deferred executable-extension contracts.
 
 ## Source-of-truth hierarchy
 
