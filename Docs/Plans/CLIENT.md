@@ -2,13 +2,17 @@
 
 **Status:** proposed/frozen implementation plan after Physics P0.1b (`6bfef1e2`).
 
-**Purpose:** replace the current acceptance-oriented Godot playable harness with a real, persistent, user-facing client shell while preserving UltraSim's existing ownership boundaries and proving that local play, remote play, bundled content, and optional client capabilities can be composed independently.
+**Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
-This plan incorporates the useful client-shell, UI-layer, server-composed UI, presentation, and content lessons from archived V2 while targeting the current V3 architecture. V2 is archaeology and behavioral reference, not code or ownership to port wholesale.
+Companion content-distribution plan: [`ASSET_STREAMING.md`](ASSET_STREAMING.md).
 
 The milestone is not generic "front-facing cleanup." It is:
 
-> **Reconstruct a V2-quality real Godot client shell on V3 architecture, promote Cabin in the Woods to an optional built-in Test World, and prove the same thin client can be compiled as single-player-only, online-only, complete, or contentless-online without retaining absent capabilities as hidden runtime code.**
+> **Reconstruct a V2-quality real Godot client shell on V3 architecture, promote Cabin in the Woods to an optional built-in Test World, and prove the same thin client can be compiled as Single Player-only, Online-only, Complete, or Contentless Online without retaining absent capabilities as hidden runtime code.**
+
+A second client goal is now explicit:
+
+> **The same stock client architecture should be able to feel materially different from one server to another — UO-like, third-person survival-like, or another supported interaction style — through declarative content, UI, controls, and camera profiles rather than server-supplied executable code.**
 
 ---
 
@@ -16,9 +20,21 @@ The milestone is not generic "front-facing cleanup." It is:
 
 UltraSim's client is deliberately thin.
 
-It owns input capture, presentation, UI rendering, local settings, content caching, local application flow, and session-facing client state. It does **not** become the authoritative owner of gameplay because the server happens to be embedded in the same process.
+It owns:
 
-The client should be able to exist in several concrete compositions:
+- physical input capture;
+- client-local application flow;
+- local settings and accessibility/preferences;
+- retained client semantic state;
+- rendering/presentation;
+- UI realization/focus;
+- content acquisition/cache/resolution;
+- camera implementation/feel;
+- local diagnostics.
+
+It does **not** become authoritative Game logic because the server happens to be embedded in the same process.
+
+The client should exist in several concrete compositions.
 
 ```text
 Single Player Client
@@ -38,6 +54,7 @@ Online / MMO Client
     client core
     Godot presentation
     remote client protocol/network capability
+    content acquisition/cache
 
     NO local authoritative Game/server composition
     NO required bundled world
@@ -55,12 +72,12 @@ Contentless Online Client
     bootstrap/fallback presentation assets
     content acquisition/cache
 
-    NO bundled game world
+    NO bundled playable world
     NO bundled authoritative Game implementation
     NO Single Player capability
 ```
 
-The distinction must be real at the project/package/assembly level. A Single Player build does not merely hide Multiplayer while still shipping Network. An Online build does not merely hide Single Player while still shipping the local Game/server implementation.
+The distinction is real at project/package/assembly level. A Single Player build does not merely hide Multiplayer while still shipping Network. An Online build does not merely hide Single Player while still shipping local Game/server code.
 
 The shell exposes only features supplied by its composition.
 
@@ -68,69 +85,91 @@ The shell exposes only features supplied by its composition.
 
 # 2. Current V3 position
 
-The current repository already contains many of the correct independent pieces.
+The current repository already has many correct independent pieces.
 
 ## Client Core
 
-`Client/Core` is engine-neutral and currently does not depend on Network. It owns client semantic state and presentation coordination such as:
+`Client/Core` is engine-neutral and Network-free. It owns retained client semantics such as:
 
 - `ClientWorldSemanticCache`;
 - bounded semantic chunk residency;
 - retained public entity knowledge;
 - presentation-window coordination;
-- input sequencing and focus-aware client semantics;
-- client UI state/contracts;
-- other client-side retained semantic state.
+- input sequencing/focus-aware semantics;
+- concrete control-profile canaries;
+- client chat state;
+- UI runtime/cache state;
+- other session-local knowledge.
 
 This is the correct center of the real client.
 
 ## Client Network
 
-`Client/Network` is already a separate project. It introduces the remote protocol and Network dependencies.
+`Client/Network` is a separate project that introduces remote protocol/Network dependencies.
 
-That separation is valuable and must become an explicit executable-composition boundary.
+That separation should become an explicit executable-composition boundary.
 
 ## Godot adapter
 
-`Client/_Godot` is also already Network-free. It translates Client Core semantics into Godot-native rendering, UI controls, input capture, render windows, and fallback presentation resources.
+`Client/_Godot` is Network-free and translates Client Core semantics into native:
 
-The Godot adapter remains a presentation/input adapter. It must not become the place where local-vs-remote Game semantics diverge.
+- rendering;
+- UI controls;
+- raw input capture;
+- render windows/resources;
+- camera/presentation;
+- fallback assets.
+
+The Godot adapter must not become the place where local-vs-remote Game semantics diverge.
 
 ## Current playable harness
 
-`Client/Playable.Godot` currently composes Client Core, Client Network, Game projects, Server Runtime/Persistence, and the Network kernel into one acceptance executable. Its large `PlayableWorldClient` has been useful for proving whole verticals.
+`Client/Playable.Godot` currently composes Client Core, Client Network, Game projects, Server Runtime/Persistence, and Network into one acceptance executable. That was appropriate for vertical proof.
 
-That executable is an acceptance harness, not the final client ownership model.
+It is not the final client ownership model.
 
-It should remain available while the real shell is being built, then either shrink into a dedicated acceptance launcher or retire once the real client provides equivalent automated and manual coverage.
+Keep it until the real shell reaches equivalent automated/manual coverage, then shrink/retire it.
 
 ## Existing UI foundation
 
-V3 already contains substantial engine-neutral UI machinery under `Kernels/UI`, including authoring, compiled definitions, models, protocol/types, and semantic wire codecs. `Game/UI` already has a real Inventory UI consumer.
+V3 already has substantial engine-neutral UI machinery under `Kernels/UI`, including authoring, compiled definitions, models, protocol/types, and semantic codecs. `Game/UI` already has a real Inventory consumer.
 
-The real client should consume and prove these capabilities rather than inventing a parallel Godot-specific game UI framework.
+The real client should prove that path rather than invent a second Godot-only game UI framework.
 
 ---
 
 # 3. V2 archaeology to preserve
 
-Archived V2 established several client concepts that remain useful:
+Archived V2 established useful concepts:
 
-- one persistent client root rather than replacing the entire scene/app per screen;
-- persistent UI categories/layers;
-- local application-shell UI separate from server-driven UI;
-- world overlays such as nameplates and overhead chat;
-- menu/HUD/debug separation;
-- actor definition/catalog concepts rather than hardcoding one final model;
-- a RunUO-gump-like server-composed UI path;
-- cold/hot UI schema caching;
-- a client-local main menu and settings flow;
-- explicit content/resource distinctions;
-- future diagnostics/admin tooling as optional client quality-of-life rather than gameplay authority.
+- one persistent client root;
+- persistent World/HUD/Menus/Debug UI categories;
+- client-local app-shell UI separate from server-driven UI;
+- nameplates and overhead chat;
+- actor/mobile definitions/catalogs;
+- X/Y human presentation assets;
+- RunUO-gump-like server-composed UI;
+- cold/hot schema caching;
+- local settings flow;
+- content resolver/cache/pack stack;
+- resource packs versus server patches versus executable mods;
+- asset/content download from server or declared external source;
+- future diagnostics/admin concepts.
 
-Recover these **behaviors and boundaries**.
+Recover behaviors/boundaries, not old ownership mistakes.
 
-Do not recover obsolete V2 ownership where networking, world state, or client presentation improperly owned server/game semantics.
+Historical V2 X/Y definitions are useful calibration evidence:
+
+```text
+X Bot -> Human Female
+Y Bot -> Human Male
+VisualScale        1,1,1
+CameraPivotOffset  y=1.6m
+NameplateOffset    y=2.0m
+EffectsOffset      y=0.9m
+```
+
+Those values are starting calibration evidence, not frozen universal character dimensions.
 
 ---
 
@@ -155,7 +194,7 @@ A MISSING CAPABILITY PRODUCES NO UI ENTRY POINT FOR THAT CAPABILITY.
 
 CLIENT-LOCAL APPLICATION UI AND SERVER-COMPOSED GAME UI ARE DIFFERENT OWNERSHIP DOMAINS.
 
-SERVER-COMPOSED UI IS DATA/SCHEMA, NEVER EXECUTABLE CLIENT CODE.
+SERVER-COMPOSED UI IS DATA/SCHEMA, NEVER ARBITRARY EXECUTABLE CLIENT CODE.
 
 STANDARD PREINSTALLED UI DEFINITIONS USE THE SAME SEMANTIC IDENTITY AS CACHED CUSTOM DEFINITIONS.
 
@@ -171,11 +210,27 @@ CLIENT SEMANTIC CACHE KNOWLEDGE IS PRESENTATION INPUT, NOT AUTHORITY.
 
 SERVER DISCLOSURE DETERMINES WHAT THE CLIENT MAY KNOW; CLIENT POLICY DETERMINES HOW KNOWN STATE IS PRESENTED.
 
-LOCAL CONTENT, SERVER CONTENT PATCHES, RESOURCE PACKS, AND EXECUTABLE CLIENT MODS ARE DIFFERENT CONCEPTS.
+SERVER-RECOMMENDED CONTROLS/CAMERA/UI BINDINGS ARE DECLARATIVE CLIENT PROFILES, NOT EXECUTABLE INPUT CODE.
 
-A SERVER MAY STREAM DATA/ASSETS; IT MAY NOT SILENTLY INSTALL EXECUTABLE CLIENT CODE.
+THE USER OWNS FINAL PHYSICAL BINDINGS AND CLIENT-LOCAL SETTINGS.
 
-A CONTENTLESS CLIENT MUST RETAIN A SMALL BUILT-IN FALLBACK PRESENTATION SET.
+SERVER DEFAULTS NEVER DESTRUCTIVELY REWRITE USER SETTINGS.
+
+LOCAL CONTENT, PASSIVE SERVER CONTENT, USER RESOURCE PACKS, AND EXECUTABLE CLIENT EXTENSIONS ARE DIFFERENT TRUST CLASSES.
+
+NORMAL SERVER CONTENT IS PASSIVE/ALLOWLISTED DATA AND ASSETS.
+
+A SERVER MAY NOT SILENTLY INSTALL OR EXECUTE CLIENT CODE THROUGH THE NORMAL CONTENT PATH.
+
+FUTURE EXECUTABLE CLIENT EXTENSIONS, IF SUPPORTED, REQUIRE A SEPARATE PACKAGE/LOADER/CONSENT PATH.
+
+FUTURE EXECUTABLE EXTENSIONS USE PRECOMPILED WASM OR PRECOMPILED .NET DLL PAYLOADS; THE STOCK CLIENT DOES NOT COMPILE SERVER MOD SOURCE.
+
+CONTENT AUTHORITY AND CONTENT BYTE ORIGIN ARE SEPARATE.
+
+THE GAME SERVER AUTHORIZES EXACT CONTENT IDENTITY; LOCAL FILES, SERVER STATIC HOSTING, OR EXTERNAL HTTPS/CDN MAY SUPPLY THE VERIFIED BYTES.
+
+A CONTENTLESS CLIENT RETAINS A SMALL BUILT-IN BOOTSTRAP/FALLBACK PRESENTATION SET.
 
 SINGLE PLAYER MAY USE AN EMBEDDED AUTHORITATIVE SERVER WITHOUT USING NETWORK TRANSPORT.
 
@@ -185,7 +240,7 @@ DIRECT CONNECT IS THE FIRST REMOTE ENTRY POINT.
 
 SERVER DISCOVERY / PUBLIC SERVER LISTS ARE DEFERRED UNTIL SEPARATELY AUTHORIZED.
 
-THE REAL CLIENT MUST BECOME A PRE-EXTRACTION COMPOSITION ORACLE FOR THE FUTURE REPOSITORY SPLIT.
+THE REAL CLIENT IS A PRE-EXTRACTION COMPOSITION ORACLE FOR THE FUTURE REPOSITORY SPLIT.
 ```
 
 ---
@@ -194,76 +249,84 @@ THE REAL CLIENT MUST BECOME A PRE-EXTRACTION COMPOSITION ORACLE FOR THE FUTURE R
 
 ## Client shell
 
-The application shell owns:
+Owns:
 
 - application lifetime;
-- main menu;
+- Main Menu;
 - local Settings;
 - Exit;
 - loading/transition/error surfaces;
-- Direct Connect when remote play is installed;
-- Single Player entry when local play is installed;
-- in-session local options/disconnect flow;
-- local capability-to-menu composition;
-- persistent UI layer roots;
-- orchestration of one active client session/world presentation.
+- Direct Connect when Remote Play exists;
+- Single Player entry when Local Play exists;
+- in-session local options/disconnect;
+- capability-driven menu composition;
+- persistent UI roots;
+- orchestration of one active client session/world presentation;
+- user consent surfaces for server control profiles and future executable extensions.
 
-The shell does not own:
+Does not own:
 
 - authoritative world state;
-- combat, inventory, physics, character permission, or movement authority;
+- combat/inventory/physics permissions;
 - Network protocol semantics;
 - server discovery service behavior;
-- server-authored game menus.
+- server-authored gameplay menus.
 
 ## Client Core
 
-Client Core owns engine-neutral client state and policy:
+Owns engine-neutral client state/policy:
 
 - semantic world cache;
 - public entity knowledge;
-- client presentation coordination;
-- input sequencing/focus suppression policy;
-- bounded client chat state;
-- UI semantic/cache state where appropriate;
-- presentation eligibility/state that is not engine-specific;
+- presentation coordination;
+- input sequencing/focus suppression;
+- control grammar/profile interpretation;
+- bounded chat state;
+- UI semantic/cache state;
+- layered/effective client profile state where appropriate;
 - session-local knowledge lifetimes.
 
 ## Godot adapter
 
-Godot owns:
+Owns:
 
 - scene composition;
 - native controls;
 - renderer resources;
-- camera feel;
+- camera implementation/feel;
 - animation/audio/VFX presentation;
 - raw physical input capture;
 - UI focus realization;
-- local settings persistence where platform-specific;
-- presentation fallback primitives/assets.
+- platform/local settings persistence;
+- fallback primitives/assets.
 
-Godot does not own Game semantics, protocol codecs, AOI, replication policy, or server UI state machines.
+Does not own Game semantics, protocol codecs, AOI, replication policy, or server UI state machines.
 
-## Local play capability
+## Local Play capability
 
-The Local Play capability owns composition of an authoritative in-process/local Game/server runtime for Single Player.
+Owns composition of an authoritative in-process/local Game/server runtime for Single Player.
 
-It may directly bridge committed Game semantic outputs into Client Core **without Network/UDP packetization**, provided it uses the same semantic boundaries and does not let presentation code mutate authoritative Game state directly.
+May directly bridge committed Game semantic outputs into Client Core without Network/UDP, but presentation code never directly mutates authoritative Game state.
 
-## Remote play capability
+## Remote Play capability
 
-The Remote Play capability owns:
+Owns:
 
 - client protocol/session machinery;
-- Network kernel dependency;
+- Network dependency;
 - remote transport;
-- remote submission/proof paths;
+- submission/proof paths;
 - mapping remote Game semantics into the same Client Core state used by Local Play.
+
+## Content capability
+
+Owns acquisition/cache/resolution of passive content through the rules in `ASSET_STREAMING.md`.
+
+It does not make the byte host semantic authority.
 
 ## Game/server
 
-Game/server remains authoritative in both local and remote compositions.
+Remains authoritative in local and remote compositions.
 
 Single Player means "the authoritative server is local," not "the client is authoritative."
 
@@ -271,59 +334,58 @@ Single Player means "the authoritative server is local," not "the client is auth
 
 # 6. Capability composition model
 
-The real client should be composed from explicit capabilities supplied by the executable composition root.
+Compose the real client from explicit capabilities supplied by the executable composition root.
 
-Do not begin with a process-global service locator or reflection-based arbitrary plugin discovery.
-
-Conceptually:
+Do not start with process-global service locators or arbitrary reflection plugin discovery.
 
 ```text
 ClientShell
     always present
 
-LocalPlay capability
+LocalPlay
     optional
 
-RemotePlay capability
+RemotePlay
     optional
 
-BuiltInWorldCatalog / TestWorld capability
+ContentAcquisition
+    present in Online/Complete/Contentless as needed
+
+BuiltInWorldCatalog / TestWorld
     optional
 
-Future ServerDiscovery capability
+Future ServerDiscovery
     optional, deferred
 
-Future ClientModHost capability
-    optional, deferred
+Future ClientExtensionHost
+    optional, deferred and separately trusted
 ```
 
-The shell uses the capabilities it was actually given.
+Menu entries follow installed capabilities.
 
 ```text
-if LocalPlay exists:
-    show Single Player
+LocalPlay present
+    -> Single Player
 
-if RemotePlay exists:
-    show Multiplayer / Direct Connect
+RemotePlay present
+    -> Multiplayer / Direct Connect
 
-if neither exists:
-    shell can still launch Settings / diagnostics / Exit for test compositions
+ClientExtensionHost absent
+    -> executable extension servers can be rejected cleanly rather than silently loading code
 ```
 
-This is composition, not a runtime feature flag around code that is still linked into the executable.
+This is composition, not runtime flags around linked code.
 
-## Required initial build profiles
+## Single Player
 
-### Single Player
-
-Must compile without references to:
+Must compile without:
 
 - `Client/Network`;
 - `Kernels/Network`;
 - remote Game protocol transport;
 - Hosted Network.
 
-Expected main menu:
+Menu:
 
 ```text
 Single Player
@@ -331,16 +393,11 @@ Settings
 Exit
 ```
 
-### Online
+## Online
 
-Must compile without references to local authoritative composition such as:
+Must compile without local authoritative implementation dependencies such as Server Runtime/Game composition merely for play.
 
-- `Game/Composition` as an executable/server implementation dependency;
-- `Server/Runtime`;
-- server persistence;
-- built-in Test World package unless deliberately added.
-
-Initial main menu:
+Menu:
 
 ```text
 Multiplayer
@@ -349,11 +406,9 @@ Settings
 Exit
 ```
 
-No server discovery/list is required in this campaign.
+No server discovery required in this campaign.
 
-### Complete
-
-Contains both capabilities:
+## Complete
 
 ```text
 Single Player
@@ -362,92 +417,67 @@ Settings
 Exit
 ```
 
-### Online Contentless
+## Contentless Online
 
-Contains Remote Play but no bundled playable world/content pack beyond bootstrap/fallback assets.
+Remote Play + content/cache + bootstrap/fallback only. No bundled playable world or local authority implementation.
 
-This is a stronger packaging profile and may require the content-acquisition checkpoint before it can enter a world.
+## Future installable capabilities
 
-## Future installable capability
-
-The architecture should not prevent a later experience where an official multiplayer capability can be installed into an existing Single Player distribution.
-
-However, **dynamic assembly/plugin installation is not required now**.
-
-First prove clean projects/packages and explicit composition roots. A future real need can earn a versioned dynamic capability loader.
+Architecture should leave room for installing official capabilities later, but dynamic capability installation is not required now. First prove clean project/package boundaries.
 
 ---
 
 # 7. Local play versus remote play
 
-The key invariant is semantic parity, not packet parity.
+The invariant is **semantic parity, not packet parity**.
 
-## Local play
+## Local
 
 ```text
 Godot input
-    -> Client Core input semantics
+    -> Client Core input/control semantics
     -> Local Play semantic bridge
     -> authoritative Game/server runtime
     -> committed Game/world/chat/UI semantics
-    -> Local Play semantic projection/bridge
+    -> Local Play semantic projection
     -> Client Core semantic state
     -> Godot presentation
 ```
 
-Local Play should not encode a packet, encrypt it, send it over loopback UDP, decrypt it, and decode it merely to pretend that local and remote execution are identical.
+No loopback UDP is required just to pretend local/remote are identical.
 
-That work is unnecessary when the server is in-process.
-
-What must remain identical is:
-
-- authority ownership;
-- command/session semantics;
-- accepted Game transitions;
-- semantic publication identity;
-- client-side knowledge/application semantics;
-- UI definitions/models;
-- public/private disclosure rules;
-- presentation inputs.
-
-## Remote play
+## Remote
 
 ```text
 Godot input
-    -> Client Core input semantics
+    -> Client Core input/control semantics
     -> Client Network / protocol
     -> Network
     -> hosted authoritative server
     -> Game
-    -> Game semantic publication
+    -> semantic publication
     -> protocol / Network
     -> Client Network
     -> Client Core semantic state
     -> Godot presentation
 ```
 
-Local and remote play should converge on the same Client Core types/stores wherever the meaning is actually the same.
+Transport differs; Game meaning and client semantic destination should not.
 
-## No local authority bypass
-
-Forbidden pattern:
+Forbidden:
 
 ```text
 if singlePlayer:
     Godot UI -> directly mutate GameWorldState / Inventory / ECS
 ```
 
-Local UI may invoke a local semantic bridge for a normal Game request. The request still goes through Game authority.
-
 ---
 
-# 8. Cabin in the Woods becomes a built-in Test World
+# 8. Cabin in the Woods becomes the built-in Test World
 
-The current Cabin in the Woods playable slice should be promoted from "acceptance fixture that happens to be playable" into the first optional built-in Test World/content package.
+Promote Cabin from an acceptance fixture into the first optional built-in Test World/content package.
 
-It should not become hardcoded client logic.
-
-Conceptually:
+It is not hardcoded client logic.
 
 ```text
 BuiltInServerContent/
@@ -455,54 +485,83 @@ BuiltInServerContent/
         WorldPack
         content definitions
         server/game configuration
-        UI definitions/models where applicable
-        presentation assets or references
+        UI definitions/models
+        presentation assets/references
 ```
 
-The exact package path/format is not frozen by this plan.
+Exact package path/format remains unfrozen.
 
-## Single Player use
+## Local
 
 ```text
 Main Menu
     -> Single Player
     -> Cabin in the Woods
-    -> start local authoritative server/runtime with Cabin package
+    -> start local authoritative runtime
     -> enter through Local Play semantic path
 ```
 
-## Remote use
+## Remote
 
-The same Test World should be hostable by an external server and reachable through Direct Connect.
+The same Test World is externally hostable/reachable through Direct Connect.
 
-The client must not contain a special "remote Cabin" implementation.
-
-## Parity objective
-
-The same user-facing behaviors should work locally and remotely:
+## Parity objectives
 
 - movement;
 - swept collision;
 - chunk crossings;
-- camera/input;
-- opening/closing cabin door;
-- inventory/container interaction;
-- chat and commands;
-- nameplates;
+- calibrated camera/input;
+- human actor scale;
+- door interaction;
+- inventory/container;
+- chat/commands;
+- nameplates/Ctrl reveal;
 - overhead speech;
 - server-composed Inventory UI;
+- content Default/Replace/Add;
+- local/server-hosted/external content-source parity;
 - disconnect/session teardown;
 - world/client-cache rebuild.
 
-This becomes a powerful composition oracle before repository extraction.
+Cabin is the common controlled fixture for client composition, scale, physics, UI, and asset streaming.
 
 ---
 
-# 9. Persistent real-client shell
+# 9. Human presentation and scale calibration
+
+A real human model is a required early client calibration tool, not cosmetic polish.
+
+Recover X/Y Bot where licensing/source permits continued use.
+
+Use at least one human body in the first real Cabin client; support both early enough to prove presentation definitions are not hardcoded to one mesh.
+
+Calibrate:
+
+```text
+authoritative playable body
+    currently human-scale Physics body
+
+against
+
+visual human model
+camera pivot
+camera distance/pitch/FOV
+nameplate anchor
+effects anchor
+door/chest/wall dimensions
+0.5 m terrain cells
+movement-speed feel
+```
+
+Historical `1.6m` camera pivot / `2.0m` nameplate anchor are starting evidence only.
+
+Presentation anchors belong to the presentation definition. They are not Physics constants and are not inferred from one mesh forever.
+
+---
+
+# 10. Persistent real-client shell
 
 Recover the V2 persistent-shell concept.
-
-Conceptually:
 
 ```text
 ClientRoot
@@ -523,162 +582,117 @@ ClientRoot
     └── Debug
 ```
 
-Exact Godot node names are not frozen. Ownership is.
+Exact node names are not frozen. Ownership is.
 
-The shell persists while current session/world content is injected and retired beneath it.
-
-A disconnect or world/session replacement should retire session-owned presentation/state and return to the application shell without reconstructing the whole executable.
+Disconnect/world replacement retires session-owned presentation beneath the persistent shell and returns to local app flow.
 
 ---
 
-# 10. UI layers are also input/focus layers
+# 11. UI layers are input/focus layers
 
-The V2 menu categories should return as persistent lifetime categories.
+## World
 
-## World layer
-
-Examples:
-
-- actor/nameplate projections;
+- nameplates;
 - overhead chat;
 - future damage numbers;
-- interaction prompts;
-- world markers.
+- prompts/markers.
 
-These are presentation overlays tied to already-known world semantics.
-
-## HUD layer
-
-Examples:
+## HUD
 
 - chat feed;
-- connection/ping status;
+- connection/ping;
 - player HUD;
-- future hotbar/status bars/minimap.
+- future hotbar/status/minimap.
 
-## Menu layer
+## Menus
 
-Contains both:
+- local app shell;
+- local Settings;
+- server-composed windows;
+- focus/z-order/modal policy.
 
-- client-local application menus;
-- server-composed game/application panels while connected.
-
-It owns z-order, focus, modal behavior, and panel lifetime realization.
-
-## Debug layer
-
-Examples:
+## Debug
 
 - FPS/performance;
-- network diagnostics when Remote Play exists;
-- ECS/server diagnostics when allowed by a local/admin semantic source;
-- chunk/render/cache diagnostics;
-- UI diagnostics;
+- Network diagnostics when present;
+- cache/chunk/render/UI diagnostics;
 - optional admin tooling.
 
-Debug/admin surfaces are quality-of-life features, not required gameplay authority.
-
-## Focus semantics
-
-UI categories should participate in input suppression explicitly.
-
-Examples:
+Focus semantics are explicit:
 
 ```text
 World focus
-    movement/world input active
+    gameplay input active
 
-Chat entry focused
-    text keys do not become movement
+Chat entry
+    text keys suppressed from movement
 
 Modal Menu
     world interaction suppressed
 
-Debug overlay
-    captures input only when its active controls require it
+Debug
+    captures only what its active controls require
 ```
 
-Do not accumulate ad-hoc Godot `_Input()` exceptions that independently decide whether gameplay input is allowed.
+Do not accumulate independent Godot `_Input()` exceptions.
 
 ---
 
-# 11. Three UI ownership classes
+# 12. Three UI ownership classes
 
-Not all UI should be server-driven.
+## 12.1 Client-local application UI
 
-## 11.1 Client-local application UI
-
-Must work with no server/session.
-
-Initial required set:
+Works without server/session:
 
 - Main Menu;
-- Single Player entry when Local Play exists;
-- Multiplayer / Direct Connect entry when Remote Play exists;
+- Single Player entry if available;
+- Multiplayer/Direct Connect if available;
 - local Settings;
 - Exit;
-- loading/connection state;
-- failure/error state;
-- in-session local options/disconnect menu.
+- loading/error/connection states;
+- in-session local options/disconnect;
+- server-control-profile consent;
+- future executable-extension consent.
 
-The server does not decide whether the user can open Settings or Exit the application.
+## 12.2 Standard client presentation UI
 
-## 11.2 Standard client presentation UI
-
-These are client-owned presentation primitives driven by disclosed semantic state, not server-opened generic windows.
-
-Examples:
+Client-owned primitives driven by already-disclosed semantic state:
 
 - nameplates;
 - overhead speech;
-- chat feed presentation;
-- targeting/pointer presentation;
-- connection status;
+- chat feed;
+- targeting/pointer;
+- connection state;
 - fallback/missing-content indicators.
 
-The server provides facts/identity. The client decides the visual presentation.
+## 12.3 Server-composed game UI
 
-## 11.3 Server-composed game UI
-
-The server/Game owns the semantic menu/window and sends engine-neutral definitions/models/actions.
-
-Examples:
+Game/server owns semantic windows and sends engine-neutral definitions/models/actions:
 
 - Inventory/container;
 - character sheet;
-- vendor;
-- crafting;
-- dialog/quest surfaces;
-- character/account game flows when later earned;
-- property management;
-- admin/game-control pages;
-- other RunUO-gump-like panels.
+- vendor/crafting;
+- dialog/quest;
+- property/admin pages;
+- later admission/character flows where appropriate.
 
-Godot renders them. It does not own their gameplay truth.
+Godot renders them; it does not own gameplay truth.
 
 ---
 
-# 12. Server-composed UI: compiled definitions and a standard set
+# 13. Server-composed UI and standard compiled definitions
 
-The existing UI kernel should be the basis of the real server-composed path.
-
-## Definition versus model
-
-Keep the fundamental split:
+Retain definition/model separation:
 
 ```text
 UiCompiledDefinition
     layout/schema/control semantics
 
-UiModel / payload
-    current values/state
+UiModel
+    current state/value payload
 ```
 
-Do not repeatedly send a full layout when only model data changes.
-
-## Exact identity
-
-A compiled definition should have exact semantic identity sufficient to determine whether client and server agree on the definition, for example existing/future values equivalent to:
+Use exact identity such as existing/future equivalent of:
 
 ```text
 UiDefinitionId / panel type
@@ -686,110 +700,74 @@ revision
 hash/version
 ```
 
-Do not accept "close enough" definitions.
+No "close enough" schema.
 
-## Standard preinstalled set
+## Standard preinstalled library
 
-The client may ship with a standard library of commonly used **compiled UI definitions**.
-
-These are normal UI definitions whose exact bytes/identity happen to be preinstalled.
-
-They are not hardcoded semantic switch cases.
+Common layouts may ship precompiled in the client but remain ordinary exact UI definitions.
 
 Good:
 
 ```text
-server opens InventoryStandard revision/hash X
-client already has exact X
-client renders with model payload
+server opens InventoryStandard hash X
+client already has X
+render model immediately
 ```
 
 Bad:
 
 ```text
 if UiId == Inventory:
-    call special Godot inventory screen outside UI kernel
+    use hidden hardcoded special screen
 ```
 
-Candidate standard definitions may include Inventory, basic dialogs/confirmations, simple selection/list forms, and other layouts proven common by real consumers. Do not freeze a large catalog before consumers earn it.
+## Cold/hot
 
-## Cold path
+Cold: obtain validated definition, cache by server/content identity, render model.
 
-```text
-server opens definition identity + model
-client lacks exact definition
-    -> obtain full compiled definition
-    -> validate bounds/schema
-    -> cache under server/content namespace
-    -> render model
-```
+Hot: exact definition already present, render model/delta.
 
-## Hot path
-
-```text
-server opens definition identity + model/delta
-client already has exact definition
-    -> render immediately
-```
-
-## Server-owned panel lifetime
-
-Connected server-composed panels are session/server-owned presentation.
-
-On disconnect or application-session replacement:
-
-- retire server-owned panels;
-- clear their model/action debt;
-- do not clear local Main Menu/Settings infrastructure;
-- never allow stale panel actions to target a new session.
+Disconnect/session replacement retires server-owned panels/actions but not local app UI.
 
 ---
 
-# 13. Nameplates: cached presentation, never server polling
+# 14. Nameplates: cached presentation, never server polling
 
-Holding Ctrl to reveal nameplates is entirely a client presentation operation over already-authorized client knowledge.
+Ctrl reveal is entirely client-side over already-authorized retained knowledge.
 
 It must not:
 
-- send a server query;
+- send server query;
 - expand AOI;
-- alter chunk/public subscription;
+- alter subscription;
 - request hidden entities;
-- request names for entities the client was not already entitled to know.
-
-Conceptually:
+- request names the client was not entitled to know.
 
 ```text
 Game/server publication
-    -> ClientWorldSemanticCache / presentation metadata cache
-    -> resident/renderable actor presentation
-    -> Nameplate renderer
+    -> Client semantic/presentation metadata cache
+    -> resident/renderable entity presentation
+    -> nameplate renderer
 ```
 
-When Ctrl is pressed:
+Holding Ctrl:
 
 ```text
-show nameplates for all currently resident/renderable entities
+show all currently resident/renderable entities
 that are already known and nameplate-eligible
 ```
 
-While Ctrl remains held:
+While held:
 
-- a newly resident eligible entity automatically gains a nameplate;
-- a retiring entity loses it;
-- a moving actor's plate follows its presentation anchor;
-- changed public presentation metadata updates the plate;
-- no polling loop asks the server to restate known information.
+- newly resident eligible entity appears automatically;
+- retiring entity disappears;
+- moving entity label follows anchor;
+- metadata/name updates refresh automatically;
+- no presentation-triggered polling.
 
-This follows the same retained-cache model already used for public world state.
+Eligibility is presentation semantics, not `EntityType == Player`.
 
-## Nameplate eligibility
-
-Do not hardcode "all ECS entities" or "players only."
-
-Eligibility is client presentation semantics over disclosed information.
-
-Possible examples:
+Examples:
 
 ```text
 player                    yes
@@ -797,184 +775,381 @@ NPC/mob                    yes
 named quest object         maybe
 generic dropped item       usually no
 important/named item       maybe
-hidden/GM-private entity   not disclosed, therefore impossible to reveal
+hidden/private entity      never disclosed, therefore impossible to reveal
 ```
 
-Exact policy belongs to Game/public presentation semantics and client presentation definitions, not Network.
+Relatively cold public presentation metadata should carry authoritative custom display names/categories where they cannot be derived from content definition. Do not put unchanged name strings in every movement row.
 
-## Public display metadata
+---
 
-Current minimal world public rows are intentionally small and do not carry a display label on every movement update.
+# 15. Chat presentation
 
-The real client should not solve nameplates by querying the server when Ctrl is pressed.
+Use the accepted Chat C0.1a semantics directly:
 
-Instead, earn a relatively cold presentation-identity/metadata path when needed, conceptually:
+- accepted speech is a fact/occurrence;
+- authoritative display label/public anchor travels with it;
+- bounded ClientChatState retains feed history;
+- incompatible/missing actor suppresses overhead presentation only, not the feed fact.
+
+Overhead belongs to World layer. Feed/input belongs to HUD/Menu. Text focus suppresses movement via shared focus policy.
+
+No second Godot-only chat protocol.
+
+---
+
+# 16. Actor presentation parity
+
+Recover useful V2 concepts:
+
+- stable actor presentation root;
+- Visual/Effects/Camera/Nameplate anchors;
+- logical mobile definition/catalog;
+- X/Y human variants;
+- public prefab/definition id -> client presentation definition;
+- animation/audio/VFX hooks;
+- fallback representation.
+
+Client never infers gameplay truth from loaded model/scene.
+
+---
+
+# 17. Client settings must be readable and layered
+
+Settings should be easy to inspect, configure, diff, and diagnose. Exact serialization format (JSON/TOML/etc.) remains unfrozen, but the data must be human-readable where practical.
+
+Conceptual roots:
 
 ```text
-WorldPublicEntityId
-    -> authoritative disclosed display label when dynamic/custom
-    -> presentation/nameplate category/style identity as needed
+settings/
+    client.*
+    controls.*
+    servers/
+        <server identity>/
+            preferences.*
+            bindings.*
+
+cache/
+    <server identity>/
+        client-profile.*
 ```
 
-For content-defined mobs/items, the client may derive the ordinary display label from a known presentation/content definition keyed by prefab/definition identity.
+Server-provided defaults live in server cache, **not** inside the user's settings file.
 
-For custom-named actors/players, Game supplies the authoritative disclosed label once and whenever it changes.
+## Resolution layers
 
-Movement/latest-state publication should remain focused on changing spatial/public state rather than repeatedly carrying unchanged strings.
+Effective settings are composed rather than destructively patched:
 
-The exact metadata type/wire/cache spelling is deliberately unfrozen until implementation archaeology chooses the smallest correct seam.
+```text
+Built-in client defaults
+        ↓
+User global settings
+        ↓
+optional accepted server recommendations
+        ↓
+User per-server overrides
+        ↓
+Resolved session settings
+```
 
----
+The resolved object is transient/session state.
 
-# 14. Overhead chat and chat feed
+`Use Server Defaults` does not overwrite global settings. `Keep My Controls` ignores the server's recommended physical mappings. `Customize` creates/edits per-server overrides.
 
-Chat C0.1a already establishes the correct semantic split:
+User-owned values remain inspectable after leaving the server.
 
-- accepted speech is an occurrence;
-- it carries authoritative display label and optional public presentation anchor;
-- the client applies it to bounded `ClientChatState`;
-- feed history survives world generation replacement;
-- an incompatible/missing public actor suppresses overhead presentation but not the feed fact.
+## Client-reserved controls
 
-The real client should consume that path directly.
+Some local controls are never taken away by a server profile, including at minimum:
 
-Overhead bubbles belong to the World UI layer.
+- Exit application;
+- open local client menu;
+- Disconnect;
+- open local Settings;
+- platform/window essentials.
 
-Chat feed/input belongs to HUD/Menu presentation as appropriate.
-
-Chat text focus must suppress movement input through shared client focus policy.
-
-Do not rebuild a second Godot-only chat protocol.
-
----
-
-# 15. Actor presentation parity
-
-The real client should recover useful V2 actor-presentation concepts without coupling authority to Godot scenes.
-
-Useful concepts include:
-
-- a stable actor presentation root;
-- visual/collision/effect/camera/nameplate anchors;
-- actor/mobile definition catalog;
-- multiple body/presentation definitions such as male/female body variants where still useful;
-- world public prefab/definition identity -> client visual definition;
-- animation/audio/VFX presentation hooks;
-- fallback representation when content is missing.
-
-The client does not infer gameplay truth from which scene/model is currently loaded.
+Accessibility/user-sensitive settings such as UI scale, volume, sensitivity, invert-Y, etc. remain user-owned. A server may suggest behavior-compatible defaults where appropriate but does not silently force hostile values.
 
 ---
 
-# 16. Content source model
+# 18. Server-recommended control / camera / UI profiles
 
-The client must distinguish at least four content classes.
+A server can describe how its game is intended to be controlled without shipping input code.
 
-## 16.1 Built-in/local server content
+The current Client Core already has concrete evidence for multiple grammars:
 
-Used by a Single Player distribution or Complete distribution.
+- `OrbitCommandProfile`;
+- camera-relative `ThirdPersonDirectProfile`;
+- `IndependentMoveLookProfile`.
 
-Examples:
+Godot currently maps a small physical InputMap vocabulary. The missing layer is declarative profile/binding composition.
 
-- Cabin Test World;
-- preinstalled WorldPack;
-- game definitions;
-- presentation assets;
-- standard server UI definitions.
+Conceptually:
 
-Conceptually, this content belongs to the local authoritative game/server package even when it is physically shipped beside the client executable.
+```text
+Physical input
+    W / MouseRight / MouseMiddle / GamepadRT
+        ↓
+Client binding profile
+        ↓
+Client semantic action
+        ↓
+Supported control grammar
+        ↓
+Game intent / client-local UI action
+```
 
-## 16.2 Server-provided content patches
+## Server profile may recommend/describe
 
-Remote servers may supply validated data/assets required to present their world.
+```text
+control grammar
+recommended physical bindings
+camera profile
+camera defaults/limits
+pointer-lock behavior
+supported semantic actions
+UI hotkeys
+context-menu binding
+interaction binding
+```
 
-Examples:
+Example UO-like profile:
+
+```text
+ControlGrammar = OrbitCommand
+MouseLeft click       -> Select
+MouseLeft hold        -> MoveTowardPointer
+MouseLeft doubleClick -> Destination
+MouseRight            -> Cancel/Context
+Camera                 -> IsometricOrbit
+```
+
+Example third-person profile:
+
+```text
+ControlGrammar = ThirdPersonDirect
+WASD                   -> Move
+MouseRight             -> ObjectContextMenu
+MouseMiddle            -> PrimaryFire
+E                       -> Interact
+Camera                  -> ThirdPersonFollow
+```
+
+Same client architecture; materially different feel.
+
+## Action vocabulary versus key recommendation
+
+Keep them separate.
+
+```text
+Action catalog
+    Fire
+    ContextMenu
+    Interact
+    OpenInventory
+
+Recommended bindings
+    Fire        -> MiddleMouse
+    ContextMenu -> RightMouse
+```
+
+The player may rebind actions without changing Game meaning.
+
+Do not design an unbounded universal action protocol before a real server needs more vocabulary than current Game actions can express. First prove the layered profile mechanism with earned actions/control grammars.
+
+## Camera profiles
+
+Server selects/configures supported client camera capabilities; it does not upload camera scripts.
+
+Possible supported families over time:
+
+- Orbit;
+- ThirdPersonFollow;
+- IndependentMoveLook;
+- TopDown;
+- FirstPerson later;
+- RTS later.
+
+Declarative parameters may include distance, pitch range, FOV default, yaw behavior, shoulder offset, zoom behavior, pointer lock.
+
+A new unsupported camera grammar requires a new stock-client capability or, much later, an explicitly trusted executable extension.
+
+---
+
+# 19. Server profile consent and persistence
+
+When a connected server advertises a materially different client profile, present a clear local prompt equivalent to:
+
+```text
+This server recommends custom controls.
+
+Right Mouse    Object Context Menu
+Middle Mouse   Primary Fire
+Camera         Third-Person Follow
+
+[Use Server Defaults]
+[Keep My Controls]
+[Customize]
+```
+
+Remember the decision by durable server/profile identity, conceptually:
+
+```text
+ServerIdentity
+ControlProfileRevision
+ControlProfileHash
+```
+
+Do not prompt every connection when exact profile identity is already accepted/overridden.
+
+Materially changed profile hash/revision may prompt again.
+
+Server defaults remain recommendations layered below user per-server overrides.
+
+---
+
+# 20. Content source model
+
+Detailed content semantics live in `ASSET_STREAMING.md`. The client recognizes distinct classes.
+
+## Built-in/local server content
+
+Single Player/Complete optional content such as Cabin WorldPack, presentation definitions/assets, standard UI definitions.
+
+## Passive server-authorized content
+
+Validated passive data/assets required or offered by remote server:
 
 - models;
-- textures/materials;
-- sounds;
+- textures/material descriptors;
+- sounds/icons;
 - UI definitions;
-- item/prefab presentation data;
+- item/mobile presentation data;
 - terrain/static/world content;
-- server-specific remaps.
+- control profile data.
 
-Server content is cached under the server/content identity namespace.
+This is cached by server/content identity.
 
-It is **not executable client code**.
+The **authoritative server names the exact package/hash**, but bytes may come from:
 
-## 16.3 Local resource/texture packs
+- local/preseeded source;
+- server-hosted static HTTP;
+- external HTTPS/CDN/object storage;
+- bounded approved mirror list.
 
-These are user-local visual substitutions/remaps.
+The byte host does not become semantic authority.
 
-They may affect presentation such as textures, icons, UI skinning, audio, or model mappings where allowed.
+## Local resource packs
 
-They do not alter protocol/Game authority.
+User-local visual remaps. No protocol/Game authority.
 
-## 16.4 Client mods
+## Executable client extensions — future
 
-Future explicit user-installed executable/script extensions.
+Separate trust class and optional client capability.
 
-They are not silently delivered by servers.
+Not normal server content.
 
-A client mod API/loader is deferred until separately earned.
-
----
-
-# 17. Contentless Online Client
-
-One desired final composition contains no bundled playable world and no bundled authoritative Game implementation.
-
-It includes only enough to:
-
-- launch the shell;
-- configure settings;
-- Direct Connect;
-- negotiate required content;
-- validate/cache server-provided data/assets;
-- render generic semantic UI/world state;
-- use fallback assets while content is unavailable/missing.
-
-This distribution should contain no Cabin world pack or other game-world content merely because the Complete build does.
-
-This is useful both as a deployment profile and as an architectural proof that the client is not secretly relying on local server/Game content to render a remote world.
-
-It does not make the executable impossible to reverse engineer. The client protocol, renderer, and semantic machinery remain inspectable. The meaningful property is that the distribution does not contain the authoritative Game implementation or proprietary bundled world/content that it does not need.
+If ever supported, a server may advertise an optional/required extension, but execution requires explicit install/consent and the client may omit extension-host capability entirely.
 
 ---
 
-# 18. Fallback assets are permanent client infrastructure
+# 21. Future executable client extensions
 
-Every client composition should retain a tiny hardcoded fallback presentation set so missing content remains diagnosable.
+No current feature has earned client-extension distribution. Server Game code + server-composed UI + declarative controls/camera + passive Add/Replace content should cover nearly everything ordinary server authors need, similar in spirit to RunUO's ability to create radically different server experiences on one client.
 
-Examples:
+Therefore this remains deferred.
+
+If later authorized:
+
+```text
+WASM
+    preferred constrained/sandboxable runtime
+
+precompiled .NET DLL
+    advanced/full-trust runtime
+```
+
+No source compiler is included in the stock client for server extension source.
+
+Use an explicit mod/extension package foundation with fields equivalent to:
+
+```text
+Id
+Name
+Description
+Version
+PackageHash / FileHashes
+Runtime
+EntryPoint
+ClientApi compatibility
+Dependencies
+Deterministic load ordering where needed
+Declared capabilities for sandboxed runtime
+Publisher/signature later
+Required or Optional
+```
+
+Loader responsibilities:
+
+- validate hashes;
+- resolve dependencies deterministically;
+- reject cycles/missing deps/incompatible API ranges;
+- compute active extension-set fingerprint;
+- never execute unapproved candidate just to inspect it.
+
+Manifests/hashes/sorting make extensions more auditable/reproducible; they do not make arbitrary full-trust code safe.
+
+A future required extension prompt should clearly state that executable code is being installed/run and allow refusal. Refusing a required extension means refusing to join.
+
+Signatures prove provenance, not safety.
+
+---
+
+# 22. Contentless Online Client
+
+Desired final composition:
+
+- shell;
+- client core;
+- Godot adapter;
+- Remote Play;
+- passive content acquisition/cache;
+- bootstrap/fallback assets;
+- no bundled playable world;
+- no local authoritative Game/server implementation.
+
+It launches, configures settings, Direct Connects, obtains validated server-authorized content from approved source(s), and renders generic semantic world/UI state.
+
+This does not make the protocol/client impossible to reverse engineer. The meaningful property is absence of unneeded authoritative Game implementation and proprietary bundled world content.
+
+Executable extension support is separately optional; a Contentless build can omit it.
+
+---
+
+# 23. Fallback assets are permanent infrastructure
+
+Every composition retains tiny fallback presentation:
 
 ```text
 missing mesh/object
-    -> simple box/capsule according to known semantic bounds/category
+    -> box/capsule/category primitive
 
 missing texture
-    -> intentionally ugly high-visibility checker/rainbow diagnostic texture
+    -> high-visibility rainbow/checker in debug mode
 
-texture-debug disabled
-    -> neutral/simple fallback if desired
+texture debug disabled
+    -> neutral grey/default fallback
 
 missing animation
-    -> bounded presentation timer/static pose rather than breaking Game semantics
+    -> stable pose/bounded timer
 ```
 
-Fallback presentation is client-local.
-
-It must not change authoritative gameplay state or collision.
-
-A contentless client can therefore join and remain semantically functional even when specific presentation assets have not yet arrived, subject to whatever content admission policy the server/client chooses.
+Fallback never changes authoritative collision/Game truth.
 
 ---
 
-# 19. Direct Connect first; discovery later
+# 24. Direct Connect first; discovery later
 
-This campaign does not require server discovery or a public server list.
-
-The initial Remote Play application flow is:
+Initial Remote flow:
 
 ```text
 Main Menu
@@ -982,380 +1157,294 @@ Main Menu
     -> Direct Connect
 ```
 
-A future `ServerDiscovery` capability may add:
+Future optional `ServerDiscovery` may add favorites, curated/public lists, LAN, registry, entitlement lists.
 
-- saved favorites;
-- curated endpoints;
-- LAN discovery;
-- public registry/server browser;
-- entitlement/access lists.
-
-The shell composition model must leave room for this, but no discovery service or registry architecture should be introduced merely to finish the real-client rebuild.
+Do not build discovery merely to finish real-client reconstruction.
 
 ---
 
-# 20. Remote controlled-actor parity is a required client gate
+# 25. Remote controlled-actor parity is required
 
-The current public-actor/replication evidence proves authoritative remote public state, but the historical Physics archaeology noted that the real retained `GamePlayerCommand` locomotion path was not yet proven as the remote player's actual live control route.
-
-The real Online/Complete client must close that gap before claiming local/remote playable parity.
-
-Required shape:
+The real Online/Complete client must prove the actual retained Game locomotion path.
 
 ```text
 Godot raw input
-    -> Client Core quantized/sequenced Game locomotion intent
+    -> Client Core control/input semantics
     -> remote protocol/Network
     -> authenticated application/control session
-    -> real GamePlayerCommand / GameWorldActions authority
+    -> GamePlayerCommand / GameWorldActions
     -> Physics
     -> canonical WorldPosition
-    -> public/owner semantic result
+    -> owner/public semantic result
     -> Client Core
     -> Godot
 ```
 
-Do not create a second remote-only movement authority path merely to make the client move.
-
-Single Player and Remote Play may differ in transport, not in Game locomotion meaning.
+No second remote-only movement authority path.
 
 ---
 
-# 21. Settings
+# 26. Debug/admin quality-of-life
 
-Local Settings are always client-owned and available without a server.
-
-Examples may include:
-
-- display/window settings;
-- graphics/presentation options;
-- audio;
-- local input bindings;
-- camera preferences;
-- UI scale;
-- nameplate presentation preferences;
-- local debug options.
-
-Server/game policy settings are separate and may later be exposed through server-composed UI.
-
-Do not let a server replace or suppress the user's basic local application Settings/Exit capabilities.
-
----
-
-# 22. Debug/admin quality-of-life
-
-Archived V1/V2 had useful diagnostics/admin concepts. Some are worth recovering after the basic shell is real.
-
-Possible client Debug-layer surfaces:
+Possible Debug-layer surfaces after basic shell works:
 
 - FPS/frame timings;
-- client semantic cache counts/high-water;
-- render-window/chunk diagnostics;
-- Network connection metrics when Remote Play is present;
-- UI cache/definition diagnostics;
-- physics/world debug visualization when data is legitimately available;
-- server/admin pages supplied through server-composed UI;
-- ECS/system diagnostics for local/admin-authorized scenarios.
+- client cache high-water;
+- render/chunk diagnostics;
+- Network metrics when present;
+- UI definition/cache diagnostics;
+- content source/cache diagnostics;
+- active server profile/binding resolution diagnostics;
+- optional server/admin pages;
+- local/admin-authorized ECS/system diagnostics.
 
-These are valuable but not parity blockers unless a checkpoint explicitly names them.
-
-Avoid making a giant universal admin framework part of the client-shell foundation.
+Useful, but not a giant mandatory admin framework.
 
 ---
 
-# 23. Proposed package/composition direction
+# 27. Proposed package/composition direction
 
-Exact names are deliberately not frozen, but the dependency shape should move toward something equivalent to:
+Exact names unfrozen; desired dependency shape equivalent to:
 
 ```text
 Client.Core
-    engine-neutral client semantics
+    engine-neutral client semantics/settings/control profiles
 
 Client.GodotAdapter
-    Godot presentation/input only
+    Godot presentation/input
 
 Client.Shell.Godot
-    persistent application shell
-    client-local menus
-    installed-capability composition
+    persistent app shell/local menus/consent/settings
 
 Client.LocalPlay
-    optional local-authority bridge/composition
-    depends on Game/server implementation
-    does NOT require Network
+    optional local authority bridge
+    depends on Game/server
+    NO Network requirement
 
 Client.RemotePlay / Client.Network
-    optional remote session/protocol/Network path
+    optional remote protocol/network
+
+Client.Content
+    passive content resolver/cache/acquisition substrate
 
 Client.BuiltInTestWorlds
-    optional bundled server/content package
-    Cabin in the Woods initially
+    optional Cabin package
+
+Client.ExtensionHost          future/deferred
+    optional precompiled WASM/DLL extension loader
 ```
 
-There may be better final names after implementation archaeology.
-
-The important rule is that no shared shell/Core/adapter package requires both Local Play and Remote Play implementations.
+No shared shell/Core/adapter package should require both Local and Remote implementations.
 
 ---
 
-# 24. Build/profile verification rules
+# 28. Build/profile verification
 
-The composition claim must be mechanically tested.
-
-For each profile, verify both successful behavior and **absence of forbidden dependencies**.
-
-## Single Player profile
+## Single Player
 
 Required:
 
-- compiles;
-- launches Main Menu;
-- shows Single Player / Settings / Exit;
-- no Multiplayer/Direct Connect;
-- plays Cabin Test World;
-- no project/assembly reference to `Client.Network`;
-- no project/assembly reference to `Kernels.Network`;
-- no remote protocol transport required at runtime.
+- compiles/launches;
+- Single Player / Settings / Exit only;
+- Cabin works;
+- X/Y human presentation/camera calibration available as configured;
+- no `Client.Network`;
+- no `Kernels.Network`;
+- no remote protocol transport;
+- local settings/control-profile machinery still works.
 
-## Online profile
-
-Required:
-
-- compiles;
-- launches Main Menu;
-- shows Multiplayer/Direct Connect / Settings / Exit;
-- no Single Player entry;
-- no local Game/server runtime implementation dependency;
-- connects to external Test World server;
-- controlled actor uses real Game command authority remotely.
-
-## Complete profile
+## Online
 
 Required:
 
-- compiles;
-- both Local Play and Remote Play available;
-- local and remote Cabin scenarios converge on the same user-visible semantics.
+- compiles/launches;
+- Multiplayer/Direct Connect / Settings / Exit;
+- no Single Player;
+- no local Game/server runtime implementation;
+- external Cabin works;
+- real remote controlled actor path;
+- server profile prompt/override works;
+- passive content can come from server-hosted or external approved source.
 
-## Contentless Online profile
+## Complete
 
-Final stronger gate:
+Both capabilities; local and remote Cabin converge semantically/presentationally.
 
-- no bundled playable WorldPack/Test World;
-- no local authoritative Game/server implementation;
-- bootstrap/fallback client still launches;
-- obtains or validates server-required content before/while entering remote world;
-- server content cannot install executable client code.
+## Contentless Online
 
-Dependency scans/build graph checks should be permanent tests or verifier gates, not a one-time manual observation.
+- no bundled playable world;
+- no local authority implementation;
+- bootstrap/fallback launch;
+- obtains/validates required passive content;
+- normal passive content cannot silently execute code;
+- extension support may be absent.
+
+Dependency scans are permanent verifier gates.
 
 ---
 
-# 25. Implementation roadmap
-
-The checkpoint names below are working names. Preserve the scope and gates even if implementation chooses slightly different labels.
+# 29. Implementation roadmap
 
 ## F0.0 — Real client composition foundation
 
-**Goal:** establish the permanent client-shell dependency shape before rebuilding presentation features.
-
 Implement:
 
-- a real persistent client-shell project/composition root distinct from `Playable.Godot` acceptance code;
-- explicit optional Local Play and Remote Play capabilities;
-- local app-shell capability enumeration sufficient to add/remove menu entries based on actual installed composition;
-- initial build matrix projects/configurations for Single Player, Online, and Complete;
-- dependency checks proving Single Player omits Network and Online omits local Game/server implementation;
-- preserve current `Playable.Godot` acceptance harness until replacement evidence exists.
-
-Do not implement discovery, dynamic plugin loading, or content streaming yet.
-
-**Gate:** all three compositions compile with their forbidden dependencies genuinely absent.
-
----
-
-## F0.1 — Persistent Godot shell + local application UI
-
-**Goal:** make a user-facing executable that can exist even with no active session/world.
-
-Implement:
-
-- persistent `ClientRoot`;
-- persistent World/HUD/Menu/Debug layers;
-- Main Menu;
-- local Settings surface;
-- Exit;
-- loading/transition/error surface;
-- in-session local options/disconnect shell;
+- real persistent shell composition root distinct from `Playable.Godot`;
+- explicit Local/Remote capabilities;
 - capability-driven menu entries;
-- focus/input ownership between UI layers and world input;
-- no server required to launch/use local application UI.
+- Single Player/Online/Complete build matrix;
+- dependency checks proving absent capabilities are physically absent.
 
-Expected menus:
+No discovery, dynamic plugin loading, or full streaming implementation yet.
 
-```text
-Single Player build:
-    Single Player
-    Settings
-    Exit
-
-Online build:
-    Multiplayer -> Direct Connect
-    Settings
-    Exit
-
-Complete build:
-    Single Player
-    Multiplayer -> Direct Connect
-    Settings
-    Exit
-```
-
-**Gate:** shell/headless Godot smokes run for each composition with no fake hidden capability buttons.
+**Gate:** all compositions compile with forbidden dependencies absent.
 
 ---
 
-## F0.2 — Single Player Local Play + Cabin Test World
+## F0.1 — Persistent shell + local settings/control foundation
 
-**Goal:** promote Cabin in the Woods into the first optional built-in server/Test World and run it through the real shell without Network.
+Implement:
+
+- persistent ClientRoot;
+- World/HUD/Menu/Debug layers;
+- Main Menu;
+- readable local Settings persistence;
+- physical binding representation;
+- built-in client defaults;
+- per-server user override store shape;
+- control/camera profile selection;
+- effective layered settings resolution;
+- client-reserved controls;
+- Exit/loading/error/in-session local options;
+- focus/input ownership.
+
+Do not need a live server to use/test these.
+
+**Gate:** each build composition launches correct local app shell; profile/settings resolution is engine-neutral testable.
+
+---
+
+## F0.2 — Single Player Local Play + Cabin + human calibration
 
 Implement:
 
 - Local Play capability;
-- local authoritative Game/server/runtime composition;
-- optional Cabin Test World/content package;
-- local semantic bridge from Game outputs to the same Client Core semantic stores used by remote play;
-- local input bridge into normal Game command/session semantics;
-- world/session enter and leave under the persistent shell;
-- current world renderer/camera/input behavior through real shell;
-- inventory/chat/current public-world consumers as available.
+- local authoritative Game/server composition;
+- optional Cabin Test World package;
+- local semantic bridge;
+- normal Game input/session semantics;
+- real X/Y human presentation path;
+- camera/nameplate/effects calibration;
+- world/session enter/leave;
+- renderer/camera/input through real shell;
+- inventory/chat/current public consumers.
 
-Hard rule:
+Hard rule: no Client.Network/Kernels.Network.
 
-- `Client.Network` and `Kernels.Network` are absent from the Single Player build.
-
-**Gate:** launch -> Single Player -> Cabin -> move/interact/chat/inventory -> return cleanly to Main Menu, with no Network assembly required.
+**Gate:** launch -> Cabin -> move/interact/chat/inventory -> leave to Main Menu, with coherent human scale and no Network assembly.
 
 ---
 
-## F0.3 — Online Direct Connect + real controlled-actor parity
-
-**Goal:** make the Online build a real remote client rather than a public-state viewer/test driver.
+## F0.3 — Online Direct Connect + remote control + server client profile
 
 Implement:
 
-- Remote Play capability under the same shell;
-- Direct Connect UI;
-- authenticated remote session/application flow;
-- real retained `GamePlayerCommand` controlled-actor path over remote protocol;
-- owner/public state convergence through Client Core;
-- clean disconnect/failure return to shell;
-- externally hosted Cabin Test World as parity target.
+- Remote Play capability;
+- Direct Connect;
+- authenticated session;
+- real retained GamePlayerCommand control;
+- clean disconnect/failure;
+- external Cabin parity target;
+- server-advertised declarative client profile identity/hash;
+- `Use Server Defaults / Keep My Controls / Customize` flow;
+- remembered per-server/profile decision;
+- no destructive settings rewrite.
 
 Hard rules:
 
-- Online build does not require local Game/server implementation;
-- no server discovery/list yet;
-- no alternate remote-only movement semantics.
+- Online no local authority implementation;
+- no discovery/list;
+- no remote-only movement semantics;
+- no executable code in client profile.
 
-**Gate:** an external server hosts Cabin and the Online client performs the same movement/physics/interactions/chat/inventory semantics as Local Play within the limits of currently supported remote consumers.
+**Gate:** external Cabin behaves like Local Play and materially different supported control profiles can be selected without changing client executable.
 
 ---
 
-## F0.4 — World presentation parity: actor definitions, nameplates, Ctrl reveal, overhead chat
-
-**Goal:** recover the useful V2 front-facing world presentation on top of retained client semantics.
+## F0.4 — World presentation parity
 
 Implement:
 
-- actor/mobile presentation definition/catalog path as needed;
-- useful body/presentation variants where current assets support them;
-- nameplate anchors and renderer;
-- ordinary nameplate visibility policy;
-- **hold Ctrl -> reveal all currently resident/renderable nameplate-eligible known entities**;
-- automatic nameplate add/remove/update as Client Core knowledge changes while Ctrl is held;
-- no Ctrl-triggered server request or AOI change;
-- minimal public presentation metadata path for authoritative custom display labels when not derivable from content definition;
-- overhead chat through existing Chat occurrence/public-anchor semantics;
-- chat feed/input through persistent HUD/Menu layers;
-- focus isolation so chat/menu typing does not become world movement.
+- actor/mobile definition/catalog;
+- X/Y variants;
+- nameplates;
+- Ctrl reveal all already-known resident eligible entities;
+- automatic cache-driven add/remove/update while held;
+- no Ctrl server request/AOI change;
+- cold public presentation metadata for custom names as needed;
+- overhead chat/feed;
+- focus isolation.
 
-**Gate:** two or more actors/entities demonstrate cached nameplate updates, Ctrl reveal, movement-following labels, retirement, and overhead/feed fallback without presentation-triggered Network requests.
+**Gate:** multi-actor cached nameplate/overhead behavior with no presentation polling.
 
 ---
 
-## F0.5 — Server-composed UI + standard compiled definition library
-
-**Goal:** make the real client prove the intended RunUO-gump-like UI architecture.
+## F0.5 — Server-composed UI + standard compiled library
 
 Implement:
 
-- Godot rendering of the existing engine-neutral compiled UI path under Menu layer;
-- exact definition identity validation;
-- preinstalled standard compiled definition cache/library;
-- cold definition transfer/cache path;
-- hot cached/preinstalled path;
-- server-owned panel/session lifetime fencing;
-- first real Inventory/container panel through this path;
-- local and remote operation through the same UI semantics;
-- standard definitions remain normal definitions, not hardcoded special screens.
+- Godot rendering of engine-neutral compiled UI;
+- exact definition identity;
+- preinstalled standard definition cache;
+- cold/hot paths;
+- session lifetime fencing;
+- real Inventory/container panel;
+- local/remote same semantics.
 
-Do not move Main Menu/Settings/Exit into server-composed UI.
+Main Menu/Settings/Exit stay client-owned.
 
-**Gate:** Inventory opens and operates through server-composed UI in Single Player and Remote Play; exact cached/preinstalled definition avoids unnecessary full-definition transfer; a custom/cold definition validates and renders; disconnect retires server-owned panels only.
+**Gate:** Inventory works locally/remotely through normal server-composed UI; cached/preinstalled/custom definitions behave correctly.
 
 ---
 
-## F0.6 — Content-source separation + contentless Online proof
+## F0.6 — Content-source separation + Contentless Online integration
 
-**Goal:** prove the client does not require bundled game-world content.
+Asset streaming implementation is governed by `ASSET_STREAMING.md`; do not hide its full campaign in one client commit.
 
-This checkpoint may require additional content/asset-streaming archaeology because current Client World construction expects prepared structural world content.
+Client integration must prove:
 
-Implement only the smallest path needed to prove:
+- Test World/content optional, not Client Core;
+- Online may ship without Cabin;
+- passive server content cached by server/content identity;
+- normal content source may be local/preseeded, server-hosted static HTTP, or external HTTPS/CDN;
+- byte source does not become semantic authority;
+- fallback is diagnosable;
+- user resource packs remain separate;
+- normal passive content cannot silently install executable extensions.
 
-- Built-in Test World/content is an optional package, not Client Core;
-- Online build may ship without Cabin/another world pack;
-- server/content identity negotiates required presentation/world content;
-- validated data/assets are cached under server/content identity;
-- standard fallback assets allow visibly degraded but semantically diagnosable presentation during missing-content conditions where policy permits;
-- servers do not deliver executable client code;
-- local resource packs remain a separate client-local remap layer.
+Executable extension host remains deferred/separate.
 
-Dynamic executable client mod loading remains deferred.
-
-**Gate:** Contentless Online client launches with no playable world bundled, Direct Connects to a compatible server, obtains/uses the required content path, and enters/renders the server world without local authoritative Game implementation.
-
-If the required content-transfer work is materially larger than the rest of the client campaign, stop after archaeology and split this into separately reviewed sub-checkpoints rather than hiding a new Asset Streaming campaign inside one client commit.
+**Gate:** Contentless Online connects to compatible server and renders acquired world without bundled playable world/local authority implementation.
 
 ---
 
-## F0.7 — Settings/debug/hardening + V2-quality shell closure
+## F0.7 — Settings/debug/lifecycle hardening
 
-**Goal:** make the shell comfortable and diagnosable enough to become the permanent client composition oracle.
+Implement:
 
-Implement/restore only useful proven features:
-
-- coherent local Settings persistence;
-- in-session options/disconnect UX;
+- settings UX/persistence polish;
+- resolved-binding/profile diagnostics;
+- in-session options/disconnect;
+- content/cache/source diagnostics;
 - connection/loading/error UX;
-- basic HUD polish;
-- bounded Debug-layer diagnostics;
-- client cache/render/UI/network diagnostics where capabilities exist;
-- useful V1/V2 admin/debug ideas only where current architecture provides a real semantic owner;
-- lifecycle hardening for session replacement, local->menu, remote->menu, generation replacement, world replacement, and repeated local/remote runs.
+- bounded debug surfaces;
+- lifecycle hardening across local->menu, remote->menu, repeated runs, generation/world replacement.
 
-No requirement for server discovery/public browser.
-
-**Gate:** repeated user-flow and headless smoke cycles leave no stale session world, server panels, nameplates, chat overhead, render chunks, or input focus behind.
+**Gate:** no stale world, panels, nameplates, overhead chat, render chunks, control profile, or input focus crosses session boundaries.
 
 ---
 
-## F0.8 — Final composition/parity matrix and split-readiness gate
-
-**Goal:** prove the real client before repository generalization/extraction.
-
-Run the complete matrix:
+## F0.8 — Final composition/parity matrix
 
 ### Single Player
 
@@ -1363,15 +1452,14 @@ Run the complete matrix:
 launch
 -> Main Menu
 -> Single Player
--> Cabin in the Woods
+-> Cabin
+-> human-scale camera calibration
 -> move/collide/cross chunks
--> open/close door
--> see nameplates
--> hold Ctrl for all eligible resident nameplates
+-> door/container
+-> nameplates / Ctrl reveal
 -> chat feed + overhead
--> open/use Inventory server-composed UI
--> Esc/in-session options
--> leave session
+-> Inventory server-composed UI
+-> leave
 -> Main Menu
 ```
 
@@ -1379,230 +1467,293 @@ launch
 
 ```text
 launch
--> Main Menu
--> Multiplayer / Direct Connect
--> external Cabin server
+-> Direct Connect
+-> accept/keep/customize server profile
+-> external Cabin
 -> real remote controlled actor
--> same world presentation and gameplay consumers
+-> same presentation/game consumers
+-> passive content source/cache path
 -> disconnect
 -> Main Menu
 ```
 
 ### Complete
 
-Run Local Play, return to shell, then Remote Play in one executable lifetime and prove no stale semantic/presentation/session state crosses modes.
+Run local then remote in one executable lifetime; no stale semantic/presentation/settings-session state crosses modes.
 
 ### Contentless Online
 
-When F0.6 is complete, prove no bundled playable world/local authority dependency is required.
+Prove no bundled playable world/local authority dependency.
+
+### Different-feel canary
+
+Use the same executable with at least two supported client profiles:
+
+```text
+Profile A
+    UO-like OrbitCommand / pointer movement
+
+Profile B
+    third-person camera-relative Direct / different mouse bindings
+```
+
+This demonstrates that server-authored declarative profiles can materially change feel without a client fork.
 
 ### Dependency matrix
 
-Mechanically verify forbidden assembly/project dependencies are absent for each profile.
+Mechanically verify forbidden dependencies absent.
 
-**Gate:** ordinary gameplay/client feature work no longer requires editing kernels merely to make the shell function, and the client composition is clean enough to survive planned repository extraction.
+**Gate:** client composition clean enough for repository extraction.
 
 ---
 
-# 26. Permanent acceptance scenarios
-
-At minimum retain automated or repeatable smoke coverage for:
+# 30. Permanent acceptance scenarios
 
 ## Shell/capabilities
 
-- capability absent -> menu entry absent;
-- capability present -> entry works;
-- no Network assembly in Single Player dependency graph;
-- no local Game/server implementation in Online dependency graph;
-- repeated session enter/leave returns to same shell cleanly.
+- absent capability -> absent menu entry;
+- present capability -> works;
+- no Network in Single Player graph;
+- no local authority implementation in Online graph;
+- repeated enter/leave returns clean shell.
+
+## Human scale/camera
+
+- real human body appears at intended world scale;
+- camera pivot/distance/FOV are human-usable;
+- nameplate/effects anchors come from presentation definition;
+- X/Y swap does not alter Game authority/Physics body.
+
+## Settings/control profiles
+
+- human-readable persisted user settings;
+- server recommendation stored separately from user settings;
+- Use Server Defaults does not overwrite global settings;
+- Keep Mine ignores recommended physical bindings;
+- per-server overrides win;
+- exact accepted profile does not reprompt every join;
+- materially changed profile can reprompt;
+- client-reserved controls remain available;
+- two supported control grammars yield expected Game intent.
 
 ## Local/remote parity
 
-- same Cabin movement destination/collision result locally and remotely;
-- remote controlled actor uses normal Game locomotion authority;
+- same Cabin movement/collision result;
+- remote uses normal Game locomotion authority;
 - Local Play never mutates Game directly from presentation;
-- same Client Core public semantic state shape is consumed by Godot in both modes.
+- same Client Core semantic shape consumed by Godot.
 
 ## Nameplates
 
-- normal eligible actor nameplate;
-- Ctrl reveal all resident eligible known entities;
-- Ctrl held while entity becomes resident -> appears automatically;
-- Ctrl held while entity retires -> disappears automatically;
-- movement updates position without server nameplate query;
-- metadata/name change updates cached display;
-- hidden/non-disclosed entity cannot be revealed by Ctrl.
+- normal eligible plate;
+- Ctrl all resident eligible known entities;
+- entity enters while held -> appears;
+- retires -> disappears;
+- movement follows;
+- metadata update refreshes;
+- hidden/non-disclosed cannot be revealed.
 
 ## Chat
 
-- feed always receives accepted occurrence;
-- compatible public anchor -> overhead bubble;
-- missing/incompatible actor -> feed-only;
-- chat focus suppresses movement input.
+- feed accepted occurrence;
+- compatible anchor -> overhead;
+- missing actor -> feed only;
+- chat focus suppresses movement.
 
 ## Server UI
 
-- preinstalled standard definition hot path;
-- cached custom definition hot path;
-- cold definition validate/cache/render;
-- malformed/unbounded definition rejects;
-- Inventory actions remain Game-authoritative;
-- disconnect/session replacement retires server-owned panel/action lineage.
+- standard preinstalled hot path;
+- cached custom hot path;
+- cold validate/cache/render;
+- malformed/unbounded reject;
+- Inventory remains Game-authoritative;
+- disconnect retires server panel/action lineage.
 
 ## Content
 
-- missing asset falls back visibly;
-- fallback does not alter semantic/gameplay truth;
-- server content cache identity prevents cross-server schema/asset confusion;
-- contentless build contains no bundled Test World;
-- server-provided content never executes arbitrary client code.
+- missing asset visible fallback;
+- fallback does not change Game truth;
+- server cache namespace isolation;
+- Contentless build has no Test World;
+- same passive package from local/server-host/external source resolves identically;
+- normal passive package cannot execute arbitrary client code.
+
+## Future extension boundary
+
+Until extension host exists:
+
+- server advertising required executable extension is rejected clearly/cleanly;
+- passive-content loader does not treat DLL/WASM/script as ordinary content;
+- no compiler/runtime injection is pulled into the normal content path.
 
 ---
 
-# 27. Performance and boundedness posture
+# 31. Performance and boundedness posture
 
-The real client is not required to be allocation-free in every UI frame merely for stylistic purity, but hot/scale-sensitive structures retain the existing UltraSim posture:
+The client need not be allocation-free in every UI frame, but scale-sensitive structures retain UltraSim posture:
 
-- bounded semantic world caches;
+- bounded semantic caches;
 - bounded presentation windows;
-- no object/node per terrain cell;
-- no server polling for nameplate state;
-- no rebuild-everything-on-camera movement;
-- cached compiled UI definitions;
-- model/delta updates instead of repeated schema rebuild;
-- no unbounded server-controlled UI/content allocation;
-- explicit cache quotas/eviction/failure policy;
-- no giant per-frame scans when a retained index/change path already exists;
-- UI/nameplate rendering work should follow changed/resident presentation state rather than theoretical server/ECS capacity.
+- no node per terrain cell;
+- no server polling for nameplates;
+- no rebuild-everything on camera movement;
+- cached UI definitions;
+- model/delta updates rather than repeated schema rebuild;
+- bounded server-controlled UI/content;
+- explicit cache quotas/failure policy;
+- content acquisition concurrency/retries/timeouts bounded;
+- UI/nameplate work follows changed/resident state rather than theoretical ECS capacity.
 
-Performance gates should measure whole-client behavior where useful, but correctness/ownership comes first during shell reconstruction.
+Correct ownership first; measure whole-client behavior where useful.
 
 ---
 
-# 28. Security/disclosure rules
-
-The thin client model does not weaken authority.
+# 32. Security/disclosure rules
 
 ```text
 CLIENT INPUT IS INTENT, NOT TRUSTED GAME TRUTH.
 
 SERVER DISCLOSURE DETERMINES WHICH ENTITY/PRESENTATION FACTS ENTER CLIENT KNOWLEDGE.
 
-CTRL NAMEPLATES CAN ONLY PRESENT ALREADY-DISCLOSED CLIENT KNOWLEDGE.
+CTRL NAMEPLATES CAN ONLY PRESENT ALREADY-DISCLOSED KNOWLEDGE.
 
 SERVER-COMPOSED UI CANNOT EXECUTE ARBITRARY CLIENT CODE.
 
-SERVER-PROVIDED CONTENT IS DATA/ASSETS, NOT SILENT CLIENT MOD INSTALLATION.
+SERVER CLIENT PROFILES ARE DECLARATIVE DATA; USER OWNS FINAL LOCAL BINDINGS/SETTINGS.
+
+PASSIVE SERVER CONTENT IS ALLOWLISTED DATA/ASSETS, NOT SILENT MOD INSTALLATION.
+
+CONTENT HOSTING LOCATION DOES NOT CHANGE AUTHORITY; HASHED PACKAGE IDENTITY DOES.
+
+FUTURE EXECUTABLE EXTENSIONS ARE THIRD-PARTY SOFTWARE WITH EXPLICIT CONSENT, NOT ASSET DOWNLOADS.
+
+SIGNATURES ESTABLISH PROVENANCE, NOT SAFETY.
 
 LOCAL RESOURCE PACKS CANNOT CHANGE SERVER PROTOCOL OR GAME AUTHORITY.
 
-ONLINE-ONLY CLIENT DOES NOT NEED LOCAL SERVER/GAME IMPLEMENTATION TO PLAY.
+ONLINE-ONLY CLIENT DOES NOT NEED LOCAL SERVER/GAME IMPLEMENTATION.
 
-SINGLE-PLAYER-ONLY CLIENT DOES NOT NEED NETWORK IMPLEMENTATION TO PLAY.
+SINGLE-PLAYER-ONLY CLIENT DOES NOT NEED NETWORK IMPLEMENTATION.
 ```
 
-The client should fail closed on malformed UI definitions/content identities/protocol state while preserving local app-shell usability where possible.
+Fail closed on malformed identities/profiles/UI/content while preserving local app-shell usability where possible.
 
 ---
 
-# 29. Explicit non-goals for this campaign
+# 33. Explicit non-goals for this campaign
 
-Unless a later checkpoint is separately authorized, do not expand the client rebuild into:
+Unless separately authorized, do not expand client reconstruction into:
 
-- public server discovery/registry;
+- public discovery/registry;
 - matchmaking;
-- account/character ecosystem redesign;
-- generalized plugin/service locator framework;
-- dynamic executable capability installation;
-- user client mod loader/API;
-- downloading/executing server code;
-- giant admin/control-panel framework;
-- rewriting Network;
-- rewriting the UI kernel merely to imitate V2 code;
-- new Physics P0.1c support/step work without a real client/gameplay need;
-- new game feature campaigns unrelated to proving client composition;
-- requiring the Single Player build to carry Network for convenience;
-- requiring the Online build to carry local Game/server code for convenience.
+- account ecosystem redesign;
+- generalized service locator/plugin framework;
+- executable extension loader/runtime;
+- WASM sandbox implementation;
+- downloading/executing DLLs through passive content;
+- client-side source compiler;
+- public mod marketplace;
+- arbitrary server camera/input scripts;
+- giant admin framework;
+- Network rewrite;
+- UI kernel rewrite merely to imitate V2;
+- unrelated Physics/game feature campaigns;
+- requiring Network in Single Player for convenience;
+- requiring local Game/server implementation in Online for convenience.
+
+Self-hosted/external passive content acquisition is handled in `ASSET_STREAMING.md` and is not an excuse to merge content serving into gameplay replication.
 
 ---
 
-# 30. Deferred decisions intentionally left open
+# 34. Deferred decisions intentionally open
 
-These should be chosen from implementation evidence rather than frozen prematurely:
-
-- exact final project/assembly names for Shell, LocalPlay, RemotePlay, TestWorlds;
-- whether capability composition is one project per profile, MSBuild feature composition, or another compile-time structure;
+- exact final project names;
+- project-per-profile vs MSBuild composition;
 - exact local semantic bridge API;
-- exact presentation-metadata type for custom nameplate labels/categories;
-- exact standard UI definition catalog;
-- exact schema cache on-disk format/quota;
-- exact server content-transfer/cache protocol and asset packaging;
-- final client mod/plugin API;
-- future server discovery capability shape;
-- whether official capabilities later support dynamic install into an existing binary or are distributed as separately built executables.
+- exact presentation metadata type for custom names;
+- exact standard UI catalog;
+- exact settings serialization format;
+- exact control-profile contract/action catalog generalization;
+- exact content cache format/quota;
+- exact content package/HTTP source implementation;
+- final executable extension API;
+- WASM runtime choice/capability model;
+- future discovery shape;
+- whether official capabilities later support dynamic install or separate binaries.
 
-The frozen requirement is the ownership/dependency behavior, not these spellings.
+Frozen requirements are ownership/dependency/security behaviors, not spellings.
 
 ---
 
-# 31. Definition of done
+# 35. Definition of done
 
 The client-shell campaign is complete when UltraSim has a real executable shell that:
 
-1. launches independently of any active world/session;
-2. has persistent World/HUD/Menu/Debug presentation layers;
-3. exposes menu entries only for installed capabilities;
-4. compiles as Single Player with Network physically absent;
-5. compiles as Online with local authoritative Game/server implementation physically absent;
-6. compiles as Complete with both capabilities;
-7. promotes Cabin in the Woods to an optional built-in Test World rather than client-special-case code;
-8. uses the same authoritative Game semantics locally and remotely;
-9. proves the real remote controlled-actor command/Physics path;
-10. drives public world/nameplate/overhead presentation from retained client knowledge, not presentation-triggered server polls;
-11. supports Ctrl reveal of all already-known resident eligible nameplates;
-12. keeps local Main Menu/Settings/Exit client-owned;
-13. renders real server-composed UI through the existing engine-neutral UI system;
-14. supports preinstalled standard compiled UI definitions and cached custom definitions through one identity model;
-15. runs Inventory through that real UI path;
-16. cleans all session-owned world/UI/presentation state on leave/disconnect;
-17. retains a minimal fallback presentation set;
-18. has an explicit path to a Contentless Online build with no bundled playable world;
-19. has permanent build/dependency and behavioral acceptance gates;
-20. is coherent enough that subsequent repository extraction does not require first untangling a monolithic client executable.
+1. launches independently of active world/session;
+2. has persistent World/HUD/Menu/Debug layers;
+3. exposes only installed capabilities;
+4. compiles Single Player with Network physically absent;
+5. compiles Online with local authority implementation physically absent;
+6. compiles Complete with both;
+7. promotes Cabin to optional Test World content;
+8. uses same authoritative Game semantics locally/remotely;
+9. proves real remote controlled-actor Game/Physics path;
+10. uses real human presentation to calibrate world/camera/nameplate scale;
+11. drives nameplates/overhead from retained client knowledge;
+12. supports Ctrl reveal without server polling;
+13. keeps Main Menu/Settings/Exit client-owned;
+14. has readable layered local settings;
+15. can accept/ignore/customize declarative server controls/camera defaults without destructive rewrite;
+16. demonstrates at least two materially different supported control profiles on same executable;
+17. renders server-composed UI through engine-neutral UI system;
+18. supports preinstalled and cached custom UI definitions through one identity model;
+19. runs Inventory through that path;
+20. cleans all session-owned state on leave/disconnect;
+21. retains minimal fallback presentation;
+22. has Contentless Online path with no bundled playable world;
+23. consumes passive content from source-independent local/server-hosted/external sources under `ASSET_STREAMING.md`;
+24. keeps executable extensions outside normal passive content and unimplemented unless separately authorized;
+25. has permanent dependency/behavioral acceptance gates;
+26. is coherent enough for repository extraction without first untangling a monolithic client.
 
-At that point, the client is no longer an acceptance harness around framework pieces. It is the permanent thin composition shell those pieces are meant to serve.
+At that point the client is no longer an acceptance harness around framework pieces. It is the permanent thin composition shell those pieces are meant to serve.
 
 ---
 
-# 32. Useful archaeology/current anchors
+# 36. Useful archaeology/current anchors
 
-Current V3 anchors:
+Current V3:
 
 - `Client/Core`
+- `Client/Core/ClientWorldControlProfiles.cs`
 - `Client/Network`
 - `Client/_Godot`
+- `Client/_Godot/GodotWorldInput.cs`
 - `Client/Playable.Godot`
 - `Kernels/UI`
 - `Game/UI/InventoryUi.cs`
-- `Game/World` public/semantic world records
-- Chat C0.1a client state + overhead semantics
-- Physics P0.0-P0.1b Game/Physics boundary
-- Terrain T0 client semantic cache + Godot render window
+- `Game/World` public/semantic records
+- Chat C0.1a client/overhead semantics
+- Physics P0.0-P0.1b boundary
+- Terrain T0 semantic cache/render window
+- [`ASSET_STREAMING.md`](ASSET_STREAMING.md)
 
-Archived V2 references worth consulting for behavior/UX only:
+Archived V2:
 
 - `_Archive/_V2/Client/GODOT_CLIENT_SHELL_ROADMAP.md`
 - `_Archive/_V2/Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`
+- `_Archive/_V2/Client/CONTENT_PACK_PIPELINE_PLAN.md`
 - `_Archive/_V2/Client/CLIENT_IMPLEMENTATION_PLAN.md`
 - `_Archive/_V2/Client/Core`
 - `_Archive/_V2/Client/UI`
 - `_Archive/_V2/Client/_Godot`
+- X/Y human avatar definitions/assets.
 
-Recover concepts where they fit current ownership. Do not port V2 coupling merely because a feature once existed there.
+Recover concepts where they fit current ownership; do not port old coupling because a feature once existed.
 
 ---
 
-# 33. Roadmap summary
+# 37. Roadmap summary
 
 ```text
 Physics foundation                    CLOSED through P0.1b
@@ -1610,24 +1761,24 @@ Physics foundation                    CLOSED through P0.1b
         v
 F0.0  real client composition foundation
         |
-F0.1  persistent shell + local app UI
+F0.1  persistent shell + readable layered settings/control foundation
         |
-F0.2  Single Player + Cabin Test World, NO Network
+F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network
         |
-F0.3  Online Direct Connect + real remote GamePlayerCommand control
+F0.3  Online Direct Connect + real remote GamePlayerCommand + server client profile
         |
-F0.4  world presentation parity: actor definitions/nameplates/Ctrl/chat
+F0.4  actor definitions/nameplates/Ctrl/chat presentation parity
         |
 F0.5  server-composed UI + standard compiled definitions + Inventory
         |
-F0.6  content-source separation + Contentless Online proof
+F0.6  content-source integration + Contentless Online (A0 companion campaign)
         |
 F0.7  settings/debug/lifecycle hardening
         |
-F0.8  final local/remote/complete/contentless matrix
+F0.8  final local/remote/complete/contentless + different-feel matrix
         |
         v
 repository generalization / extraction readiness
 ```
 
-**Hard stop:** do not silently turn this roadmap into server discovery, matchmaking, mod loading, account redesign, or unrelated gameplay campaigns. Review each checkpoint before advancing.
+**Hard stop:** do not silently turn this roadmap into discovery, matchmaking, executable mod loading, account redesign, or unrelated gameplay campaigns. Review each checkpoint before advancing.
