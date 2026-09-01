@@ -1,6 +1,10 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
-**Status:** proposed/frozen implementation plan after Physics P0.1b (`6bfef1e2`).
+**Status:** frozen architectural direction with proposed checkpoint implementations after Physics
+P0.1b (`6bfef1e2`). The Network-free local-host model is accepted; F0.0a/F0.0b extract the
+already-proven OfflineDirect behavior into permanent executable and local-session boundaries.
+Direct-connect trust, content activation, and later content acquisition remain separately gated
+before their consuming checkpoints.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -130,6 +134,28 @@ It is not the final client ownership model.
 
 Keep it until the real shell reaches equivalent automated/manual coverage, then shrink/retire it.
 
+The current harness already proves the intended authoritative local path: Godot forms a
+`GamePlayerCommand`, Game/Physics owns the result, and Client Core owns the resulting presentation
+state. It does not use Network for local movement. Its remaining shortcuts are composition and
+lifetime shortcuts, not evidence for a different architecture:
+
+```text
+Godot thread
+    directly invokes active Game generation
+    directly ticks ServerRuntime
+    directly scans/copies the complete Cabin publication store
+    uses protocol loopback for the accepted Chat consumer
+```
+
+F0.0b replaces those shortcuts with one authority owner thread, bounded local command ingress,
+bounded domain-specific semantic egress, and explicit applied/rejected local semantic proof. It
+does not redesign OfflineDirect or route the host player through loopback Network.
+
+One current assembly boundary also needs extraction: `Game/Replication` presently references
+`Kernels/Network` because Game-owned replication semantics and remote delivery integration share a
+project. F0.0a/F0.0b must leave the Game-owned publication/debt side usable by Local Play without
+shipping Network. Exact project names are not frozen; the shipped dependency result is.
+
 ## Existing UI foundation
 
 V3 already has substantial engine-neutral UI machinery under `Kernels/UI`, including authoring, compiled definitions, models, protocol/types, and semantic codecs. `Game/UI` already has a real Inventory consumer.
@@ -236,7 +262,19 @@ SINGLE PLAYER MAY USE AN EMBEDDED AUTHORITATIVE SERVER WITHOUT USING NETWORK TRA
 
 LOCAL PLAY MAY BYPASS PACKETIZATION; IT MAY NOT BYPASS GAME AUTHORITY OR CLIENT SEMANTIC BOUNDARIES.
 
+THE PERMANENT LOCAL AUTHORITY RUNS ON AN OWNER THREAD INDEPENDENT FROM GODOT PRESENTATION.
+
+LOCAL COMMAND INGRESS AND SEMANTIC EGRESS ARE BOUNDED; QUEUED DOES NOT MEAN APPLIED.
+
+LOCAL APPLICATION KNOWLEDGE ADVANCES ONLY AFTER CLIENT CORE APPLIES AND REPORTS THE SEMANTIC RESULT.
+
+ENABLING LAN/INTERNET HOSTING ADDS REMOTE NETWORK RECIPIENTS TO THE EXISTING AUTHORITATIVE WORLD;
+IT DOES NOT RESTART THE WORLD OR MOVE THE HOST PLAYER ONTO LOOPBACK NETWORK.
+
 DIRECT CONNECT IS THE FIRST REMOTE ENTRY POINT.
+
+HOSTED NETWORK REMAINS PINNED-KEY-ONLY; HUMAN TOFU/EXPLICIT-FINGERPRINT ONBOARDING BELONGS TO THE
+CLIENT SHELL ABOVE NETWORK.
 
 SERVER DISCOVERY / PUBLIC SERVER LISTS ARE DEFERRED UNTIL SEPARATELY AUTHORIZED.
 
@@ -306,7 +344,9 @@ Does not own Game semantics, protocol codecs, AOI, replication policy, or server
 
 Owns composition of an authoritative in-process/local Game/server runtime for Single Player.
 
-May directly bridge committed Game semantic outputs into Client Core without Network/UDP, but presentation code never directly mutates authoritative Game state.
+Bridges committed Game semantic outputs into Client Core through bounded domain-specific local
+delivery/proof adapters without Network/UDP. Presentation code never directly mutates or reads
+mutable authoritative Game/ECS state.
 
 ## Remote Play capability
 
@@ -436,15 +476,32 @@ The invariant is **semantic parity, not packet parity**.
 ```text
 Godot input
     -> Client Core input/control semantics
-    -> Local Play semantic bridge
+    -> bounded local command ingress
+    -> authority owner thread
     -> authoritative Game/server runtime
-    -> committed Game/world/chat/UI semantics
-    -> Local Play semantic projection
-    -> Client Core semantic state
+    -> committed Game/world/chat/UI semantics and recipient debt
+    -> bounded domain-specific local semantic egress
+    -> Client Core apply
+    -> applied/rejected local proof
+    -> authority owner thread retires or retains debt
     -> Godot presentation
 ```
 
 No loopback UDP is required just to pretend local/remote are identical.
+
+The local bridge preserves the same meaning as the remote application boundary:
+
+```text
+latest-state work may coalesce under its accepted semantic rules
+Events remain independent occurrences
+capacity/backpressure is explicit
+queued != applied
+authority cadence does not depend on Godot render cadence
+```
+
+Use concrete local public-world, Chat, UI, owner/private, and command adapters. Do not begin with a
+generic `ITransport<T>` or a universal application-message bus merely because several domains cross
+the same process boundary.
 
 ## Remote
 
@@ -463,6 +520,27 @@ Godot input
 ```
 
 Transport differs; Game meaning and client semantic destination should not.
+
+## Hosting from an existing local world
+
+In a Complete build, enabling LAN/Internet hosting adds the Hosted Network listener and remote
+application sessions to the already-running authoritative world:
+
+```text
+                         authoritative Game
+                         /                \
+             local application       remote application
+                  adapter              protocol adapters
+                     |                       |
+              host Client Core            Network
+                                             |
+                                      remote Client Core
+```
+
+The host player remains on the local application adapter before and after hosting is enabled. The
+world is not destroyed/recreated as a separate multiplayer authority, and the host does not begin
+paying packetization, encryption, retransmission, or loopback latency. A Single Player-only build
+cannot expose the listener because the Network capability is physically absent.
 
 Forbidden:
 
@@ -723,7 +801,8 @@ if UiId == Inventory:
 
 ## Cold/hot
 
-Cold: obtain validated definition, cache by server/content identity, render model.
+Cold: obtain validated definition, cache by verified application-realm/content identity, render
+model.
 
 Hot: exact definition already present, render model/delta.
 
@@ -824,16 +903,16 @@ settings/
     client.*
     controls.*
     servers/
-        <server identity>/
+        <verified application realm encoding>/
             preferences.*
             bindings.*
 
 cache/
-    <server identity>/
+    <verified application realm encoding>/
         client-profile.*
 ```
 
-Server-provided defaults live in server cache, **not** inside the user's settings file.
+Server-provided defaults live in realm-scoped cache, **not** inside the user's settings file.
 
 ## Resolution layers
 
@@ -1027,7 +1106,7 @@ Validated passive data/assets required or offered by remote server:
 - terrain/static/world content;
 - control profile data.
 
-This is cached by server/content identity.
+This is cached by verified application-realm/content identity.
 
 The **authoritative server names the exact package/hash**, but bytes may come from:
 
@@ -1161,6 +1240,40 @@ Future optional `ServerDiscovery` may add favorites, curated/public lists, LAN, 
 
 Do not build discovery merely to finish real-client reconstruction.
 
+## Human trust onboarding above Hosted Network
+
+Hosted Network continues to require an explicitly pinned deployment public key. It does not gain
+silent self-trust or TOFU policy. The Client Shell supplies the missing human/application flow.
+
+First connection may use either:
+
+- an address plus an explicitly supplied fingerprint/invite; or
+- TOFU after displaying the untrusted candidate deployment-key fingerprint and obtaining explicit
+  local consent.
+
+After consent, persist a trust record and perform/restart the real Hosted handshake with that exact
+key pinned. A later mismatch blocks; it never silently replaces the trusted key.
+
+```text
+endpoint
+    mutable location hint
+
+deployment-key fingerprint
+    cryptographic transport/deployment trust anchor
+
+ApplicationRealmId
+    durable server/shard namespace authenticated by that deployment
+```
+
+The verified application realm initially scopes per-server settings, accepted client profiles, UI
+cache ownership, and content activation ownership. Do not manufacture separate UI/content/control
+realm identity spaces until a concrete deployment needs them. A future rotation may preserve trust
+when the old trusted key signs the new deployment key plus realm; otherwise key replacement requires
+explicit user approval.
+
+Current string-shaped UI cache fields may receive a canonical encoded verified realm identity. This
+checkpoint does not require rewriting the UI kernel merely to change those fields to a binary type.
+
 ---
 
 # 25. Remote controlled-actor parity is required
@@ -1204,7 +1317,9 @@ Useful, but not a giant mandatory admin framework.
 
 # 27. Proposed package/composition direction
 
-Exact names unfrozen; desired dependency shape equivalent to:
+Exact names remain unfrozen, but use separate thin executable composition roots sharing the shell,
+Core, and Godot adapter. Do not rely on one executable project with conditional references to prove
+that an absent capability is physically absent. Desired dependency shape is equivalent to:
 
 ```text
 Client.Core
@@ -1281,23 +1396,55 @@ Both capabilities; local and remote Cabin converge semantically/presentationally
 
 Dependency scans are permanent verifier gates.
 
+Inspect final shipped artifacts rather than only source project references. Gates include the
+resolved project graph, generated `.deps.json`, copied managed/native assemblies, and Godot export
+contents. An assembly hidden from a menu but still shipped is not an absent capability.
+
 ---
 
 # 29. Implementation roadmap
 
-## F0.0 — Real client composition foundation
+## F0.0a — Real client executable-composition foundation
 
 Implement:
 
-- real persistent shell composition root distinct from `Playable.Godot`;
+- minimal launchable shell composition roots distinct from `Playable.Godot` (persistent UI/layer
+  behavior follows in F0.1);
 - explicit Local/Remote capabilities;
 - capability-driven menu entries;
 - Single Player/Online/Complete build matrix;
-- dependency checks proving absent capabilities are physically absent.
+- separate thin executable roots rather than conditional hidden references;
+- separate the current Network-facing replication integration from the Game-owned
+  publication/debt dependencies enough for the Local graph to remain Network-free;
+- shipped-artifact dependency checks proving absent capabilities are physically absent.
 
 No discovery, dynamic plugin loading, or full streaming implementation yet.
 
 **Gate:** all compositions compile with forbidden dependencies absent.
+
+---
+
+## F0.0b — Permanent OfflineDirect local-session extraction
+
+Extract the behavior already proven by the playable Cabin slice into its permanent ownership shape:
+
+- one local authoritative Game/server owner thread independent from Godot;
+- bounded local command ingress using normal Game commands/control-session fencing;
+- bounded local public-world, owner/private, Chat, and UI semantic egress;
+- the same Game-owned disclosure/AOI/cadence policy for the local recipient;
+- Client Core applied/rejected results returned as local semantic proof;
+- latest-state coalescing and Event retention remain domain-specific;
+- no direct Godot access to mutable ECS/Game authority;
+- no complete-publication-store scan/copy every render frame;
+- no protocol loopback merely to deliver local Chat/UI/application semantics;
+- Network physically absent from the Single Player graph.
+
+Do not build a universal transport/message abstraction. Extract concrete local domain adapters and
+only generalize a primitive after multiple accepted consumers genuinely duplicate it.
+
+**Gate:** the authority continues ticking when Godot presentation is deliberately stalled; bounded
+local debt recovers through application proof; disclosure/final Client Core semantics match the
+accepted remote path; ordinary local play ships no Network assembly.
 
 ---
 
@@ -1341,20 +1488,59 @@ Implement:
 
 Hard rule: no Client.Network/Kernels.Network.
 
+This checkpoint consumes the accepted A0.0/A0.1 local content contracts/oracle from
+`ASSET_STREAMING.md`; it does not invent a second Cabin package/catalog format. X/Y meshes may remain
+bundled/build-time content during the first passive-content campaign.
+
 **Gate:** launch -> Cabin -> move/interact/chat/inventory -> leave to Main Menu, with coherent human scale and no Network assembly.
 
 ---
 
-## F0.3 — Online Direct Connect + remote control + server client profile
+## F0.3a — Online Direct Connect trust and session lifecycle
 
 Implement:
 
 - Remote Play capability;
 - Direct Connect;
-- authenticated session;
-- real retained GamePlayerCommand control;
+- candidate deployment-key discovery/display without treating it as trusted;
+- TOFU and optional explicit fingerprint/invite onboarding in Client Shell;
+- persistent deployment-key pin plus verified `ApplicationRealmId`;
+- mismatch blocking and explicit replacement policy;
+- authenticated application session;
 - clean disconnect/failure;
+- Online build with no local authority implementation.
+
+Hard rules:
+
+- Hosted Network remains pinned-key-only;
+- no silent pin replacement/self-trust;
+- no discovery/list;
+- no executable code in trust/profile data.
+
+**Gate:** first trust, reconnect, mismatch, explicit fingerprint, and clean teardown all preserve the
+Network trust boundary and realm-scoped client state.
+
+---
+
+## F0.3b — Remote controlled actor and semantic parity
+
+Implement:
+
+- real retained `GamePlayerCommand` control;
 - external Cabin parity target;
+- the same Game authority/Physics path as Local Play;
+- remote semantic application/proof into the same Client Core destinations;
+- no remote-only movement authority or presentation state.
+
+**Gate:** external Cabin controlled-actor, public world, Chat, owner/private, and UI consumers match
+the accepted local semantic result under relevant loss/reconnect cases.
+
+---
+
+## F0.3c — Server client-profile negotiation and consent
+
+Implement:
+
 - server-advertised declarative client profile identity/hash;
 - `Use Server Defaults / Keep My Controls / Customize` flow;
 - remembered per-server/profile decision;
@@ -1362,12 +1548,13 @@ Implement:
 
 Hard rules:
 
-- Online no local authority implementation;
-- no discovery/list;
-- no remote-only movement semantics;
+- profile identity is scoped by the verified application realm;
+- only stock supported control/camera grammars and validated parameters are accepted;
+- client-reserved controls remain available;
 - no executable code in client profile.
 
-**Gate:** external Cabin behaves like Local Play and materially different supported control profiles can be selected without changing client executable.
+**Gate:** materially different supported control profiles can be selected without changing the
+client executable, while user settings and reserved controls remain intact.
 
 ---
 
@@ -1415,7 +1602,7 @@ Client integration must prove:
 
 - Test World/content optional, not Client Core;
 - Online may ship without Cabin;
-- passive server content cached by server/content identity;
+- passive server content cached by verified application-realm/content identity;
 - normal content source may be local/preseeded, server-hosted static HTTP, or external HTTPS/CDN;
 - byte source does not become semantic authority;
 - fallback is diagnosable;
@@ -1515,6 +1702,9 @@ Mechanically verify forbidden dependencies absent.
 - present capability -> works;
 - no Network in Single Player graph;
 - no local authority implementation in Online graph;
+- Single Player authority runs independently from Godot presentation;
+- local semantic pressure cannot stall or silently advance authority knowledge;
+- enabling hosting preserves the host local-session path and authoritative world;
 - repeated enter/leave returns clean shell.
 
 ## Human scale/camera
@@ -1540,8 +1730,18 @@ Mechanically verify forbidden dependencies absent.
 
 - same Cabin movement/collision result;
 - remote uses normal Game locomotion authority;
-- Local Play never mutates Game directly from presentation;
+- Local Play never mutates/reads Game authority directly from presentation;
+- local queued semantics advance knowledge only after Client Core application result;
+- local and remote recipients use the same Game-owned disclosure/AOI policy;
 - same Client Core semantic shape consumed by Godot.
+
+## Direct-connect trust
+
+- first unpinned endpoint requires explicit TOFU or supplied fingerprint/invite;
+- accepted deployment key is used as the actual Hosted pin;
+- later mismatch blocks without silent replacement;
+- verified application realm scopes settings/profile/UI/content ownership;
+- explicit teardown does not leave candidate trust/session state active.
 
 ## Nameplates
 
@@ -1573,7 +1773,8 @@ Mechanically verify forbidden dependencies absent.
 
 - missing asset visible fallback;
 - fallback does not change Game truth;
-- server cache namespace isolation;
+- verified application-realm content ownership remains isolated;
+- required content references wait for exact activation application proof;
 - Contentless build has no Test World;
 - same passive package from local/server-host/external source resolves identically;
 - normal passive package cannot execute arbitrary client code.
@@ -1668,7 +1869,6 @@ Self-hosted/external passive content acquisition is handled in `ASSET_STREAMING.
 # 34. Deferred decisions intentionally open
 
 - exact final project names;
-- project-per-profile vs MSBuild composition;
 - exact local semantic bridge API;
 - exact presentation metadata type for custom names;
 - exact standard UI catalog;
@@ -1695,26 +1895,28 @@ The client-shell campaign is complete when UltraSim has a real executable shell 
 4. compiles Single Player with Network physically absent;
 5. compiles Online with local authority implementation physically absent;
 6. compiles Complete with both;
-7. promotes Cabin to optional Test World content;
-8. uses same authoritative Game semantics locally/remotely;
-9. proves real remote controlled-actor Game/Physics path;
-10. uses real human presentation to calibrate world/camera/nameplate scale;
-11. drives nameplates/overhead from retained client knowledge;
-12. supports Ctrl reveal without server polling;
-13. keeps Main Menu/Settings/Exit client-owned;
-14. has readable layered local settings;
-15. can accept/ignore/customize declarative server controls/camera defaults without destructive rewrite;
-16. demonstrates at least two materially different supported control profiles on same executable;
-17. renders server-composed UI through engine-neutral UI system;
-18. supports preinstalled and cached custom UI definitions through one identity model;
-19. runs Inventory through that path;
-20. cleans all session-owned state on leave/disconnect;
-21. retains minimal fallback presentation;
-22. has Contentless Online path with no bundled playable world;
-23. consumes passive content from source-independent local/server-hosted/external sources under `ASSET_STREAMING.md`;
-24. keeps executable extensions outside normal passive content and unimplemented unless separately authorized;
-25. has permanent dependency/behavioral acceptance gates;
-26. is coherent enough for repository extraction without first untangling a monolithic client.
+7. runs local authority on an owner thread with bounded command/semantic/proof handoff;
+8. promotes Cabin to optional Test World content;
+9. uses same authoritative Game semantics locally/remotely;
+10. proves real remote controlled-actor Game/Physics path;
+11. onboards and pins Direct Connect identity above Hosted Network;
+12. uses real human presentation to calibrate world/camera/nameplate scale;
+13. drives nameplates/overhead from retained client knowledge;
+14. supports Ctrl reveal without server polling;
+15. keeps Main Menu/Settings/Exit client-owned;
+16. has readable layered local settings;
+17. can accept/ignore/customize declarative server controls/camera defaults without destructive rewrite;
+18. demonstrates at least two materially different supported control profiles on same executable;
+19. renders server-composed UI through engine-neutral UI system;
+20. supports preinstalled and cached custom UI definitions through one identity model;
+21. runs Inventory through that path;
+22. cleans all session-owned state on leave/disconnect;
+23. retains minimal fallback presentation;
+24. has Contentless Online path with no bundled playable world;
+25. consumes passive content from source-independent local/server-hosted/external sources under `ASSET_STREAMING.md`;
+26. keeps executable extensions outside normal passive content and unimplemented unless separately authorized;
+27. has permanent dependency/behavioral acceptance gates;
+28. is coherent enough for repository extraction without first untangling a monolithic client.
 
 At that point the client is no longer an acceptance harness around framework pieces. It is the permanent thin composition shell those pieces are meant to serve.
 
@@ -1759,13 +1961,21 @@ Recover concepts where they fit current ownership; do not port old coupling beca
 Physics foundation                    CLOSED through P0.1b
         |
         v
-F0.0  real client composition foundation
+F0.0a executable composition roots / shipped-dependency proof
+        |
+F0.0b permanent OfflineDirect local-session extraction
         |
 F0.1  persistent shell + readable layered settings/control foundation
         |
+A0.0-A0.1 minimal/local content contracts and oracle (companion plan)
+        |
 F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network
         |
-F0.3  Online Direct Connect + real remote GamePlayerCommand + server client profile
+F0.3a Direct Connect identity trust/session lifecycle
+        |
+F0.3b real remote GamePlayerCommand + semantic parity
+        |
+F0.3c server client-profile consent/settings
         |
 F0.4  actor definitions/nameplates/Ctrl/chat presentation parity
         |

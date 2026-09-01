@@ -1,6 +1,10 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
-**Status:** proposed/frozen companion plan to [`CLIENT.md`](CLIENT.md), based on V2 client/content archaeology and the current V3 thin-client direction.
+**Status:** frozen ownership/security direction with proposed A0 checkpoint implementations,
+companion to [`CLIENT.md`](CLIENT.md). A0.0 is the next content-contract checkpoint after the client
+executable/local-session/shell foundation (F0.0a/F0.0b/F0.1); runtime mesh/audio import, package
+dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
+artifacts remain deferred.
 
 **Purpose:** restore the useful V2 content-pack, resolver, cache, server-patch, and asset-streaming ideas without reviving old ownership mistakes. The first proof uses the same Cabin in the Woods world locally and remotely so a preinstalled Single Player composition can act as a deterministic oracle for Online content.
 
@@ -67,6 +71,23 @@ V2 also had two partially overlapping representations:
 
 V3 should **not** recreate two competing semantic notions of a patch. The server delivery protocol should advertise/install validated content packages whose file hashes and logical definitions are understood by the same package pipeline used for local/preinstalled packs. A small transport/download advertisement may still exist, but it points to the canonical package/content identity rather than becoming a second definition system.
 
+## Current V3 baseline
+
+The current repository has useful content-adjacent authority, but not the A0 acquisition/catalog
+pipeline yet:
+
+- World owns canonical complete `WorldPackArtifact` bytes/fingerprints and bounded open/validation;
+- World owns mutable overlay revisions and per-chunk content hashes plus persistence serialization,
+  but no public independently downloadable chunk artifact;
+- Client Core/UI already retain typed definition/cache identity and generation-aware semantic state,
+  but there is no general passive-content activation plan, CAS, or HTTP acquisition service;
+- the playable Cabin and X/Y calibration assets are currently build-time/fixture composition;
+- no `ContentSetApplied`, immutable resolved content catalog, or lazy downloaded-resource realization
+  contract is implemented yet.
+
+A0 extracts/builds those missing content contracts. It does not reinterpret current persistence,
+UI cache keys, or World chunk hashes as if they already formed a streaming package system.
+
 ---
 
 # 2. Frozen principles
@@ -126,7 +147,18 @@ OPTIONAL SERVER CONTENT MAY ARRIVE AFTER ENTRY ONLY WHEN A SAFE LOWER-LAYER FALL
 
 A CLIENT NEVER TREATS PARTIALLY DOWNLOADED OR HASH-FAILED CONTENT AS PUBLISHED CONTENT.
 
-CACHE IDENTITY IS SERVER/CONTENT-SCOPED; SAME RELATIVE PATH ON TWO SERVERS IS NOT THE SAME CACHE OWNERSHIP.
+DOWNLOADED != INSTALLED != CATALOG-PUBLISHED != ENGINE-REALIZED != SERVER-KNOWN-APPLIED.
+
+REQUIRED CONTENT REFERENCES MAY BEGIN ONLY AFTER EXPLICIT CLIENT APPLICATION PROOF FOR THE EXACT
+CONTENT ACTIVATION.
+
+THE FIRST REQUIRED CONTENT ACTIVATION IS FROZEN FOR ONE APPLICATION/WORLD SESSION.
+
+CACHE SEMANTIC OWNERSHIP IS VERIFIED-REALM/CONTENT-SCOPED; SAME RELATIVE PATH IN TWO REALMS DOES NOT
+CREATE THE SAME LOGICAL OWNERSHIP.
+
+IMMUTABLE VERIFIED FILE BYTES LIVE IN A GLOBAL SHA-256 CONTENT-ADDRESSED BLOB STORE; REALM-SCOPED
+MANIFESTS AND ACTIVATION PLANS OWN AUTHORIZATION AND SEMANTIC USE.
 
 MISSING/INVALID CONTENT FALLS BACK VISIBLY WHEN POLICY ALLOWS; IT DOES NOT SILENTLY CHANGE GAMEPLAY TRUTH.
 
@@ -138,9 +170,14 @@ LOCAL PLAY MAY READ THE SAME PACKAGE DIRECTLY WITHOUT NETWORK.
 
 LOCAL PREINSTALLED CONTENT AND REMOTELY ACQUIRED IDENTICAL CONTENT MUST CONVERGE ON THE SAME RESOLVED CONTENT SET.
 
+CONTENT CATALOG PUBLICATION AND GODOT RESOURCE REALIZATION ARE SEPARATE GENERATIONAL LIFETIMES.
+
 UI SCHEMAS, PRESENTATION ASSETS, AND STRUCTURAL WORLD CONTENT MAY SHARE CACHE/TRANSFER INFRASTRUCTURE WITHOUT SHARING SEMANTIC IDENTITY.
 
 TERRAIN/STATIC CHUNK REVISION IS NOT AN ITEM/MOBILE/TEXTURE LOGICAL CONTENT ID.
+
+ASSET STREAMING CARRIES WORLD-OWNED CANONICAL ARTIFACTS; IT DOES NOT INVENT WORLD ARTIFACT OR
+TRANSITION SEMANTICS.
 
 THE CONTENTLESS ONLINE CLIENT REMAINS BOOTABLE THROUGH BUILT-IN BOOTSTRAP UI/FALLBACK ASSETS.
 ```
@@ -169,7 +206,8 @@ Built-in content is lowest-level fallback content. A Contentless Online distribu
 
 ### Server-authorized passive content
 
-Passive data/assets required or offered by the connected server and cached under that server/content identity.
+Passive data/assets required or offered by the connected server and activated under its verified
+application realm/content identity.
 
 May include, subject to capability/schema support:
 
@@ -201,6 +239,10 @@ Examples:
 - local sound suppression/remapping.
 
 They do not alter protocol, Game authority, collision, or server semantics.
+
+These are permitted local presentation-leaf substitutions after the authoritative activation plan
+resolves. They are not packages in that plan and cannot replace UI actions/schemas, control
+profiles, structural World content, or disclosure semantics.
 
 ### Executable client extensions — future/deferred
 
@@ -278,7 +320,54 @@ If a real workload needs "change one hue", "change one anchor", "change one mate
 
 ---
 
-## 3.3 Physical byte sources
+## 3.3 Server-authorized content activation plan
+
+Packages do not self-assign priority. One authenticated, realm-scoped
+`ContentActivationPlan` supplies the exact ordered package set:
+
+```text
+ApplicationRealmId
+ContentActivationId
+PlanHash
+required lower/base catalog fingerprint
+ordered PackageId + exact ManifestHash entries
+```
+
+`ContentActivationId` is a stable realm-scoped authored activation/revision identity, not a
+connection-local counter or process-local catalog handle. Reusing it for different plan bytes is an
+error. `PlanHash` hashes the canonical encoding of every other plan field, including realm,
+activation identity, required base catalog fingerprint, and exact ordered package entries.
+Application proof is additionally fenced by the current application-session lineage.
+
+Initial resolution is deliberately simple:
+
+```text
+Add X
+    X must be absent from the lower semantic catalog
+    otherwise fail the candidate activation
+
+Replace X
+    X must exist in the lower semantic catalog
+    the explicitly later package becomes the owner
+```
+
+If packages A and B both Replace X, B wins only because the authenticated activation plan places B
+later. Packages cannot choose an arbitrary numeric priority to promote themselves. Duplicate or
+ambiguous ownership outside this exact order fails candidate publication.
+
+User resource packs do not participate as packages in the authoritative semantic activation plan.
+They are a later local presentation-leaf overlay limited initially to permitted texture, icon,
+audio, theme/skin, and other explicitly compatible presentation substitutions. They may not replace
+server UI action/schema meaning, control profiles, structural World content, disclosure metadata, or
+other Game semantics.
+
+Package dependencies, version-range solving, load-before/load-after graphs, and applicability
+filters are deferred. Authoring/build tooling may resolve those concerns into one flat exact
+activation plan before the client sees it.
+
+---
+
+## 3.4 Physical byte sources
 
 Package identity is independent from where bytes are read.
 
@@ -368,6 +457,21 @@ package file
 
 Godot `res://...`, cache paths, archive member paths, temporary download filenames, server URLs, and CDN URLs are never durable logical content identity.
 
+The first grammar is deliberately cross-platform and canonical:
+
+```text
+namespace:path/to/id
+
+lowercase ASCII letters, digits, underscore, hyphen
+one colon between non-empty namespace and path
+forward slash between non-empty path segments
+no dot segments, backslashes, whitespace, Unicode aliases, or case folding
+```
+
+`Add` normally owns IDs in the package/server namespace authorized by the activation plan. Replacing
+a lower-layer ID is permitted only through explicit `Replace`; declaring another package's namespace
+does not silently grant ownership.
+
 ---
 
 # 5. Files versus semantic definitions
@@ -412,9 +516,12 @@ minimum pipeline format
 maximum pipeline format
 whole package/content hash
 per-file path/kind/size/SHA-256
-dependencies
-filters/applicability       where earned
 ```
+
+For A0, exact semantic package identity is the SHA-256 of a canonical manifest encoding that
+includes the ordered/canonical definitions and every file descriptor/hash. Human-readable version
+is display/update metadata, not equality or authority. A transport archive may additionally have an
+exact archive-byte hash, but archive layout is not the semantic package identity.
 
 Required validation before publication:
 
@@ -430,12 +537,13 @@ Required validation before publication:
 - file byte length matches declaration;
 - file SHA-256 matches declaration;
 - whole package/content identity matches when declared;
-- dependency validation;
 - bounded counts/sizes before proportional allocation/import;
-- passive-content type/import validation before active publication;
-- runtime importer/resource-pressure checks before active publication.
+- passive-content envelope/type validation before catalog publication.
 
 Validation failure publishes **none** of the candidate package.
+
+Initial A0 manifests contain no client-resolved dependency/filter graph. Package-set ordering and
+ownership come exclusively from the exact authenticated activation plan.
 
 ---
 
@@ -443,21 +551,32 @@ Validation failure publishes **none** of the candidate package.
 
 The V2 code rejected a useful list of obvious executable/script extensions. Keep that as defense-in-depth, but do not treat it as proof that every other file is safe.
 
-The normal streaming path should be based on **supported passive content families**.
-
-Conceptually:
+The normal streaming path is based on **supported passive content families**. The first A0
+allowlist is intentionally narrower than the eventual content vision:
 
 ```text
-allowed passive model format(s)
-allowed raster texture format(s)
-allowed audio format(s)
-validated engine-neutral material descriptors
-validated UI schemas
-validated content-definition metadata
-validated world-pack/chunk formats
+canonical typed UltraSim content definitions
+PNG/WebP raster textures through explicit bounded decoders
+declarative materials using built-in trusted shader families
+existing canonical complete WorldPack artifacts
+```
+
+X/Y human meshes remain bundled/build-time calibration assets initially. Downloaded GLB and audio
+are later separately reviewed importer checkpoints, not implicit A0 formats.
+
+Future candidate families may include:
+
+```text
+bounded passive model format(s)
+bounded audio format(s)
+additional typed UI/World artifacts
 ```
 
 Unknown formats reject or remain inactive.
+
+Ordinary passive acquisition never passes downloaded `.pck`, `.tscn`, `.scn`, `.tres`, `.res`,
+`.gd`, DLL, shader source, SPIR-V, or another script/code-capable Godot resource to generic
+`ResourceLoader`.
 
 Important edge cases:
 
@@ -481,25 +600,34 @@ validated parameters
 
 Custom server-supplied shaders, if ever supported, are a separately elevated capability.
 
+A later GLB importer must bound at least node, mesh, primitive, vertex, index, material, texture,
+animation, skin/bone, decoded-byte, and realized-resource counts before native construction. The same
+principle applies to later audio decoding.
+
 ---
 
-# 8. Server identity and cache namespace
+# 8. Verified realm ownership and content-addressed cache
 
-Recover the V2 server-scoped cache idea.
+Recover V2's server-scoped semantic ownership without duplicating immutable bytes per server.
 
-A stable server/content identity maps to a path-safe cache namespace.
+The Client Shell verifies a deployment-key fingerprint and authenticated `ApplicationRealmId` as
+defined by `CLIENT.md`. Realm metadata maps to a path-safe namespace; exact file bytes map only to
+their verified SHA-256.
 
 Conceptually:
 
 ```text
 Cache/
-    Global/
-    Servers/
-        <server identity hash>/
-            Packages/
-            Assets/
-            Schemas/
-            World/
+    Blobs/
+        sha256/
+            ab/
+                abcdef...
+    Realms/
+        <verified realm encoding>/
+            manifests/
+            activations/
+            metadata/
+    Staging/
     Extensions/      future executable extension install/cache
     Mods/            future user-managed local mods if kept distinct
 ```
@@ -508,22 +636,31 @@ Exact folders are not frozen.
 
 Rules:
 
-- same relative path from two different servers does not alias accidentally;
+- same relative path from two realms does not create semantic ownership aliasing;
 - cache paths cannot escape their root;
-- schema/package/assets are associated with server identity and exact revision/hash;
-- changing hostname while preserving a verified durable server identity should not necessarily create a new logical cache owner;
+- schema/package/activation ownership is associated with the verified realm and exact hashes;
+- changing hostname while preserving verified deployment/realm continuity does not create a new logical cache owner;
 - endpoint/IP is not durable content identity;
 - cache ownership is separate from Network `ConnectionId` and Game identity;
 - byte-source URL is not cache identity;
-- a mirror change must not invalidate otherwise-identical cached content.
+- a mirror change does not invalidate otherwise-identical cached content;
+- manifest-controlled relative names are never used as physical blob paths;
+- a verified blob may be physically reused across realms without transferring authorization,
+  logical IDs, activation, or trust between them;
+- a remote peer may test reuse only for hashes present in its authenticated content requirement; the
+  global blob store is not exposed as an arbitrary remote cache-membership oracle.
 
-Cross-server physical deduplication by content hash may be considered later, but server-scoped logical/cache ownership is the safe first implementation.
+Eviction initially uses reachability: pinned realm activations/manifests and live engine resource
+handles mark referenced blobs; unmarked blobs are eligible under quota/retention policy. User packs,
+built-ins, and future executable installations keep their separate ownership/lifecycle rules.
 
 ---
 
 # 9. Cache publication and atomicity
 
-Downloaded content is staged privately:
+Publication has three different generational lifetimes.
+
+## 9.1 Verified blob installation
 
 ```text
 authenticated requirement/manifest identity received
@@ -533,8 +670,7 @@ authenticated requirement/manifest identity received
     -> stream to staging/temp storage
     -> verify size/hash
     -> validate complete package/definition graph
-    -> prepare/import runtime assets
-    -> atomically publish active package/content layer
+    -> atomically install immutable SHA-256 blobs + realm manifest
 ```
 
 Failure at any point:
@@ -550,6 +686,38 @@ Do not replace a good cached file with a half-written candidate.
 Second joins should validate/use matching cached files rather than re-transfer them.
 
 The source that supplied the bytes has no special publication authority.
+
+## 9.2 Immutable resolved catalog generation
+
+After every required manifest/blob is installed and validated, resolve the exact activation plan into
+one immutable engine-neutral catalog generation. Publish the complete candidate catalog
+transactionally; no definition from a failed/partial candidate becomes active.
+
+```text
+ContentActivationId + PlanHash
+        + required lower/base catalog fingerprint
+        -> CatalogGeneration
+        -> deterministic ResolvedContentFingerprint
+```
+
+`ContentSetApplied` proves this catalog generation is active in Client Core. It does not claim that
+every possible texture/model/audio object has already been uploaded to native/GPU resources.
+
+## 9.3 Lazy engine resource realization
+
+Godot realizes a catalog entry only when presentation needs it, on the correct engine thread and
+under bounded work/memory limits:
+
+```text
+catalog entry + generation
+    -> realized resource already available? use it
+    -> otherwise queue bounded realization and use allowed fallback
+    -> publish generation-fenced native resource handle when ready
+```
+
+Old catalog/native handles remain valid only for their declared pinned lifetime. Catalog replacement
+does not retarget an existing RID/object to unrelated bytes. Native resource failure is visible and
+uses fallback only when the activation policy permits it; it never changes Game truth.
 
 ---
 
@@ -568,7 +736,7 @@ Important distinctions:
 
 - active required content is pinned for the relevant lifetime;
 - an in-use UI schema or loaded asset may not be evicted underneath an active handle;
-- inactive server cache is quota-managed;
+- blobs unreachable from pinned realm activations/live resource handles are quota-managed;
 - user-installed resource packs are not ordinary server-cache eviction candidates;
 - executable extensions, if implemented, are explicit installations and are not silently quota-evicted like transient server asset cache;
 - built-in content is installation content, not server cache.
@@ -584,13 +752,19 @@ Required passive content blocks the semantic/world entry point that needs it unt
 - package identity/manifest is valid;
 - required files are present and verified;
 - definitions resolve;
-- runtime preparation succeeds.
+- the exact immutable catalog generation publishes;
+- the client returns successful `ContentSetApplied` proof.
 
 Examples:
 
 - a new player/mobile presentation with no acceptable fallback;
 - structural world package required before a chunk can become resident;
 - required UI/catalog definition for admission/game flow.
+
+For the first A0 implementation, the complete required activation is frozen for one
+application/world session. The server cannot introduce new mandatory Add/Replace content and begin
+referencing it mid-session. A later required-content generation transition must be separately
+designed with old/new semantic ordering and failure policy.
 
 ## Optional
 
@@ -600,7 +774,7 @@ Optional content may arrive after entry only when a safe lower-layer fallback ex
 server offers high-resolution wolf model
 client initially uses lower-layer/fallback wolf presentation
 optional package arrives and verifies
-client hot-replaces presentation resources
+client publishes an optional catalog generation and lazily realizes replacement resources
 ```
 
 Optional content arriving late must not alter Game authority.
@@ -616,9 +790,11 @@ If a future server declares a **required executable client extension**, refusal 
 The authenticated Game/application session carries the authoritative requirement:
 
 ```text
-PackageId
-Version/Revision
-ManifestHash / PackageHash
+ApplicationRealmId
+ContentActivationId
+PlanHash
+RequiredBaseCatalogFingerprint
+ordered PackageId + ManifestHash entries
 Required or Optional
 Compatible pipeline/API constraints
 Ordered approved byte sources
@@ -637,6 +813,34 @@ The content host may serve:
 - individual immutable files keyed/path-addressed by the authorized manifest.
 
 The client verifies all resulting bytes before publication.
+
+## Application proof and reference ordering
+
+Content follows the same accepted rule as other application semantics:
+
+```text
+downloaded != installed != applied
+```
+
+For required content:
+
+```text
+server authorizes activation
+    -> client obtains/installs blobs
+    -> client publishes exact catalog generation
+    -> client sends ContentSetApplied(activation, plan hash, resolved fingerprint)
+    -> server validates the exact application-session lineage
+    -> server may publish semantics requiring that activation
+```
+
+Network packet acknowledgement, HTTP completion, cache presence, or hash verification alone never
+advances server knowledge. Duplicate/stale proof is idempotent/fenced, a new application session does
+not inherit old proof lineage, and rejection/capacity failure cannot partially advance an
+activation. Local Play uses the same semantic application rule without packetization.
+
+Structural World artifacts retain separate World generation/revision application transactions. A
+generic content proof may establish byte/catalog availability; it does not supersede World lineage
+or authorize an in-place structural swap.
 
 ---
 
@@ -780,6 +984,7 @@ Add an engine-neutral diagnostic/acceptance concept equivalent to a deterministi
 For each relevant logical id, include deterministic identity such as:
 
 ```text
+ApplicationRealmId / ContentActivationId / PlanHash / required base catalog fingerprint
 logical id
 resolved owning package/layer identity
 canonical definition hash
@@ -796,6 +1001,8 @@ Do **not** include:
 - chosen download URL/mirror;
 - connection id;
 - remote IP/port.
+- Godot RID/object/resource-realization state.
+- process-local catalog-generation handle/counter.
 
 Thus LocalSource, self-hosted HTTP, and external CDN must all produce the same fingerprint for identical content.
 
@@ -977,9 +1184,9 @@ Expected:
 - reconnect can re-request/resume according to implementation policy;
 - no poisoned final cache entry.
 
-## Server namespace isolation
+## Realm semantic-ownership isolation
 
-Two servers advertise same relative path with different hashes/content.
+Two verified application realms advertise the same relative path with different hashes/content.
 
 Expected no logical/cache ownership collision.
 
@@ -989,7 +1196,8 @@ Prove required blocks use/entry; optional safely hot-upgrades from fallback; nei
 
 ## Quota pressure
 
-Prove active/pinned content remains, old unpinned server cache evicts, deletion cannot escape cache root.
+Prove active/pinned content remains, unreachable unpinned blobs/realm metadata evict, and deletion
+cannot escape cache root.
 
 ## Source failover
 
@@ -1031,112 +1239,24 @@ Because they are content definitions, they also make excellent Replace targets.
 
 # 22. Future executable client-extension model
 
-There is currently no known client feature that requires executable extension distribution. Server Game code + server-composed UI + declarative control/camera profiles + passive content Add/Replace should cover the overwhelming majority of server customization.
+No known client feature currently earns executable extension distribution. It is **not authorized by
+A0**. If a future gameplay need cannot be expressed through server Game code, server-composed UI,
+declarative profiles, and passive Add/Replace content, create a separate `CLIENT_EXTENSIONS.md`
+campaign.
 
-Therefore executable extensions remain deferred.
+The only frozen boundary is:
 
-If a real need later earns them, use a **separate package type and loader foundation**, not the normal passive asset package path.
+- executable extensions use a separate package type, install root, loader capability, consent, and
+  lifecycle from passive content;
+- the stock client never compiles server-supplied source;
+- possible future payloads are precompiled constrained WASM or explicitly full-trust precompiled
+  .NET DLLs, subject to a later security/API/runtime decision;
+- a server may advertise an extension, but normal content never installs/executes it;
+- refusing a required extension refuses entry rather than silently degrading;
+- hashes/signatures establish byte identity/provenance, not safety;
+- Contentless Online may omit the extension-host capability entirely.
 
-## Precompiled runtimes only
-
-Initial candidates:
-
-```text
-WASM
-    preferred constrained/sandboxable extension runtime
-
-precompiled .NET DLL
-    advanced/full-trust extension runtime
-```
-
-Do not include a compiler in the stock client merely to compile server-supplied extension source.
-
-No arbitrary source compilation on join.
-
-## Extension manifest
-
-A future extension package should carry identity/diagnostics equivalent to:
-
-```text
-ExtensionId
-Name
-Description
-Version
-PackageHash
-FileHashes
-Runtime = WASM | DotNet
-EntryPoint
-ClientApiMin
-ClientApiMax
-Dependencies[]
-LoadBefore[] / LoadAfter[]       if actually needed
-DeclaredCapabilities[]          especially for WASM
-RequiredByServer / Optional
-PublisherIdentity / Signature   later
-Homepage/Source/Support         optional
-```
-
-## Deterministic loader/sorter
-
-The loader should:
-
-- validate unique ids/versions;
-- validate package/file hashes;
-- resolve dependencies deterministically;
-- reject missing/incompatible dependencies;
-- reject dependency/load-order cycles;
-- reject incompatible Client API ranges;
-- compute a deterministic active mod/extension-set fingerprint;
-- never execute an unapproved candidate merely to inspect it.
-
-A manifest/loader makes extensions more auditable/reproducible; it does **not** make arbitrary full-trust code safe.
-
-## Consent
-
-Server advertisement must clearly distinguish passive content from executable extensions.
-
-For a required executable extension, present a high-severity consent surface equivalent to:
-
-```text
-WARNING — Executable Client Extension
-
-This server requires client-side executable code:
-    Name / Version
-    Publisher/Server identity
-    Package hash
-    Runtime
-
-Executable extensions may access capabilities available to the extension runtime.
-Only continue if you trust this server/publisher.
-
-[Cancel]
-[Review Extension]
-[Install and Connect]
-```
-
-Optional extensions also provide `[Connect Without Extension]` where compatible.
-
-A signature may allow the user to trust future signed updates from a known publisher, but the UI/documentation must not imply that a signature proves safety.
-
-Hash change means different executable bytes and should trigger appropriate update/consent policy unless explicitly covered by trusted signed-publisher policy.
-
-## WASM versus DLL
-
-WASM can eventually expose a constrained capability API such as:
-
-- read already-disclosed client semantic state;
-- draw custom extension UI;
-- receive presentation events;
-- store bounded extension-local settings;
-- call explicitly granted client APIs.
-
-Default WASM capability design should avoid arbitrary filesystem/process/native-library/raw-socket access.
-
-A .NET DLL should be treated as full-trust third-party software unless UltraSim later isolates it in a separate process/sandbox with a real security boundary.
-
-## Required extensions and Contentless Online
-
-A server may eventually require an extension, but the stock Contentless Online client still remains useful with passive content only. Client-extension support itself should be an optional client capability/package so distributions can omit it entirely if desired.
+Do not design manifests, dependency sorting, capability APIs, or runtime selection in this plan.
 
 ---
 
@@ -1165,7 +1285,7 @@ Uses exact UI definition/catalog identity from the UI kernel.
 
 It may share:
 
-- server cache namespace;
+- verified application-realm cache ownership;
 - SHA validation;
 - cold/hot acquisition;
 - source/mirror infrastructure;
@@ -1175,25 +1295,30 @@ It does **not** become a generic texture/model logical id if UI semantics alread
 
 ## Structural world content
 
-Terrain/frozen statics/Multi/world-pack fragments are authoritative structural semantics, not ordinary mobile/material definitions.
+Terrain/frozen statics/Multi/WorldPack data are authoritative structural semantics, not ordinary
+mobile/material definitions.
 
-Use identity equivalent to:
+The first streaming canary uses one complete World-owned artifact and its existing identity:
 
 ```text
-server/world/content lineage
-SpatialChunkKey
-WorldChunkContentRevision
-WorldChunkContentHash
-section/content kind
+ApplicationRealmId + ContentActivationId
+complete WorldPackFingerprint + WorldContentFingerprint
+authorized manifest/blob hashes
 ```
 
-The bytes may use the same cache/source/download substrate, but structural publication/application remains World/Client Core semantics.
+Current per-chunk revision/hash values are not downloadable artifact identity. If World later
+defines a canonical overlay or independent chunk artifact, that stronger contract may additionally
+bind server/world/content lineage, `SpatialChunkKey`, `WorldChunkContentRevision`, section kind, and
+exact artifact hash. Asset Streaming must not define that contract on World's behalf.
+
+The bytes may use the same cache/source/download substrate, but structural publication/application
+remains World/Client Core semantics.
 
 ---
 
 # 24. Terrain/static hot patching
 
-Recover the useful V2 goal:
+Recover the useful V2 goal only through artifacts whose semantics World explicitly owns:
 
 - frozen/static chunk content can be cached client-side;
 - server can authorize a newer structural chunk revision;
@@ -1201,6 +1326,15 @@ Recover the useful V2 goal:
 - client stages/verifies replacement structural semantics privately;
 - renderer hot-swaps the affected structural layer;
 - dynamic actors remain realtime publication/replication.
+
+Current accepted public artifact support is a complete canonical `WorldPack`. Current
+`WorldChunkContentRevision`/`WorldChunkContentHash` values identify effective overlay chunks but do
+not constitute a canonical independently downloadable chunk artifact. Persistence save-set encoding
+is likewise not automatically a public streaming format.
+
+Therefore A0.7 first acquires and opens one complete exact WorldPack. A later World milestone may
+define a canonical complete `WorldOverlayArtifact` bound to its base fingerprint/revision. Only a
+still-later measured need may earn an `IndependentWorldChunkArtifact`.
 
 Do not send every static/terrain object as an ECS entity because remote content is patchable.
 
@@ -1244,7 +1378,7 @@ The declarative server control/camera profile discussed in `CLIENT.md` belongs t
 It should use:
 
 - exact profile identity/revision/hash;
-- server-scoped cache;
+- verified application-realm-scoped cache ownership;
 - validation;
 - user acceptance (`Use Server Defaults` / `Keep Mine` / `Customize`);
 - layered local settings resolution.
@@ -1261,21 +1395,31 @@ This campaign is adjacent to Client F0. Do not hide a large new subsystem inside
 
 Document/test:
 
-- package identity/version/pipeline compatibility;
-- stable logical id;
+- verified application-realm ownership shape;
+- canonical manifest/package identity and pipeline compatibility;
+- lowercase ASCII namespaced logical-id grammar;
 - file descriptor + size/SHA;
-- passive file/definition kind allowlist;
+- first passive allowlist: typed definitions, PNG/WebP, declarative trusted materials, complete
+  WorldPack artifacts;
+- explicit rejection of generic Godot/script/shader/code-capable resources;
+- exact `ContentActivationPlan` identity/order;
+- exact required lower/base catalog fingerprint so `Default` cannot depend on an unspecified client
+  installation/version;
 - Replace and Add/Append;
 - built-in/default fallback;
 - source/trust identity;
 - required/optional package requirement;
+- required activation/application-proof state values;
 - deterministic resolved content fingerprint;
+- global immutable SHA-256 blob + realm activation ownership model;
+- immutable catalog-generation identity separate from engine-resource realization;
 - bounded manifest/file/package limits;
 - authoritative package requirement separated from physical source list;
 - Local / ServerHostedStatic / ExternalHttps source vocabulary;
 - executable extensions explicitly outside normal content.
 
-Defer partial Patch and executable-extension runtime implementation.
+Defer dependencies/filters, partial Patch, downloaded GLB/audio, mutable World artifacts,
+independent chunk artifacts, and executable-extension runtime implementation.
 
 **Gate:** pure tests build/validate local packages and prove deterministic resolution with no Godot/Network.
 
@@ -1283,7 +1427,7 @@ Defer partial Patch and executable-extension runtime implementation.
 
 ## A0.1 — local resolver + Cabin Default/Replace/Add oracle
 
-Use local/preinstalled sources only.
+Use local/preinstalled sources only and publish immutable engine-neutral catalog generations.
 
 Prove:
 
@@ -1291,7 +1435,9 @@ Prove:
 2. Cabin Replace package.
 3. Cabin Add package.
 
-Record resolved fingerprints. Include X/Y human calibration presentation.
+Record resolved fingerprints. X/Y human calibration meshes remain bundled/build-time assets; the
+first Replace/Add cases may use typed definitions, texture/material/icon content without claiming a
+downloaded-model importer.
 
 **Gate:** Single Player runs all variants without Network and intended logical ownership changes are exact/diagnosable.
 
@@ -1301,14 +1447,14 @@ Record resolved fingerprints. Include X/Y human calibration presentation.
 
 Reintroduce/harden:
 
-- server/content identity namespace;
-- safe cache paths;
-- package index;
-- file staging;
+- global hash-addressed immutable blob store;
+- verified-realm manifests/activation metadata;
+- safe opaque cache paths;
+- atomic blob staging/install;
 - size/SHA verification;
-- atomic publish;
-- metadata/access tracking;
-- quota/pinning/eviction;
+- immutable catalog publication;
+- metadata/access tracking and catalog/native-resource pinning;
+- quota plus reachability-based eviction;
 - corrupt-cache detection;
 - passive allowlist/active-content rejection.
 
@@ -1326,17 +1472,20 @@ Flow:
 
 ```text
 connect/authenticate
--> server authorizes package id/version/hash + required policy + approved sources
+-> server authorizes exact activation/plan hash + required policy + approved sources
 -> compare cache
 -> fetch missing files over selected content source
 -> verify/install
--> publish layer
+-> publish exact catalog generation
+-> send ContentSetApplied for application-session lineage
+-> server advances content knowledge
 -> continue world entry
 ```
 
 Do **not** require large file transfer through realtime Network Bulk.
 
-**Gate:** Online Cabin cold-cache Replace result matches Single Player local Replace fingerprint exactly.
+**Gate:** Online Cabin cannot receive semantics requiring the activation before proof; cold-cache
+Replace result matches Single Player local Replace fingerprint exactly.
 
 ---
 
@@ -1372,7 +1521,7 @@ Add:
 - corrupt-cache repair;
 - interrupted-download transactional behavior;
 - optional package fallback/hot upgrade;
-- server namespace isolation;
+- verified realm semantic-ownership isolation;
 - repeated reconnect/restart;
 - quota pressure;
 - unavailable first mirror -> valid fallback;
@@ -1387,7 +1536,8 @@ Do not add arbitrary field-level Patch just to call this a delta.
 
 ## A0.6 — UI schema/content convergence
 
-Ensure server-composed UI cold/hot cache uses the same server/content cache ownership, validation, quota, and source substrate without losing typed UI identity.
+Ensure server-composed UI cold/hot cache uses the same verified application-realm/content ownership,
+validation, quota, and source substrate without losing typed UI identity.
 
 **Gate:** Inventory/standard UI definition can be preinstalled, cached, self-hosted, or externally obtained with exact equivalent result.
 
@@ -1395,17 +1545,23 @@ Ensure server-composed UI cold/hot cache uses the same server/content cache owne
 
 ## A0.7 — structural world streaming canary
 
-After presentation streaming is proven, add one bounded structural-content canary using current WorldPack/chunk revision semantics.
+After presentation streaming is proven, carry one existing complete World-owned artifact through the
+content byte/cache substrate.
 
-Possible first canary:
+First canary:
 
-- one Cabin/static chunk revision differs;
-- client obtains exact new structural bytes from approved content source;
-- prepares privately;
-- swaps one semantic/render structural layer;
+- Contentless client has no Cabin WorldPack;
+- server authorizes the exact complete Cabin WorldPack fingerprint/content binding;
+- client obtains and caches the complete canonical WorldPack bytes;
+- `WorldPack.TryOpen` and World content binding validate them;
+- client publishes the initial structural semantic/render world;
 - dynamic entity replication unaffected.
 
-**Gate:** structural revision/hash convergence and renderer replacement proven independently from dynamic public replication.
+**Gate:** complete WorldPack fingerprint/content binding and renderer result match the local oracle,
+independently from dynamic public replication.
+
+Later World-owned checkpoints—not A0.7—may define a canonical complete overlay artifact and, only if
+earned afterward, an independently downloadable chunk artifact.
 
 ---
 
@@ -1446,7 +1602,8 @@ Retain machine-readable evidence including:
 ```text
 scenario
 client build profile
-server/content identity
+verified deployment fingerprint / application realm
+content activation id / plan hash
 package ids/revisions/hashes
 package requirement source (authenticated server)
 approved content sources
@@ -1462,6 +1619,8 @@ files reused
 resolved logical ids
 resolved owning layers/packages
 resolved content fingerprint
+catalog generation
+ContentSetApplied proof/result
 world/game semantic hash where comparable
 client semantic world hash where comparable
 presentation definition ids
@@ -1489,6 +1648,7 @@ Do not silently expand A0 into:
 - P2P content distribution;
 - building a production CDN service inside UltraSim;
 - arbitrary field-level `patch` merge semantics;
+- package dependency/version-range solving or applicability filters;
 - universal one-priority-stack policy for every future content type;
 - arbitrary server-supplied shader code;
 - rebuilding Terrain/World identity around asset ids;
@@ -1498,7 +1658,9 @@ Do not silently expand A0 into:
 
 Simple self-hosted static HTTP and external HTTPS/CDN/object-storage byte-source support **are** in scope. UltraSim does not need to become a CDN; it only needs to advertise, validate, and consume approved immutable content sources.
 
-Resource texture atlases, hue channels, named material slots, richer package dependencies, and executable extension runtimes remain valid future ideas and should be recovered only when real workloads earn them.
+Resource texture atlases, hue channels, named material slots, package dependency tooling, downloaded
+model/audio importers, and executable extension runtimes remain valid future ideas and should be
+recovered only when real workloads earn them.
 
 ---
 
@@ -1509,18 +1671,20 @@ A0 is complete when:
 1. the same canonical package can be read locally, served by server-hosted static HTTP, or downloaded from external HTTPS without changing its semantic identity;
 2. the authenticated Game server authorizes exact package identity/hash and required/optional policy;
 3. content hosts are byte sources only;
-4. Default / Replace / Add resolve deterministically;
+4. one authenticated activation plan orders Default / Replace / Add deterministically;
 5. Single Player Cabin provides deterministic local oracle fingerprints;
 6. Online Cabin converges to those fingerprints after acquisition;
-7. warm cache avoids redundant transfer;
-8. one-file changes transfer only changed/missing bytes;
-9. corrupted/partial downloads never publish;
-10. mirror/source failover preserves final semantics;
-11. cache ownership/eviction remains bounded and path-safe;
-12. passive content validation is allowlist-based rather than pretending a filename blacklist proves safety;
-13. UI schemas can reuse the cache/source substrate without losing typed UI identity;
-14. one structural world-content canary preserves World/chunk identity;
-15. Contentless Online can enter an externally hosted world with no bundled playable world/local authority implementation;
-16. executable client extensions remain outside the normal passive content pipeline and unimplemented unless separately authorized.
+7. the server does not publish required content references before exact client application proof;
+8. warm cache avoids redundant transfer;
+9. one-file changes transfer only changed/missing bytes;
+10. corrupted/partial downloads never publish;
+11. mirror/source failover preserves final semantics;
+12. CAS blobs and realm activation ownership remain bounded, path-safe, and distinct;
+13. catalog publication and lazy Godot realization remain generation-fenced;
+14. passive content validation is allowlist-based rather than pretending a filename blacklist proves safety;
+15. UI schemas can reuse the cache/source substrate without losing typed UI identity;
+16. one complete WorldPack canary preserves World-owned artifact/content binding identity;
+17. Contentless Online can enter an externally hosted world with no bundled playable world/local authority implementation;
+18. executable client extensions remain outside the normal passive content pipeline and unimplemented unless separately authorized.
 
 At that point, asset streaming is a real content-distribution layer rather than a gameplay transport feature, and server operators can choose the hosting model that matches their scale without changing the game's content semantics.

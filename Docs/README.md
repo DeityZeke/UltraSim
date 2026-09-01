@@ -53,14 +53,14 @@ acceptance narratives remain available through git history.
   OfflineDirect woods/cabin application, controls, and save location.
 - [Client shell/composition plan](Plans/CLIENT.md) — the real-client reconstruction
   roadmap: Single Player/Online/Complete/Contentless compositions, local-vs-remote
-  semantic parity, human-scale presentation calibration, nameplates/chat, layered
-  settings, server-recommended control/camera profiles, server-composed UI, and
-  explicit executable-extension trust boundaries.
+  semantic parity, Network-free local authority/session extraction, Direct Connect
+  identity onboarding, human-scale presentation calibration, nameplates/chat,
+  layered settings, server-recommended profiles, and server-composed UI.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
-  content identity, Default/Replace/Add layering, passive-content validation,
-  server/content cache ownership, source-independent local/self-hosted/external
-  byte delivery, Cabin local-vs-remote parity, and the deferred precompiled
-  WASM/.NET executable-extension model.
+  content identity, activation/application proof, deterministic Default/Replace/Add,
+  passive-content validation, content-addressed blobs with realm-scoped ownership,
+  source-independent byte delivery, immutable catalog generations, Cabin parity,
+  and complete-WorldPack streaming scope.
 
 ## ECS
 
@@ -146,11 +146,12 @@ consumer/deployment need earns them.
   P0.1a occupancy-aware relocation, P0.1b swept blocking, and stopped P0.1c+
   behavior/provider work.
 - [Client F0](Plans/CLIENT.md) records the frozen real-client shell/composition,
-  settings/control-profile, world-presentation, server-composed UI, and parity
-  roadmap leading into repository extraction readiness.
+  authority-thread/local-session extraction, Direct Connect trust, settings/control-
+  profile, world-presentation, server-composed UI, and parity roadmap.
 - [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
-  cache, hosting/source, Default/Replace/Add, Cabin parity, Contentless Online, and
-  explicitly deferred executable-extension contracts.
+  activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
+  lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred
+  executable-extension boundary.
 
 ## Source-of-truth hierarchy
 
