@@ -27,8 +27,9 @@ acceptance narratives remain available through git history.
   contracts plus explicitly deferred placement, capacity, nesting, and viewer work.
 - [Chat](../Game/Chat/README.md) — packet-free authoritative spatial speech,
   command interception, exact hearing, and retained occurrence semantics.
-- [Chat plan/status](Plans/CHAT.md) — accepted C0.0 contracts and the deliberately
-  deferred remote, routed-channel, moderation, and extensibility checkpoints.
+- [Chat plan/status](Plans/CHAT.md) — accepted C0.0-C0.1a spatial/remote occurrence
+  semantics plus deliberately deferred routed-channel, moderation, history, and
+  richer extensibility work.
 - [UltraSim Simple Physics](../Game/Physics/README.md) — the concrete generation-owned
   P0.0-P0.1b resolver, first-class occupancy, and bounded swept blocker test.
 - [Physics plan/status](Plans/PHYSICS.md) — accepted P0.0 ownership extraction and
@@ -61,6 +62,11 @@ acceptance narratives remain available through git history.
   passive-content validation, content-addressed blobs with realm-scoped ownership,
   source-independent byte delivery, immutable catalog generations, Cabin parity,
   and complete-WorldPack streaming scope.
+- [Concept Demo / live-test plan](Plans/CONCEPT_DEMO.md) — the cross-cutting
+  super-pre-alpha target: floating central terrain, Sky Island/cave/Far Island,
+  signs and fallback lab, guest entry, render-distance Settings, minimal Inventory
+  and animations, Local/Global/system Chat, read-only server monitor, opt-in client
+  diagnostics, server test metrics/markers, and staged multiplayer stress evidence.
 
 ## ECS
 
@@ -79,6 +85,10 @@ acceptance narratives remain available through git history.
   preserved 3D region/property seams, dynamic public chunk publication, bounded
   dirty history, client streaming, Godot batching, and the playable woods/cabin
   vertical.
+- [Concept Demo / live-test plan](Plans/CONCEPT_DEMO.md) — concrete future consumer
+  for intentional surface absence, upper/lower terrain surfaces, cave and sky
+  topology, far-distance AOI/residency transitions, and human-facing streaming
+  evidence without redefining the owning Terrain/Physics contracts.
 
 ## Network
 
@@ -140,8 +150,9 @@ consumer/deployment need earns them.
   explicitly stopped/future work; it is not a pre-selection candidate plan.
 - [Hosted Network H0](Plans/HOSTED_NETWORK.md) records the accepted H0.0-H0.5 local/
   dedicated lifecycle plus explicit deployment gates still unclaimed.
-- [Chat C0](Plans/CHAT.md) records accepted packet-free C0.0 semantics and the
-  stopped C0.1+ remote/presentation/channel work.
+- [Chat C0](Plans/CHAT.md) records accepted C0.0-C0.1a spatial/remote occurrence
+  semantics and the stopped routed-channel/social/moderation work until a real
+  consumer earns it.
 - [Physics P0](Plans/PHYSICS.md) records the P0.0 Simple Physics extraction,
   P0.1a occupancy-aware relocation, P0.1b swept blocking, and stopped P0.1c+
   behavior/provider work.
@@ -152,6 +163,9 @@ consumer/deployment need earns them.
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred
   executable-extension boundary.
+- [Concept Demo](Plans/CONCEPT_DEMO.md) records the accepted cross-cutting Round 1
+  human demo/stress target and explicitly defers Combat damage/HP/death to Round 2;
+  subsystem APIs remain owned by their respective plans.
 
 ## Source-of-truth hierarchy
 
