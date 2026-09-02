@@ -50,6 +50,6 @@ connection, or reference `Client.Network`, Game Protocol, Remote Replication, or
 sessions around the same authority; the host player stays on this local path.
 
 `LocalPlayableSession` is currently the concrete Cabin/reference composition,
-not the final F0.2 content package or a universal local-server API. F0.1/F0.2
-will place this accepted boundary behind the persistent shell and built-in Test
-World composition without changing its ownership direction.
+not the final F0.2 content package or a universal local-server API. F0.1 supplies
+the persistent shell; F0.2 will bind this accepted boundary into its Single Player
+session lifecycle and built-in Test World composition without changing ownership.

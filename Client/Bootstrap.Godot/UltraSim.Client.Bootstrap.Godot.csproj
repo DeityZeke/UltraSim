@@ -12,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../_Godot/UltraSim.Client.Godot.csproj" />
   </ItemGroup>
 </Project>

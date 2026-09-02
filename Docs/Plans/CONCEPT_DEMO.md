@@ -5,9 +5,10 @@ subsystem contracts in `CLIENT.md`, `ASSET_STREAMING.md`, `TERRAIN.md`, `PHYSICS
 Network, Inventory, or UI. It defines the first coherent world and human test experience that earns
 and exercises those capabilities together.
 
-**Current baseline:** Client F0.0a and the permanent Network-free F0.0b local-session boundary are
-closed. `Playable.Godot` is the reference consumer of that boundary; F0.1/F0.2 must compose it into
-the persistent shell/Test World rather than expanding the reference executable into this demo.
+**Current baseline:** Client F0.0a, the permanent Network-free F0.0b local-session boundary, and
+the F0.1 persistent shell/settings/focus foundation are closed. `Playable.Godot` is the reference
+consumer of the local-session boundary; F0.2 must bind that capability into the persistent
+shell/Test World rather than expanding the reference executable into this demo.
 
 The demo has two purposes:
 
@@ -1125,7 +1126,7 @@ Preferred dependency order remains approximately:
 ```text
 F0.0a  executable composition foundation                 CLOSED
 F0.0b  permanent Network-free local-session extraction   CLOSED
-F0.1   persistent shell/settings/focus
+F0.1   persistent shell/settings/focus                     CLOSED
 
 A0.0/A0.1 local content/catalog contracts
 F0.2   real Single Player Cabin + human calibration

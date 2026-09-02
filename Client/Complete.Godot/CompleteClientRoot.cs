@@ -4,7 +4,7 @@ using UltraSim.Client.Network;
 
 namespace UltraSim.Client.Complete.Godot;
 
-public partial class CompleteClientRoot : ClientCompositionBootstrap
+public partial class CompleteClientRoot : ClientRoot
 {
     protected override ClientCompositionManifest Composition
     {

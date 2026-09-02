@@ -3,7 +3,7 @@ using UltraSim.Client.Network;
 
 namespace UltraSim.Client.Online.Godot;
 
-public partial class OnlineClientRoot : ClientCompositionBootstrap
+public partial class OnlineClientRoot : ClientRoot
 {
     protected override ClientCompositionManifest Composition
     {

@@ -43,8 +43,8 @@ acceptance narratives remain available through git history.
 - [Game world](../Game/World/README.md) — fixed world-position profile and accepted
   T0 authority/publication/interest/world-layer contracts.
 - [Client Core](../Client/Core/README.md) — retained engine-neutral UI and
-  production semantic-world projections plus transactional presentation-window
-  planning.
+  semantic-world projections, transactional presentation-window planning, and
+  F0.1 shell/settings/focus policy.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
   Network-free authority-owner-thread composition with bounded command,
   semantic-debt, and application-proof handoff.
@@ -53,6 +53,8 @@ acceptance narratives remain available through git history.
   Events, and owner-private UI/Inventory.
 - [Godot client adapter](../Client/_Godot/README.md) — native UI/world presentation,
   bounded render residency, grouping, and floating origin.
+- [Persistent Godot client shell](../Client/Bootstrap.Godot/README.md) — shared
+  F0.1 application roots, local settings persistence, and fixed-composition menus.
 - [Launchable T0.10 client](../Client/Playable.Godot/README.md) — real
   OfflineDirect woods/cabin reference application over the F0.0b local bridge,
   controls, and save location.

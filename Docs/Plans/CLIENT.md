@@ -1,8 +1,8 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
 **Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`), F0.0a executable
-composition/shipped-dependency separation, and F0.0b permanent Network-free local-session
-extraction accepted.
+composition/shipped-dependency separation, F0.0b permanent Network-free local-session extraction,
+and F0.1 persistent shell/settings/focus accepted.
 Direct-connect trust, content activation, and later content acquisition remain separately gated
 before their consuming checkpoints.
 
@@ -1474,6 +1474,20 @@ accepted remote path; ordinary local play ships no Network assembly.
 
 ## F0.1 — Persistent shell + local settings/control foundation
 
+**Status: CLOSED.** `Client/Core` owns the engine-neutral shell lifecycle, focus policy, finite
+physical-binding/action vocabulary, built-in defaults, scoped user-override document, declarative
+control/camera recommendation model, and deterministic layered resolver. Recommendations are
+transient and opt-in; they cannot replace reserved client controls or carry local audio/accessibility
+settings. The current scope key is intentionally opaque fixture/storage vocabulary rather than a
+hostname, endpoint, or claim of verified `ApplicationRealmId`; F0.3a establishes that identity.
+
+`Client/Bootstrap.Godot` now supplies one persistent `ClientRoot` with Controller,
+ContentCatalogs, World, and World/HUD/Menu/Debug layer roots. It owns readable versioned
+`user://settings/client.json` persistence with fail-closed invalid-file fallback, main/settings,
+loading/error/in-session-options surfaces, and reserved-control dispatch. All three fixed
+compositions launch this same shell while their capability entries remain tied to physically
+installed dependencies.
+
 Implement:
 
 - persistent ClientRoot;
@@ -1499,10 +1513,9 @@ Do not need a live server to use/test these.
 
 Implement:
 
-- Local Play capability;
-- local authoritative Game/server composition;
+- consume the existing `Client.Local` capability;
+- bind `LocalPlayableSession` lifecycle into the persistent shell and Cabin presentation;
 - optional Cabin Test World package;
-- local semantic bridge;
 - normal Game input/session semantics;
 - real X/Y human presentation path;
 - camera/nameplate/effects calibration;
@@ -1989,7 +2002,7 @@ F0.0a executable composition roots / shipped-dependency proof
         |
 F0.0b permanent OfflineDirect local-session extraction     CLOSED
         |
-F0.1  persistent shell + readable layered settings/control foundation
+F0.1  persistent shell + readable layered settings/control foundation CLOSED
         |
 A0.0-A0.1 minimal/local content contracts and oracle (companion plan)
         |

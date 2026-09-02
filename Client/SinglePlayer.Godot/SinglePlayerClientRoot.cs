@@ -3,7 +3,7 @@ using UltraSim.Client.Local;
 
 namespace UltraSim.Client.SinglePlayer.Godot;
 
-public partial class SinglePlayerClientRoot : ClientCompositionBootstrap
+public partial class SinglePlayerClientRoot : ClientRoot
 {
     protected override ClientCompositionManifest Composition
     {

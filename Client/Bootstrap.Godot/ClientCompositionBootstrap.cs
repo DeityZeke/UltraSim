@@ -1,9 +1,10 @@
 using System.Collections.ObjectModel;
 using Godot;
+using UltraSim.Client.Core;
 
 namespace UltraSim.Client.Bootstrap.Godot;
 
-/// <summary>Names one physically composed client capability exposed by the bootstrap menu.</summary>
+/// <summary>Names one physically composed client capability exposed by the application shell.</summary>
 public enum ClientCapability : byte
 {
     SinglePlayer = 1,
@@ -25,57 +26,522 @@ public readonly record struct ClientCompositionManifest(
 
     public static ClientCompositionManifest Complete { get; } = new(
         "Complete",
-        Frozen(ClientCapability.SinglePlayer, ClientCapability.Multiplayer, ClientCapability.Settings, ClientCapability.Exit));
+        Frozen(ClientCapability.SinglePlayer, ClientCapability.Multiplayer,
+            ClientCapability.Settings, ClientCapability.Exit));
 
     private static ReadOnlyCollection<ClientCapability> Frozen(params ClientCapability[] capabilities) =>
         Array.AsReadOnly(capabilities);
 }
 
-/// <summary>Shared minimal F0.0a bootstrap; concrete roots provide a fixed compile-time manifest.</summary>
-public abstract partial class ClientCompositionBootstrap : Control
+public readonly record struct GodotClientRootSnapshot(
+    string Edition,
+    ClientShellSnapshot Shell,
+    ClientSettingsLoadStatus SettingsLoadStatus,
+    int CapabilityCount,
+    bool ControllerRootPresent,
+    bool ContentCatalogRootPresent,
+    bool WorldRootPresent,
+    bool WorldUiLayerPresent,
+    bool HudLayerPresent,
+    bool MenuLayerPresent,
+    bool DebugLayerPresent);
+
+/// <summary>
+/// Persistent F0.1 Godot client root. Concrete executables supply only their
+/// compile-time capability manifest and later capability activation hooks.
+/// </summary>
+public abstract partial class ClientRoot : Control
 {
+    private readonly ClientShellCoordinator _shell = new();
+    private ClientCompositionManifest _composition;
+    private ClientSettingsDocument _settings = ClientSettingsDocument.Empty;
+    private ResolvedClientSettings _resolved = ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
+    private ClientSettingsFileStore? _settingsStore;
+    private ClientSettingsLoadStatus _settingsLoadStatus;
+    private Node? _controllerRoot;
+    private Node? _contentCatalogRoot;
+    private Node? _worldRoot;
+    private CanvasLayer? _worldUiLayer;
+    private CanvasLayer? _hudLayer;
+    private CanvasLayer? _menuLayer;
+    private CanvasLayer? _debugLayer;
+    private Control? _menuHost;
+    private Label? _hudStatus;
+    private Label? _debugStatus;
+
     protected abstract ClientCompositionManifest Composition { get; }
 
     public override void _Ready()
     {
-        ClientCompositionManifest composition = Composition;
-        Validate(composition);
-        BuildMenu(composition);
-        string capabilities = string.Join(',', composition.Capabilities);
-        GD.Print($"ULTRASIM CLIENT READY edition={composition.Edition} capabilities={capabilities}");
-        if (OS.GetCmdlineUserArgs().Contains("--composition-smoke", StringComparer.Ordinal))
+        try
         {
-            GD.Print($"F0.0a COMPOSITION SMOKE PASS edition={composition.Edition} capabilities={capabilities}");
-            GetTree().Quit(0);
+            _composition = Composition;
+            Validate(_composition);
+            LoadSettings();
+            BuildPersistentRoots();
+            RenderCurrentSurface();
+            string capabilities = string.Join(',', _composition.Capabilities);
+            GD.Print(
+                $"ULTRASIM CLIENT READY edition={_composition.Edition} capabilities={capabilities} " +
+                $"screen={_shell.Snapshot().Screen} settings={_settingsLoadStatus}");
+            if (OS.GetCmdlineUserArgs().Contains("--composition-smoke", StringComparer.Ordinal))
+            {
+                ValidateShellSmoke();
+                GD.Print(
+                    $"F0.1 CLIENT SHELL SMOKE PASS edition={_composition.Edition} " +
+                    $"capabilities={capabilities} layers=World,HUD,Menus,Debug");
+                GetTree().Quit(0);
+            }
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"Client shell initialization failed: {exception}");
+            GetTree().Quit(1);
         }
     }
 
-    private void BuildMenu(in ClientCompositionManifest composition)
+    public override void _UnhandledInput(InputEvent inputEvent)
+    {
+        if (inputEvent is not InputEventKey key || !key.Pressed || key.Echo) return;
+        if (Matches(key, ClientSemanticAction.ExitApplication))
+        {
+            GetTree().Quit(0);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        ClientShellSnapshot snapshot = _shell.Snapshot(
+            textEntryFocused: GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit);
+        if (Matches(key, ClientSemanticAction.OpenSettings))
+        {
+            if (snapshot.Screen == ClientShellScreen.Settings) _shell.CloseSettings();
+            else if (snapshot.Screen is not (ClientShellScreen.Loading or ClientShellScreen.Error))
+                _shell.OpenSettings();
+            RenderCurrentSurface();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (Matches(key, ClientSemanticAction.Disconnect) && snapshot.SessionActive)
+        {
+            RetireCurrentSession();
+            _shell.ReturnToMainMenu("Session disconnected.");
+            RenderCurrentSurface();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (!Matches(key, ClientSemanticAction.OpenClientMenu)) return;
+        switch (snapshot.Screen)
+        {
+            case ClientShellScreen.InSession:
+                _shell.OpenInSessionOptions();
+                break;
+            case ClientShellScreen.InSessionOptions:
+                _shell.ResumeSession();
+                break;
+            case ClientShellScreen.Settings:
+                _shell.CloseSettings();
+                break;
+            case ClientShellScreen.Loading:
+            case ClientShellScreen.Error:
+                RetireCurrentSession();
+                _shell.ReturnToMainMenu();
+                break;
+        }
+        RenderCurrentSurface();
+        GetViewport().SetInputAsHandled();
+    }
+
+    public GodotClientRootSnapshot GetSnapshot()
+    {
+        ClientShellSnapshot shell = _shell.Snapshot(
+            textEntryFocused: GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit);
+        return new GodotClientRootSnapshot(
+            _composition.Edition,
+            shell,
+            _settingsLoadStatus,
+            _composition.Capabilities?.Count ?? 0,
+            _controllerRoot is not null,
+            _contentCatalogRoot is not null,
+            _worldRoot is not null,
+            _worldUiLayer is not null,
+            _hudLayer is not null,
+            _menuLayer is not null,
+            _debugLayer is not null);
+    }
+
+    /// <summary>F0.2/F0.3 composition roots replace this with real session activation.</summary>
+    protected virtual void BeginCapability(ClientCapability capability)
+    {
+        _shell.BeginLoading($"{Label(capability)} capability is ready for its consuming checkpoint.");
+        RenderCurrentSurface();
+    }
+
+    /// <summary>Later composition roots retire their concrete session-owned presentation here.</summary>
+    protected virtual void RetireCurrentSession() { }
+
+    private void LoadSettings()
+    {
+        string path = ProjectSettings.GlobalizePath("user://settings/client.json");
+        _settingsStore = new ClientSettingsFileStore(path);
+        ClientSettingsLoadResult loaded = _settingsStore.Load();
+        _settingsLoadStatus = loaded.Status;
+        _settings = loaded.Document;
+        _resolved = ClientSettingsResolver.Resolve(_settings);
+    }
+
+    private void BuildPersistentRoots()
     {
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        var background = new ColorRect { Color = new Color(0.035f, 0.05f, 0.045f) };
-        background.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(background);
+        _controllerRoot = NamedNode("Controller");
+        _contentCatalogRoot = NamedNode("ContentCatalogs");
+        _worldRoot = NamedNode("World");
+        AddChild(_controllerRoot);
+        AddChild(_contentCatalogRoot);
+        AddChild(_worldRoot);
 
-        var center = new CenterContainer();
-        center.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-        AddChild(center);
-        var column = new VBoxContainer { CustomMinimumSize = new Vector2(340, 0) };
-        column.AddThemeConstantOverride("separation", 12);
-        center.AddChild(column);
+        Node map = NamedNode("Map");
+        map.AddChild(NamedNode("Terrain"));
+        map.AddChild(NamedNode("FrozenStatics"));
+        map.AddChild(NamedNode("Environment"));
+        _worldRoot.AddChild(map);
+        _worldRoot.AddChild(NamedNode("DynamicEntities"));
+        _worldRoot.AddChild(NamedNode("Effects"));
+        _worldRoot.AddChild(NamedNode("CameraRig"));
+
+        Node layers = NamedNode("UILayers");
+        AddChild(layers);
+        _worldUiLayer = Layer("World", 10);
+        _hudLayer = Layer("HUD", 20);
+        _menuLayer = Layer("Menus", 30);
+        _debugLayer = Layer("Debug", 40);
+        layers.AddChild(_worldUiLayer);
+        layers.AddChild(_hudLayer);
+        layers.AddChild(_menuLayer);
+        layers.AddChild(_debugLayer);
+
+        _menuHost = FullRectControl("MenuSurface");
+        _menuLayer.AddChild(_menuHost);
+        _hudStatus = new Label { Name = "SessionStatus", Visible = false };
+        _hudStatus.SetAnchorsPreset(LayoutPreset.TopWide);
+        _hudLayer.AddChild(_hudStatus);
+        _debugStatus = new Label
+        {
+            Name = "Diagnostics",
+            Visible = false,
+            Text = "Client diagnostics",
+            Position = new Vector2(12, 44),
+        };
+        _debugLayer.AddChild(_debugStatus);
+    }
+
+    private void RenderCurrentSurface()
+    {
+        if (_menuHost is null) return;
+        ClearChildren(_menuHost);
+        ClientShellSnapshot snapshot = _shell.Snapshot();
+        _menuHost.Visible = snapshot.Screen != ClientShellScreen.InSession;
+        if (_hudStatus is not null)
+        {
+            _hudStatus.Visible = snapshot.SessionActive;
+            _hudStatus.Text = snapshot.Status ?? "Session active";
+        }
+        if (!_menuHost.Visible) return;
+
+        switch (snapshot.Screen)
+        {
+            case ClientShellScreen.MainMenu:
+                BuildMainMenu(snapshot);
+                break;
+            case ClientShellScreen.Settings:
+                BuildSettingsMenu();
+                break;
+            case ClientShellScreen.Loading:
+                BuildMessageSurface("Loading", snapshot.Status ?? "Preparing client session…", "Back", () =>
+                {
+                    RetireCurrentSession();
+                    _shell.ReturnToMainMenu();
+                    RenderCurrentSurface();
+                });
+                break;
+            case ClientShellScreen.InSessionOptions:
+                BuildInSessionOptions();
+                break;
+            case ClientShellScreen.Error:
+                BuildMessageSurface("Unable to continue", snapshot.Error ?? "Unknown client error.", "Main Menu", () =>
+                {
+                    RetireCurrentSession();
+                    _shell.ReturnToMainMenu();
+                    RenderCurrentSurface();
+                });
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported client shell screen {snapshot.Screen}.");
+        }
+    }
+
+    private void BuildMainMenu(in ClientShellSnapshot snapshot)
+    {
+        VBoxContainer column = CreateCenteredColumn();
+        column.AddChild(Title($"UltraSim — {_composition.Edition}"));
+        if (!string.IsNullOrWhiteSpace(snapshot.Status))
+            column.AddChild(CenteredLabel(snapshot.Status));
+        if (_settingsLoadStatus == ClientSettingsLoadStatus.InvalidFallback)
+            column.AddChild(CenteredLabel("Invalid settings were ignored; built-in defaults are active."));
+        foreach (ClientCapability capability in _composition.Capabilities)
+        {
+            Button button = MenuButton(Label(capability));
+            switch (capability)
+            {
+                case ClientCapability.Settings:
+                    button.Pressed += () => { _shell.OpenSettings(); RenderCurrentSurface(); };
+                    break;
+                case ClientCapability.Exit:
+                    button.Pressed += () => GetTree().Quit(0);
+                    break;
+                default:
+                    ClientCapability captured = capability;
+                    button.Pressed += () => BeginCapability(captured);
+                    break;
+            }
+            column.AddChild(button);
+        }
+        FocusFirstButton(column);
+    }
+
+    private void BuildSettingsMenu()
+    {
+        VBoxContainer column = CreateCenteredColumn(420);
+        column.AddChild(Title("Client Settings"));
+
+        HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
+        HSlider volume = Slider(0, 1, 0.05, _resolved.MasterVolume);
+        HSlider sensitivity = Slider(0.1, 5, 0.1, _resolved.PointerSensitivity);
+        CheckBox invert = new() { Text = "Invert camera Y", ButtonPressed = _resolved.InvertY };
+        OptionButton grammar = EnumOptions(_resolved.ControlGrammar);
+        OptionButton camera = EnumOptions(_resolved.CameraProfile);
+        HSlider distance = Slider(2, 80, 1, _resolved.CameraDistance);
+        HSlider fov = Slider(40, 120, 1, _resolved.CameraFovDegrees);
+        AddSetting(column, "UI scale", uiScale);
+        AddSetting(column, "Master volume", volume);
+        AddSetting(column, "Pointer sensitivity", sensitivity);
+        column.AddChild(invert);
+        AddSetting(column, "Control grammar", grammar);
+        AddSetting(column, "Camera profile", camera);
+        AddSetting(column, "Camera distance", distance);
+        AddSetting(column, "Camera FOV", fov);
         column.AddChild(new Label
         {
-            Text = $"UltraSim — {composition.Edition}",
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Text = "Bindings are readable/persisted in settings/client.json. " +
+                "The interactive binding editor follows with a consuming gameplay shell.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
-        foreach (ClientCapability capability in composition.Capabilities)
+
+        Button save = MenuButton("Save");
+        save.Pressed += () =>
         {
-            var button = new Button { Text = Label(capability), CustomMinimumSize = new Vector2(340, 44) };
-            if (capability == ClientCapability.Exit)
-                button.Pressed += () => GetTree().Quit(0);
-            else
-                button.Pressed += () => GD.Print($"F0.0a placeholder selected: {capability}");
-            column.AddChild(button);
+            try
+            {
+                _settings = _settings.WithGlobal(new ClientSettingsLayer(
+                    (float)uiScale.Value,
+                    (float)volume.Value,
+                    (float)sensitivity.Value,
+                    invert.ButtonPressed,
+                    (ClientControlGrammar)grammar.GetSelectedId(),
+                    (ClientCameraProfile)camera.GetSelectedId(),
+                    (float)distance.Value,
+                    (float)fov.Value,
+                    _settings.Global.Bindings));
+                _settingsStore!.Save(_settings);
+                _settingsLoadStatus = ClientSettingsLoadStatus.Loaded;
+                _resolved = ClientSettingsResolver.Resolve(_settings);
+                _shell.CloseSettings();
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                _shell.Fail($"Settings could not be saved: {exception.Message}");
+            }
+            RenderCurrentSurface();
+        };
+        column.AddChild(save);
+        Button reset = MenuButton("Reset Global Defaults");
+        reset.Pressed += () =>
+        {
+            _settings = new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes);
+            _resolved = ClientSettingsResolver.Resolve(_settings);
+            RenderCurrentSurface();
+        };
+        column.AddChild(reset);
+        Button back = MenuButton("Back");
+        back.Pressed += () => { _shell.CloseSettings(); RenderCurrentSurface(); };
+        column.AddChild(back);
+        FocusFirstButton(column);
+    }
+
+    private void BuildInSessionOptions()
+    {
+        VBoxContainer column = CreateCenteredColumn();
+        column.AddChild(Title("Session Options"));
+        Button resume = MenuButton("Resume");
+        resume.Pressed += () => { _shell.ResumeSession(); RenderCurrentSurface(); };
+        column.AddChild(resume);
+        Button settings = MenuButton("Settings");
+        settings.Pressed += () => { _shell.OpenSettings(); RenderCurrentSurface(); };
+        column.AddChild(settings);
+        Button disconnect = MenuButton("Disconnect / Main Menu");
+        disconnect.Pressed += () =>
+        {
+            RetireCurrentSession();
+            _shell.ReturnToMainMenu("Session disconnected.");
+            RenderCurrentSurface();
+        };
+        column.AddChild(disconnect);
+        FocusFirstButton(column);
+    }
+
+    private void BuildMessageSurface(
+        string title,
+        string message,
+        string action,
+        Action pressed)
+    {
+        VBoxContainer column = CreateCenteredColumn();
+        column.AddChild(Title(title));
+        column.AddChild(CenteredLabel(message));
+        Button button = MenuButton(action);
+        button.Pressed += pressed;
+        column.AddChild(button);
+        button.GrabFocus();
+    }
+
+    private void ValidateShellSmoke()
+    {
+        GodotClientRootSnapshot snapshot = GetSnapshot();
+        if (!snapshot.ControllerRootPresent || !snapshot.ContentCatalogRootPresent ||
+            !snapshot.WorldRootPresent || !snapshot.WorldUiLayerPresent || !snapshot.HudLayerPresent ||
+            !snapshot.MenuLayerPresent || !snapshot.DebugLayerPresent ||
+            snapshot.Shell.Screen != ClientShellScreen.MainMenu ||
+            snapshot.Shell.Focus.Owner != ClientInputFocusOwner.ModalMenu ||
+            snapshot.Shell.Focus.GameplayInputAllowed ||
+            snapshot.CapabilityCount != _composition.Capabilities.Count)
+            throw new InvalidOperationException("The persistent client shell smoke contract failed.");
+    }
+
+    private bool Matches(InputEventKey key, ClientSemanticAction action)
+    {
+        if (!_resolved.TryGetBinding(action, out ClientPhysicalInput input) ||
+            input.Kind != ClientPhysicalInputKind.Keyboard)
+            return false;
+        ClientInputModifiers modifiers = ClientInputModifiers.None;
+        if (key.ShiftPressed) modifiers |= ClientInputModifiers.Shift;
+        if (key.CtrlPressed) modifiers |= ClientInputModifiers.Control;
+        if (key.AltPressed) modifiers |= ClientInputModifiers.Alt;
+        if (key.MetaPressed) modifiers |= ClientInputModifiers.Meta;
+        return modifiers == input.Modifiers &&
+            string.Equals(key.Keycode.ToString().ToUpperInvariant(), input.Code, StringComparison.Ordinal);
+    }
+
+    private VBoxContainer CreateCenteredColumn(float width = 360)
+    {
+        var background = new ColorRect
+        {
+            Color = new Color(0.035f, 0.05f, 0.045f, 1f),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
+        background.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _menuHost!.AddChild(background);
+        var center = new CenterContainer();
+        center.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _menuHost.AddChild(center);
+        var column = new VBoxContainer { CustomMinimumSize = new Vector2(width, 0) };
+        column.AddThemeConstantOverride("separation", 10);
+        center.AddChild(column);
+        return column;
+    }
+
+    private static void AddSetting(VBoxContainer column, string label, Control control)
+    {
+        column.AddChild(new Label { Text = label });
+        column.AddChild(control);
+    }
+
+    private static Label Title(string text)
+    {
+        var result = new Label
+        {
+            Text = text,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        result.AddThemeFontSizeOverride("font_size", 24);
+        return result;
+    }
+
+    private static Label CenteredLabel(string? text) => new()
+    {
+        Text = text ?? string.Empty,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        AutowrapMode = TextServer.AutowrapMode.WordSmart,
+    };
+
+    private static Button MenuButton(string text) => new()
+    {
+        Text = text,
+        CustomMinimumSize = new Vector2(360, 42),
+    };
+
+    private static HSlider Slider(double minimum, double maximum, double step, double value) => new()
+    {
+        MinValue = minimum,
+        MaxValue = maximum,
+        Step = step,
+        Value = value,
+    };
+
+    private static OptionButton EnumOptions<T>(T selected) where T : struct, Enum
+    {
+        var result = new OptionButton();
+        int selectedIndex = 0;
+        int index = 0;
+        foreach (T value in Enum.GetValues<T>())
+        {
+            int id = Convert.ToInt32(value);
+            result.AddItem(value.ToString(), id);
+            if (EqualityComparer<T>.Default.Equals(value, selected)) selectedIndex = index;
+            index++;
+        }
+        result.Select(selectedIndex);
+        return result;
+    }
+
+    private static Node NamedNode(string name) => new() { Name = name };
+
+    private static CanvasLayer Layer(string name, int layer) => new()
+    {
+        Name = name,
+        Layer = layer,
+    };
+
+    private static Control FullRectControl(string name)
+    {
+        var result = new Control { Name = name };
+        result.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        return result;
+    }
+
+    private static void ClearChildren(Node node)
+    {
+        foreach (Node child in node.GetChildren())
+        {
+            node.RemoveChild(child);
+            child.Free();
+        }
+    }
+
+    private static void FocusFirstButton(Node root)
+    {
+        foreach (Node child in root.GetChildren())
+        {
+            if (child is not Button button) continue;
+            button.GrabFocus();
+            return;
         }
     }
 

@@ -231,7 +231,10 @@ static void VerifyArchitecture(string root)
             "Kernels/Spatial/UltraSim.Spatial.csproj",
         ],
         ["Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj"] =
-            ["Client/_Godot/UltraSim.Client.Godot.csproj"],
+        [
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Client/_Godot/UltraSim.Client.Godot.csproj",
+        ],
         ["Client/Local/UltraSim.Client.Local.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",

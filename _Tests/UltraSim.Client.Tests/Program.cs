@@ -27,6 +27,9 @@ var tests = new (string Name, Action Body)[]
     ("ClientWorldSemanticCacheProductionContracts", ClientWorldSemanticCacheTests.Run),
     ("ClientPresentationWindowIsEngineNeutralAndTransactional", ClientPresentationWindowTests.Run),
     ("ClientWorldInputIsEngineNeutralAndSequenced", ClientWorldInputTests.Run),
+    ("ClientSettingsAreLayeredReadableAndReserved", ClientApplicationSettingsTests.Run),
+    ("ClientSettingsFilePersistenceIsAtomicAndFailClosed", ClientSettingsFileStoreTests.Run),
+    ("ClientShellLifecycleAndFocusAreExplicit", ClientShellStateTests.Run),
     ("CapabilityMenuMatchesComposition", CapabilityMenuMatchesComposition),
 };
 

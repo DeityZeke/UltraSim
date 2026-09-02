@@ -4,6 +4,20 @@ Client Core owns retained engine-neutral client projections. UI retention uses
 the neutral UI kernel. Terrain T0.8 adds `ClientWorldSemanticCache`, the one
 production semantic world cache consumed by presentation.
 
+F0.1 also places the application-shell state and local settings model here. The owner-thread-bound
+`ClientShellCoordinator` owns Main Menu/loading/session/options/settings/error transitions, while
+`ClientInputFocusPolicy` produces one finite World/HUD-text/modal/debug focus decision for engine
+adapters. Reserved application controls remain available without allowing ordinary gameplay input
+to leak through a text field or modal surface.
+
+`ClientSettingsDocument` is a bounded, versioned, engine-neutral user document. Resolution layers
+built-in defaults, global user choices, an explicitly accepted declarative server recommendation,
+and a scoped user override. Server recommendations are deliberately absent from persistence, cannot
+replace reserved application actions, and cannot carry local audio/accessibility preferences. The
+current opaque `ClientSettingsScopeKey` proves the store/resolver shape only; it is not a hostname,
+Network endpoint, or authenticated realm identity. F0.3a may map a verified `ApplicationRealmId`
+into this shape. Godot owns platform file I/O and physical event translation.
+
 The world cache is owner-thread bound and fixed-capacity. Its limits describe
 client-resident chunks and rows rather than the server's ECS/public address
 space. It copies immutable base terrain/statics/Multi fragments from a bound

@@ -1,8 +1,9 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
 **Status:** frozen ownership/security direction with proposed A0 checkpoint implementations,
-companion to [`CLIENT.md`](CLIENT.md). A0.0 is the next content-contract checkpoint after the client
-executable/local-session/shell foundation (F0.0a/F0.0b/F0.1); runtime mesh/audio import, package
+companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
+(F0.0a/F0.0b/F0.1) is closed and A0.0 is the next content-contract checkpoint; runtime mesh/audio
+import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
 
