@@ -36,6 +36,7 @@ string[] testProjects =
     "_Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj",
     "_Tests/UltraSim.Game.Chat.Tests/UltraSim.Game.Chat.Tests.csproj",
     "_Tests/UltraSim.Game.Inventory.Tests/UltraSim.Game.Inventory.Tests.csproj",
+    "_Tests/UltraSim.Client.Local.Tests/UltraSim.Client.Local.Tests.csproj",
     "_Tests/UltraSim.S0.Integration.Tests/UltraSim.S0.Integration.Tests.csproj",
 ];
 
@@ -109,20 +110,22 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
         new(
             "SinglePlayer",
             "Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj",
-            ["UltraSim.Game.Composition", "UltraSim.Game.Replication", "UltraSim.Server.Runtime"],
+            ["UltraSim.Client.Local", "UltraSim.Game.Composition", "UltraSim.Game.Replication",
+                "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
         new(
             "Online",
             "Client/Online.Godot/UltraSim.Client.Online.Godot.csproj",
             ["UltraSim.Client.Network", "UltraSim.Game.Protocol", "UltraSim.Network"],
-            ["UltraSim.Game.Composition", "UltraSim.Game.Persistence", "UltraSim.Game.Replication",
+            ["UltraSim.Client.Local", "UltraSim.Game.Composition", "UltraSim.Game.Persistence",
+                "UltraSim.Game.Replication",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting",
                 "UltraSim.Server.Persistence", "UltraSim.Server.Runtime"]),
         new(
             "Complete",
             "Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj",
-            ["UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
+            ["UltraSim.Client.Local", "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime"],
             []),
     ];
@@ -182,8 +185,10 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
 
     Console.WriteLine("PASS SinglePlayer_NoClientNetwork");
     Console.WriteLine("PASS SinglePlayer_NoNetworkKernel");
+    Console.WriteLine("PASS SinglePlayer_UsesLocalAuthorityBridge");
     Console.WriteLine("PASS Online_NoLocalServerRuntime");
     Console.WriteLine("PASS Online_NoLocalAuthorityComposition");
+    Console.WriteLine("PASS Online_NoLocalAuthorityBridge");
 }
 
 static void VerifyArchitecture(string root)
@@ -227,12 +232,28 @@ static void VerifyArchitecture(string root)
         ],
         ["Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj"] =
             ["Client/_Godot/UltraSim.Client.Godot.csproj"],
+        ["Client/Local/UltraSim.Client.Local.csproj"] =
+        [
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Chat/UltraSim.Game.Chat.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/Inventory/UltraSim.Game.Inventory.csproj",
+            "Game/Persistence/UltraSim.Game.Persistence.csproj",
+            "Game/Replication/UltraSim.Game.Replication.csproj",
+            "Game/UI/UltraSim.Game.UI.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/ECS/UltraSim.ECS.csproj",
+            "Kernels/Spatial/UltraSim.Spatial.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
+            "Server/Persistence/UltraSim.Server.Persistence.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+        ],
         ["Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj"] =
         [
             "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
-            "Game/Composition/UltraSim.Game.Composition.csproj",
-            "Game/Replication/UltraSim.Game.Replication.csproj",
-            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+            "Client/Local/UltraSim.Client.Local.csproj",
         ],
         ["Client/Online.Godot/UltraSim.Client.Online.Godot.csproj"] =
         [
@@ -242,28 +263,18 @@ static void VerifyArchitecture(string root)
         ["Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj"] =
         [
             "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
+            "Client/Local/UltraSim.Client.Local.csproj",
             "Client/Network/UltraSim.Client.Network.csproj",
-            "Game/Composition/UltraSim.Game.Composition.csproj",
-            "Game/Replication/UltraSim.Game.Replication.csproj",
-            "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
         ["Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",
-            "Client/Network/UltraSim.Client.Network.csproj",
+            "Client/Local/UltraSim.Client.Local.csproj",
             "Client/_Godot/UltraSim.Client.Godot.csproj",
-            "Game/Admission/UltraSim.Game.Admission.csproj",
-            "Game/Chat/UltraSim.Game.Chat.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
-            "Game/Inventory/UltraSim.Game.Inventory.csproj",
-            "Game/Persistence/UltraSim.Game.Persistence.csproj",
-            "Game/Protocol/UltraSim.Game.Protocol.csproj",
-            "Game/Replication/UltraSim.Game.Replication.csproj",
-            "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
-            "Kernels/Network/UltraSim.Network.csproj",
-            "Server/Persistence/UltraSim.Server.Persistence.csproj",
-            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+            "Kernels/Spatial/UltraSim.Spatial.csproj",
         ],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
@@ -425,6 +436,7 @@ static void VerifyDocumentation(string root)
         "Kernels/Network/README.md",
         "Kernels/Spatial/README.md",
         "Client/Core/README.md",
+        "Client/Local/README.md",
         "Client/Bootstrap.Godot/README.md",
         "Client/_Godot/README.md",
         "Client/Playable.Godot/README.md",
@@ -456,7 +468,7 @@ static void VerifyDocumentation(string root)
             "Docs/Plans/CHAT.md", "Docs/Plans/NETWORK.md", "Docs/Plans/PHYSICS.md",
             "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
-            "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
+            "Client/Local/README.md", "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
             "Game/Chat/README.md", "Game/Physics/README.md", "Game/Replication/README.md",
             "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],

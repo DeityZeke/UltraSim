@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1572;CS1573;CS1574;CS1580;CS1581;CS1584;CS1587;CS1711;CS1734;CS1735</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
+    <ProjectReference Include="../../Game/Chat/UltraSim.Game.Chat.csproj" />
+    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
+    <ProjectReference Include="../../Game/Inventory/UltraSim.Game.Inventory.csproj" />
+    <ProjectReference Include="../../Game/Persistence/UltraSim.Game.Persistence.csproj" />
+    <ProjectReference Include="../../Game/Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
+    <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
+    <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
+    <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
+    <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+    <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
+    <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+  </ItemGroup>
+</Project>

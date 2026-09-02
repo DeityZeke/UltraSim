@@ -1,9 +1,10 @@
 # Launchable T0.10 client
 
-This is the real OfflineDirect woods/cabin application composition root. It
-keeps the reusable Godot adapter narrow while composing the local authoritative
-runtime, Game world, persistence, Client Core profiles/cache/window, and native
-renderer in one launchable project.
+This is the real OfflineDirect woods/cabin reference application. Its F0.0b
+composition consumes the Network-free [`Client.Local`](../Local/README.md)
+boundary: a private owner thread composes the authoritative runtime, Game world,
+persistence, Chat, and UI, while Godot owns only input and presentation over
+bounded Client-side semantic state.
 
 From the repository root:
 
@@ -30,8 +31,9 @@ IndependentMoveLook. E uses the selected cabin door/chest, F5 saves, and F9
 restores.
 
 The C0.1 Chat panel is always available at the lower left. Enter focuses the
-bounded text field; choosing Whisper/Say/Yell and submitting uses the canonical
-Game protocol and `ClientChatState`. While the field has focus, gameplay movement
+bounded text field; choosing Whisper/Say/Yell and submitting uses packet-free
+Game Chat semantics through the local retained-occurrence bridge and
+`ClientChatState`. While the field has focus, gameplay movement
 input is suppressed. `/help` and `/where` appear as private system rows. Spatial
 speech also shows a short presentation-only overhead label when its public actor
 anchor is currently resident; otherwise the feed remains authoritative for what
@@ -53,6 +55,9 @@ the final available chunks while the player-relative camera origin continues to
 follow the actor. Structural-window center and viewer origin are deliberately
 separate; there is no implicit camera breakaway mode yet.
 
-This application is intentionally OfflineDirect. It must not adapt the legacy
-network `InputVelocity` path; remote control-session binding and command
-transport remain N1 work.
+This application is intentionally OfflineDirect. Godot does not tick
+`ServerRuntime`, access mutable ECS/Game state, scan the authority publication
+store, or loop local Chat/UI through protocol or Network. It sends normal
+control-session-fenced `GamePlayerCommand` intent to the authority owner thread;
+public, Chat, and UI debt retires only after Client-side application proof.
+Remote command transport remains a separate Online consumer path.

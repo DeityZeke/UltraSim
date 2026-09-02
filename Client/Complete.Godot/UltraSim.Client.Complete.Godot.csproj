@@ -12,9 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj" />
+    <ProjectReference Include="../Local/UltraSim.Client.Local.csproj" />
     <ProjectReference Include="../Network/UltraSim.Client.Network.csproj" />
-    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
-    <ProjectReference Include="../../Game/Replication/UltraSim.Game.Replication.csproj" />
-    <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
   </ItemGroup>
 </Project>

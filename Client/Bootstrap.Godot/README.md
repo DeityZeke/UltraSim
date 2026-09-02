@@ -7,7 +7,7 @@ manifest and references only the implementation family it installs:
 ```text
 SinglePlayer.Godot
     Bootstrap.Godot + Core/Godot adapter
-    Game composition + packet-free Game replication + Server Runtime
+    Client.Local + transitive Game/packet-free replication/Server Runtime
     no Client.Network, Game.Protocol, or Kernels.Network
 
 Online.Godot
@@ -22,5 +22,6 @@ Complete.Godot
 The shared bootstrap renders exactly the supplied capability catalog. Missing capabilities
 therefore have no menu entry, while the repository verifier independently inspects the resolved
 project graph, generated `.deps.json`, and copied managed outputs. The entries remain placeholders
-until their later roadmap checkpoints; this project does not implement F0.0b's authority thread or
-local semantic bridge.
+until their later roadmap checkpoints. F0.0b's authority thread/local semantic bridge now lives in
+`Client.Local`; the shared bootstrap does not depend on it, and F0.2 is where the Single Player menu
+entry becomes the real Cabin/Test World launch path.

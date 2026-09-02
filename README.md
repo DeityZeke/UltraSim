@@ -95,8 +95,8 @@ headroom and fewer ticks per second.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, semantic port,
   and bounded transport-independent semantic wire codec.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
-- `Client/*` — retained client projection, remote network bridge, and Godot
-  presentation.
+- `Client/*` — retained client projection, bounded Network-free local application
+  bridge, remote network bridge, and Godot presentation.
 - `Game/*` — concrete game schema/content/state, authoritative workflows,
   canonical replication projection, persisted world-position authority,
   generation-owned dynamic spatial membership, and game-owned network binding.

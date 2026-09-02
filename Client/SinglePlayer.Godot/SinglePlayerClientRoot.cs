@@ -1,7 +1,5 @@
 using UltraSim.Client.Bootstrap.Godot;
-using UltraSim.Game.Composition;
-using UltraSim.Game.Replication;
-using UltraSim.Server.Runtime;
+using UltraSim.Client.Local;
 
 namespace UltraSim.Client.SinglePlayer.Godot;
 
@@ -11,9 +9,7 @@ public partial class SinglePlayerClientRoot : ClientCompositionBootstrap
     {
         get
         {
-            _ = typeof(UltraSimGameComposition);
-            _ = typeof(GameProjectionService);
-            _ = typeof(ServerRuntime);
+            _ = typeof(LocalPlayableSession);
             return ClientCompositionManifest.SinglePlayer;
         }
     }

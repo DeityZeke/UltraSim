@@ -1,8 +1,8 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
-**Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`) and F0.0a executable
-composition/shipped-dependency separation accepted. The Network-free local-host model is accepted;
-F0.0b extracts the already-proven OfflineDirect behavior into its permanent local-session boundary.
+**Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`), F0.0a executable
+composition/shipped-dependency separation, and F0.0b permanent Network-free local-session
+extraction accepted.
 Direct-connect trust, content activation, and later content acquisition remain separately gated
 before their consuming checkpoints.
 
@@ -136,8 +136,8 @@ Keep it until the real shell reaches equivalent automated/manual coverage, then 
 
 The current harness already proves the intended authoritative local path: Godot forms a
 `GamePlayerCommand`, Game/Physics owns the result, and Client Core owns the resulting presentation
-state. It does not use Network for local movement. Its remaining shortcuts are composition and
-lifetime shortcuts, not evidence for a different architecture:
+state. It does not use Network for local movement. Before F0.0b its remaining shortcuts were
+composition and lifetime shortcuts, not evidence for a different architecture:
 
 ```text
 Godot thread
@@ -147,7 +147,7 @@ Godot thread
     uses protocol loopback for the accepted Chat consumer
 ```
 
-F0.0b replaces those shortcuts with one authority owner thread, bounded local command ingress,
+F0.0b replaced those shortcuts with one authority owner thread, bounded local command ingress,
 bounded domain-specific semantic egress, and explicit applied/rejected local semantic proof. It
 does not redesign OfflineDirect or route the host player through loopback Network.
 
@@ -1412,7 +1412,7 @@ contents. An assembly hidden from a menu but still shipped is not an absent capa
 `Client/Bootstrap.Godot` menu/bootstrap. Their built `.deps.json` and copied output assemblies are
 permanently verified: Single Player excludes Client Network/Game Protocol/the Network kernel,
 Online excludes local Game composition/replication/Server Runtime, and Complete contains both
-capability families. `Playable.Godot` remains the acceptance/reference executable for F0.0b.
+capability families. `Playable.Godot` served as the acceptance/reference executable for F0.0b.
 
 Implement:
 
@@ -1433,6 +1433,22 @@ No discovery, dynamic plugin loading, or full streaming implementation yet.
 ---
 
 ## F0.0b — Permanent OfflineDirect local-session extraction
+
+**Status: CLOSED.** `Client/Local` owns the concrete Network-free Cabin/local application bridge.
+It runs mutable `ServerRuntime`/Game authority on a private owner thread and exposes only bounded
+control-session-fenced command/admin/Chat ingress, one coalesced immutable owner presentation view,
+and retained public-world/Chat/UI semantic channels. Client application returns applied/rejected
+proof; rejected public/Chat debt is retried, rejected UI projection follows the existing terminal
+view-desynchronization rule, and presentation stalls do not stop authoritative ticks.
+
+`Client/Playable.Godot` now consumes this boundary. It no longer ticks or enters active Game
+generations, scans/copies the complete publication store, or constructs a local protocol loopback.
+The local public recipient uses the accepted Game chunk-interest profile and cadence; dynamic-public
+AOI leave clears only public knowledge while structural Client residency remains intact.
+
+Single Player and Complete install `UltraSim.Client.Local`; Online excludes it. The shipped-output
+gate still proves that Single Player contains no Client Network, Game Protocol, Remote Replication,
+Network kernel, or Hosted implementation.
 
 Extract the behavior already proven by the playable Cabin slice into its permanent ownership shape:
 
@@ -1971,7 +1987,7 @@ Physics foundation                    CLOSED through P0.1b
         v
 F0.0a executable composition roots / shipped-dependency proof
         |
-F0.0b permanent OfflineDirect local-session extraction
+F0.0b permanent OfflineDirect local-session extraction     CLOSED
         |
 F0.1  persistent shell + readable layered settings/control foundation
         |

@@ -1,21 +1,11 @@
 using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
-using UltraSim.Client.Network;
-using UltraSim.ECS;
-using UltraSim.Game.Admission;
-using UltraSim.Game.Chat;
+using UltraSim.Client.Local;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
-using UltraSim.Game.Inventory;
-using UltraSim.Game.Persistence;
-using UltraSim.Game.Protocol;
-using UltraSim.Game.Replication;
 using UltraSim.Game.World;
-using UltraSim.Server.Persistence;
-using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
-using UltraSim.Network;
 
 namespace UltraSim.Client.Playable.Godot;
 
@@ -38,14 +28,10 @@ public partial class PlayableWorldClient : Node3D
     }
 
     private const int RenderRadius = 1;
-    private const int MaximumPublicRows = 16;
+    private const int MaximumChatTextCharacters = 256;
 
-    private ServerRuntime? _runtime;
-    private AdmissionService? _admission;
-    private UltraSimGameComposition? _composition;
-    private GameRuntimePersistence? _persistence;
+    private LocalPlayableSession? _localSession;
     private BoundWorldPack? _boundWorld;
-    private GamePlayableWorldEntities _entities;
     private ClientWorldSemanticCache? _cache;
     private GodotWorldRenderer? _renderer;
     private GodotSlidingRenderWindow? _window;
@@ -54,7 +40,6 @@ public partial class PlayableWorldClient : Node3D
     private readonly ThirdPersonDirectProfile _thirdPerson = new();
     private readonly IndependentMoveLookProfile _independent = new();
     private readonly ClientPresentationChange[] _presentationChanges = new ClientPresentationChange[18];
-    private readonly WorldPublicRecord[] _publicRows = new WorldPublicRecord[MaximumPublicRows];
     private readonly ClientSemanticHash[] _semanticHashesBeforeRefresh = new ClientSemanticHash[25];
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
     private readonly ClientSemanticChunkInfo[] _chatChunkInfo = new ClientSemanticChunkInfo[25];
@@ -80,15 +65,14 @@ public partial class PlayableWorldClient : Node3D
     private bool _profileStopPending;
     private SelectionKind _selection;
     private string _lastOutcome = "Ready";
-    private ulong _saveSequence;
     private bool _initialized;
-    private GameChatService? _chatAuthority;
-    private RemoteChatDeliveryService? _chatDelivery;
-    private RemoteChatServerSession? _chatServer;
-    private RemoteChatClient? _chatClient;
     private ClientChatState? _chatState;
-    private ProtocolLoopback? _chatLoopback;
     private ulong _chatAppliedPresentationCount;
+    private ulong _nextChatSubmission = 1;
+    private ulong _nextAdministrativeRequest = 1;
+    private ulong _residentGenerationId;
+    private ulong _observedCommandSequence;
+    private ulong _observedAdministrativeSequence;
     private WorldPublicEntityId _overheadAnchor;
     private ulong _overheadOriginGenerationId;
     private ulong _overheadExpiresAtMilliseconds;
@@ -125,7 +109,7 @@ public partial class PlayableWorldClient : Node3D
 
     public override void _PhysicsProcess(double delta)
     {
-        if (!_initialized || _runtime is null || _sequencer is null || _camera is null)
+        if (!_initialized || _localSession is null || _sequencer is null || _camera is null)
             return;
         try
         {
@@ -151,7 +135,6 @@ public partial class PlayableWorldClient : Node3D
                 faceRequested,
                 facingPoint,
                 facingRequiresAcceptedLocomotion);
-            _runtime.Tick();
             SynchronizeProjection();
             UpdateChatPresentation();
             UpdateCamera();
@@ -233,70 +216,38 @@ public partial class PlayableWorldClient : Node3D
 
     public override void _ExitTree()
     {
-        _chatServer?.Dispose();
-        _chatDelivery?.Dispose();
-        _chatAuthority?.Dispose();
-        _chatLoopback?.Dispose();
         _renderer?.Dispose();
-        _admission?.Dispose();
-        _runtime?.Dispose();
+        _localSession?.Dispose();
     }
 
     private void StartFreshWorld()
     {
-        WorldPack pack = GamePlayableWorld.CreateWorldPack();
-        _boundWorld = BindPlayablePack(pack);
-        _composition = new UltraSimGameComposition(
-            new InventoryLimits(32, 128, 32),
-            baseWorldPack: pack);
-        _runtime = new ServerRuntime(
-            _composition,
-            new ServerRuntimeOptions(
-                UltraSimGameComposition.CreateWorldOptions(
-                    128,
-                    new PersistenceIdentityOptions(new PersistentWorldId(0x80_4010))),
-                WorldClockOptions.Default));
-        _runtime.Initialize();
-        _runtime.Start();
-        _admission = new AdmissionService(_runtime.Game, _composition);
-        AdmissionResult entered = _admission.JoinAccountless(new ParticipantId(4010));
-        if (!entered.IsEntered)
-            throw new InvalidOperationException("The local playable participant could not enter.");
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
-                (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
-                out _entities))
-            throw new InvalidOperationException("The woods/cabin world could not populate.");
-        _runtime.Tick();
-
-        StartChat(entered.Participant);
-
         string saveRoot = ProjectSettings.GlobalizePath("user://t0-10-saves");
-        _persistence = new GameRuntimePersistence(
-            _runtime.Game,
-            _composition,
-            RestoreOptions(),
-            new SaveSetCoordinator(saveRoot));
-        _saveSequence = checked((ulong)Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
-        RebuildClientProjection();
+        _localSession = LocalPlayableSession.CreateCabin(saveRoot);
+        _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
+        _boundWorld = _localSession.BoundWorld;
+        _chatState = new ClientChatState(
+            _localSession.ApplicationSessionEpoch,
+            new ClientChatLimits(64, 256, 128));
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+            throw new InvalidOperationException("The local authority did not publish its initial view.");
+        RebuildClientProjection(view);
+        DriveLocalUntil(() =>
+            CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1 &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1);
         _lastOutcome = "Fresh woods/cabin world started";
     }
 
-    private void RebuildClientProjection()
+    private void RebuildClientProjection(in LocalPlayableAuthorityView view)
     {
-        if (_runtime is null || _boundWorld is null)
+        if (_localSession is null || _boundWorld is null || !view.IsReady)
             throw new InvalidOperationException("Authority is not ready.");
         _renderer?.Dispose();
-
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldMutableOverlay>(
-                (_, _, game) => game.WorldState.Overlay ?? WorldMutableOverlay.Empty(_boundWorld),
-                out WorldMutableOverlay overlay))
-            throw new InvalidOperationException("Current prepared-world lineage was unavailable.");
         _cache = new ClientWorldSemanticCache(
-            new WorldPreparedView(_boundWorld, overlay),
+            view.PreparedWorld,
             new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64));
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-                (_, _, game) => StageAllChunks(game.WorldState.Publications),
-                out bool staged) || !staged)
+        if (!StageAllChunks())
             throw new InvalidOperationException("The local semantic world could not stage.");
 
         _renderer = new GodotWorldRenderer(
@@ -305,14 +256,10 @@ public partial class PlayableWorldClient : Node3D
             GodotWorldRendererLimits.ForStructuralWindow(RenderRadius, 5, 32),
             new PlayableAssetResolver());
         _window = new GodotSlidingRenderWindow(_cache, _renderer, RenderRadius);
-        _sequencer = new ClientWorldInputSequencer();
+        _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
         _orbit.Reset();
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
-                (world, _, game) => game.WorldActions.BeginControlSession(
-                    world, Resolve(world, _entities.PlayerId), _sequencer.ControlSession),
-                out GameWorldActionStatus bound) || bound != GameWorldActionStatus.Accepted)
-            throw new InvalidOperationException($"Local control binding failed: {bound}.");
-        ReadAuthorityView();
+        _residentGenerationId = view.GenerationId;
+        _player = view.PlayerPosition;
         TrackPresentation(reset: true);
         DrainRenderer();
     }
@@ -377,72 +324,22 @@ public partial class PlayableWorldClient : Node3D
         in ClientControlWorldPoint lookPoint,
         bool facingRequiresAcceptedLocomotion)
     {
-        if (_runtime is null)
+        if (_localSession is null)
             return;
-        GamePlayerCommand admitted = command;
-        ClientControlWorldPoint facingPoint = lookPoint;
-        bool interactionPressed =
-            (command.PressedActions & GamePlayerActions.Interact) != 0;
-        bool chestInteraction = _selection == SelectionKind.CabinChest && interactionPressed;
-        bool unsupportedInteraction = interactionPressed &&
-            _selection is not (SelectionKind.CabinDoor or SelectionKind.CabinChest);
-        if (chestInteraction || unsupportedInteraction)
+        LocalPlayableSelection selection = _selection switch
         {
-            admitted = command with
-            {
-                HeldActions = command.HeldActions & ~GamePlayerActions.Interact,
-                PressedActions = command.PressedActions & ~GamePlayerActions.Interact,
-            };
-        }
-        PersistentEntityId targetId = _selection == SelectionKind.CabinDoor
-            ? _entities.CabinDoorId
-            : default;
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayerCommandResult>(
-                (world, generationId, game) =>
-                {
-                    Entity target = targetId.IsValid ? Resolve(world, targetId) : Entity.Null;
-                    game.WorldActions.ApplyPlayerCommand(
-                        world,
-                        game.WorldState,
-                        Resolve(world, _entities.PlayerId),
-                        admitted,
-                        target,
-                        out GamePlayerCommandResult result);
-                    if (result.WasAdmitted && faceLookPoint &&
-                        (!facingRequiresAcceptedLocomotion ||
-                         result.Locomotion == GameWorldActionStatus.Accepted))
-                    {
-                        GameWorldActionStatus facing = game.WorldActions.FaceActorToward(
-                            world,
-                            game.WorldState,
-                            Resolve(world, _entities.PlayerId),
-                            facingPoint.XMillimeters,
-                            facingPoint.ZMillimeters,
-                            out _);
-                        if (facing != GameWorldActionStatus.Accepted)
-                            throw new InvalidOperationException($"Profile facing failed: {facing}.");
-                    }
-                    return result;
-                }, out GamePlayerCommandResult result))
-            throw new InvalidOperationException("The OfflineDirect command had no authority generation.");
-
-        if (unsupportedInteraction)
-        {
-            _lastOutcome = "Select the cabin door or chest before using Interact";
-        }
-        else if (chestInteraction)
-        {
-            GameWorldActionStatus chest = ToggleBreadContainer();
-            _lastOutcome = chest == GameWorldActionStatus.Accepted
-                ? "Moved bread between backpack and cabin chest"
-                : $"Chest use: {chest}";
-        }
-        else if (result.Interaction != GameWorldActionStatus.NotRequested)
-        {
-            _lastOutcome = result.Interaction == GameWorldActionStatus.Accepted
-                ? $"Cabin door {(result.DoorIsOpen ? "opened" : "closed")}"
-                : $"Interaction: {result.Interaction}";
-        }
+            SelectionKind.None => LocalPlayableSelection.None,
+            SelectionKind.CabinDoor => LocalPlayableSelection.CabinDoor,
+            SelectionKind.CabinChest => LocalPlayableSelection.CabinChest,
+            _ => LocalPlayableSelection.Unsupported,
+        };
+        if (!_localSession.TrySubmit(new LocalPlayableCommand(
+                command,
+                selection,
+                faceLookPoint,
+                lookPoint,
+                facingRequiresAcceptedLocomotion)))
+            _lastOutcome = "Local command queue busy";
     }
 
     private bool TryResolveProfileFacing(
@@ -479,43 +376,30 @@ public partial class PlayableWorldClient : Node3D
         }
     }
 
-    private GameWorldActionStatus ToggleBreadContainer()
-    {
-        if (_runtime is null)
-            return GameWorldActionStatus.InvariantViolation;
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
-                (world, generationId, game) =>
-                {
-                    Entity player = Resolve(world, _entities.PlayerId);
-                    Entity bread = Resolve(world, _entities.BreadId);
-                    Entity backpack = Resolve(world, _entities.BackpackId);
-                    Entity chest = Resolve(world, _entities.CabinChestId);
-                    if (!game.Inventory.TryReadItem(world, bread, out InventoryItem item))
-                        return GameWorldActionStatus.MissingTarget;
-                    Entity source = item.Parent;
-                    Entity destination = source == backpack ? chest : backpack;
-                    return game.WorldActions.MoveItemToNearbyContainer(
-                        world, game.WorldState, game.Inventory,
-                        player, bread, source, destination, out _);
-                }, out GameWorldActionStatus status))
-            return GameWorldActionStatus.InvariantViolation;
-        return status;
-    }
-
     private void SynchronizeProjection()
     {
-        if (_runtime is null || _cache is null || _renderer is null)
+        if (_localSession is null || _cache is null || _renderer is null)
             return;
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-                (_, _, game) => RefreshAllChunks(game.WorldState.Publications),
-                out bool refreshed) || !refreshed)
-            throw new InvalidOperationException("Authoritative publication could not refresh locally.");
-        ReadAuthorityView();
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+            throw new InvalidOperationException("The local authority view was unavailable.");
+        if (view.GenerationId != _residentGenerationId)
+        {
+            RebuildClientProjection(view);
+            _selection = SelectionKind.None;
+            _lastOutcome = $"Entered authoritative generation {view.GenerationId}";
+            return;
+        }
+
+        CaptureSemanticHashes();
+        _ = _localSession.PumpWorld(_cache);
+        QueueChangedPublicChunks();
+        _player = view.PlayerPosition;
+        ObserveAuthorityOutcomes(view);
         TrackPresentation(reset: false);
         _renderer.ProcessFrame(GodotWorldFrameBudget.Default);
     }
 
-    private bool StageAllChunks(ChunkPublicationStore publications)
+    private bool StageAllChunks()
     {
         if (_cache is null)
             return false;
@@ -526,23 +410,17 @@ public partial class PlayableWorldClient : Node3D
                 SpatialChunkKey key = ChunkKey(x, z);
                 if (!_cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _))
                     return false;
-                ChunkPublicationReadStatus status = publications.TryCopySnapshot(
-                    key, _publicRows, out ChunkPublicationBatch batch);
-                bool staged = status == ChunkPublicationReadStatus.Snapshot
-                    ? _cache.TryStageFromBaseWorld(handle, _publicRows.AsSpan(0, batch.Count), batch.Cursor, out _)
-                    : status == ChunkPublicationReadStatus.ChunkAbsent &&
-                        _cache.TryStageFromBaseWorld(handle, [], default, out _);
-                if (!staged || !_cache.TryPublish(handle, out _))
+                if (!_cache.TryStageFromBaseWorld(handle, [], default, out _) ||
+                    !_cache.TryPublish(handle, out _))
                     return false;
             }
         }
         return true;
     }
 
-    private bool RefreshAllChunks(ChunkPublicationStore publications)
+    private void CaptureSemanticHashes()
     {
-        if (_cache is null || _renderer is null)
-            return false;
+        if (_cache is null) return;
         int semanticIndex = 0;
         for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
         {
@@ -551,33 +429,16 @@ public partial class PlayableWorldClient : Node3D
                 SpatialChunkKey key = ChunkKey(x, z);
                 if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
                     !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info))
-                    return false;
+                    throw new InvalidOperationException("A structural semantic chunk was unavailable.");
                 _semanticHashesBeforeRefresh[semanticIndex++] = info.SemanticHash;
             }
         }
+    }
 
-        semanticIndex = 0;
-        for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
-        {
-            for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
-            {
-                SpatialChunkKey key = ChunkKey(x, z);
-                if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
-                    return false;
-                ChunkPublicationReadStatus status = publications.TryCopySnapshot(
-                    key, _publicRows, out ChunkPublicationBatch batch);
-                bool applied = status == ChunkPublicationReadStatus.Snapshot
-                    ? _cache.TryApplySnapshot(handle, batch, _publicRows.AsSpan(0, batch.Count), out _)
-                    : status == ChunkPublicationReadStatus.ChunkAbsent &&
-                        _cache.TryApplyChunkAbsent(handle, publications.Epoch, batch, out _);
-                if (!applied)
-                    return false;
-            }
-        }
-
-        // Applying one snapshot can supersede the same public identity in a different resident
-        // chunk. Compare the complete resident set after the transaction so both the old and new
-        // presentation layers are refreshed; checking only the currently read chunk leaves ghosts.
+    private void QueueChangedPublicChunks()
+    {
+        if (_cache is null || _renderer is null) return;
+        int semanticIndex = 0;
         for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
         {
             for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
@@ -585,26 +446,41 @@ public partial class PlayableWorldClient : Node3D
                 SpatialChunkKey key = ChunkKey(x, z);
                 if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
                     !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo after))
-                    return false;
+                    throw new InvalidOperationException("A structural semantic chunk was unavailable after apply.");
                 if (after.SemanticHash != _semanticHashesBeforeRefresh[semanticIndex])
                     _ = _renderer.TryQueuePublicRefresh(handle, out _);
                 semanticIndex++;
             }
         }
-        return true;
     }
 
-    private void ReadAuthorityView()
+    private void ObserveAuthorityOutcomes(in LocalPlayableAuthorityView view)
     {
-        if (_runtime is null)
-            return;
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
-                (world, _, game) => game.WorldState.TryReadPosition(
-                    world, Resolve(world, _entities.PlayerId), out WorldPosition position)
-                        ? position
-                        : throw new InvalidOperationException("The controlled actor has no position."),
-                out _player))
-            throw new InvalidOperationException("The controlled actor could not be read.");
+        if (view.LastCommandSequence != 0 && view.LastCommandSequence != _observedCommandSequence)
+        {
+            _observedCommandSequence = view.LastCommandSequence;
+            if (view.LastChestAction != GameWorldActionStatus.NotRequested)
+            {
+                _lastOutcome = view.LastChestAction == GameWorldActionStatus.Accepted
+                    ? "Moved bread between backpack and cabin chest"
+                    : view.LastChestAction == GameWorldActionStatus.MissingTarget
+                        ? "Select the cabin door or chest before using Interact"
+                        : $"Chest use: {view.LastChestAction}";
+            }
+            else if (view.LastCommandResult.Interaction != GameWorldActionStatus.NotRequested)
+            {
+                _lastOutcome = view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted
+                    ? $"Cabin door {(view.LastCommandResult.DoorIsOpen ? "opened" : "closed")}"
+                    : $"Interaction: {view.LastCommandResult.Interaction}";
+            }
+        }
+        if (view.LastAdministrativeSequence != 0 &&
+            view.LastAdministrativeSequence != _observedAdministrativeSequence)
+        {
+            _observedAdministrativeSequence = view.LastAdministrativeSequence;
+            _lastOutcome = view.LastAdministrativeMessage ??
+                $"{view.LastAdministrativeKind}: {(view.LastAdministrativeSucceeded ? "accepted" : "rejected")}";
+        }
     }
 
     private void TrackPresentation(bool reset)
@@ -751,7 +627,7 @@ public partial class PlayableWorldClient : Node3D
 
     private void RunLaunchSmokeAcceptance()
     {
-        if (_camera is null || _renderer is null || _runtime is null || _sequencer is null)
+        if (_camera is null || _renderer is null || _localSession is null || _sequencer is null)
             throw new InvalidOperationException("The launch smoke started before composition completed.");
 
         Vector3 orbitCamera = _camera.Position;
@@ -784,14 +660,12 @@ public partial class PlayableWorldClient : Node3D
 
         int before = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
         RelocateControlledActor(GamePlayableWorld.ClearCrossChunkPosition);
-        _runtime.Tick();
-        SynchronizeProjection();
-        DrainRenderer();
+        DriveLocalUntil(() => _player.Chunk == GamePlayableWorld.ClearCrossChunkPosition.Chunk &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1);
         int afterCrossing = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
         RelocateControlledActor(GamePlayableWorld.PlayerStart);
-        _runtime.Tick();
-        SynchronizeProjection();
-        DrainRenderer();
+        DriveLocalUntil(() => _player == GamePlayableWorld.PlayerStart &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1);
         int afterReturn = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
         if (before != 1 || afterCrossing != 1 || afterReturn != 1)
             throw new InvalidOperationException(
@@ -804,9 +678,8 @@ public partial class PlayableWorldClient : Node3D
             14_000,
             0);
         RelocateControlledActor(edge);
-        _runtime.Tick();
-        SynchronizeProjection();
-        DrainRenderer();
+        DriveLocalUntil(() => _player.Chunk == edge.Chunk &&
+            _player.Local.XMillimeters == edge.Local.XMillimeters);
         SpatialChunkKey expectedCenter = ChunkKey(
             GamePlayableWorld.MaximumChunk - RenderRadius,
             GamePlayableWorld.MaximumChunk - RenderRadius);
@@ -824,18 +697,17 @@ public partial class PlayableWorldClient : Node3D
             14_500,
             0);
         RelocateControlledActor(fartherInsideEdge);
-        _runtime.Tick();
-        SynchronizeProjection();
-        DrainRenderer();
+        DriveLocalUntil(() =>
+            _player.Chunk == fartherInsideEdge.Chunk &&
+            _player.Local.XMillimeters == fartherInsideEdge.Local.XMillimeters &&
+            _player.Local.ZMillimeters == fartherInsideEdge.Local.ZMillimeters);
         if (!Mathf.IsEqualApprox(_renderer.Root.Position.X, -15.5f) ||
             !Mathf.IsEqualApprox(_renderer.Root.Position.Z, -14.5f))
             throw new InvalidOperationException(
                 "Same-edge-chunk movement did not keep the camera centered on the player.");
 
         RelocateControlledActor(GamePlayableWorld.PlayerStart);
-        _runtime.Tick();
-        SynchronizeProjection();
-        DrainRenderer();
+        DriveLocalUntil(() => _player == GamePlayableWorld.PlayerStart);
 
         void ProbeMovementFacing(
             ControlProfile profile,
@@ -863,9 +735,10 @@ public partial class PlayableWorldClient : Node3D
                     out bool requiresAcceptedLocomotion))
                 throw new InvalidOperationException($"{profile} did not produce movement-facing intent.");
             ApplyCommand(command, true, facingPoint, requiresAcceptedLocomotion);
-            _runtime.Tick();
-            SynchronizeProjection();
-            DrainRenderer();
+            DriveLocalUntil(() =>
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == command.Sequence &&
+                current.PlayerOrientation == expected);
             if (ReadPlayerOrientation() != expected)
                 throw new InvalidOperationException(
                     $"{profile} did not face its accepted movement direction.");
@@ -878,8 +751,7 @@ public partial class PlayableWorldClient : Node3D
             throw new InvalidOperationException("Playable Chat presentation was not composed.");
         ulong before = _chatState.GetSnapshot().Applied;
         SubmitChat("playable speech");
-        for (int step = 0; step < 2_048 && _chatState.GetSnapshot().Applied == before; step++)
-            PumpChat();
+        DriveLocalUntil(() => _chatState.GetSnapshot().Applied != before);
         if (_chatState.GetSnapshot().Applied != before + 1)
             throw new InvalidOperationException("Playable spatial speech did not apply.");
         UpdateChatPresentation();
@@ -889,8 +761,7 @@ public partial class PlayableWorldClient : Node3D
 
         before = _chatState.GetSnapshot().Applied;
         SubmitChat("/where");
-        for (int step = 0; step < 2_048 && _chatState.GetSnapshot().Applied == before; step++)
-            PumpChat();
+        DriveLocalUntil(() => _chatState.GetSnapshot().Applied != before);
         UpdateChatPresentation();
         if (_chatState.GetSnapshot().Applied != before + 1 ||
             !_chatFeed.Text.Contains("Where:", StringComparison.Ordinal))
@@ -899,39 +770,26 @@ public partial class PlayableWorldClient : Node3D
 
     private WorldYaw ReadPlayerOrientation()
     {
-        if (_runtime is null || !_runtime.Game.TryUseActiveGeneration<
-                IGameGenerationStateProvider, WorldYaw>(
-                (world, _, game) => game.WorldState.TryReadPublic(
-                    world,
-                    Resolve(world, _entities.PlayerId),
-                    out WorldPublicDescriptor descriptor)
-                        ? descriptor.Orientation
-                        : throw new InvalidOperationException("The playable character lost public state."),
-                out WorldYaw orientation))
+        if (_localSession is null ||
+            !_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The playable character orientation was unavailable.");
-        return orientation;
+        return view.PlayerOrientation;
     }
 
     private void RelocateControlledActor(in WorldPosition requested)
     {
-        if (_runtime is null)
+        if (_localSession is null)
             throw new InvalidOperationException("Authority is not available for relocation.");
-        WorldPosition target = requested;
-        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
-                (world, generationId, game) =>
-                {
-                    GameWorldActionStatus result = game.WorldActions.RelocateActor(
-                        world,
-                        game.WorldState,
-                        Resolve(world, _entities.PlayerId),
-                        target,
-                        out WorldPosition relocated);
-                    _ = generationId;
-                    _ = relocated;
-                    return result;
-                },
-                out GameWorldActionStatus status) || status != GameWorldActionStatus.Accepted)
-            throw new InvalidOperationException($"Launch-smoke relocation failed: {status}.");
+        ulong request = _nextAdministrativeRequest++;
+        if (!_localSession.TryRequestRelocation(request, requested))
+            throw new InvalidOperationException("Launch-smoke relocation queue was full.");
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastAdministrativeSequence == request);
+        _localSession.TryGetLatestView(out LocalPlayableAuthorityView completed);
+        if (!completed.LastAdministrativeSucceeded)
+            throw new InvalidOperationException(
+                $"Launch-smoke relocation failed: {completed.LastAdministrativeMessage}.");
     }
 
     private int CountPresentedPrefab(uint prefabId)
@@ -975,30 +833,37 @@ public partial class PlayableWorldClient : Node3D
 
     private void SaveWorld()
     {
-        if (_persistence is null)
+        if (_localSession is null)
             return;
-        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        ulong sequence = _saveSequence++;
-        GameSaveResult result = _persistence.TrySave(
-            new SaveSetContext(sequence, now), static capture => capture());
-        _lastOutcome = result.Succeeded
-            ? $"Saved generation {sequence}"
-            : $"Save failed: {result.Failure?.Message}";
+        ulong request = _nextAdministrativeRequest++;
+        _lastOutcome = _localSession.TryRequestSave(request)
+            ? "Save requested"
+            : "Save queue busy";
     }
 
     private void LoadWorld()
     {
-        if (_persistence is null)
+        if (_localSession is null)
             return;
-        GameLoadResult result = _persistence.TryLoad();
-        if (!result.Succeeded)
+        ulong request = _nextAdministrativeRequest++;
+        _lastOutcome = _localSession.TryRequestLoad(request)
+            ? "Load requested"
+            : "Load queue busy";
+    }
+
+    private void DriveLocalUntil(Func<bool> complete)
+    {
+        ArgumentNullException.ThrowIfNull(complete);
+        for (int step = 0; step < 10_000; step++)
         {
-            _lastOutcome = $"Load failed: {result.Failure?.Message}";
-            return;
+            PumpChat();
+            SynchronizeProjection();
+            UpdateChatPresentation();
+            DrainRenderer();
+            if (complete()) return;
+            Thread.Sleep(1);
         }
-        RebuildClientProjection();
-        _selection = SelectionKind.None;
-        _lastOutcome = $"Restored generation {result.GenerationId}; control intent reset";
+        throw new TimeoutException("The local authority/client semantic bridge did not converge.");
     }
 
     private void CreateSceneFurniture()
@@ -1092,7 +957,7 @@ public partial class PlayableWorldClient : Node3D
         {
             PlaceholderText = "Enter chat or /help /where",
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-            MaxLength = UltraSimGameProtocol.MaximumChatTextUtf8Bytes,
+            MaxLength = MaximumChatTextCharacters,
         };
         _chatInput.TextSubmitted += SubmitChat;
         chatEntry.AddChild(_chatInput);
@@ -1112,52 +977,14 @@ public partial class PlayableWorldClient : Node3D
         }
     }
 
-    private void StartChat(ParticipantId participant)
-    {
-        if (_runtime is null || _admission is null)
-            throw new InvalidOperationException("Chat requires active Game authority and Admission.");
-        GameChatLimits chatLimits = GameChatLimits.Default with
-        {
-            MaximumParticipants = 8,
-            MaximumRecipientsPerSpeech = 8,
-        };
-        _chatAuthority = new GameChatService(_runtime.Game, _admission, chatLimits);
-        if (!ProtocolLoopback.TryCreate(
-                NetworkProtocolLimits.Default,
-                new DeterministicDatagramLimits(2_048, 1_472),
-                default,
-                out ProtocolLoopback? loopback,
-                out _,
-                UltraSimGameProtocol.Manifest))
-            throw new InvalidOperationException("The playable Chat protocol path could not establish.");
-        _chatLoopback = loopback;
-        _chatDelivery = new RemoteChatDeliveryService(
-            _runtime.Game,
-            _chatAuthority,
-            RemoteChatServerLimits.Default with
-            {
-                MaximumSessions = 8,
-                MaximumPendingDeliveries = 64,
-                MaximumPendingDeliveriesPerSession = 16,
-            });
-        const ulong applicationSessionEpoch = 0xC0_1001;
-        _chatServer = _chatDelivery.Register(
-            loopback!.Server, participant, applicationSessionEpoch);
-        _chatState = new ClientChatState(
-            applicationSessionEpoch,
-            new ClientChatLimits(64, 256, 128));
-        _chatClient = new RemoteChatClient(
-            loopback.Client, applicationSessionEpoch, _chatState);
-    }
-
     private void SubmitChat(string text)
     {
-        if (_chatInput is null || _chatClient is null)
+        if (_chatInput is null || _localSession is null)
             return;
         ClientChatSpeechMode mode = _chatMode is null
             ? ClientChatSpeechMode.Say
             : (ClientChatSpeechMode)_chatMode.GetSelectedId();
-        if (_chatClient.TrySubmit(text, mode))
+        if (_localSession.TrySubmitChat(_nextChatSubmission++, mode, text))
         {
             _chatInput.Clear();
             _chatInput.ReleaseFocus();
@@ -1171,22 +998,9 @@ public partial class PlayableWorldClient : Node3D
 
     private void PumpChat()
     {
-        if (_chatLoopback is null || _chatServer is null || _chatClient is null)
+        if (_localSession is null || _chatState is null)
             return;
-        _ = _chatServer.TryProgress();
-        _ = _chatClient.TryProgress();
-        _chatLoopback.Pump();
-        Drain(_chatLoopback.Server, _chatServer);
-        Drain(_chatLoopback.Client, _chatClient);
-
-        static void Drain(NetworkProtocolPeer peer, IRemoteGameProtocolHandler handler)
-        {
-            while (peer.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
-            {
-                _ = handler.TryProcess(in message, payload);
-                _ = peer.TryConsumeReceived();
-            }
-        }
+        _ = _localSession.PumpChat(_chatState);
     }
 
     private void UpdateChatPresentation()
@@ -1252,10 +1066,10 @@ public partial class PlayableWorldClient : Node3D
 
     private ulong ReadActiveGenerationId()
     {
-        if (_runtime is null || !_runtime.Game.TryUseActiveGeneration(
-                static (_, generationId) => generationId, out ulong generationId))
-            return 0;
-        return generationId;
+        return _localSession is not null &&
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view)
+                ? view.GenerationId
+                : 0;
     }
 
     private bool TryFindPublicAnchor(WorldPublicEntityId id, out WorldPosition position)
@@ -1284,65 +1098,20 @@ public partial class PlayableWorldClient : Node3D
         if (_status is null || _details is null)
             return;
         _status.Text = _lastOutcome;
-        if (!_initialized || _runtime is null || _renderer is null)
+        if (!_initialized || _localSession is null || _renderer is null ||
+            !_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
         {
             _details.Text = "Not running";
             return;
         }
-        bool doorOpen = false;
-        bool breadInChest = false;
-        _ = _runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-            (world, generationId, game) =>
-            {
-                _ = game.WorldActions.TryReadCabinDoor(
-                    world, Resolve(world, _entities.CabinDoorId), out doorOpen);
-                if (game.Inventory.TryReadItem(
-                        world, Resolve(world, _entities.BreadId), out InventoryItem item))
-                    breadInChest = item.Parent == Resolve(world, _entities.CabinChestId);
-                return true;
-            }, out _);
         GodotWorldRendererSnapshot render = _renderer.GetSnapshot();
         _details.Text =
-            $"Profile {_profile} • Selected {_selection} • Tick {_runtime.SimulationTick}\n" +
+            $"Profile {_profile} • Selected {_selection} • Tick {view.SimulationTick}\n" +
             $"Player {_player.Chunk} + ({_player.Local.XMillimeters}, {_player.Local.ZMillimeters}) mm • " +
-            $"door {(doorOpen ? "open" : "closed")} • bread in {(breadInChest ? "chest" : "backpack")}\n" +
+            $"door {(view.DoorIsOpen ? "open" : "closed")} • " +
+            $"bread in {(view.BreadIsInBackpack ? "backpack" : "chest")}\n" +
             $"rendered {render.ActiveRenderChunks} chunks • pending {render.PendingBuilds}/{render.PendingRetirements}";
     }
-
-    private static BoundWorldPack BindPlayablePack(WorldPack pack)
-    {
-        var binding = new WorldContentBinding(
-            GameContent.WorldFingerprint,
-            [
-                GameTerrainMaterialIds.Water,
-                GameTerrainMaterialIds.Sand,
-                GameTerrainMaterialIds.Grass,
-                GameTerrainMaterialIds.Rock,
-                GameTerrainMaterialIds.Snow,
-            ],
-            [
-                GameWorldStaticDefinitionIds.Tree,
-                GameWorldStaticDefinitionIds.Rock,
-                GameWorldStaticDefinitionIds.CabinWall,
-                GameWorldStaticDefinitionIds.CabinRoof,
-                GameWorldStaticDefinitionIds.Shelf,
-                GameWorldStaticDefinitionIds.Book,
-            ]);
-        if (!pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError error))
-            throw new InvalidOperationException($"The playable pack did not bind: {error}.");
-        return bound!;
-    }
-
-    private static PersistenceRestoreOptions RestoreOptions() => new(
-        new PersistenceLimits(
-            maximumArtifactBytes: 16 * 1024 * 1024,
-            maximumEntities: 100_000,
-            maximumShapes: 64,
-            maximumComponents: 64,
-            maximumSections: 256,
-            maximumComponentPayloadBytes: 8 * 1024 * 1024,
-            maximumTemporaryBytes: 64 * 1024 * 1024),
-        ChunkLayoutOptions.KiB16);
 
     private static SpatialChunkKey ChunkKey(int x, int z) =>
         new(GameWorldState.DefaultSpace, new SpatialChunkCoord(x, z));
@@ -1357,11 +1126,6 @@ public partial class PlayableWorldClient : Node3D
             Math.Clamp(player.Chunk.X, minimum, maximum),
             Math.Clamp(player.Chunk.Z, minimum, maximum));
     }
-
-    private static Entity Resolve(EcsWorld world, PersistentEntityId id) =>
-        world.TryResolvePersistentEntity(id, out Entity entity)
-            ? entity
-            : throw new InvalidOperationException($"Persistent entity {id.Value} did not resolve.");
 
     private static bool Nearest(
         in ClientControlWorldPoint point,

@@ -592,6 +592,36 @@ public sealed class ClientWorldSemanticCache
         return true;
     }
 
+    /// <summary>
+    /// Retires only dynamic-public knowledge when Game interest removes a
+    /// chunk. Structural base/overlay residency remains client-owned and may
+    /// continue to serve the render window. This is topology application, not
+    /// an assertion that the authoritative publication chunk is absent.
+    /// </summary>
+    public bool TryRetirePublicInterest(
+        ClientSemanticChunkHandle handle,
+        PublicationEpoch sourceEpoch,
+        out ClientSemanticChunkError error)
+    {
+        EnsureOwner();
+        if (!TryResolveResident(handle, out int slot, out error)) return false;
+        if (!sourceEpoch.IsValid ||
+            _publicationEpoch.IsValid && _publicationEpoch != sourceEpoch)
+        {
+            error = ClientSemanticChunkError.StalePublication;
+            return false;
+        }
+
+        ref ChunkSlot state = ref _slots[slot];
+        DetachKnowledgeLocations(slot);
+        state.PublicRecordCount = 0;
+        state.PublicationCursor = default;
+        if (!_publicationEpoch.IsValid) _publicationEpoch = sourceEpoch;
+        state.SemanticHash = ComputeChunkHash(slot);
+        error = ClientSemanticChunkError.None;
+        return true;
+    }
+
     public void ResetPublicationEpoch(PublicationEpoch epoch)
     {
         EnsureOwner();

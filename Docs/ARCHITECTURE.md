@@ -62,9 +62,11 @@ The previous generation is retired only after publication. Game code borrows
 authority through callback-scoped capabilities; hosts and clients never receive
 the ECS world as shared mutable state.
 
-Offline play remains server-authoritative. Its local semantic link avoids fake
-packetization while preserving the same authority/presentation separation proved
-by the accepted Network N0 OfflineDirect/ProtocolLoopback/UDP paths.
+Offline play remains server-authoritative. `Client/Local` owns one Network-free
+application bridge: mutable Game/Server authority runs on a private owner thread,
+while bounded commands and domain-specific semantic debt/proof cross to Client
+state. It avoids fake packetization while preserving the same authority/
+presentation separation proved by remote paths.
 
 ## Data and time boundaries
 
@@ -121,8 +123,9 @@ derived/application indexes when their ownership and scale are explicit.
   no world storage, membership, AOI, publication, or threads.
 - `Server/Runtime`, `Server/Hosting`, `Server/Persistence`: authority,
   deployment, and durable save-set mechanics.
-- `Client/Core`, `Client/Network`, `Client/_Godot`: retained projection, remote
-  delivery, and rendering.
+- `Client/Core`, `Client/Local`, `Client/Network`, `Client/_Godot`: retained
+  projection, packet-free local application composition, remote delivery, and
+  rendering.
 - `Game/*`: concrete content, state, policy, authoritative workflows, the fixed
   game-world position profile, and replication composition.
 - `_Tests`, `_Benchmarks`, `_Tools`: executable evidence and repository gates.

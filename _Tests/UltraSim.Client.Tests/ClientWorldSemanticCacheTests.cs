@@ -15,6 +15,7 @@ internal static class ClientWorldSemanticCacheTests
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
         PublicationKnowledgeIsGlobalAndFenced(world);
+        PublicInterestRetirementPreservesStructuralResidency(world);
         SnapshotLineageAndCanonicality(world);
         PublicationEpochReplacementIsExplicit(world);
         DeterministicClientCacheChurnMatchesReference(world);
@@ -201,6 +202,34 @@ internal static class ClientWorldSemanticCacheTests
         True(cache.TryApplySnapshot(handle, batch, [replacement], out _));
         Equal(newEpoch, cache.GetSnapshot().PublicationEpoch);
         Equal(replacement, Resident(cache, handle).PublicRecords[0]);
+    }
+
+    private static void PublicInterestRetirementPreservesStructuralResidency(BoundWorldPack world)
+    {
+        var cache = new ClientWorldSemanticCache(world, new(1, 2, 2, 2, 4));
+        SpatialChunkKey key = Key(0, 0);
+        PublicationEpoch epoch = PublicationEpoch.Create();
+        ClientSemanticChunkHandle handle = Publish(
+            cache, key, epoch, 1, [Public(12, 1, 1, key, 300)]);
+        ClientSemanticChunkInfo before = Info(cache, handle);
+
+        False(cache.TryRetirePublicInterest(
+            handle, PublicationEpoch.Create(), out ClientSemanticChunkError stale));
+        Equal(ClientSemanticChunkError.StalePublication, stale);
+        Equal(1, PublicCount(cache, handle));
+
+        True(cache.TryRetirePublicInterest(handle, epoch, out ClientSemanticChunkError retired));
+        Equal(ClientSemanticChunkError.None, retired);
+        ClientSemanticChunkInfo after = Info(cache, handle);
+        Equal(ClientSemanticChunkState.Resident, after.State);
+        Equal(0, after.PublicRecordCount);
+        Equal(default(ChunkPublicationCursor), after.PublicationCursor);
+        Equal(before.StructuralRevision, after.StructuralRevision);
+        Equal(before.StructuralContentHash, after.StructuralContentHash);
+        True(cache.TryGetResidentView(handle, out ClientSemanticChunkView view));
+        Equal(TerrainChunkFormat.MaterialCellCount, view.TerrainMaterials.Length);
+        Equal(1, view.FrozenStatics.Length);
+        Equal(1, view.MultiFragments.Length);
     }
 
     private static void SnapshotLineageAndCanonicality(BoundWorldPack world)

@@ -37,6 +37,13 @@ expanding the server/game-owned public-entity interest entitlement. The
 it does not create Network or AOI policy, and the old `512` default is not a
 frozen production view distance.
 
+`TryRetirePublicInterest` is the corresponding client application operation for
+a Game-owned AOI leave. It clears only dynamic-public knowledge/cursor state for
+the exact resident chunk and source epoch. It does not evict the structurally
+resident terrain/static page or reinterpret a leave as authoritative chunk
+absence. F0.0b's packet-free local bridge and the remote adapters therefore
+converge on the same retained semantic cache while keeping transport different.
+
 `TryApplyChunkAbsent` assumes its local/remote bridge already validated the
 current request/subscription attempt. The cache fences semantic-handle generation
 and publication epoch; same-epoch transport request ordering belongs to the

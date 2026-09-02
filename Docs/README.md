@@ -45,13 +45,17 @@ acceptance narratives remain available through git history.
 - [Client Core](../Client/Core/README.md) — retained engine-neutral UI and
   production semantic-world projections plus transactional presentation-window
   planning.
+- [Local client application bridge](../Client/Local/README.md) — the F0.0b
+  Network-free authority-owner-thread composition with bounded command,
+  semantic-debt, and application-proof handoff.
 - [Client Network](../Client/Network/README.md) — hostile authenticated protocol-
   to-client semantic application for public chunk state, retained entity controls,
   Events, and owner-private UI/Inventory.
 - [Godot client adapter](../Client/_Godot/README.md) — native UI/world presentation,
   bounded render residency, grouping, and floating origin.
 - [Launchable T0.10 client](../Client/Playable.Godot/README.md) — real
-  OfflineDirect woods/cabin application, controls, and save location.
+  OfflineDirect woods/cabin reference application over the F0.0b local bridge,
+  controls, and save location.
 - [Client shell/composition plan](Plans/CLIENT.md) — the real-client reconstruction
   roadmap: Single Player/Online/Complete/Contentless compositions, local-vs-remote
   semantic parity, Network-free local authority/session extraction, Direct Connect
