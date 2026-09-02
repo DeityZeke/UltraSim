@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using UltraSim.Client.Network;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
@@ -13,6 +14,8 @@ using UltraSim.UI;
 
 var tests = new (string Name, Action Body)[]
 {
+    ("ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth", ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth),
+    ("GameSemanticTraceIsBoundedDeterministicAndAllocationFree", GameSemanticTraceIsBoundedDeterministicAndAllocationFree),
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("P04ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers", ReplicationProfileConformanceTests.ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
@@ -144,6 +147,63 @@ var tests = new (string Name, Action Body)[]
     ("N13SnapshotImpairmentAndLostProofConverge", N1OfflineDirectChunkTests.SnapshotImpairmentAndLostProofConverge),
     ("N13BulkSnapshotDoesNotBlockOrdinaryWorldState", N1OfflineDirectChunkTests.BulkSnapshotDoesNotBlockOrdinaryWorldState),
 };
+
+static void ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth()
+{
+    Check.Equal(8, Unsafe.SizeOf<ReplicationEntityId>());
+    Check.Equal(8, Unsafe.SizeOf<StateEpoch>());
+    var canonical = new ReplicationEntityId(31, 4);
+    Check.Equal(canonical, new ReplicationEntityId(31, 4));
+    Check.False(new ReplicationEntityId(31, 5) == canonical);
+    Check.Throws<ArgumentOutOfRangeException>(() => _ = new ReplicationEntityId(0, 0));
+    Check.Throws<ArgumentOutOfRangeException>(() => _ = new StateEpoch(0));
+}
+
+static void GameSemanticTraceIsBoundedDeterministicAndAllocationFree()
+{
+    var first = new GameSemanticTrace(2);
+    var second = new GameSemanticTrace(2);
+    var state = new GameSemanticTraceEntry(
+        GameSemanticTraceKind.ProjectionStatePublished, new StateEpoch(9), 4, 10, 20, 30);
+    var lifecycle = new GameSemanticTraceEntry(
+        GameSemanticTraceKind.ProjectionLifecyclePublished, new StateEpoch(9), 5, 11, 21, 31);
+    var rejected = new GameSemanticTraceEntry(
+        GameSemanticTraceKind.ApplicationEventPublished, new StateEpoch(9), 6, 12, 22, 32);
+
+    Check.True(first.TryAppend(state));
+    Check.True(first.TryAppend(lifecycle));
+    Check.True(second.TryAppend(state));
+    Check.True(second.TryAppend(lifecycle));
+    Check.False(first.TryAppend(rejected));
+    Check.Equal(2, first.Count);
+    Check.True(first.CanonicalEquals(second));
+    Check.Equal(first.ComputeDigest(), second.ComputeDigest());
+    Check.True(first.ReservedBytes >= first.Count * Unsafe.SizeOf<GameSemanticTraceEntry>());
+
+    var reverse = new GameSemanticTrace(2);
+    Check.True(reverse.TryAppend(lifecycle));
+    Check.True(reverse.TryAppend(state));
+    Check.False(first.CanonicalEquals(reverse));
+    Check.False(first.ComputeDigest() == reverse.ComputeDigest());
+
+    first.Clear();
+    Check.Equal(0, first.Count);
+    Check.Equal(2, first.Capacity);
+
+    var warm = new GameSemanticTrace(128);
+    Check.True(warm.TryAppend(state));
+    _ = warm.ComputeDigest();
+    warm.Clear();
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < warm.Capacity; index++)
+    {
+        Check.True(warm.TryAppend(new GameSemanticTraceEntry(
+            GameSemanticTraceKind.ProjectionStatePublished,
+            new StateEpoch(9), unchecked((ulong)index), 1, 2, 3)));
+    }
+    _ = warm.ComputeDigest();
+    Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
 
 foreach ((string name, Action body) in tests)
 {
@@ -2348,6 +2408,19 @@ static class Check
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
             throw new InvalidOperationException($"Expected {expected}, got {actual}.");
+    }
+
+    internal static void Throws<TException>(Action body) where TException : Exception
+    {
+        try
+        {
+            body();
+        }
+        catch (TException)
+        {
+            return;
+        }
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 
     internal static void Contains(ReadOnlySpan<GameProjectionDelta> values, GameProjectionDeltaKind kind)

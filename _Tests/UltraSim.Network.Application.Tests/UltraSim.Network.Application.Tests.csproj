@@ -18,6 +18,7 @@
     <ProjectReference Include="../../Game/Protocol/UltraSim.Game.Protocol.csproj" />
     <ProjectReference Include="../../Game/Persistence/UltraSim.Game.Persistence.csproj" />
     <ProjectReference Include="../../Game/Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../../Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj" />
     <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
     <ProjectReference Include="../../Server/Hosting/UltraSim.Server.Hosting.csproj" />

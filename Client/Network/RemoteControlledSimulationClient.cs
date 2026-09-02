@@ -1,4 +1,5 @@
 using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
 using UltraSim.Network;
 
 namespace UltraSim.Client.Network;

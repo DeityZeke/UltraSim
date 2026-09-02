@@ -1,6 +1,5 @@
 using System.Runtime.CompilerServices;
 using UltraSim.Game.Composition;
-using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
 
@@ -19,7 +18,7 @@ public sealed class OfflineDirectGameProjection
     private readonly GameProjectedEntity[] _packedEntities;
     private GameProjectionParticipant[] _participants;
     private GameProjectionParticipant[] _stagingParticipants;
-    private readonly NetworkSemanticTrace _trace;
+    private readonly GameSemanticTrace _trace;
     private StateEpoch _stateEpoch;
     private ulong _generationId;
     private ulong _baselineRevision;
@@ -42,7 +41,7 @@ public sealed class OfflineDirectGameProjection
         _packedEntities = new GameProjectedEntity[maximumEntities];
         _participants = new GameProjectionParticipant[maximumParticipants];
         _stagingParticipants = new GameProjectionParticipant[maximumParticipants];
-        _trace = new NetworkSemanticTrace(semanticTraceCapacity);
+        _trace = new GameSemanticTrace(semanticTraceCapacity);
     }
 
     /// <summary>Atomically publishes one whole-epoch baseline from canonical projection truth.</summary>
@@ -106,13 +105,13 @@ public sealed class OfflineDirectGameProjection
         _nextDeltaSequence = frame.NextDeltaSequence;
         _nextApplicationEventSequence = nextApplicationEventSequence;
         _trace.Clear();
-        _trace.TryAppend(new NetworkSemanticTraceEntry(
-            NetworkSemanticTraceKind.BaselineCommitted,
+        _trace.TryAppend(new GameSemanticTraceEntry(
+            GameSemanticTraceKind.BaselineCommitted,
             _stateEpoch,
             frame.SimulationTick,
-            subject: unchecked((ulong)entityCount),
-            version: frame.FrameSequence,
-            valueHash: ComputeCanonicalHash()));
+            Subject: unchecked((ulong)entityCount),
+            Version: frame.FrameSequence,
+            ValueHash: ComputeCanonicalHash()));
         return OfflineProjectionApplyStatus.Success;
     }
 
@@ -227,11 +226,11 @@ public sealed class OfflineDirectGameProjection
         for (int index = 0; index < deltas.Length; index++)
         {
             GameProjectionDelta delta = deltas[index];
-            _trace.TryAppend(new NetworkSemanticTraceEntry(
+            _trace.TryAppend(new GameSemanticTraceEntry(
                 delta.Kind is GameProjectionDeltaKind.Created or GameProjectionDeltaKind.Destroyed or
                     GameProjectionDeltaKind.ComponentAdded or GameProjectionDeltaKind.ComponentRemoved
-                    ? NetworkSemanticTraceKind.ProjectionLifecyclePublished
-                    : NetworkSemanticTraceKind.ProjectionStatePublished,
+                    ? GameSemanticTraceKind.ProjectionLifecyclePublished
+                    : GameSemanticTraceKind.ProjectionStatePublished,
                 _stateEpoch,
                 frame.SimulationTick,
                 Pack(delta.Entity),
@@ -257,10 +256,10 @@ public sealed class OfflineDirectGameProjection
         for (int index = 0; index < events.Length; index++)
         {
             GameApplicationEvent applicationEvent = events[index];
-            _trace.TryAppend(new NetworkSemanticTraceEntry(
-                NetworkSemanticTraceKind.ApplicationEventPublished,
+            _trace.TryAppend(new GameSemanticTraceEntry(
+                GameSemanticTraceKind.ApplicationEventPublished,
                 _stateEpoch,
-                simulationTick: 0,
+                SimulationTick: 0,
                 applicationEvent.Subject,
                 applicationEvent.Sequence,
                 applicationEvent.PayloadHash));

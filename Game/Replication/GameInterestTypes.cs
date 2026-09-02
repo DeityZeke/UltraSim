@@ -1,7 +1,6 @@
 using System.Runtime.InteropServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
-using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
 

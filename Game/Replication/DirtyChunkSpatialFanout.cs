@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using UltraSim.Game.Admission;
-using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -18,7 +17,7 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
     int MaximumDeltaRecords,
     int SpatialRegionEdgeMillimeters,
     ulong MaximumDeliveryAgeSteps = 1_024,
-    int MaximumChunksPerBundle = UltraSimGameProtocol.MaximumDirtyChunkBundleEntries)
+    int MaximumChunksPerBundle = DirtyReplicationEncoding.MaximumChunksPerBundle)
 {
     public static DirtyChunkSpatialFanoutLimits Default => new(
         MaximumRecipients: 256,
@@ -30,7 +29,7 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
         MaximumDeltaRecords: 64,
         SpatialRegionEdgeMillimeters: 128_000,
         MaximumDeliveryAgeSteps: 1_024,
-        MaximumChunksPerBundle: UltraSimGameProtocol.MaximumDirtyChunkBundleEntries);
+        MaximumChunksPerBundle: DirtyReplicationEncoding.MaximumChunksPerBundle);
 
     internal void Validate()
     {
@@ -39,10 +38,10 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
             MaximumOutstandingDeliveries < MaximumRecipients || MaximumSnapshotRecords <= 0 ||
             MaximumDeltaRecords <= 0 || SpatialRegionEdgeMillimeters <= 0 ||
             MaximumDeliveryAgeSteps == 0 || MaximumChunksPerBundle <= 0 ||
-            MaximumChunksPerBundle > UltraSimGameProtocol.MaximumDirtyChunkBundleEntries)
+            MaximumChunksPerBundle > DirtyReplicationEncoding.MaximumChunksPerBundle)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecipients));
-        if (MaximumSnapshotRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords ||
-            MaximumDeltaRecords > UltraSimGameProtocol.MaximumChunkPublicationRecords)
+        if (MaximumSnapshotRecords > DirtyReplicationEncoding.MaximumRecordsPerChunk ||
+            MaximumDeltaRecords > DirtyReplicationEncoding.MaximumRecordsPerChunk)
             throw new ArgumentOutOfRangeException(nameof(MaximumSnapshotRecords));
         _ = checked(MaximumRecipients * 2);
     }
@@ -654,7 +653,7 @@ public sealed class DirtyChunkSpatialFanout
         EnsureOwner();
         bundle = default;
         PrepareCadenceStep(cadenceStep);
-        if (byteBudget <= RemoteDirtyChunkBundleHeaderCodec.EncodedSize || _nextBundleId == 0)
+        if (byteBudget <= DirtyReplicationEncoding.DirtyChunkBundleHeaderBytes || _nextBundleId == 0)
             return DirtyChunkBuildStatus.CapacityExceeded;
         int recipientIndex = FindRecipient(participant);
         if (recipientIndex < 0) return DirtyChunkBuildStatus.UnknownRecipient;
@@ -674,7 +673,7 @@ public sealed class DirtyChunkSpatialFanout
         EnsureOwner();
         bundle = default;
         PrepareCadenceStep(cadenceStep);
-        if (byteBudget <= RemoteDirtyChunkBundleHeaderCodec.EncodedSize || _nextBundleId == 0)
+        if (byteBudget <= DirtyReplicationEncoding.DirtyChunkBundleHeaderBytes || _nextBundleId == 0)
             return DirtyChunkBuildStatus.CapacityExceeded;
         while (TryPopReadyRecipient(out int recipientIndex))
         {
@@ -698,7 +697,7 @@ public sealed class DirtyChunkSpatialFanout
         int entryCount = 0;
         int snapshotCount = 0;
         int deltaCount = 0;
-        int encodedBytes = RemoteDirtyChunkBundleHeaderCodec.EncodedSize;
+        int encodedBytes = DirtyReplicationEncoding.DirtyChunkBundleHeaderBytes;
         DirtyChunkBuildStatus deferredStatus = DirtyChunkBuildStatus.NoData;
         for (int rowIndex = _recipientPendingHeads[recipientIndex];
              rowIndex >= 0 && entryCount < _bundleEntries.Length;)
@@ -713,10 +712,9 @@ public sealed class DirtyChunkSpatialFanout
                 participant, recipientIndex, rowIndex, cadenceStep, out DirtyChunkDelivery delivery);
             if (status == DirtyChunkBuildStatus.Success)
             {
-                RemoteChunkPublicationKind kind = PublicationKind(delivery.Status);
                 int recordCount = delivery.Snapshot.Length + delivery.Deltas.Length;
-                int entryBytes = UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
-                    kind, recordCount);
+                int entryBytes = DirtyReplicationEncoding.GetChunkEntryEncodedBytes(
+                    delivery.Status, recordCount);
                 if (encodedBytes + entryBytes > byteBudget)
                 {
                     _ = AbandonDelivery(participant, delivery.DeliveryId);
@@ -756,15 +754,6 @@ public sealed class DirtyChunkSpatialFanout
             _bundleDeltaScratch.AsSpan(0, deltaCount), encodedBytes);
         return DirtyChunkBuildStatus.Success;
     }
-
-    private static RemoteChunkPublicationKind PublicationKind(OfflineDirectChunkReadStatus status) =>
-        status switch
-        {
-            OfflineDirectChunkReadStatus.Snapshot => RemoteChunkPublicationKind.Snapshot,
-            OfflineDirectChunkReadStatus.Delta => RemoteChunkPublicationKind.Delta,
-            OfflineDirectChunkReadStatus.ChunkAbsent => RemoteChunkPublicationKind.Absence,
-            _ => throw new ArgumentOutOfRangeException(nameof(status)),
-        };
 
     private DirtyChunkBuildStatus TryBuildDeliveryCore(
         ParticipantId participant,

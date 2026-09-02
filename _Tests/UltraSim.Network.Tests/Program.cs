@@ -5,11 +5,7 @@ using UltraSim.Network.Comparison;
 var tests = new (string Name, Action Body)[]
 {
     ("ConnectionIdentityIsGenerationalAndFixedWidth", ConnectionIdentityIsGenerationalAndFixedWidth),
-    ("ReplicationIdentityIsConnectionIndependentAndFixedWidth", ReplicationIdentityIsConnectionIndependentAndFixedWidth),
     ("LaneTableIsExhaustiveAndSemanticallyDistinct", LaneTableIsExhaustiveAndSemanticallyDistinct),
-    ("SemanticTraceIsBoundedTransactionalAndDeterministic", SemanticTraceIsBoundedTransactionalAndDeterministic),
-    ("SemanticTraceDigestIsOrderSensitive", SemanticTraceDigestIsOrderSensitive),
-    ("SemanticTraceWarmAppendAndDigestAllocateNothing", SemanticTraceWarmAppendAndDigestAllocateNothing),
     ("ImpairmentIsStatelessDeterministicAndBounded", ImpairmentIsStatelessDeterministicAndBounded),
     ("ImpairmentProbabilityBoundariesAreExact", ImpairmentProbabilityBoundariesAreExact),
     ("AdmittedHotContractOperationsAllocateNothing", AdmittedHotContractOperationsAllocateNothing),
@@ -45,19 +41,6 @@ static void ConnectionIdentityIsGenerationalAndFixedWidth()
     False(first == reused);
     Equal("7:1", first.ToString());
     Throws<ArgumentOutOfRangeException>(() => _ = new ConnectionId(7, 0));
-}
-
-static void ReplicationIdentityIsConnectionIndependentAndFixedWidth()
-{
-    Equal(8, Unsafe.SizeOf<ReplicationEntityId>());
-    Equal(8, Unsafe.SizeOf<StateEpoch>());
-    var canonical = new ReplicationEntityId(31, 4);
-    var recipientA = canonical;
-    var recipientB = canonical;
-    Equal(recipientA, recipientB);
-    False(new ReplicationEntityId(31, 5) == canonical);
-    Throws<ArgumentOutOfRangeException>(() => _ = new ReplicationEntityId(0, 0));
-    Throws<ArgumentOutOfRangeException>(() => _ = new StateEpoch(0));
 }
 
 static void LaneTableIsExhaustiveAndSemanticallyDistinct()
@@ -99,70 +82,6 @@ static void LaneTableIsExhaustiveAndSemanticallyDistinct()
     Equal(NetworkRetentionPolicy.Disposable, disposable.Retention);
     False(events.Retention == NetworkRetentionPolicy.LatestState);
     Throws<ArgumentOutOfRangeException>(() => NetworkLaneContracts.Get((NetworkLane)255));
-}
-
-static void SemanticTraceIsBoundedTransactionalAndDeterministic()
-{
-    var first = new NetworkSemanticTrace(2);
-    var second = new NetworkSemanticTrace(2);
-    NetworkSemanticTraceEntry a = Entry(NetworkSemanticTraceKind.ProjectionStatePublished, 4, 10, 20);
-    NetworkSemanticTraceEntry b = Entry(NetworkSemanticTraceKind.ClientStateApplied, 4, 10, 20);
-    NetworkSemanticTraceEntry rejected = Entry(NetworkSemanticTraceKind.ApplicationEventPublished, 5, 11, 21);
-
-    True(first.TryAppend(a));
-    True(first.TryAppend(b));
-    True(second.TryAppend(a));
-    True(second.TryAppend(b));
-    False(first.TryAppend(rejected));
-    Equal(2, first.Count);
-    True(first.CanonicalEquals(second));
-    Equal(first.ComputeDigest(), second.ComputeDigest());
-    True(first.ReservedBytes >= first.Count * Unsafe.SizeOf<NetworkSemanticTraceEntry>());
-
-    first.Clear();
-    Equal(0, first.Count);
-    Equal(2, first.Capacity);
-    False(first.CanonicalEquals(second));
-}
-
-static void SemanticTraceDigestIsOrderSensitive()
-{
-    var forward = new NetworkSemanticTrace(2);
-    var reverse = new NetworkSemanticTrace(2);
-    NetworkSemanticTraceEntry a = Entry(NetworkSemanticTraceKind.AuthorityInputAccepted, 1, 2, 3);
-    NetworkSemanticTraceEntry b = Entry(NetworkSemanticTraceKind.ProjectionStatePublished, 1, 2, 3);
-    True(forward.TryAppend(a));
-    True(forward.TryAppend(b));
-    True(reverse.TryAppend(b));
-    True(reverse.TryAppend(a));
-    False(forward.CanonicalEquals(reverse));
-    False(forward.ComputeDigest() == reverse.ComputeDigest());
-
-    var maximumValues = new NetworkSemanticTrace(1);
-    True(maximumValues.TryAppend(new(
-        NetworkSemanticTraceKind.ClockAnchorApplied,
-        new StateEpoch(ulong.MaxValue),
-        ulong.MaxValue,
-        ulong.MaxValue,
-        ulong.MaxValue,
-        ulong.MaxValue)));
-    False(maximumValues.ComputeDigest() == default);
-}
-
-static void SemanticTraceWarmAppendAndDigestAllocateNothing()
-{
-    var trace = new NetworkSemanticTrace(128);
-    for (int i = 0; i < 16; i++)
-        True(trace.TryAppend(Entry(NetworkSemanticTraceKind.ProjectionStatePublished, (ulong)i, 1, 2)));
-    _ = trace.ComputeDigest();
-    trace.Clear();
-
-    long before = GC.GetAllocatedBytesForCurrentThread();
-    for (int i = 0; i < 128; i++)
-        True(trace.TryAppend(Entry(NetworkSemanticTraceKind.ProjectionStatePublished, (ulong)i, 1, 2)));
-    _ = trace.ComputeDigest();
-    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-    Equal(0L, allocated);
 }
 
 static void ImpairmentIsStatelessDeterministicAndBounded()
@@ -251,9 +170,6 @@ static void DirectionalEvidenceNeverProducesHeadlineRatio()
     False(unsupported.SemanticallyComparable);
     False(unsupported.MayReportHeadlineRatio);
 }
-
-static NetworkSemanticTraceEntry Entry(NetworkSemanticTraceKind kind, ulong tick, ulong subject, ulong version) =>
-    new(kind, new StateEpoch(9), tick, subject, version, valueHash: subject ^ version);
 
 static NetworkEvidenceProfile Profile() => new(
     "network-n0-contract-v1",

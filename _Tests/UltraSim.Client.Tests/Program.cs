@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using UltraSim.Client.Bootstrap.Godot;
 using UltraSim.Client.Core;
 using UltraSim.UI;
 
@@ -26,6 +27,7 @@ var tests = new (string Name, Action Body)[]
     ("ClientWorldSemanticCacheProductionContracts", ClientWorldSemanticCacheTests.Run),
     ("ClientPresentationWindowIsEngineNeutralAndTransactional", ClientPresentationWindowTests.Run),
     ("ClientWorldInputIsEngineNeutralAndSequenced", ClientWorldInputTests.Run),
+    ("CapabilityMenuMatchesComposition", CapabilityMenuMatchesComposition),
 };
 
 foreach ((string name, Action body) in tests)
@@ -35,6 +37,19 @@ foreach ((string name, Action body) in tests)
 }
 
 Console.WriteLine($"All {tests.Length} Client Core tests passed.");
+
+static void CapabilityMenuMatchesComposition()
+{
+    Assert.Equal(
+        "SinglePlayer,Settings,Exit",
+        string.Join(',', ClientCompositionManifest.SinglePlayer.Capabilities));
+    Assert.Equal(
+        "Multiplayer,Settings,Exit",
+        string.Join(',', ClientCompositionManifest.Online.Capabilities));
+    Assert.Equal(
+        "SinglePlayer,Multiplayer,Settings,Exit",
+        string.Join(',', ClientCompositionManifest.Complete.Capabilities));
+}
 
 static void ColdAndHotOpenUseExactDefinitionCache()
 {

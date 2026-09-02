@@ -1,7 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
-using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
 
@@ -229,6 +228,6 @@ public readonly record struct OfflineProjectionSnapshot(
     int EntityCount,
     int ParticipantCount,
     ulong NextApplicationEventSequence,
-    NetworkTraceDigest SemanticTraceDigest,
+    GameSemanticTraceDigest SemanticTraceDigest,
     ulong CanonicalHash,
     long ReservedBytes);

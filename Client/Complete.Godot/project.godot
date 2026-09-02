@@ -1,0 +1,16 @@
+config_version=5
+
+[application]
+config/name="UltraSim Complete"
+run/main_scene="res://Bootstrap.tscn"
+
+[dotnet]
+project/assembly_name="UltraSim.Client.Complete.Godot"
+
+[display]
+window/size/viewport_width=960
+window/size/viewport_height=540
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

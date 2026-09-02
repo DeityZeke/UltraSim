@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
     <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+    <ProjectReference Include="../Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../../Kernels/Network.Generators/UltraSim.Network.Generators.csproj"
                       OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>

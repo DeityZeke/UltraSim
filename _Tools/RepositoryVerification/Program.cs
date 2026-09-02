@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -48,6 +49,8 @@ foreach (string configuration in configurations)
         Run(root, "dotnet", command);
     }
 
+    VerifyClientCompositionArtifacts(root, configuration, options.NoRestore);
+
     if (!options.SkipGodot)
     {
         const string godotProject = "_Tests/UltraSim.S0.Godot.Tests/UltraSim.S0.Godot.Tests.csproj";
@@ -83,12 +86,105 @@ foreach (string configuration in configurations)
             "--path", "Client/Playable.Godot",
             "--", "--smoke",
         ]);
+        foreach (string composition in new[] { "SinglePlayer", "Online", "Complete" })
+        {
+            Run(root, godot,
+            [
+                "--headless",
+                "--path", $"Client/{composition}.Godot",
+                "--", "--composition-smoke",
+            ]);
+        }
     }
 }
 
 Run(root, "git", ["diff", "--check"]);
 Console.WriteLine("PASS repository verification");
 return 0;
+
+static void VerifyClientCompositionArtifacts(string root, string configuration, bool noRestore)
+{
+    ClientCompositionGate[] gates =
+    [
+        new(
+            "SinglePlayer",
+            "Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj",
+            ["UltraSim.Game.Composition", "UltraSim.Game.Replication", "UltraSim.Server.Runtime"],
+            ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
+                "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
+        new(
+            "Online",
+            "Client/Online.Godot/UltraSim.Client.Online.Godot.csproj",
+            ["UltraSim.Client.Network", "UltraSim.Game.Protocol", "UltraSim.Network"],
+            ["UltraSim.Game.Composition", "UltraSim.Game.Persistence", "UltraSim.Game.Replication",
+                "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting",
+                "UltraSim.Server.Persistence", "UltraSim.Server.Runtime"]),
+        new(
+            "Complete",
+            "Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj",
+            ["UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
+                "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime"],
+            []),
+    ];
+
+    foreach (ClientCompositionGate gate in gates)
+    {
+        var command = new List<string> { "build", gate.Project, "-c", configuration };
+        if (noRestore) command.Add("--no-restore");
+        Run(root, "dotnet", command);
+
+        string output = Path.Combine(root, "Client", $"{gate.Name}.Godot", ".godot", "mono", "temp", "bin",
+            configuration);
+        string dependenciesPath = Path.Combine(output, $"UltraSim.Client.{gate.Name}.Godot.deps.json");
+        if (!File.Exists(dependenciesPath))
+            throw new InvalidOperationException($"{gate.Name} did not produce its expected .deps.json: {dependenciesPath}");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(dependenciesPath));
+        var dependencies = document.RootElement.GetProperty("libraries").EnumerateObject()
+            .Select(static property => property.Name.Split('/')[0])
+            .ToHashSet(StringComparer.Ordinal);
+        int declaredNativeAssets = 0;
+        foreach (JsonProperty target in document.RootElement.GetProperty("targets").EnumerateObject())
+        foreach (JsonProperty library in target.Value.EnumerateObject())
+        {
+            if (library.Value.TryGetProperty("native", out JsonElement native))
+                declaredNativeAssets += native.EnumerateObject().Count();
+            if (!library.Value.TryGetProperty("runtimeTargets", out JsonElement runtimeTargets)) continue;
+            declaredNativeAssets += runtimeTargets.EnumerateObject().Count(static asset =>
+                asset.Value.TryGetProperty("assetType", out JsonElement kind) &&
+                string.Equals(kind.GetString(), "native", StringComparison.Ordinal));
+        }
+        var outputAssemblies = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
+            .Select(static path => Path.GetFileNameWithoutExtension(path))
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (string required in gate.RequiredAssemblies)
+        {
+            if (!dependencies.Contains(required) || !outputAssemblies.Contains(required))
+                throw new InvalidOperationException(
+                    $"{gate.Name} composition is missing required capability assembly '{required}'.");
+        }
+        foreach (string forbidden in gate.ForbiddenAssemblies)
+        {
+            if (dependencies.Contains(forbidden) || outputAssemblies.Contains(forbidden))
+                throw new InvalidOperationException(
+                    $"{gate.Name} composition resolved or copied forbidden assembly '{forbidden}'.");
+        }
+
+        long managedBytes = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
+            .Sum(static path => new FileInfo(path).Length);
+        int copiedNativeAssets = Directory.EnumerateFiles(output, "*", SearchOption.TopDirectoryOnly)
+            .Count(static path => Path.GetExtension(path) is ".so" or ".dylib");
+        Console.WriteLine(
+            $"PASS {gate.Name}_ResolvedOutput dependencies={dependencies.Count} " +
+            $"ultrasimAssemblies={outputAssemblies.Count} managedBytes={managedBytes} " +
+            $"declaredNativeAssets={declaredNativeAssets} copiedNativeAssets={copiedNativeAssets}");
+    }
+
+    Console.WriteLine("PASS SinglePlayer_NoClientNetwork");
+    Console.WriteLine("PASS SinglePlayer_NoNetworkKernel");
+    Console.WriteLine("PASS Online_NoLocalServerRuntime");
+    Console.WriteLine("PASS Online_NoLocalAuthorityComposition");
+}
 
 static void VerifyArchitecture(string root)
 {
@@ -118,6 +214,7 @@ static void VerifyArchitecture(string root)
         ["Client/Network/UltraSim.Client.Network.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
@@ -127,6 +224,28 @@ static void VerifyArchitecture(string root)
             "Client/Core/UltraSim.Client.Core.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
+        ],
+        ["Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj"] =
+            ["Client/_Godot/UltraSim.Client.Godot.csproj"],
+        ["Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj"] =
+        [
+            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Replication/UltraSim.Game.Replication.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+        ],
+        ["Client/Online.Godot/UltraSim.Client.Online.Godot.csproj"] =
+        [
+            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
+            "Client/Network/UltraSim.Client.Network.csproj",
+        ],
+        ["Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj"] =
+        [
+            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
+            "Client/Network/UltraSim.Client.Network.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Replication/UltraSim.Game.Replication.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
         ["Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj"] =
         [
@@ -140,6 +259,7 @@ static void VerifyArchitecture(string root)
             "Game/Persistence/UltraSim.Game.Persistence.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
             "Game/Replication/UltraSim.Game.Replication.csproj",
+            "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
@@ -199,11 +319,21 @@ static void VerifyArchitecture(string root)
         ],
         ["Game/Protocol/UltraSim.Game.Protocol.csproj"] =
         [
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Kernels/Network.Generators/UltraSim.Network.Generators.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
         ],
         ["Game/Replication/UltraSim.Game.Replication.csproj"] =
+        [
+            "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/ECS/UltraSim.ECS.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+        ],
+        ["Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj"] =
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",
             "Game/Admission/UltraSim.Game.Admission.csproj",
@@ -211,8 +341,8 @@ static void VerifyArchitecture(string root)
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Game/Replication/UltraSim.Game.Replication.csproj",
             "Game/World/UltraSim.Game.World.csproj",
-            "Kernels/ECS/UltraSim.ECS.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
@@ -281,6 +411,8 @@ static void VerifyDocumentation(string root)
         "Docs/GAME.md",
         "Docs/Plans/NETWORK.md",
         "Docs/Plans/CHAT.md",
+        "Docs/Plans/CLIENT.md",
+        "Docs/Plans/ASSET_STREAMING.md",
         "Docs/Plans/PHYSICS.md",
         "Docs/Plans/TERRAIN.md",
         "Kernels/ECS/README.md",
@@ -293,6 +425,7 @@ static void VerifyDocumentation(string root)
         "Kernels/Network/README.md",
         "Kernels/Spatial/README.md",
         "Client/Core/README.md",
+        "Client/Bootstrap.Godot/README.md",
         "Client/_Godot/README.md",
         "Client/Playable.Godot/README.md",
         "Game/World/README.md",
@@ -527,3 +660,9 @@ internal sealed record VerificationOptions(
         return new(architectureOnly, allConfigurations, configuration, skipGodot, noRestore, godot);
     }
 }
+
+internal sealed record ClientCompositionGate(
+    string Name,
+    string Project,
+    string[] RequiredAssemblies,
+    string[] ForbiddenAssemblies);

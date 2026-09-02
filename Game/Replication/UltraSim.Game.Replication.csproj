@@ -11,15 +11,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="OfflineDirectChunkWireEncoder.cs" />
+    <Compile Remove="RemoteApplicationEventServer.cs" />
+    <Compile Remove="RemoteChatServer.cs" />
+    <Compile Remove="RemoteChunkWorldStateServer.cs" />
+    <Compile Remove="RemoteControlledSimulationServer.cs" />
+    <Compile Remove="RemoteDirtyChunkSpatialFanoutServer.cs" />
+    <Compile Remove="RemoteDirtyEntitySpatialFanoutServer.cs" />
+    <Compile Remove="RemoteGameApplicationSession.cs" />
+    <Compile Remove="RemoteWorldStateCompactionScheduler.cs" />
+    <Compile Remove="RemoteWorldStateServer.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
-    <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
-    <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
-    <ProjectReference Include="../Accounting/UltraSim.Game.Accounting.csproj" />
     <ProjectReference Include="../Admission/UltraSim.Game.Admission.csproj" />
-    <ProjectReference Include="../Chat/UltraSim.Game.Chat.csproj" />
     <ProjectReference Include="../Composition/UltraSim.Game.Composition.csproj" />
     <ProjectReference Include="../Contracts/UltraSim.Game.Contracts.csproj" />
-    <ProjectReference Include="../Protocol/UltraSim.Game.Protocol.csproj" />
     <ProjectReference Include="../World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
   </ItemGroup>

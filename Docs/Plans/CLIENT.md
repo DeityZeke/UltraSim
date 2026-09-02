@@ -1,8 +1,8 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
-**Status:** frozen architectural direction with proposed checkpoint implementations after Physics
-P0.1b (`6bfef1e2`). The Network-free local-host model is accepted; F0.0a/F0.0b extract the
-already-proven OfflineDirect behavior into permanent executable and local-session boundaries.
+**Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`) and F0.0a executable
+composition/shipped-dependency separation accepted. The Network-free local-host model is accepted;
+F0.0b extracts the already-proven OfflineDirect behavior into its permanent local-session boundary.
 Direct-connect trust, content activation, and later content acquisition remain separately gated
 before their consuming checkpoints.
 
@@ -151,10 +151,11 @@ F0.0b replaces those shortcuts with one authority owner thread, bounded local co
 bounded domain-specific semantic egress, and explicit applied/rejected local semantic proof. It
 does not redesign OfflineDirect or route the host player through loopback Network.
 
-One current assembly boundary also needs extraction: `Game/Replication` presently references
-`Kernels/Network` because Game-owned replication semantics and remote delivery integration share a
-project. F0.0a/F0.0b must leave the Game-owned publication/debt side usable by Local Play without
-shipping Network. Exact project names are not frozen; the shipped dependency result is.
+F0.0a resolved the former shared assembly boundary. `Game/Replication` now owns packet-free
+publication, disclosure, knowledge/debt, profile, and proof meaning without referencing Game
+Protocol or `Kernels/Network`. `Game/Replication.Remote` contains the Network-dependent remote
+codec/protocol-peer adapters. Local Play can consume Game-owned semantics without shipping either
+the remote adapter or Network kernel.
 
 ## Existing UI foundation
 
@@ -1073,7 +1074,7 @@ Camera         Third-Person Follow
 Remember the decision by durable server/profile identity, conceptually:
 
 ```text
-ServerIdentity
+ApplicationRealmId
 ControlProfileRevision
 ControlProfileHash
 ```
@@ -1405,6 +1406,13 @@ contents. An assembly hidden from a menu but still shipped is not an absent capa
 # 29. Implementation roadmap
 
 ## F0.0a — Real client executable-composition foundation
+
+**Status: CLOSED.** `Client/SinglePlayer.Godot`, `Client/Online.Godot`, and
+`Client/Complete.Godot` are separate fixed composition roots over one shared
+`Client/Bootstrap.Godot` menu/bootstrap. Their built `.deps.json` and copied output assemblies are
+permanently verified: Single Player excludes Client Network/Game Protocol/the Network kernel,
+Online excludes local Game composition/replication/Server Runtime, and Complete contains both
+capability families. `Playable.Godot` remains the acceptance/reference executable for F0.0b.
 
 Implement:
 

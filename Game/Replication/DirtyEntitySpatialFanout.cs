@@ -1,9 +1,7 @@
 using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
-using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
-using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
 
@@ -814,7 +812,7 @@ public class DirtyEntitySpatialFanout
         int maximum = Math.Min(_limits.MaximumRecordsPerBundle, destination.Length);
         if (maximum == 0) return DirtyEntityBuildStatus.DestinationTooSmall;
         int estimate = DirtyEntityDeliveryRecord.MaximumEncodedBytes;
-        int available = byteBudget - RemoteDirtyEntityStateHeaderCodec.EncodedSize;
+        int available = byteBudget - DirtyReplicationEncoding.DirtyEntityBundleHeaderBytes;
         if (available < estimate) return DirtyEntityBuildStatus.ByteBudgetTooSmall;
         int capacityByBytes = Math.Min(maximum, available / estimate);
         if (capacityByBytes == 0) return DirtyEntityBuildStatus.ByteBudgetTooSmall;
@@ -871,7 +869,7 @@ public class DirtyEntitySpatialFanout
         SaturatingIncrement(ref _bundlesBuilt);
         bundle = new DirtyEntityBundle(
             recipient.Participant, _stateEpoch, bundleId, selectedCount,
-            checked(RemoteDirtyEntityStateHeaderCodec.EncodedSize + selectedCount * estimate));
+            checked(DirtyReplicationEncoding.DirtyEntityBundleHeaderBytes + selectedCount * estimate));
         return DirtyEntityBuildStatus.Success;
     }
 

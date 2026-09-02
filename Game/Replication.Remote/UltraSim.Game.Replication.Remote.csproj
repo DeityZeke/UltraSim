@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <AssemblyName>UltraSim.Game.Replication.Remote</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1572;CS1573;CS1574;CS1580;CS1581;CS1584;CS1587;CS1711;CS1734;CS1735</WarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Replication/OfflineDirectChunkWireEncoder.cs" Link="OfflineDirectChunkWireEncoder.cs" />
+    <Compile Include="../Replication/RemoteApplicationEventServer.cs" Link="RemoteApplicationEventServer.cs" />
+    <Compile Include="../Replication/RemoteChatServer.cs" Link="RemoteChatServer.cs" />
+    <Compile Include="../Replication/RemoteChunkWorldStateServer.cs" Link="RemoteChunkWorldStateServer.cs" />
+    <Compile Include="../Replication/RemoteControlledSimulationServer.cs" Link="RemoteControlledSimulationServer.cs" />
+    <Compile Include="../Replication/RemoteDirtyChunkSpatialFanoutServer.cs" Link="RemoteDirtyChunkSpatialFanoutServer.cs" />
+    <Compile Include="../Replication/RemoteDirtyEntitySpatialFanoutServer.cs" Link="RemoteDirtyEntitySpatialFanoutServer.cs" />
+    <Compile Include="../Replication/RemoteGameApplicationSession.cs" Link="RemoteGameApplicationSession.cs" />
+    <Compile Include="../Replication/RemoteWorldStateCompactionScheduler.cs" Link="RemoteWorldStateCompactionScheduler.cs" />
+    <Compile Include="../Replication/RemoteWorldStateServer.cs" Link="RemoteWorldStateServer.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+    <ProjectReference Include="../Accounting/UltraSim.Game.Accounting.csproj" />
+    <ProjectReference Include="../Admission/UltraSim.Game.Admission.csproj" />
+    <ProjectReference Include="../Chat/UltraSim.Game.Chat.csproj" />
+    <ProjectReference Include="../Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../Contracts/UltraSim.Game.Contracts.csproj" />
+    <ProjectReference Include="../Protocol/UltraSim.Game.Protocol.csproj" />
+    <ProjectReference Include="../Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../World/UltraSim.Game.World.csproj" />
+    <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+  </ItemGroup>
+</Project>

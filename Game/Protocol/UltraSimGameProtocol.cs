@@ -1,3 +1,4 @@
+using UltraSim.Game.Replication;
 using UltraSim.Network;
 using UltraSim.UI;
 

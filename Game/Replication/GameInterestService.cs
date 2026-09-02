@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
-using UltraSim.Network;
 
 namespace UltraSim.Game.Replication;
 

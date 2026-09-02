@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../../Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj" />
     <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
   </ItemGroup>
 </Project>

@@ -1439,7 +1439,10 @@ Record resolved fingerprints. X/Y human calibration meshes remain bundled/build-
 first Replace/Add cases may use typed definitions, texture/material/icon content without claiming a
 downloaded-model importer.
 
-**Gate:** Single Player runs all variants without Network and intended logical ownership changes are exact/diagnosable.
+**Gate:** local content fixtures build the Default/Replace/Add Cabin catalogs and deterministic
+fingerprints without Godot, Network, or the final playable Single Player shell; intended logical
+ownership changes are exact and diagnosable. F0.2 performs the actual playable Single Player Cabin
+integration.
 
 ---
 

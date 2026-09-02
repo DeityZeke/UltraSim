@@ -42,9 +42,11 @@ Participant capacity is non-poisoning. An excess Admission session is excluded
 from the bounded projection and can be rejected by the remote admission
 boundary; it does not freeze capture for already admitted participants.
 
-`Game/Replication` is the game-owned seam between committed authoritative state
-and Network delivery. It depends on the concrete game composition and Runtime;
-`Kernels/Network` remains independent of ECS, Game, Server, UI, and Client.
+`Game/Replication` is the packet-free Game-owned seam between committed authoritative
+state and semantic delivery. It depends on the concrete game composition and Runtime,
+but not Game Protocol or `Kernels/Network`. `Game/Replication.Remote` is the separate
+Network-dependent assembly containing codecs/protocol-peer adapters. The Network kernel
+remains independent of ECS, Game, Server, UI, and Client.
 
 ## Remote Chat occurrence delivery
 
@@ -419,7 +421,7 @@ frames stage into fixed private arrays and publish only after the supplied frame
 exactly equals the source's current frame and staged entity/participant state
 exactly equals current canonical truth. It also validates epoch, sequence, and
 capacity. It receives no ECS
-world or runtime entity authority. Its canonical hash and `NetworkSemanticTrace`
+world or runtime entity authority. Its canonical hash and `GameSemanticTrace`
 are the reference meaning later ProtocolLoopback and UDP paths must reproduce.
 
 ## Authoritative ingress
