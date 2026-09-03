@@ -52,11 +52,13 @@ Patch, dependencies/version solving, and executable extensions are outside A0.0.
 packs and executable extensions have vocabulary values so they cannot be confused with normal
 server-passive trust, but the A0.0 manifest factory rejects both.
 
-## Current stop
+## Current boundary
 
 A0.0 provides contracts, validation, local package descriptors, deterministic base/activation
 resolution, immutable catalog generations, and application-proof values. It does not fetch, cache,
-install, activate over Network, realize Godot resources, or contain Cabin-specific catalogs.
-A0.1 supplies the local Default/Replace/Add Cabin oracle; A0.2 later owns persistent CAS/install.
+install, activate over Network, realize Godot resources, or contain Cabin-specific catalogs. The
+accepted A0.1 Cabin Default/Replace/Add oracle lives in the optional
+[`Client.BuiltInTestWorlds`](../BuiltInTestWorlds/README.md) capability rather than coupling the
+generic resolver to one Test World. A0.2 later owns persistent CAS/install.
 
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.

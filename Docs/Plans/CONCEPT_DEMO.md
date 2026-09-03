@@ -1129,8 +1129,8 @@ F0.0b  permanent Network-free local-session extraction   CLOSED
 F0.1   persistent shell/settings/focus                     CLOSED
 
 A0.0   content contracts/resolution                        CLOSED
-A0.1   local Cabin Default/Replace/Add oracle
-F0.2   real Single Player Cabin + human calibration
+A0.1   local Cabin Default/Replace/Add oracle                       CLOSED
+F0.2   real Single Player Cabin + human calibration                 NEXT
 
 then earn/integrate Concept Demo Round 1 consumers:
     terrain surface presence/void

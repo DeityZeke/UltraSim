@@ -2006,9 +2006,9 @@ F0.1  persistent shell + readable layered settings/control foundation CLOSED
         |
 A0.0  content contracts + deterministic resolution (companion plan) CLOSED
         |
-A0.1  local Cabin Default/Replace/Add oracle
+A0.1  local Cabin Default/Replace/Add oracle                         CLOSED
         |
-F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network
+F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network     NEXT
         |
 F0.3a Direct Connect identity trust/session lifecycle
         |

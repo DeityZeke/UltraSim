@@ -48,6 +48,8 @@ acceptance narratives remain available through git history.
 - [Client Content](../Client/Content/README.md) — A0.0 passive package identities,
   exact payload validation, realm-scoped activation plans, deterministic Add/Replace
   resolution, immutable catalogs, and application-proof vocabulary.
+- [Built-in Test Worlds](../Client/BuiltInTestWorlds/README.md) — A0.1 local Cabin
+  Default/Replace/Add package oracle, frozen catalog fingerprints, and exact ownership deltas.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
   Network-free authority-owner-thread composition with bounded command,
   semantic-debt, and application-proof handoff.

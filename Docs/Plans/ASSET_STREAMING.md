@@ -1,8 +1,9 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
-**Status:** frozen ownership/security direction with A0.0 content contracts/resolution accepted,
+**Status:** frozen ownership/security direction with A0.0 content contracts/resolution and the
+local A0.1 Cabin Default/Replace/Add oracle accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.1) and A0.0 are closed; A0.1 is the next local content-oracle checkpoint. Runtime mesh/audio
+(F0.0a/F0.0b/F0.1) and A0.0/A0.1 are closed; F0.2 is the next consumer checkpoint. Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
@@ -1440,6 +1441,28 @@ independent chunk artifacts, and executable-extension runtime implementation.
 ---
 
 ## A0.1 — local resolver + Cabin Default/Replace/Add oracle
+
+**Status: CLOSED.** `Client/BuiltInTestWorlds` now owns a local, engine-neutral Cabin fixture over
+the generic A0.0 resolver. One verified built-in base package resolves into three separately
+identified immutable catalogs:
+
+| Oracle | Resolved fingerprint |
+| --- | --- |
+| Base catalog | `573b0486d7914f7640b109fcae10e0712c033844ca2325db889e0443adcd7a31` |
+| Default | `633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503` |
+| Replace | `f1f223d3c1ccf94560b8fbbb4d50bf036a98b043cb117ced63257ac4ecdd7f44` |
+| Add | `919d13d6572bf0df807891783d3ea4e25dea16010717df8a2223081ab1df8564` |
+
+Replace changes ownership of exactly `cabin:texture/wall`; its unchanged built-in wall material
+correctly resolves the replacement texture hash, while every unrelated entry remains identical.
+Add preserves every base entry and introduces exactly the `test-cabin` blue-glow texture/material
+and streamed-badge icon. All payloads are complete deterministic local PNGs and must produce a
+`VerifiedContentPackage` before resolution. The fixture realm is stable oracle identity, not a
+claim of authenticated remote realm establishment.
+
+This first presentation oracle deliberately does not repackage the existing authoritative Cabin
+WorldPack or bundled X/Y meshes. F0.2 consumes the catalogs in the real Single Player shell; A0.7
+later carries a complete World-owned artifact through the streaming substrate.
 
 Use local/preinstalled sources only and publish immutable engine-neutral catalog generations.
 

@@ -33,6 +33,7 @@ string[] testProjects =
     "_Tests/UltraSim.Game.World.Tests/UltraSim.Game.World.Tests.csproj",
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
     "_Tests/UltraSim.Client.Content.Tests/UltraSim.Client.Content.Tests.csproj",
+    "_Tests/UltraSim.Client.BuiltInTestWorlds.Tests/UltraSim.Client.BuiltInTestWorlds.Tests.csproj",
     "_Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj",
     "_Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj",
     "_Tests/UltraSim.Game.Chat.Tests/UltraSim.Game.Chat.Tests.csproj",
@@ -222,6 +223,8 @@ static void VerifyArchitecture(string root)
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
         ],
+        ["Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj"] =
+            ["Client/Content/UltraSim.Client.Content.csproj"],
         ["Client/Network/UltraSim.Client.Network.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",
@@ -446,6 +449,7 @@ static void VerifyDocumentation(string root)
         "Kernels/Spatial/README.md",
         "Client/Core/README.md",
         "Client/Content/README.md",
+        "Client/BuiltInTestWorlds/README.md",
         "Client/Local/README.md",
         "Client/Bootstrap.Godot/README.md",
         "Client/_Godot/README.md",
@@ -478,7 +482,7 @@ static void VerifyDocumentation(string root)
             "Docs/Plans/CHAT.md", "Docs/Plans/NETWORK.md", "Docs/Plans/PHYSICS.md",
             "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
-            "Client/Content/README.md",
+            "Client/Content/README.md", "Client/BuiltInTestWorlds/README.md",
             "Client/Local/README.md", "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
             "Game/Chat/README.md", "Game/Physics/README.md", "Game/Replication/README.md",
             "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
