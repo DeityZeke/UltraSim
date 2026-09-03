@@ -797,6 +797,15 @@ public sealed class WorldPreparedView
     public bool TryGetMultiFragments(SpatialChunkKey key, out WorldMultiFragmentChunkView view) =>
         Overlay.TryGetMultiFragments(key, out view) || BaseWorld.TryGetMultiFragments(key, out view);
 
+    /// <summary>
+    /// Additional authored terrain shells are immutable base-pack structure in T1.1. The current
+    /// material/height replacement overlay deliberately cannot change their topology or geometry.
+    /// </summary>
+    public bool TryGetAdditionalTerrainSurfaceBands(
+        SpatialChunkKey key,
+        out WorldTerrainSurfaceBandChunkView view) =>
+        BaseWorld.TryGetAdditionalTerrainSurfaceBands(key, out view);
+
     public bool TryGetMultiInstance(MultiInstanceId id, out WorldMultiInstanceRecord instance) =>
         Overlay.ReplacesMultiInstances
             ? Overlay.TryGetMultiInstance(id, out instance)

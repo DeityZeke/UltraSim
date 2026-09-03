@@ -41,6 +41,16 @@ var tests = new (string Name, Action Body)[]
         BaseSurfaceVoidMeshOmitsGeometryDeterministically),
     ("TerrainReplacementPreservesAuthoredBaseTopology",
         TerrainReplacementPreservesAuthoredBaseTopology),
+    ("AdditionalTerrainShellsCompileCanonicallyAndSpanChunks",
+        AdditionalTerrainShellsCompileCanonicallyAndSpanChunks),
+    ("AdditionalTerrainColumnsUseGeometryNotLayerRank",
+        AdditionalTerrainColumnsUseGeometryNotLayerRank),
+    ("AdditionalTerrainQueriesAndMeshesShareBaseParity",
+        AdditionalTerrainQueriesAndMeshesShareBaseParity),
+    ("AdditionalTerrainMeshIsBoundedClosedAndDeterministic",
+        AdditionalTerrainMeshIsBoundedClosedAndDeterministic),
+    ("AdditionalTerrainValidationAndCompatibilityAreFailClosed",
+        AdditionalTerrainValidationAndCompatibilityAreFailClosed),
     ("WorldPackCompilationIsCanonicalAndOrderIndependent", WorldPackCompilationIsCanonicalAndOrderIndependent),
     ("WorldPackRandomTerrainReadsAreExactAndAllocationFree", WorldPackRandomTerrainReadsAreExactAndAllocationFree),
     ("WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams", WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams),
@@ -136,7 +146,7 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Terrain T0.0-T1.0 world tests passed.");
+Console.WriteLine($"All {tests.Length} Terrain T0.0-T1.1 world tests passed.");
 
 static void FrozenProfileAndPayloadWidths()
 {
@@ -333,6 +343,7 @@ static void WorldPackFormatAndFingerprintsAreFrozen()
     Equal(1U, WorldPackFormat.FrozenStaticsSchemaVersion);
     Equal(1U, WorldPackFormat.MultiFragmentsSchemaVersion);
     Equal(1U, WorldPackFormat.TerrainPresenceSchemaVersion);
+    Equal(1U, WorldPackFormat.AdditionalTerrainSurfacesSchemaVersion);
     Equal(16, Marshal.SizeOf<WorldContentFingerprint>());
     Equal(32, Marshal.SizeOf<WorldPackFingerprint>());
     Equal(1U, (uint)WorldPackSectionKind.TerrainMaterials);
@@ -340,6 +351,10 @@ static void WorldPackFormatAndFingerprintsAreFrozen()
     Equal(3U, (uint)WorldPackSectionKind.FrozenStatics);
     Equal(4U, (uint)WorldPackSectionKind.MultiFragments);
     Equal(5U, (uint)WorldPackSectionKind.TerrainPresence);
+    Equal(6U, (uint)WorldPackSectionKind.AdditionalTerrainSurfaces);
+    Equal(8, Marshal.SizeOf<WorldSurfaceId>());
+    Equal(4, Marshal.SizeOf<TerrainSurfacePatchBounds>());
+    Equal(16, Marshal.SizeOf<WorldTerrainColumnSurface>());
     Equal(4, Marshal.SizeOf<WorldStaticDefinitionId>());
     Equal(8, Marshal.SizeOf<WorldStaticId>());
     Equal(8, Marshal.SizeOf<MultiInstanceId>());
@@ -556,6 +571,258 @@ static void TerrainReplacementPreservesAuthoredBaseTopology()
     BaseTerrainSurfaceSample sample = prepared.ProbeBaseTerrainSurface(present);
     Equal(BaseTerrainSurfaceStatus.Present, sample.Status);
     Equal((ushort)5, sample.MaterialId);
+}
+
+static void AdditionalTerrainShellsCompileCanonicallyAndSpanChunks()
+{
+    WorldPackArtifact forward = CreateAdditionalTerrainWorldPack(reverse: false);
+    WorldPackArtifact reverse = CreateAdditionalTerrainWorldPack(reverse: true);
+    Equal(forward.Fingerprint, reverse.Fingerprint);
+    Equal(forward.Length, reverse.Length);
+    var forwardBytes = new byte[forward.Length];
+    var reverseBytes = new byte[reverse.Length];
+    forward.CopyTo(forwardBytes);
+    reverse.CopyTo(reverseBytes);
+    True(forwardBytes.AsSpan().SequenceEqual(reverseBytes));
+
+    WorldPack pack = forward.Open();
+    Equal(4, pack.AdditionalTerrainSurfaceFragmentCount);
+    Equal(3, pack.SectionCount);
+    var left = new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0);
+    var right = new SpatialChunkKey(WorldPackTestProfile.Space, 1, 0);
+    True(pack.TryGetAdditionalTerrainSurfaceBands(left, out WorldTerrainSurfaceBandChunkView leftBands));
+    True(pack.TryGetAdditionalTerrainSurfaceBands(right, out WorldTerrainSurfaceBandChunkView rightBands));
+    Equal(2, leftBands.Count);
+    Equal(2, rightBands.Count);
+    Equal(new WorldSurfaceId(100), leftBands.GetBand(0).Id);
+    Equal(new WorldSurfaceId(100), rightBands.GetBand(0).Id);
+    Equal(new WorldSurfaceId(200), leftBands.GetBand(1).Id);
+    Equal(new WorldSurfaceId(200), rightBands.GetBand(1).Id);
+    Equal(TerrainSurfaceEdgeConnection.East,
+        leftBands.GetBand(0).GetEdgeConnections(1, 0));
+    Equal(TerrainSurfaceEdgeConnection.West,
+        rightBands.GetBand(0).GetEdgeConnections(0, 0));
+    True(pack.TryBind(new WorldContentBinding(WorldPackTestProfile.Content, [1, 2, 3, 4, 5]),
+        out BoundWorldPack? bound, out WorldPackBindingError bindingError));
+    Equal(WorldPackBindingError.None, bindingError);
+    Equal(4, bound!.AdditionalTerrainSurfaceFragmentCount);
+}
+
+static void AdditionalTerrainColumnsUseGeometryNotLayerRank()
+{
+    BoundWorldPack world = OpenAdditionalTerrainWorld();
+    var point = new WorldPosition(0, 0, 15_250, 250, 1_250_000);
+    Span<WorldTerrainColumnSurface> surfaces = stackalloc WorldTerrainColumnSurface[5];
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryCopyTerrainColumnSurfaces(point, surfaces, out int count, out int required));
+    Equal(5, count);
+    Equal(5, required);
+    Equal(new WorldSurfaceId(100), surfaces[0].SurfaceId);
+    Equal(WorldTerrainSurfaceFace.Top, surfaces[0].Face);
+    Equal(1_300_000, surfaces[0].HeightMillimeters);
+    Equal(new WorldSurfaceId(100), surfaces[1].SurfaceId);
+    Equal(WorldTerrainSurfaceFace.Bottom, surfaces[1].Face);
+    Equal(1_290_000, surfaces[1].HeightMillimeters);
+    Equal(new WorldSurfaceId(200), surfaces[2].SurfaceId);
+    Equal(1_100_000, surfaces[2].HeightMillimeters);
+    Equal(new WorldSurfaceId(200), surfaces[3].SurfaceId);
+    Equal(1_090_000, surfaces[3].HeightMillimeters);
+    True(surfaces[4].IsBase);
+    Equal(0, surfaces[4].HeightMillimeters);
+
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryFindHighestSupportAtOrBelow(point, 1_295_000, out WorldTerrainColumnSurface support));
+    Equal(new WorldSurfaceId(200), support.SurfaceId);
+    Equal(1_100_000, support.HeightMillimeters);
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryFindLowestCeilingAtOrAbove(point, 1_105_000, out WorldTerrainColumnSurface ceiling));
+    Equal(new WorldSurfaceId(100), ceiling.SurfaceId);
+    Equal(1_290_000, ceiling.HeightMillimeters);
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryFindHighestSupportAtOrBelow(point, int.MinValue,
+            out WorldTerrainColumnSurface noSupport));
+    False(noSupport.IsValid);
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryFindLowestCeilingAtOrAbove(point, int.MaxValue,
+            out WorldTerrainColumnSurface noCeiling));
+    False(noCeiling.IsValid);
+    False(default(WorldTerrainColumnSurface).IsValid);
+    Equal(WorldTerrainColumnQueryStatus.DestinationTooSmall,
+        world.TryCopyTerrainColumnSurfaces(point, surfaces[..4], out count, out required));
+    Equal(0, count);
+    Equal(5, required);
+    Equal(WorldTerrainColumnQueryStatus.Unavailable,
+        world.TryCopyTerrainColumnSurfaces(new WorldPosition(8, 8, 0, 0, 0), surfaces,
+            out count, out required));
+
+    _ = world.TryCopyTerrainColumnSurfaces(point, surfaces, out _, out _);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    ulong checksum = 0;
+    for (int index = 0; index < 100_000; index++)
+    {
+        Equal(WorldTerrainColumnQueryStatus.Complete,
+            world.TryCopyTerrainColumnSurfaces(point, surfaces, out count, out _));
+        checksum += unchecked((uint)surfaces[index % count].HeightMillimeters);
+    }
+    Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+    True(checksum != 0);
+}
+
+static void AdditionalTerrainQueriesAndMeshesShareBaseParity()
+{
+    var builder = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(512 * 1024, 1, 8));
+    ushort[] baseMaterials = Enumerable.Repeat((ushort)1, TerrainChunkFormat.MaterialCellCount).ToArray();
+    var baseHeights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase zero));
+    var key = new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0);
+    True(builder.TryAddBaseTerrain(key, baseMaterials, zero, baseHeights, out _));
+    TerrainSurfacePatchBounds bounds = new(0, 0, 1, 1);
+    TerrainHeightOffset[] sloped =
+    [
+        new(0), new(0),
+        new(0), new(200),
+    ];
+    True(builder.TryAddAdditionalTerrainSurfaceBand(
+        key, new WorldSurfaceId(11), bounds, WorldTerrainSurfaceFaces.Top,
+        [1UL], [TerrainSurfaceEdgeConnection.None], [2], zero, sloped,
+        [], default, [], 0, out _));
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
+    True(artifact!.Open().TryBind(
+        new WorldContentBinding(WorldPackTestProfile.Content, [1, 2, 3, 4, 5]),
+        out BoundWorldPack? world, out _));
+    BoundWorldPack bound = world!;
+
+    var point = new WorldPosition(0, 0, 400, 100, 0);
+    Span<WorldTerrainColumnSurface> column = stackalloc WorldTerrainColumnSurface[2];
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        bound.TryCopyTerrainColumnSurfaces(point, column, out int count, out _));
+    Equal(2, count);
+    Equal(new WorldSurfaceId(11), column[0].SurfaceId);
+    Equal(200, column[0].HeightMillimeters);
+
+    True(bound.TryGetAdditionalTerrainSurfaceBands(key, out WorldTerrainSurfaceBandChunkView bands));
+    WorldTerrainSurfaceBandView band = bands.GetBand(0);
+    var vertices = new TerrainBaseMeshVertex[TerrainSurfaceBandMesh.MaximumVertexCount];
+    var indices = new ushort[TerrainSurfaceBandMesh.MaximumIndexCount];
+    var materials = new ushort[TerrainSurfaceBandMesh.MaximumTriangleCount];
+    True(TerrainSurfaceBandMesh.TryBuild(band, vertices, indices, materials,
+        out TerrainSurfaceBandMeshSummary summary, out _));
+    Equal(2, summary.TriangleCount);
+    Equal(0, vertices[0].LocalXMillimeters);
+    Equal(0, vertices[0].LocalZMillimeters);
+    Equal(0, vertices[1].LocalXMillimeters);
+    Equal(GameWorldSpatialProfile.TerrainCellEdgeUnits, vertices[1].LocalZMillimeters);
+    Equal(GameWorldSpatialProfile.TerrainCellEdgeUnits, vertices[2].LocalXMillimeters);
+    Equal(GameWorldSpatialProfile.TerrainCellEdgeUnits, vertices[2].LocalZMillimeters);
+    Equal(1_000, vertices[2].AbsoluteYMillimeters);
+}
+
+static void AdditionalTerrainMeshIsBoundedClosedAndDeterministic()
+{
+    BoundWorldPack world = OpenAdditionalTerrainWorld();
+    var key = new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0);
+    True(world.TryGetAdditionalTerrainSurfaceBands(key, out WorldTerrainSurfaceBandChunkView bands));
+    WorldTerrainSurfaceBandView band = bands.GetBand(0);
+    var vertices = new TerrainBaseMeshVertex[TerrainSurfaceBandMesh.MaximumVertexCount];
+    var indices = new ushort[TerrainSurfaceBandMesh.MaximumIndexCount];
+    var materials = new ushort[TerrainSurfaceBandMesh.MaximumTriangleCount];
+    True(TerrainSurfaceBandMesh.TryBuild(band, vertices, indices, materials,
+        out TerrainSurfaceBandMeshSummary summary, out TerrainSurfaceBandMeshBuildError error));
+    Equal(TerrainSurfaceBandMeshBuildError.None, error);
+    Equal(4, summary.TopTriangleCount);
+    Equal(4, summary.BottomTriangleCount);
+    Equal(10, summary.BoundaryTriangleCount);
+    Equal(18, summary.TriangleCount);
+    Equal(54, summary.VertexCount);
+    Equal(1_290_000, summary.MinimumHeightMillimeters);
+    Equal(1_300_000, summary.MaximumHeightMillimeters);
+    Equal(4, materials.AsSpan(0, summary.TriangleCount).ToArray().Count(value => value == 2));
+    Equal(4, materials.AsSpan(0, summary.TriangleCount).ToArray().Count(value => value == 3));
+    Equal(10, materials.AsSpan(0, summary.TriangleCount).ToArray().Count(value => value == 4));
+    Equal(12, vertices.AsSpan(0, summary.VertexCount).ToArray().Count(value => value.NormalY > 0));
+    Equal(12, vertices.AsSpan(0, summary.VertexCount).ToArray().Count(value => value.NormalY < 0));
+
+    var secondVertices = new TerrainBaseMeshVertex[summary.VertexCount];
+    var secondIndices = new ushort[summary.IndexCount];
+    var secondMaterials = new ushort[summary.TriangleCount];
+    True(TerrainSurfaceBandMesh.TryBuild(band, secondVertices, secondIndices, secondMaterials,
+        out TerrainSurfaceBandMeshSummary second, out _));
+    Equal(summary, second);
+    True(vertices.AsSpan(0, summary.VertexCount).SequenceEqual(secondVertices));
+    True(indices.AsSpan(0, summary.IndexCount).SequenceEqual(secondIndices));
+    True(materials.AsSpan(0, summary.TriangleCount).SequenceEqual(secondMaterials));
+    False(TerrainSurfaceBandMesh.TryBuild(band, secondVertices.AsSpan(1), secondIndices,
+        secondMaterials, out _, out error));
+    Equal(TerrainSurfaceBandMeshBuildError.DestinationTooSmall, error);
+}
+
+static void AdditionalTerrainValidationAndCompatibilityAreFailClosed()
+{
+    WorldPackArtifact legacy = CreateFlatTwoChunkWorld();
+    var recreated = CreateFlatTwoChunkWorld();
+    Equal(legacy.Fingerprint, recreated.Fingerprint);
+    Equal(legacy.Length, recreated.Length);
+    Equal(2, legacy.Open().SectionCount);
+    Equal(0, legacy.Open().AdditionalTerrainSurfaceFragmentCount);
+
+    var builder = CreateFlatTwoChunkBuilder();
+    var key = new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0);
+    TerrainSurfacePatchBounds bounds = new(0, 0, 2, 1);
+    ulong[] presence = [0b11UL];
+    ushort[] materials = [2, 2];
+    TerrainHeightOffset[] heights = new TerrainHeightOffset[bounds.VertexCount];
+    True(TerrainHeightPlaneBase.TryCreate(10_000, out TerrainHeightPlaneBase top));
+    True(TerrainHeightPlaneBase.TryCreate(9_000, out TerrainHeightPlaneBase bottom));
+    False(builder.TryAddAdditionalTerrainSurfaceBand(key, default, bounds,
+        WorldTerrainSurfaceFaces.Top, presence, new TerrainSurfaceEdgeConnection[bounds.CellCount],
+        materials, top, heights,
+        [], default, [], 0, out WorldPackBuildError invalid));
+    Equal(WorldPackBuildError.InvalidAdditionalTerrainSurface, invalid);
+    True(builder.TryAddAdditionalTerrainSurfaceBand(key, new WorldSurfaceId(7), bounds,
+        WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom, presence,
+        new TerrainSurfaceEdgeConnection[bounds.CellCount],
+        materials, top, heights, materials, bottom, heights, 4, out _));
+    False(builder.TryAddAdditionalTerrainSurfaceBand(key, new WorldSurfaceId(7), bounds,
+        WorldTerrainSurfaceFaces.Top, presence, new TerrainSurfaceEdgeConnection[bounds.CellCount],
+        materials, top, heights,
+        [], default, [], 0, out invalid));
+    Equal(WorldPackBuildError.InvalidAdditionalTerrainSurface, invalid);
+
+    var brokenSeam = CreateFlatTwoChunkBuilder();
+    TerrainSurfacePatchBounds edgeBounds = new(30, 0, 2, 1);
+    var edgeConnections = new TerrainSurfaceEdgeConnection[edgeBounds.CellCount];
+    edgeConnections[1] = TerrainSurfaceEdgeConnection.East;
+    True(brokenSeam.TryAddAdditionalTerrainSurfaceBand(
+        key, new WorldSurfaceId(8), edgeBounds,
+        WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom,
+        [0b11UL], edgeConnections, materials, top, heights,
+        materials, bottom, heights, 4, out _));
+    False(brokenSeam.TryBuild(out _, out WorldPackBuildError brokenSeamError));
+    Equal(WorldPackBuildError.InvalidAdditionalTerrainSurface, brokenSeamError);
+
+    WorldPackArtifact artifact = CreateAdditionalTerrainWorldPack(false);
+    var bytes = new byte[artifact.Length];
+    artifact.CopyTo(bytes);
+    int sectionDirectory = WorldPackFormat.HeaderBytes +
+        BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(64)) * WorldPackFormat.ChunkDirectoryRowBytes;
+    int row = sectionDirectory + 2 * WorldPackFormat.SectionDirectoryRowBytes;
+    int payload = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(row + 8)));
+    int descriptors = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(payload + 20));
+    bytes[payload + descriptors + 13] = 1;
+    RewriteSectionDigest(bytes, row);
+    RewritePackFingerprint(bytes);
+    AssertPackOpenFails(bytes, new WorldPackLimits(2 * 1024 * 1024, 2, 8),
+        WorldPackOpenError.InvalidAdditionalTerrainSurfacePayload);
+
+    artifact.CopyTo(bytes);
+    int firstConnections = BinaryPrimitives.ReadInt32LittleEndian(
+        bytes.AsSpan(payload + descriptors + 36));
+    bytes[payload + firstConnections + 1] = (byte)TerrainSurfaceEdgeConnection.None;
+    RewriteSectionDigest(bytes, row);
+    RewritePackFingerprint(bytes);
+    AssertPackOpenFails(bytes, new WorldPackLimits(2 * 1024 * 1024, 2, 8),
+        WorldPackOpenError.InvalidAdditionalTerrainSurfacePayload);
 }
 
 static void WorldPackCompilationIsCanonicalAndOrderIndependent()
@@ -2108,6 +2375,83 @@ static WorldPackArtifact CreateWorldPackArtifact(
     Equal(WorldPackBuildError.None, buildError);
     True(artifact is not null);
     return artifact!;
+}
+
+static WorldPackArtifact CreateAdditionalTerrainWorldPack(bool reverse)
+{
+    WorldPackBuilder builder = CreateFlatTwoChunkBuilder();
+    var fragments = new List<(SpatialChunkKey Key, WorldSurfaceId Id, int Top, int Bottom)>
+    {
+        (new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0), new WorldSurfaceId(100), 1_300_000, 1_290_000),
+        (new SpatialChunkKey(WorldPackTestProfile.Space, 1, 0), new WorldSurfaceId(100), 1_300_000, 1_290_000),
+        (new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0), new WorldSurfaceId(200), 1_100_000, 1_090_000),
+        (new SpatialChunkKey(WorldPackTestProfile.Space, 1, 0), new WorldSurfaceId(200), 1_100_000, 1_090_000),
+    };
+    if (reverse) fragments.Reverse();
+    foreach ((SpatialChunkKey key, WorldSurfaceId id, int top, int bottom) in fragments)
+        AddFlatShellFragment(builder, key, id, top, bottom);
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError error));
+    Equal(WorldPackBuildError.None, error);
+    return artifact!;
+}
+
+static BoundWorldPack OpenAdditionalTerrainWorld()
+{
+    WorldPack pack = CreateAdditionalTerrainWorldPack(false).Open();
+    True(pack.TryBind(new WorldContentBinding(WorldPackTestProfile.Content, [1, 2, 3, 4, 5]),
+        out BoundWorldPack? world, out WorldPackBindingError error));
+    Equal(WorldPackBindingError.None, error);
+    return world!;
+}
+
+static WorldPackArtifact CreateFlatTwoChunkWorld()
+{
+    WorldPackBuilder builder = CreateFlatTwoChunkBuilder();
+    True(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError error));
+    Equal(WorldPackBuildError.None, error);
+    return artifact!;
+}
+
+static WorldPackBuilder CreateFlatTwoChunkBuilder()
+{
+    var builder = new WorldPackBuilder(WorldPackTestProfile.Space, WorldPackTestProfile.Content,
+        new WorldPackLimits(2 * 1024 * 1024, 2, 8));
+    ushort[] materials = Enumerable.Repeat((ushort)1, TerrainChunkFormat.MaterialCellCount).ToArray();
+    var heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
+    True(builder.TryAddBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0),
+        materials, heightBase, heights, out _));
+    True(builder.TryAddBaseTerrain(new SpatialChunkKey(WorldPackTestProfile.Space, 1, 0),
+        materials, heightBase, heights, out _));
+    return builder;
+}
+
+static void AddFlatShellFragment(
+    WorldPackBuilder builder,
+    SpatialChunkKey key,
+    WorldSurfaceId id,
+    int topMillimeters,
+    int bottomMillimeters)
+{
+    bool left = key.Coord.X == 0;
+    TerrainSurfacePatchBounds bounds = new(left ? (byte)30 : (byte)0, 0, 2, 1);
+    ulong[] presence = [0b11UL];
+    var connections = new TerrainSurfaceEdgeConnection[bounds.CellCount];
+    connections[left ? 1 : 0] = left
+        ? TerrainSurfaceEdgeConnection.East
+        : TerrainSurfaceEdgeConnection.West;
+    ushort[] topMaterials = [2, 2];
+    ushort[] bottomMaterials = [3, 3];
+    var topHeights = new TerrainHeightOffset[bounds.VertexCount];
+    var bottomHeights = new TerrainHeightOffset[bounds.VertexCount];
+    True(TerrainHeightPlaneBase.TryCreate(topMillimeters, out TerrainHeightPlaneBase topBase));
+    True(TerrainHeightPlaneBase.TryCreate(bottomMillimeters, out TerrainHeightPlaneBase bottomBase));
+    True(builder.TryAddAdditionalTerrainSurfaceBand(
+        key, id, bounds, WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom,
+        presence, connections, topMaterials, topBase, topHeights,
+        bottomMaterials, bottomBase, bottomHeights,
+        4, out WorldPackBuildError error));
+    Equal(WorldPackBuildError.None, error);
 }
 
 static WorldPackArtifact CreatePresenceWorldPackArtifact(

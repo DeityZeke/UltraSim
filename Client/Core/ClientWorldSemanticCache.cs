@@ -25,6 +25,7 @@ public enum ClientSemanticChunkError : byte
     MissingTerrain,
     FrozenStaticCapacityExceeded,
     MultiFragmentCapacityExceeded,
+    AdditionalTerrainSurfaceCapacityExceeded,
     PublicRecordCapacityExceeded,
     KnownIdentityCapacityExceeded,
     InvalidPublication,
@@ -50,7 +51,8 @@ public readonly record struct ClientWorldSemanticCacheLimits(
     int MaximumFrozenStaticsPerChunk,
     int MaximumMultiFragmentsPerChunk,
     int MaximumPublicRecordsPerChunk,
-    int MaximumKnownPublicIdentities)
+    int MaximumKnownPublicIdentities,
+    int MaximumAdditionalTerrainSurfaceFragmentsPerChunk = 64)
 {
     public static ClientWorldSemanticCacheLimits Default => new(512, 64, 64, 64, 4_096);
 
@@ -64,7 +66,8 @@ public readonly record struct ClientWorldSemanticCacheLimits(
         int maximumFrozenStaticsPerChunk = 64,
         int maximumMultiFragmentsPerChunk = 64,
         int maximumPublicRecordsPerChunk = 64,
-        int maximumKnownPublicIdentities = 4_096)
+        int maximumKnownPublicIdentities = 4_096,
+        int maximumAdditionalTerrainSurfaceFragmentsPerChunk = 64)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(renderRadiusChunks);
         ArgumentOutOfRangeException.ThrowIfNegative(spareResidentChunks);
@@ -75,14 +78,16 @@ public readonly record struct ClientWorldSemanticCacheLimits(
             maximumFrozenStaticsPerChunk,
             maximumMultiFragmentsPerChunk,
             maximumPublicRecordsPerChunk,
-            maximumKnownPublicIdentities);
+            maximumKnownPublicIdentities,
+            maximumAdditionalTerrainSurfaceFragmentsPerChunk);
     }
 
     internal void Validate()
     {
         if (MaximumResidentChunks <= 0 || MaximumFrozenStaticsPerChunk < 0 ||
             MaximumMultiFragmentsPerChunk < 0 || MaximumPublicRecordsPerChunk <= 0 ||
-            MaximumKnownPublicIdentities <= 0)
+            MaximumKnownPublicIdentities <= 0 ||
+            MaximumAdditionalTerrainSurfaceFragmentsPerChunk < 0)
             throw new ArgumentOutOfRangeException(nameof(MaximumResidentChunks));
         _ = checked(MaximumResidentChunks * TerrainChunkFormat.MaterialCellCount);
         _ = checked(MaximumResidentChunks * TerrainChunkFormat.HeightVertexCount);
@@ -102,6 +107,7 @@ public readonly record struct ClientSemanticChunkInfo(
     ChunkPublicationCursor PublicationCursor,
     int FrozenStaticCount,
     int MultiFragmentCount,
+    int AdditionalTerrainSurfaceFragmentCount,
     int PublicRecordCount,
     ClientSemanticHash SemanticHash);
 
@@ -131,6 +137,7 @@ public readonly ref struct ClientSemanticChunkView
         ReadOnlySpan<ushort> terrainMaterials,
         ReadOnlySpan<int> terrainHeights,
         ReadOnlySpan<ulong> terrainSurfacePresence,
+        WorldTerrainSurfaceBandChunkView additionalTerrainSurfaces,
         ReadOnlySpan<WorldFrozenStaticRecord> frozenStatics,
         ReadOnlySpan<WorldMultiFragmentRecord> multiFragments,
         ReadOnlySpan<WorldPublicRecord> publicRecords)
@@ -139,6 +146,7 @@ public readonly ref struct ClientSemanticChunkView
         TerrainMaterials = terrainMaterials;
         TerrainAbsoluteHeightsMillimeters = terrainHeights;
         TerrainSurfacePresence = terrainSurfacePresence;
+        AdditionalTerrainSurfaces = additionalTerrainSurfaces;
         FrozenStatics = frozenStatics;
         MultiFragments = multiFragments;
         PublicRecords = publicRecords;
@@ -148,6 +156,7 @@ public readonly ref struct ClientSemanticChunkView
     public ReadOnlySpan<ushort> TerrainMaterials { get; }
     public ReadOnlySpan<int> TerrainAbsoluteHeightsMillimeters { get; }
     public ReadOnlySpan<ulong> TerrainSurfacePresence { get; }
+    public WorldTerrainSurfaceBandChunkView AdditionalTerrainSurfaces { get; }
     public ReadOnlySpan<WorldFrozenStaticRecord> FrozenStatics { get; }
     public ReadOnlySpan<WorldMultiFragmentRecord> MultiFragments { get; }
     public ReadOnlySpan<WorldPublicRecord> PublicRecords { get; }
@@ -329,6 +338,17 @@ public sealed class ClientWorldSemanticCache
                 return false;
             }
         }
+        int additionalTerrainCount = 0;
+        if (_preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+                state.Key, out WorldTerrainSurfaceBandChunkView additionalTerrainView))
+        {
+            additionalTerrainCount = additionalTerrainView.Count;
+            if (additionalTerrainCount > _limits.MaximumAdditionalTerrainSurfaceFragmentsPerChunk)
+            {
+                error = ClientSemanticChunkError.AdditionalTerrainSurfaceCapacityExceeded;
+                return false;
+            }
+        }
         if (publicSnapshot.Length > _publicScratch.Length)
         {
             error = ClientSemanticChunkError.PublicRecordCapacityExceeded;
@@ -369,6 +389,7 @@ public sealed class ClientWorldSemanticCache
         _publicScratch.AsSpan(0, publicCount).CopyTo(PublicSpan(slot));
         state.FrozenStaticCount = frozenCount;
         state.MultiFragmentCount = multiCount;
+        state.AdditionalTerrainSurfaceFragmentCount = additionalTerrainCount;
         state.PublicRecordCount = publicCount;
         _preparedWorld.TryGetReplacementIdentity(
             state.Key, out state.StructuralRevision, out state.StructuralContentHash);
@@ -711,11 +732,14 @@ public sealed class ClientWorldSemanticCache
             return false;
         }
         ref readonly ChunkSlot state = ref _slots[slot];
+        _preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+            state.Key, out WorldTerrainSurfaceBandChunkView additionalTerrain);
         view = new ClientSemanticChunkView(
             Info(slot),
             MaterialSpan(slot),
             HeightSpan(slot),
             SurfacePresenceSpan(slot),
+            additionalTerrain,
             FrozenStaticSpan(slot)[..state.FrozenStaticCount],
             MultiFragmentSpan(slot)[..state.MultiFragmentCount],
             PublicSpan(slot)[..state.PublicRecordCount]);
@@ -753,6 +777,46 @@ public sealed class ClientWorldSemanticCache
         }
         if (!_preparedWorld.TryBuildBaseTerrainMesh(
                 _slots[slot].Key, vertices, indices, triangleMaterials, out summary, out meshError))
+        {
+            semanticError = ClientSemanticChunkError.None;
+            return false;
+        }
+        semanticError = ClientSemanticChunkError.None;
+        return true;
+    }
+
+    public bool TryBuildResidentAdditionalTerrainSurfaceMesh(
+        ClientSemanticChunkHandle handle,
+        int fragmentIndex,
+        Span<TerrainBaseMeshVertex> vertices,
+        Span<ushort> indices,
+        Span<ushort> triangleMaterials,
+        out TerrainSurfaceBandMeshSummary summary,
+        out ClientSemanticChunkError semanticError,
+        out TerrainSurfaceBandMeshBuildError meshError)
+    {
+        EnsureOwner();
+        if (!TryResolve(handle, out int slot))
+        {
+            summary = default;
+            semanticError = ClientSemanticChunkError.InvalidHandle;
+            meshError = TerrainSurfaceBandMeshBuildError.None;
+            return false;
+        }
+        if (_slots[slot].State != ClientSemanticChunkState.Resident ||
+            (uint)fragmentIndex >= (uint)_slots[slot].AdditionalTerrainSurfaceFragmentCount)
+        {
+            summary = default;
+            semanticError = ClientSemanticChunkError.InvalidState;
+            meshError = TerrainSurfaceBandMeshBuildError.None;
+            return false;
+        }
+        if (!_preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+                _slots[slot].Key, out WorldTerrainSurfaceBandChunkView fragments))
+            throw new InvalidOperationException("A resident additional terrain fragment disappeared.");
+        if (!TerrainSurfaceBandMesh.TryBuild(
+                fragments.GetBand(fragmentIndex), vertices, indices, triangleMaterials,
+                out summary, out meshError))
         {
             semanticError = ClientSemanticChunkError.None;
             return false;
@@ -1073,6 +1137,40 @@ public sealed class ClientWorldSemanticCache
             hash.Add(0x5431_5650U); // T1VP: optional topology extension marker.
             foreach (ulong word in surfacePresence) hash.Add(word);
         }
+        hash.Add(unchecked((uint)state.AdditionalTerrainSurfaceFragmentCount));
+        if (state.AdditionalTerrainSurfaceFragmentCount != 0)
+        {
+            if (!_preparedWorld.TryGetAdditionalTerrainSurfaceBands(
+                    state.Key, out WorldTerrainSurfaceBandChunkView bands) ||
+                bands.Count != state.AdditionalTerrainSurfaceFragmentCount)
+                throw new InvalidOperationException("Resident additional terrain semantics changed.");
+            for (int bandIndex = 0; bandIndex < bands.Count; bandIndex++)
+            {
+                WorldTerrainSurfaceBandView band = bands.GetBand(bandIndex);
+                hash.Add(band.Id.Value);
+                hash.Add(band.Bounds.MinimumCellX); hash.Add(band.Bounds.MinimumCellZ);
+                hash.Add(band.Bounds.CellWidth); hash.Add(band.Bounds.CellDepth);
+                hash.Add((byte)band.Faces); hash.Add(band.SideMaterialId);
+                for (int z = 0; z < band.Bounds.CellDepth; z++)
+                for (int x = 0; x < band.Bounds.CellWidth; x++)
+                {
+                    bool present = band.IsCellPresent(x, z);
+                    hash.Add(present ? (byte)1 : (byte)0);
+                    if (!present) continue;
+                    hash.Add((byte)band.GetEdgeConnections(x, z));
+                    if (band.HasTop) hash.Add(band.GetMaterial(WorldTerrainSurfaceFace.Top, x, z));
+                    if (band.HasBottom) hash.Add(band.GetMaterial(WorldTerrainSurfaceFace.Bottom, x, z));
+                }
+                for (int z = 0; z <= band.Bounds.CellDepth; z++)
+                for (int x = 0; x <= band.Bounds.CellWidth; x++)
+                {
+                    if (band.HasTop)
+                        hash.Add(unchecked((uint)band.GetHeight(WorldTerrainSurfaceFace.Top, x, z)));
+                    if (band.HasBottom)
+                        hash.Add(unchecked((uint)band.GetHeight(WorldTerrainSurfaceFace.Bottom, x, z)));
+                }
+            }
+        }
         hash.Add(unchecked((uint)state.FrozenStaticCount));
         foreach (WorldFrozenStaticRecord record in FrozenStaticSpan(slot)[..state.FrozenStaticCount])
             AddStatic(ref hash, record.Id.Value, record.DefinitionId.Value, record.Position,
@@ -1308,7 +1406,8 @@ public sealed class ClientWorldSemanticCache
         return new ClientSemanticChunkInfo(
             state.Key, Handle(slot), state.State,
             state.StructuralRevision, state.StructuralContentHash, state.PublicationCursor,
-            state.FrozenStaticCount, state.MultiFragmentCount, state.PublicRecordCount,
+            state.FrozenStaticCount, state.MultiFragmentCount,
+            state.AdditionalTerrainSurfaceFragmentCount, state.PublicRecordCount,
             state.SemanticHash);
     }
 
@@ -1372,6 +1471,7 @@ public sealed class ClientWorldSemanticCache
         internal ChunkPublicationCursor PublicationCursor;
         internal int FrozenStaticCount;
         internal int MultiFragmentCount;
+        internal int AdditionalTerrainSurfaceFragmentCount;
         internal int PublicRecordCount;
         internal ClientSemanticHash SemanticHash;
     }

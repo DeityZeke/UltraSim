@@ -13,6 +13,7 @@ internal static class ClientWorldSemanticCacheTests
         BoundWorldPack world = CreateWorld();
         StructuralOverlayIdentityIsRetained(world);
         BaseSurfaceTopologyIsResidentAndHashed();
+        AdditionalTerrainSurfaceResidencyIsBoundedAndRenderable();
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
         PublicationKnowledgeIsGlobalAndFenced(world);
@@ -53,6 +54,39 @@ internal static class ClientWorldSemanticCacheTests
         Equal(ClientSemanticChunkError.None, semanticError);
         Equal(TerrainBaseMeshBuildError.None, meshError);
         Equal(TerrainChunkFormat.TriangleCount - 2, summary.TriangleCount);
+    }
+
+    private static void AdditionalTerrainSurfaceResidencyIsBoundedAndRenderable()
+    {
+        BoundWorldPack world = CreateAdditionalTerrainWorld();
+        var rejected = new ClientWorldSemanticCache(world, new(1, 0, 0, 1, 1, 0));
+        True(rejected.TryRequest(Key(0, 0), out ClientSemanticChunkHandle rejectedHandle, out _));
+        False(rejected.TryStageFromBaseWorld(rejectedHandle, [], default,
+            out ClientSemanticChunkError capacityError));
+        Equal(ClientSemanticChunkError.AdditionalTerrainSurfaceCapacityExceeded, capacityError);
+        Equal(ClientSemanticChunkState.Requested, Info(rejected, rejectedHandle).State);
+
+        var cache = new ClientWorldSemanticCache(world, new(1, 0, 0, 1, 1, 1));
+        ClientSemanticChunkHandle handle = Publish(
+            cache, Key(0, 0), PublicationEpoch.Create(), 1, []);
+        ClientSemanticChunkInfo info = Info(cache, handle);
+        Equal(1, info.AdditionalTerrainSurfaceFragmentCount);
+        True(cache.TryGetResidentView(handle, out ClientSemanticChunkView view));
+        Equal(1, view.AdditionalTerrainSurfaces.Count);
+        Equal(new WorldSurfaceId(44), view.AdditionalTerrainSurfaces.GetBand(0).Id);
+        var vertices = new TerrainBaseMeshVertex[TerrainSurfaceBandMesh.MaximumVertexCount];
+        var indices = new ushort[TerrainSurfaceBandMesh.MaximumIndexCount];
+        var materials = new ushort[TerrainSurfaceBandMesh.MaximumTriangleCount];
+        True(cache.TryBuildResidentAdditionalTerrainSurfaceMesh(
+            handle, 0, vertices, indices, materials, out TerrainSurfaceBandMeshSummary summary,
+            out ClientSemanticChunkError semanticError, out TerrainSurfaceBandMeshBuildError meshError));
+        Equal(ClientSemanticChunkError.None, semanticError);
+        Equal(TerrainSurfaceBandMeshBuildError.None, meshError);
+        Equal(new WorldSurfaceId(44), summary.SurfaceId);
+        Equal(12, summary.TriangleCount);
+        False(cache.TryBuildResidentAdditionalTerrainSurfaceMesh(
+            handle, 1, vertices, indices, materials, out _, out semanticError, out _));
+        Equal(ClientSemanticChunkError.InvalidState, semanticError);
     }
 
     private static void StructuralOverlayIdentityIsRetained(BoundWorldPack world)
@@ -617,6 +651,30 @@ internal static class ClientWorldSemanticCacheTests
         WorldPack pack = artifact!.Open();
         True(pack.TryBind(new WorldContentBinding(Content, [1], []), out BoundWorldPack? bound, out _));
         return bound!;
+    }
+
+    private static BoundWorldPack CreateAdditionalTerrainWorld()
+    {
+        var builder = new WorldPackBuilder(
+            Space, Content, new WorldPackLimits(256 * 1024, 1, 4, 0, 0, 0, 1, 1));
+        ushort[] baseMaterials = Enumerable.Repeat((ushort)1,
+            TerrainChunkFormat.MaterialCellCount).ToArray();
+        var baseHeights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase baseHeight));
+        True(builder.TryAddBaseTerrain(Key(0, 0), baseMaterials, baseHeight, baseHeights, out _));
+        TerrainSurfacePatchBounds bounds = new(1, 1, 1, 1);
+        True(TerrainHeightPlaneBase.TryCreate(10_000, out TerrainHeightPlaneBase top));
+        True(TerrainHeightPlaneBase.TryCreate(9_000, out TerrainHeightPlaneBase bottom));
+        True(builder.TryAddAdditionalTerrainSurfaceBand(
+            Key(0, 0), new WorldSurfaceId(44), bounds,
+            WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom,
+            [1UL], new TerrainSurfaceEdgeConnection[bounds.CellCount],
+            [(ushort)1], top, new TerrainHeightOffset[bounds.VertexCount],
+            [(ushort)2], bottom, new TerrainHeightOffset[bounds.VertexCount], 2, out _));
+        True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
+        True(artifact!.Open().TryBind(
+            new WorldContentBinding(Content, [1, 2]), out BoundWorldPack? world, out _));
+        return world!;
     }
 
     private static WorldStaticBounds Bounds(WorldPosition position, int half) => new(

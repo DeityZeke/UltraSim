@@ -1,12 +1,13 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: T0 accepted/frozen; T1.0 accepted/closed. T0.0 through T0.10 and the
+Status: T0 accepted/frozen; T1.0 and T1.1 accepted/closed. T0.0 through T0.10 and the
 complete Terrain / World T0 milestone were accepted as of 2026-08-21. T0.9 was
 accepted at `2e147426`; T0.10 then closed the launchable woods/cabin vertical,
 controls/camera profiles, authoritative locomotion/collision, save/restore,
-native adapter geometry, and cumulative evidence matrix. T1.0 later added the
-first post-T0 topology capability: explicit base-surface presence/intentional
-void. T1.1 sparse additional surfaces remains unstarted.
+native adapter geometry, and cumulative evidence matrix. T1.0 later added explicit
+base-surface presence/intentional void. T1.1 adds immutable sparse terrain shells
+at free absolute elevations, complete vertical-column reads, stable logical shell
+identity across chunk fragments, and bounded client/native realization.
 Revised from the accepted Network N0 baseline, later spatial-seam decisions, and
 V1/transitional spatial-publication archaeology. Network N0 remains the frozen
 remote-authority reference; accepted T0 now supplies the world/spatial/publication
@@ -77,6 +78,33 @@ TRIANGLE, MISSING CONTENT, OR AN UNPREPARED WORLD CHUNK.
 BASE TERRAIN IS NOT THE PERMANENT MAXIMUM TOPOLOGY OF WORLD TERRAIN.
 
 WORLD TERRAIN IS NOT PERMANENTLY LIMITED TO ONE SURFACE PER X/Z.
+
+BASE TERRAIN IS THE DENSE DEFAULT TERRAIN SHEET, NOT THE UNIVERSAL LOWEST SURFACE.
+
+ADDITIONAL TERRAIN SHELLS MAY EXIST AT ANY ABSOLUTE ELEVATION.
+
+AUTHORING LAYER OR SHELL IDENTITY DOES NOT DEFINE VERTICAL ORDER.
+
+SPACE BETWEEN TERRAIN SHELLS IS SIMPLY SPACE; NO EMPTY INTERMEDIATE LAYER EXISTS.
+
+A TERRAIN SHELL MAY SPAN SPATIAL CHUNKS WHILE RETAINING ONE LOGICAL AUTHORED IDENTITY.
+
+CHUNK-LOCAL SHELL FRAGMENTS, PACK SLOTS, AND TRIANGLES ARE NOT DURABLE IDENTITY.
+
+RIP/EXTRUDE IS AN EXPLICIT FUTURE TOPOLOGY OPERATION. IT DOES NOT MOVE OR DESTROY
+THE SOURCE SHEET UNLESS A SEPARATE TOPOLOGY EDIT REMOVES IT.
+
+CAVE, SUBTERRANEAN, SKY, UPPER, AND LOWER ARE AUTHORING/PRESENTATION CONCEPTS,
+NOT REQUIRED RUNTIME TERRAIN CLASSES.
+
+THE FUTURE TERRAIN GRAMMAR CREATES AND COMPILES BOUNDED GEOMETRY; IT DOES NOT
+ARBITRARILY STRETCH ONE TERRAIN TRIANGLE ACROSS UNBOUNDED ELEVATION CHANGES.
+
+FREEZING LOWERS EDITABLE TERRAIN SHELLS INTO CHUNK-NATIVE STRUCTURAL WORLD DATA
+WITHOUT CHANGING THEIR PHYSICAL SHAPE OR MEANING.
+
+PHYSICS QUERIES STRUCTURAL SURFACES IN SPACE. IT DOES NOT INTERPRET AUTHORING
+LAYER NUMBERS OR ASSUME BASE TERRAIN IS THE LOWEST SURFACE.
 
 TERRAIN CHUNKS ARE WORLD-DATA PARTITIONS, NOT ECS STORAGE CHUNKS.
 
@@ -1172,8 +1200,8 @@ T0.3 required sections
 
 later sections using the same container
     TerrainPresence/v1          introduced by T1.0; optional base-cell topology
-    additional structural-terrain surface section
-                              future name/version/schema deliberately unfrozen
+    AdditionalTerrainSurfaces/v1
+                              introduced by T1.1; optional sparse shell fragments
     FrozenStatics/v1           introduced by T0.5
     MultiFragments/v1          introduced by T0.5
 
@@ -1193,9 +1221,10 @@ SHARED SPATIAL CHUNK IDENTITY != SHARED STORAGE LAYOUT
 
 `TerrainMaterials/v1` and `TerrainHeights/v1` describe only the dense base
 surface. T1.0's optional `TerrainPresence/v1` supplies topology for that same
-base surface without changing either frozen section. The container must admit a
-future structural-surface section without changing these base sections, but T0.3
-did not invent that future section's name, version, or row schema.
+base surface without changing either frozen section. T1.1's optional
+`AdditionalTerrainSurfaces/v1` independently supplies sparse immutable terrain
+shell fragments. None of these later sections changes the frozen base sections
+or top-level chunk row.
 
 The first format should be uncompressed unless I/O measurement proves compression
 is needed. Compression complicates random access, corruption boundaries, scratch
@@ -3242,8 +3271,9 @@ shared four-way corner        requires every applicable chunk
 
 An editor may offer “expand edit region” at a protected boundary. This avoids
 cross-session seam reconciliation and preserves exact reconstructed shared
-edges. Future sparse additional surfaces define equivalent ownership at their
-own topology boundaries when their representation is earned.
+edges. T1.1 sparse additional shells define equivalent future edit ownership at
+their own topology/continuation boundaries; T1.1 itself keeps those shells
+immutable.
 
 ### Terrain Save is one authoritative multi-chunk transaction
 
@@ -4562,8 +4592,9 @@ exact absence bits.
 
 The current durable `WorldMutableOverlay` terrain replacement changes the dense
 material/height planes only. It inherits authored base topology and cannot fill or
-cut holes. Mutable topology, durable `WorldSurfaceId`, breakable terrain, and
-observer-specific perception remain future separately reviewed work.
+cut holes. T1.1 later introduces immutable WorldPack-lineage `WorldSurfaceId` for
+additional shells; mutable topology, breakable terrain, mutable identity lineage,
+and observer-specific perception remain future separately reviewed work.
 
 Client Core copies the complete topology plane into bounded structural semantic
 residency. Its semantic hash includes the plane when any bit is absent while
@@ -4593,11 +4624,139 @@ T1.0 deliberately does not add sparse upper/lower surfaces, cave ceilings,
 cliffs, gravity/support policy, mutable surface identity, surface damage,
 navigation, occlusion, or recipient-specific illusions.
 
-## T1.1 — sparse additional world-terrain surfaces — NEXT
+## T1.1 — sparse additional world-terrain shells — CLOSED
 
-The next terrain checkpoint may add the smallest bounded World-owned additional
-surface representation needed for the Sky Island/cave consumer. It must preserve
-multiple surfaces at one X/Z, correct vertical selection, immutable authored
-identity, client structural residency, and renderer/Physics projections without
-turning geology into ECS entities or a voxel system. Its exact geometry, indexing,
-serialization, and durable identity remain unfrozen until that checkpoint.
+T1.1 adds the smallest immutable World-owned representation needed for detached
+sky terrain, mountain/cave shells, and several terrain faces in one X/Z column.
+It deliberately freezes a **compiled runtime fragment**, not the eventual editable
+terrain-cell format or editor UX:
+
+```text
+future editable terrain shell
+    discrete Flat / ~22.5 / ~45 / ~67.5 / 90-degree grammar
+    explicit rip/extrude and closure operations
+        ↓ deterministic compile/freeze
+AdditionalTerrainSurfaces/v1
+    sparse chunk-native immutable surface fragments
+```
+
+The representation is a bounded rectangular cell patch, up to the existing
+32-by-32 terrain-cell chunk, with a canonical nonempty presence bitset. Each
+present cell may have a Top face, a Bottom face, or both. A face owns one material
+per present patch cell and one q5 absolute-height vertex plane. A two-sided shell
+also owns one side/closure material. Top must be strictly above Bottom at every
+vertex. Geometry uses the same global checkerboard diagonal and signed
+nearest-millimeter plane sampling as BaseTerrain.
+
+This is sparse by section and fragment rather than a second world-sized dense
+heightfield. A pack with no fragments emits no section, so every historical
+T1.0/T0 pack retains its exact bytes and fingerprint. One maximum 32-by-32
+two-sided fragment occupies 9,612 payload bytes plus its 48-byte descriptor:
+128 B presence, 1,024 B edge-continuation state, and 4,230 B material/height data
+per face. The default pack limits admit at most 65,536 fragments globally and 64
+per chunk; callers may choose smaller limits before opening/building.
+
+`WorldSurfaceId` is an 8-byte nonzero stable identity for one logical authored
+shell **within the exact WorldPack/content lineage**. The same identity may own
+one canonical fragment in each of several chunks. A chunk key plus logical shell
+ID locates a fragment, but no separate fragment ID, descriptor order, render
+handle, cell, or triangle becomes durable identity. The ID has no vertical rank.
+Fragments are serialized in canonical chunk-key then shell-ID order.
+
+A cross-chunk shell seam is explicit rather than inferred from proximity. A
+boundary cell may name a North/East/South/West continuation only at the matching
+chunk edge. Build and open validate that the adjacent chunk exists, carries the
+same `WorldSurfaceId` and face set, reciprocates the connection on the exact
+neighbor cell, and reconstructs identical edge heights. A connected seam emits
+no closure wall; an exposed two-sided boundary deterministically emits two
+outward side triangles. This prevents both accidental cracks and artificial
+walls at chunk fragmentation boundaries.
+
+`AdditionalTerrainSurfaces/v1` is optional, canonical, digest/fingerprint-covered,
+and bounded before publication. Its 32-byte header points to one 8-byte fragment
+range per canonical WorldPack chunk, sorted 48-byte descriptors, and tightly
+packed fragment payloads. Opening rejects invalid/redundant presence, unknown
+face/edge bits, zero materials, invalid q5 height bases/ranges, crossed Top/Bottom,
+noncanonical offsets/order, mismatched continuations, malformed lengths/counts,
+and capacity excess transactionally. Content binding validates every effective
+top/bottom/side material before a `BoundWorldPack` is published.
+
+World exposes allocation-free, caller-bounded structural reads:
+
+```text
+TryGetAdditionalTerrainSurfaceBands(chunk)
+    borrowed immutable fragments for one chunk
+
+TryCopyTerrainColumnSurfaces(position, destination)
+    BaseTerrain plus every intersecting Top/Bottom face
+    sorted by actual sampled Y descending
+
+TryFindHighestSupportAtOrBelow(position, maximumY)
+TryFindLowestCeilingAtOrAbove(position, minimumY)
+    geometry-selected structural candidates only
+```
+
+The complete-column operation reports an exact required count without partial
+output when the caller span is too small. An unavailable base/prepared chunk is
+still `Unavailable`; a resident T1.0 Absent base cell simply contributes no base
+face while resident additional faces remain queryable. A completed nearest-face
+search with no qualifying candidate returns the fail-closed invalid/default
+surface value. Top is exposed as a
+support candidate and Bottom as a ceiling candidate, but T1.1 does not decide
+grounding, body clearance, step, gravity, or character response. Those policies
+belong to P0.1c/later Physics.
+
+The same shell is contextual geometry, not a permanently classified Floor or
+Ceiling. Its Top can support a body above it while its Bottom/closed boundary can
+limit a body below it. BaseTerrain is likewise just the dense default sheet; it
+may lie below, above, or between additional faces. “Cave,” “mountain,” “sky,” and
+“level” are not serialized physical classes.
+
+`WorldMutableOverlay` deliberately delegates additional-shell reads to its exact
+immutable base pack. Existing material/height replacements therefore cannot cut,
+fill, move, or damage shell topology. Mutable additional shells, surface HP,
+destruction, illusion/per-observer perception, and overlay state keyed by
+`WorldSurfaceId` remain separately reviewed future work.
+
+Client Core retains the borrowed immutable fragment set as part of bounded
+structural chunk residency, counts it against a per-chunk limit, and incorporates
+all identity/topology/material/height/continuation bytes into the semantic hash.
+No fragment becomes an ECS entity or client semantic entity row. Its
+engine-neutral mesh builder emits one deterministic batch per fragment, including
+top/bottom/closure faces, into caller-owned spans. Godot realizes one mesh/node
+per fragment—not one node per cell, slope face, or triangle—and uses the existing
+chunk/floating-origin transform. Renderer-owned worst-case scratch is fixed at
+36,864 vertices, 36,864 ushort indices, and 12,288 material entries (1,425,408
+bytes total) and is reused across fragments.
+
+Permanent fixtures prove:
+
+- a MountainShell and preserved BaseTerrain remain independently queryable;
+- a detached Sky Island requires no empty intermediate layer;
+- high mountain exterior, cave ceiling, intermediate floor, lower shell, and
+  BaseTerrain order by sampled geometry rather than identity;
+- one logical shell crosses a chunk boundary with exact reciprocal continuity
+  and without a false seam wall;
+- query interpolation and mesh triangulation share BaseTerrain parity;
+- canonical order independence, malformed/capacity/connection rejection, exact
+  no-section compatibility, bounded Client Core residency/hash, Godot realization,
+  and zero warmed column-query allocation.
+
+T1.1 does not implement the interactive terrain editor, rip/extrude UX,
+Freeze/Unfreeze tooling, mutable shell overlays, destruction, arbitrary runtime
+mesh import, voxels, navigation, gravity, jump/fall/landing, grounding, support
+policy, clearance, step response, or Network/content acquisition.
+
+The next owning sequence is:
+
+```text
+P0.1c
+    support / grounding / clearance
+    selection from actual structural geometry
+
+following Physics vertical
+    gravity / jump / fall / landing / recovery
+
+Concept Demo integration
+    MountainShell/cave, Sky Island, telepad, central terrain, Far Island/gate
+```

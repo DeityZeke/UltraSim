@@ -9,8 +9,9 @@ and exercises those capabilities together.
 F0.1 persistent shell/settings/focus foundation, A0.0/A0.1 local content resolution, and the F0.2
 Single Player Cabin/human-calibration vertical are closed. `Client.Local.Godot` is the permanent
 consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over it. Terrain T1.0
-now supplies explicit base-surface presence/intentional-void semantics; sparse additional
-sky/cave surfaces remain the next Terrain checkpoint.
+supplies explicit base-surface presence/intentional-void semantics, and T1.1 supplies immutable
+sparse terrain shells at free absolute elevations for the Sky Island and cave. Physics support,
+grounding, clearance, and vertical motion remain the next owning checkpoints before integration.
 
 The demo has two purposes:
 
@@ -287,30 +288,49 @@ no longer hypothetical.
 
 ## 6.2 Sky Island
 
-The Sky Island exercises an **additional world-terrain surface** above the main base surface.
+The Sky Island exercises an **additional detached world-terrain shell** above the main base sheet:
 
-It should not be forced into ECS or a giant static/Multi merely because WorldPack v1 currently has a
-dense base heightfield.
+```text
+SkyIslandShell
+====================== high
 
-The smallest correct additional-surface representation should preserve the existing T0 rule:
-additional geology/surfaces are World data by default, and multiple surfaces at one X/Z do not imply
-voxel terrain.
+          air
+
+BaseTerrain
+====================== low
+```
+
+No blank numbered layer exists between them. T1.1 stores the Sky Island as sparse immutable
+WorldPack shell fragments sharing one logical `WorldSurfaceId` where it crosses chunk boundaries.
+It is not forced into ECS, a giant static/Multi, or a second dense world-sized heightfield.
 
 ## 6.3 Cave
 
-The cave lives on the opposite side of the main island from the Sky Island and proves the inverse
-vertical arrangement:
+The cave lives on the opposite side of the main island from the Sky Island and proves the shell
+model rather than a numbered underground layer:
 
 ```text
-main terrain above
-cave ceiling
-cave interior
-cave floor/support below
+MountainShell exterior/ceiling
+===============================
+
+            cave space
+
+optional intermediate shell
+        ===============
+
+preserved BaseTerrain / lowest floor
+===============================
 ```
 
-The first cave does not need to solve every possible cliff/overhang/tunnel authoring problem. It must
-prove that renderer, collision/support queries, and client structural semantics can distinguish the
-correct surface where multiple vertical surfaces exist.
+An authored mountain may remain on BaseTerrain, or a future explicit rip may raise a
+`MountainShell` while leaving the source BaseTerrain physically present. In the latter case that
+preserved base naturally becomes potential cave floor once an opening makes the intervening space
+reachable. Additional sparse shells supply any extra floors, ledges, bridges, or chambers.
+
+The same MountainShell is exterior support from above and ceiling/clearance geometry from below;
+it is not serialized as a permanent Floor or Ceiling layer. The first cave does not need to solve
+every possible cliff/overhang/tunnel authoring problem. It must prove that renderer, support/
+clearance queries, and client structural semantics select actual geometry at the body's Y.
 
 ## 6.4 Client void/residency implication
 
@@ -968,8 +988,8 @@ TEST COMPLETE global-chat
 TEST START  sky-jump-telepad
 TEST COMPLETE sky-jump-telepad
 
-TEST START  cave-layer
-TEST COMPLETE cave-layer
+TEST START  cave-shell
+TEST COMPLETE cave-shell
 
 TEST START  far-gate-aoi
 TEST COMPLETE far-gate-aoi
@@ -1137,7 +1157,9 @@ F0.2   real Single Player Cabin + human calibration                 CLOSED
 
 then earn/integrate Concept Demo Round 1 consumers:
     terrain T1.0 surface presence/void                         CLOSED
-    terrain T1.1 additional sky/cave surfaces                  NEXT
+    terrain T1.1 sparse terrain shells                         CLOSED
+    Physics P0.1c support / grounding / clearance              NEXT
+    Physics vertical motion / jump / fall / landing            AFTER P0.1c
     render-distance setting
     signs/Fallback Lab
     guest/demo admission presentation
@@ -1174,6 +1196,12 @@ RENDER DISTANCE IS CLIENT PRESENTATION POLICY; IT DOES NOT SILENTLY EXPAND SERVE
 INTENTIONAL TERRAIN VOID != MISSING STREAMED CONTENT.
 
 SKY/CAVE SURFACES ARE WORLD TERRAIN DATA, NOT FORCED ECS ENTITIES BY DEFAULT.
+
+BASE TERRAIN IS THE DENSE DEFAULT SHEET, NOT THE UNIVERSAL LOWEST SURFACE.
+
+SKY, CAVE, UPPER, AND LOWER DO NOT IMPLY NUMBERED RUNTIME TERRAIN LAYERS.
+
+SPACE BETWEEN TERRAIN SHELLS IS ORDINARY WORLD SPACE.
 
 JUMP IS AUTHORITATIVE GAME/PHYSICS MOVEMENT, NOT A CLIENT TELEPORT ANIMATION.
 

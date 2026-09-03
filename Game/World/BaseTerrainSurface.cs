@@ -132,7 +132,7 @@ public static class BaseTerrainSurface
         return sample.IsPresent;
     }
 
-    private static int SampleHeight(in WorldTerrainChunkView terrain, in WorldPosition location)
+    internal static int SampleHeight(in WorldTerrainChunkView terrain, in WorldPosition location)
     {
 
         TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);

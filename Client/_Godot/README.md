@@ -20,6 +20,17 @@ transparent material or hidden collision plane. Terrain group admission counts
 only materials used by present cells, so a backing material value stored beneath
 an absent cell cannot consume presentation capacity.
 
+Terrain T1.1 additional terrain shells are realized as one `ArrayMesh` and one
+`MeshInstance3D` per bounded chunk fragment, with material groups as mesh surfaces.
+There is no node per authored cell, slope face, triangle, or logical shell across
+the world. The renderer reuses one fixed worst-case fragment scratch set, receives
+canonical top/bottom/closure triangles from Game.World, applies the same Godot
+winding conversion as base terrain, and places the result under the existing
+chunk/floating-origin transform. Reciprocal cross-chunk continuation suppresses
+false closure faces at a logical shell seam. Fragment resources retire with their
+ordinary structural render chunk; `WorldSurfaceId` never becomes a Godot object
+identity.
+
 `Game.World` terrain indices use an engine-neutral mathematical invariant:
 `cross(v1-v0, v2-v0)` points toward the semantic front/outward side in UltraSim
 coordinates, and supplied normals occupy that same hemisphere. The current

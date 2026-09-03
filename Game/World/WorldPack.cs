@@ -20,9 +20,10 @@ public static class WorldPackFormat
     public const uint FrozenStaticsSchemaVersion = 1;
     public const uint MultiFragmentsSchemaVersion = 1;
     public const uint TerrainPresenceSchemaVersion = 1;
+    public const uint AdditionalTerrainSurfacesSchemaVersion = 1;
 }
 
-/// <summary>Known section identities. Additional structural-surface kinds remain future schemas.</summary>
+/// <summary>Known canonical WorldPack section identities.</summary>
 public enum WorldPackSectionKind : uint
 {
     TerrainMaterials = 1,
@@ -30,6 +31,7 @@ public enum WorldPackSectionKind : uint
     FrozenStatics = 3,
     MultiFragments = 4,
     TerrainPresence = 5,
+    AdditionalTerrainSurfaces = 6,
 }
 
 /// <summary>Cold content/schema identity supplied by game composition when opening a pack.</summary>
@@ -105,7 +107,9 @@ public readonly record struct WorldPackLimits
         32,
         maximumFrozenStatics: 1_000_000,
         maximumMultiInstances: 262_144,
-        maximumMultiFragments: 2_000_000);
+        maximumMultiFragments: 2_000_000,
+        maximumAdditionalTerrainSurfaceFragments: 65_536,
+        maximumAdditionalTerrainSurfaceFragmentsPerChunk: 64);
 
     public WorldPackLimits(
         int maximumPackBytes,
@@ -113,7 +117,9 @@ public readonly record struct WorldPackLimits
         int maximumSections,
         int maximumFrozenStatics = 1_000_000,
         int maximumMultiInstances = 262_144,
-        int maximumMultiFragments = 2_000_000)
+        int maximumMultiFragments = 2_000_000,
+        int maximumAdditionalTerrainSurfaceFragments = 65_536,
+        int maximumAdditionalTerrainSurfaceFragmentsPerChunk = 64)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(maximumPackBytes, WorldPackFormat.HeaderBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumChunks);
@@ -121,12 +127,16 @@ public readonly record struct WorldPackLimits
         ArgumentOutOfRangeException.ThrowIfNegative(maximumFrozenStatics);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumMultiInstances);
         ArgumentOutOfRangeException.ThrowIfNegative(maximumMultiFragments);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumAdditionalTerrainSurfaceFragments);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumAdditionalTerrainSurfaceFragmentsPerChunk);
         MaximumPackBytes = maximumPackBytes;
         MaximumChunks = maximumChunks;
         MaximumSections = maximumSections;
         MaximumFrozenStatics = maximumFrozenStatics;
         MaximumMultiInstances = maximumMultiInstances;
         MaximumMultiFragments = maximumMultiFragments;
+        MaximumAdditionalTerrainSurfaceFragments = maximumAdditionalTerrainSurfaceFragments;
+        MaximumAdditionalTerrainSurfaceFragmentsPerChunk = maximumAdditionalTerrainSurfaceFragmentsPerChunk;
     }
 
     public int MaximumPackBytes { get; }
@@ -135,9 +145,12 @@ public readonly record struct WorldPackLimits
     public int MaximumFrozenStatics { get; }
     public int MaximumMultiInstances { get; }
     public int MaximumMultiFragments { get; }
+    public int MaximumAdditionalTerrainSurfaceFragments { get; }
+    public int MaximumAdditionalTerrainSurfaceFragmentsPerChunk { get; }
     internal bool IsValid => MaximumPackBytes >= WorldPackFormat.HeaderBytes && MaximumChunks > 0 &&
         MaximumSections >= 2 && MaximumFrozenStatics >= 0 && MaximumMultiInstances >= 0 &&
-        MaximumMultiFragments >= 0;
+        MaximumMultiFragments >= 0 && MaximumAdditionalTerrainSurfaceFragments >= 0 &&
+        MaximumAdditionalTerrainSurfaceFragmentsPerChunk >= 0;
 }
 
 public enum WorldPackBuildError
@@ -151,6 +164,7 @@ public enum WorldPackBuildError
     MalformedHeightPlane,
     InvalidHeightPlane,
     MalformedTerrainPresence,
+    InvalidAdditionalTerrainSurface,
     SharedEdgeMismatch,
     DuplicateStaticId,
     InvalidStaticPlacement,
@@ -178,6 +192,7 @@ public enum WorldPackOpenError
     InvalidTerrainPayload,
     InvalidFrozenStaticPayload,
     InvalidMultiPayload,
+    InvalidAdditionalTerrainSurfacePayload,
     SharedEdgeMismatch,
     IoFailure,
 }
@@ -364,11 +379,17 @@ public sealed partial class WorldPackBuilder
             error = WorldPackBuildError.SharedEdgeMismatch;
             return false;
         }
+        if (!ValidateAdditionalTerrainConnections())
+        {
+            error = WorldPackBuildError.InvalidAdditionalTerrainSurface;
+            return false;
+        }
 
         SourceChunk[] ordered = _chunks.ToArray();
         Array.Sort(ordered, static (left, right) => left.Key.CompareTo(right.Key));
         int sectionCount = 2 + (_frozenStatics.Count == 0 ? 0 : 1) +
-            (_staticMultis.Count == 0 ? 0 : 1) + (_hasAbsentBaseSurface ? 1 : 0);
+            (_staticMultis.Count == 0 ? 0 : 1) + (_hasAbsentBaseSurface ? 1 : 0) +
+            (_additionalTerrainBands.Count == 0 ? 0 : 1);
         if (sectionCount > _limits.MaximumSections)
         {
             error = WorldPackBuildError.CapacityExceeded;
@@ -384,10 +405,17 @@ public sealed partial class WorldPackBuilder
         int multiOffset;
         int presenceOffset;
         int presenceLength;
+        int additionalTerrainOffset;
         int totalLength;
         if (!FrozenWorldStructureCodec.TryMeasure(ordered.Length, _frozenStatics.Count,
                 _staticMultis.Count, _multiFragmentCount, out int measuredStaticLength,
                 out int measuredMultiLength))
+        {
+            error = WorldPackBuildError.SizeOverflow;
+            return false;
+        }
+        if (!AdditionalTerrainSurfaceCodec.TryMeasure(ordered.Length, _additionalTerrainBands,
+                out int measuredAdditionalTerrainLength))
         {
             error = WorldPackBuildError.SizeOverflow;
             return false;
@@ -406,7 +434,8 @@ public sealed partial class WorldPackBuilder
             presenceLength = _hasAbsentBaseSurface
                 ? checked(ordered.Length * TerrainChunkFormat.SurfacePresencePlaneBytes)
                 : 0;
-            totalLength = checked(presenceOffset + presenceLength);
+            additionalTerrainOffset = checked(presenceOffset + presenceLength);
+            totalLength = checked(additionalTerrainOffset + measuredAdditionalTerrainLength);
         }
         catch (OverflowException)
         {
@@ -427,6 +456,10 @@ public sealed partial class WorldPackBuilder
         if ((staticPayload?.Length ?? 0) != measuredStaticLength ||
             (multiPayload?.Length ?? 0) != measuredMultiLength)
             throw new InvalidOperationException("Frozen structure measurement diverged from compilation.");
+        if (!AdditionalTerrainSurfaceCodec.TryCompile(orderedKeys, _additionalTerrainBands,
+                out byte[]? additionalTerrainPayload) ||
+            (additionalTerrainPayload?.Length ?? 0) != measuredAdditionalTerrainLength)
+            throw new InvalidOperationException("Additional terrain measurement diverged from compilation.");
 
         var bytes = new byte[totalLength];
         WriteHeader(bytes, ordered.Length, chunkDirectoryLength, sectionDirectoryLength,
@@ -435,10 +468,13 @@ public sealed partial class WorldPackBuilder
         if (staticPayload is not null) staticPayload.CopyTo(bytes.AsSpan(staticOffset));
         if (multiPayload is not null) multiPayload.CopyTo(bytes.AsSpan(multiOffset));
         if (_hasAbsentBaseSurface) WritePresencePayload(bytes, ordered, presenceOffset);
+        if (additionalTerrainPayload is not null)
+            additionalTerrainPayload.CopyTo(bytes.AsSpan(additionalTerrainOffset));
         WriteSectionDirectory(bytes, ordered.Length, chunkDirectoryLength, materialOffset,
             materialLength, heightOffset, heightLength, staticOffset, staticPayload,
             _frozenStatics.Count, multiOffset, multiPayload, _multiFragmentCount,
-            presenceOffset, presenceLength);
+            presenceOffset, presenceLength, additionalTerrainOffset, additionalTerrainPayload,
+            _additionalTerrainBands.Count);
         WorldPackFingerprint fingerprint = WorldPackCodec.ComputePackFingerprint(bytes);
         fingerprint.Write(bytes.AsSpan(WorldPackFormat.PackFingerprintOffset,
             WorldPackFormat.PackFingerprintBytes));
@@ -587,7 +623,10 @@ public sealed partial class WorldPackBuilder
         byte[]? multiPayload,
         int multiFragmentCount,
         int presenceOffset,
-        int presenceLength)
+        int presenceLength,
+        int additionalTerrainOffset,
+        byte[]? additionalTerrainPayload,
+        int additionalTerrainFragmentCount)
     {
         int sectionOffset = WorldPackFormat.HeaderBytes + chunkDirectoryLength;
         WriteSection(bytes, sectionOffset, WorldPackSectionKind.TerrainMaterials,
@@ -611,10 +650,18 @@ public sealed partial class WorldPackBuilder
         }
         if (presenceLength != 0)
         {
-            WriteSection(bytes, sectionOffset + row * WorldPackFormat.SectionDirectoryRowBytes,
+            WriteSection(bytes, sectionOffset + row++ * WorldPackFormat.SectionDirectoryRowBytes,
                 WorldPackSectionKind.TerrainPresence, WorldPackFormat.TerrainPresenceSchemaVersion,
                 presenceOffset, presenceLength,
                 checked((ulong)chunkCount * TerrainChunkFormat.MaterialCellCount));
+        }
+        if (additionalTerrainPayload is not null)
+        {
+            WriteSection(bytes, sectionOffset + row * WorldPackFormat.SectionDirectoryRowBytes,
+                WorldPackSectionKind.AdditionalTerrainSurfaces,
+                WorldPackFormat.AdditionalTerrainSurfacesSchemaVersion,
+                additionalTerrainOffset, additionalTerrainPayload.Length,
+                checked((ulong)additionalTerrainFragmentCount));
         }
     }
 
@@ -707,6 +754,9 @@ public sealed class WorldPack
         : 0;
     public int MultiFragmentCount => _metadata.MultiFragments.IsPresent
         ? checked((int)_metadata.MultiFragments.Count)
+        : 0;
+    public int AdditionalTerrainSurfaceFragmentCount => _metadata.AdditionalTerrainSurfaces.IsPresent
+        ? checked((int)_metadata.AdditionalTerrainSurfaces.Count)
         : 0;
     public int MultiInstanceCount => _metadata.MultiFragments.IsPresent
         ? BinaryPrimitives.ReadInt32LittleEndian(_bytes.AsSpan(_metadata.MultiFragments.Offset + 4))
@@ -883,6 +933,33 @@ public sealed class WorldPack
         return true;
     }
 
+    public bool TryGetAdditionalTerrainSurfaceBands(
+        SpatialChunkKey key,
+        out WorldTerrainSurfaceBandChunkView view)
+    {
+        if (!_metadata.AdditionalTerrainSurfaces.IsPresent || key.Space != Space)
+        {
+            view = default;
+            return false;
+        }
+        int chunk = WorldPackCodec.FindChunkIndex(_bytes, _metadata, key);
+        if (chunk < 0)
+        {
+            view = default;
+            return false;
+        }
+        ReadOnlySpan<byte> payload = _bytes.AsSpan(
+            _metadata.AdditionalTerrainSurfaces.Offset, _metadata.AdditionalTerrainSurfaces.Length);
+        int rangesOffset = BinaryPrimitives.ReadInt32LittleEndian(payload[16..]);
+        ReadOnlySpan<byte> range = payload.Slice(
+            rangesOffset + chunk * AdditionalTerrainSurfaceFormat.RangeBytes,
+            AdditionalTerrainSurfaceFormat.RangeBytes);
+        view = new WorldTerrainSurfaceBandChunkView(
+            key, payload, BinaryPrimitives.ReadInt32LittleEndian(range),
+            BinaryPrimitives.ReadInt32LittleEndian(range[4..]));
+        return true;
+    }
+
     public bool TryGetMultiInstance(MultiInstanceId id, out WorldMultiInstanceRecord instance)
     {
         if (!id.IsValid || !_metadata.MultiFragments.IsPresent)
@@ -989,6 +1066,32 @@ public sealed class WorldPack
                         record.MultiId, record.PieceId, chunk);
                 }
             }
+            if (TryGetAdditionalTerrainSurfaceBands(key, out WorldTerrainSurfaceBandChunkView bands))
+            {
+                for (int bandIndex = 0; bandIndex < bands.Count; bandIndex++)
+                {
+                    WorldTerrainSurfaceBandView band = bands.GetBand(bandIndex);
+                    for (int z = 0; z < band.Bounds.CellDepth; z++)
+                    for (int x = 0; x < band.Bounds.CellWidth; x++)
+                    {
+                        if (!band.IsCellPresent(x, z)) continue;
+                        if (band.HasTop && !binding.ContainsTerrainMaterial(
+                                band.GetMaterial(WorldTerrainSurfaceFace.Top, x, z)) ||
+                            band.HasBottom && !binding.ContainsTerrainMaterial(
+                                band.GetMaterial(WorldTerrainSurfaceFace.Bottom, x, z)))
+                        {
+                            error = WorldPackBindingError.UnknownTerrainMaterial;
+                            return false;
+                        }
+                    }
+                    if (band.HasTop && band.HasBottom &&
+                        !binding.ContainsTerrainMaterial(band.SideMaterialId))
+                    {
+                        error = WorldPackBindingError.UnknownTerrainMaterial;
+                        return false;
+                    }
+                }
+            }
         }
         if (staticOwnerCount != staticOwners.Length || pieceOwnerCount != pieceOwners.Length)
             throw new InvalidOperationException("Validated WorldPack structural counts changed during binding.");
@@ -1042,6 +1145,7 @@ public sealed class BoundWorldPack
     public int FrozenStaticCount => Pack.FrozenStaticCount;
     public int MultiInstanceCount => Pack.MultiInstanceCount;
     public int MultiFragmentCount => Pack.MultiFragmentCount;
+    public int AdditionalTerrainSurfaceFragmentCount => Pack.AdditionalTerrainSurfaceFragmentCount;
     public long StructuralIdentityIndexReservedBytes =>
         checked((long)_staticOwners.Length * Marshal.SizeOf<StaticIdentityOwner>() +
             (long)_pieceOwners.Length * Marshal.SizeOf<MultiPieceIdentityOwner>());
@@ -1056,6 +1160,11 @@ public sealed class BoundWorldPack
 
     public bool TryGetMultiFragments(SpatialChunkKey key, out WorldMultiFragmentChunkView view) =>
         Pack.TryGetMultiFragments(key, out view);
+
+    public bool TryGetAdditionalTerrainSurfaceBands(
+        SpatialChunkKey key,
+        out WorldTerrainSurfaceBandChunkView view) =>
+        Pack.TryGetAdditionalTerrainSurfaceBands(key, out view);
 
     public bool TryGetMultiInstance(MultiInstanceId id, out WorldMultiInstanceRecord instance) =>
         Pack.TryGetMultiInstance(id, out instance);
@@ -1237,7 +1346,8 @@ internal readonly record struct WorldPackMetadata(
     WorldPackFingerprint PackFingerprint,
     WorldPackSectionMetadata FrozenStatics,
     WorldPackSectionMetadata MultiFragments,
-    WorldPackSectionMetadata TerrainPresence);
+    WorldPackSectionMetadata TerrainPresence,
+    WorldPackSectionMetadata AdditionalTerrainSurfaces);
 
 internal readonly record struct WorldPackSectionMetadata(
     uint Kind,
@@ -1385,16 +1495,18 @@ internal static class WorldPackCodec
 
         var candidate = new WorldPackMetadata(chunkCount, sectionCount, chunkDirectoryOffset,
             sectionDirectoryOffset, payloadOffset, space, content, storedFingerprint,
-            default, default, default);
+            default, default, default, default);
         if (!ValidateSections(bytes, candidate, out WorldPackSectionMetadata materials,
                 out WorldPackSectionMetadata heights, out WorldPackSectionMetadata statics,
-                out WorldPackSectionMetadata multis, out WorldPackSectionMetadata presence, out error))
+                out WorldPackSectionMetadata multis, out WorldPackSectionMetadata presence,
+                out WorldPackSectionMetadata additionalTerrain, out error))
             return false;
         candidate = candidate with
         {
             FrozenStatics = statics,
             MultiFragments = multis,
             TerrainPresence = presence,
+            AdditionalTerrainSurfaces = additionalTerrain,
         };
         if (!ValidateChunks(bytes, candidate, materials, heights, out error)) return false;
         if (statics.IsPresent && !FrozenWorldStructureCodec.TryValidateStaticSection(
@@ -1407,6 +1519,12 @@ internal static class WorldPackCodec
                 bytes, candidate, multis, limits))
         {
             error = WorldPackOpenError.InvalidMultiPayload;
+            return false;
+        }
+        if (additionalTerrain.IsPresent && !AdditionalTerrainSurfaceCodec.TryValidateSection(
+                bytes, candidate, additionalTerrain, limits))
+        {
+            error = WorldPackOpenError.InvalidAdditionalTerrainSurfacePayload;
             return false;
         }
         metadata = candidate;
@@ -1459,6 +1577,7 @@ internal static class WorldPackCodec
         out WorldPackSectionMetadata statics,
         out WorldPackSectionMetadata multis,
         out WorldPackSectionMetadata presence,
+        out WorldPackSectionMetadata additionalTerrain,
         out WorldPackOpenError error)
     {
         materials = default;
@@ -1466,6 +1585,7 @@ internal static class WorldPackCodec
         statics = default;
         multis = default;
         presence = default;
+        additionalTerrain = default;
         uint priorKind = 0;
         int expectedOffset = metadata.PayloadOffset;
         Span<byte> digest = stackalloc byte[32];
@@ -1495,6 +1615,8 @@ internal static class WorldPackCodec
             if (kind == (uint)WorldPackSectionKind.FrozenStatics) statics = section;
             if (kind == (uint)WorldPackSectionKind.MultiFragments) multis = section;
             if (kind == (uint)WorldPackSectionKind.TerrainPresence) presence = section;
+            if (kind == (uint)WorldPackSectionKind.AdditionalTerrainSurfaces)
+                additionalTerrain = section;
             priorKind = kind;
             expectedOffset = checked(offset + length);
         }
@@ -1512,7 +1634,9 @@ internal static class WorldPackCodec
             heights.Version != WorldPackFormat.TerrainHeightsSchemaVersion ||
             statics.IsPresent && statics.Version != WorldPackFormat.FrozenStaticsSchemaVersion ||
             multis.IsPresent && multis.Version != WorldPackFormat.MultiFragmentsSchemaVersion ||
-            presence.IsPresent && presence.Version != WorldPackFormat.TerrainPresenceSchemaVersion)
+            presence.IsPresent && presence.Version != WorldPackFormat.TerrainPresenceSchemaVersion ||
+            additionalTerrain.IsPresent &&
+                additionalTerrain.Version != WorldPackFormat.AdditionalTerrainSurfacesSchemaVersion)
         {
             error = WorldPackOpenError.UnsupportedRequiredSection;
             return false;

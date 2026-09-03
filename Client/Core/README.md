@@ -38,6 +38,20 @@ includes non-all-present topology in the semantic hash, and preserves the legacy
 all-present hash. Resident terrain mesh preparation therefore omits intentional-
 void cells without interpreting them as missing structural data or a material.
 
+Terrain T1.1 admits immutable sparse additional terrain-shell fragments into the
+same structural residency transaction. Each slot retains the bounded fragment
+count and borrows the exact validated per-chunk WorldPack view; it does not copy
+shells into ECS/public semantic rows or create a cell object graph. The semantic
+hash covers logical `WorldSurfaceId`, patch bounds, face/closure topology,
+cross-chunk continuation, materials, and q5 heights. A configurable per-chunk
+fragment limit rejects the complete stage before publication.
+
+`TryBuildResidentAdditionalTerrainSurfaceMesh` materializes one selected fragment
+through the engine-neutral World mesh builder into caller-owned spans. Column and
+mesh ordering come from actual geometry and canonical chunk/surface identity,
+never a numbered vertical layer. Current material/height overlays cannot mutate
+the immutable additional-shell topology.
+
 The cache contains no ECS entities, server mutable storage, connections,
 packets, Godot nodes, RIDs, or resources. Borrowed chunk views remain valid only
 until the next cache mutation. Engine-neutral resident terrain mesh preparation

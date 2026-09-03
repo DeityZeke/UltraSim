@@ -9,7 +9,9 @@ packed per-chunk current state, and bounded observer-independent dirty history.
 T0.7 adds exact chunk-interest rings and a bounded packet-free local streaming
 oracle over that publication state. It is accepted as a reference consumer;
 T0.8's production client cache is separately owned under `Client/Core` and does
-not make the oracle part of client storage.
+not make the oracle part of client storage. T1.0 adds explicit base-surface
+presence/intentional void; T1.1 adds immutable sparse terrain shells and bounded
+multi-surface column reads without turning terrain into ECS entities or voxels.
 
 The frozen first profile is:
 
@@ -34,8 +36,46 @@ Present result carries effective height/material. The legacy height/material
 `Try...` APIs return false for either non-present state; callers needing residency
 semantics use the explicit probe. Mesh generation omits both triangles of absent
 cells. Current terrain replacements preserve the authored topology plane rather
-than silently filling holes. Sparse additional surfaces, mutable topology, and
-support/gravity behavior remain later World/Physics checkpoints.
+than silently filling holes. T1.1 additional shells remain independent immutable
+WorldPack structure; mutable topology and support/gravity behavior remain later
+World/Physics checkpoints.
+
+## Sparse terrain shells
+
+Terrain T1.1 adds optional `AdditionalTerrainSurfaces/v1`. BaseTerrain remains
+the dense default sheet, not the universal lowest surface. Additional shells may
+exist at any absolute elevation, overlap one X/Z column, and span chunks. Empty
+vertical distance is ordinary space; there is no numbered upper/underground layer
+and no voxel volume.
+
+`WorldSurfaceId` names one logical authored shell within an exact WorldPack/content
+lineage. The same ID may have one canonical fragment per chunk; descriptor order,
+chunk-local fragments, cells, triangles, ECS entities, and renderer handles are
+not durable identity. A fragment is a bounded 32-by-32-or-smaller sparse presence
+patch with optional Top/Bottom q5 height/material planes. A two-sided patch has
+an explicit side material and closed exposed edges. Reciprocal edge-continuation
+bits join same-ID fragments across adjacent chunks only when face sets and exact
+edge heights agree, preventing both cracks and false closure walls.
+
+The section is absent when unused, preserving exact historical T0/T1.0 pack bytes
+and fingerprints. Opening validates canonical chunk/ID order, offsets, counts,
+presence, face/edge flags, materials, heights, Top-above-Bottom, and cross-chunk
+continuations before publication. Default limits admit 65,536 fragments per pack
+and 64 per chunk; consumers may select smaller bounds.
+
+Bound/prepared views expose borrowed per-chunk fragments plus allocation-free
+column queries. A complete column contains present BaseTerrain and every
+intersecting Top/Bottom face sorted by sampled Y, while helper reads select the
+highest support candidate at/below a threshold or lowest ceiling candidate
+at/above it. Identity never determines order. These are structural candidates,
+not grounding/clearance policy; Physics P0.1c owns that interpretation.
+
+The engine-neutral mesh builder emits deterministic top, bottom, and exposed
+closure triangles into caller-owned spans using the same global parity as base
+terrain. Existing `WorldMutableOverlay` material/height replacements cannot
+mutate shell geometry or topology. Mutable shells, destruction/state overlays,
+illusions/per-observer perception, editor rip/extrude, and gravity remain future
+work.
 
 `WorldPosition` is a 16-byte game value: signed 32-bit chunk X/Z, unsigned
 canonical local X/Z in `0..15,999`, and signed 32-bit Y millimeters. It is not an
@@ -242,25 +282,25 @@ container. It owns a 160-byte header, sorted 48-byte chunk rows, versioned
 The required sections are the dense base `TerrainMaterials/v1` and
 `TerrainHeights/v1`. T0.5 optionally adds `FrozenStatics/v1` and
 `MultiFragments/v1`; each owns a section-local range table aligned to canonical
-main-chunk order. The frozen top-level 48-byte terrain chunk row remains
-unchanged. A future sparse additional structural-surface section can likewise be
-added without changing any accepted section, but no such surface schema exists.
+main-chunk order. T1.0 adds optional `TerrainPresence/v1`; T1.1 adds optional
+`AdditionalTerrainSurfaces/v1` with its own canonical chunk range table. The
+frozen top-level 48-byte terrain chunk row and accepted base sections remain
+unchanged.
 
-That future schema must keep surface topology, material, effective physical
+The additional-shell schema keeps surface topology, material, effective physical
 behavior, observer perception, and mutable Game state distinct. An absent/`None`
 surface is topological absence, not a transparent or non-colliding material.
-Stateful authored surfaces will require stable World-owned identity rather than
-using chunk rows, triangle indices, render handles, or ECS entities as durable
-identity. A durable overlay may retain divergence such as damaged/destroyed state
-against that identity, while Game derives separate physical, presentation,
-occlusion, and navigation projections. These are frozen design constraints only:
-the current WorldPack and overlay formats do not yet implement sparse mutable
-surfaces or observer-specific perception.
+T1.1 supplies stable pack-lineage World-owned identity instead of using chunk
+rows, triangle indices, render handles, or ECS entities. A future durable overlay
+may retain divergence such as damaged/destroyed state against that identity while
+Game derives separate physical, presentation, occlusion, and navigation
+projections. The current overlay does not yet implement mutable shell state or
+observer-specific perception.
 
 Opening is bounded by `WorldPackLimits` before proportional allocation. The
 reader validates geometry, content fingerprint, all checked offsets/counts,
 canonical ordering, section and pack hashes, material/height payloads, and
-reconstructed seams before publishing immutable owned bytes. Buffered file and
+reconstructed base/shell seams before publishing immutable owned bytes. Buffered file and
 owned-memory inputs use the same validator. `TryGetBaseTerrain` returns a
 borrowed, allocation-free `WorldTerrainChunkView` rather than constructing a
 cell or chunk object graph.

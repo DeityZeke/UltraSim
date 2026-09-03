@@ -138,6 +138,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             "The repeated enter/leave path was not exercised.");
         RendererCapacityAndIdentityRegressions(world);
         BaseSurfaceVoidRenderingRegression();
+        AdditionalTerrainShellRenderingRegression();
         HighElevationPrecisionRegression();
         SlidingRenderWindowRegressions();
         SlidingRenderWindowPendingWorkRegressions();
@@ -294,6 +295,31 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(renderer.TryGetChunkDiagnostics(handle, out GodotWorldRenderChunkDiagnostics diagnostic) &&
             diagnostic.TerrainTriangleCount == TerrainChunkFormat.TriangleCount - 2,
             "Godot terrain realization did not omit the intentional-void cell's triangles.");
+    }
+
+    private void AdditionalTerrainShellRenderingRegression()
+    {
+        BoundWorldPack world = CreateAdditionalTerrainWorld();
+        var cache = new ClientWorldSemanticCache(
+            world, new ClientWorldSemanticCacheLimits(1, 0, 0, 1, 1, 1));
+        SpatialChunkKey key = Key(0, 0);
+        Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _) &&
+            cache.TryStageFromBaseWorld(handle, [], default, out _) &&
+            cache.TryPublish(handle, out _),
+            "Additional terrain fixture did not become semantically resident.");
+        using var renderer = new GodotWorldRenderer(
+            this, cache, new GodotWorldRendererLimits(1, 4));
+        Expect(renderer.TryEnterPresentation(handle, true, out GodotWorldRenderQueueError error),
+            $"Additional terrain shell did not queue: {error}.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
+        Expect(renderer.TryGetChunkDiagnostics(handle, out GodotWorldRenderChunkDiagnostics diagnostic),
+            "Additional terrain diagnostics were unavailable.");
+        Expect(diagnostic.AdditionalTerrainSurfaceFragmentCount == 1 &&
+            diagnostic.AdditionalTerrainTriangleCount == 12 &&
+            MathF.Abs(diagnostic.FirstAdditionalTerrainLocalY - 10.0f) < 0.000001f,
+            "Godot did not realize the additional shell as one batched structural mesh.");
+        Expect(renderer.GetSnapshot().ActiveNodes < TerrainChunkFormat.MaterialCellCount,
+            "Additional terrain cells leaked into scene-tree identity.");
     }
 
     private void RendererCapacityAndIdentityRegressions(BoundWorldPack world)
@@ -1149,6 +1175,36 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(pack.TryBind(new WorldContentBinding(Content, [1, 2], []),
             out BoundWorldPack? bound, out _), "Intentional-void WorldPack binding failed.");
         return bound!;
+    }
+
+    private static BoundWorldPack CreateAdditionalTerrainWorld()
+    {
+        var builder = new WorldPackBuilder(
+            Space, Content, new WorldPackLimits(512 * 1024, 1, 4, 0, 0, 0, 1, 1));
+        ushort[] materials = Enumerable.Repeat((ushort)1,
+            TerrainChunkFormat.MaterialCellCount).ToArray();
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase baseHeight),
+            "Additional terrain base was invalid.");
+        Expect(builder.TryAddBaseTerrain(Key(0, 0), materials, baseHeight, offsets, out _),
+            "Additional terrain base could not be added.");
+        TerrainSurfacePatchBounds bounds = new(4, 4, 1, 1);
+        Expect(TerrainHeightPlaneBase.TryCreate(10_000, out TerrainHeightPlaneBase top),
+            "Additional terrain shell top was invalid.");
+        Expect(TerrainHeightPlaneBase.TryCreate(9_000, out TerrainHeightPlaneBase bottom),
+            "Additional terrain shell bottom was invalid.");
+        Expect(builder.TryAddAdditionalTerrainSurfaceBand(
+            Key(0, 0), new WorldSurfaceId(91), bounds,
+            WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom,
+            [1UL], new TerrainSurfaceEdgeConnection[bounds.CellCount],
+            [(ushort)2], top, new TerrainHeightOffset[bounds.VertexCount],
+            [(ushort)3], bottom, new TerrainHeightOffset[bounds.VertexCount], 4, out _),
+            "Additional terrain shell could not be added.");
+        Expect(builder.TryBuild(out WorldPackArtifact? artifact, out _),
+            "Additional terrain WorldPack build failed.");
+        Expect(artifact!.Open().TryBind(new WorldContentBinding(Content, [1, 2, 3, 4], []),
+            out BoundWorldPack? world, out _), "Additional terrain WorldPack binding failed.");
+        return world!;
     }
 
     private static BoundWorldPack CreateSlidingWorld()

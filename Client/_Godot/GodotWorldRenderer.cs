@@ -132,7 +132,10 @@ public readonly record struct GodotWorldRenderChunkDiagnostics(
     float FirstPublicLocalY,
     ulong StructuralObjectId,
     ulong PublicObjectId,
-    ulong TerrainMeshObjectId);
+    ulong TerrainMeshObjectId,
+    int AdditionalTerrainSurfaceFragmentCount,
+    int AdditionalTerrainTriangleCount,
+    float FirstAdditionalTerrainLocalY);
 
 /// <summary>
 /// Engine-thread presentation over the production semantic cache. Private render slots are mapped
@@ -160,6 +163,12 @@ public sealed class GodotWorldRenderer : IDisposable
         new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
     private readonly ushort[] _terrainIndices = new ushort[TerrainChunkFormat.TriangleIndexCount];
     private readonly ushort[] _terrainMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+    private readonly TerrainBaseMeshVertex[] _additionalTerrainVertices =
+        new TerrainBaseMeshVertex[TerrainSurfaceBandMesh.MaximumVertexCount];
+    private readonly ushort[] _additionalTerrainIndices =
+        new ushort[TerrainSurfaceBandMesh.MaximumIndexCount];
+    private readonly ushort[] _additionalTerrainMaterials =
+        new ushort[TerrainSurfaceBandMesh.MaximumTriangleCount];
     private readonly BoxMesh _fallbackStaticMesh;
     private readonly BoxMesh _fallbackPublicMesh;
     private int _freeRenderSlotCount;
@@ -565,7 +574,8 @@ public sealed class GodotWorldRenderer : IDisposable
             chunk.FirstTerrainLocalY, chunk.TerrainTriangleCount,
             chunk.FirstStaticLocalY, chunk.FirstPublicLocalY,
             chunk.StructuralRoot.GetInstanceId(), chunk.PublicRoot.GetInstanceId(),
-            chunk.TerrainMesh.GetInstanceId());
+            chunk.TerrainMesh.GetInstanceId(), chunk.AdditionalTerrainSurfaceFragmentCount,
+            chunk.AdditionalTerrainTriangleCount, chunk.FirstAdditionalTerrainLocalY);
         return true;
     }
 
@@ -758,6 +768,21 @@ public sealed class GodotWorldRenderer : IDisposable
                 handle, semantic.Info.Key, out int yAnchor, out float firstTerrainY,
                 out int terrainTriangleCount);
             structural.AddChild(new MeshInstance3D { Name = "BaseTerrain", Mesh = terrainMesh });
+            int additionalTerrainTriangles = 0;
+            float firstAdditionalTerrainY = float.NaN;
+            for (int fragment = 0; fragment < semantic.AdditionalTerrainSurfaces.Count; fragment++)
+            {
+                ArrayMesh additionalMesh = CreateAdditionalTerrainMesh(
+                    handle, fragment, yAnchor, out int fragmentTriangles, out float fragmentFirstY,
+                    out WorldSurfaceId surfaceId);
+                structural.AddChild(new MeshInstance3D
+                {
+                    Name = $"AdditionalTerrain_{surfaceId.Value}_{fragment}",
+                    Mesh = additionalMesh,
+                });
+                additionalTerrainTriangles += fragmentTriangles;
+                if (float.IsNaN(firstAdditionalTerrainY)) firstAdditionalTerrainY = fragmentFirstY;
+            }
 
             var staticGroups = new SortedDictionary<WorldStaticRenderKey, List<Transform3D>>();
             float firstStaticY = float.NaN;
@@ -780,7 +805,11 @@ public sealed class GodotWorldRenderer : IDisposable
                 windowOffset, root,
                 structural, publicLayer.Root, terrainMesh, yAnchor, firstTerrainY,
                 terrainTriangleCount, firstStaticY,
-                publicLayer.FirstLocalY, 3 + staticGroups.Count, 1 + staticGroups.Count,
+                publicLayer.FirstLocalY,
+                3 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count,
+                1 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count,
+                semantic.AdditionalTerrainSurfaces.Count, additionalTerrainTriangles,
+                firstAdditionalTerrainY,
                 publicLayer.NodeCount, publicLayer.ResourceCount);
         }
         catch
@@ -879,6 +908,61 @@ public sealed class GodotWorldRenderer : IDisposable
         return mesh;
     }
 
+    private ArrayMesh CreateAdditionalTerrainMesh(
+        ClientSemanticChunkHandle handle,
+        int fragmentIndex,
+        int yAnchor,
+        out int triangleCount,
+        out float firstLocalY,
+        out WorldSurfaceId surfaceId)
+    {
+        if (!_cache.TryBuildResidentAdditionalTerrainSurfaceMesh(
+                handle, fragmentIndex, _additionalTerrainVertices, _additionalTerrainIndices,
+                _additionalTerrainMaterials, out TerrainSurfaceBandMeshSummary summary,
+                out ClientSemanticChunkError semanticError, out TerrainSurfaceBandMeshBuildError meshError))
+            throw new InvalidOperationException(
+                $"Could not prepare additional terrain fragment {fragmentIndex}: {semanticError}/{meshError}.");
+        surfaceId = summary.SurfaceId;
+        triangleCount = summary.TriangleCount;
+        var vertices = new Vector3[summary.VertexCount];
+        var normals = new Vector3[summary.VertexCount];
+        for (int index = 0; index < summary.VertexCount; index++)
+        {
+            TerrainBaseMeshVertex source = _additionalTerrainVertices[index];
+            vertices[index] = new Vector3(
+                source.LocalXMillimeters * MillimetersToMeters,
+                checked((long)source.AbsoluteYMillimeters - yAnchor) * MillimetersToMeters,
+                source.LocalZMillimeters * MillimetersToMeters);
+            normals[index] = new Vector3(source.NormalX, source.NormalY, source.NormalZ).Normalized();
+        }
+        firstLocalY = vertices.Length == 0 ? float.NaN : vertices[0].Y;
+        var trianglesByMaterial = new SortedDictionary<ushort, List<int>>();
+        for (int triangle = 0; triangle < summary.TriangleCount; triangle++)
+        {
+            ushort material = _additionalTerrainMaterials[triangle];
+            if (!trianglesByMaterial.TryGetValue(material, out List<int>? indices))
+                trianglesByMaterial.Add(material, indices = []);
+            int source = triangle * 3;
+            GodotMeshGeometry.ConvertCanonicalTriangle(
+                _additionalTerrainIndices[source], _additionalTerrainIndices[source + 1],
+                _additionalTerrainIndices[source + 2], out int first, out int second, out int third);
+            indices.Add(first); indices.Add(second); indices.Add(third);
+        }
+        var mesh = new ArrayMesh();
+        foreach ((ushort material, List<int> indices) in trianglesByMaterial)
+        {
+            var arrays = new global::Godot.Collections.Array();
+            arrays.Resize((int)Mesh.ArrayType.Max);
+            arrays[(int)Mesh.ArrayType.Vertex] = vertices;
+            arrays[(int)Mesh.ArrayType.Normal] = normals;
+            arrays[(int)Mesh.ArrayType.Index] = indices.ToArray();
+            mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+            Material? resolved = _assets?.ResolveTerrainMaterial(material);
+            if (resolved is not null) mesh.SurfaceSetMaterial(mesh.GetSurfaceCount() - 1, resolved);
+        }
+        return mesh;
+    }
+
     private static MultiMeshInstance3D CreateMultiMesh(string name, Mesh mesh,
         List<Transform3D> transforms)
     {
@@ -939,6 +1023,22 @@ public sealed class GodotWorldRenderer : IDisposable
             }
             if (!prior) groups++;
         }
+        for (int bandIndex = 0; bandIndex < semantic.AdditionalTerrainSurfaces.Count; bandIndex++)
+        {
+            WorldTerrainSurfaceBandView band = semantic.AdditionalTerrainSurfaces.GetBand(bandIndex);
+            for (int z = 0; z < band.Bounds.CellDepth; z++)
+            for (int x = 0; x < band.Bounds.CellWidth; x++)
+            {
+                if (!band.IsCellPresent(x, z)) continue;
+                if (band.HasTop && IsFirstBandMaterial(
+                        band, WorldTerrainSurfaceFace.Top, x, z)) groups++;
+                if (band.HasBottom && IsFirstBandMaterial(
+                        band, WorldTerrainSurfaceFace.Bottom, x, z)) groups++;
+            }
+            if (band.HasTop && band.HasBottom &&
+                !BandContainsMaterialBeforeBoundary(band, band.SideMaterialId)) groups++;
+            if (groups > _limits.MaximumGroupsPerChunk) return false;
+        }
         for (int index = 0; index < semantic.FrozenStatics.Length; index++)
         {
             WorldFrozenStaticRecord record = semantic.FrozenStatics[index];
@@ -973,6 +1073,47 @@ public sealed class GodotWorldRenderer : IDisposable
             if (!prior) groups++;
         }
         return groups <= _limits.MaximumGroupsPerChunk;
+    }
+
+    private static bool IsFirstBandMaterial(
+        in WorldTerrainSurfaceBandView band,
+        WorldTerrainSurfaceFace face,
+        int x,
+        int z)
+    {
+        ushort candidate = band.GetMaterial(face, x, z);
+        int target = z * band.Bounds.CellWidth + x;
+        if (face == WorldTerrainSurfaceFace.Bottom && band.HasTop)
+        {
+            for (int scanZ = 0; scanZ < band.Bounds.CellDepth; scanZ++)
+            for (int scanX = 0; scanX < band.Bounds.CellWidth; scanX++)
+                if (band.IsCellPresent(scanX, scanZ) &&
+                    band.GetMaterial(WorldTerrainSurfaceFace.Top, scanX, scanZ) == candidate)
+                    return false;
+        }
+        for (int scan = 0; scan < target; scan++)
+        {
+            int scanX = scan % band.Bounds.CellWidth;
+            int scanZ = scan / band.Bounds.CellWidth;
+            if (band.IsCellPresent(scanX, scanZ) &&
+                band.GetMaterial(face, scanX, scanZ) == candidate) return false;
+        }
+        return true;
+    }
+
+    private static bool BandContainsMaterialBeforeBoundary(
+        in WorldTerrainSurfaceBandView band,
+        ushort candidate)
+    {
+        for (int z = 0; z < band.Bounds.CellDepth; z++)
+        for (int x = 0; x < band.Bounds.CellWidth; x++)
+        {
+            if (!band.IsCellPresent(x, z)) continue;
+            if (band.HasTop && band.GetMaterial(WorldTerrainSurfaceFace.Top, x, z) == candidate ||
+                band.HasBottom && band.GetMaterial(WorldTerrainSurfaceFace.Bottom, x, z) == candidate)
+                return true;
+        }
+        return false;
     }
 
     private void ApplyOrigin(RenderChunk chunk)
@@ -1200,6 +1341,8 @@ public sealed class GodotWorldRenderer : IDisposable
             float firstTerrainLocalY, int terrainTriangleCount,
             float firstStaticLocalY, float firstPublicLocalY,
             int structuralNodeCount, int structuralResourceCount,
+            int additionalTerrainSurfaceFragmentCount, int additionalTerrainTriangleCount,
+            float firstAdditionalTerrainLocalY,
             int publicNodeCount, int publicResourceCount)
         {
             Handle = handle;
@@ -1217,6 +1360,9 @@ public sealed class GodotWorldRenderer : IDisposable
             FirstPublicLocalY = firstPublicLocalY;
             StructuralNodeCount = structuralNodeCount;
             StructuralResourceCount = structuralResourceCount;
+            AdditionalTerrainSurfaceFragmentCount = additionalTerrainSurfaceFragmentCount;
+            AdditionalTerrainTriangleCount = additionalTerrainTriangleCount;
+            FirstAdditionalTerrainLocalY = firstAdditionalTerrainLocalY;
             PublicNodeCount = publicNodeCount;
             PublicResourceCount = publicResourceCount;
         }
@@ -1232,6 +1378,9 @@ public sealed class GodotWorldRenderer : IDisposable
         internal int YAnchorMillimeters { get; }
         internal float FirstTerrainLocalY { get; }
         internal int TerrainTriangleCount { get; }
+        internal int AdditionalTerrainSurfaceFragmentCount { get; }
+        internal int AdditionalTerrainTriangleCount { get; }
+        internal float FirstAdditionalTerrainLocalY { get; }
         internal float FirstStaticLocalY { get; }
         internal float FirstPublicLocalY { get; set; }
         internal int StructuralNodeCount { get; }

@@ -1,10 +1,11 @@
 # Physics P0: injected authoritative motion plan
 
-Status: P0.1b implementation/evidence checkpoint. P0.0 extracted the accepted
-endpoint behavior into generation-owned UltraSim Simple Physics and P0.1a added
-first-class occupancy-aware relocation. P0.1b now adds bounded exact swept blocker
-collision. Support, step, clearance, sliding, continuous terrain support, and actor
-collision remain unstarted.
+Status: P0.0 through P0.1b accepted/closed; P0.1c is next. P0.0 extracted the
+accepted endpoint behavior into generation-owned UltraSim Simple Physics, P0.1a
+added first-class occupancy-aware relocation, and P0.1b added bounded exact swept
+blocker collision. Terrain T1.1 now supplies multiple immutable structural surface
+candidates per X/Z column. Support, step, clearance, sliding, continuous terrain
+support, and actor collision remain unstarted.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
@@ -1461,19 +1462,33 @@ Earn continuous movement semantics separately:
 
 ### P0.1c — support, step, and clearance if gameplay earns them
 
-Only after concrete movement requirements justify them, consider:
+The T1.1 Sky Island/cave consumer now earns this checkpoint. Add only the bounded
+physical foundation needed before vertical motion:
 
 - explicit support versus blocking;
 - body height/footprint profile;
-- bounded step-up;
+- support/clearance selection from actual structural geometry and body position;
+- bounded step-up if required by the accepted terrain grammar;
 - grounded step-down rule if required;
-- low-ceiling clearance;
+- low-ceiling clearance.
 
-Terrain T1.0 now supplies the required World-side distinction between a Present
-base surface, intentional resident Absent surface, and Unavailable prepared data.
-P0.1c must treat Absent as unsupported physical topology while preserving
-fail-closed handling for Unavailable. Current endpoint locomotion still rejects
-both and does not claim gap traversal, falling, or gravity.
+World may return BaseTerrain plus several T1.1 Top/Bottom structural faces within
+one X/Z column or body-height range. Physics must select by actual sampled Y,
+body position, and geometry—not BaseTerrain-only height, `WorldSurfaceId`, fragment
+order, or any authoring layer rank. The same two-sided shell may act as support
+from above and clearance/blocking geometry from below. FrozenStatics, Multis, and
+Game-owned dynamic collision projection remain separately owned structural
+candidates rather than being reclassified as terrain layers.
+
+Terrain T1.0 supplies the distinction between Present BaseTerrain, intentional
+resident Absent surface, and Unavailable prepared data. P0.1c must treat Absent as
+unsupported topology while preserving fail-closed handling for Unavailable.
+T1.1's `TryCopyTerrainColumnSurfaces`, `TryFindHighestSupportAtOrBelow`, and
+`TryFindLowestCeilingAtOrAbove` are bounded neutral World reads; they do not
+pre-decide grounding, clearance, step response, or motion.
+
+P0.1c still must not add gravity, jump, falling, or landing. Those remain the
+following vertical-motion checkpoint after support/clearance is accepted.
 
 **Gate:** conformance scenarios pass at accepted 20/60/120 Hz semantics with
 bounded zero-allocation warmed Simple hot paths.
