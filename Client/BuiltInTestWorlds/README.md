@@ -18,13 +18,14 @@ built-in base:
 Every package is validated from exact local PNG payload bytes before the resolver can consume its
 `VerifiedContentPackage` capability. `CabinContentFingerprints` freezes the base and three resolved
 catalog hashes, while the tests freeze the exact owner/definition/reference delta for each logical
-id.
+id. F0.2 resolves those same verified bytes by catalog SHA-256 identity rather than depending on
+package-relative presentation paths.
 
 The fixture realm is stable test identity only; it is not presented as authenticated remote realm
 establishment. Physical local source paths do not enter the package, plan, or resolved fingerprints.
 
 This first oracle intentionally covers passive texture/material/icon presentation. The existing
-authoritative Cabin WorldPack and bundled X/Y meshes are not repackaged here. F0.2 consumes this
+authoritative Cabin WorldPack and bundled X/Y meshes are not repackaged here. F0.2 now consumes this
 catalog in the real Single Player shell, while A0.2 owns persistent CAS/install and A0.7 later carries
 a complete World-owned artifact through the streaming substrate.
 

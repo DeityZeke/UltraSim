@@ -1,15 +1,14 @@
 using UltraSim.Client.Bootstrap.Godot;
-using UltraSim.Client.Local;
+using UltraSim.Client.Local.Godot;
 
 namespace UltraSim.Client.SinglePlayer.Godot;
 
-public partial class SinglePlayerClientRoot : ClientRoot
+public partial class SinglePlayerClientRoot : LocalPlayClientRoot
 {
     protected override ClientCompositionManifest Composition
     {
         get
         {
-            _ = typeof(LocalPlayableSession);
             return ClientCompositionManifest.SinglePlayer;
         }
     }

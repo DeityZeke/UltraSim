@@ -12,12 +12,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../_Godot/UltraSim.Client.Godot.csproj" />
-    <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
-    <ProjectReference Include="../Local/UltraSim.Client.Local.csproj" />
-    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
-    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
-    <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
-    <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
+    <ProjectReference Include="../Local.Godot/UltraSim.Client.Local.Godot.csproj" />
   </ItemGroup>
 </Project>

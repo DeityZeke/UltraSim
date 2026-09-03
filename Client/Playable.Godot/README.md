@@ -1,7 +1,8 @@
 # Launchable T0.10 client
 
-This is the real OfflineDirect woods/cabin reference application. Its F0.0b
-composition consumes the Network-free [`Client.Local`](../Local/README.md)
+This is the legacy/reference OfflineDirect woods/cabin acceptance executable. Its thin root now
+consumes the permanent F0.2 [`Client.Local.Godot`](../Local.Godot/README.md) consumer, which in turn
+uses the Network-free [`Client.Local`](../Local/README.md)
 boundary: a private owner thread composes the authoritative runtime, Game world,
 persistence, Chat, and UI, while Godot owns only input and presentation over
 bounded Client-side semantic state.
@@ -39,7 +40,8 @@ speech also shows a short presentation-only overhead label when its public actor
 anchor is currently resident; otherwise the feed remains authoritative for what
 the client applied.
 
-The player starts just south of a recognizable 8 m x 6 m openable cabin. The
+The player starts just south of a recognizable 8 m x 6 m openable cabin and uses a bundled X Bot
+human calibration body. The
 thin wall segments, trees, shelf, closed door, and chest use authoritative
 world bounds: ordinary Direct movement stops against them, opening the door
 allows passage through its two-metre gap, and a blocked straight-line

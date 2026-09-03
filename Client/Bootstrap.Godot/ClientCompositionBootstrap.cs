@@ -71,6 +71,53 @@ public abstract partial class ClientRoot : Control
 
     protected abstract ClientCompositionManifest Composition { get; }
 
+    /// <summary>Persistent capability-owned controller root.</summary>
+    protected Node ControllerRoot => _controllerRoot ??
+        throw new InvalidOperationException("The client shell is not ready.");
+
+    /// <summary>Persistent owner of active resolved-content catalog markers.</summary>
+    protected Node ContentCatalogRoot => _contentCatalogRoot ??
+        throw new InvalidOperationException("The client shell is not ready.");
+
+    /// <summary>Persistent world host used by concrete local or remote presentation capabilities.</summary>
+    protected Node WorldRoot => _worldRoot ??
+        throw new InvalidOperationException("The client shell is not ready.");
+
+    protected CanvasLayer WorldUiLayer => _worldUiLayer ??
+        throw new InvalidOperationException("The client shell is not ready.");
+
+    protected CanvasLayer HudLayer => _hudLayer ??
+        throw new InvalidOperationException("The client shell is not ready.");
+
+    protected ResolvedClientSettings EffectiveSettings => _resolved;
+
+    protected ClientShellSnapshot ShellSnapshot() => _shell.Snapshot(
+        textEntryFocused: GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit);
+
+    protected void BeginSessionLoading(string status)
+    {
+        _shell.BeginLoading(status);
+        RenderCurrentSurface();
+    }
+
+    protected void CommitSession(string status)
+    {
+        _shell.EnterSession(status);
+        RenderCurrentSurface();
+    }
+
+    protected void FailSession(string message)
+    {
+        _shell.Fail(message);
+        RenderCurrentSurface();
+    }
+
+    protected void ReturnToMainMenu(string? status = null)
+    {
+        _shell.ReturnToMainMenu(status);
+        RenderCurrentSurface();
+    }
+
     public override void _Ready()
     {
         try
@@ -177,6 +224,12 @@ public abstract partial class ClientRoot : Control
 
     /// <summary>Later composition roots retire their concrete session-owned presentation here.</summary>
     protected virtual void RetireCurrentSession() { }
+
+    /// <summary>
+    /// Gives an active capability newly resolved client-owned settings without granting it
+    /// ownership of persistence or profile resolution.
+    /// </summary>
+    protected virtual void OnEffectiveSettingsChanged(ResolvedClientSettings settings) { }
 
     private void LoadSettings()
     {
@@ -353,6 +406,7 @@ public abstract partial class ClientRoot : Control
                 _settingsStore!.Save(_settings);
                 _settingsLoadStatus = ClientSettingsLoadStatus.Loaded;
                 _resolved = ClientSettingsResolver.Resolve(_settings);
+                OnEffectiveSettingsChanged(_resolved);
                 _shell.CloseSettings();
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -367,6 +421,7 @@ public abstract partial class ClientRoot : Control
         {
             _settings = new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes);
             _resolved = ClientSettingsResolver.Resolve(_settings);
+            OnEffectiveSettingsChanged(_resolved);
             RenderCurrentSurface();
         };
         column.AddChild(reset);

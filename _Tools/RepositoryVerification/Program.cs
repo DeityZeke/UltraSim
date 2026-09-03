@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -8,6 +9,8 @@ VerificationOptions options = VerificationOptions.Parse(args);
 
 VerifyArchitecture(root);
 Console.WriteLine("PASS active project dependency boundaries");
+VerifyClientPresentationAssets(root);
+Console.WriteLine("PASS built-in client presentation assets");
 VerifyDocumentation(root);
 Console.WriteLine("PASS documentation architecture and links");
 
@@ -83,6 +86,16 @@ foreach (string configuration in configurations)
         var playableBuild = new List<string> { "build", playableProject, "-c", configuration };
         if (options.NoRestore) playableBuild.Add("--no-restore");
         Run(root, "dotnet", playableBuild);
+        foreach (string localGodotProject in new[] { "Playable", "SinglePlayer", "Complete" })
+        {
+            Run(root, godot,
+            [
+                "--headless",
+                "--editor",
+                "--path", $"Client/{localGodotProject}.Godot",
+                "--quit",
+            ]);
+        }
         Run(root, godot,
         [
             "--headless",
@@ -98,6 +111,26 @@ foreach (string configuration in configurations)
                 "--", "--composition-smoke",
             ]);
         }
+        foreach ((string variant, string human) in new[]
+        {
+            ("default", "x"),
+            ("replace", "y"),
+            ("add", "x"),
+        })
+        {
+            Run(root, godot,
+            [
+                "--headless",
+                "--path", "Client/SinglePlayer.Godot",
+                "--", "--f0-2-smoke", $"--cabin-content={variant}", $"--human={human}",
+            ]);
+        }
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Complete.Godot",
+            "--", "--f0-2-smoke", "--cabin-content=default", "--human=x",
+        ]);
     }
 }
 
@@ -112,7 +145,8 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
         new(
             "SinglePlayer",
             "Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj",
-            ["UltraSim.Client.Local", "UltraSim.Game.Composition", "UltraSim.Game.Replication",
+            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Content", "UltraSim.Client.Local",
+                "UltraSim.Client.Local.Godot", "UltraSim.Game.Composition", "UltraSim.Game.Replication",
                 "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
@@ -120,14 +154,16 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
             "Online",
             "Client/Online.Godot/UltraSim.Client.Online.Godot.csproj",
             ["UltraSim.Client.Network", "UltraSim.Game.Protocol", "UltraSim.Network"],
-            ["UltraSim.Client.Local", "UltraSim.Game.Composition", "UltraSim.Game.Persistence",
+            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
+                "UltraSim.Game.Composition", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting",
                 "UltraSim.Server.Persistence", "UltraSim.Server.Runtime"]),
         new(
             "Complete",
             "Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj",
-            ["UltraSim.Client.Local", "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
+            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
+                "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime"],
             []),
     ];
@@ -191,6 +227,33 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
     Console.WriteLine("PASS Online_NoLocalServerRuntime");
     Console.WriteLine("PASS Online_NoLocalAuthorityComposition");
     Console.WriteLine("PASS Online_NoLocalAuthorityBridge");
+}
+
+static void VerifyClientPresentationAssets(string root)
+{
+    var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Client/PresentationAssets/Avatars/x_bot/X Bot.fbx"] =
+            "706ffe9e298271fa69a3a8e28dc6a391479f58c4945a63608d33e2fb87e09aa6",
+        ["Client/PresentationAssets/Avatars/y_bot/Y Bot.fbx"] =
+            "ed035787491803490456840a1f2479e8c0a7ae65cfa38b5447fb2f1a9f8e2fd5",
+    };
+    foreach ((string relative, string hash) in expected)
+    {
+        string path = Path.Combine(root, relative);
+        if (!File.Exists(path) ||
+            !string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(),
+                hash, StringComparison.Ordinal))
+            throw new InvalidOperationException($"The frozen human calibration asset is missing or changed: {relative}.");
+    }
+    foreach (string composition in new[] { "SinglePlayer", "Complete", "Playable" })
+    {
+        string link = Path.Combine(root, "Client", $"{composition}.Godot", "Assets");
+        if (!Directory.Exists(link) ||
+            !string.Equals(new DirectoryInfo(link).LinkTarget, "../PresentationAssets", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"{composition} does not expose the shared build-time presentation assets.");
+    }
 }
 
 static void VerifyArchitecture(string root)
@@ -262,10 +325,22 @@ static void VerifyArchitecture(string root)
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
+        ["Client/Local.Godot/UltraSim.Client.Local.Godot.csproj"] =
+        [
+            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
+            "Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj",
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Client/Local/UltraSim.Client.Local.csproj",
+            "Client/_Godot/UltraSim.Client.Godot.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/Spatial/UltraSim.Spatial.csproj",
+        ],
         ["Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj"] =
         [
             "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
-            "Client/Local/UltraSim.Client.Local.csproj",
+            "Client/Local.Godot/UltraSim.Client.Local.Godot.csproj",
         ],
         ["Client/Online.Godot/UltraSim.Client.Online.Godot.csproj"] =
         [
@@ -275,19 +350,11 @@ static void VerifyArchitecture(string root)
         ["Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj"] =
         [
             "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
-            "Client/Local/UltraSim.Client.Local.csproj",
+            "Client/Local.Godot/UltraSim.Client.Local.Godot.csproj",
             "Client/Network/UltraSim.Client.Network.csproj",
         ],
         ["Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj"] =
-        [
-            "Client/Core/UltraSim.Client.Core.csproj",
-            "Client/Local/UltraSim.Client.Local.csproj",
-            "Client/_Godot/UltraSim.Client.Godot.csproj",
-            "Game/Composition/UltraSim.Game.Composition.csproj",
-            "Game/Contracts/UltraSim.Game.Contracts.csproj",
-            "Game/World/UltraSim.Game.World.csproj",
-            "Kernels/Spatial/UltraSim.Spatial.csproj",
-        ],
+            ["Client/Local.Godot/UltraSim.Client.Local.Godot.csproj"],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Game/Contracts/UltraSim.Game.Contracts.csproj"] =

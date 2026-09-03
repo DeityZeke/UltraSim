@@ -1511,6 +1511,19 @@ Do not need a live server to use/test these.
 
 ## F0.2 — Single Player Local Play + Cabin + human calibration
 
+**Status: CLOSED.** `Client/Local.Godot` is the separately composed permanent Cabin consumer used by
+Single Player and Complete. It binds `LocalPlayableSession` into the F0.1 World/HUD/session
+lifecycle, resolves the exact A0.1 Default catalog for normal play, and realizes the frozen
+Default/Replace/Add catalogs in headless acceptance through the same Godot consumer. Online has no
+dependency on the local capability or built-in Test World.
+
+The permanent path now covers normal command input, public world presentation, door/chest
+interaction, Chat, server-composed Inventory UI, clean leave/re-entry with fresh application/control
+lineage, the F0.1 resolved control/camera settings and bindings, and the bundled X/Y Bot human
+calibration bodies. Initial presentation anchors are 1.6 m camera pivot, 2.0 m nameplate, and 0.9 m
+effects; they are presentation evidence rather than Physics constants. `Playable.Godot` remains
+only a thin acceptance wrapper over this consumer.
+
 Implement:
 
 - consume the existing `Client.Local` capability;
@@ -2008,7 +2021,7 @@ A0.0  content contracts + deterministic resolution (companion plan) CLOSED
         |
 A0.1  local Cabin Default/Replace/Add oracle                         CLOSED
         |
-F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network     NEXT
+F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network     CLOSED
         |
 F0.3a Direct Connect identity trust/session lifecycle
         |

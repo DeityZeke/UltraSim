@@ -3,7 +3,7 @@
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution and the
 local A0.1 Cabin Default/Replace/Add oracle accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.1) and A0.0/A0.1 are closed; F0.2 is the next consumer checkpoint. Runtime mesh/audio
+(F0.0a/F0.0b/F0.1/F0.2) and A0.0/A0.1 are closed; A0.2 is the next content checkpoint. Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.

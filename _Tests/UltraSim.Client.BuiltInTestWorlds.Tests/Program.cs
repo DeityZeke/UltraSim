@@ -9,6 +9,7 @@ var tests = new (string Name, Action Body)[]
     ("AddPreservesBaseAndAddsExactNamespace", AddPreservesBaseAndAddsExactNamespace),
     ("LocalPackagesAreExactVerifiedPayloadSets", LocalPackagesAreExactVerifiedPayloadSets),
     ("MissingRequiredVariantIsDiagnosableAndTransactional", MissingRequiredVariantIsDiagnosableAndTransactional),
+    ("VerifiedPayloadsResolveByContentIdentity", VerifiedPayloadsResolveByContentIdentity),
 };
 
 foreach ((string name, Action body) in tests)
@@ -17,6 +18,19 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} built-in Test World content tests passed.");
+
+static void VerifiedPayloadsResolveByContentIdentity()
+{
+    CabinContentOracle oracle = CabinContentOracle.Create();
+    foreach (CabinResolvedContent resolved in Variants(oracle))
+    foreach (ResolvedContentEntry entry in resolved.Catalog.Entries)
+    foreach (ContentHash hash in entry.ReferencedFiles)
+    {
+        True(oracle.TryGetPayload(hash, out ReadOnlyMemory<byte> payload));
+        Equal(hash, ContentHash.Compute(payload.Span));
+    }
+    False(oracle.TryGetPayload(default, out _));
+}
 
 static void FrozenFingerprintsAreDeterministic()
 {

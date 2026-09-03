@@ -49,7 +49,6 @@ connection, or reference `Client.Network`, Game Protocol, Remote Replication, or
 `Kernels.Network`. Hosting in a Complete composition adds independent remote
 sessions around the same authority; the host player stays on this local path.
 
-`LocalPlayableSession` is currently the concrete Cabin/reference composition,
-not the final F0.2 content package or a universal local-server API. F0.1 supplies
-the persistent shell; F0.2 will bind this accepted boundary into its Single Player
-session lifecycle and built-in Test World composition without changing ownership.
+`LocalPlayableSession` remains the concrete Cabin authority composition rather than a universal
+local-server API. F0.2's `Client.Local.Godot` consumer now binds it into the persistent Single Player
+and Complete shell lifecycle without changing this ownership boundary.

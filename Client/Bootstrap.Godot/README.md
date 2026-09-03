@@ -7,7 +7,8 @@ manifest and references only the implementation family it installs:
 ```text
 SinglePlayer.Godot
     Bootstrap.Godot + Core/Godot adapter
-    Client.Local + transitive Game/packet-free replication/Server Runtime
+    Client.Local.Godot + Client.Local + built-in Cabin content
+    transitive Game/packet-free replication/Server Runtime
     no Client.Network, Game.Protocol, or Kernels.Network
 
 Online.Godot
@@ -26,7 +27,7 @@ settings live at `user://settings/client.json`; invalid documents fail closed to
 
 The shared shell renders exactly the supplied capability catalog. Missing capabilities therefore
 have no menu entry, while the repository verifier independently inspects the resolved project graph,
-generated `.deps.json`, and copied managed outputs. Capability entries remain placeholders until
-their consuming checkpoints. F0.0b's authority thread/local semantic bridge lives in `Client.Local`;
-the shared bootstrap does not depend on it, and F0.2 binds that existing capability and session
-lifecycle into the Single Player Cabin/Test World presentation.
+generated `.deps.json`, and copied managed outputs. F0.0b's authority thread/local semantic bridge
+lives in `Client.Local`; the shared bootstrap does not depend on it. F0.2's separately composed
+`Client.Local.Godot` capability binds that session into the persistent World/HUD roots for Single
+Player and Complete while Online remains physically free of the local authority/Test World family.

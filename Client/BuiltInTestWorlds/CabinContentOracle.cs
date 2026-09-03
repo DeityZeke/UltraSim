@@ -153,6 +153,23 @@ public sealed class CabinContentOracle
     public CabinResolvedContent Replace { get; }
     public CabinResolvedContent Add { get; }
 
+    /// <summary>
+    /// Resolves one verified local fixture payload by content identity. This is the narrow
+    /// A0.1-to-F0.2 realization seam; later cache/source implementations can satisfy the same
+    /// hash without exposing package-relative paths to presentation code.
+    /// </summary>
+    public bool TryGetPayload(ContentHash hash, out ReadOnlyMemory<byte> payload)
+    {
+        if (!hash.IsValid)
+        {
+            payload = default;
+            return false;
+        }
+        return TryGetPayload(BasePackage, hash, out payload) ||
+            TryGetPayload(ReplacePackage, hash, out payload) ||
+            TryGetPayload(AddPackage, hash, out payload);
+    }
+
     public static CabinContentOracle Create()
     {
         CabinLocalContentPackage basePackage = CreateBasePackage();
@@ -206,6 +223,23 @@ public sealed class CabinContentOracle
                 out ContentCatalogResolutionError resolutionError))
             throw new InvalidOperationException($"The frozen Cabin {variant} catalog is invalid: {resolutionError}.");
         return new CabinResolvedContent(variant, plan!, catalog!);
+    }
+
+    private static bool TryGetPayload(
+        CabinLocalContentPackage package,
+        ContentHash hash,
+        out ReadOnlyMemory<byte> payload)
+    {
+        foreach (ContentFileDescriptor file in package.Manifest.Files)
+        {
+            if (file.Sha256 != hash) continue;
+            if (!package.TryGetPayload(file.Path, out payload))
+                throw new InvalidOperationException(
+                    $"Verified Cabin file '{file.Path}' lost its local payload.");
+            return true;
+        }
+        payload = default;
+        return false;
     }
 
     private static CabinLocalContentPackage CreateBasePackage()
