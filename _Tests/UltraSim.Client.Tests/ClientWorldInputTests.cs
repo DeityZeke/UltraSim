@@ -121,6 +121,13 @@ static class ClientWorldInputTests
         Assert.True(sequencer.TryCreateCommand(held, out GamePlayerCommand pressedAfterRelease));
         Assert.Equal(GamePlayerActions.Interact, pressedAfterRelease.PressedActions);
         Assert.True(pressedAfterRelease.IsValid);
+
+        Assert.True(sequencer.TryCreateCommand(
+            held with { HeldActions = GamePlayerActions.Jump }, out GamePlayerCommand jump));
+        Assert.Equal(GamePlayerActions.Jump, jump.PressedActions);
+        Assert.True(sequencer.TryCreateCommand(
+            held with { HeldActions = GamePlayerActions.Jump }, out GamePlayerCommand heldJump));
+        Assert.Equal(GamePlayerActions.None, heldJump.PressedActions);
     }
 
     private static void OrbitCommandInterpretsMouseGestures()

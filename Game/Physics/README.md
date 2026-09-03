@@ -1,6 +1,6 @@
 # UltraSim Simple Physics
 
-`Game/Physics` owns the concrete authoritative physical resolver earned by Physics P0.0-P0.1c.
+`Game/Physics` owns the concrete authoritative physical resolver earned by Physics P0.0-P0.1d.
 It is deliberately not a general engine or provider framework.
 
 The current capability has adjacent motion and occupancy requests over one shared physical legality
@@ -30,6 +30,19 @@ nearest actual support + same footprint/clearance/static/dynamic legality
         ↓
 SimpleOccupancyResult
     Clear+Support / Unsupported / Blocked / OutsidePreparedWorld
+
+SimpleAirborneMotionRequest
+    current WorldPosition
+    desired global X/Y/Z endpoint
+    upright body extents
+        ↓
+bounded structural-footprint sampling without ground snapping
+Top/Base landing + Bottom-face ceiling contact
+same exact swept static/projected-dynamic blocker test
+        ↓
+SimpleAirborneMotionResult
+    Airborne / Landed+Support / CeilingBlocked+Contact /
+    Blocked / OutsidePreparedWorld
 ```
 
 The resolver owns no ECS entity, prefab identity, door state, input/control meaning,
@@ -70,10 +83,18 @@ clearance, and steps:
 - broadphase candidates are filtered by exact swept geometry rather than becoming false hits;
 - sweep candidate/hit pressure remains bounded and fails closed.
 
+P0.1d adds the terrain-contact primitive consumed by Game-owned vertical motion. It samples at the
+same no-more-than-250 mm spacing and 512-sample ceiling, keeps intentional resident void as clear
+unsupported air, lands descending bodies on the first complete footprint-supporting Top/Base face,
+and stops ascending bodies at the first Bottom face reached by any footprint point. Structural data
+must be completely resident for all five footprint columns or resolution fails closed. Airborne
+requests do not snap to a nearby support merely because one exists.
+
 The resolver remains all-or-nothing: a blocked or unsupported request realizes no partial
-displacement. P0.1c's fixed spatial samples are a bounded grounded traversal contract, not a
-general triangle time-of-impact solver or airborne character controller. FrozenStatics/Multis and
-Game-projected dynamic bounds remain blockers; this checkpoint does not newly make them support
-surfaces. There is no sliding, depenetration, persistent grounded ECS component, gravity, jump,
-falling, landing, actor collision, navigation, Godot Physics, Jolt, or generalized provider
-interface. Those remain later checkpoints in [`PHYSICS.md`](../../Docs/Plans/PHYSICS.md).
+displacement. Fixed spatial samples are bounded Simple Physics traversal contracts, not a general
+triangle time-of-impact solver or rigid-body character controller. FrozenStatics/Multis and
+Game-projected dynamic bounds remain blockers rather than landing support. The resolver owns no
+gravity, jump admission, vertical state, recovery policy, sliding, depenetration, actor collision,
+navigation, Godot Physics, Jolt, or generalized provider interface. Game composition owns the
+accepted P0.1d grounded/airborne lifecycle above this physical seam; see
+[`PHYSICS.md`](../../Docs/Plans/PHYSICS.md).

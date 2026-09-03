@@ -1,12 +1,15 @@
 # Physics P0: injected authoritative motion plan
 
-Status: P0.0 through P0.1c accepted/closed; vertical motion is next. P0.0 extracted the
+Status: P0.0 through P0.1d accepted/closed. P0.0 extracted the
 accepted endpoint behavior into generation-owned UltraSim Simple Physics, P0.1a
 added first-class occupancy-aware relocation, and P0.1b added bounded exact swept
 blocker collision. Terrain T1.1 supplies multiple immutable structural surface
 candidates per X/Z column; P0.1c now selects actual support, checks footprint and
-clearance, and enforces bounded grounded steps. Gravity, jump/fall/landing, sliding,
-general terrain time-of-impact, and actor collision remain unstarted.
+clearance, and enforces bounded grounded steps. P0.1d adds Game-owned grounded/airborne
+state, jump admission, deterministic gravity, horizontal air control, terrain-shell
+landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. Sliding,
+general triangle time-of-impact, FrozenStatic landing support, and actor collision remain
+unstarted.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
@@ -405,6 +408,82 @@ gravity, jump, falling, landing, sliding, partial advance, arbitrary triangle
 time-of-impact, or support supplied by FrozenStatics/Multis/dynamic blockers.
 Those structures remain blockers at this checkpoint. The next reviewed behavior
 checkpoint owns vertical motion over this accepted grounded foundation.
+
+## P0.1d implementation checkpoint — 2026-09-03
+
+P0.1d adds the first authoritative vertical lifecycle without moving policy into Physics:
+
+```text
+Client/Godot
+    edge-triggered Jump intent only
+
+GameWorldActions
+    grounded/airborne state
+    jump admission
+    fixed-point vertical velocity + integration remainder
+    gravity and fall-recovery policy
+        ↓
+UltraSimSimplePhysics.ResolveAirborneMotion
+    bounded structural availability
+    Top/Base landing
+    Bottom-face ceiling contact
+    exact static/projected-dynamic blocker sweep
+        ↓
+GameWorldActions
+    authoritative WorldPosition commit
+    landed/airborne transition
+```
+
+The playable policy uses an 11,000 mm/s jump speed, -18,000 mm/s² gravity, and a
+Game-configured recovery threshold at -50,000 mm. Recovery targets
+`GamePlayableWorld.PlayerStart`, but still passes through the accepted first-class occupancy
+oracle before Game commits it. Physics knows neither the safe point nor why recovery occurred.
+
+`GameVerticalMotionKind` and its velocity/remainder arrays are generation-owned operational state,
+not ECS components and not persistence truth. A successful occupancy-aware relocation establishes
+Grounded with zero vertical velocity. Generation initialization and restore classify an actor at
+its exact saved support as Grounded; a structurally valid unsupported position becomes Airborne
+with zero velocity so gravity resumes. Invalid or unavailable restored placement attempts the
+Game-owned safe recovery and otherwise remains fail closed. ECS slot reuse is generation fenced,
+including the case where an unsupported new actor replaces an airborne retired generation.
+
+Jump is a replay-fenced `GamePlayerCommand` action edge. It succeeds only from Grounded after a
+one-millimeter upward physical clearance probe. Fresh airborne Jump attempts return `NotGrounded`;
+there is no coyote time, buffering, double jump, wall jump, stamina, or client-authoritative
+velocity. ThirdPersonDirect and IndependentMoveLook expose the action; OrbitCommand intentionally
+retains its no-jump grammar and may use future authoritative relocation/telepad content instead.
+
+Airborne Direct/Destination intent supplies X/Z while Game vertical state supplies Y. The combined
+request does not run through grounded support snapping. Descending motion lands on the first
+geometry-ordered Base/Top support crossed with a valid five-point footprint and clearance;
+ascending motion stops at the first Bottom face crossed by any footprint point, zeros upward
+velocity, and remains airborne for gravity on the next step. Intentional T1.0 void supplies no
+landing surface. Unavailable or incomplete structural data remains fail closed.
+
+Vertical integration is exact integer fixed point over authoritative time quanta. It retains an
+`Int128` trapezoidal displacement remainder per active actor, so accepted final jump/fall/landing
+truth agrees at 20, 60, and 120 Hz. One fixed active-actor set processes retained horizontal intent
+and airborne state exactly once per simulation step; idle grounded actors incur no scan.
+
+The Simple airborne path remains bounded at <=250 mm sample spacing, 512 samples, five footprint
+columns, 129 stack-resident column faces, 16 static candidate chunks, 64 static hits, and the
+existing complete 16-entry Game dynamic projection. One thousand warmed terrain-shell airborne
+resolutions allocate 0 B. The added generation-owned arrays raise the accepted integrated fixture's
+`GameWorldActions` reservation from 14,336 B to 16,704 B.
+
+P0.1d deliberately does not make FrozenStatics, Multis, or dynamic bounds into support surfaces.
+They remain exact swept blockers, so a blocked airborne request realizes no partial displacement.
+Terrain-shell side faces and arbitrary triangle time-of-impact are also outside this first vertical
+contract. There is no slope sliding, depenetration, actor-vs-actor collision, moving platform,
+buoyancy, navigation, or general rigid-body solver.
+
+The accepted Release artifact is
+[`physics-p0.1d-vertical-motion-2026-09-03.json`](../../_Benchmarks/Baselines/physics-p0.1d-vertical-motion-2026-09-03.json).
+It reports all twenty-seven integrated gates passing, the unchanged playable-world
+`B764...F220` hash, 0 B warmed airborne allocation, 16,704 B `GameWorldActions`
+reservation, and one integrated observation of 57.049 us mean / 87.739 us p95.
+The preceding P0.1c artifact observed 54.835 us / 82.309 us; these single-run integrated
+figures retain the cost change as regression context and are not a causal throughput claim.
 
 ## RunUO archaeology
 
@@ -1565,14 +1644,18 @@ vertical-motion checkpoint.
 **Gate:** conformance scenarios pass at accepted 20/60/120 Hz semantics with
 bounded zero-allocation warmed Simple hot paths.
 
-### P0.1d — vertical motion, jump, fall, and landing — NEXT
+### P0.1d — vertical motion, jump, fall, and landing — CLOSED
 
-Build on the accepted support result rather than inventing a second ground oracle.
-Add explicit grounded-to-airborne transition, bounded authoritative vertical
-integration, gravity, landing/support acquisition, and recovery only after a
-separate behavior review. Preserve intentional void and actual multi-surface
-selection. Do not broaden this milestone entry into actor collision, navigation,
-rigid bodies, or an alternate-provider campaign.
+Built on the accepted support result rather than inventing a second ground oracle.
+The accepted implementation adds explicit grounded-to-airborne transition, bounded
+authoritative vertical integration, gravity, landing/support acquisition, and
+Game-owned recovery while preserving intentional void and actual multi-surface
+selection. It does not broaden into actor collision, navigation, rigid bodies, or
+an alternate-provider campaign.
+
+**Gate:** terrain Top/Bottom contacts, jump admission, hostile double-jump rejection,
+horizontal air control, void fall/recovery, generation-local restore, ECS slot-reuse
+fencing, 20/60/120 Hz final convergence, and zero warmed airborne allocation pass.
 
 ### P0.2 — Godot provider canary
 

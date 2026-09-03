@@ -57,6 +57,8 @@ public static class GodotWorldInput
             held |= GamePlayerActions.Interact;
         if (IsPressed(settings, ClientSemanticAction.Primary))
             held |= GamePlayerActions.Primary;
+        if (IsPressed(settings, ClientSemanticAction.Jump))
+            held |= GamePlayerActions.Jump;
         return new ClientWorldInputSample(moveX, moveZ, held, windowHasFocus);
     }
 

@@ -521,14 +521,19 @@ public partial class LocalCabinClient : Node3D
         in ClientWorldInputSample physical,
         in ClientHorizontalCameraBasis basis)
     {
+        // OrbitCommand intentionally retains its UO-like no-jump grammar; direct human-control
+        // profiles may emit the common Game Jump action edge.
+        ClientWorldInputSample admitted = _profile == ControlProfile.OrbitCommand
+            ? physical with { HeldActions = physical.HeldActions & ~GamePlayerActions.Jump }
+            : physical;
         if (_profileStopPending)
         {
             _profileStopPending = false;
             return new ClientControlProfileDecision(
                 new ClientWorldCommandIntent(
                     GameLocomotionUpdate.Stop,
-                    physical.HasFocus ? physical.HeldActions : GamePlayerActions.None,
-                    physical.HasFocus),
+                    admitted.HasFocus ? admitted.HeldActions : GamePlayerActions.None,
+                    admitted.HasFocus),
                 false,
                 default,
                 false,
@@ -537,8 +542,8 @@ public partial class LocalCabinClient : Node3D
         return _profile switch
         {
             ControlProfile.OrbitCommand => _orbit.Evaluate(new ClientOrbitCommandSample(
-                physical.HeldActions,
-                physical.HasFocus,
+                admitted.HeldActions,
+                admitted.HasFocus,
                 _player.GlobalXMillimeters,
                 _player.GlobalZMillimeters,
                 _primaryDown,
@@ -551,20 +556,20 @@ public partial class LocalCabinClient : Node3D
                 checked((long)Time.GetTicksMsec()))),
             ControlProfile.ThirdPersonDirect => new ClientControlProfileDecision(
                 new ClientWorldCommandIntent(
-                    physical.HasFocus
-                        ? _thirdPerson.Evaluate(physical.MoveX, physical.MoveZ, basis)
+                    admitted.HasFocus
+                        ? _thirdPerson.Evaluate(admitted.MoveX, admitted.MoveZ, basis)
                         : GameLocomotionUpdate.Stop,
-                    physical.HeldActions,
-                    physical.HasFocus),
+                    admitted.HeldActions,
+                    admitted.HasFocus),
                 false,
                 default,
                 false,
                 default),
             ControlProfile.IndependentMoveLook => _independent.Evaluate(
-                physical.MoveX,
-                physical.MoveZ,
-                physical.HeldActions,
-                physical.HasFocus,
+                admitted.MoveX,
+                admitted.MoveZ,
+                admitted.HeldActions,
+                admitted.HasFocus,
                 _pointerPointValid,
                 _pointerPoint),
             _ => throw new InvalidOperationException("Unknown control profile."),
@@ -726,6 +731,12 @@ public partial class LocalCabinClient : Node3D
                 _lastOutcome = view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted
                     ? $"Cabin door {(view.LastCommandResult.DoorIsOpen ? "opened" : "closed")}"
                     : $"Interaction: {view.LastCommandResult.Interaction}";
+            }
+            else if (view.LastCommandResult.Jump != GameWorldActionStatus.NotRequested)
+            {
+                _lastOutcome = view.LastCommandResult.Jump == GameWorldActionStatus.Accepted
+                    ? "Jumped"
+                    : $"Jump: {view.LastCommandResult.Jump}";
             }
         }
         if (view.LastAdministrativeSequence != 0 &&
@@ -946,6 +957,7 @@ public partial class LocalCabinClient : Node3D
         ProbePlayableChat();
         ProbePlayableInventory();
         ProbeDoorAndChestInteraction();
+        ProbeAuthoritativeJump();
 
         ProbeMovementFacing(
             ControlProfile.OrbitCommand,
@@ -1084,6 +1096,40 @@ public partial class LocalCabinClient : Node3D
             return _uiClient.OpenViewCount == 1 &&
                 _localSession.GetSnapshot().UiOperationsApplied > before;
         });
+    }
+
+    private void ProbeAuthoritativeJump()
+    {
+        if (_localSession is null || _sequencer is null)
+            throw new InvalidOperationException("Playable vertical motion was not composed.");
+        RelocateControlledActor(GamePlayableWorld.PlayerStart);
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        WorldPosition start = _player;
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Unchanged,
+                    GamePlayerActions.Jump,
+                    true),
+                out GamePlayerCommand jump))
+            throw new InvalidOperationException("Playable Jump could not form a command edge.");
+        ApplyCommand(jump, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == jump.Sequence &&
+            view.LastCommandResult.Jump == GameWorldActionStatus.Accepted &&
+            _player.YMillimeters > start.YMillimeters);
+
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Unchanged,
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand release))
+            throw new InvalidOperationException("Playable Jump release could not form a command.");
+        ApplyCommand(release, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == release.Sequence && _player == start);
     }
 
     private void ProbeDoorAndChestInteraction()

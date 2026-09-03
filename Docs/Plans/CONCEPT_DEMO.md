@@ -11,8 +11,9 @@ Single Player Cabin/human-calibration vertical are closed. `Client.Local.Godot` 
 consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over it. Terrain T1.0
 supplies explicit base-surface presence/intentional-void semantics, and T1.1 supplies immutable
 sparse terrain shells at free absolute elevations for the Sky Island and cave. Physics support,
-grounding, and clearance are closed at P0.1c. Vertical motion remains the next owning checkpoint
-before physical Sky Island integration.
+grounding, and clearance are closed at P0.1c, and Physics P0.1d now supplies authoritative
+jump/gravity/fall/landing/recovery. The next natural
+consumer work is physical Central Island/Sky Island/cave integration, not another Physics provider.
 
 The demo has two purposes:
 
@@ -354,8 +355,7 @@ without weakening fail-closed behavior for genuinely missing required structural
 
 ## 7.1 Real jump
 
-Third-person jump should eventually be authoritative physical movement, not a client animation plus
-teleport.
+Third-person jump is authoritative physical movement, not a client animation plus teleport.
 
 The demo provides the concrete consumer for Physics support/vertical work:
 
@@ -370,6 +370,12 @@ fall/recovery policy
 ```
 
 Exact Physics checkpoint/API is owned by `PHYSICS.md` and must be reviewed before implementation.
+
+P0.1d closes the foundation: Space produces a focus-fenced Jump edge, Game admits only grounded
+jumps, integrates vertical velocity/gravity with horizontal air control, lands against actual
+Base/Top surfaces, stops at Bottom ceilings, and uses occupancy-aware Game recovery below the
+admitted fall envelope. The Concept Demo still needs to author and integrate the actual island/cave
+traversal fixture before claiming the complete human-facing sequence.
 
 ## 7.2 Telepad
 
@@ -1160,12 +1166,12 @@ then earn/integrate Concept Demo Round 1 consumers:
     terrain T1.0 surface presence/void                         CLOSED
     terrain T1.1 sparse terrain shells                         CLOSED
     Physics P0.1c support / grounding / clearance              CLOSED
-    Physics P0.1d vertical motion / jump / fall / landing      NEXT
+    Physics P0.1d vertical motion / jump / fall / landing      CLOSED
     render-distance setting
     signs/Fallback Lab
     guest/demo admission presentation
     animation/pickup/inventory swing
-    support/jump/gravity/landing
+    physical central/Sky Island/cave + telepad integration
     Global/system Chat
     diagnostics/Server Monitor/test markers
 

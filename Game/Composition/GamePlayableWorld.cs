@@ -40,17 +40,57 @@ public enum GameWorldActionStatus : byte
     InvariantViolation,
     Blocked,
     Unsupported,
+    NotGrounded,
 }
 
 /// <summary>Admission and independently composed effects of one player command.</summary>
 public readonly record struct GamePlayerCommandResult(
     GameWorldActionStatus Admission,
     GameWorldActionStatus Locomotion,
+    GameWorldActionStatus Jump,
     GameWorldActionStatus Interaction,
     WorldPosition Position,
     bool DoorIsOpen)
 {
     public bool WasAdmitted => Admission == GameWorldActionStatus.Accepted;
+}
+
+/// <summary>Generation-local authoritative vertical lifecycle; it is not durable save state.</summary>
+public enum GameVerticalMotionKind : byte
+{
+    None = 0,
+    Grounded,
+    Airborne,
+}
+
+/// <summary>Concrete Game-owned jump/gravity/recovery policy for the current playable body.</summary>
+public readonly record struct GameVerticalMotionOptions(
+    int JumpSpeedMillimetersPerSecond,
+    int GravityMillimetersPerSecondSquared,
+    int RecoveryMinimumYMillimeters,
+    WorldPosition RecoveryPosition)
+{
+    public static GameVerticalMotionOptions PlayableDefault => new(
+        JumpSpeedMillimetersPerSecond: 11_000,
+        GravityMillimetersPerSecondSquared: -18_000,
+        RecoveryMinimumYMillimeters: -50_000,
+        RecoveryPosition: GamePlayableWorld.PlayerStart);
+
+    public bool IsValid => JumpSpeedMillimetersPerSecond > 0 &&
+        GravityMillimetersPerSecondSquared < 0 &&
+        RecoveryMinimumYMillimeters < RecoveryPosition.YMillimeters;
+}
+
+/// <summary>Read-only diagnostics for one actor's current generation-local vertical state.</summary>
+public readonly record struct GameVerticalMotionSnapshot(
+    GameVerticalMotionKind Kind,
+    int VelocityMillimetersPerSecond,
+    long CumulativeJumpsAccepted,
+    long CumulativeLandings,
+    long CumulativeRecoveries)
+{
+    public bool IsGrounded => Kind == GameVerticalMotionKind.Grounded;
+    public bool IsAirborne => Kind == GameVerticalMotionKind.Airborne;
 }
 
 /// <summary>
@@ -81,10 +121,13 @@ public sealed class GameWorldActions
     public const int InteractionRangeMillimeters = 2_500;
 
     private readonly WorldId _worldId;
+    private readonly GameWorldState _worldState;
     private readonly ComponentLookup<GameCharacter> _character;
+    private readonly ReadJobPlan<GameCharacter> _characterBaseline;
     private readonly ComponentLookup<GameCabinDoorState> _door;
     private readonly UltraSimSimplePhysics _physics;
     private readonly GamePlayableCollisionProjection _collisionProjection;
+    private readonly GameVerticalMotionOptions _verticalOptions;
     private readonly ulong[] _controlEpochs;
     private readonly ulong[] _lastSequences;
     private readonly uint[] _controlGenerations;
@@ -99,21 +142,42 @@ public sealed class GameWorldActions
     private readonly long[] _destinationProgress;
     private readonly long[] _movementRemainderX;
     private readonly long[] _movementRemainderZ;
-    private readonly Entity[] _activeLocomotion;
-    private readonly int[] _activeLocomotionPositions;
+    private readonly uint[] _verticalGenerations;
+    private readonly GameVerticalMotionKind[] _verticalKinds;
+    private readonly long[] _verticalVelocityNumerators;
+    private readonly Int128[] _verticalDisplacementRemainders;
+    private readonly Entity[] _activeActors;
+    private readonly int[] _activeActorPositions;
+    private readonly uint[] _characterScratch;
+    private int _activeActorCount;
     private int _activeLocomotionCount;
+    private int _activeAirborneCount;
+    private long _jumpsAccepted;
+    private long _landings;
+    private long _recoveries;
 
     internal GameWorldActions(
         EcsWorld world,
+        GameWorldState worldState,
         UltraSimSimplePhysics physics,
-        GamePlayableCollisionProjection collisionProjection)
+        GamePlayableCollisionProjection collisionProjection,
+        GameVerticalMotionOptions? verticalOptions = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         _physics = physics ?? throw new ArgumentNullException(nameof(physics));
         _collisionProjection = collisionProjection ??
             throw new ArgumentNullException(nameof(collisionProjection));
+        _verticalOptions = verticalOptions ?? GameVerticalMotionOptions.PlayableDefault;
+        if (!_verticalOptions.IsValid)
+            throw new ArgumentException("The Game vertical-motion policy is invalid.", nameof(verticalOptions));
         _worldId = world.Id;
+        _worldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
+        if (_worldState.WorldId != _worldId)
+            throw new ArgumentException(
+                "World actions and current-world state belong to different generations.",
+                nameof(worldState));
         _character = world.PrepareLookup<GameCharacter>();
+        _characterBaseline = world.PrepareReadJob<GameCharacter>();
         _door = world.PrepareLookup<GameCabinDoorState>();
         _controlEpochs = new ulong[world.Options.EntityCapacity.MaximumEntities];
         _lastSequences = new ulong[world.Options.EntityCapacity.MaximumEntities];
@@ -129,19 +193,27 @@ public sealed class GameWorldActions
         _destinationProgress = new long[_lastSequences.Length];
         _movementRemainderX = new long[_lastSequences.Length];
         _movementRemainderZ = new long[_lastSequences.Length];
-        _activeLocomotion = new Entity[_lastSequences.Length];
-        _activeLocomotionPositions = new int[_lastSequences.Length];
+        _verticalGenerations = new uint[_lastSequences.Length];
+        _verticalKinds = new GameVerticalMotionKind[_lastSequences.Length];
+        _verticalVelocityNumerators = new long[_lastSequences.Length];
+        _verticalDisplacementRemainders = new Int128[_lastSequences.Length];
+        _activeActors = new Entity[_lastSequences.Length];
+        _activeActorPositions = new int[_lastSequences.Length];
+        _characterScratch = new uint[_lastSequences.Length];
     }
 
-    /// <summary>Known fixed backing reserved for control lineage and retained locomotion.</summary>
+    /// <summary>Known fixed backing reserved for control, locomotion, and vertical state.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
         ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
-         (sizeof(long) * 8) + sizeof(byte) + Unsafe.SizeOf<Entity>() + sizeof(int)) +
+         (sizeof(long) * 9) + (sizeof(uint) * 3) + (sizeof(byte) * 2) +
+         Unsafe.SizeOf<Int128>() + Unsafe.SizeOf<Entity>() + sizeof(int)) +
         _physics.ReservedBytes + _collisionProjection.ReservedBytes);
 
     public int ActiveLocomotionCount => _activeLocomotionCount;
 
-    /// <summary>The concrete generation-owned P0.1b swept motion/occupancy resolver.</summary>
+    public int ActiveAirborneCount => _activeAirborneCount;
+
+    /// <summary>The concrete generation-owned Simple Physics resolver.</summary>
     public UltraSimSimplePhysics SimplePhysics => _physics;
 
     /// <summary>
@@ -165,9 +237,77 @@ public sealed class GameWorldActions
             return GameWorldActionStatus.Accepted;
 
         ClearLocomotion(index);
+        if (_verticalGenerations[index] != actor.Generation ||
+            _verticalKinds[index] == GameVerticalMotionKind.None)
+            ReconcileVerticalState(world, actor);
         _controlGenerations[index] = actor.Generation;
         _controlEpochs[index] = epoch.Value;
         _lastSequences[index] = 0;
+        return GameWorldActionStatus.Accepted;
+    }
+
+    /// <summary>Reads generation-local vertical state without exposing solver-owned caches.</summary>
+    public bool TryReadVerticalMotion(
+        EcsWorld world,
+        Entity actor,
+        out GameVerticalMotionSnapshot snapshot)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(actor) || !world.Has(actor, _character))
+        {
+            snapshot = default;
+            return false;
+        }
+        int index = checked((int)actor.Index);
+        if (_verticalGenerations[index] != actor.Generation ||
+            _verticalKinds[index] == GameVerticalMotionKind.None)
+        {
+            snapshot = default;
+            return false;
+        }
+        snapshot = new GameVerticalMotionSnapshot(
+            _verticalKinds[index],
+            checked((int)(_verticalVelocityNumerators[index] /
+                WorldClockOptions.WorldTimeQuantaPerSecond)),
+            _jumpsAccepted,
+            _landings,
+            _recoveries);
+        return true;
+    }
+
+    private GameWorldActionStatus TryBeginJump(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in WorldPosition current)
+    {
+        int index = checked((int)actor.Index);
+        if (_verticalGenerations[index] != actor.Generation ||
+            _verticalKinds[index] == GameVerticalMotionKind.None)
+            ReconcileVerticalState(world, actor);
+        if (_verticalKinds[index] != GameVerticalMotionKind.Grounded)
+            return GameWorldActionStatus.NotGrounded;
+
+        bool complete = _collisionProjection.TryCapture(
+            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        if (current.YMillimeters == int.MaxValue)
+            return GameWorldActionStatus.OutsidePreparedWorld;
+        SimpleAirborneMotionResult clearance = _physics.ResolveAirborneMotion(
+            new SimpleAirborneMotionRequest(
+                current,
+                current.GlobalXMillimeters,
+                current.YMillimeters + 1,
+                current.GlobalZMillimeters,
+                s_actorBody),
+            dynamicBounds,
+            complete);
+        if (clearance.Status == SimpleAirborneMotionStatus.OutsidePreparedWorld)
+            return GameWorldActionStatus.OutsidePreparedWorld;
+        if (clearance.Status != SimpleAirborneMotionStatus.Airborne)
+            return GameWorldActionStatus.Blocked;
+
+        BeginAirborne(actor, index, _verticalOptions.JumpSpeedMillimetersPerSecond);
+        _jumpsAccepted++;
         return GameWorldActionStatus.Accepted;
     }
 
@@ -245,6 +385,10 @@ public sealed class GameWorldActions
         GameWorldActionStatus locomotion = ApplyLocomotionUpdate(
             worldState, actor, current, command.Locomotion);
 
+        GameWorldActionStatus jump = GameWorldActionStatus.NotRequested;
+        if ((command.PressedActions & GamePlayerActions.Jump) != 0)
+            jump = TryBeginJump(world, worldState, actor, current);
+
         GameWorldActionStatus interaction = GameWorldActionStatus.NotRequested;
         bool doorIsOpen = false;
         if ((command.PressedActions & GamePlayerActions.Interact) != 0)
@@ -256,6 +400,7 @@ public sealed class GameWorldActions
         result = new GamePlayerCommandResult(
             GameWorldActionStatus.Accepted,
             locomotion,
+            jump,
             interaction,
             current,
             doorIsOpen);
@@ -308,8 +453,8 @@ public sealed class GameWorldActions
     }
 
     /// <summary>
-    /// Integrates every retained Direct or Destination intent once for the authoritative fixed step.
-    /// This runs after the ECS graph/barrier and before canonical Spatial/publication maintenance.
+    /// Integrates every retained horizontal intent and airborne actor once for the authoritative
+    /// fixed step. This runs after the ECS graph/barrier and before Spatial/publication maintenance.
     /// </summary>
     internal void CommitLocomotionAfterEcsStep(
         EcsWorld world,
@@ -321,34 +466,50 @@ public sealed class GameWorldActions
             throw new ArgumentException("A valid authoritative fixed-step delta is required.", nameof(delta));
 
         int active = 0;
-        while (active < _activeLocomotionCount)
+        while (active < _activeActorCount)
         {
-            Entity actor = _activeLocomotion[active];
+            Entity actor = _activeActors[active];
             int index = checked((int)actor.Index);
             if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
-                _controlGenerations[index] != actor.Generation ||
-                _controlEpochs[index] == 0 ||
+                _verticalGenerations[index] != actor.Generation ||
                 !worldState.TryReadPosition(world, actor, out WorldPosition current))
             {
-                ClearLocomotion(index);
+                ClearActorState(index);
                 continue;
             }
 
-            bool retained = _locomotionKinds[index] switch
+            if (_locomotionKinds[index] != RetainedLocomotionKind.None &&
+                (_controlGenerations[index] != actor.Generation || _controlEpochs[index] == 0))
+                ClearLocomotion(index);
+
+            if (_verticalKinds[index] == GameVerticalMotionKind.Airborne)
+                IntegrateAirborne(world, worldState, actor, index, current, delta.Quanta);
+            else
             {
-                RetainedLocomotionKind.Direct =>
-                    IntegrateDirect(world, worldState, actor, index, current, delta.Quanta),
-                RetainedLocomotionKind.Destination =>
-                    IntegrateDestination(world, worldState, actor, index, current, delta.Quanta),
-                _ => throw new InvalidOperationException(
-                    "An active locomotion slot has no retained locomotion kind."),
-            };
-            if (retained)
+                switch (_locomotionKinds[index])
+                {
+                    case RetainedLocomotionKind.Direct:
+                        IntegrateGroundedDirect(world, worldState, actor, index, current, delta.Quanta);
+                        break;
+                    case RetainedLocomotionKind.Destination:
+                        IntegrateGroundedDestination(
+                            world, worldState, actor, index, current, delta.Quanta);
+                        break;
+                    case RetainedLocomotionKind.None:
+                        RemoveActive(index);
+                        break;
+                    default:
+                        throw new InvalidOperationException(
+                            "An active actor has an unknown retained locomotion kind.");
+                }
+            }
+
+            if (active < _activeActorCount && _activeActors[active] == actor)
                 active++;
         }
     }
 
-    private bool IntegrateDirect(
+    private void IntegrateGroundedDirect(
         EcsWorld world,
         GameWorldState worldState,
         Entity actor,
@@ -359,21 +520,27 @@ public sealed class GameWorldActions
         int deltaX = IntegrateAxis(_directX[index], stepQuanta, ref _movementRemainderX[index]);
         int deltaZ = IntegrateAxis(_directZ[index], stepQuanta, ref _movementRemainderZ[index]);
         if (deltaX == 0 && deltaZ == 0)
-            return true;
+            return;
 
         long nextX = checked(current.GlobalXMillimeters + deltaX);
         long nextZ = checked(current.GlobalZMillimeters + deltaZ);
         SimpleMotionResult physical = ResolveMotion(world, worldState, actor, current, nextX, nextZ);
-        if (!physical.WasResolved)
+        if (physical.WasResolved)
         {
-            // Direct remains retained at prepared-world limits, query pressure, or geometry.
-            return true;
+            SetAuthoritativePosition(world, worldState, actor, physical.Position);
+            return;
         }
-        SetAuthoritativePosition(world, worldState, actor, physical.Position);
-        return true;
+        if (physical.Status == SimpleMotionStatus.Unsupported)
+        {
+            BeginAirborne(actor, index, initialVelocityMillimetersPerSecond: 0);
+            IntegrateAirborneToward(
+                world, worldState, actor, index, current, nextX, nextZ, stepQuanta,
+                destinationProgress: null, destinationReached: false);
+        }
+        // Direct remains retained at prepared-world limits, query pressure, or geometry.
     }
 
-    private bool IntegrateDestination(
+    private void IntegrateGroundedDestination(
         EcsWorld world,
         GameWorldState worldState,
         Entity actor,
@@ -383,7 +550,7 @@ public sealed class GameWorldActions
     {
         int distance = IntegrateDistance(stepQuanta, ref _movementRemainderX[index]);
         if (distance == 0)
-            return true;
+            return;
 
         // Derive each published point from the original route and cumulative
         // authoritative progress. Never compound per-tick X/Z rounding.
@@ -403,21 +570,132 @@ public sealed class GameWorldActions
             (long)((Int128)routeZ * progress / routeLength));
 
         SimpleMotionResult physical = ResolveMotion(world, worldState, actor, current, nextX, nextZ);
+        if (physical.WasResolved)
+        {
+            SetAuthoritativePosition(world, worldState, actor, physical.Position);
+            _destinationProgress[index] = progress;
+            if (reached)
+                ClearLocomotion(index);
+            return;
+        }
+        if (physical.Status == SimpleMotionStatus.Unsupported)
+        {
+            BeginAirborne(actor, index, initialVelocityMillimetersPerSecond: 0);
+            IntegrateAirborneToward(
+                world, worldState, actor, index, current, nextX, nextZ, stepQuanta,
+                progress, reached);
+            return;
+        }
+        // Destination remains one straight physical route. A blocker/unavailable route retires it.
+        ClearLocomotion(index);
+    }
+
+    private void IntegrateAirborne(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        int index,
+        in WorldPosition current,
+        long stepQuanta)
+    {
+        long nextX = current.GlobalXMillimeters;
+        long nextZ = current.GlobalZMillimeters;
+        long? progress = null;
+        bool reached = false;
+        switch (_locomotionKinds[index])
+        {
+            case RetainedLocomotionKind.Direct:
+                nextX = checked(nextX +
+                    IntegrateAxis(_directX[index], stepQuanta, ref _movementRemainderX[index]));
+                nextZ = checked(nextZ +
+                    IntegrateAxis(_directZ[index], stepQuanta, ref _movementRemainderZ[index]));
+                break;
+            case RetainedLocomotionKind.Destination:
+                int distance = IntegrateDistance(stepQuanta, ref _movementRemainderX[index]);
+                long candidateProgress = checked(_destinationProgress[index] + distance);
+                long routeLength = _destinationRouteLength[index];
+                reached = candidateProgress >= routeLength;
+                progress = reached ? routeLength : candidateProgress;
+                long routeX = checked(_destinationX[index] - _destinationStartX[index]);
+                long routeZ = checked(_destinationZ[index] - _destinationStartZ[index]);
+                nextX = checked(_destinationStartX[index] +
+                    (long)((Int128)routeX * progress.Value / routeLength));
+                nextZ = checked(_destinationStartZ[index] +
+                    (long)((Int128)routeZ * progress.Value / routeLength));
+                break;
+        }
+        IntegrateAirborneToward(
+            world, worldState, actor, index, current, nextX, nextZ, stepQuanta,
+            progress, reached);
+    }
+
+    private void IntegrateAirborneToward(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        int index,
+        in WorldPosition current,
+        long nextX,
+        long nextZ,
+        long stepQuanta,
+        long? destinationProgress,
+        bool destinationReached)
+    {
+        int deltaY = IntegrateVertical(index, stepQuanta);
+        long targetY = checked((long)current.YMillimeters + deltaY);
+        if (targetY < int.MinValue || targetY > int.MaxValue ||
+            targetY <= _verticalOptions.RecoveryMinimumYMillimeters)
+        {
+            _ = TryRecoverActor(world, worldState, actor, index);
+            return;
+        }
+
+        bool complete = _collisionProjection.TryCapture(
+            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        SimpleAirborneMotionResult physical = _physics.ResolveAirborneMotion(
+            new SimpleAirborneMotionRequest(
+                current, nextX, checked((int)targetY), nextZ, s_actorBody),
+            dynamicBounds,
+            complete);
         if (!physical.WasResolved)
         {
-            // T0.10 Destination is a straight route. Prepared-world failure or physical
-            // obstruction makes it impossible and stops it; pathfinding remains future work.
-            ClearLocomotion(index);
-            return false;
+            if (_locomotionKinds[index] == RetainedLocomotionKind.Destination)
+                ClearLocomotion(index);
+            if (physical.Status == SimpleAirborneMotionStatus.Blocked &&
+                _verticalVelocityNumerators[index] > 0)
+            {
+                _verticalVelocityNumerators[index] = 0;
+                _verticalDisplacementRemainders[index] = 0;
+            }
+            return;
         }
+
         SetAuthoritativePosition(world, worldState, actor, physical.Position);
-        _destinationProgress[index] = progress;
-        if (reached)
+        if (destinationProgress.HasValue)
         {
-            ClearLocomotion(index);
-            return false;
+            if (physical.Position.GlobalXMillimeters == nextX &&
+                physical.Position.GlobalZMillimeters == nextZ)
+            {
+                _destinationProgress[index] = destinationProgress.Value;
+                if (destinationReached)
+                    ClearLocomotion(index);
+            }
+            else
+            {
+                ClearLocomotion(index);
+            }
         }
-        return true;
+
+        if (physical.Status == SimpleAirborneMotionStatus.Landed)
+        {
+            SetGrounded(actor, index);
+            _landings++;
+        }
+        else if (physical.Status == SimpleAirborneMotionStatus.CeilingBlocked)
+        {
+            _verticalVelocityNumerators[index] = 0;
+            _verticalDisplacementRemainders[index] = 0;
+        }
     }
 
     private SimpleMotionResult ResolveMotion(
@@ -581,7 +859,9 @@ public sealed class GameWorldActions
         if (!worldState.TrySetPosition(world, actor, relocated))
             return GameWorldActionStatus.InvariantViolation;
 
-        ClearLocomotion(checked((int)actor.Index));
+        int index = checked((int)actor.Index);
+        ClearLocomotion(index);
+        SetGrounded(actor, index);
         return GameWorldActionStatus.Accepted;
     }
 
@@ -616,9 +896,18 @@ public sealed class GameWorldActions
             : GameWorldActionStatus.InvariantViolation;
     }
 
-    internal void ValidateRestoredDoorConsistency(EcsWorld world, GameWorldState worldState)
+    internal void InitializePhysicalState(EcsWorld world, GameWorldState worldState)
     {
+        EnsureWorld(world, worldState);
         _collisionProjection.RebuildAndValidate(world, worldState);
+        var visitor = new CharacterBaselineVisitor(_characterScratch);
+        _ = world.ExecuteJob(_characterBaseline, ref visitor);
+        Array.Sort(_characterScratch, 0, visitor.Count);
+        for (int item = 0; item < visitor.Count; item++)
+        {
+            if (world.TryGetEntity(_characterScratch[item], out Entity actor))
+                ReconcileVerticalState(world, actor);
+        }
     }
 
     private static int IntegrateAxis(short value, long stepQuanta, ref long remainder)
@@ -682,8 +971,11 @@ public sealed class GameWorldActions
     {
         int index = checked((int)actor.Index);
         if (_locomotionKinds[index] != RetainedLocomotionKind.Direct)
+        {
             ClearLocomotion(index);
-        _locomotionKinds[index] = RetainedLocomotionKind.Direct;
+            _locomotionKinds[index] = RetainedLocomotionKind.Direct;
+            _activeLocomotionCount++;
+        }
         _directX[index] = x;
         _directZ[index] = z;
         EnsureActive(actor, index);
@@ -707,6 +999,7 @@ public sealed class GameWorldActions
             return;
 
         _locomotionKinds[index] = RetainedLocomotionKind.Destination;
+        _activeLocomotionCount++;
         _destinationX[index] = globalX;
         _destinationZ[index] = globalZ;
         _destinationStartX[index] = start.GlobalXMillimeters;
@@ -722,31 +1015,19 @@ public sealed class GameWorldActions
 
     private void EnsureActive(Entity actor, int index)
     {
-        if (_activeLocomotionPositions[index] != 0)
+        if (_activeActorPositions[index] != 0)
             return;
-        if (_activeLocomotionCount >= _activeLocomotion.Length)
-            throw new InvalidOperationException("The bounded locomotion set exhausted unexpectedly.");
-        _activeLocomotion[_activeLocomotionCount] = actor;
-        _activeLocomotionPositions[index] = checked(_activeLocomotionCount + 1);
-        _activeLocomotionCount++;
+        if (_activeActorCount >= _activeActors.Length)
+            throw new InvalidOperationException("The bounded physical actor set exhausted unexpectedly.");
+        _activeActors[_activeActorCount] = actor;
+        _activeActorPositions[index] = checked(_activeActorCount + 1);
+        _activeActorCount++;
     }
 
     private void ClearLocomotion(int index)
     {
-        int encoded = _activeLocomotionPositions[index];
-        if (encoded != 0)
-        {
-            int slot = encoded - 1;
-            int last = --_activeLocomotionCount;
-            if (slot != last)
-            {
-                Entity donor = _activeLocomotion[last];
-                _activeLocomotion[slot] = donor;
-                _activeLocomotionPositions[checked((int)donor.Index)] = checked(slot + 1);
-            }
-            _activeLocomotion[last] = Entity.Null;
-            _activeLocomotionPositions[index] = 0;
-        }
+        if (_locomotionKinds[index] != RetainedLocomotionKind.None)
+            _activeLocomotionCount--;
 
         _locomotionKinds[index] = RetainedLocomotionKind.None;
         _directX[index] = 0;
@@ -759,6 +1040,147 @@ public sealed class GameWorldActions
         _destinationProgress[index] = 0;
         _movementRemainderX[index] = 0;
         _movementRemainderZ[index] = 0;
+        if (_verticalKinds[index] != GameVerticalMotionKind.Airborne)
+            RemoveActive(index);
+    }
+
+    private void BeginAirborne(Entity actor, int index, int initialVelocityMillimetersPerSecond)
+    {
+        if (_verticalKinds[index] != GameVerticalMotionKind.Airborne)
+            _activeAirborneCount++;
+        _verticalGenerations[index] = actor.Generation;
+        _verticalKinds[index] = GameVerticalMotionKind.Airborne;
+        _verticalVelocityNumerators[index] = checked(
+            (long)initialVelocityMillimetersPerSecond *
+            WorldClockOptions.WorldTimeQuantaPerSecond);
+        _verticalDisplacementRemainders[index] = 0;
+        EnsureActive(actor, index);
+    }
+
+    private void SetGrounded(Entity actor, int index)
+    {
+        if (_verticalKinds[index] == GameVerticalMotionKind.Airborne)
+            _activeAirborneCount--;
+        _verticalGenerations[index] = actor.Generation;
+        _verticalKinds[index] = GameVerticalMotionKind.Grounded;
+        _verticalVelocityNumerators[index] = 0;
+        _verticalDisplacementRemainders[index] = 0;
+        if (_locomotionKinds[index] == RetainedLocomotionKind.None)
+            RemoveActive(index);
+    }
+
+    private void ClearActorState(int index)
+    {
+        if (_locomotionKinds[index] != RetainedLocomotionKind.None)
+            _activeLocomotionCount--;
+        if (_verticalKinds[index] == GameVerticalMotionKind.Airborne)
+            _activeAirborneCount--;
+        _locomotionKinds[index] = RetainedLocomotionKind.None;
+        _verticalKinds[index] = GameVerticalMotionKind.None;
+        _verticalGenerations[index] = 0;
+        _verticalVelocityNumerators[index] = 0;
+        _verticalDisplacementRemainders[index] = 0;
+        _directX[index] = 0;
+        _directZ[index] = 0;
+        _destinationX[index] = 0;
+        _destinationZ[index] = 0;
+        _destinationStartX[index] = 0;
+        _destinationStartZ[index] = 0;
+        _destinationRouteLength[index] = 0;
+        _destinationProgress[index] = 0;
+        _movementRemainderX[index] = 0;
+        _movementRemainderZ[index] = 0;
+        RemoveActive(index);
+    }
+
+    private void RemoveActive(int index)
+    {
+        int encoded = _activeActorPositions[index];
+        if (encoded == 0)
+            return;
+        int slot = encoded - 1;
+        int last = --_activeActorCount;
+        if (slot != last)
+        {
+            Entity donor = _activeActors[last];
+            _activeActors[slot] = donor;
+            _activeActorPositions[checked((int)donor.Index)] = checked(slot + 1);
+        }
+        _activeActors[last] = Entity.Null;
+        _activeActorPositions[index] = 0;
+    }
+
+    private int IntegrateVertical(int index, long stepQuanta)
+    {
+        long oldVelocity = _verticalVelocityNumerators[index];
+        long nextVelocity = checked(oldVelocity +
+            (long)_verticalOptions.GravityMillimetersPerSecondSquared * stepQuanta);
+        Int128 denominator = 2 * (Int128)WorldClockOptions.WorldTimeQuantaPerSecond *
+            WorldClockOptions.WorldTimeQuantaPerSecond;
+        Int128 numerator = (Int128)(oldVelocity + nextVelocity) * stepQuanta +
+            _verticalDisplacementRemainders[index];
+        int displacement = checked((int)(numerator / denominator));
+        _verticalDisplacementRemainders[index] = numerator % denominator;
+        _verticalVelocityNumerators[index] = nextVelocity;
+        return displacement;
+    }
+
+    private void ReconcileVerticalState(EcsWorld world, Entity actor)
+    {
+        int index = checked((int)actor.Index);
+        if (_verticalKinds[index] == GameVerticalMotionKind.Airborne)
+            _activeAirborneCount--;
+        // A recycled ECS slot can still be represented by an active entry carrying the retired
+        // generation. Remove that identity before unsupported reconstruction can append/reuse it.
+        RemoveActive(index);
+        _verticalKinds[index] = GameVerticalMotionKind.None;
+        _verticalGenerations[index] = actor.Generation;
+        _verticalVelocityNumerators[index] = 0;
+        _verticalDisplacementRemainders[index] = 0;
+        if (!_worldState.TryReadPosition(world, actor, out WorldPosition current))
+            return;
+        bool complete = _collisionProjection.TryCapture(
+            world, _worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        SimpleMotionResult grounded = _physics.ResolveMotion(
+            new SimpleMotionRequest(
+                current, current.GlobalXMillimeters, current.GlobalZMillimeters, s_actorBody),
+            dynamicBounds,
+            complete);
+        if (grounded.WasResolved)
+        {
+            SetGrounded(actor, index);
+        }
+        else if (grounded.Status == SimpleMotionStatus.Unsupported)
+        {
+            BeginAirborne(actor, index, initialVelocityMillimetersPerSecond: 0);
+        }
+        else
+        {
+            if (!TryRecoverActor(world, _worldState, actor, index) &&
+                _locomotionKinds[index] == RetainedLocomotionKind.None)
+                RemoveActive(index);
+        }
+    }
+
+    private bool TryRecoverActor(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        int index)
+    {
+        bool complete = _collisionProjection.TryCapture(
+            world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        SimpleOccupancyResult recovery = _physics.ProbeOccupancy(
+            new SimpleOccupancyRequest(_verticalOptions.RecoveryPosition, s_actorBody),
+            dynamicBounds,
+            complete);
+        if (!recovery.CanOccupy ||
+            !worldState.TrySetPosition(world, actor, recovery.Position))
+            return false;
+        ClearLocomotion(index);
+        SetGrounded(actor, index);
+        _recoveries++;
+        return true;
     }
 
     private static WorldYaw DoorOrientation(bool isOpen) =>
@@ -792,6 +1214,30 @@ public sealed class GameWorldActions
         ArgumentNullException.ThrowIfNull(world);
         if (world.Id != _worldId)
             throw new ArgumentException("World actions belong to another ECS world.", nameof(world));
+    }
+
+    private struct CharacterBaselineVisitor : IReadChunkJob<GameCharacter>
+    {
+        private readonly uint[] _indices;
+
+        internal CharacterBaselineVisitor(uint[] indices)
+        {
+            _indices = indices;
+            Count = 0;
+        }
+
+        internal int Count;
+
+        public void Execute(in ReadComponentChunk<GameCharacter> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                if (Count >= _indices.Length)
+                    throw new InvalidOperationException(
+                        "The bounded character baseline exceeded entity capacity.");
+                _indices[Count++] = chunk.EntityIndices[row];
+            }
+        }
     }
 }
 

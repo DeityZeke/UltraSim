@@ -50,6 +50,7 @@ public enum GamePlayerActions : ushort
     None = 0,
     Interact = 1 << 0,
     Primary = 1 << 1,
+    Jump = 1 << 2,
 }
 
 /// <summary>Command-level mutation of the one retained authoritative locomotion state.</summary>
@@ -117,7 +118,7 @@ public readonly record struct GamePlayerCommand(
     public const short MaximumAxisMagnitude = short.MaxValue;
     public const short MinimumAxisMagnitude = -short.MaxValue;
     public const GamePlayerActions KnownActions =
-        GamePlayerActions.Interact | GamePlayerActions.Primary;
+        GamePlayerActions.Interact | GamePlayerActions.Primary | GamePlayerActions.Jump;
 
     public bool IsValid => ControlSession.IsValid && Sequence != 0 && Locomotion.IsValid &&
         (HeldActions & ~KnownActions) == 0 &&

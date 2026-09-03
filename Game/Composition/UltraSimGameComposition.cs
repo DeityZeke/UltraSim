@@ -53,13 +53,15 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
     private readonly GameRuntimeProfile _runtimeProfile;
     private readonly WorldPack? _baseWorldPack;
     private readonly InventoryRuleSelection _inventoryRuleSelection;
+    private readonly GameVerticalMotionOptions _verticalMotionOptions;
 
     public UltraSimGameComposition(
         InventoryLimits? inventoryLimits = null,
         int maximumChunksPerContentArchetype = 16,
         GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local,
         WorldPack? baseWorldPack = null,
-        InventoryRuleSelection? inventoryRuleSelection = null)
+        InventoryRuleSelection? inventoryRuleSelection = null,
+        GameVerticalMotionOptions? verticalMotionOptions = null)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
@@ -73,6 +75,9 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         _inventoryRuleSelection = inventoryRuleSelection ?? InventoryRuleSelection.PerContainer;
         if (!_inventoryRuleSelection.IsValid)
             throw new ArgumentException("The inventory rule selection is invalid.", nameof(inventoryRuleSelection));
+        _verticalMotionOptions = verticalMotionOptions ?? GameVerticalMotionOptions.PlayableDefault;
+        if (!_verticalMotionOptions.IsValid)
+            throw new ArgumentException("The vertical-motion options are invalid.", nameof(verticalMotionOptions));
         Schema = GameSchema.CreateSchema();
         PersistenceCatalog = GameSchema.CreatePersistenceCatalog(static builder =>
             builder.RegisterHistoricalReader<GameSimulationState>(
@@ -235,13 +240,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         return new GameWorldState(world, bound);
     }
 
-    private static GameWorldActions CreateWorldActions(
+    private GameWorldActions CreateWorldActions(
         EcsWorld world,
         GameWorldState worldState)
     {
         var projection = new GamePlayableCollisionProjection(world);
         var physics = new UltraSimSimplePhysics(worldState);
-        return new GameWorldActions(world, physics, projection);
+        return new GameWorldActions(
+            world, worldState, physics, projection, _verticalMotionOptions);
     }
 
     private static (ComponentLookup<GameSimulationState>, GameReplicationBindings?) PrepareSimulation(

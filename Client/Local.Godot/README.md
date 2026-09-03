@@ -24,6 +24,11 @@ projection equals the authoritative relocated position before a following facing
 acceptance step may derive an absolute world point. This closes the relocation/facing race without
 giving Godot direct authority access or changing the accepted command format.
 
+Physics P0.1d maps the resolved Space binding to the common edge-triggered Game `Jump` action for
+the direct human-control profiles. OrbitCommand deliberately retains its UO-like no-jump grammar.
+Godot presents the authoritative replicated Y position; it owns no body velocity, gravity,
+grounding decision, or recovery teleport.
+
 The normal user path resolves the frozen A0.1 `Default` catalog. Headless acceptance can inject
 `Default`, `Replace`, or `Add` without adding a user-facing test-variant menu. Presentation resolves
 verified PNG payloads by SHA-256 identity; it does not introduce cache, HTTP, or runtime model

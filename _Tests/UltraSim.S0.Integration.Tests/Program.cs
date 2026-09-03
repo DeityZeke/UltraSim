@@ -31,6 +31,14 @@ Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsO
 Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
 Run("SimplePhysicsSelectsTerrainShellSupportStepAndClearance",
     SimplePhysicsTerrainShellSupport, results);
+Run("SimplePhysicsResolvesAirborneTerrainShellContacts",
+    SimplePhysicsAirborneTerrainShellContacts, results);
+Run("AuthoritativeJumpFallLandingAndRecovery",
+    AuthoritativeJumpFallLandingAndRecovery, results);
+Run("VerticalMomentumIsGenerationLocalAcrossRestore",
+    VerticalMomentumIsGenerationLocalAcrossRestore, results);
+Run("VerticalStateFencesReusedEntitySlots",
+    VerticalStateFencesReusedEntitySlots, results);
 Run("SweptMotionPreservesDirectAndDestinationPolicy", SweptMotionPreservesGamePolicy, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
@@ -1165,6 +1173,466 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
         HashText("terrain-shell-support-step-clearance-void"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
         "Geometry-ordered Base/Top support, Bottom clearance, bounded step up/down, intentional void, unavailable data, fixed path-work limits, and 0 B warmed allocation.");
+}
+
+static TestMetrics SimplePhysicsAirborneTerrainShellContacts()
+{
+    WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1084))));
+    host.Start();
+
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, long>(
+            (world, generationId, game) =>
+            {
+                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                Expect(!default(SimpleAirborneMotionResult).WasResolved,
+                    "A default airborne result did not fail closed.");
+
+                SimpleAirborneMotionResult mountain = Air(3_500, 12_000, 3_500, 3_500, 9_000, 3_500);
+                SimpleAirborneMotionResult middle = Air(3_500, 7_000, 3_500, 3_500, 4_000, 3_500);
+                SimpleAirborneMotionResult ceiling = Air(3_500, 5_000, 3_500, 3_500, 7_000, 3_500);
+                SimpleAirborneMotionResult overVoid = Air(12_500, 3_000, 12_500, 12_500, 0, 12_500);
+                SimpleAirborneMotionResult acrossVoid = Air(11_500, 1_000, 12_500, 13_500, 1_000, 12_500);
+                SimpleAirborneMotionResult unavailable = Air(
+                    15_500, 3_000, 3_500, 17_000, 2_000, 3_500);
+
+                Expect(mountain.IsGrounded && mountain.Position.YMillimeters == 10_000 &&
+                    mountain.Contact.SurfaceId == new WorldSurfaceId(900),
+                    "Descending motion did not land on the highest crossed mountain Top.");
+                Expect(middle.IsGrounded && middle.Position.YMillimeters == 5_000 &&
+                    middle.Contact.SurfaceId == new WorldSurfaceId(1),
+                    "Descending motion did not land on the actual intermediate cave floor.");
+                Expect(ceiling.Status == SimpleAirborneMotionStatus.CeilingBlocked &&
+                    ceiling.Position.YMillimeters == 6_200 &&
+                    ceiling.Contact.Face == WorldTerrainSurfaceFace.Bottom &&
+                    ceiling.Contact.SurfaceId == new WorldSurfaceId(900),
+                    "Ascending motion did not stop the body at the mountain-shell Bottom face.");
+                Expect(overVoid.Status == SimpleAirborneMotionStatus.Airborne &&
+                    overVoid.Position.YMillimeters == 0,
+                    "Intentional resident void incorrectly became an airborne landing surface.");
+                Expect(acrossVoid.Status == SimpleAirborneMotionStatus.Airborne &&
+                    acrossVoid.Position.GlobalXMillimeters == 13_500,
+                    "Airborne horizontal movement was snapped onto or blocked by a terrain gap.");
+                Expect(unavailable.Status == SimpleAirborneMotionStatus.OutsidePreparedWorld,
+                    "Unavailable structural data was interpreted as clear airborne space.");
+
+                for (int index = 0; index < 16; index++)
+                    _ = Air(12_500, 3_000, 12_500, 12_500, 2_900, 12_500);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 1_000; index++)
+                {
+                    SimpleAirborneMotionResult result =
+                        Air(12_500, 3_000, 12_500, 12_500, 2_900, 12_500);
+                    if (result.Status != SimpleAirborneMotionStatus.Airborne)
+                        throw new InvalidOperationException("The warmed airborne result changed.");
+                }
+                return GC.GetAllocatedBytesForCurrentThread() - before;
+
+                SimpleAirborneMotionResult Air(
+                    long fromX, int fromY, long fromZ,
+                    long toX, int toY, long toZ) =>
+                    game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            Position(fromX, fromY, fromZ), toX, toY, toZ, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+
+                static WorldPosition Position(long x, int y, long z)
+                {
+                    if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+                        throw new InvalidOperationException("An airborne fixture point was invalid.");
+                    return value;
+                }
+            },
+            out long allocated) && allocated == 0,
+        $"Warmed airborne terrain-shell resolution allocated {allocated} caller bytes.");
+
+    return new TestMetrics(
+        HashText("airborne-top-bottom-contact-void-horizontal"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
+        "Bounded airborne motion lands on geometry-ordered Top faces, stops at Bottom ceilings, crosses intentional void horizontally, fails closed for unavailable structure, and allocates 0 B warmed.");
+}
+
+static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
+{
+    WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1085))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(1085));
+    Expect(entered.IsEntered, "The vertical-motion actor did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The vertical-motion fixture could not populate.");
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, input.ControlSession);
+    WorldPosition verticalStart = Position(
+        GamePlayableWorld.PlayerStart.GlobalXMillimeters,
+        0,
+        GamePlayableWorld.PlayerStart.GlobalZMillimeters);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.RelocateActor(
+                world, game.WorldState, ResolveInWorld(world, entities.PlayerId),
+                verticalStart, out WorldPosition _), out GameWorldActionStatus startRelocation) &&
+        startRelocation == GameWorldActionStatus.Accepted,
+        "The vertical-motion actor could not enter the shell fixture's BaseTerrain.");
+
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            1, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump),
+        "The jump edge could not be formed.");
+    GamePlayerCommandResult admitted = link.ApplyCommand(jump);
+    Expect(admitted.Jump == GameWorldActionStatus.Accepted,
+        $"The grounded jump was not admitted: {admitted.Jump}.");
+    host.Tick();
+    WorldPosition afterFirst = link.ReadPosition();
+    Expect(afterFirst.GlobalXMillimeters > verticalStart.GlobalXMillimeters &&
+        afterFirst.YMillimeters > verticalStart.YMillimeters &&
+        ReadVertical(runtime.Game, entities.PlayerId).IsAirborne,
+        "One authoritative jump step did not compose horizontal and upward motion.");
+
+    var hostileDoubleJump = new GamePlayerCommand(
+        input.ControlSession,
+        jump.Sequence + 1,
+        GameLocomotionUpdate.Unchanged,
+        GamePlayerActions.Jump,
+        GamePlayerActions.Jump);
+    GamePlayerCommandResult duplicateAirJump = link.ApplyCommand(hostileDoubleJump);
+    Expect(duplicateAirJump.Jump == GameWorldActionStatus.NotGrounded,
+        "A fresh hostile Jump edge created an airborne double-jump.");
+
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.None, true), out GamePlayerCommand stop),
+        "The jump fixture could not release horizontal input.");
+    // The hostile sequence consumed sequence 2, so use an explicitly fresh stop.
+    stop = stop with { Sequence = hostileDoubleJump.Sequence + 1 };
+    _ = link.ApplyCommand(stop);
+    int landingBudget = 180;
+    while (ReadVertical(runtime.Game, entities.PlayerId).IsAirborne && landingBudget-- > 0)
+        host.Tick();
+    GameVerticalMotionSnapshot landed = ReadVertical(runtime.Game, entities.PlayerId);
+    WorldPosition landing = link.ReadPosition();
+    Expect(landingBudget >= 0 && landed.IsGrounded && landing.YMillimeters == 0 &&
+        landed.CumulativeJumpsAccepted == 1 && landed.CumulativeLandings == 1,
+        "The authoritative jump did not fall and land exactly on BaseTerrain.");
+
+    WorldPosition gapStart = Position(11_500, 0, 12_500);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.RelocateActor(
+                world, game.WorldState, ResolveInWorld(world, entities.PlayerId),
+                gapStart, out WorldPosition _), out GameWorldActionStatus relocation) &&
+        relocation == GameWorldActionStatus.Accepted,
+        "The recovery fixture could not relocate beside intentional void.");
+    var fallSession = new ClientWorldInputSequencer(input.ControlSession, hostileDoubleJump.Sequence + 2);
+    Expect(fallSession.TryCreateCommand(new ClientWorldInputSample(
+            1, 0, GamePlayerActions.None, true), out GamePlayerCommand walkOff),
+        "The walk-off command could not be formed.");
+    _ = link.ApplyCommand(walkOff);
+    int airborneBudget = 20;
+    while (!ReadVertical(runtime.Game, entities.PlayerId).IsAirborne && airborneBudget-- > 0)
+        host.Tick();
+    Expect(airborneBudget >= 0 && link.ReadPosition().GlobalXMillimeters > gapStart.GlobalXMillimeters,
+        "Grounded locomotion did not transition into horizontal airborne motion over void.");
+    Expect(fallSession.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.None, true), out GamePlayerCommand stopFall),
+        "The falling actor could not release horizontal input.");
+    _ = link.ApplyCommand(stopFall);
+    long recoveriesBefore = ReadVertical(runtime.Game, entities.PlayerId).CumulativeRecoveries;
+    int recoveryBudget = 240;
+    while (ReadVertical(runtime.Game, entities.PlayerId).CumulativeRecoveries == recoveriesBefore &&
+           recoveryBudget-- > 0)
+        host.Tick();
+    WorldPosition recovered = link.ReadPosition();
+    GameVerticalMotionSnapshot recovery = ReadVertical(runtime.Game, entities.PlayerId);
+    Expect(recoveryBudget >= 0 && recovery.IsGrounded &&
+        recovery.CumulativeRecoveries == recoveriesBefore + 1 &&
+        recovered.GlobalXMillimeters == GamePlayableWorld.PlayerStart.GlobalXMillimeters &&
+        recovered.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters &&
+        recovered.YMillimeters == 0,
+        "Game-owned fall recovery did not use the occupancy-aware safe relocation point.");
+
+    WorldPosition cadence20 = RunJumpCadence(20, 0x80_1086);
+    WorldPosition cadence60 = RunJumpCadence(60, 0x80_1087);
+    WorldPosition cadence120 = RunJumpCadence(120, 0x80_1088);
+    Expect(cadence20.YMillimeters == 0 && cadence20 == cadence60 && cadence20 == cadence120,
+        "Jump/fall/landing final truth diverged across 20/60/120 Hz.");
+
+    return new TestMetrics(
+        HashText($"{afterFirst}|{landing}|{recovered}|{cadence20}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "Game admits one grounded Jump edge, integrates horizontal air control plus exact fixed-point gravity, lands on terrain, rejects double-jump, recovers below the configured fall envelope, and converges at 20/60/120 Hz.");
+
+    static GameVerticalMotionSnapshot ReadVertical(ServerGameFacet gameFacet, PersistentEntityId id)
+    {
+        Expect(gameFacet.TryUseActiveGeneration<IGameGenerationStateProvider, GameVerticalMotionSnapshot>(
+                (world, _, game) =>
+                {
+                    Expect(game.WorldActions.TryReadVerticalMotion(
+                            world, ResolveInWorld(world, id), out GameVerticalMotionSnapshot state),
+                        "Vertical state was unavailable.");
+                    return state;
+                }, out GameVerticalMotionSnapshot snapshot),
+            "Vertical-state read did not run.");
+        return snapshot;
+    }
+
+    static WorldPosition RunJumpCadence(int frequency, ulong worldId)
+    {
+        WorldPack cadencePack = CreatePhysicsTerrainShellWorldPack();
+        var cadenceComposition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32), baseWorldPack: cadencePack);
+        using var cadenceHost = new InternalHost(
+            cadenceComposition,
+            RuntimeOptions(
+                new PersistenceIdentityOptions(new PersistentWorldId(worldId)),
+                frequencyHz: frequency));
+        cadenceHost.Start();
+        using var cadenceAdmission = new AdmissionService(
+            cadenceHost.RuntimeForTesting.Game, cadenceComposition);
+        AdmissionResult cadenceEntered = cadenceAdmission.JoinAccountless(
+            new ParticipantId(checked((ulong)(2_000 + frequency))));
+        Expect(cadenceEntered.IsEntered, $"The {frequency} Hz jump actor did not enter.");
+        Expect(cadenceHost.RuntimeForTesting.Game.TryUseActiveGeneration<
+                IGameGenerationStateProvider, GamePlayableWorldEntities>(
+                (world, _, game) => GamePlayableWorld.Populate(world, game, cadenceEntered.Entity),
+                out GamePlayableWorldEntities cadenceEntities),
+            $"The {frequency} Hz jump fixture could not populate.");
+        var cadenceInput = new ClientWorldInputSequencer();
+        var cadenceLink = new PlayableOfflineDirectLink(
+            cadenceHost.RuntimeForTesting.Game,
+            cadenceEntities.PlayerId,
+            cadenceInput.ControlSession);
+        WorldPosition cadenceStart = Position(
+            GamePlayableWorld.PlayerStart.GlobalXMillimeters,
+            0,
+            GamePlayableWorld.PlayerStart.GlobalZMillimeters);
+        Expect(cadenceHost.RuntimeForTesting.Game.TryUseActiveGeneration<
+                IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, generationId, game) => game.WorldActions.RelocateActor(
+                    world, game.WorldState, ResolveInWorld(world, cadenceEntities.PlayerId),
+                    cadenceStart, out WorldPosition _), out GameWorldActionStatus relocated) &&
+            relocated == GameWorldActionStatus.Accepted,
+            $"The {frequency} Hz actor could not enter BaseTerrain.");
+        Expect(cadenceInput.TryCreateCommand(new ClientWorldInputSample(
+                0, 0, GamePlayerActions.Jump, true), out GamePlayerCommand command) &&
+            cadenceLink.ApplyCommand(command).Jump == GameWorldActionStatus.Accepted,
+            $"The {frequency} Hz jump was not accepted.");
+        bool observedAirborne = false;
+        for (int tick = 0; tick < frequency * 3; tick++)
+        {
+            cadenceHost.Tick();
+            GameVerticalMotionSnapshot state = ReadVertical(
+                cadenceHost.RuntimeForTesting.Game, cadenceEntities.PlayerId);
+            observedAirborne |= state.IsAirborne;
+            if (observedAirborne && state.IsGrounded)
+                return cadenceLink.ReadPosition();
+        }
+        throw new InvalidOperationException($"The {frequency} Hz jump did not land.");
+    }
+
+    static WorldPosition Position(long x, int y, long z)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+            throw new InvalidOperationException("A vertical Game fixture point was invalid.");
+        return value;
+    }
+}
+
+static TestMetrics VerticalMomentumIsGenerationLocalAcrossRestore()
+{
+    string root = TempRoot("p0-1d-vertical-restore");
+    try
+    {
+        var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x80_1089));
+        WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32), baseWorldPack: pack);
+        using var host = new InternalHost(composition, RuntimeOptions(identity));
+        host.Start();
+        ServerRuntime runtime = host.RuntimeForTesting;
+        using var admission = new AdmissionService(runtime.Game, composition);
+        AdmissionResult entered = admission.JoinAccountless(new ParticipantId(1089));
+        Expect(entered.IsEntered, "The vertical restore actor did not enter.");
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+                (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+                out GamePlayableWorldEntities entities),
+            "The vertical restore fixture could not populate.");
+        var input = new ClientWorldInputSequencer();
+        var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, input.ControlSession);
+        WorldPosition start = Position(
+            GamePlayableWorld.PlayerStart.GlobalXMillimeters,
+            0,
+            GamePlayableWorld.PlayerStart.GlobalZMillimeters);
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, generationId, game) => game.WorldActions.RelocateActor(
+                    world, game.WorldState, ResolveInWorld(world, entities.PlayerId),
+                    start, out WorldPosition _), out GameWorldActionStatus relocated) &&
+            relocated == GameWorldActionStatus.Accepted,
+            "The vertical restore actor could not reach BaseTerrain.");
+        Expect(input.TryCreateCommand(new ClientWorldInputSample(
+                0, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump) &&
+            link.ApplyCommand(jump).Jump == GameWorldActionStatus.Accepted,
+            "The pre-save jump was not admitted.");
+        for (int tick = 0; tick < 12; tick++) host.Tick();
+        WorldPosition savedPosition = link.ReadPosition();
+        GameVerticalMotionSnapshot beforeSave = ReadVertical();
+        Expect(beforeSave.IsAirborne && beforeSave.VelocityMillimetersPerSecond > 0,
+            "The save point did not contain upward generation-local momentum.");
+
+        var persistence = new GameRuntimePersistence(
+            runtime.Game,
+            composition,
+            RestoreOptions(),
+            new SaveSetCoordinator(root));
+        GameSaveResult saved = persistence.TrySave(
+            new SaveSetContext(1, 1_700_001_080_009), static capture => capture());
+        Expect(saved.Succeeded, "The airborne save failed.");
+        for (int tick = 0; tick < 10; tick++) host.Tick();
+        Expect(link.ReadPosition() != savedPosition, "The airborne authority did not diverge after save.");
+
+        GameLoadResult loaded = persistence.TryLoad();
+        Expect(loaded.Succeeded, "The airborne save did not restore.");
+        WorldPosition restored = ReadWorldPosition(runtime.Game, entities.PlayerId);
+        GameVerticalMotionSnapshot afterLoad = ReadVertical();
+        Expect(restored == savedPosition && afterLoad.IsAirborne &&
+            afterLoad.VelocityMillimetersPerSecond == 0,
+            "Restore persisted provider momentum or failed to reconstruct unsupported position as airborne.");
+        host.Tick();
+        WorldPosition afterGravity = ReadWorldPosition(runtime.Game, entities.PlayerId);
+        Expect(afterGravity.YMillimeters < restored.YMillimeters,
+            "A restored unsupported actor did not begin falling from zero vertical velocity.");
+
+        return new TestMetrics(
+            HashText($"{savedPosition}|{restored}|{afterGravity}"),
+            0, 0, 0, 0, 0,
+            saved.Manifest?.Artifacts.Sum(static artifact => artifact.ByteCount) ?? 0,
+            0, 0, 0, 0, 0,
+            "WorldPosition persists; vertical momentum does not. Generation initialization reconstructs unsupported saved position as Airborne at zero velocity and gravity resumes.");
+
+        GameVerticalMotionSnapshot ReadVertical()
+        {
+            Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameVerticalMotionSnapshot>(
+                    (world, _, game) =>
+                    {
+                        Expect(game.WorldActions.TryReadVerticalMotion(
+                                world, ResolveInWorld(world, entities.PlayerId),
+                                out GameVerticalMotionSnapshot state),
+                            "The restored vertical state was unavailable.");
+                        return state;
+                    }, out GameVerticalMotionSnapshot snapshot),
+                "The restored vertical-state read did not run.");
+            return snapshot;
+        }
+
+        static WorldPosition Position(long x, int y, long z)
+        {
+            if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+                throw new InvalidOperationException("A vertical restore point was invalid.");
+            return value;
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static TestMetrics VerticalStateFencesReusedEntitySlots()
+{
+    WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32), baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1090))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(1090));
+    Expect(entered.IsEntered, "The reused-slot vertical actor did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The reused-slot fixture could not populate.");
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, input.ControlSession);
+    WorldPosition supported = Position(
+        GamePlayableWorld.PlayerStart.GlobalXMillimeters,
+        0,
+        GamePlayableWorld.PlayerStart.GlobalZMillimeters);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, _, game) => game.WorldActions.RelocateActor(
+                world, game.WorldState, ResolveInWorld(world, entities.PlayerId),
+                supported, out WorldPosition _), out GameWorldActionStatus relocated) &&
+        relocated == GameWorldActionStatus.Accepted,
+        "The reused-slot actor could not reach supported terrain.");
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump) &&
+        link.ApplyCommand(jump).Jump == GameWorldActionStatus.Accepted,
+        "The retired slot was not airborne before reuse.");
+
+    WorldPosition unsupported = Position(12_500, 3_000, 12_500);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, Entity>(
+            (world, _, game) =>
+            {
+                Entity retired = ResolveInWorld(world, entities.PlayerId);
+                Expect(world.TryDestroy(retired), "The airborne actor could not be retired.");
+                Expect(world.TryInstantiate(game.Content.Character, out Entity replacement),
+                    "The replacement actor could not be created.");
+                Expect(replacement.Index == retired.Index && replacement.Generation != retired.Generation,
+                    "The ECS fixture did not reuse the intended slot with new generation lineage.");
+                Expect(game.WorldState.TrySetPosition(world, replacement, unsupported),
+                    "The replacement actor could not enter unsupported resident space.");
+                Expect(game.WorldActions.BeginControlSession(
+                        world, replacement, GameControlSessionEpoch.Create()) ==
+                    GameWorldActionStatus.Accepted,
+                    "The replacement actor control lineage was not admitted.");
+                Expect(game.WorldActions.TryReadVerticalMotion(
+                        world, replacement, out GameVerticalMotionSnapshot vertical) &&
+                    vertical.IsAirborne,
+                    "The replacement actor was not reconstructed as airborne.");
+                return replacement;
+            }, out Entity replacementActor),
+        "The reused-slot mutation did not run.");
+
+    host.Tick();
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
+            (world, _, game) =>
+            {
+                Expect(game.WorldActions.TryReadVerticalMotion(
+                        world, replacementActor, out GameVerticalMotionSnapshot vertical) &&
+                    vertical.IsAirborne,
+                    "The replacement generation lost its vertical state on the next tick.");
+                Expect(game.WorldState.TryReadPosition(world, replacementActor, out WorldPosition position),
+                    "The replacement generation lost its position on the next tick.");
+                return position;
+            }, out WorldPosition afterTick) && afterTick.YMillimeters < unsupported.YMillimeters,
+        "A replacement generation inherited the retired actor's stale active-list identity.");
+
+    return new TestMetrics(
+        HashText($"{replacementActor}|{unsupported}|{afterTick}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "An unsupported actor reusing an airborne ECS slot owns a fresh active entry and continues falling under its new generation.");
+
+    static WorldPosition Position(long x, int y, long z)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+            throw new InvalidOperationException("A reused-slot fixture point was invalid.");
+        return value;
+    }
 }
 
 static TestMetrics SweptMotionPreservesGamePolicy()
@@ -3424,6 +3892,7 @@ sealed class PlayableOfflineDirectLink
         if (!world.TryResolvePersistentEntity(_playerId, out Entity player))
             return new GamePlayerCommandResult(
                 GameWorldActionStatus.MissingActor,
+                GameWorldActionStatus.NotRequested,
                 GameWorldActionStatus.NotRequested,
                 GameWorldActionStatus.NotRequested,
                 default,

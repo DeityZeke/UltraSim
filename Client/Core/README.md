@@ -122,6 +122,11 @@ immediately but only seeds the held-action baseline; a key held across focus los
 cannot manufacture a fresh edge-triggered interaction until released and pressed
 again.
 
+Physics P0.1d adds `Jump` to that same finite action set and binds the shared default to Space.
+Core emits only the focus-fenced held-to-pressed action edge; Game decides whether the controlled
+actor is grounded and whether the jump is admitted. Vertical velocity, gravity, landing, and fall
+recovery never become client input or presentation authority.
+
 The Direct-era raw-sample overload remains a convenience producer: nonzero axes
 produce complete world-space `Direct`, while zero axes produce explicit `Stop`.
 Control profiles use `ClientWorldCommandIntent` and

@@ -44,6 +44,7 @@ static class ClientApplicationSettingsTests
         Equal("R", RequireBinding(accepted, ClientSemanticAction.Interact).Code);
         Equal("F10", RequireBinding(accepted, ClientSemanticAction.OpenSettings).Code);
         Equal("RIGHT", RequireBinding(accepted, ClientSemanticAction.ContextMenu).Code);
+        Equal("SPACE", RequireBinding(accepted, ClientSemanticAction.Jump).Code);
 
         ResolvedClientSettings keepMine = ClientSettingsResolver.Resolve(
             document, default, recommendation, ClientProfileApplicationMode.KeepMyControls);

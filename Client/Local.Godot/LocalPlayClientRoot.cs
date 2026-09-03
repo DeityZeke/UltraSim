@@ -185,7 +185,10 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         if (snapshot.ControlGrammar != EffectiveSettings.ControlGrammar ||
             snapshot.CameraProfile != EffectiveSettings.CameraProfile ||
             !Mathf.IsEqualApprox(snapshot.CameraDistance, EffectiveSettings.CameraDistance) ||
-            !Mathf.IsEqualApprox(snapshot.CameraFovDegrees, EffectiveSettings.CameraFovDegrees))
+            !Mathf.IsEqualApprox(snapshot.CameraFovDegrees, EffectiveSettings.CameraFovDegrees) ||
+            !EffectiveSettings.TryGetBinding(
+                ClientSemanticAction.Jump, out ClientPhysicalInput jump) ||
+            jump.Kind != ClientPhysicalInputKind.Keyboard || jump.Code != "SPACE")
             throw new InvalidOperationException(
                 "The local Cabin consumer did not apply the persistent shell settings.");
     }
