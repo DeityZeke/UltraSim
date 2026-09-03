@@ -32,6 +32,12 @@ location hint, and touched-slot list keep public application shaped by changed
 client-resident state rather than a scan of all resident chunks or all retained
 identity knowledge.
 
+Terrain T1.0 adds the base-surface presence plane to bounded structural semantic
+residency. The cache exposes the exact 1,024-bit plane in its borrowed chunk view,
+includes non-all-present topology in the semantic hash, and preserves the legacy
+all-present hash. Resident terrain mesh preparation therefore omits intentional-
+void cells without interpreting them as missing structural data or a material.
+
 The cache contains no ECS entities, server mutable storage, connections,
 packets, Godot nodes, RIDs, or resources. Borrowed chunk views remain valid only
 until the next cache mutation. Engine-neutral resident terrain mesh preparation

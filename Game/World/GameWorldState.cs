@@ -150,6 +150,19 @@ public sealed class GameWorldState : IDisposable
     }
 
     /// <summary>
+    /// Probes authoritative current base-surface topology. Intentional resident void is distinct
+    /// from absent/unprepared world data even though the current grounded locomotion policy rejects
+    /// both as non-resolvable endpoints.
+    /// </summary>
+    public BaseTerrainSurfaceSample ProbeBaseTerrainSurface(in WorldPosition location)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return PreparedWorld is null
+            ? BaseTerrainSurfaceSample.Unavailable
+            : PreparedWorld.ProbeBaseTerrainSurface(location);
+    }
+
+    /// <summary>
     /// Resolves authoritative current base-terrain material through the prepared base-plus-overlay view.
     /// </summary>
     public bool TryResolveBaseTerrainMaterial(in WorldPosition location, out ushort materialId)

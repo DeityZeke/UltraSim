@@ -1469,6 +1469,12 @@ Only after concrete movement requirements justify them, consider:
 - grounded step-down rule if required;
 - low-ceiling clearance;
 
+Terrain T1.0 now supplies the required World-side distinction between a Present
+base surface, intentional resident Absent surface, and Unavailable prepared data.
+P0.1c must treat Absent as unsupported physical topology while preserving
+fail-closed handling for Unavailable. Current endpoint locomotion still rejects
+both and does not claim gap traversal, falling, or gravity.
+
 **Gate:** conformance scenarios pass at accepted 20/60/120 Hz semantics with
 bounded zero-allocation warmed Simple hot paths.
 

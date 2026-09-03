@@ -19,6 +19,7 @@ public static class WorldPackFormat
     public const uint TerrainHeightsSchemaVersion = 1;
     public const uint FrozenStaticsSchemaVersion = 1;
     public const uint MultiFragmentsSchemaVersion = 1;
+    public const uint TerrainPresenceSchemaVersion = 1;
 }
 
 /// <summary>Known section identities. Additional structural-surface kinds remain future schemas.</summary>
@@ -28,6 +29,7 @@ public enum WorldPackSectionKind : uint
     TerrainHeights = 2,
     FrozenStatics = 3,
     MultiFragments = 4,
+    TerrainPresence = 5,
 }
 
 /// <summary>Cold content/schema identity supplied by game composition when opening a pack.</summary>
@@ -148,6 +150,7 @@ public enum WorldPackBuildError
     InvalidMaterialId,
     MalformedHeightPlane,
     InvalidHeightPlane,
+    MalformedTerrainPresence,
     SharedEdgeMismatch,
     DuplicateStaticId,
     InvalidStaticPlacement,
@@ -246,6 +249,7 @@ public sealed partial class WorldPackBuilder
     private readonly WorldPackLimits _limits;
     private readonly List<SourceChunk> _chunks;
     private readonly Dictionary<SpatialChunkKey, SourceChunk> _byKey;
+    private bool _hasAbsentBaseSurface;
 
     public WorldPackBuilder(
         SpatialSpaceId space,
@@ -269,6 +273,24 @@ public sealed partial class WorldPackBuilder
         ReadOnlySpan<ushort> materials,
         TerrainHeightPlaneBase heightBase,
         ReadOnlySpan<TerrainHeightOffset> heightOffsets,
+        out WorldPackBuildError error)
+    {
+        Span<ulong> presence = stackalloc ulong[TerrainChunkFormat.SurfacePresenceWordCount];
+        TerrainSurfacePresence.FillPresent(presence);
+        return TryAddBaseTerrain(key, materials, heightBase, heightOffsets, presence, out error);
+    }
+
+    /// <summary>
+    /// Adds one complete base-heightfield chunk plus its independent one-bit-per-cell topology.
+    /// Clear presence bits represent intentional resident void; material and height storage remain
+    /// complete canonical source data but are not effective surface truth for those cells.
+    /// </summary>
+    public bool TryAddBaseTerrain(
+        SpatialChunkKey key,
+        ReadOnlySpan<ushort> materials,
+        TerrainHeightPlaneBase heightBase,
+        ReadOnlySpan<TerrainHeightOffset> heightOffsets,
+        ReadOnlySpan<ulong> surfacePresence,
         out WorldPackBuildError error)
     {
         if (key.Space != _space)
@@ -314,9 +336,17 @@ public sealed partial class WorldPackBuilder
             }
         }
 
-        var chunk = new SourceChunk(key, materials.ToArray(), heightBase, heightOffsets.ToArray());
+        if (surfacePresence.Length != TerrainChunkFormat.SurfacePresenceWordCount)
+        {
+            error = WorldPackBuildError.MalformedTerrainPresence;
+            return false;
+        }
+
+        var chunk = new SourceChunk(key, materials.ToArray(), heightBase, heightOffsets.ToArray(),
+            surfacePresence.ToArray());
         _chunks.Add(chunk);
         _byKey.Add(key, chunk);
+        _hasAbsentBaseSurface |= TerrainSurfacePresence.HasAnyAbsent(surfacePresence);
         error = WorldPackBuildError.None;
         return true;
     }
@@ -337,7 +367,8 @@ public sealed partial class WorldPackBuilder
 
         SourceChunk[] ordered = _chunks.ToArray();
         Array.Sort(ordered, static (left, right) => left.Key.CompareTo(right.Key));
-        int sectionCount = 2 + (_frozenStatics.Count == 0 ? 0 : 1) + (_staticMultis.Count == 0 ? 0 : 1);
+        int sectionCount = 2 + (_frozenStatics.Count == 0 ? 0 : 1) +
+            (_staticMultis.Count == 0 ? 0 : 1) + (_hasAbsentBaseSurface ? 1 : 0);
         if (sectionCount > _limits.MaximumSections)
         {
             error = WorldPackBuildError.CapacityExceeded;
@@ -351,6 +382,8 @@ public sealed partial class WorldPackBuilder
         int heightOffset;
         int staticOffset;
         int multiOffset;
+        int presenceOffset;
+        int presenceLength;
         int totalLength;
         if (!FrozenWorldStructureCodec.TryMeasure(ordered.Length, _frozenStatics.Count,
                 _staticMultis.Count, _multiFragmentCount, out int measuredStaticLength,
@@ -369,7 +402,11 @@ public sealed partial class WorldPackBuilder
             heightOffset = checked(materialOffset + materialLength);
             staticOffset = checked(heightOffset + heightLength);
             multiOffset = checked(staticOffset + measuredStaticLength);
-            totalLength = checked(multiOffset + measuredMultiLength);
+            presenceOffset = checked(multiOffset + measuredMultiLength);
+            presenceLength = _hasAbsentBaseSurface
+                ? checked(ordered.Length * TerrainChunkFormat.SurfacePresencePlaneBytes)
+                : 0;
+            totalLength = checked(presenceOffset + presenceLength);
         }
         catch (OverflowException)
         {
@@ -397,9 +434,11 @@ public sealed partial class WorldPackBuilder
         WritePayloadAndChunkDirectory(bytes, ordered, materialOffset, heightOffset);
         if (staticPayload is not null) staticPayload.CopyTo(bytes.AsSpan(staticOffset));
         if (multiPayload is not null) multiPayload.CopyTo(bytes.AsSpan(multiOffset));
+        if (_hasAbsentBaseSurface) WritePresencePayload(bytes, ordered, presenceOffset);
         WriteSectionDirectory(bytes, ordered.Length, chunkDirectoryLength, materialOffset,
             materialLength, heightOffset, heightLength, staticOffset, staticPayload,
-            _frozenStatics.Count, multiOffset, multiPayload, _multiFragmentCount);
+            _frozenStatics.Count, multiOffset, multiPayload, _multiFragmentCount,
+            presenceOffset, presenceLength);
         WorldPackFingerprint fingerprint = WorldPackCodec.ComputePackFingerprint(bytes);
         fingerprint.Write(bytes.AsSpan(WorldPackFormat.PackFingerprintOffset,
             WorldPackFormat.PackFingerprintBytes));
@@ -517,6 +556,22 @@ public sealed partial class WorldPackBuilder
         }
     }
 
+    private static void WritePresencePayload(
+        Span<byte> bytes,
+        ReadOnlySpan<SourceChunk> ordered,
+        int presenceOffset)
+    {
+        for (int chunk = 0; chunk < ordered.Length; chunk++)
+        {
+            Span<byte> destination = bytes.Slice(
+                checked(presenceOffset + chunk * TerrainChunkFormat.SurfacePresencePlaneBytes),
+                TerrainChunkFormat.SurfacePresencePlaneBytes);
+            for (int word = 0; word < TerrainChunkFormat.SurfacePresenceWordCount; word++)
+                BinaryPrimitives.WriteUInt64LittleEndian(destination[(word * sizeof(ulong))..],
+                    ordered[chunk].SurfacePresence[word]);
+        }
+    }
+
     private static void WriteSectionDirectory(
         Span<byte> bytes,
         int chunkCount,
@@ -530,7 +585,9 @@ public sealed partial class WorldPackBuilder
         int staticCount,
         int multiOffset,
         byte[]? multiPayload,
-        int multiFragmentCount)
+        int multiFragmentCount,
+        int presenceOffset,
+        int presenceLength)
     {
         int sectionOffset = WorldPackFormat.HeaderBytes + chunkDirectoryLength;
         WriteSection(bytes, sectionOffset, WorldPackSectionKind.TerrainMaterials,
@@ -548,9 +605,16 @@ public sealed partial class WorldPackBuilder
         }
         if (multiPayload is not null)
         {
-            WriteSection(bytes, sectionOffset + row * WorldPackFormat.SectionDirectoryRowBytes,
+            WriteSection(bytes, sectionOffset + row++ * WorldPackFormat.SectionDirectoryRowBytes,
                 WorldPackSectionKind.MultiFragments, WorldPackFormat.MultiFragmentsSchemaVersion,
                 multiOffset, multiPayload.Length, checked((ulong)multiFragmentCount));
+        }
+        if (presenceLength != 0)
+        {
+            WriteSection(bytes, sectionOffset + row * WorldPackFormat.SectionDirectoryRowBytes,
+                WorldPackSectionKind.TerrainPresence, WorldPackFormat.TerrainPresenceSchemaVersion,
+                presenceOffset, presenceLength,
+                checked((ulong)chunkCount * TerrainChunkFormat.MaterialCellCount));
         }
     }
 
@@ -576,7 +640,8 @@ public sealed partial class WorldPackBuilder
         SpatialChunkKey Key,
         ushort[] Materials,
         TerrainHeightPlaneBase HeightBase,
-        TerrainHeightOffset[] HeightOffsets);
+        TerrainHeightOffset[] HeightOffsets,
+        ulong[] SurfacePresence);
 }
 
 /// <summary>Immutable compiler output that can be copied, persisted, or opened without exposing mutable bytes.</summary>
@@ -646,6 +711,7 @@ public sealed class WorldPack
     public int MultiInstanceCount => _metadata.MultiFragments.IsPresent
         ? BinaryPrimitives.ReadInt32LittleEndian(_bytes.AsSpan(_metadata.MultiFragments.Offset + 4))
         : 0;
+    public bool HasExplicitTerrainPresence => _metadata.TerrainPresence.IsPresent;
     public SpatialSpaceId Space => new(_metadata.SpaceValue);
     public WorldContentFingerprint ContentFingerprint => _metadata.ContentFingerprint;
     public WorldPackFingerprint Fingerprint => _metadata.PackFingerprint;
@@ -738,9 +804,14 @@ public sealed class WorldPack
         ReadOnlySpan<byte> row = _bytes.AsSpan(rowOffset, WorldPackFormat.ChunkDirectoryRowBytes);
         int materialOffset = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(row[16..]));
         int heightOffset = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(row[32..]));
+        ReadOnlySpan<byte> presence = _metadata.TerrainPresence.IsPresent
+            ? _bytes.AsSpan(checked(_metadata.TerrainPresence.Offset +
+                index * TerrainChunkFormat.SurfacePresencePlaneBytes),
+                TerrainChunkFormat.SurfacePresencePlaneBytes)
+            : ReadOnlySpan<byte>.Empty;
         view = new WorldTerrainChunkView(key,
             _bytes.AsSpan(materialOffset, TerrainChunkFormat.MaterialPlaneBytes),
-            _bytes.AsSpan(heightOffset, TerrainChunkFormat.HeightPlaneBytes));
+            _bytes.AsSpan(heightOffset, TerrainChunkFormat.HeightPlaneBytes), presence);
         return true;
     }
 
@@ -1052,20 +1123,36 @@ public readonly ref struct WorldTerrainChunkView
 {
     private readonly ReadOnlySpan<byte> _materials;
     private readonly ReadOnlySpan<byte> _heights;
+    private readonly ReadOnlySpan<byte> _surfacePresence;
 
     internal WorldTerrainChunkView(
         SpatialChunkKey key,
         ReadOnlySpan<byte> materials,
-        ReadOnlySpan<byte> heights)
+        ReadOnlySpan<byte> heights,
+        ReadOnlySpan<byte> surfacePresence = default)
     {
         Key = key;
         _materials = materials;
         _heights = heights;
+        _surfacePresence = surfacePresence;
     }
 
     public SpatialChunkKey Key { get; }
     public int MaterialCount => TerrainChunkFormat.MaterialCellCount;
     public int HeightVertexCount => TerrainChunkFormat.HeightVertexCount;
+    public bool HasExplicitSurfacePresence => !_surfacePresence.IsEmpty;
+    public int PresentSurfaceCount
+    {
+        get
+        {
+            if (_surfacePresence.IsEmpty) return TerrainChunkFormat.MaterialCellCount;
+            int count = 0;
+            for (int word = 0; word < TerrainChunkFormat.SurfacePresenceWordCount; word++)
+                count += System.Numerics.BitOperations.PopCount(BinaryPrimitives.ReadUInt64LittleEndian(
+                    _surfacePresence[(word * sizeof(ulong))..]));
+            return count;
+        }
+    }
     public TerrainHeightPlaneBase HeightBase
     {
         get
@@ -1082,6 +1169,19 @@ public readonly ref struct WorldTerrainChunkView
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)MaterialCount);
         return BinaryPrimitives.ReadUInt16LittleEndian(_materials[(index * sizeof(ushort))..]);
     }
+
+    public bool IsSurfacePresent(int materialCellIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(
+            (uint)materialCellIndex, (uint)TerrainChunkFormat.MaterialCellCount);
+        if (_surfacePresence.IsEmpty) return true;
+        int word = materialCellIndex >> 6;
+        ulong value = BinaryPrimitives.ReadUInt64LittleEndian(_surfacePresence[(word * sizeof(ulong))..]);
+        return (value & (1UL << (materialCellIndex & 63))) != 0;
+    }
+
+    public bool IsSurfacePresent(TerrainCellCoord cell) =>
+        IsSurfacePresent(TerrainChunkFormat.GetMaterialIndex(cell));
 
     public TerrainHeightOffset GetHeightOffset(int index)
     {
@@ -1106,6 +1206,24 @@ public readonly ref struct WorldTerrainChunkView
         for (int index = 0; index < HeightVertexCount; index++)
             destination[index] = checked(heightBase.Millimeters + GetHeightOffset(index).OffsetMillimeters);
     }
+
+    public void CopySurfacePresence(Span<ulong> destination)
+    {
+        if (destination.Length < TerrainChunkFormat.SurfacePresenceWordCount)
+            throw new ArgumentException("Destination is too small.", nameof(destination));
+        if (_surfacePresence.IsEmpty)
+        {
+            TerrainSurfacePresence.FillPresent(destination[..TerrainChunkFormat.SurfacePresenceWordCount]);
+            return;
+        }
+        for (int word = 0; word < TerrainChunkFormat.SurfacePresenceWordCount; word++)
+            destination[word] = BinaryPrimitives.ReadUInt64LittleEndian(
+                _surfacePresence[(word * sizeof(ulong))..]);
+    }
+
+    internal ReadOnlySpan<byte> MaterialBytes => _materials;
+    internal ReadOnlySpan<byte> HeightBytes => _heights;
+    internal ReadOnlySpan<byte> SurfacePresenceBytes => _surfacePresence;
 }
 
 internal readonly record struct WorldPackMetadata(
@@ -1118,7 +1236,8 @@ internal readonly record struct WorldPackMetadata(
     WorldContentFingerprint ContentFingerprint,
     WorldPackFingerprint PackFingerprint,
     WorldPackSectionMetadata FrozenStatics,
-    WorldPackSectionMetadata MultiFragments);
+    WorldPackSectionMetadata MultiFragments,
+    WorldPackSectionMetadata TerrainPresence);
 
 internal readonly record struct WorldPackSectionMetadata(
     uint Kind,
@@ -1265,12 +1384,18 @@ internal static class WorldPackCodec
         }
 
         var candidate = new WorldPackMetadata(chunkCount, sectionCount, chunkDirectoryOffset,
-            sectionDirectoryOffset, payloadOffset, space, content, storedFingerprint, default, default);
+            sectionDirectoryOffset, payloadOffset, space, content, storedFingerprint,
+            default, default, default);
         if (!ValidateSections(bytes, candidate, out WorldPackSectionMetadata materials,
                 out WorldPackSectionMetadata heights, out WorldPackSectionMetadata statics,
-                out WorldPackSectionMetadata multis, out error))
+                out WorldPackSectionMetadata multis, out WorldPackSectionMetadata presence, out error))
             return false;
-        candidate = candidate with { FrozenStatics = statics, MultiFragments = multis };
+        candidate = candidate with
+        {
+            FrozenStatics = statics,
+            MultiFragments = multis,
+            TerrainPresence = presence,
+        };
         if (!ValidateChunks(bytes, candidate, materials, heights, out error)) return false;
         if (statics.IsPresent && !FrozenWorldStructureCodec.TryValidateStaticSection(
                 bytes, candidate, statics, limits))
@@ -1333,12 +1458,14 @@ internal static class WorldPackCodec
         out WorldPackSectionMetadata heights,
         out WorldPackSectionMetadata statics,
         out WorldPackSectionMetadata multis,
+        out WorldPackSectionMetadata presence,
         out WorldPackOpenError error)
     {
         materials = default;
         heights = default;
         statics = default;
         multis = default;
+        presence = default;
         uint priorKind = 0;
         int expectedOffset = metadata.PayloadOffset;
         Span<byte> digest = stackalloc byte[32];
@@ -1367,6 +1494,7 @@ internal static class WorldPackCodec
             if (kind == (uint)WorldPackSectionKind.TerrainHeights) heights = section;
             if (kind == (uint)WorldPackSectionKind.FrozenStatics) statics = section;
             if (kind == (uint)WorldPackSectionKind.MultiFragments) multis = section;
+            if (kind == (uint)WorldPackSectionKind.TerrainPresence) presence = section;
             priorKind = kind;
             expectedOffset = checked(offset + length);
         }
@@ -1383,7 +1511,8 @@ internal static class WorldPackCodec
         if (materials.Version != WorldPackFormat.TerrainMaterialsSchemaVersion ||
             heights.Version != WorldPackFormat.TerrainHeightsSchemaVersion ||
             statics.IsPresent && statics.Version != WorldPackFormat.FrozenStaticsSchemaVersion ||
-            multis.IsPresent && multis.Version != WorldPackFormat.MultiFragmentsSchemaVersion)
+            multis.IsPresent && multis.Version != WorldPackFormat.MultiFragmentsSchemaVersion ||
+            presence.IsPresent && presence.Version != WorldPackFormat.TerrainPresenceSchemaVersion)
         {
             error = WorldPackOpenError.UnsupportedRequiredSection;
             return false;
@@ -1393,7 +1522,10 @@ internal static class WorldPackCodec
             if (materials.Length != checked(metadata.ChunkCount * TerrainChunkFormat.MaterialPlaneBytes) ||
                 materials.Count != checked((ulong)metadata.ChunkCount * TerrainChunkFormat.MaterialCellCount) ||
                 heights.Length != checked(metadata.ChunkCount * TerrainChunkFormat.HeightPlaneBytes) ||
-                heights.Count != checked((ulong)metadata.ChunkCount * TerrainChunkFormat.HeightVertexCount))
+                heights.Count != checked((ulong)metadata.ChunkCount * TerrainChunkFormat.HeightVertexCount) ||
+                presence.IsPresent &&
+                (presence.Length != checked(metadata.ChunkCount * TerrainChunkFormat.SurfacePresencePlaneBytes) ||
+                    presence.Count != checked((ulong)metadata.ChunkCount * TerrainChunkFormat.MaterialCellCount)))
             {
                 error = WorldPackOpenError.InvalidSectionDirectory;
                 return false;
@@ -1403,6 +1535,22 @@ internal static class WorldPackCodec
         {
             error = WorldPackOpenError.InvalidSectionDirectory;
             return false;
+        }
+        if (presence.IsPresent)
+        {
+            bool hasAbsent = false;
+            ReadOnlySpan<byte> payload = bytes.Slice(presence.Offset, presence.Length);
+            for (int offset = 0; offset < payload.Length; offset += sizeof(ulong))
+            {
+                if (BinaryPrimitives.ReadUInt64LittleEndian(payload[offset..]) == ulong.MaxValue) continue;
+                hasAbsent = true;
+                break;
+            }
+            if (!hasAbsent)
+            {
+                error = WorldPackOpenError.InvalidTerrainPayload;
+                return false;
+            }
         }
         error = WorldPackOpenError.None;
         return true;

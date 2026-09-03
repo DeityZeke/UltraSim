@@ -21,6 +21,22 @@ terrain cells/chunk edge           32
 placement snap policy             100 mm
 ```
 
+## Base-surface topology
+
+Terrain T1.0 makes dense base-surface existence independent from material and
+height. Each resident chunk has a canonical 1,024-bit presence plane: a clear bit
+is intentional void, not material zero or missing content. All-present WorldPacks
+omit the optional `TerrainPresence/v1` section and retain their exact historical
+bytes/fingerprint; affected packs store one 128-byte plane per sorted chunk.
+
+`ProbeBaseTerrainSurface` returns `Present`, `Absent`, or `Unavailable`. Only a
+Present result carries effective height/material. The legacy height/material
+`Try...` APIs return false for either non-present state; callers needing residency
+semantics use the explicit probe. Mesh generation omits both triangles of absent
+cells. Current terrain replacements preserve the authored topology plane rather
+than silently filling holes. Sparse additional surfaces, mutable topology, and
+support/gravity behavior remain later World/Physics checkpoints.
+
 `WorldPosition` is a 16-byte game value: signed 32-bit chunk X/Z, unsigned
 canonical local X/Z in `0..15,999`, and signed 32-bit Y millimeters. It is not an
 ECS component. `WorldPositionComponent` is the separate 16-byte persisted ECS

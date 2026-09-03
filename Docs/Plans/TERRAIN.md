@@ -1,10 +1,12 @@
 # Terrain / World T0: spatial-seam, chunk-native world implementation plan
 
-Status: accepted/frozen. T0.0 through T0.10 and the complete Terrain / World T0
-milestone are accepted as of 2026-08-21. T0.9 was accepted at `2e147426`; T0.10
-then closed the launchable woods/cabin vertical, controls/camera profiles,
-authoritative locomotion/collision, save/restore, native adapter geometry, and
-cumulative evidence matrix. Network N1.0 is now the active checkpoint.
+Status: T0 accepted/frozen; T1.0 accepted/closed. T0.0 through T0.10 and the
+complete Terrain / World T0 milestone were accepted as of 2026-08-21. T0.9 was
+accepted at `2e147426`; T0.10 then closed the launchable woods/cabin vertical,
+controls/camera profiles, authoritative locomotion/collision, save/restore,
+native adapter geometry, and cumulative evidence matrix. T1.0 later added the
+first post-T0 topology capability: explicit base-surface presence/intentional
+void. T1.1 sparse additional surfaces remains unstarted.
 Revised from the accepted Network N0 baseline, later spatial-seam decisions, and
 V1/transitional spatial-publication archaeology. Network N0 remains the frozen
 remote-authority reference; accepted T0 now supplies the world/spatial/publication
@@ -66,6 +68,11 @@ COARSE SPATIAL MEMBERSHIP IS A DERIVED ACCELERATOR.
 BASE TERRAIN AND FROZEN STATICS ARE WORLD DATA, NOT ECS ENTITIES BY DEFAULT.
 
 THE DENSE BASE TERRAIN SURFACE IS A 2D HEIGHTFIELD.
+
+BASE-SURFACE EXISTENCE IS INDEPENDENT FROM MATERIAL AND HEIGHT SOURCE DATA.
+
+AN ABSENT BASE CELL IS INTENTIONAL RESIDENT VOID, NOT MATERIAL ZERO, A HIDDEN
+TRIANGLE, MISSING CONTENT, OR AN UNPREPARED WORLD CHUNK.
 
 BASE TERRAIN IS NOT THE PERMANENT MAXIMUM TOPOLOGY OF WORLD TERRAIN.
 
@@ -991,7 +998,7 @@ This principle does not add the identity, sparse-surface schema, mutable state,
 per-recipient disclosure protocol, renderer behavior, or navigation/occlusion
 system in T0; each still requires a separately reviewed implementation checkpoint.
 
-The base-surface layout is two dense planes per 16 m `TerrainChunk`:
+The T0 base-surface layout is two dense planes per 16 m `TerrainChunk`:
 
 ```
 material[cellZ * 32 + cellX]              ushort material/content id
@@ -1009,6 +1016,12 @@ materials: 1,024 × ushort                   ~= 2.00 KiB
 based 16-bit heights: int32 + 1,089 × ushort ~= 2.13 KiB
 raw terrain foundation                       ~= 4.13 KiB / chunk
 ```
+
+T1.0 preserves those exact all-present bytes and adds an optional canonical
+presence section only when at least one base cell is absent. Its per-chunk plane
+is 1,024 bits / 128 bytes. The material/height planes remain complete source data,
+but their values are not effective surface truth where the corresponding bit is
+clear. An explicit all-present presence section is noncanonical and rejected.
 
 The `(N+1) × (N+1)` height lattice gives every terrain chunk complete edge vertices for its `N × N` material cells. Neighboring chunks must agree on their shared edge; the pack compiler validates that invariant. Runtime mesh generation therefore does not need to borrow mutable neighbor memory merely to close a seam.
 Terrain material behavior comes from compiled content whenever possible. Do not store duplicated walkability/render/collision flags per cell if they are stable properties of the material definition. Add another per-cell plane only when a real feature proves that the value varies independently.
@@ -1158,6 +1171,7 @@ T0.3 required sections
     TerrainHeights/v1
 
 later sections using the same container
+    TerrainPresence/v1          introduced by T1.0; optional base-cell topology
     additional structural-terrain surface section
                               future name/version/schema deliberately unfrozen
     FrozenStatics/v1           introduced by T0.5
@@ -1178,9 +1192,10 @@ SHARED SPATIAL CHUNK IDENTITY != SHARED STORAGE LAYOUT
 ```
 
 `TerrainMaterials/v1` and `TerrainHeights/v1` describe only the dense base
-surface. The container must admit a future structural-surface section without
-changing either base section, but T0.3 must not invent that future section's
-name, version, or row schema.
+surface. T1.0's optional `TerrainPresence/v1` supplies topology for that same
+base surface without changing either frozen section. The container must admit a
+future structural-surface section without changing these base sections, but T0.3
+did not invent that future section's name, version, or row schema.
 
 The first format should be uncompressed unless I/O measurement proves compression
 is needed. Compression complicates random access, corruption boundaries, scratch
@@ -4491,3 +4506,98 @@ The measurement question is not “can N1 replace N0 by design?” It is:
 > **Does paying coarse spatial membership/public projection once per changed entity/chunk materially reduce sparse recipient work while preserving accepted semantics and dense behavior?**
 
 If it does not, reject or limit the ChunkPublication profile with the same evidence discipline used throughout N0. If it does, make it the preferred path where it wins while retaining EntityRelation for exact/selective/targeted cases or as a valid alternative capability.
+
+---
+
+# Terrain / World T1 — explicit topology and additional surfaces
+
+T1 is the post-T0 terrain-topology campaign earned by the permanent Single Player
+Cabin and Concept Demo. It extends the frozen base representation incrementally;
+it does not reopen the 16 m chunk, 0.5 m cell, q5 height, or deterministic
+parity-diagonal decisions.
+
+## T1.0 — base-surface presence and intentional void — CLOSED
+
+T1.0 adds exactly one independent topology fact to each dense base-terrain cell:
+
+```text
+Present
+    resident base surface exists
+    canonical height/material are effective
+    two deterministic base triangles are emitted
+
+Absent
+    resident intentional void
+    no base triangles, base collision, or base support
+    stored dense height/material values are not effective truth
+
+Unavailable
+    required authored/prepared chunk data is unavailable
+    fail-closed residency/world-boundary condition, not intentional void
+```
+
+`None = 0` remains the fail-closed default result. The public bounded probe returns
+`BaseTerrainSurfaceSample(Status, HeightMillimeters, MaterialId)` and legacy
+height/material `Try...` queries remain compatibility conveniences that return
+`false` for both Absent and Unavailable. Callers that need to distinguish those
+states use the explicit probe.
+
+The packed representation is one bit per base cell, 16 `ulong` words / 128 bytes
+per chunk. `TerrainPresence/v1` is optional at the WorldPack level:
+
+```text
+all cells present in every chunk
+    no presence section
+    exact T0 bytes and fingerprint preserved
+
+one or more cells absent
+    one canonical presence plane for every sorted chunk
+    section count/capacity and digest cover the new payload
+```
+
+Explicit all-present payloads are rejected on open as redundant/noncanonical.
+Malformed plane length, section version/length/count/digest, and section-capacity
+pressure fail before publication. File reopen preserves the pack fingerprint and
+exact absence bits.
+
+The current durable `WorldMutableOverlay` terrain replacement changes the dense
+material/height planes only. It inherits authored base topology and cannot fill or
+cut holes. Mutable topology, durable `WorldSurfaceId`, breakable terrain, and
+observer-specific perception remain future separately reviewed work.
+
+Client Core copies the complete topology plane into bounded structural semantic
+residency. Its semantic hash includes the plane when any bit is absent while
+retaining historical all-present hashes. The engine-neutral mesh builder emits
+two triangles only for each present cell and keeps deterministic indices,
+materials, normals, and exact destination bounds. Godot group admission ignores
+materials referenced only by absent cells, and native presentation omits their
+triangles rather than hiding them with a special material.
+
+The current Simple Physics/locomotion consumer still uses the legacy grounded
+endpoint query. It therefore rejects Absent and Unavailable endpoints without
+conflating their World status, but T1.0 does not add continuous support, falling,
+gravity, or traversal across a gap. Those behaviors remain P0.1c/later Physics
+work.
+
+Permanent evidence covers:
+
+- exact all-present WorldPack byte/fingerprint compatibility;
+- deterministic order-independent presence encoding and file reopen;
+- malformed/redundant/capacity rejection;
+- Present/Absent/Unavailable query semantics and zero warmed query allocation;
+- exact triangle omission, all-void meshes, and destination atomicity;
+- topology preservation through material/height overlay replacement;
+- client semantic residency/hash and Godot triangle/group realization.
+
+T1.0 deliberately does not add sparse upper/lower surfaces, cave ceilings,
+cliffs, gravity/support policy, mutable surface identity, surface damage,
+navigation, occlusion, or recipient-specific illusions.
+
+## T1.1 — sparse additional world-terrain surfaces — NEXT
+
+The next terrain checkpoint may add the smallest bounded World-owned additional
+surface representation needed for the Sky Island/cave consumer. It must preserve
+multiple surfaces at one X/Z, correct vertical selection, immutable authored
+identity, client structural residency, and renderer/Physics projections without
+turning geology into ECS entities or a voxel system. Its exact geometry, indexing,
+serialization, and durable identity remain unfrozen until that checkpoint.

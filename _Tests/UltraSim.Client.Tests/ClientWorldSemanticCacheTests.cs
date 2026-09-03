@@ -12,6 +12,7 @@ internal static class ClientWorldSemanticCacheTests
     {
         BoundWorldPack world = CreateWorld();
         StructuralOverlayIdentityIsRetained(world);
+        BaseSurfaceTopologyIsResidentAndHashed();
         LifecycleAndDeterministicHash(world);
         CapacityFailureIsTransactional(world);
         PublicationKnowledgeIsGlobalAndFenced(world);
@@ -19,6 +20,39 @@ internal static class ClientWorldSemanticCacheTests
         SnapshotLineageAndCanonicality(world);
         PublicationEpochReplacementIsExplicit(world);
         DeterministicClientCacheChurnMatchesReference(world);
+    }
+
+    private static void BaseSurfaceTopologyIsResidentAndHashed()
+    {
+        BoundWorldPack allPresent = CreateTopologyWorld(withVoid: false);
+        BoundWorldPack withVoid = CreateTopologyWorld(withVoid: true);
+        var limits = new ClientWorldSemanticCacheLimits(1, 0, 0, 1, 1);
+        var presentCache = new ClientWorldSemanticCache(allPresent, limits);
+        var voidCache = new ClientWorldSemanticCache(withVoid, limits);
+        PublicationEpoch epoch = PublicationEpoch.Create();
+        ClientSemanticChunkHandle presentHandle = Publish(presentCache, Key(0, 0), epoch, 1, []);
+        ClientSemanticChunkHandle voidHandle = Publish(voidCache, Key(0, 0), epoch, 1, []);
+
+        True(presentCache.TryGetResidentView(presentHandle, out ClientSemanticChunkView presentView));
+        True(voidCache.TryGetResidentView(voidHandle, out ClientSemanticChunkView voidView));
+        Equal(TerrainChunkFormat.SurfacePresenceWordCount, presentView.TerrainSurfacePresence.Length);
+        Equal(TerrainChunkFormat.SurfacePresenceWordCount, voidView.TerrainSurfacePresence.Length);
+        True(TerrainSurfacePresence.IsPresent(presentView.TerrainSurfacePresence, new TerrainCellCoord(3, 4)));
+        False(TerrainSurfacePresence.IsPresent(voidView.TerrainSurfacePresence, new TerrainCellCoord(3, 4)));
+        True(TerrainSurfacePresence.IsPresent(voidView.TerrainSurfacePresence, new TerrainCellCoord(4, 4)));
+        False(Info(presentCache, presentHandle).SemanticHash == Info(voidCache, voidHandle).SemanticHash);
+
+        var vertices = new TerrainBaseMeshVertex[TerrainChunkFormat.HeightVertexCount];
+        var indices = new ushort[TerrainChunkFormat.TriangleIndexCount];
+        var triangleMaterials = new ushort[TerrainChunkFormat.TriangleCount];
+        True(voidCache.TryBuildResidentTerrainMesh(
+            voidHandle, vertices, indices, triangleMaterials,
+            out TerrainBaseMeshSummary summary,
+            out ClientSemanticChunkError semanticError,
+            out TerrainBaseMeshBuildError meshError));
+        Equal(ClientSemanticChunkError.None, semanticError);
+        Equal(TerrainBaseMeshBuildError.None, meshError);
+        Equal(TerrainChunkFormat.TriangleCount - 2, summary.TriangleCount);
     }
 
     private static void StructuralOverlayIdentityIsRetained(BoundWorldPack world)
@@ -563,6 +597,25 @@ internal static class ClientWorldSemanticCacheTests
         WorldPack pack = artifact!.Open();
         var binding = new WorldContentBinding(Content, [1, 2], [1, 2]);
         True(pack.TryBind(binding, out BoundWorldPack? bound, out _));
+        return bound!;
+    }
+
+    private static BoundWorldPack CreateTopologyWorld(bool withVoid)
+    {
+        var builder = new WorldPackBuilder(
+            Space, Content, new WorldPackLimits(256 * 1024, 1, 3, 0, 0, 0));
+        ushort[] materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+        Array.Fill(materials, (ushort)1);
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        var presence = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
+        TerrainSurfacePresence.FillPresent(presence);
+        if (withVoid)
+            TerrainSurfacePresence.SetPresent(presence, new TerrainCellCoord(3, 4), present: false);
+        True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
+        True(builder.TryAddBaseTerrain(Key(0, 0), materials, heightBase, offsets, presence, out _));
+        True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
+        WorldPack pack = artifact!.Open();
+        True(pack.TryBind(new WorldContentBinding(Content, [1], []), out BoundWorldPack? bound, out _));
         return bound!;
     }
 

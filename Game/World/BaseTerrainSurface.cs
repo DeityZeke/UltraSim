@@ -88,6 +88,27 @@ public static class BaseTerrainSurface
     private const int SouthEast = 3;
 
     /// <summary>
+    /// Resolves resident base-surface topology without conflating intentional void with missing
+    /// or unprepared world data. The supplied Y coordinate is ignored.
+    /// </summary>
+    public static BaseTerrainSurfaceSample ProbeBaseTerrainSurface(
+        this BoundWorldPack world,
+        in WorldPosition location)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        return Probe(new TerrainMeshSource(world), location);
+    }
+
+    /// <summary>Resolves current prepared base-surface topology and durable terrain replacement.</summary>
+    public static BaseTerrainSurfaceSample ProbeBaseTerrainSurface(
+        this WorldPreparedView world,
+        in WorldPosition location)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        return Probe(new TerrainMeshSource(world), location);
+    }
+
+    /// <summary>
     /// Samples the canonical triangle plane beneath the supplied X/Z. The location's Y is ignored.
     /// </summary>
     public static bool TrySampleBaseTerrainHeight(
@@ -95,15 +116,9 @@ public static class BaseTerrainSurface
         in WorldPosition location,
         out int heightMillimeters)
     {
-        ArgumentNullException.ThrowIfNull(world);
-        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
-        {
-            heightMillimeters = 0;
-            return false;
-        }
-
-        heightMillimeters = SampleHeight(terrain, location);
-        return true;
+        BaseTerrainSurfaceSample sample = world.ProbeBaseTerrainSurface(location);
+        heightMillimeters = sample.HeightMillimeters;
+        return sample.IsPresent;
     }
 
     /// <summary>Samples the current prepared base plus durable replacement terrain.</summary>
@@ -112,15 +127,9 @@ public static class BaseTerrainSurface
         in WorldPosition location,
         out int heightMillimeters)
     {
-        ArgumentNullException.ThrowIfNull(world);
-        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
-        {
-            heightMillimeters = 0;
-            return false;
-        }
-
-        heightMillimeters = SampleHeight(terrain, location);
-        return true;
+        BaseTerrainSurfaceSample sample = world.ProbeBaseTerrainSurface(location);
+        heightMillimeters = sample.HeightMillimeters;
+        return sample.IsPresent;
     }
 
     private static int SampleHeight(in WorldTerrainChunkView terrain, in WorldPosition location)
@@ -146,15 +155,9 @@ public static class BaseTerrainSurface
         in WorldPosition location,
         out ushort materialId)
     {
-        ArgumentNullException.ThrowIfNull(world);
-        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
-        {
-            materialId = 0;
-            return false;
-        }
-        TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);
-        materialId = terrain.GetMaterial(TerrainChunkFormat.GetMaterialIndex(cell));
-        return true;
+        BaseTerrainSurfaceSample sample = world.ProbeBaseTerrainSurface(location);
+        materialId = sample.MaterialId;
+        return sample.IsPresent;
     }
 
     /// <summary>Resolves current prepared base plus durable replacement terrain material.</summary>
@@ -163,15 +166,9 @@ public static class BaseTerrainSurface
         in WorldPosition location,
         out ushort materialId)
     {
-        ArgumentNullException.ThrowIfNull(world);
-        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
-        {
-            materialId = 0;
-            return false;
-        }
-        TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);
-        materialId = terrain.GetMaterial(TerrainChunkFormat.GetMaterialIndex(cell));
-        return true;
+        BaseTerrainSurfaceSample sample = world.ProbeBaseTerrainSurface(location);
+        materialId = sample.MaterialId;
+        return sample.IsPresent;
     }
 
     /// <summary>
@@ -221,28 +218,30 @@ public static class BaseTerrainSurface
         out TerrainBaseMeshBuildError error)
     {
         summary = default;
+        if (!world.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain))
+        {
+            error = TerrainBaseMeshBuildError.MissingChunk;
+            return false;
+        }
+        int presentCells = terrain.PresentSurfaceCount;
+        int requiredTriangles = checked(presentCells * 2);
+        int requiredIndices = checked(requiredTriangles * 3);
         if (vertices.Length < TerrainChunkFormat.HeightVertexCount ||
-            indices.Length < TerrainChunkFormat.TriangleIndexCount ||
-            triangleMaterials.Length < TerrainChunkFormat.TriangleCount)
+            indices.Length < requiredIndices ||
+            triangleMaterials.Length < requiredTriangles)
         {
             error = TerrainBaseMeshBuildError.DestinationTooSmall;
             return false;
         }
         Span<byte> vertexBytes = MemoryMarshal.AsBytes(vertices[..TerrainChunkFormat.HeightVertexCount]);
-        Span<byte> indexBytes = MemoryMarshal.AsBytes(indices[..TerrainChunkFormat.TriangleIndexCount]);
-        Span<byte> materialBytes = MemoryMarshal.AsBytes(triangleMaterials[..TerrainChunkFormat.TriangleCount]);
+        Span<byte> indexBytes = MemoryMarshal.AsBytes(indices[..requiredIndices]);
+        Span<byte> materialBytes = MemoryMarshal.AsBytes(triangleMaterials[..requiredTriangles]);
         if (vertexBytes.Overlaps(indexBytes) || vertexBytes.Overlaps(materialBytes) ||
             indexBytes.Overlaps(materialBytes))
         {
             error = TerrainBaseMeshBuildError.OverlappingDestinations;
             return false;
         }
-        if (!world.TryGetBaseTerrain(key, out WorldTerrainChunkView terrain))
-        {
-            error = TerrainBaseMeshBuildError.MissingChunk;
-            return false;
-        }
-
         int minimumHeight = int.MaxValue;
         int maximumHeight = int.MinValue;
         for (byte z = 0; z < TerrainChunkFormat.HeightVertexEdge; z++)
@@ -262,9 +261,18 @@ public static class BaseTerrainSurface
                     frame.NormalY,
                     checked(-frame.NormalX),
                     0);
-                minimumHeight = Math.Min(minimumHeight, height);
-                maximumHeight = Math.Max(maximumHeight, height);
+                if (IsReferencedByPresentCell(terrain, x, z))
+                {
+                    minimumHeight = Math.Min(minimumHeight, height);
+                    maximumHeight = Math.Max(maximumHeight, height);
+                }
             }
+        }
+
+        if (presentCells == 0)
+        {
+            minimumHeight = 0;
+            maximumHeight = 0;
         }
 
         int triangle = 0;
@@ -273,6 +281,8 @@ public static class BaseTerrainSurface
         {
             for (byte x = 0; x < TerrainChunkFormat.MaterialCellEdge; x++)
             {
+                int materialIndex = TerrainChunkFormat.GetMaterialIndex(new TerrainCellCoord(x, z));
+                if (!terrain.IsSurfacePresent(materialIndex)) continue;
                 int northWest = z * TerrainChunkFormat.HeightVertexEdge + x;
                 int northEast = northWest + 1;
                 int southWest = northWest + TerrainChunkFormat.HeightVertexEdge;
@@ -289,8 +299,7 @@ public static class BaseTerrainSurface
                     WriteTriangle(indices, ref indexOffset, northWest, southWest, northEast);
                     WriteTriangle(indices, ref indexOffset, northEast, southWest, southEast);
                 }
-                ushort material = terrain.GetMaterial(TerrainChunkFormat.GetMaterialIndex(
-                    new TerrainCellCoord(x, z)));
+                ushort material = terrain.GetMaterial(materialIndex);
                 triangleMaterials[triangle++] = material;
                 triangleMaterials[triangle++] = material;
             }
@@ -298,8 +307,8 @@ public static class BaseTerrainSurface
 
         summary = new TerrainBaseMeshSummary(
             TerrainChunkFormat.HeightVertexCount,
-            TerrainChunkFormat.TriangleCount,
-            TerrainChunkFormat.TriangleIndexCount,
+            requiredTriangles,
+            requiredIndices,
             minimumHeight,
             maximumHeight);
         error = TerrainBaseMeshBuildError.None;
@@ -366,6 +375,9 @@ public static class BaseTerrainSurface
                 if (!TryGetGlobalCell(world, cellX, cellZ, out WorldTerrainChunkView cellTerrain,
                         out byte localCellX, out byte localCellZ))
                     continue;
+                if (!cellTerrain.IsSurfacePresent(TerrainChunkFormat.GetMaterialIndex(
+                        new TerrainCellCoord(localCellX, localCellZ))))
+                    continue;
                 GetCellHeights(cellTerrain, localCellX, localCellZ, out int northWest,
                     out int northEast, out int southWest, out int southEast);
                 int targetCorner = checked((int)(globalVertexX - cellX)) switch
@@ -392,8 +404,9 @@ public static class BaseTerrainSurface
                 }
             }
         }
-        if (normalY <= 0)
-            throw new InvalidOperationException("A validated base-terrain vertex had no upward triangle support.");
+        if (normalY == 0) return new TerrainVertexFrame(0, 1, 0);
+        if (normalY < 0)
+            throw new InvalidOperationException("A validated base-terrain vertex had inverted triangle support.");
         return new TerrainVertexFrame(checked((int)normalX), checked((int)normalY), checked((int)normalZ));
     }
 
@@ -456,6 +469,42 @@ public static class BaseTerrainSurface
 
     private static bool IsEvenParity(long globalCellX, long globalCellZ) =>
         ((globalCellX ^ globalCellZ) & 1) == 0;
+
+    private static bool IsReferencedByPresentCell(
+        in WorldTerrainChunkView terrain,
+        byte vertexX,
+        byte vertexZ)
+    {
+        int minimumX = Math.Max(0, (int)vertexX - 1);
+        int maximumX = Math.Min(TerrainChunkFormat.MaterialCellEdge - 1, (int)vertexX);
+        int minimumZ = Math.Max(0, (int)vertexZ - 1);
+        int maximumZ = Math.Min(TerrainChunkFormat.MaterialCellEdge - 1, (int)vertexZ);
+        for (int z = minimumZ; z <= maximumZ; z++)
+        {
+            for (int x = minimumX; x <= maximumX; x++)
+            {
+                if (terrain.IsSurfacePresent(TerrainChunkFormat.GetMaterialIndex(
+                        new TerrainCellCoord(checked((byte)x), checked((byte)z)))))
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    private static BaseTerrainSurfaceSample Probe(
+        in TerrainMeshSource world,
+        in WorldPosition location)
+    {
+        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
+            return BaseTerrainSurfaceSample.Unavailable;
+        TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);
+        int materialIndex = TerrainChunkFormat.GetMaterialIndex(cell);
+        if (!terrain.IsSurfacePresent(materialIndex)) return BaseTerrainSurfaceSample.Absent;
+        return new BaseTerrainSurfaceSample(
+            BaseTerrainSurfaceStatus.Present,
+            SampleHeight(terrain, location),
+            terrain.GetMaterial(materialIndex));
+    }
 
     private static void GetCellHeights(
         WorldTerrainChunkView terrain,

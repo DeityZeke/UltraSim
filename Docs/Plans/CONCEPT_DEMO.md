@@ -8,7 +8,9 @@ and exercises those capabilities together.
 **Current baseline:** Client F0.0a, the permanent Network-free F0.0b local-session boundary, the
 F0.1 persistent shell/settings/focus foundation, A0.0/A0.1 local content resolution, and the F0.2
 Single Player Cabin/human-calibration vertical are closed. `Client.Local.Godot` is the permanent
-consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over it.
+consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over it. Terrain T1.0
+now supplies explicit base-surface presence/intentional-void semantics; sparse additional
+sky/cave surfaces remain the next Terrain checkpoint.
 
 The demo has two purposes:
 
@@ -279,8 +281,9 @@ outside authored/prepared world
 Do not represent a hole or island edge as material `0`, an invisible texture, an invisible colliding
 plane, or another presentation trick.
 
-This demo is the first concrete consumer that may earn a base-terrain surface-presence/cutout
-contract in World/Terrain.
+Terrain T1.0 implements this base-terrain surface-presence/cutout contract in World/Terrain. The
+actual floating-island content remains a Concept Demo integration task; the topology substrate is
+no longer hypothetical.
 
 ## 6.2 Sky Island
 
@@ -1133,8 +1136,8 @@ A0.1   local Cabin Default/Replace/Add oracle                       CLOSED
 F0.2   real Single Player Cabin + human calibration                 CLOSED
 
 then earn/integrate Concept Demo Round 1 consumers:
-    terrain surface presence/void
-    additional sky/cave surfaces
+    terrain T1.0 surface presence/void                         CLOSED
+    terrain T1.1 additional sky/cave surfaces                  NEXT
     render-distance setting
     signs/Fallback Lab
     guest/demo admission presentation

@@ -780,8 +780,16 @@ public sealed class WorldPreparedView
         out WorldChunkContentHash hash) =>
         Overlay.TryGetChunkRevision(key, out revision, out hash);
 
-    public bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView view) =>
-        Overlay.TryGetTerrain(key, out view) || BaseWorld.TryGetBaseTerrain(key, out view);
+    public bool TryGetBaseTerrain(SpatialChunkKey key, out WorldTerrainChunkView view)
+    {
+        if (!Overlay.TryGetTerrain(key, out WorldTerrainChunkView replacement))
+            return BaseWorld.TryGetBaseTerrain(key, out view);
+        if (!BaseWorld.TryGetBaseTerrain(key, out WorldTerrainChunkView authored))
+            throw new InvalidOperationException("A validated terrain replacement lost its base chunk.");
+        view = new WorldTerrainChunkView(
+            key, replacement.MaterialBytes, replacement.HeightBytes, authored.SurfacePresenceBytes);
+        return true;
+    }
 
     public bool TryGetFrozenStatics(SpatialChunkKey key, out WorldFrozenStaticChunkView view) =>
         Overlay.TryGetFrozenStatics(key, out view) || BaseWorld.TryGetFrozenStatics(key, out view);

@@ -86,6 +86,7 @@ public readonly record struct ClientWorldSemanticCacheLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumResidentChunks));
         _ = checked(MaximumResidentChunks * TerrainChunkFormat.MaterialCellCount);
         _ = checked(MaximumResidentChunks * TerrainChunkFormat.HeightVertexCount);
+        _ = checked(MaximumResidentChunks * TerrainChunkFormat.SurfacePresenceWordCount);
         _ = checked(MaximumResidentChunks * MaximumFrozenStaticsPerChunk);
         _ = checked(MaximumResidentChunks * MaximumMultiFragmentsPerChunk);
         _ = checked(MaximumResidentChunks * MaximumPublicRecordsPerChunk);
@@ -129,6 +130,7 @@ public readonly ref struct ClientSemanticChunkView
         ClientSemanticChunkInfo info,
         ReadOnlySpan<ushort> terrainMaterials,
         ReadOnlySpan<int> terrainHeights,
+        ReadOnlySpan<ulong> terrainSurfacePresence,
         ReadOnlySpan<WorldFrozenStaticRecord> frozenStatics,
         ReadOnlySpan<WorldMultiFragmentRecord> multiFragments,
         ReadOnlySpan<WorldPublicRecord> publicRecords)
@@ -136,6 +138,7 @@ public readonly ref struct ClientSemanticChunkView
         Info = info;
         TerrainMaterials = terrainMaterials;
         TerrainAbsoluteHeightsMillimeters = terrainHeights;
+        TerrainSurfacePresence = terrainSurfacePresence;
         FrozenStatics = frozenStatics;
         MultiFragments = multiFragments;
         PublicRecords = publicRecords;
@@ -144,6 +147,7 @@ public readonly ref struct ClientSemanticChunkView
     public ClientSemanticChunkInfo Info { get; }
     public ReadOnlySpan<ushort> TerrainMaterials { get; }
     public ReadOnlySpan<int> TerrainAbsoluteHeightsMillimeters { get; }
+    public ReadOnlySpan<ulong> TerrainSurfacePresence { get; }
     public ReadOnlySpan<WorldFrozenStaticRecord> FrozenStatics { get; }
     public ReadOnlySpan<WorldMultiFragmentRecord> MultiFragments { get; }
     public ReadOnlySpan<WorldPublicRecord> PublicRecords { get; }
@@ -167,11 +171,13 @@ public sealed class ClientWorldSemanticCache
     private readonly int[] _affectedSlots;
     private readonly ushort[] _materials;
     private readonly int[] _heights;
+    private readonly ulong[] _surfacePresence;
     private readonly WorldFrozenStaticRecord[] _frozenStatics;
     private readonly WorldMultiFragmentRecord[] _multiFragments;
     private readonly WorldPublicRecord[] _publicRecords;
     private readonly ushort[] _materialScratch;
     private readonly int[] _heightScratch;
+    private readonly ulong[] _surfacePresenceScratch;
     private readonly WorldFrozenStaticRecord[] _frozenStaticScratch;
     private readonly WorldMultiFragmentRecord[] _multiFragmentScratch;
     private readonly WorldPublicRecord[] _publicScratch;
@@ -211,6 +217,8 @@ public sealed class ClientWorldSemanticCache
         _affectedSlots = new int[limits.MaximumResidentChunks];
         _materials = new ushort[checked(limits.MaximumResidentChunks * TerrainChunkFormat.MaterialCellCount)];
         _heights = new int[checked(limits.MaximumResidentChunks * TerrainChunkFormat.HeightVertexCount)];
+        _surfacePresence = new ulong[
+            checked(limits.MaximumResidentChunks * TerrainChunkFormat.SurfacePresenceWordCount)];
         _frozenStatics = new WorldFrozenStaticRecord[
             checked(limits.MaximumResidentChunks * limits.MaximumFrozenStaticsPerChunk)];
         _multiFragments = new WorldMultiFragmentRecord[
@@ -219,6 +227,7 @@ public sealed class ClientWorldSemanticCache
             checked(limits.MaximumResidentChunks * limits.MaximumPublicRecordsPerChunk)];
         _materialScratch = new ushort[TerrainChunkFormat.MaterialCellCount];
         _heightScratch = new int[TerrainChunkFormat.HeightVertexCount];
+        _surfacePresenceScratch = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
         _frozenStaticScratch = new WorldFrozenStaticRecord[limits.MaximumFrozenStaticsPerChunk];
         _multiFragmentScratch = new WorldMultiFragmentRecord[limits.MaximumMultiFragmentsPerChunk];
         _publicScratch = new WorldPublicRecord[limits.MaximumPublicRecordsPerChunk];
@@ -339,6 +348,7 @@ public sealed class ClientWorldSemanticCache
 
         terrain.CopyMaterials(_materialScratch);
         terrain.CopyAbsoluteHeights(_heightScratch);
+        terrain.CopySurfacePresence(_surfacePresenceScratch);
         if (frozenCount != 0)
         {
             _preparedWorld.TryGetFrozenStatics(state.Key, out WorldFrozenStaticChunkView stagedFrozen);
@@ -353,6 +363,7 @@ public sealed class ClientWorldSemanticCache
         }
         _materialScratch.CopyTo(MaterialSpan(slot));
         _heightScratch.CopyTo(HeightSpan(slot));
+        _surfacePresenceScratch.CopyTo(SurfacePresenceSpan(slot));
         _frozenStaticScratch.AsSpan(0, frozenCount).CopyTo(FrozenStaticSpan(slot));
         _multiFragmentScratch.AsSpan(0, multiCount).CopyTo(MultiFragmentSpan(slot));
         _publicScratch.AsSpan(0, publicCount).CopyTo(PublicSpan(slot));
@@ -704,6 +715,7 @@ public sealed class ClientWorldSemanticCache
             Info(slot),
             MaterialSpan(slot),
             HeightSpan(slot),
+            SurfacePresenceSpan(slot),
             FrozenStaticSpan(slot)[..state.FrozenStaticCount],
             MultiFragmentSpan(slot)[..state.MultiFragmentCount],
             PublicSpan(slot)[..state.PublicRecordCount]);
@@ -1055,6 +1067,12 @@ public sealed class ClientWorldSemanticCache
         hash.Add(unchecked((uint)state.Key.Coord.Z));
         foreach (ushort material in MaterialSpan(slot)) hash.Add(material);
         foreach (int height in HeightSpan(slot)) hash.Add(unchecked((uint)height));
+        ReadOnlySpan<ulong> surfacePresence = SurfacePresenceSpan(slot);
+        if (TerrainSurfacePresence.HasAnyAbsent(surfacePresence))
+        {
+            hash.Add(0x5431_5650U); // T1VP: optional topology extension marker.
+            foreach (ulong word in surfacePresence) hash.Add(word);
+        }
         hash.Add(unchecked((uint)state.FrozenStaticCount));
         foreach (WorldFrozenStaticRecord record in FrozenStaticSpan(slot)[..state.FrozenStaticCount])
             AddStatic(ref hash, record.Id.Value, record.DefinitionId.Value, record.Position,
@@ -1298,6 +1316,9 @@ public sealed class ClientWorldSemanticCache
         _materials.AsSpan(slot * TerrainChunkFormat.MaterialCellCount, TerrainChunkFormat.MaterialCellCount);
     private Span<int> HeightSpan(int slot) =>
         _heights.AsSpan(slot * TerrainChunkFormat.HeightVertexCount, TerrainChunkFormat.HeightVertexCount);
+    private Span<ulong> SurfacePresenceSpan(int slot) =>
+        _surfacePresence.AsSpan(slot * TerrainChunkFormat.SurfacePresenceWordCount,
+            TerrainChunkFormat.SurfacePresenceWordCount);
     private Span<WorldFrozenStaticRecord> FrozenStaticSpan(int slot) =>
         _frozenStatics.AsSpan(slot * _limits.MaximumFrozenStaticsPerChunk,
             _limits.MaximumFrozenStaticsPerChunk);
@@ -1314,11 +1335,13 @@ public sealed class ClientWorldSemanticCache
         _affectedScratch.Length * sizeof(bool) +
         (long)_materials.Length * sizeof(ushort) +
         (long)_heights.Length * sizeof(int) +
+        (long)_surfacePresence.Length * sizeof(ulong) +
         (long)_frozenStatics.Length * Unsafe.SizeOf<WorldFrozenStaticRecord>() +
         (long)_multiFragments.Length * Unsafe.SizeOf<WorldMultiFragmentRecord>() +
         (long)_publicRecords.Length * Unsafe.SizeOf<WorldPublicRecord>() +
         (long)_materialScratch.Length * sizeof(ushort) +
         (long)_heightScratch.Length * sizeof(int) +
+        (long)_surfacePresenceScratch.Length * sizeof(ulong) +
         (long)_frozenStaticScratch.Length * Unsafe.SizeOf<WorldFrozenStaticRecord>() +
         (long)_multiFragmentScratch.Length * Unsafe.SizeOf<WorldMultiFragmentRecord>() +
         (long)_publicScratch.Length * Unsafe.SizeOf<WorldPublicRecord>() +

@@ -15,6 +15,11 @@ Expected render/group pressure is rejected before native construction.
 Multi-fragment, and public-prefab groups; terrain cannot bypass the configured
 presentation-pressure bound.
 
+Terrain T1.0 intentional void is realized by missing base-mesh triangles, not a
+transparent material or hidden collision plane. Terrain group admission counts
+only materials used by present cells, so a backing material value stored beneath
+an absent cell cannot consume presentation capacity.
+
 `Game.World` terrain indices use an engine-neutral mathematical invariant:
 `cross(v1-v0, v2-v0)` points toward the semantic front/outward side in UltraSim
 coordinates, and supplied normals occupy that same hemisphere. The current

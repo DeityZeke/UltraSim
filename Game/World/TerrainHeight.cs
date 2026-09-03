@@ -19,7 +19,12 @@ public static class TerrainChunkFormat
     public const int HeightPlaneBaseBytes = sizeof(int);
     public const int HeightOffsetPlaneBytes = HeightVertexCount * sizeof(ushort);
     public const int HeightPlaneBytes = HeightPlaneBaseBytes + HeightOffsetPlaneBytes;
+    public const int SurfacePresenceWordCount = MaterialCellCount / 64;
+    public const int SurfacePresencePlaneBytes = SurfacePresenceWordCount * sizeof(ulong);
+    // Keep the frozen T0 dense-foundation accounting stable. T1 presence is an optional section:
+    // all-present chunks retain the exact historical representation and byte identity.
     public const int FoundationBytes = MaterialPlaneBytes + HeightPlaneBytes;
+    public const int FoundationBytesWithSurfacePresence = FoundationBytes + SurfacePresencePlaneBytes;
     public const int DuplicatedBorderVertexCountPerChunk = HeightVertexCount - MaterialCellCount;
     public const int DuplicatedBorderBytesPerChunk = DuplicatedBorderVertexCountPerChunk * sizeof(ushort);
 
@@ -28,6 +33,54 @@ public static class TerrainChunkFormat
 
     public static int GetHeightIndex(TerrainVertexCoord vertex) =>
         checked(vertex.Z * HeightVertexEdge + vertex.X);
+}
+
+/// <summary>
+/// Canonical one-bit-per-cell topology plane for the dense base terrain. A clear bit means
+/// intentional resident void; it is not a material identity or missing chunk data.
+/// </summary>
+public static class TerrainSurfacePresence
+{
+    public static void FillPresent(Span<ulong> destination)
+    {
+        ValidateLength(destination.Length);
+        destination.Fill(ulong.MaxValue);
+    }
+
+    public static bool IsPresent(ReadOnlySpan<ulong> source, int materialCellIndex)
+    {
+        ValidateLength(source.Length);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(
+            (uint)materialCellIndex, (uint)TerrainChunkFormat.MaterialCellCount);
+        return (source[materialCellIndex >> 6] & (1UL << (materialCellIndex & 63))) != 0;
+    }
+
+    public static bool IsPresent(ReadOnlySpan<ulong> source, TerrainCellCoord cell) =>
+        IsPresent(source, TerrainChunkFormat.GetMaterialIndex(cell));
+
+    public static void SetPresent(Span<ulong> destination, TerrainCellCoord cell, bool present)
+    {
+        ValidateLength(destination.Length);
+        int index = TerrainChunkFormat.GetMaterialIndex(cell);
+        ulong mask = 1UL << (index & 63);
+        ref ulong word = ref destination[index >> 6];
+        if (present) word |= mask;
+        else word &= ~mask;
+    }
+
+    public static bool HasAnyAbsent(ReadOnlySpan<ulong> source)
+    {
+        ValidateLength(source.Length);
+        for (int index = 0; index < source.Length; index++)
+            if (source[index] != ulong.MaxValue) return true;
+        return false;
+    }
+
+    private static void ValidateLength(int length)
+    {
+        if (length != TerrainChunkFormat.SurfacePresenceWordCount)
+            throw new ArgumentException("A terrain presence plane must contain exactly one bit per base cell.");
+    }
 }
 
 /// <summary>Canonical terrain vertex coordinate within one chunk, including its positive duplicated edge.</summary>

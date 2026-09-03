@@ -127,6 +127,7 @@ public readonly record struct GodotWorldRenderChunkDiagnostics(
     float RootLocalY,
     float RootLocalZ,
     float FirstTerrainLocalY,
+    int TerrainTriangleCount,
     float FirstStaticLocalY,
     float FirstPublicLocalY,
     ulong StructuralObjectId,
@@ -561,7 +562,8 @@ public sealed class GodotWorldRenderer : IDisposable
         diagnostics = new GodotWorldRenderChunkDiagnostics(
             handle, renderSlot, chunk.WindowOffset, chunk.YAnchorMillimeters,
             chunk.Root.Position.X, chunk.Root.Position.Y, chunk.Root.Position.Z,
-            chunk.FirstTerrainLocalY, chunk.FirstStaticLocalY, chunk.FirstPublicLocalY,
+            chunk.FirstTerrainLocalY, chunk.TerrainTriangleCount,
+            chunk.FirstStaticLocalY, chunk.FirstPublicLocalY,
             chunk.StructuralRoot.GetInstanceId(), chunk.PublicRoot.GetInstanceId(),
             chunk.TerrainMesh.GetInstanceId());
         return true;
@@ -753,7 +755,8 @@ public sealed class GodotWorldRenderer : IDisposable
         try
         {
             ArrayMesh terrainMesh = CreateTerrainMesh(
-                handle, semantic.Info.Key, out int yAnchor, out float firstTerrainY);
+                handle, semantic.Info.Key, out int yAnchor, out float firstTerrainY,
+                out int terrainTriangleCount);
             structural.AddChild(new MeshInstance3D { Name = "BaseTerrain", Mesh = terrainMesh });
 
             var staticGroups = new SortedDictionary<WorldStaticRenderKey, List<Transform3D>>();
@@ -775,7 +778,8 @@ public sealed class GodotWorldRenderer : IDisposable
             root.AddChild(publicLayer.Root);
             return new RenderChunk(handle, semantic.Info.Key, semantic.Info.SemanticHash,
                 windowOffset, root,
-                structural, publicLayer.Root, terrainMesh, yAnchor, firstTerrainY, firstStaticY,
+                structural, publicLayer.Root, terrainMesh, yAnchor, firstTerrainY,
+                terrainTriangleCount, firstStaticY,
                 publicLayer.FirstLocalY, 3 + staticGroups.Count, 1 + staticGroups.Count,
                 publicLayer.NodeCount, publicLayer.ResourceCount);
         }
@@ -818,7 +822,7 @@ public sealed class GodotWorldRenderer : IDisposable
     }
 
     private ArrayMesh CreateTerrainMesh(ClientSemanticChunkHandle handle, SpatialChunkKey key,
-        out int yAnchor, out float firstLocalY)
+        out int yAnchor, out float firstLocalY, out int triangleCount)
     {
         if (!_cache.TryBuildResidentTerrainMesh(handle, _terrainVertices, _terrainIndices,
                 _terrainMaterials, out TerrainBaseMeshSummary summary,
@@ -827,6 +831,7 @@ public sealed class GodotWorldRenderer : IDisposable
                 $"Could not prepare resident terrain mesh for {key}: {semanticError}/{meshError}.");
 
         yAnchor = summary.MinimumHeightMillimeters;
+        triangleCount = summary.TriangleCount;
         var vertices = new Vector3[TerrainChunkFormat.HeightVertexCount];
         var normals = new Vector3[TerrainChunkFormat.HeightVertexCount];
         for (int index = 0; index < vertices.Length; index++)
@@ -841,7 +846,7 @@ public sealed class GodotWorldRenderer : IDisposable
         firstLocalY = vertices[0].Y;
 
         var trianglesByMaterial = new SortedDictionary<ushort, List<int>>();
-        for (int triangle = 0; triangle < TerrainChunkFormat.TriangleCount; triangle++)
+        for (int triangle = 0; triangle < summary.TriangleCount; triangle++)
         {
             ushort material = _terrainMaterials[triangle];
             if (!trianglesByMaterial.TryGetValue(material, out List<int>? indices))
@@ -920,11 +925,13 @@ public sealed class GodotWorldRenderer : IDisposable
         int groups = 0;
         for (int index = 0; index < semantic.TerrainMaterials.Length; index++)
         {
+            if (!TerrainSurfacePresence.IsPresent(semantic.TerrainSurfacePresence, index)) continue;
             ushort material = semantic.TerrainMaterials[index];
             bool prior = false;
             for (int scan = 0; scan < index; scan++)
             {
-                if (semantic.TerrainMaterials[scan] == material)
+                if (TerrainSurfacePresence.IsPresent(semantic.TerrainSurfacePresence, scan) &&
+                    semantic.TerrainMaterials[scan] == material)
                 {
                     prior = true;
                     break;
@@ -1190,7 +1197,8 @@ public sealed class GodotWorldRenderer : IDisposable
             ClientSemanticHash semanticHash, ClientPresentationOffset windowOffset,
             Node3D root, Node3D structuralRoot,
             Node3D publicRoot, ArrayMesh terrainMesh, int yAnchorMillimeters,
-            float firstTerrainLocalY, float firstStaticLocalY, float firstPublicLocalY,
+            float firstTerrainLocalY, int terrainTriangleCount,
+            float firstStaticLocalY, float firstPublicLocalY,
             int structuralNodeCount, int structuralResourceCount,
             int publicNodeCount, int publicResourceCount)
         {
@@ -1204,6 +1212,7 @@ public sealed class GodotWorldRenderer : IDisposable
             TerrainMesh = terrainMesh;
             YAnchorMillimeters = yAnchorMillimeters;
             FirstTerrainLocalY = firstTerrainLocalY;
+            TerrainTriangleCount = terrainTriangleCount;
             FirstStaticLocalY = firstStaticLocalY;
             FirstPublicLocalY = firstPublicLocalY;
             StructuralNodeCount = structuralNodeCount;
@@ -1222,6 +1231,7 @@ public sealed class GodotWorldRenderer : IDisposable
         internal ArrayMesh TerrainMesh { get; }
         internal int YAnchorMillimeters { get; }
         internal float FirstTerrainLocalY { get; }
+        internal int TerrainTriangleCount { get; }
         internal float FirstStaticLocalY { get; }
         internal float FirstPublicLocalY { get; set; }
         internal int StructuralNodeCount { get; }

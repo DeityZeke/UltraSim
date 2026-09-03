@@ -137,6 +137,7 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         Expect(final.CompletedBuilds >= 13 && final.CompletedRetirements >= 13,
             "The repeated enter/leave path was not exercised.");
         RendererCapacityAndIdentityRegressions(world);
+        BaseSurfaceVoidRenderingRegression();
         HighElevationPrecisionRegression();
         SlidingRenderWindowRegressions();
         SlidingRenderWindowPendingWorkRegressions();
@@ -272,6 +273,27 @@ public partial class T08WorldHeadlessAcceptance : Node3D
             Expect(snapshot.ActiveNodes < resident.Count * TerrainChunkFormat.MaterialCellCount,
                 "Terrain cells leaked into scene-tree identity.");
         }
+    }
+
+    private void BaseSurfaceVoidRenderingRegression()
+    {
+        BoundWorldPack world = CreateVoidWorld();
+        var cache = new ClientWorldSemanticCache(
+            world, new ClientWorldSemanticCacheLimits(1, 0, 0, 1, 1));
+        SpatialChunkKey key = Key(0, 0);
+        Expect(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _) &&
+            cache.TryStageFromBaseWorld(handle, [], default, out _) &&
+            cache.TryPublish(handle, out _),
+            "Intentional-void terrain did not become semantically resident.");
+
+        using var renderer = new GodotWorldRenderer(
+            this, cache, new GodotWorldRendererLimits(1, 1));
+        Expect(renderer.TryEnterPresentation(handle, true, out GodotWorldRenderQueueError error),
+            $"Absent-cell material incorrectly consumed a terrain group: {error}.");
+        renderer.ProcessFrame(new GodotWorldFrameBudget(1, 0));
+        Expect(renderer.TryGetChunkDiagnostics(handle, out GodotWorldRenderChunkDiagnostics diagnostic) &&
+            diagnostic.TerrainTriangleCount == TerrainChunkFormat.TriangleCount - 2,
+            "Godot terrain realization did not omit the intentional-void cell's triangles.");
     }
 
     private void RendererCapacityAndIdentityRegressions(BoundWorldPack world)
@@ -1101,6 +1123,31 @@ public partial class T08WorldHeadlessAcceptance : Node3D
         WorldPack pack = artifact!.Open();
         Expect(pack.TryBind(new WorldContentBinding(Content, admitted, []),
             out BoundWorldPack? bound, out _), "Material-diversity WorldPack binding failed.");
+        return bound!;
+    }
+
+    private static BoundWorldPack CreateVoidWorld()
+    {
+        var builder = new WorldPackBuilder(
+            Space, Content, new WorldPackLimits(512 * 1024, 1, 3, 0, 0, 0));
+        ushort[] materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+        Array.Fill(materials, (ushort)1);
+        TerrainCellCoord voidCell = new(3, 4);
+        materials[TerrainChunkFormat.GetMaterialIndex(voidCell)] = 2;
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        var presence = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
+        TerrainSurfacePresence.FillPresent(presence);
+        TerrainSurfacePresence.SetPresent(presence, voidCell, present: false);
+        Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase),
+            "Intentional-void terrain base was invalid.");
+        Expect(builder.TryAddBaseTerrain(
+                Key(0, 0), materials, heightBase, offsets, presence, out _),
+            "Intentional-void terrain could not be added.");
+        Expect(builder.TryBuild(out WorldPackArtifact? artifact, out _),
+            "Intentional-void WorldPack build failed.");
+        WorldPack pack = artifact!.Open();
+        Expect(pack.TryBind(new WorldContentBinding(Content, [1, 2], []),
+            out BoundWorldPack? bound, out _), "Intentional-void WorldPack binding failed.");
         return bound!;
     }
 
