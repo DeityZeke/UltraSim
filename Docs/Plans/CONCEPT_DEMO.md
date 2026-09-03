@@ -1128,7 +1128,8 @@ F0.0a  executable composition foundation                 CLOSED
 F0.0b  permanent Network-free local-session extraction   CLOSED
 F0.1   persistent shell/settings/focus                     CLOSED
 
-A0.0/A0.1 local content/catalog contracts
+A0.0   content contracts/resolution                        CLOSED
+A0.1   local Cabin Default/Replace/Add oracle
 F0.2   real Single Player Cabin + human calibration
 
 then earn/integrate Concept Demo Round 1 consumers:

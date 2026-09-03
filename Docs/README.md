@@ -45,6 +45,9 @@ acceptance narratives remain available through git history.
 - [Client Core](../Client/Core/README.md) — retained engine-neutral UI and
   semantic-world projections, transactional presentation-window planning, and
   F0.1 shell/settings/focus policy.
+- [Client Content](../Client/Content/README.md) — A0.0 passive package identities,
+  exact payload validation, realm-scoped activation plans, deterministic Add/Replace
+  resolution, immutable catalogs, and application-proof vocabulary.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
   Network-free authority-owner-thread composition with bounded command,
   semantic-debt, and application-proof handoff.

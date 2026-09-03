@@ -1,8 +1,8 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
-**Status:** frozen ownership/security direction with proposed A0 checkpoint implementations,
+**Status:** frozen ownership/security direction with A0.0 content contracts/resolution accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.1) is closed and A0.0 is the next content-contract checkpoint; runtime mesh/audio
+(F0.0a/F0.0b/F0.1) and A0.0 are closed; A0.1 is the next local content-oracle checkpoint. Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
@@ -1393,6 +1393,19 @@ A server content package may reference a recommended profile identity, but that 
 This campaign is adjacent to Client F0. Do not hide a large new subsystem inside one client commit.
 
 ## A0.0 — archaeology/contracts freeze
+
+**Status: CLOSED.** `Client/Content` now owns strict logical/package/file identities, exact SHA-256
+descriptors, bounded immutable passive manifests, realm-scoped ordered activation plans, required
+base-catalog fencing, Add/Replace resolution, source-independent resolved fingerprints,
+process-local immutable catalog-generation handles, and exact application-proof vocabulary.
+Normal passive manifests accept only typed PNG/WebP-backed Texture/Icon definitions, declarative
+`StandardLit` materials, and complete WorldPack definitions. Raster bytes receive exact descriptor
+and passive-envelope validation; complete WorldPack bytes delegate to the existing World-owned
+bounded container/hash/schema validator. Built-in and server-authorized-passive trust are accepted;
+user resource packs and executable extensions remain distinct and rejected by this normal manifest
+path. Successful payload validation produces the only package capability accepted by base/activation
+resolution, so a bare or hash-failed manifest cannot publish catalog state. The assembly has no
+Godot or Network dependency.
 
 Document/test:
 

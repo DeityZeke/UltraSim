@@ -2,7 +2,7 @@
 
 **Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`), F0.0a executable
 composition/shipped-dependency separation, F0.0b permanent Network-free local-session extraction,
-and F0.1 persistent shell/settings/focus accepted.
+F0.1 persistent shell/settings/focus, and content A0.0 contracts/resolution accepted.
 Direct-connect trust, content activation, and later content acquisition remain separately gated
 before their consuming checkpoints.
 
@@ -2004,7 +2004,9 @@ F0.0b permanent OfflineDirect local-session extraction     CLOSED
         |
 F0.1  persistent shell + readable layered settings/control foundation CLOSED
         |
-A0.0-A0.1 minimal/local content contracts and oracle (companion plan)
+A0.0  content contracts + deterministic resolution (companion plan) CLOSED
+        |
+A0.1  local Cabin Default/Replace/Add oracle
         |
 F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network
         |
