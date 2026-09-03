@@ -12,8 +12,10 @@ consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over
 supplies explicit base-surface presence/intentional-void semantics, and T1.1 supplies immutable
 sparse terrain shells at free absolute elevations for the Sky Island and cave. Physics support,
 grounding, and clearance are closed at P0.1c, and Physics P0.1d now supplies authoritative
-jump/gravity/fall/landing/recovery. The next natural
-consumer work is physical Central Island/Sky Island/cave integration, not another Physics provider.
+jump/gravity/fall/landing/recovery. Concept Demo D0.0 now composes those accepted capabilities into
+the permanent Single Player client as a floating Central Island, MountainShell cave, detached Sky
+Island, and Game-owned telepad. The next local world checkpoint is render-distance/larger-residency
+policy before adding the geographically separate Far Island and gate.
 
 The demo has two purposes:
 
@@ -374,8 +376,8 @@ Exact Physics checkpoint/API is owned by `PHYSICS.md` and must be reviewed befor
 P0.1d closes the foundation: Space produces a focus-fenced Jump edge, Game admits only grounded
 jumps, integrates vertical velocity/gravity with horizontal air control, lands against actual
 Base/Top surfaces, stops at Bottom ceilings, and uses occupancy-aware Game recovery below the
-admitted fall envelope. The Concept Demo still needs to author and integrate the actual island/cave
-traversal fixture before claiming the complete human-facing sequence.
+admitted fall envelope. D0.0 now consumes that foundation through the actual island/cave traversal
+fixture described below.
 
 ## 7.2 Telepad
 
@@ -393,6 +395,53 @@ UO-like profile
 
 This demonstrates that server/game content can support different stock client control grammars
 without moving authority into the client.
+
+## 7.2a D0.0 physical-world integration — CLOSED
+
+D0.0 is the first real Concept Demo consumer checkpoint. It deliberately composes the accepted
+World, Physics, local-application, and Godot seams rather than introducing another terrain or
+movement mechanism:
+
+```text
+finite Central BaseTerrain sheet
+    + intentional-void outer edge and east cutout
+
+MountainShell
+    + top support at 7 m
+    + Bottom clearance face at 5 m
+    + preserved BaseTerrain cave floor
+    + sparse 3 m interior ledge
+    + frozen structural perimeter with a real south opening
+
+detached SkyIslandShell
+    + top support at 3.5 m
+    + Bottom face at 3 m
+    + no BaseTerrain or synthetic intermediate layer beneath it
+```
+
+The normal Single Player entry selects this world through `Client.Local`. The historical F0.2 and
+`Playable.Godot` acceptance paths deliberately retain the byte-stable Cabin fixture, so D0.0 cannot
+silently weaken earlier lifecycle/content or edge-window evidence. The two fixtures also use
+separate persistent-world identities and save roots.
+
+The Sky telepad is one concrete public Game prefab. A client nominates only that admitted target;
+Game validates identity and range, selects the authored destination, and invokes the existing
+occupancy-aware relocation primitive. No teleport framework, client-provided coordinates, or new
+Physics behavior was introduced.
+
+Permanent D0.0 acceptance proves through the real Single Player client that:
+
+- the mountain opening is traversable on preserved BaseTerrain beneath the shell Bottom;
+- the central edge and Sky gap are actual intentional void;
+- sparse mountain, cave-ledge, and Sky fragments enter bounded Client Core residency and Godot
+  realization without ECS terrain entities;
+- ThirdPersonDirect performs an authoritative jump with air control and lands on the Sky shell;
+- OrbitCommand still filters Jump and reaches the same shell through the authoritative telepad;
+- walking off support produces normal fall/recovery to the safe occupied player start; and
+- the historical Cabin WorldPack bytes/fingerprint remain unchanged.
+
+D0.0 does not implement render-distance policy, the Far Island/gate, terrain editing, static support,
+or any deferred Physics feature.
 
 ## 7.3 Far gate
 
@@ -1167,11 +1216,11 @@ then earn/integrate Concept Demo Round 1 consumers:
     terrain T1.1 sparse terrain shells                         CLOSED
     Physics P0.1c support / grounding / clearance              CLOSED
     Physics P0.1d vertical motion / jump / fall / landing      CLOSED
+    D0.0 physical central/Sky Island/cave + telepad integration CLOSED
     render-distance setting
     signs/Fallback Lab
     guest/demo admission presentation
     animation/pickup/inventory swing
-    physical central/Sky Island/cave + telepad integration
     Global/system Chat
     diagnostics/Server Monitor/test markers
 

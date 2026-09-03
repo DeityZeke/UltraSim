@@ -26,6 +26,10 @@ var results = new List<TestResult>();
 Run("PlayableWoodsCabinOfflineDirectRoundTrip", PlayableWoodsCabinRoundTrip, results);
 Run("PlayableCabinHasCanonicalRectangularShell", PlayableCabinHasCanonicalRectangularShell, results);
 Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabinDoorWallsAndChest, results);
+Run("ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells",
+    ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells, results);
+Run("ConceptDemoTelepadUsesAuthoritativeDestination",
+    ConceptDemoTelepadUsesAuthoritativeDestination, results);
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
 Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
@@ -593,6 +597,147 @@ static TestMetrics PlayableAuthorityBlocksCabinDoorWallsAndChest()
             status == GameWorldActionStatus.Accepted,
             $"The collision actor could not relocate to ({globalX},{globalZ}).");
     }
+}
+
+static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
+{
+    WorldPack legacy = GamePlayableWorld.CreateWorldPack();
+    WorldPack first = GamePlayableWorld.CreateConceptDemoWorldPack();
+    WorldPack second = GamePlayableWorld.CreateConceptDemoWorldPack();
+    Expect(first.Fingerprint == second.Fingerprint && first.Fingerprint != legacy.Fingerprint,
+        "The Concept Demo WorldPack is not deterministic and distinct from the preserved Cabin pack.");
+    Expect(first.AdditionalTerrainSurfaceFragmentCount == 3,
+        "The Concept Demo pack does not contain exactly Mountain, cave-ledge, and Sky fragments.");
+
+    var binding = new WorldContentBinding(
+        GameContent.WorldFingerprint,
+        [
+            GameTerrainMaterialIds.Water,
+            GameTerrainMaterialIds.Sand,
+            GameTerrainMaterialIds.Grass,
+            GameTerrainMaterialIds.Rock,
+            GameTerrainMaterialIds.Snow,
+        ],
+        [
+            GameWorldStaticDefinitionIds.Tree,
+            GameWorldStaticDefinitionIds.Rock,
+            GameWorldStaticDefinitionIds.CabinWall,
+            GameWorldStaticDefinitionIds.CabinRoof,
+            GameWorldStaticDefinitionIds.Shelf,
+            GameWorldStaticDefinitionIds.Book,
+        ]);
+    Expect(first.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError bindError),
+        $"The Concept Demo WorldPack did not bind: {bindError}.");
+    BoundWorldPack world = bound!;
+
+    Expect(WorldPosition.TryFromGlobalMillimeters(40_000, 0, 40_000, out WorldPosition outer) &&
+        world.ProbeBaseTerrainSurface(outer).Status == BaseTerrainSurfaceStatus.Absent,
+        "The central terrain does not have a real intentional-void outer edge.");
+    Expect(world.ProbeBaseTerrainSurface(GamePlayableWorld.SkyJumpStart).IsPresent &&
+        world.ProbeBaseTerrainSurface(GamePlayableWorld.SkyTelepadDestination).Status ==
+            BaseTerrainSurfaceStatus.Absent,
+        "The detached Sky Island is not separated from the central base sheet by real void.");
+
+    Span<WorldTerrainColumnSurface> surfaces = stackalloc WorldTerrainColumnSurface[8];
+    Expect(world.TryCopyTerrainColumnSurfaces(
+            GamePlayableWorld.CaveLedgePoint, surfaces, out int caveCount, out _) ==
+            WorldTerrainColumnQueryStatus.Complete && caveCount == 4,
+        "The mountain/cave column did not expose four actual structural faces.");
+    Expect(surfaces[0].SurfaceId == GamePlayableWorld.MountainSurface &&
+        surfaces[0].Face == WorldTerrainSurfaceFace.Top &&
+        surfaces[0].HeightMillimeters == 7_000 &&
+        surfaces[1].SurfaceId == GamePlayableWorld.MountainSurface &&
+        surfaces[1].Face == WorldTerrainSurfaceFace.Bottom &&
+        surfaces[1].HeightMillimeters == 5_000 &&
+        surfaces[2].SurfaceId == GamePlayableWorld.CaveLedgeSurface &&
+        surfaces[2].Face == WorldTerrainSurfaceFace.Top &&
+        surfaces[2].HeightMillimeters == 3_000 && surfaces[3].IsBase,
+        "The cave surfaces were ordered by something other than physical elevation.");
+    Expect(world.TryCopyTerrainColumnSurfaces(
+            GamePlayableWorld.SkyTelepadDestination, surfaces, out int skyCount, out _) ==
+            WorldTerrainColumnQueryStatus.Complete && skyCount == 2 &&
+        surfaces[0].SurfaceId == GamePlayableWorld.SkyIslandSurface &&
+        surfaces[0].HeightMillimeters == 3_500 &&
+        surfaces[1].SurfaceId == GamePlayableWorld.SkyIslandSurface &&
+        surfaces[1].Face == WorldTerrainSurfaceFace.Bottom,
+        "The Sky Island did not remain one detached two-sided terrain shell.");
+
+    return new TestMetrics(
+        first.Fingerprint.ToString(),
+        0, 0, 0, 0, 0, first.Length, 0, 0, 0, 0, 0,
+        "D0.0 deterministically composes intentional BaseTerrain void, preserved cave base, Mountain/ledge surfaces, and a detached Sky Island without changing the historical Cabin pack.",
+        WorldPackBytes: first.Length);
+}
+
+static TestMetrics ConceptDemoTelepadUsesAuthoritativeDestination()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_D000))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0xD000));
+    Expect(entered.IsEntered, "The Concept Demo participant did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.PopulateConceptDemo(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities) && entities.SkyTelepadId.IsValid,
+        "The Concept Demo dynamic population did not include its telepad.");
+    host.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, input.ControlSession);
+    Expect(input.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand distantUse),
+        "The distant telepad command could not be formed.");
+    WorldPosition before = link.ReadPosition();
+    GamePlayerCommandResult distant = link.ApplyCommand(distantUse, entities.SkyTelepadId);
+    Expect(distant.Interaction == GameWorldActionStatus.OutOfRange && link.ReadPosition() == before,
+        "An out-of-range telepad interaction relocated the actor.");
+
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.RelocateActor(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                GamePlayableWorld.SkyTelepadPosition,
+                out _),
+            out GameWorldActionStatus approach) && approach == GameWorldActionStatus.Accepted,
+        "The actor could not approach the authored telepad.");
+    var nextInput = new ClientWorldInputSequencer(input.ControlSession, distantUse.Sequence + 1);
+    Expect(nextInput.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand use),
+        "The accepted telepad command could not be formed.");
+    GamePlayerCommandResult accepted = link.ApplyCommand(use, entities.SkyTelepadId);
+    WorldPosition arrived = link.ReadPosition();
+    Expect(accepted.Interaction == GameWorldActionStatus.Accepted &&
+        arrived == GamePlayableWorld.SkyTelepadDestination,
+        "The telepad did not use its exact Game-owned occupied Sky Island destination.");
+
+    var forged = new GamePlayerCommand(
+        input.ControlSession,
+        use.Sequence + 1,
+        GameLocomotionUpdate.Stop,
+        GamePlayerActions.Interact,
+        GamePlayerActions.Interact);
+    GamePlayerCommandResult wrongTarget = link.ApplyCommand(forged, entities.WoodlandAnimalId);
+    Expect(wrongTarget.Interaction == GameWorldActionStatus.MissingTarget &&
+        link.ReadPosition() == GamePlayableWorld.SkyTelepadDestination,
+        "A non-telepad public target acquired telepad semantics.");
+
+    return new TestMetrics(
+        HashText($"{before}|{arrived}|{distant.Interaction}|{wrongTarget.Interaction}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "The public telepad accepts only an in-range authoritative target, obtains no destination from the client, and relocates through the existing occupancy-aware Game primitive.",
+        InputCommands: nextInput.Snapshot().CommandsProduced + input.Snapshot().CommandsProduced + 1);
 }
 
 static TestMetrics SimplePhysicsGenerationReplacement()

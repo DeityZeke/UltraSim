@@ -44,7 +44,7 @@ public readonly record struct LocalCabinPresentationSnapshot(
     string? InitializationError);
 
 /// <summary>
-/// Permanent F0.2 Godot consumer for one Network-free local Cabin application session.
+/// Permanent Godot consumer for one Network-free local playable application session.
 /// Authority remains behind <see cref="LocalPlayableSession"/>; this node owns only Client Core
 /// semantic caches and Godot presentation.
 /// </summary>
@@ -63,6 +63,7 @@ public partial class LocalCabinClient : Node3D
         Terrain,
         CabinDoor,
         CabinChest,
+        SkyTelepad,
         WoodlandAnimal,
     }
 
@@ -78,6 +79,9 @@ public partial class LocalCabinClient : Node3D
     private CanvasLayer? _shellHudLayer;
     private CanvasLayer? _shellWorldUiLayer;
     private CabinHumanBody _humanBody = CabinHumanBody.XBot;
+    // The unconfigured Playable.Godot reference executable retains the historical Cabin fixture.
+    // Permanent Single Player composition selects the Concept Demo explicitly.
+    private bool _useConceptDemoWorld;
     private ResolvedClientSettings? _settings;
     private CabinCatalogAssetResolver? _assetResolver;
     private LocalPlayableSession? _localSession;
@@ -145,7 +149,8 @@ public partial class LocalCabinClient : Node3D
         CanvasLayer? hudLayer = null,
         CanvasLayer? worldUiLayer = null,
         CabinHumanBody humanBody = CabinHumanBody.XBot,
-        ResolvedClientSettings? settings = null)
+        ResolvedClientSettings? settings = null,
+        bool useConceptDemoWorld = false)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -160,6 +165,7 @@ public partial class LocalCabinClient : Node3D
         _shellHudLayer = hudLayer;
         _shellWorldUiLayer = worldUiLayer;
         _humanBody = humanBody;
+        _useConceptDemoWorld = useConceptDemoWorld;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     }
 
@@ -393,7 +399,9 @@ public partial class LocalCabinClient : Node3D
     {
         if (_saveRoot is null || _resolvedContent is null || _contentOracle is null)
             throw new InvalidOperationException("Cabin composition was not configured.");
-        _localSession = LocalPlayableSession.CreateCabin(_saveRoot);
+        _localSession = _useConceptDemoWorld
+            ? LocalPlayableSession.CreateConceptDemo(_saveRoot)
+            : LocalPlayableSession.CreateCabin(_saveRoot);
         _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
         _boundWorld = _localSession.BoundWorld;
         _chatState = new ClientChatState(
@@ -405,8 +413,12 @@ public partial class LocalCabinClient : Node3D
         DriveLocalUntil(() =>
             CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
-            CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1);
-        _lastOutcome = "Fresh woods/cabin world started";
+            CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1 &&
+            (!_useConceptDemoWorld ||
+                CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) == 1));
+        _lastOutcome = _useConceptDemoWorld
+            ? "Fresh Concept Demo island started"
+            : "Fresh woods/cabin world started";
     }
 
     private void CreateInventoryConsumer()
@@ -589,6 +601,7 @@ public partial class LocalCabinClient : Node3D
             SelectionKind.None => LocalPlayableSelection.None,
             SelectionKind.CabinDoor => LocalPlayableSelection.CabinDoor,
             SelectionKind.CabinChest => LocalPlayableSelection.CabinChest,
+            SelectionKind.SkyTelepad => LocalPlayableSelection.SkyTelepad,
             _ => LocalPlayableSelection.Unsupported,
         };
         if (!_localSession.TrySubmit(new LocalPlayableCommand(
@@ -785,9 +798,11 @@ public partial class LocalCabinClient : Node3D
             ? SelectionKind.CabinDoor
             : Nearest(point, GamePlayableWorld.ChestPosition, 1_750)
                 ? SelectionKind.CabinChest
-                : Nearest(point, GamePlayableWorld.AnimalPosition, 1_750)
-                    ? SelectionKind.WoodlandAnimal
-                    : SelectionKind.Terrain;
+                : Nearest(point, GamePlayableWorld.SkyTelepadPosition, 1_750)
+                    ? SelectionKind.SkyTelepad
+                    : Nearest(point, GamePlayableWorld.AnimalPosition, 1_750)
+                        ? SelectionKind.WoodlandAnimal
+                        : SelectionKind.Terrain;
         _lastOutcome = $"Selected {_selection} at ({point.XMillimeters / 1000d:F1}, {point.ZMillimeters / 1000d:F1}) m";
     }
 
@@ -1057,6 +1072,152 @@ public partial class LocalCabinClient : Node3D
             if (ReadPlayerOrientation() != expected)
                 throw new InvalidOperationException(
                     $"{profile} did not face its accepted movement direction.");
+        }
+    }
+
+    /// <summary>
+    /// D0.0 permanent-client journey over the first physical Concept Demo island. Administrative
+    /// relocation is used only to choose deterministic starting points; jump, telepad interaction,
+    /// falling, landing, and recovery cross the ordinary local Game command/semantic boundary.
+    /// </summary>
+    public void RunD00Acceptance()
+    {
+        if (_boundWorld is null || _cache is null || _renderer is null ||
+            _localSession is null || _sequencer is null || _camera is null)
+            throw new InvalidOperationException("The Concept Demo smoke started before composition completed.");
+        if (!_useConceptDemoWorld)
+            throw new InvalidOperationException("The Concept Demo smoke requires the Concept Demo world fixture.");
+
+        if (!WorldPosition.TryFromGlobalMillimeters(40_000, 0, 40_000, out WorldPosition outerVoid) ||
+            _boundWorld.ProbeBaseTerrainSurface(outerVoid).Status != BaseTerrainSurfaceStatus.Absent ||
+            _boundWorld.ProbeBaseTerrainSurface(GamePlayableWorld.SkyTelepadDestination).Status !=
+                BaseTerrainSurfaceStatus.Absent)
+            throw new InvalidOperationException("The central island/sky gap is not intentional BaseTerrain void.");
+
+        Span<WorldTerrainColumnSurface> column = stackalloc WorldTerrainColumnSurface[8];
+        if (_boundWorld.TryCopyTerrainColumnSurfaces(
+                GamePlayableWorld.CaveLedgePoint, column, out int caveCount, out _) !=
+                WorldTerrainColumnQueryStatus.Complete || caveCount != 4 ||
+            !column[..caveCount].Contains(new WorldTerrainColumnSurface(
+                GamePlayableWorld.MountainSurface,
+                WorldTerrainSurfaceFace.Bottom,
+                5_000,
+                GameTerrainMaterialIds.Rock)) ||
+            !column[..caveCount].Contains(new WorldTerrainColumnSurface(
+                GamePlayableWorld.CaveLedgeSurface,
+                WorldTerrainSurfaceFace.Top,
+                3_000,
+                GameTerrainMaterialIds.Rock)))
+            throw new InvalidOperationException("The MountainShell/preserved-base cave column is incomplete.");
+        if (_boundWorld.TryCopyTerrainColumnSurfaces(
+                GamePlayableWorld.SkyTelepadDestination, column, out int skyCount, out _) !=
+                WorldTerrainColumnQueryStatus.Complete || skyCount != 2 ||
+            column[0].SurfaceId != GamePlayableWorld.SkyIslandSurface ||
+            column[0].Face != WorldTerrainSurfaceFace.Top ||
+            column[0].HeightMillimeters != 3_500)
+            throw new InvalidOperationException("The detached Sky Island shell is incomplete.");
+
+        ValidateRenderedShell(new SpatialChunkKey(GameWorldState.DefaultSpace, -1, 0), 2);
+        ValidateRenderedShell(new SpatialChunkKey(GameWorldState.DefaultSpace, 1, 0), 1);
+
+        // Enter the mountain through its authored south opening. The preserved BaseTerrain remains
+        // the cave floor while the MountainShell Bottom is real overhead clearance geometry.
+        RelocateControlledActor(GamePlayableWorld.CaveEntranceApproach);
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDirect(
+                        0, GamePlayerCommand.MaximumAxisMagnitude),
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand enterCave))
+            throw new InvalidOperationException("The mountain cave traversal could not form a command.");
+        ApplyCommand(enterCave, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == enterCave.Sequence &&
+            _player.GlobalZMillimeters >= GamePlayableWorld.CaveFloorPoint.GlobalZMillimeters &&
+            _player.YMillimeters < 5_000);
+        SubmitStop();
+
+        // Third-person profile: cross the intentional gap by authoritative jump/air control.
+        RelocateControlledActor(GamePlayableWorld.SkyJumpStart);
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+                    GamePlayerActions.Jump,
+                    true),
+                out GamePlayerCommand jump))
+            throw new InvalidOperationException("The Sky Island jump could not form a command.");
+        ApplyCommand(jump, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == jump.Sequence &&
+            view.LastCommandResult.Jump == GameWorldActionStatus.Accepted &&
+            _player.YMillimeters == GamePlayableWorld.SkyTelepadDestination.YMillimeters &&
+            _player.GlobalXMillimeters >= 25_000);
+        SubmitStop();
+
+        // Orbit profile: Jump is absent from its grammar; the selected public telepad invokes the
+        // server-owned destination and the accepted relocation path.
+        RelocateControlledActor(GamePlayableWorld.SkyTelepadPosition);
+        SetProfile(ControlProfile.OrbitCommand);
+        ClientControlProfileDecision orbitJump = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.Jump, true), CameraBasis());
+        if ((orbitJump.Command.HeldActions & GamePlayerActions.Jump) != 0)
+            throw new InvalidOperationException("OrbitCommand unexpectedly admitted a Jump action.");
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop,
+                    GamePlayerActions.Interact,
+                    true),
+                out GamePlayerCommand telepad) ||
+            !_localSession.TrySubmit(new LocalPlayableCommand(
+                telepad, LocalPlayableSelection.SkyTelepad, false, default, false)))
+            throw new InvalidOperationException("The Sky Island telepad interaction could not be submitted.");
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == telepad.Sequence &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            _player == GamePlayableWorld.SkyTelepadDestination);
+
+        // Walking east eventually leaves both the Sky Island and central sheet. Game owns the
+        // below-envelope recovery and clears retained locomotion at the safe occupied start point.
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand walkOff))
+            throw new InvalidOperationException("The Concept Demo fall could not form a command.");
+        ApplyCommand(walkOff, false, default, false);
+        DriveLocalUntil(() => _player == GamePlayableWorld.PlayerStart);
+        SetProfile(ControlProfile.OrbitCommand);
+
+        void ValidateRenderedShell(SpatialChunkKey key, int expectedFragments)
+        {
+            if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
+                !_renderer.TryGetChunkDiagnostics(handle, out GodotWorldRenderChunkDiagnostics diagnostics) ||
+                diagnostics.AdditionalTerrainSurfaceFragmentCount != expectedFragments ||
+                diagnostics.AdditionalTerrainTriangleCount <= 0)
+                throw new InvalidOperationException($"Concept Demo shell chunk {key} was not realized.");
+        }
+
+        void SubmitStop()
+        {
+            if (!_sequencer.TryCreateSemanticCommand(
+                    new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop,
+                        GamePlayerActions.None,
+                        true),
+                    out GamePlayerCommand stop))
+                throw new InvalidOperationException("The Sky Island landing stop could not form a command.");
+            ApplyCommand(stop, false, default, false);
+            DriveLocalUntil(() =>
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastCommandSequence == stop.Sequence);
         }
     }
 
@@ -1398,7 +1559,13 @@ public partial class LocalCabinClient : Node3D
         _ownedHudRoot.AddChild(panel);
         var stack = new VBoxContainer();
         panel.AddChild(stack);
-        var title = new Label { Text = "UltraSim — T0.10 Woods / Cabin", ThemeTypeVariation = "HeaderMedium" };
+        var title = new Label
+        {
+            Text = _useConceptDemoWorld
+                ? "UltraSim — Concept Demo Island"
+                : "UltraSim — T0.10 Woods / Cabin",
+            ThemeTypeVariation = "HeaderMedium",
+        };
         stack.AddChild(title);
         _status = new Label();
         _details = new Label();
@@ -1412,8 +1579,11 @@ public partial class LocalCabinClient : Node3D
         stack.AddChild(new Label
         {
             Text = "LMB click select • hold steer • double-click destination • RMB/Esc stop\n" +
-                "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n" +
-                "1/F1 Orbit • 2/F2 third-person • 3/F3 fixed iso move/look • F5 save • F9 load",
+                (_useConceptDemoWorld
+                    ? "MMB drag camera • wheel zoom • E use selected door/chest/telepad • I inventory\n"
+                    : "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n") +
+                "Space jump (direct profiles) • 1/F1 Orbit • 2/F2 third-person • " +
+                "3/F3 fixed iso move/look • F5 save • F9 load",
         });
 
         var chatPanel = new PanelContainer
@@ -1662,6 +1832,12 @@ public partial class LocalCabinClient : Node3D
         private readonly Mesh _chest;
         private readonly Mesh _animal = GroundedBox(
             new Vector3(1.1f, 1.15f, 0.55f), new Color(0.48f, 0.35f, 0.23f));
+        private readonly Mesh _telepad = GroundedBox(
+            new Vector3(1.8f, 0.18f, 1.8f), new Color(0.12f, 0.72f, 0.9f));
+        private readonly Mesh _mountainWallEight = GroundedBox(
+            new Vector3(8f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
+        private readonly Mesh _mountainWallTen = GroundedBox(
+            new Vector3(10f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
 
         public CabinCatalogAssetResolver(
             CabinContentOracle oracle,
@@ -1692,7 +1868,12 @@ public partial class LocalCabinClient : Node3D
         public Mesh? ResolveStaticMesh(WorldStaticRenderKey key) => key.DefinitionId switch
         {
             var id when id.Value == GameWorldStaticDefinitionIds.Tree => _wood,
-            var id when id.Value == GameWorldStaticDefinitionIds.Rock => _stone,
+            var id when id.Value == GameWorldStaticDefinitionIds.Rock => key.Variant switch
+            {
+                GameWorldStaticVariants.MountainWallEightMeters => _mountainWallEight,
+                GameWorldStaticVariants.MountainWallTenMeters => _mountainWallTen,
+                _ => _stone,
+            },
             var id when id.Value == GameWorldStaticDefinitionIds.CabinWall => key.Variant switch
             {
                 GameWorldStaticVariants.CabinWallEightMeters => _wallEight,
@@ -1712,6 +1893,7 @@ public partial class LocalCabinClient : Node3D
             GameWorldPublicPrefabIds.CabinDoor => _door,
             GameWorldPublicPrefabIds.WorldChest => _chest,
             GameWorldPublicPrefabIds.WoodlandAnimal => _animal,
+            GameWorldPublicPrefabIds.SkyTelepad => _telepad,
             _ => _stone,
         };
 

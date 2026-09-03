@@ -131,6 +131,12 @@ foreach (string configuration in configurations)
             "--path", "Client/Complete.Godot",
             "--", "--f0-2-smoke", "--cabin-content=default", "--human=x",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/SinglePlayer.Godot",
+            "--", "--d0-0-smoke",
+        ]);
     }
 }
 

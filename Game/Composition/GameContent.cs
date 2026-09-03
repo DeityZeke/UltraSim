@@ -16,6 +16,7 @@ public static class GamePrefabKeys
     public static readonly PrefabKey IronSword = new("game.item.iron-sword");
     public static readonly PrefabKey Apple = new("game.item.apple");
     public static readonly PrefabKey CabinDoor = new("game.world.cabin-door");
+    public static readonly PrefabKey SkyTelepad = new("game.world.sky-telepad");
     public static readonly PrefabKey WoodlandAnimal = new("game.world.woodland-animal");
 }
 
@@ -58,6 +59,8 @@ public static class GameWorldStaticVariants
     public const ushort CabinWallSixMeters = 2;
     public const ushort CabinWallThreeMeters = 3;
     public const ushort CabinRoofEightBySixMeters = 1;
+    public const ushort MountainWallEightMeters = 100;
+    public const ushort MountainWallTenMeters = 101;
 }
 
 /// <summary>Compact public-projection prefab identities admitted by the concrete game.</summary>
@@ -67,6 +70,7 @@ public static class GameWorldPublicPrefabIds
     public const uint CabinDoor = 2;
     public const uint WorldChest = 3;
     public const uint WoodlandAnimal = 4;
+    public const uint SkyTelepad = 5;
 }
 
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
@@ -89,6 +93,7 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryItemDefinition ironSword,
         InventoryItemDefinition apple,
         PrefabHandle cabinDoor,
+        PrefabHandle skyTelepad,
         PrefabHandle woodlandAnimal,
         WorldContentBinding world,
         Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions)
@@ -106,6 +111,7 @@ public sealed class GameContent : IInventoryContentCatalog
         IronSword = ironSword;
         Apple = apple;
         CabinDoor = cabinDoor;
+        SkyTelepad = skyTelepad;
         WoodlandAnimal = woodlandAnimal;
         World = world;
         _gridPlacementTransitions = gridPlacementTransitions;
@@ -145,6 +151,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public InventoryItemDefinition IronSword { get; }
     public InventoryItemDefinition Apple { get; }
     public PrefabHandle CabinDoor { get; }
+    public PrefabHandle SkyTelepad { get; }
     public PrefabHandle WoodlandAnimal { get; }
     public WorldContentBinding World { get; }
 
@@ -286,6 +293,14 @@ public sealed class GameContent : IInventoryContentCatalog
             GameWorldPublicPrefabIds.CabinDoor, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         cabinDoor.DisplayName("Cabin Door");
 
+        // The destination is selected by concrete Game world content when this public marker is
+        // used. The client may nominate the marker, but never supplies relocation coordinates.
+        PrefabBuilder skyTelepad = content.Define(GamePrefabKeys.SkyTelepad);
+        skyTelepad.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        skyTelepad.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.SkyTelepad, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        skyTelepad.DisplayName("Sky Island Telepad");
+
         PrefabBuilder woodlandAnimal = content.Define(GamePrefabKeys.WoodlandAnimal);
         woodlandAnimal.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         woodlandAnimal.With(new WorldPublicComponent(new WorldPublicDescriptor(
@@ -312,6 +327,7 @@ public sealed class GameContent : IInventoryContentCatalog
             sword,
             apple,
             compiled.GetHandle(GamePrefabKeys.CabinDoor),
+            compiled.GetHandle(GamePrefabKeys.SkyTelepad),
             compiled.GetHandle(GamePrefabKeys.WoodlandAnimal),
             new WorldContentBinding(WorldFingerprint,
             [

@@ -22,7 +22,9 @@ public readonly record struct GamePlayableWorldEntities(
     PersistentEntityId CabinDoorId,
     PersistentEntityId CabinChestId,
     PersistentEntityId WoodlandAnimalId,
-    PersistentEntityId BreadId);
+    PersistentEntityId BreadId,
+    Entity SkyTelepad,
+    PersistentEntityId SkyTelepadId);
 
 /// <summary>Concrete authoritative action outcomes for the first playable vertical.</summary>
 public enum GameWorldActionStatus : byte
@@ -393,7 +395,7 @@ public sealed class GameWorldActions
         bool doorIsOpen = false;
         if ((command.PressedActions & GamePlayerActions.Interact) != 0)
         {
-            interaction = ToggleCabinDoorCore(
+            interaction = InteractWithWorldTarget(
                 world, worldState, actor, interactionTarget, out doorIsOpen);
         }
 
@@ -766,6 +768,54 @@ public sealed class GameWorldActions
         if (!worldState.TrySetPublic(world, door, nextDescriptor))
             throw new InvalidOperationException("A validated cabin door lost its public component.");
         return GameWorldActionStatus.Accepted;
+    }
+
+    private GameWorldActionStatus InteractWithWorldTarget(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        Entity target,
+        out bool doorIsOpen)
+    {
+        doorIsOpen = false;
+        if (!world.IsAlive(target) ||
+            !worldState.TryReadPublic(world, target, out WorldPublicDescriptor descriptor))
+            return GameWorldActionStatus.MissingTarget;
+        return descriptor.PrefabId switch
+        {
+            GameWorldPublicPrefabIds.CabinDoor =>
+                ToggleCabinDoorCore(world, worldState, actor, target, out doorIsOpen),
+            GameWorldPublicPrefabIds.SkyTelepad =>
+                ActivateSkyTelepad(world, worldState, actor, target),
+            _ => GameWorldActionStatus.MissingTarget,
+        };
+    }
+
+    private GameWorldActionStatus ActivateSkyTelepad(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        Entity telepad)
+    {
+        if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            return GameWorldActionStatus.MissingActor;
+        if (!world.IsAlive(telepad) ||
+            !worldState.TryReadPosition(world, telepad, out WorldPosition telepadPosition) ||
+            !worldState.TryReadPublic(world, telepad, out WorldPublicDescriptor descriptor) ||
+            descriptor.PrefabId != GameWorldPublicPrefabIds.SkyTelepad)
+            return GameWorldActionStatus.MissingTarget;
+        if (!WithinInteractionRange(actorPosition, telepadPosition))
+            return GameWorldActionStatus.OutOfRange;
+
+        // This destination is concrete authored Game content. The interaction caller nominates
+        // only the public telepad entity and never supplies relocation coordinates.
+        return RelocateActor(
+            world,
+            worldState,
+            actor,
+            GamePlayableWorld.SkyTelepadDestination,
+            out _);
     }
 
     public bool TryReadCabinDoor(EcsWorld world, Entity door, out bool isOpen)
@@ -1248,13 +1298,32 @@ public static class GamePlayableWorld
     public const int MaximumChunk = 2;
     public const int ChunkCount = 25;
 
+    public static WorldSurfaceId MountainSurface => new(0xD0_001);
+    public static WorldSurfaceId CaveLedgeSurface => new(0xD0_002);
+    public static WorldSurfaceId SkyIslandSurface => new(0xD0_003);
+
     public static WorldPosition PlayerStart => FromGlobal(15_500, 7_000);
     public static WorldPosition ClearCrossChunkPosition => FromGlobal(18_000, 7_000);
     public static WorldPosition DoorPosition => FromGlobal(16_000, 9_000);
     public static WorldPosition ChestPosition => FromGlobal(18_000, 12_000);
     public static WorldPosition AnimalPosition => FromGlobal(8_000, 4_000);
+    public static WorldPosition SkyTelepadPosition => FromGlobal(21_000, 6_500);
+    public static WorldPosition SkyTelepadDestination => AtHeight(28_000, 3_500, 9_000);
+    public static WorldPosition SkyJumpStart => AtHeight(22_000, 1_000, 9_000);
+    public static WorldPosition CaveEntranceApproach => FromGlobal(-6_000, 2_500);
+    public static WorldPosition CaveFloorPoint => FromGlobal(-6_000, 7_000);
+    public static WorldPosition CaveLedgePoint => AtHeight(-6_000, 3_000, 11_000);
 
-    public static WorldPack CreateWorldPack()
+    public static WorldPack CreateWorldPack() => CreateWorldPackCore(conceptDemo: false);
+
+    /// <summary>
+    /// Builds the first local Concept Demo world while preserving the historical Cabin fixture.
+    /// Its BaseTerrain is a finite floating island; sparse immutable shells form the mountain,
+    /// cave ledge, and detached Sky Island.
+    /// </summary>
+    public static WorldPack CreateConceptDemoWorldPack() => CreateWorldPackCore(conceptDemo: true);
+
+    private static WorldPack CreateWorldPackCore(bool conceptDemo)
     {
         var limits = new WorldPackLimits(
             2 * 1024 * 1024,
@@ -1270,6 +1339,7 @@ public static class GamePlayableWorld
         var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
         var heights = new int[TerrainChunkFormat.HeightVertexCount];
         var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        var presence = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
         for (int chunkZ = MinimumChunk; chunkZ <= MaximumChunk; chunkZ++)
         {
             for (int chunkX = MinimumChunk; chunkX <= MaximumChunk; chunkX++)
@@ -1280,14 +1350,32 @@ public static class GamePlayableWorld
                         heights, offsets, out TerrainHeightPlaneBase heightBase, out _, out _))
                     throw new InvalidOperationException("Authored woods terrain did not fit q5 encoding.");
                 var key = new SpatialChunkKey(GameWorldState.DefaultSpace, chunkX, chunkZ);
-                if (!builder.TryAddBaseTerrain(key, materials, heightBase, offsets, out WorldPackBuildError error))
+                bool added;
+                WorldPackBuildError error;
+                if (conceptDemo)
+                {
+                    FillConceptBasePresence(chunkX, chunkZ, presence);
+                    added = builder.TryAddBaseTerrain(
+                        key, materials, heightBase, offsets, presence, out error);
+                }
+                else
+                {
+                    added = builder.TryAddBaseTerrain(
+                        key, materials, heightBase, offsets, out error);
+                }
+                if (!added)
                     throw new InvalidOperationException($"Authored terrain chunk {key} failed: {error}.");
-                AddWoodsStatics(builder, chunkX, chunkZ);
+                AddWoodsStatics(builder, chunkX, chunkZ, conceptDemo);
             }
         }
         AddCabin(builder);
+        if (conceptDemo)
+        {
+            AddConceptTerrainShells(builder);
+            AddConceptMountainWalls(builder);
+        }
         if (!builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError))
-            throw new InvalidOperationException($"Authored woods/cabin WorldPack failed: {buildError}.");
+            throw new InvalidOperationException($"Authored playable WorldPack failed: {buildError}.");
         return artifact!.Open();
     }
 
@@ -1330,7 +1418,65 @@ public static class GamePlayableWorld
             world.GetOrAssignPersistentId(door),
             world.GetOrAssignPersistentId(chest),
             world.GetOrAssignPersistentId(animal),
-            world.GetOrAssignPersistentId(bread));
+            world.GetOrAssignPersistentId(bread),
+            Entity.Null,
+            default);
+    }
+
+    /// <summary>Extends the accepted Cabin population with the concrete Sky Island telepad.</summary>
+    public static GamePlayableWorldEntities PopulateConceptDemo(
+        EcsWorld world,
+        IGameGenerationStateProvider game,
+        Entity player)
+    {
+        GamePlayableWorldEntities entities = Populate(world, game, player);
+        if (!world.TryInstantiate(game.Content.SkyTelepad, out Entity telepad) ||
+            !game.WorldState.TrySetPosition(world, telepad, SkyTelepadPosition))
+            throw new InvalidOperationException("The Concept Demo Sky Island telepad could not be created.");
+        return entities with
+        {
+            SkyTelepad = telepad,
+            SkyTelepadId = world.GetOrAssignPersistentId(telepad),
+        };
+    }
+
+    private static void FillConceptBasePresence(
+        int chunkX,
+        int chunkZ,
+        Span<ulong> destination)
+    {
+        destination.Clear();
+        for (int z = 0; z < TerrainChunkFormat.MaterialCellEdge; z++)
+        for (int x = 0; x < TerrainChunkFormat.MaterialCellEdge; x++)
+        {
+            int globalCellX = checked(chunkX * TerrainChunkFormat.MaterialCellEdge + x);
+            int globalCellZ = checked(chunkZ * TerrainChunkFormat.MaterialCellEdge + z);
+            long centerX = checked((long)globalCellX * GameWorldSpatialProfile.TerrainCellEdgeUnits +
+                GameWorldSpatialProfile.TerrainCellEdgeUnits / 2);
+            long centerZ = checked((long)globalCellZ * GameWorldSpatialProfile.TerrainCellEdgeUnits +
+                GameWorldSpatialProfile.TerrainCellEdgeUnits / 2);
+            if (!IsConceptBasePresent(centerX, centerZ)) continue;
+            TerrainSurfacePresence.SetPresent(
+                destination,
+                new TerrainCellCoord(checked((byte)x), checked((byte)z)),
+                true);
+        }
+    }
+
+    private static bool IsConceptBasePresent(long xMillimeters, long zMillimeters)
+    {
+        // An integer ellipse gives the central sheet a genuine finite edge. A deliberate east-side
+        // cutout supplies unsupported air between that sheet and the detached Sky Island shell.
+        long dx = xMillimeters - 8_000;
+        long dz = zMillimeters - 8_000;
+        const long radiusX = 26_000;
+        const long radiusZ = 24_000;
+        bool withinIsland = checked(
+            dx * dx * radiusZ * radiusZ + dz * dz * radiusX * radiusX <=
+            radiusX * radiusX * radiusZ * radiusZ);
+        bool skyCutout = xMillimeters >= 23_000 && xMillimeters < 32_000 &&
+            zMillimeters >= 5_500 && zMillimeters < 12_500;
+        return withinIsland && !skyCutout;
     }
 
     private static void FillMaterials(int chunkX, int chunkZ, Span<ushort> destination)
@@ -1374,7 +1520,11 @@ public static class GamePlayableWorld
         return 800 + noise * TerrainChunkFormat.HeightQuantumMillimeters;
     }
 
-    private static void AddWoodsStatics(WorldPackBuilder builder, int chunkX, int chunkZ)
+    private static void AddWoodsStatics(
+        WorldPackBuilder builder,
+        int chunkX,
+        int chunkZ,
+        bool conceptDemo)
     {
         int ordinal = checked((chunkZ - MinimumChunk) * 5 + (chunkX - MinimumChunk));
         int[][] locations = [[3_000, 3_000], [12_000, 5_000], [5_000, 13_000]];
@@ -1383,6 +1533,8 @@ public static class GamePlayableWorld
             int globalX = checked(chunkX * GameWorldSpatialProfile.WorldChunkEdgeUnits + locations[index][0]);
             int globalZ = checked(chunkZ * GameWorldSpatialProfile.WorldChunkEdgeUnits + locations[index][1]);
             if (globalX is >= 11_500 and <= 21_000 && globalZ is >= 7_000 and <= 17_000)
+                continue;
+            if (conceptDemo && !IsConceptBasePresent(globalX, globalZ))
                 continue;
             WorldPosition position = FromGlobal(globalX, globalZ);
             var source = new WorldFrozenStaticSource(
@@ -1398,6 +1550,121 @@ public static class GamePlayableWorld
             if (!builder.TryAddFrozenStatic(source, out WorldPackBuildError error))
                 throw new InvalidOperationException($"Authored woods static failed: {error}.");
         }
+    }
+
+    private static void AddConceptTerrainShells(WorldPackBuilder builder)
+    {
+        AddFlatShell(
+            builder,
+            new SpatialChunkKey(GameWorldState.DefaultSpace, -1, 0),
+            MountainSurface,
+            new TerrainSurfacePatchBounds(12, 8, 16, 20),
+            topMillimeters: 7_000,
+            bottomMillimeters: 5_000,
+            topMaterial: GameTerrainMaterialIds.Rock,
+            bottomMaterial: GameTerrainMaterialIds.Rock,
+            sideMaterial: GameTerrainMaterialIds.Rock);
+        AddFlatShell(
+            builder,
+            new SpatialChunkKey(GameWorldState.DefaultSpace, -1, 0),
+            CaveLedgeSurface,
+            new TerrainSurfacePatchBounds(16, 20, 8, 6),
+            topMillimeters: 3_000,
+            bottomMillimeters: null,
+            topMaterial: GameTerrainMaterialIds.Rock,
+            bottomMaterial: 0,
+            sideMaterial: 0);
+        AddFlatShell(
+            builder,
+            new SpatialChunkKey(GameWorldState.DefaultSpace, 1, 0),
+            SkyIslandSurface,
+            new TerrainSurfacePatchBounds(18, 12, 12, 12),
+            topMillimeters: 3_500,
+            bottomMillimeters: 3_000,
+            topMaterial: GameTerrainMaterialIds.Grass,
+            bottomMaterial: GameTerrainMaterialIds.Rock,
+            sideMaterial: GameTerrainMaterialIds.Rock);
+    }
+
+    private static void AddFlatShell(
+        WorldPackBuilder builder,
+        SpatialChunkKey key,
+        WorldSurfaceId id,
+        TerrainSurfacePatchBounds bounds,
+        int? topMillimeters,
+        int? bottomMillimeters,
+        ushort topMaterial,
+        ushort bottomMaterial,
+        ushort sideMaterial)
+    {
+        WorldTerrainSurfaceFaces faces =
+            (topMillimeters.HasValue ? WorldTerrainSurfaceFaces.Top : WorldTerrainSurfaceFaces.None) |
+            (bottomMillimeters.HasValue ? WorldTerrainSurfaceFaces.Bottom : WorldTerrainSurfaceFaces.None);
+        var presence = new ulong[bounds.PresenceWordCount];
+        Array.Fill(presence, ulong.MaxValue);
+        int remainder = bounds.CellCount & 63;
+        if (remainder != 0)
+            presence[^1] = (1UL << remainder) - 1;
+        var connections = new TerrainSurfaceEdgeConnection[bounds.CellCount];
+        ushort[] topMaterials = topMillimeters.HasValue
+            ? Enumerable.Repeat(topMaterial, bounds.CellCount).ToArray()
+            : [];
+        ushort[] bottomMaterials = bottomMillimeters.HasValue
+            ? Enumerable.Repeat(bottomMaterial, bounds.CellCount).ToArray()
+            : [];
+        TerrainHeightOffset[] topHeights = topMillimeters.HasValue
+            ? new TerrainHeightOffset[bounds.VertexCount]
+            : [];
+        TerrainHeightOffset[] bottomHeights = bottomMillimeters.HasValue
+            ? new TerrainHeightOffset[bounds.VertexCount]
+            : [];
+        TerrainHeightPlaneBase topBase = default;
+        TerrainHeightPlaneBase bottomBase = default;
+        if (topMillimeters.HasValue &&
+            !TerrainHeightPlaneBase.TryCreate(topMillimeters.Value, out topBase) ||
+            bottomMillimeters.HasValue &&
+            !TerrainHeightPlaneBase.TryCreate(bottomMillimeters.Value, out bottomBase))
+            throw new InvalidOperationException($"Concept Demo shell {id} is not q5 canonical.");
+        if (!builder.TryAddAdditionalTerrainSurfaceBand(
+                key,
+                id,
+                bounds,
+                faces,
+                presence,
+                connections,
+                topMaterials,
+                topBase,
+                topHeights,
+                bottomMaterials,
+                bottomBase,
+                bottomHeights,
+                sideMaterial,
+                out WorldPackBuildError error))
+            throw new InvalidOperationException($"Concept Demo shell {id} failed: {error}.");
+    }
+
+    private static void AddConceptMountainWalls(WorldPackBuilder builder)
+    {
+        WorldPosition root = FromGlobal(-6_000, 9_000);
+        WorldMultiPieceSource[] pieces =
+        [
+            CabinPiece(1, GameWorldStaticDefinitionIds.Rock,
+                -10_000, 9_000, 200, 5_000, 4_200,
+                WorldYaw.QuarterTurn, GameWorldStaticVariants.MountainWallTenMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            CabinPiece(2, GameWorldStaticDefinitionIds.Rock,
+                -2_000, 9_000, 200, 5_000, 4_200,
+                WorldYaw.QuarterTurn, GameWorldStaticVariants.MountainWallTenMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            CabinPiece(3, GameWorldStaticDefinitionIds.Rock,
+                -6_000, 14_000, 4_000, 200, 4_200,
+                WorldYaw.Zero, GameWorldStaticVariants.MountainWallEightMeters,
+                WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+        ];
+        if (!builder.TryAddStaticMulti(
+                new MultiInstanceId(2), root, WorldYaw.Zero, pieces,
+                out WorldPackBuildError error))
+            throw new InvalidOperationException($"Concept Demo mountain walls failed: {error}.");
     }
 
     private static void AddCabin(WorldPackBuilder builder)
@@ -1500,6 +1767,14 @@ public static class GamePlayableWorld
                 out WorldPosition elevated))
             throw new InvalidOperationException("Authored fixture height is outside the world profile.");
         return elevated;
+    }
+
+    private static WorldPosition AtHeight(long xMillimeters, int yMillimeters, long zMillimeters)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(
+                xMillimeters, yMillimeters, zMillimeters, out WorldPosition position))
+            throw new InvalidOperationException("Authored fixture position is outside the world profile.");
+        return position;
     }
 
     private static WorldStaticBounds Bounds(in WorldPosition position, int halfWidth, int height) => new(

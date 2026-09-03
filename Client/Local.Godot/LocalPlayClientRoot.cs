@@ -17,14 +17,32 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     public override void _Ready()
     {
         base._Ready();
-        if (OS.GetCmdlineUserArgs().Contains("--composition-smoke", StringComparer.Ordinal) ||
-            !OS.GetCmdlineUserArgs().Contains("--f0-2-smoke", StringComparer.Ordinal))
+        string[] arguments = OS.GetCmdlineUserArgs();
+        bool conceptDemoSmoke = arguments.Contains("--d0-0-smoke", StringComparer.Ordinal);
+        bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
+        if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
+            !conceptDemoSmoke && !f02Smoke)
             return;
         try
         {
+            if (conceptDemoSmoke)
+            {
+                StartLocalCabin(
+                    CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
+                _cabin!.RunD00Acceptance();
+                LocalCabinPresentationSnapshot evidence = _cabin.GetPresentationSnapshot();
+                GD.Print(
+                    $"D0.0 CONCEPT DEMO PASS player={evidence.PlayerPosition} " +
+                    $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
+                RetireCurrentSession();
+                ReturnToMainMenu("Concept Demo D0.0 smoke passed.");
+                GetTree().Quit(0);
+                return;
+            }
+
             CabinContentVariant variant = ReadVariant();
             CabinHumanBody human = ReadHuman();
-            StartLocalCabin(variant, human);
+            StartLocalCabin(variant, human, useConceptDemoWorld: false);
             LocalCabinPresentationSnapshot first = _cabin!.GetPresentationSnapshot();
             ValidateEffectiveSettings(first);
             _cabin.RunF02Acceptance();
@@ -35,7 +53,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 ContentCatalogRoot.GetChildCount() != 0)
                 throw new InvalidOperationException("Local session presentation did not retire cleanly.");
 
-            StartLocalCabin(variant, human);
+            StartLocalCabin(variant, human, useConceptDemoWorld: false);
             LocalCabinPresentationSnapshot second = _cabin!.GetPresentationSnapshot();
             ValidateEffectiveSettings(second);
             if (!second.IsInitialized || first.ApplicationSessionEpoch == second.ApplicationSessionEpoch ||
@@ -86,7 +104,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         }
         try
         {
-            StartLocalCabin(CabinContentVariant.Default, CabinHumanBody.XBot);
+            StartLocalCabin(
+                CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
         }
         catch (Exception exception)
         {
@@ -115,7 +134,10 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     protected override void OnEffectiveSettingsChanged(ResolvedClientSettings settings) =>
         _cabin?.ApplySettings(settings);
 
-    private void StartLocalCabin(CabinContentVariant variant, CabinHumanBody human)
+    private void StartLocalCabin(
+        CabinContentVariant variant,
+        CabinHumanBody human,
+        bool useConceptDemoWorld)
     {
         if (_cabin is not null)
             throw new InvalidOperationException("A local Cabin session is already active.");
@@ -135,18 +157,23 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         cabin.Configure(
             oracle,
             resolved,
-            ProjectSettings.GlobalizePath("user://single-player/cabin-saves"),
+            ProjectSettings.GlobalizePath(useConceptDemoWorld
+                ? "user://single-player/concept-demo-d0-0-saves"
+                : "user://single-player/cabin-saves"),
             HudLayer,
             WorldUiLayer,
             human,
-            EffectiveSettings);
+            EffectiveSettings,
+            useConceptDemoWorld);
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
         if (!snapshot.IsInitialized)
             throw new InvalidOperationException(snapshot.InitializationError ??
                 "The local Cabin consumer did not initialize.");
-        CommitSession($"Cabin — {variant} — {human}");
+        CommitSession(useConceptDemoWorld
+            ? $"Concept Demo — {human}"
+            : $"Cabin — {variant} — {human}");
     }
 
     private static CabinContentVariant ReadVariant()

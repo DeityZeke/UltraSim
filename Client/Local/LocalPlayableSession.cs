@@ -18,8 +18,8 @@ using UltraSim.Spatial;
 namespace UltraSim.Client.Local;
 
 /// <summary>
-/// Permanent packet-free local application composition for the playable Cabin
-/// slice. All mutable authority is created, used, and reclaimed by one private
+/// Permanent packet-free local application composition for the playable Cabin/Concept Demo
+/// slices. All mutable authority is created, used, and reclaimed by one private
 /// owner thread. Client callers see only bounded command ingress, concrete
 /// semantic consumers, and immutable/coalesced presentation facts.
 /// </summary>
@@ -32,6 +32,7 @@ public sealed class LocalPlayableSession : IDisposable
     private readonly object _viewGate = new();
     private readonly WorldPack _worldPack;
     private readonly BoundWorldPack _boundWorld;
+    private readonly bool _conceptDemo;
     private readonly string _saveRoot;
     private readonly LocalPlayableSessionLimits _limits;
     private readonly BoundedSpscQueue<LocalPlayableCommand> _commands;
@@ -57,6 +58,24 @@ public sealed class LocalPlayableSession : IDisposable
         LocalPlayableSessionLimits limits = default)
     {
         WorldPack pack = GamePlayableWorld.CreateWorldPack();
+        return Create(pack, saveRoot, limits, conceptDemo: false);
+    }
+
+    /// <summary>Creates the permanent local application path over the D0.0 island fixture.</summary>
+    public static LocalPlayableSession CreateConceptDemo(
+        string saveRoot,
+        LocalPlayableSessionLimits limits = default)
+    {
+        WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+        return Create(pack, saveRoot, limits, conceptDemo: true);
+    }
+
+    private static LocalPlayableSession Create(
+        WorldPack pack,
+        string saveRoot,
+        LocalPlayableSessionLimits limits,
+        bool conceptDemo)
+    {
         var binding = new WorldContentBinding(
             GameContent.WorldFingerprint,
             [
@@ -76,17 +95,19 @@ public sealed class LocalPlayableSession : IDisposable
             ]);
         if (!pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"The playable WorldPack did not bind: {error}.");
-        return new LocalPlayableSession(pack, bound!, saveRoot, limits);
+        return new LocalPlayableSession(pack, bound!, saveRoot, limits, conceptDemo);
     }
 
     public LocalPlayableSession(
         WorldPack worldPack,
         BoundWorldPack boundWorld,
         string saveRoot,
-        LocalPlayableSessionLimits limits = default)
+        LocalPlayableSessionLimits limits = default,
+        bool conceptDemo = false)
     {
         _worldPack = worldPack ?? throw new ArgumentNullException(nameof(worldPack));
         _boundWorld = boundWorld ?? throw new ArgumentNullException(nameof(boundWorld));
+        _conceptDemo = conceptDemo;
         ArgumentException.ThrowIfNullOrWhiteSpace(saveRoot);
         if (worldPack.Fingerprint != boundWorld.Fingerprint)
             throw new ArgumentException("The bound world does not belong to the supplied WorldPack.", nameof(boundWorld));
@@ -274,7 +295,8 @@ public sealed class LocalPlayableSession : IDisposable
                 new ServerRuntimeOptions(
                     UltraSimGameComposition.CreateWorldOptions(
                         128,
-                        new PersistenceIdentityOptions(new PersistentWorldId(0x80_4010))),
+                        new PersistenceIdentityOptions(new PersistentWorldId(
+                            _conceptDemo ? 0x80_D000UL : 0x80_4010UL))),
                     WorldClockOptions.Default));
             runtime.Initialize();
             runtime.Start();
@@ -282,8 +304,11 @@ public sealed class LocalPlayableSession : IDisposable
             AdmissionResult entered = admission.JoinAccountless(new ParticipantId(4010));
             if (!entered.IsEntered)
                 throw new InvalidOperationException("The local playable participant could not enter.");
+            bool conceptDemo = _conceptDemo;
             if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
-                    (world, _, game) => GamePlayableWorld.Populate(world, game, entered.Entity),
+                    (world, _, game) => conceptDemo
+                        ? GamePlayableWorld.PopulateConceptDemo(world, game, entered.Entity)
+                        : GamePlayableWorld.Populate(world, game, entered.Entity),
                     out GamePlayableWorldEntities entities))
                 throw new InvalidOperationException("The local playable world could not populate.");
             runtime.Tick();
@@ -412,9 +437,13 @@ public sealed class LocalPlayableSession : IDisposable
                     (world, generationId, game) =>
                     {
                         Entity actor = Resolve(world, entities.PlayerId);
-                        Entity target = captured.Selection == LocalPlayableSelection.CabinDoor
-                            ? Resolve(world, entities.CabinDoorId)
-                            : Entity.Null;
+                        Entity target = captured.Selection switch
+                        {
+                            LocalPlayableSelection.CabinDoor => Resolve(world, entities.CabinDoorId),
+                            LocalPlayableSelection.SkyTelepad when entities.SkyTelepadId.IsValid =>
+                                Resolve(world, entities.SkyTelepadId),
+                            _ => Entity.Null,
+                        };
                         game.WorldActions.ApplyPlayerCommand(
                             world, game.WorldState, actor, admitted, target,
                             out GamePlayerCommandResult result);

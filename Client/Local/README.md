@@ -49,6 +49,9 @@ connection, or reference `Client.Network`, Game Protocol, Remote Replication, or
 `Kernels.Network`. Hosting in a Complete composition adds independent remote
 sessions around the same authority; the host player stays on this local path.
 
-`LocalPlayableSession` remains the concrete Cabin authority composition rather than a universal
-local-server API. F0.2's `Client.Local.Godot` consumer now binds it into the persistent Single Player
-and Complete shell lifecycle without changing this ownership boundary.
+`LocalPlayableSession` remains a concrete playable-world authority composition rather than a
+universal local-server API. `CreateCabin` preserves the historical F0.2 fixture;
+`CreateConceptDemo` composes D0.0's finite Central Island, mountain/cave, Sky Island, and public
+telepad over the same bounded bridge. The fixtures have separate persistent-world identities and
+save roots. The permanent Single Player and Complete shells select the Concept Demo explicitly;
+acceptance can still select Cabin without changing this ownership boundary.

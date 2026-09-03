@@ -1,8 +1,9 @@
 # Local Play Godot capability
 
-`UltraSim.Client.Local.Godot` is the permanent F0.2 presentation/composition consumer for the
-Network-free local Cabin application. It is referenced by Single Player and Complete, but not
-Online.
+`UltraSim.Client.Local.Godot` is the permanent presentation/composition consumer for the
+Network-free local playable application. It is referenced by Single Player and Complete, but not
+Online. F0.2 established its Cabin lifecycle; Concept Demo D0.0 now uses the same consumer for the
+physical island world.
 
 ```text
 persistent ClientRoot
@@ -28,6 +29,16 @@ Physics P0.1d maps the resolved Space binding to the common edge-triggered Game 
 the direct human-control profiles. OrbitCommand deliberately retains its UO-like no-jump grammar.
 Godot presents the authoritative replicated Y position; it owns no body velocity, gravity,
 grounding decision, or recovery teleport.
+
+Normal Single Player entry explicitly selects the D0.0 Concept Demo fixture. Its bounded acceptance
+journey walks through the MountainShell opening on the preserved base cave floor, jumps across real
+void and lands on the detached Sky shell, exercises the Game-owned telepad with OrbitCommand, then
+falls through unsupported air into Game-owned recovery. Client Core/Godot retain and realize the
+three sparse shell fragments without converting terrain into ECS entities or per-cell nodes.
+
+The unconfigured `Playable.Godot` wrapper and the F0.2 Default/Replace/Add lifecycle gates continue
+to select the historical Cabin fixture. This is a deliberate compatibility split, not a runtime
+feature flag: both paths use the same local semantic bridge and presentation consumer.
 
 The normal user path resolves the frozen A0.1 `Default` catalog. Headless acceptance can inject
 `Default`, `Replace`, or `Add` without adding a user-facing test-variant menu. Presentation resolves

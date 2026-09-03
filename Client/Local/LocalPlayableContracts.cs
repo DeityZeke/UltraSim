@@ -11,7 +11,8 @@ public enum LocalPlayableSelection : byte
     None = 0,
     CabinDoor = 1,
     CabinChest = 2,
-    Unsupported = 3,
+    SkyTelepad = 3,
+    Unsupported = 4,
 }
 
 public readonly record struct LocalPlayableCommand(

@@ -11,6 +11,11 @@ landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. S
 general triangle time-of-impact, FrozenStatic landing support, and actor collision remain
 unstarted.
 
+Concept Demo D0.0 is the accepted first integrated consumer of this chain: it traverses beneath a
+MountainShell, jumps and lands on a detached Sky shell, filters Jump from OrbitCommand, invokes an
+authored telepad through occupancy-aware relocation, and falls into Game-owned recovery. D0.0 adds
+no new Physics behavior; further provider work remains evidence-driven.
+
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
 This document defines the intended boundary between Game locomotion, world
