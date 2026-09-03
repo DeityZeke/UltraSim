@@ -18,6 +18,12 @@ consumers. Leaving the session synchronously stops the authority thread, detache
 removes session presentation, and permits a fresh application/control/content generation on the
 next entry.
 
+Administrative relocation completion is not treated as immediate presentation convergence. The
+F0.2 client continues pumping the bounded local semantic path until its controlled-player
+projection equals the authoritative relocated position before a following facing/movement
+acceptance step may derive an absolute world point. This closes the relocation/facing race without
+giving Godot direct authority access or changing the accepted command format.
+
 The normal user path resolves the frozen A0.1 `Default` catalog. Headless acceptance can inject
 `Default`, `Replace`, or `Add` without adding a user-facing test-variant menu. Presentation resolves
 verified PNG payloads by SHA-256 identity; it does not introduce cache, HTTP, or runtime model

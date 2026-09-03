@@ -303,6 +303,12 @@ public readonly ref struct WorldTerrainSurfaceBandView
 /// <summary>Deterministic complete-column queries over base plus sparse additional surfaces.</summary>
 public static class WorldTerrainColumnQueries
 {
+    /// <summary>
+    /// Default admitted maximum: one BaseTerrain face plus Top/Bottom from every additional
+    /// fragment allowed in one chunk. Consumers may use this as fixed fail-closed scratch.
+    /// </summary>
+    public const int DefaultMaximumColumnSurfaceCount = 1 + (64 * 2);
+
     public static WorldTerrainColumnQueryStatus TryCopyTerrainColumnSurfaces(
         this BoundWorldPack world,
         in WorldPosition location,
@@ -332,6 +338,27 @@ public static class WorldTerrainColumnQueries
         int maximumHeightMillimeters,
         out WorldTerrainColumnSurface support) =>
         Find(new TerrainColumnSource(world), location, maximumHeightMillimeters, support: true, out support);
+
+    /// <summary>
+    /// Finds the support face nearest one requested standing elevation. Distance is physical;
+    /// identity is used only to make an exact-height tie canonical. An equally distant lower
+    /// support wins over an upper support so placement does not rise on an ambiguous tie.
+    /// </summary>
+    public static WorldTerrainColumnQueryStatus TryFindNearestSupport(
+        this BoundWorldPack world,
+        in WorldPosition location,
+        int requestedHeightMillimeters,
+        out WorldTerrainColumnSurface support) =>
+        FindNearestSupport(
+            new TerrainColumnSource(world), location, requestedHeightMillimeters, out support);
+
+    public static WorldTerrainColumnQueryStatus TryFindNearestSupport(
+        this WorldPreparedView world,
+        in WorldPosition location,
+        int requestedHeightMillimeters,
+        out WorldTerrainColumnSurface support) =>
+        FindNearestSupport(
+            new TerrainColumnSource(world), location, requestedHeightMillimeters, out support);
 
     public static WorldTerrainColumnQueryStatus TryFindLowestCeilingAtOrAbove(
         this BoundWorldPack world,
@@ -452,6 +479,67 @@ public static class WorldTerrainColumnQueries
             }
         }
         return WorldTerrainColumnQueryStatus.Complete;
+    }
+
+    private static WorldTerrainColumnQueryStatus FindNearestSupport(
+        in TerrainColumnSource world,
+        in WorldPosition location,
+        int requestedHeightMillimeters,
+        out WorldTerrainColumnSurface result)
+    {
+        result = default;
+        if (!world.TryGetBaseTerrain(location.ToChunkKey(world.Space), out WorldTerrainChunkView terrain))
+            return WorldTerrainColumnQueryStatus.Unavailable;
+
+        bool found = false;
+        TerrainCellCoord cell = TerrainCellCoord.FromLocal(location.Local);
+        int materialIndex = TerrainChunkFormat.GetMaterialIndex(cell);
+        if (terrain.IsSurfacePresent(materialIndex))
+        {
+            result = new WorldTerrainColumnSurface(
+                default,
+                WorldTerrainSurfaceFace.Base,
+                BaseTerrainSurface.SampleHeight(terrain, location),
+                terrain.GetMaterial(materialIndex));
+            found = true;
+        }
+
+        if (world.TryGetAdditionalTerrainSurfaceBands(
+                terrain.Key, out WorldTerrainSurfaceBandChunkView bands))
+        {
+            for (int index = 0; index < bands.Count; index++)
+            {
+                WorldTerrainSurfaceBandView band = bands.GetBand(index);
+                if (!band.HasTop || !band.Bounds.Contains(cell)) continue;
+                int localX = cell.X - band.Bounds.MinimumCellX;
+                int localZ = cell.Z - band.Bounds.MinimumCellZ;
+                if (!band.IsCellPresent(localX, localZ)) continue;
+                WorldTerrainColumnSurface candidate =
+                    Sample(band, WorldTerrainSurfaceFace.Top, location);
+                if (!found || IsNearerSupport(candidate, result, requestedHeightMillimeters))
+                {
+                    result = candidate;
+                    found = true;
+                }
+            }
+        }
+        return WorldTerrainColumnQueryStatus.Complete;
+    }
+
+    private static bool IsNearerSupport(
+        in WorldTerrainColumnSurface candidate,
+        in WorldTerrainColumnSurface current,
+        int requestedHeightMillimeters)
+    {
+        long candidateDelta = (long)candidate.HeightMillimeters - requestedHeightMillimeters;
+        long currentDelta = (long)current.HeightMillimeters - requestedHeightMillimeters;
+        ulong candidateDistance = (ulong)Math.Abs(candidateDelta);
+        ulong currentDistance = (ulong)Math.Abs(currentDelta);
+        if (candidateDistance != currentDistance) return candidateDistance < currentDistance;
+        bool candidateBelow = candidateDelta <= 0;
+        bool currentBelow = currentDelta <= 0;
+        if (candidateBelow != currentBelow) return candidateBelow;
+        return CompareIdentity(candidate, current) < 0;
     }
 
     internal static WorldTerrainColumnSurface Sample(

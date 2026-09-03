@@ -1183,6 +1183,13 @@ public partial class LocalCabinClient : Node3D
         if (!completed.LastAdministrativeSucceeded)
             throw new InvalidOperationException(
                 $"Launch-smoke relocation failed: {completed.LastAdministrativeMessage}.");
+
+        // The authority may publish the administrative result after this frame copied its
+        // presentation view. Do not let the next client-authored absolute facing point use the
+        // pre-relocation _player origin. Cross the same semantic boundary as ordinary play:
+        // authority commits first, then Client Core/presentation observes that exact position.
+        WorldPosition authoritativePosition = completed.PlayerPosition;
+        DriveLocalUntil(() => _player == authoritativePosition);
     }
 
     private int CountPresentedPrefab(uint prefabId)

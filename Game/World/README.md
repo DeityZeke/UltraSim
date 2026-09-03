@@ -67,8 +67,11 @@ Bound/prepared views expose borrowed per-chunk fragments plus allocation-free
 column queries. A complete column contains present BaseTerrain and every
 intersecting Top/Bottom face sorted by sampled Y, while helper reads select the
 highest support candidate at/below a threshold or lowest ceiling candidate
-at/above it. Identity never determines order. These are structural candidates,
-not grounding/clearance policy; Physics P0.1c owns that interpretation.
+at/above it. A nearest-support helper selects by absolute elevation distance,
+prefers the lower face on an exact distance tie, and uses identity only to make
+an exact-height tie canonical. Identity never determines vertical order. These
+are structural candidates; Physics P0.1c owns grounding, footprint, clearance,
+and step interpretation.
 
 The engine-neutral mesh builder emits deterministic top, bottom, and exposed
 closure triangles into caller-owned spans using the same global parity as base

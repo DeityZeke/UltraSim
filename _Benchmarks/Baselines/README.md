@@ -210,6 +210,13 @@ Useful current anchors can be located by their embedded workload or filename:
   half-open contact, exact broadphase filtering, Direct/Destination policy, bounded
   failure, and 0 B warmed allocation. It is not support/step, sliding, continuous
   terrain-support, actor-collision, or provider evidence;
+- `physics-p0.1c-support-clearance-*` — actual-height BaseTerrain/terrain-shell
+  support selection, nearest-support occupancy, five-point footprint validation,
+  Bottom-face clearance, explicit body-profile step-up/down, bounded grounded path
+  sampling, intentional-void versus unavailable classification, transactional
+  relocation, generation replacement, 20/60/120 Hz-equivalent agreement, and 0 B
+  warmed allocation. It is not gravity, jump/fall/landing, sliding, arbitrary
+  triangle time-of-impact, static/dynamic support, or provider evidence;
 - `terrain-t0-acceptance-matrix-closure-*` and
   `terrain-t0.10-acceptance-closure-*` — cumulative T0.0-T0.10 profile mapping
   plus the current final Release integrated/native rerun. They freeze the

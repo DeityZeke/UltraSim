@@ -29,6 +29,8 @@ Run("PlayableAuthorityBlocksCabinDoorWallsAndChest", PlayableAuthorityBlocksCabi
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
 Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
+Run("SimplePhysicsSelectsTerrainShellSupportStepAndClearance",
+    SimplePhysicsTerrainShellSupport, results);
 Run("SweptMotionPreservesDirectAndDestinationPolicy", SweptMotionPreservesGamePolicy, results);
 Run("PlayableMovementIsCadenceIndependent", PlayableMovementCadenceMatrix, results);
 Run("PlayableMovementIsInputDeliveryRateIndependent", PlayableMovementDeliveryRateMatrix, results);
@@ -117,7 +119,7 @@ static TestMetrics PlayableWoodsCabinRoundTrip()
         playerPosition = offline.ReadPosition();
         Expect(playerPosition.GlobalXMillimeters ==
             GamePlayableWorld.PlayerStart.GlobalXMillimeters + 100,
-            "The retained Direct intent did not integrate on the authoritative step.");
+            $"The retained Direct intent did not integrate on the authoritative step: {playerPosition}.");
         Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayerCommandResult>(
             (world, generationId, game) =>
             {
@@ -709,7 +711,7 @@ static TestMetrics SimplePhysicsOccupancy()
             IGameGenerationStateProvider, long>(
             (_, _, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800);
+                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
                 Expect(!default(SimpleOccupancyResult).CanOccupy,
                     "A default occupancy result was interpreted as clear.");
                 bool invalidRejected = false;
@@ -817,7 +819,7 @@ static TestMetrics SimplePhysicsSweptMotion()
             IGameGenerationStateProvider, long>(
             (_, _, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800);
+                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
                 WorldPosition staticStart = At(13_500, 7_000);
                 WorldPosition staticTarget = At(13_500, 11_000);
                 Expect(game.SimplePhysics.ProbeOccupancy(
@@ -929,6 +931,240 @@ static TestMetrics SimplePhysicsSweptMotion()
         HashText("swept-static-dynamic-corner-exact"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
         "Exact integer swept-AABB motion blocks thin static/dynamic tunneling and diagonal corners, avoids broadphase false positives, fails closed at capacity, and allocates 0 B warmed.");
+}
+
+static TestMetrics SimplePhysicsTerrainShellSupport()
+{
+    WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1083))));
+    host.Start();
+    UltraSimSimplePhysics? initialPhysics = null;
+
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, long>(
+            (world, generationId, game) =>
+            {
+                initialPhysics = game.SimplePhysics;
+                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                Expect(!default(SimpleMotionResult).WasResolved &&
+                    !default(SimpleOccupancyResult).CanOccupy,
+                    "Default support-aware results did not fail closed.");
+
+                SimpleOccupancyResult mountain = Occupy(3_500, 10_000, 3_500);
+                SimpleOccupancyResult middle = Occupy(3_500, 5_000, 3_500);
+                SimpleOccupancyResult baseFloor = Occupy(3_500, 0, 3_500);
+                SimpleOccupancyResult belowBase = Occupy(3_500, -5_000, 3_500);
+                Expect(mountain.CanOccupy && mountain.IsGrounded &&
+                    mountain.Position.YMillimeters == 10_000 &&
+                    mountain.Support.SurfaceId == new WorldSurfaceId(900) &&
+                    middle.CanOccupy && middle.Position.YMillimeters == 5_000 &&
+                    middle.Support.SurfaceId == new WorldSurfaceId(1) &&
+                    baseFloor.CanOccupy && baseFloor.Position.YMillimeters == 0 &&
+                    baseFloor.Support.IsBase &&
+                    belowBase.CanOccupy && belowBase.Position.YMillimeters == -5_000 &&
+                    belowBase.Support.SurfaceId == new WorldSurfaceId(333),
+                    "Occupancy selected a shell by identity/rank instead of requested physical elevation.");
+
+                var tallBody = new SimplePhysicsBody(300, 300, 3_500, 500, 500);
+                SimpleOccupancyResult belowMountain = game.SimplePhysics.ProbeOccupancy(
+                    new SimpleOccupancyRequest(Position(3_500, 5_000, 3_500), tallBody),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(belowMountain.Status == SimpleOccupancyStatus.Blocked,
+                    "The mountain shell Bottom did not become clearance geometry below its Top support.");
+
+                SimpleOccupancyResult lowCeiling = Occupy(7_000, 0, 3_500);
+                Expect(lowCeiling.Status == SimpleOccupancyStatus.Blocked,
+                    "A 1.5 m terrain-shell ceiling admitted a 1.8 m body.");
+                var exactClearanceBody = new SimplePhysicsBody(300, 300, 1_500, 500, 500);
+                Expect(game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(Position(7_000, 0, 3_500), exactClearanceBody),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true).CanOccupy,
+                    "Exact half-open contact at body height was treated as ceiling overlap.");
+                SimpleOccupancyResult intentionalVoid = Occupy(12_500, 0, 12_500);
+                Expect(intentionalVoid.Status == SimpleOccupancyStatus.Unsupported,
+                    "Intentional resident BaseTerrain void was not classified as unsupported.");
+                SimpleOccupancyResult shellOverVoid = Occupy(15_000, 3_000, 12_000);
+                Expect(shellOverVoid.CanOccupy && shellOverVoid.Position.YMillimeters == 3_000 &&
+                    shellOverVoid.Support.SurfaceId == new WorldSurfaceId(50),
+                    "An additional shell could not independently support a body over BaseTerrain void.");
+                Expect(Occupy(1_000_000, 0, 1_000_000).Status ==
+                    SimpleOccupancyStatus.OutsidePreparedWorld,
+                    "Unavailable structural data was not distinguished from intentional void.");
+
+                WorldPosition lowStepStart = Position(1_500, 0, 8_500);
+                SimpleOccupancyResult ambiguousLowStep = Occupy(3_000, 200, 8_500);
+                Expect(ambiguousLowStep.Status == SimpleOccupancyStatus.Blocked,
+                    "An equidistant occupancy request was silently raised from lower BaseTerrain onto another shell.");
+                SimpleOccupancyResult nearestLowStepTop = Occupy(3_000, 300, 8_500);
+                Expect(nearestLowStepTop.CanOccupy &&
+                    nearestLowStepTop.Position.YMillimeters == 400 &&
+                    nearestLowStepTop.Support.SurfaceId == new WorldSurfaceId(700),
+                    "Occupancy did not honor the physically nearest terrain-shell support.");
+                SimpleMotionResult stepUp = Move(lowStepStart, 3_000, 8_500);
+                Expect(stepUp.WasResolved && stepUp.IsGrounded &&
+                    stepUp.Position.YMillimeters == 400 &&
+                    stepUp.Support.SurfaceId == new WorldSurfaceId(700),
+                    "A reachable 400 mm two-sided terrain step did not resolve onto its Top face.");
+                SimpleMotionResult stepDown = Move(stepUp.Position, 1_500, 8_500);
+                Expect(stepDown.WasResolved && stepDown.Position.YMillimeters == 0 &&
+                    stepDown.Support.IsBase,
+                    "A bounded 400 mm grounded descent did not return to BaseTerrain.");
+                WorldPosition cadence20 = TraverseLowStep(20);
+                WorldPosition cadence60 = TraverseLowStep(60);
+                WorldPosition cadence120 = TraverseLowStep(120);
+                Expect(cadence20 == cadence60 && cadence20 == cadence120 &&
+                    cadence20 == stepUp.Position,
+                    "Terrain step/support selection diverged at 20/60/120 Hz-equivalent sampling.");
+
+                WorldPosition highStepStart = Position(7_500, 0, 8_500);
+                Expect(Move(highStepStart, 9_000, 8_500).Status == SimpleMotionStatus.Blocked,
+                    "A 1,000 mm closed terrain step exceeded the 500 mm profile but did not block.");
+
+                WorldPosition gapStart = Position(11_500, 0, 12_500);
+                SimpleOccupancyResult clearBeyondGap = Occupy(13_500, 0, 12_500);
+                Expect(clearBeyondGap.CanOccupy &&
+                    Move(gapStart, 13_500, 12_500).Status == SimpleMotionStatus.Unsupported,
+                    "Bounded grounded path sampling skipped an intentional one-meter terrain gap.");
+                Expect(Move(Position(1_000, 0, 1_000), 130_000, 1_000).Status ==
+                    SimpleMotionStatus.Blocked,
+                    "Grounded traversal beyond the fixed sample budget did not fail closed.");
+
+                Expect(world.TryInstantiate(game.Content.Character, out Entity actor) &&
+                    game.WorldState.TrySetPosition(world, actor, Position(1_000, 0, 1_000)),
+                    "The Game-owned terrain-shell actor could not be created.");
+                GameWorldActionStatus relocation = game.WorldActions.RelocateActor(
+                    world,
+                    game.WorldState,
+                    actor,
+                    Position(3_500, 10_000, 3_500),
+                    out WorldPosition relocated);
+                Expect(relocation == GameWorldActionStatus.Accepted &&
+                    relocated.YMillimeters == 10_000 &&
+                    game.WorldState.TryReadPosition(world, actor, out WorldPosition committed) &&
+                    committed == relocated,
+                    "Game relocation did not commit the selected mountain-shell support.");
+                GameWorldActionStatus voidRelocation = game.WorldActions.RelocateActor(
+                    world,
+                    game.WorldState,
+                    actor,
+                    Position(12_500, 0, 12_500),
+                    out _);
+                Expect(voidRelocation == GameWorldActionStatus.Unsupported &&
+                    game.WorldState.TryReadPosition(world, actor, out WorldPosition afterRejected) &&
+                    afterRejected == relocated,
+                    "Unsupported relocation did not preserve authoritative Game position transactionally.");
+
+                WorldPosition warmStart = Position(1_000, 0, 1_000);
+                for (int index = 0; index < 16; index++)
+                    _ = Move(warmStart, 1_250, 1_000);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 1_000; index++)
+                {
+                    SimpleMotionResult result = Move(warmStart, 1_250, 1_000);
+                    if (!result.WasResolved || result.Position.YMillimeters != 0)
+                        throw new InvalidOperationException("The warmed grounded shell query changed.");
+                }
+                return GC.GetAllocatedBytesForCurrentThread() - before;
+
+                SimpleOccupancyResult Occupy(long x, int y, long z) =>
+                    game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(Position(x, y, z), body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+
+                SimpleMotionResult Move(in WorldPosition current, long x, long z) =>
+                    game.SimplePhysics.ResolveMotion(
+                        new SimpleMotionRequest(current, x, z, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+
+                WorldPosition TraverseLowStep(int frequency)
+                {
+                    WorldPosition position = lowStepStart;
+                    for (int tick = 1; tick <= frequency; tick++)
+                    {
+                        long targetX = 1_500 + (1_500L * tick / frequency);
+                        SimpleMotionResult result = Move(position, targetX, 8_500);
+                        if (!result.WasResolved)
+                            throw new InvalidOperationException(
+                                $"The {frequency} Hz-equivalent terrain step blocked at tick {tick}: {result.Status}.");
+                        position = result.Position;
+                    }
+                    return position;
+                }
+
+                static WorldPosition Position(long x, int y, long z)
+                {
+                    if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+                        throw new InvalidOperationException("A terrain-shell fixture point was invalid.");
+                    return value;
+                }
+            },
+            out long allocated) && allocated == 0,
+        $"Warmed support/step/clearance resolution allocated {allocated} caller bytes.");
+
+    GameStaging staging = composition.CreateFresh(
+        64,
+        new PersistenceIdentityOptions(new PersistentWorldId(0x80_1083)));
+    GameGenerationState? candidate = null;
+    bool published = false;
+    try
+    {
+        staging.World.Seal();
+        staging.World.Initialize();
+        staging.World.BeginRun();
+        candidate = new GameGenerationState(
+            new AccountingStore(),
+            staging.Inventory,
+            staging.Content,
+            staging.WorldState,
+            staging.SimulationLookup,
+            staging.Replication,
+            staging.WorldActions);
+        Expect(host.RuntimeForTesting.Game.TryPublishPreparedGeneration(
+                staging.World, candidate, out _),
+            "The terrain-shell replacement generation could not publish.");
+        published = true;
+        candidate = null;
+    }
+    finally
+    {
+        if (!published)
+        {
+            candidate?.Dispose();
+            staging.World.Dispose();
+        }
+    }
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, bool>(
+            (_, _, game) =>
+            {
+                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                if (!WorldPosition.TryFromGlobalMillimeters(
+                        3_500, 10_000, 3_500, out WorldPosition target))
+                    return false;
+                SimpleOccupancyResult result = game.SimplePhysics.ProbeOccupancy(
+                    new SimpleOccupancyRequest(target, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                return !ReferenceEquals(initialPhysics, game.SimplePhysics) &&
+                    result.CanOccupy && result.Position.YMillimeters == 10_000 &&
+                    result.Support.SurfaceId == new WorldSurfaceId(900);
+            },
+            out bool replacementGrounded) && replacementGrounded,
+        "Generation replacement did not rebuild support-aware Physics over the immutable shell pack.");
+
+    return new TestMetrics(
+        HashText("terrain-shell-support-step-clearance-void"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
+        "Geometry-ordered Base/Top support, Bottom clearance, bounded step up/down, intentional void, unavailable data, fixed path-work limits, and 0 B warmed allocation.");
 }
 
 static TestMetrics SweptMotionPreservesGamePolicy()
@@ -2623,6 +2859,112 @@ static string CaptureProjectionCanonical(PlayableClientProjection projection)
     publicRows.Sort(StringComparer.Ordinal);
     foreach (string value in publicRows) text.Append("|p=").Append(value);
     return HashText(text.ToString());
+}
+
+static WorldPack CreatePhysicsTerrainShellWorldPack()
+{
+    var limits = new WorldPackLimits(
+        1 * 1024 * 1024,
+        maximumChunks: 1,
+        maximumSections: 8,
+        maximumFrozenStatics: 0,
+        maximumMultiInstances: 0,
+        maximumMultiFragments: 0,
+        maximumAdditionalTerrainSurfaceFragments: 8,
+        maximumAdditionalTerrainSurfaceFragmentsPerChunk: 8);
+    var builder = new WorldPackBuilder(
+        GameWorldState.DefaultSpace,
+        GameContent.WorldFingerprint,
+        limits);
+    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    Array.Fill(materials, checked((ushort)GameTerrainMaterialIds.Grass));
+    var heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    var basePresence = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
+    TerrainSurfacePresence.FillPresent(basePresence);
+    for (int z = 24; z <= 25; z++)
+    for (int x = 24; x <= 25; x++)
+        TerrainSurfacePresence.SetPresent(
+            basePresence, new TerrainCellCoord(checked((byte)x), checked((byte)z)), false);
+    for (int z = 22; z <= 25; z++)
+    for (int x = 28; x <= 31; x++)
+        TerrainSurfacePresence.SetPresent(
+            basePresence, new TerrainCellCoord(checked((byte)x), checked((byte)z)), false);
+    Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase baseHeight),
+        "The P0.1c BaseTerrain elevation was not q5 canonical.");
+    Expect(builder.TryAddBaseTerrain(
+            key, materials, baseHeight, heights, basePresence, out WorldPackBuildError baseError),
+        $"The P0.1c base terrain could not be built: {baseError}.");
+
+    AddBand(new WorldSurfaceId(900), new TerrainSurfacePatchBounds(4, 4, 6, 6),
+        top: 10_000, bottom: 8_000);
+    AddBand(new WorldSurfaceId(1), new TerrainSurfacePatchBounds(4, 4, 6, 6),
+        top: 5_000, bottom: null);
+    AddBand(new WorldSurfaceId(333), new TerrainSurfacePatchBounds(4, 4, 6, 6),
+        top: -5_000, bottom: null);
+    AddBand(new WorldSurfaceId(400), new TerrainSurfacePatchBounds(12, 4, 6, 6),
+        top: null, bottom: 1_500);
+    AddBand(new WorldSurfaceId(700), new TerrainSurfacePatchBounds(4, 14, 6, 6),
+        top: 400, bottom: 0);
+    AddBand(new WorldSurfaceId(2), new TerrainSurfacePatchBounds(16, 14, 6, 6),
+        top: 1_000, bottom: 0);
+    AddBand(new WorldSurfaceId(50), new TerrainSurfacePatchBounds(28, 22, 4, 4),
+        top: 3_000, bottom: null);
+
+    Expect(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError),
+        $"The P0.1c terrain-shell WorldPack could not build: {buildError}.");
+    return artifact!.Open();
+
+    void AddBand(
+        WorldSurfaceId id,
+        TerrainSurfacePatchBounds bounds,
+        int? top,
+        int? bottom)
+    {
+        WorldTerrainSurfaceFaces faces =
+            (top.HasValue ? WorldTerrainSurfaceFaces.Top : WorldTerrainSurfaceFaces.None) |
+            (bottom.HasValue ? WorldTerrainSurfaceFaces.Bottom : WorldTerrainSurfaceFaces.None);
+        var presence = new ulong[bounds.PresenceWordCount];
+        Array.Fill(presence, ulong.MaxValue);
+        int remainder = bounds.CellCount & 63;
+        if (remainder != 0) presence[^1] = (1UL << remainder) - 1;
+        var connections = new TerrainSurfaceEdgeConnection[bounds.CellCount];
+        ushort[] topMaterials = top.HasValue ? new ushort[bounds.CellCount] : [];
+        ushort[] bottomMaterials = bottom.HasValue ? new ushort[bounds.CellCount] : [];
+        TerrainHeightOffset[] topHeights = top.HasValue
+            ? new TerrainHeightOffset[bounds.VertexCount]
+            : [];
+        TerrainHeightOffset[] bottomHeights = bottom.HasValue
+            ? new TerrainHeightOffset[bounds.VertexCount]
+            : [];
+        Array.Fill(topMaterials, checked((ushort)GameTerrainMaterialIds.Rock));
+        Array.Fill(bottomMaterials, checked((ushort)GameTerrainMaterialIds.Rock));
+        TerrainHeightPlaneBase topBase = default;
+        TerrainHeightPlaneBase bottomBase = default;
+        Expect(!top.HasValue || TerrainHeightPlaneBase.TryCreate(top.Value, out topBase),
+            "The P0.1c Top elevation was not q5 canonical.");
+        Expect(!bottom.HasValue || TerrainHeightPlaneBase.TryCreate(bottom.Value, out bottomBase),
+            "The P0.1c Bottom elevation was not q5 canonical.");
+        ushort sideMaterial = top.HasValue && bottom.HasValue
+            ? checked((ushort)GameTerrainMaterialIds.Rock)
+            : (ushort)0;
+        Expect(builder.TryAddAdditionalTerrainSurfaceBand(
+                key,
+                id,
+                bounds,
+                faces,
+                presence,
+                connections,
+                topMaterials,
+                topBase,
+                topHeights,
+                bottomMaterials,
+                bottomBase,
+                bottomHeights,
+                sideMaterial,
+                out WorldPackBuildError error),
+            $"The P0.1c terrain shell {id} could not be built: {error}.");
+    }
 }
 
 static WorldPosition ReadWorldPosition(ServerGameFacet runtime, PersistentEntityId id)

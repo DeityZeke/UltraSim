@@ -39,6 +39,7 @@ public enum GameWorldActionStatus : byte
     OutsidePreparedWorld,
     InvariantViolation,
     Blocked,
+    Unsupported,
 }
 
 /// <summary>Admission and independently composed effects of one player command.</summary>
@@ -60,10 +61,14 @@ public sealed class GameWorldActions
 {
     private const int ActorCollisionRadiusMillimeters = 300;
     private const int ActorCollisionHeightMillimeters = 1_800;
+    private const int ActorMaximumStepUpMillimeters = 500;
+    private const int ActorMaximumStepDownMillimeters = 500;
     private static readonly SimplePhysicsBody s_actorBody = new(
         ActorCollisionRadiusMillimeters,
         ActorCollisionRadiusMillimeters,
-        ActorCollisionHeightMillimeters);
+        ActorCollisionHeightMillimeters,
+        ActorMaximumStepUpMillimeters,
+        ActorMaximumStepDownMillimeters);
 
     private enum RetainedLocomotionKind : byte
     {
@@ -280,10 +285,17 @@ public sealed class GameWorldActions
                         current.YMillimeters,
                         update.DestinationZMillimeters,
                         out WorldPosition candidate) ||
-                    !worldState.TrySampleBaseTerrainHeight(candidate, out _))
+                    worldState.PreparedWorld is null)
                 {
                     return GameWorldActionStatus.OutsidePreparedWorld;
                 }
+                WorldTerrainColumnQueryStatus terrain =
+                    worldState.PreparedWorld.TryFindNearestSupport(
+                        candidate, current.YMillimeters, out WorldTerrainColumnSurface support);
+                if (terrain == WorldTerrainColumnQueryStatus.Unavailable)
+                    return GameWorldActionStatus.OutsidePreparedWorld;
+                if (terrain != WorldTerrainColumnQueryStatus.Complete || !support.IsValid)
+                    return GameWorldActionStatus.Unsupported;
                 SetDestination(
                     actor,
                     current,
@@ -560,6 +572,8 @@ public sealed class GameWorldActions
             projectionComplete);
         if (occupancy.Status == SimpleOccupancyStatus.OutsidePreparedWorld)
             return GameWorldActionStatus.OutsidePreparedWorld;
+        if (occupancy.Status == SimpleOccupancyStatus.Unsupported)
+            return GameWorldActionStatus.Unsupported;
         if (!occupancy.CanOccupy)
             return GameWorldActionStatus.Blocked;
 

@@ -635,6 +635,16 @@ static void AdditionalTerrainColumnsUseGeometryNotLayerRank()
     Equal(new WorldSurfaceId(200), support.SurfaceId);
     Equal(1_100_000, support.HeightMillimeters);
     Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryFindNearestSupport(point, 1_200_000,
+            out WorldTerrainColumnSurface nearestTie));
+    Equal(new WorldSurfaceId(200), nearestTie.SurfaceId);
+    Equal(1_100_000, nearestTie.HeightMillimeters);
+    Equal(WorldTerrainColumnQueryStatus.Complete,
+        world.TryFindNearestSupport(point, 1_260_000,
+            out WorldTerrainColumnSurface nearestHigh));
+    Equal(new WorldSurfaceId(100), nearestHigh.SurfaceId);
+    Equal(1_300_000, nearestHigh.HeightMillimeters);
+    Equal(WorldTerrainColumnQueryStatus.Complete,
         world.TryFindLowestCeilingAtOrAbove(point, 1_105_000, out WorldTerrainColumnSurface ceiling));
     Equal(new WorldSurfaceId(100), ceiling.SurfaceId);
     Equal(1_290_000, ceiling.HeightMillimeters);

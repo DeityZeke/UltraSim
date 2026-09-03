@@ -1,11 +1,12 @@
 # Physics P0: injected authoritative motion plan
 
-Status: P0.0 through P0.1b accepted/closed; P0.1c is next. P0.0 extracted the
+Status: P0.0 through P0.1c accepted/closed; vertical motion is next. P0.0 extracted the
 accepted endpoint behavior into generation-owned UltraSim Simple Physics, P0.1a
 added first-class occupancy-aware relocation, and P0.1b added bounded exact swept
-blocker collision. Terrain T1.1 now supplies multiple immutable structural surface
-candidates per X/Z column. Support, step, clearance, sliding, continuous terrain
-support, and actor collision remain unstarted.
+blocker collision. Terrain T1.1 supplies multiple immutable structural surface
+candidates per X/Z column; P0.1c now selects actual support, checks footprint and
+clearance, and enforces bounded grounded steps. Gravity, jump/fall/landing, sliding,
+general terrain time-of-impact, and actor collision remain unstarted.
 
 Target repository path: `Docs/Plans/PHYSICS.md`.
 
@@ -333,6 +334,77 @@ throughput improvement or as evidence for later support/response features.
 P0.1b does not add support categories, step-up/down, low-ceiling behavior beyond
 the existing swept AABB, sliding, contact response, depenetration, continuous
 terrain support, actor collision, gravity, navigation, or alternate providers.
+
+## P0.1c implementation checkpoint — 2026-09-03
+
+P0.1c consumes the accepted T1.0/T1.1 structural surface facts without adding an
+authoring-layer concept to Physics. `SimplePhysicsBody` now requires explicit
+upright extents and maximum step-up/down values; the Cabin human profile remains
+300 mm in X/Z radius, 1,800 mm high, with 500 mm step-up and step-down. There is
+no provider-global hidden step default.
+
+The two entry points remain distinct while sharing the physical legality path:
+
+```text
+ProbeOccupancy(requested X/Y/Z)
+    -> nearest Base/Top support by physical elevation
+       exact tie prefers the lower support
+    -> footprint + Bottom-face clearance
+    -> static/projected-dynamic blocker legality
+
+ResolveMotion(current -> target X/Z)
+    -> current support must still match canonical current Y
+    -> sample grounded path at <=250 mm spacing
+    -> at each sample choose highest support reachable within body step limits
+    -> footprint + Bottom-face clearance
+    -> exact P0.1b swept static/projected-dynamic blockers
+```
+
+The result carries the selected `WorldTerrainColumnSurface`. `Resolved`/`Clear`
+requires valid support; intentional resident void returns `Unsupported`, missing
+prepared structure returns `OutsidePreparedWorld`, and incomplete bounded work
+fails closed as `Blocked`. Authoritative relocation uses nearest-support occupancy:
+unsupported, blocked, and unavailable requests preserve position and retained
+locomotion; success commits the support-resolved Y and then retires locomotion.
+
+Support is geometry-ordered. `WorldSurfaceId`, fragment order, and editor shell
+labels never define vertical rank. Present BaseTerrain and additional Top faces
+are support candidates. Additional Bottom faces are clearance candidates; the
+Bottom belonging to a selected two-sided Top does not prevent standing on that
+same shell. The center and four body-footprint corners must all find support within
+the accepted height window. Exact body-top/ceiling contact retains half-open
+non-overlap semantics.
+
+Grounded path work is fixed: 250 mm maximum sample spacing, 512 path samples, five
+footprint points, and stack scratch for 129 column faces (one BaseTerrain plus
+Top/Bottom for the default 64 fragments/chunk). Custom packs with a wider column
+fail closed in this provider rather than partially interpreting geometry. Existing
+16-chunk/64-hit static scratch, the 16-entry Game collision projection, provider
+heap reservation, and warmed allocation remain unchanged.
+
+Permanent regressions prove geometry rather than identity selects mountain,
+intermediate, BaseTerrain, and below-base support; nearest placement does not jump
+to a farther upper shell; one shell acts as support above and clearance below;
+intentional void is unsupported while a shell over void supports; low ceilings
+block; exact top contact clears; 400 mm step-up/down succeeds; 1,000 mm step-up
+blocks; a one-meter void cannot be skipped; oversized path work fails closed;
+relocation is transactional; 20/60/120 Hz-equivalent traversal agrees; a replacement
+generation owns a fresh resolver over the immutable shell pack; and 1,000 warmed
+support/step/clearance resolutions allocate 0 B.
+
+The accepted Release artifact is
+[`physics-p0.1c-support-clearance-2026-09-03.json`](../../_Benchmarks/Baselines/physics-p0.1c-support-clearance-2026-09-03.json).
+It reports all twenty-three integrated gates passing, the unchanged playable-world
+`B764...F220` hash, 0 B warmed support-path allocation, unchanged 14,336 B
+`GameWorldActions` reservation, and one integrated observation of 54.835 us mean /
+82.309 us p95. That observation includes the intervening accepted T1.1/client
+baseline and is regression context, not a causal P0.1c throughput claim.
+
+P0.1c intentionally does not add persistent grounded ECS state, airborne motion,
+gravity, jump, falling, landing, sliding, partial advance, arbitrary triangle
+time-of-impact, or support supplied by FrozenStatics/Multis/dynamic blockers.
+Those structures remain blockers at this checkpoint. The next reviewed behavior
+checkpoint owns vertical motion over this accepted grounded foundation.
 
 ## RunUO archaeology
 
@@ -1460,7 +1532,7 @@ Earn continuous movement semantics separately:
 - bounded deterministic candidate work;
 - preserved Direct/Destination Game policy.
 
-### P0.1c — support, step, and clearance if gameplay earns them
+### P0.1c — support, step, and clearance — CLOSED
 
 The T1.1 Sky Island/cave consumer now earns this checkpoint. Add only the bounded
 physical foundation needed before vertical motion:
@@ -1487,11 +1559,20 @@ T1.1's `TryCopyTerrainColumnSurfaces`, `TryFindHighestSupportAtOrBelow`, and
 `TryFindLowestCeilingAtOrAbove` are bounded neutral World reads; they do not
 pre-decide grounding, clearance, step response, or motion.
 
-P0.1c still must not add gravity, jump, falling, or landing. Those remain the
-following vertical-motion checkpoint after support/clearance is accepted.
+P0.1c does not add gravity, jump, falling, or landing. Those remain the following
+vertical-motion checkpoint.
 
 **Gate:** conformance scenarios pass at accepted 20/60/120 Hz semantics with
 bounded zero-allocation warmed Simple hot paths.
+
+### P0.1d — vertical motion, jump, fall, and landing — NEXT
+
+Build on the accepted support result rather than inventing a second ground oracle.
+Add explicit grounded-to-airborne transition, bounded authoritative vertical
+integration, gravity, landing/support acquisition, and recovery only after a
+separate behavior review. Preserve intentional void and actual multi-surface
+selection. Do not broaden this milestone entry into actor collision, navigation,
+rigid bodies, or an alternate-provider campaign.
 
 ### P0.2 — Godot provider canary
 

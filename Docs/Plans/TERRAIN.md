@@ -4604,11 +4604,11 @@ materials, normals, and exact destination bounds. Godot group admission ignores
 materials referenced only by absent cells, and native presentation omits their
 triangles rather than hiding them with a special material.
 
-The current Simple Physics/locomotion consumer still uses the legacy grounded
-endpoint query. It therefore rejects Absent and Unavailable endpoints without
-conflating their World status, but T1.0 does not add continuous support, falling,
-gravity, or traversal across a gap. Those behaviors remain P0.1c/later Physics
-work.
+The accepted P0.1c Simple Physics consumer now selects support from actual
+BaseTerrain/additional Top geometry, distinguishes intentional Absent as
+`Unsupported` from Unavailable prepared data, and checks a bounded grounded path.
+T1.0 itself still owns topology only; falling, gravity, and airborne gap traversal
+remain later Physics work.
 
 Permanent evidence covers:
 
@@ -4694,6 +4694,10 @@ TryCopyTerrainColumnSurfaces(position, destination)
 TryFindHighestSupportAtOrBelow(position, maximumY)
 TryFindLowestCeilingAtOrAbove(position, minimumY)
     geometry-selected structural candidates only
+
+TryFindNearestSupport(position, requestedY)
+    physical-distance placement candidate
+    lower support wins an exact distance tie
 ```
 
 The complete-column operation reports an exact required count without partial
@@ -4701,10 +4705,10 @@ output when the caller span is too small. An unavailable base/prepared chunk is
 still `Unavailable`; a resident T1.0 Absent base cell simply contributes no base
 face while resident additional faces remain queryable. A completed nearest-face
 search with no qualifying candidate returns the fail-closed invalid/default
-surface value. Top is exposed as a
-support candidate and Bottom as a ceiling candidate, but T1.1 does not decide
-grounding, body clearance, step, gravity, or character response. Those policies
-belong to P0.1c/later Physics.
+surface value. Top is exposed as a support candidate and Bottom as a ceiling
+candidate. T1.1 does not decide grounding, body clearance, step, gravity, or
+character response; accepted P0.1c Physics now owns the first bounded
+interpretation.
 
 The same shell is contextual geometry, not a permanently classified Floor or
 Ceiling. Its Top can support a body above it while its Bottom/closed boundary can
@@ -4745,7 +4749,8 @@ Permanent fixtures prove:
 T1.1 does not implement the interactive terrain editor, rip/extrude UX,
 Freeze/Unfreeze tooling, mutable shell overlays, destruction, arbitrary runtime
 mesh import, voxels, navigation, gravity, jump/fall/landing, grounding, support
-policy, clearance, step response, or Network/content acquisition.
+policy, clearance, step response, or Network/content acquisition. P0.1c subsequently
+implements support/clearance/step policy without changing T1.1 World ownership.
 
 The next owning sequence is:
 
@@ -4753,9 +4758,11 @@ The next owning sequence is:
 P0.1c
     support / grounding / clearance
     selection from actual structural geometry
+    CLOSED
 
-following Physics vertical
+P0.1d Physics vertical
     gravity / jump / fall / landing / recovery
+    NEXT
 
 Concept Demo integration
     MountainShell/cave, Sky Island, telepad, central terrain, Far Island/gate

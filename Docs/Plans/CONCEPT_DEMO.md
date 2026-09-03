@@ -11,7 +11,8 @@ Single Player Cabin/human-calibration vertical are closed. `Client.Local.Godot` 
 consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over it. Terrain T1.0
 supplies explicit base-surface presence/intentional-void semantics, and T1.1 supplies immutable
 sparse terrain shells at free absolute elevations for the Sky Island and cave. Physics support,
-grounding, clearance, and vertical motion remain the next owning checkpoints before integration.
+grounding, and clearance are closed at P0.1c. Vertical motion remains the next owning checkpoint
+before physical Sky Island integration.
 
 The demo has two purposes:
 
@@ -1158,8 +1159,8 @@ F0.2   real Single Player Cabin + human calibration                 CLOSED
 then earn/integrate Concept Demo Round 1 consumers:
     terrain T1.0 surface presence/void                         CLOSED
     terrain T1.1 sparse terrain shells                         CLOSED
-    Physics P0.1c support / grounding / clearance              NEXT
-    Physics vertical motion / jump / fall / landing            AFTER P0.1c
+    Physics P0.1c support / grounding / clearance              CLOSED
+    Physics P0.1d vertical motion / jump / fall / landing      NEXT
     render-distance setting
     signs/Fallback Lab
     guest/demo admission presentation

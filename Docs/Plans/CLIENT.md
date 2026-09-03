@@ -1524,6 +1524,12 @@ calibration bodies. Initial presentation anchors are 1.6 m camera pivot, 2.0 m n
 effects; they are presentation evidence rather than Physics constants. `Playable.Godot` remains
 only a thin acceptance wrapper over this consumer.
 
+F0.2 hardening also freezes the administrative relocation ordering used by acceptance and future
+teleport consumers: after authority reports success, the local client continues pumping until its
+controlled-player semantic projection equals the committed authoritative position before deriving
+a following absolute facing/movement point. Authority completion alone is not presentation
+convergence. This closes the reproduced stale-origin facing race without changing command meaning.
+
 Implement:
 
 - consume the existing `Client.Local` capability;
