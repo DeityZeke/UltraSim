@@ -286,6 +286,7 @@ public sealed class LocalPlayableSession : IDisposable
         GameChatService? chat = null;
         LocalQueuedUiSemanticPort? ui = null;
         InventoryUiController? inventoryUi = null;
+        InformationalSignUiController? signUi = null;
         try
         {
             var composition = new UltraSimGameComposition(
@@ -322,6 +323,7 @@ public sealed class LocalPlayableSession : IDisposable
             chat = new GameChatService(runtime.Game, admission, chatLimits);
             ui = new LocalQueuedUiSemanticPort(_uiChannel, _limits.UiOperationCapacity);
             inventoryUi = new InventoryUiController(runtime.Game, ui);
+            signUi = new InformationalSignUiController(ui);
             var persistence = new GameRuntimePersistence(
                 runtime.Game,
                 composition,
@@ -340,12 +342,13 @@ public sealed class LocalPlayableSession : IDisposable
             ulong saveSequence = 1;
             GamePlayerCommandResult lastCommand = default;
             ulong lastCommandSequence = 0;
+            LocalPlayableSelection lastSelection = LocalPlayableSelection.None;
             GameWorldActionStatus lastChest = GameWorldActionStatus.NotRequested;
             LocalAdministrativeRequest lastAdmin = default;
             bool lastAdminSucceeded = false;
             string? lastAdminMessage = null;
 
-            CaptureView(runtime, entities, lastCommandSequence, lastCommand, lastChest,
+            CaptureView(runtime, entities, lastCommandSequence, lastSelection, lastCommand, lastChest,
                 lastAdmin, lastAdminSucceeded, lastAdminMessage);
             _running = true;
             _ready.Set();
@@ -369,7 +372,14 @@ public sealed class LocalPlayableSession : IDisposable
                 ui.Pump();
                 ProcessWorldProofs(ref recipient);
                 ProcessChatProofs();
-                ProcessCommands(runtime, entities, ref lastCommandSequence, ref lastCommand, ref lastChest);
+                ProcessCommands(
+                    runtime,
+                    signUi,
+                    entities,
+                    ref lastCommandSequence,
+                    ref lastSelection,
+                    ref lastCommand,
+                    ref lastChest);
                 ProcessAdministrative(
                     runtime, persistence, inventoryUi, entities,
                     ref lastAdministrative, ref lastAdminSucceeded, ref lastAdminMessage,
@@ -390,7 +400,7 @@ public sealed class LocalPlayableSession : IDisposable
                 DriveChat(chat, entered.Participant, recipients);
                 DriveWorld(
                     runtime, entities, recipient, worldPump, snapshotScratch, deltaScratch);
-                CaptureView(runtime, entities, lastCommandSequence, lastCommand, lastChest,
+                CaptureView(runtime, entities, lastCommandSequence, lastSelection, lastCommand, lastChest,
                     lastAdmin, lastAdminSucceeded, lastAdminMessage);
             }
 
@@ -404,6 +414,7 @@ public sealed class LocalPlayableSession : IDisposable
         finally
         {
             _running = false;
+            signUi?.Dispose();
             inventoryUi?.Dispose();
             ui?.Dispose();
             chat?.Dispose();
@@ -414,8 +425,10 @@ public sealed class LocalPlayableSession : IDisposable
 
     private void ProcessCommands(
         ServerRuntime runtime,
+        InformationalSignUiController signUi,
         GamePlayableWorldEntities entities,
         ref ulong lastSequence,
+        ref LocalPlayableSelection lastSelection,
         ref GamePlayerCommandResult lastResult,
         ref GameWorldActionStatus lastChest)
     {
@@ -446,6 +459,8 @@ public sealed class LocalPlayableSession : IDisposable
                             LocalPlayableSelection.FarGate when
                                 entities.CentralFarGateId.IsValid && entities.FarReturnGateId.IsValid =>
                                 ResolveNearestFarGate(world, game.WorldState, actor, entities),
+                            LocalPlayableSelection.InformationalSign when entities.WelcomeSignId.IsValid =>
+                                Resolve(world, entities.WelcomeSignId),
                             _ => Entity.Null,
                         };
                         game.WorldActions.ApplyPlayerCommand(
@@ -467,10 +482,19 @@ public sealed class LocalPlayableSession : IDisposable
                             chest = ToggleBreadContainer(world, game, entities);
                         else if (unsupported)
                             chest = GameWorldActionStatus.MissingTarget;
+                        if (captured.Selection == LocalPlayableSelection.InformationalSign &&
+                            result.Interaction == GameWorldActionStatus.Accepted)
+                        {
+                            InformationalSignUiOpenResult opened = signUi.Open(
+                                GameInformationalSigns.ConceptDemoWelcome);
+                            if (!opened.Succeeded)
+                                result = result with { Interaction = GameWorldActionStatus.InvariantViolation };
+                        }
                         return new CommandOutcome(result, chest);
                     }, out CommandOutcome outcome))
                 throw new InvalidOperationException("The local command had no authoritative generation.");
             lastSequence = request.Command.Sequence;
+            lastSelection = request.Selection;
             lastResult = outcome.Result;
             lastChest = outcome.Chest;
         }
@@ -730,6 +754,7 @@ public sealed class LocalPlayableSession : IDisposable
         ServerRuntime runtime,
         GamePlayableWorldEntities entities,
         ulong lastCommandSequence,
+        LocalPlayableSelection lastSelection,
         GamePlayerCommandResult lastCommand,
         GameWorldActionStatus lastChest,
         LocalAdministrativeRequest lastAdministrative,
@@ -758,6 +783,7 @@ public sealed class LocalPlayableSession : IDisposable
                         doorOpen,
                         inBackpack,
                         lastCommandSequence,
+                        lastSelection,
                         lastCommand,
                         lastChest,
                         lastAdministrative.Sequence,

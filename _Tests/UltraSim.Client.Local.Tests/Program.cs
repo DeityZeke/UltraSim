@@ -16,6 +16,7 @@ var tests = new (string Name, Action Body)[]
     ("ChatIngressRejectsUnboundedText", ChatIngressRejectsUnboundedText),
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
+    ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
     ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
 };
@@ -167,6 +168,82 @@ static void UiOperationsAndActionsUseBoundedLocalBridge()
             "Item selected.",
             StringComparison.Ordinal);
     });
+}
+
+static void ConceptDemoSignUsesAuthoritativeInformationalUi()
+{
+    using Fixture fixture = Fixture.CreateConcept();
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(client);
+    var input = new ClientWorldInputSequencer(fixture.Session.ControlSession);
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Interact,
+            true),
+        out GamePlayerCommand use));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        use,
+        LocalPlayableSelection.InformationalSign,
+        false,
+        default,
+        false)));
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == use.Sequence &&
+            view.LastSelection == LocalPlayableSelection.InformationalSign &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            client.OpenViewCount == 1;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    UiViewInstanceId signView = renderer.LastInstance;
+    True(string.Equals(
+        GameInformationalSigns.ConceptDemoWelcome.Title,
+        client.GetValue(signView, InformationalSignUi.Title).Text,
+        StringComparison.Ordinal));
+    True(string.Equals(
+        GameInformationalSigns.ConceptDemoWelcome.Body,
+        client.GetValue(signView, InformationalSignUi.Body).Text,
+        StringComparison.Ordinal));
+
+    client.SubmitAction(signView, InformationalSignUi.Close);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 0;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+        out GamePlayerCommand release));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        release, LocalPlayableSelection.None, false, default, false)));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastCommandSequence == release.Sequence);
+
+    True(fixture.Session.TryRequestRelocation(1, GamePlayableWorld.CentralFarGatePosition));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 1 && view.LastAdministrativeSucceeded);
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Interact,
+            true),
+        out GamePlayerCommand distantUse));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        distantUse,
+        LocalPlayableSelection.InformationalSign,
+        false,
+        default,
+        false)));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastCommandSequence == distantUse.Sequence);
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView distant));
+    Equal(GameWorldActionStatus.OutOfRange, distant.LastCommandResult.Interaction);
+    Equal(0, client.OpenViewCount);
 }
 
 static void SaveLoadReplacesGenerationAndRebuildsPublicLineage()

@@ -21,18 +21,21 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool conceptDemoSmoke = arguments.Contains("--d0-0-smoke", StringComparer.Ordinal);
         bool residencySmoke = arguments.Contains("--d0-1-smoke", StringComparer.Ordinal);
         bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
+        bool signSmoke = arguments.Contains("--d0-3-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
-            !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !f02Smoke)
+            !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke && !f02Smoke)
             return;
         try
         {
-            if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
+            if (conceptDemoSmoke || residencySmoke || farIslandSmoke || signSmoke)
             {
                 StartLocalCabin(
                     CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
                 LocalCabinPresentationSnapshot evidence;
-                if (farIslandSmoke)
+                if (signSmoke)
+                    evidence = _cabin!.RunD03Acceptance();
+                else if (farIslandSmoke)
                     evidence = _cabin!.RunD02Acceptance();
                 else
                 {
@@ -47,14 +50,17 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     throw new InvalidOperationException(
                         "The Concept Demo did not preserve authored > resident > rendered structure.");
                 GD.Print(
-                    $"{(farIslandSmoke ? "D0.2 FAR ISLAND" :
+                    $"{(signSmoke ? "D0.3 INFORMATIONAL SIGN" :
+                        farIslandSmoke ? "D0.2 FAR ISLAND" :
                         residencySmoke ? "D0.1 RESIDENCY" : "D0.0 CONCEPT DEMO")} PASS " +
                     $"player={evidence.PlayerPosition} authored/resident/rendered=" +
                     $"{evidence.AuthoredChunks}/{evidence.SemanticResidentChunks}/" +
                     $"{evidence.RenderedChunks} radius={evidence.RenderDistanceChunks} " +
                     $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
                 RetireCurrentSession();
-                ReturnToMainMenu(farIslandSmoke
+                ReturnToMainMenu(signSmoke
+                    ? "Concept Demo D0.3 informational-sign smoke passed."
+                    : farIslandSmoke
                     ? "Concept Demo D0.2 Far Island smoke passed."
                     : residencySmoke
                         ? "Concept Demo D0.1 residency smoke passed."

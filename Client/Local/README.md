@@ -17,8 +17,8 @@ and other presentation consumers can only:
   according to that domain's existing semantics.
 
 The authority thread owns `ServerRuntime`, Admission, mutable ECS/Game state,
-Inventory UI policy, Chat routing, persistence, the local public recipient, and
-all Game mutation. It advances at authoritative cadence independently of Godot.
+Inventory and informational-sign UI policy, Chat routing, persistence, the local public recipient,
+and all Game mutation. It advances at authoritative cadence independently of Godot.
 Presentation stalls therefore accumulate only bounded domain debt; they do not
 pause the world or grant the presentation thread authority access.
 
@@ -59,3 +59,9 @@ bounded bridge. Its 162 authored chunks are two 9×9 clusters with no authored g
 fixtures have separate persistent-world identities and save roots. The permanent Single Player and
 Complete shells select the Concept Demo explicitly; acceptance can still select Cabin without
 changing this ownership boundary.
+
+D0.3 adds an authoritative welcome sign as a second concrete consumer of that generic local UI
+path. Hover is derived only from resident/presented public kind. Interact nominates the finite local
+selection; Game resolves the trusted sign identity, validates current kind and range, and supplies
+the immutable title/body. The sign's compiled Close action crosses the same retained semantic
+operation and explicit apply/reject proof boundary as other local UI.

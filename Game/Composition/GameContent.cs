@@ -18,6 +18,7 @@ public static class GamePrefabKeys
     public static readonly PrefabKey CabinDoor = new("game.world.cabin-door");
     public static readonly PrefabKey SkyTelepad = new("game.world.sky-telepad");
     public static readonly PrefabKey FarGate = new("game.world.far-gate");
+    public static readonly PrefabKey InformationalSign = new("game.world.informational-sign");
     public static readonly PrefabKey WoodlandAnimal = new("game.world.woodland-animal");
 }
 
@@ -73,6 +74,7 @@ public static class GameWorldPublicPrefabIds
     public const uint WoodlandAnimal = 4;
     public const uint SkyTelepad = 5;
     public const uint FarGate = 6;
+    public const uint InformationalSign = 7;
 }
 
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
@@ -97,6 +99,7 @@ public sealed class GameContent : IInventoryContentCatalog
         PrefabHandle cabinDoor,
         PrefabHandle skyTelepad,
         PrefabHandle farGate,
+        PrefabHandle informationalSign,
         PrefabHandle woodlandAnimal,
         WorldContentBinding world,
         Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions)
@@ -116,6 +119,7 @@ public sealed class GameContent : IInventoryContentCatalog
         CabinDoor = cabinDoor;
         SkyTelepad = skyTelepad;
         FarGate = farGate;
+        InformationalSign = informationalSign;
         WoodlandAnimal = woodlandAnimal;
         World = world;
         _gridPlacementTransitions = gridPlacementTransitions;
@@ -157,6 +161,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public PrefabHandle CabinDoor { get; }
     public PrefabHandle SkyTelepad { get; }
     public PrefabHandle FarGate { get; }
+    public PrefabHandle InformationalSign { get; }
     public PrefabHandle WoodlandAnimal { get; }
     public WorldContentBinding World { get; }
 
@@ -314,6 +319,16 @@ public sealed class GameContent : IInventoryContentCatalog
             GameWorldPublicPrefabIds.FarGate, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         farGate.DisplayName("Far Gate");
 
+        // Sign copy remains Game-owned content. The public descriptor exposes only the finite
+        // interactable kind; selecting the object never discloses its informational body.
+        PrefabBuilder informationalSign = content.Define(GamePrefabKeys.InformationalSign);
+        informationalSign.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        informationalSign.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.InformationalSign,
+            WorldYaw.Zero,
+            WorldPublicStateFlags.Visible)));
+        informationalSign.DisplayName("Sign");
+
         PrefabBuilder woodlandAnimal = content.Define(GamePrefabKeys.WoodlandAnimal);
         woodlandAnimal.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         woodlandAnimal.With(new WorldPublicComponent(new WorldPublicDescriptor(
@@ -342,6 +357,7 @@ public sealed class GameContent : IInventoryContentCatalog
             compiled.GetHandle(GamePrefabKeys.CabinDoor),
             compiled.GetHandle(GamePrefabKeys.SkyTelepad),
             compiled.GetHandle(GamePrefabKeys.FarGate),
+            compiled.GetHandle(GamePrefabKeys.InformationalSign),
             compiled.GetHandle(GamePrefabKeys.WoodlandAnimal),
             new WorldContentBinding(WorldFingerprint,
             [

@@ -90,3 +90,9 @@ move, split, equip, and unequip intent through the generic remote UI protocol.
 The open view resnapshots after save/load generation publication, while a fresh
 authenticated application session reconstructs it after reconnect. Inventory
 remains owner/private state and never enters public spatial replication.
+
+D0.3 consumes the same semantic UI machinery for an authoritative informational sign. Public
+presentation exposes only that the object is a sign. After ordinary Game interaction validates the
+trusted target and range, Game supplies immutable title/body content and one compiled Close action.
+The native Godot view is therefore a renderer of server-authored information, not the authority for
+sign text, interaction distance, or view lifecycle.

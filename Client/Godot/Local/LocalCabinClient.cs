@@ -6,6 +6,7 @@ using UltraSim.Client.Godot;
 using UltraSim.Client.Local;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
+using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 using UltraSim.UI;
@@ -71,6 +72,7 @@ public partial class LocalCabinClient : Node3D
         CabinChest,
         SkyTelepad,
         FarGate,
+        InformationalSign,
         WoodlandAnimal,
     }
 
@@ -113,6 +115,7 @@ public partial class LocalCabinClient : Node3D
     private LineEdit? _chatInput;
     private OptionButton? _chatMode;
     private Label? _overheadSpeech;
+    private Label? _hoverTooltip;
     private Control? _ownedHudRoot;
     private Control? _ownedWorldUiRoot;
     private Control? _inventoryHost;
@@ -435,6 +438,7 @@ public partial class LocalCabinClient : Node3D
         try
         {
             UpdatePointerWorldPoint();
+            UpdateWorldHover();
             PumpChat();
             _ = _uiBridge?.Pump();
             ClientWorldInputSample physical = GodotWorldInput.Capture(
@@ -595,10 +599,75 @@ public partial class LocalCabinClient : Node3D
             CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1 &&
             (!_useConceptDemoWorld ||
                 CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) == 1 &&
-                CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1));
+                CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
+                CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 1));
         _lastOutcome = _useConceptDemoWorld
             ? "Fresh Concept Demo island started"
             : "Fresh woods/cabin world started";
+    }
+
+    /// <summary>
+    /// Permanent D0.3 canary for a real authoritative informational sign. Hover uses only
+    /// resident presentation truth; Interact crosses Game admission and the bounded UI bridge.
+    /// </summary>
+    public LocalCabinPresentationSnapshot RunD03Acceptance()
+    {
+        if (!_initialized || !_useConceptDemoWorld || _localSession is null ||
+            _sequencer is null || _uiClient is null || _uiBridge is null ||
+            _inventoryHost is null || _hoverTooltip is null)
+            throw new InvalidOperationException("D0.3 requires the initialized Concept Demo UI consumer.");
+        if (CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) != 1 ||
+            !TrySetPointerWorldPoint(
+                GamePlayableWorld.WelcomeSignPosition.GlobalXMillimeters,
+                GamePlayableWorld.WelcomeSignPosition.GlobalZMillimeters))
+            throw new InvalidOperationException("The authored welcome sign was not resident and selectable.");
+
+        UpdateWorldHover();
+        if (!_hoverTooltip.Visible || _hoverTooltip.Text != "Sign")
+            throw new InvalidOperationException("Known sign presentation did not produce its local hover label.");
+        Select(_pointerPoint);
+        if (_selection != SelectionKind.InformationalSign)
+            throw new InvalidOperationException("The known sign presentation was not selected as a sign.");
+
+        if (!_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop,
+                    GamePlayerActions.Interact,
+                    true),
+                out GamePlayerCommand use))
+            throw new InvalidOperationException("The informational-sign interaction could not be formed.");
+        ulong before = _localSession.GetSnapshot().UiOperationsApplied;
+        ApplyCommand(use, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == use.Sequence &&
+            view.LastSelection == LocalPlayableSelection.InformationalSign &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            _uiClient.OpenViewCount == 1 &&
+            _localSession.GetSnapshot().UiOperationsApplied > before);
+
+        Control? root = null;
+        foreach (Node child in _inventoryHost.GetChildren())
+        {
+            if (child is Control candidate && candidate.Name.ToString().StartsWith(
+                    "UiView_", StringComparison.Ordinal))
+            {
+                root = candidate;
+                break;
+            }
+        }
+        Label? title = root?.FindChild("Element_title", recursive: true, owned: false) as Label;
+        Label? body = root?.FindChild("Element_body", recursive: true, owned: false) as Label;
+        Button? close = root?.FindChild("Element_close", recursive: true, owned: false) as Button;
+        if (title?.Text != GameInformationalSigns.ConceptDemoWelcome.Title ||
+            body?.Text != GameInformationalSigns.ConceptDemoWelcome.Body || close is null)
+            throw new InvalidOperationException("Godot did not realize the authoritative sign title/body/actions.");
+
+        close!.EmitSignal(BaseButton.SignalName.Pressed);
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
+        if (_inventoryHost.GetChildCount() != 0)
+            throw new InvalidOperationException("Closing the informational sign left stale Godot UI presentation.");
+        return GetPresentationSnapshot();
     }
 
     private void CreateInventoryConsumer()
@@ -846,6 +915,7 @@ public partial class LocalCabinClient : Node3D
             SelectionKind.CabinChest => LocalPlayableSelection.CabinChest,
             SelectionKind.SkyTelepad => LocalPlayableSelection.SkyTelepad,
             SelectionKind.FarGate => LocalPlayableSelection.FarGate,
+            SelectionKind.InformationalSign => LocalPlayableSelection.InformationalSign,
             _ => LocalPlayableSelection.Unsupported,
         };
         if (!_localSession.TrySubmit(new LocalPlayableCommand(
@@ -962,8 +1032,16 @@ public partial class LocalCabinClient : Node3D
             else if (view.LastCommandResult.Interaction != GameWorldActionStatus.NotRequested)
             {
                 _lastOutcome = view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted
-                    ? $"Cabin door {(view.LastCommandResult.DoorIsOpen ? "opened" : "closed")}"
-                    : $"Interaction: {view.LastCommandResult.Interaction}";
+                    ? view.LastSelection switch
+                    {
+                        LocalPlayableSelection.CabinDoor =>
+                            $"Cabin door {(view.LastCommandResult.DoorIsOpen ? "opened" : "closed")}",
+                        LocalPlayableSelection.SkyTelepad => "Sky Island telepad activated",
+                        LocalPlayableSelection.FarGate => "Far Gate activated",
+                        LocalPlayableSelection.InformationalSign => "Sign opened",
+                        _ => "Interaction accepted",
+                    }
+                    : $"{view.LastSelection} interaction: {view.LastCommandResult.Interaction}";
             }
             else if (view.LastCommandResult.Jump != GameWorldActionStatus.NotRequested)
             {
@@ -1060,7 +1138,11 @@ public partial class LocalCabinClient : Node3D
 
     private void Select(in ClientControlWorldPoint point)
     {
-        _selection = Nearest(point, GamePlayableWorld.DoorPosition, 1_750)
+        _selection = _useConceptDemoWorld &&
+            IsKnownPresentedPrefabNear(
+                GameWorldPublicPrefabIds.InformationalSign, point, radius: 1_500)
+            ? SelectionKind.InformationalSign
+            : Nearest(point, GamePlayableWorld.DoorPosition, 1_750)
             ? SelectionKind.CabinDoor
             : Nearest(point, GamePlayableWorld.ChestPosition, 1_750)
                 ? SelectionKind.CabinChest
@@ -1073,6 +1155,47 @@ public partial class LocalCabinClient : Node3D
                             ? SelectionKind.WoodlandAnimal
                             : SelectionKind.Terrain;
         _lastOutcome = $"Selected {_selection} at ({point.XMillimeters / 1000d:F1}, {point.ZMillimeters / 1000d:F1}) m";
+    }
+
+    private void UpdateWorldHover()
+    {
+        if (_hoverTooltip is null)
+            return;
+        bool show = _useConceptDemoWorld && _pointerPointValid &&
+            IsKnownPresentedPrefabNear(
+                GameWorldPublicPrefabIds.InformationalSign, _pointerPoint, radius: 1_500);
+        _hoverTooltip.Visible = show;
+        if (!show)
+            return;
+        _hoverTooltip.Text = "Sign";
+        _hoverTooltip.Position = GetViewport().GetMousePosition() + new Vector2(14, 18);
+    }
+
+    private bool IsKnownPresentedPrefabNear(
+        uint prefabId,
+        in ClientControlWorldPoint point,
+        long radius)
+    {
+        if (_cache is null || CountPresentedPrefab(prefabId) == 0 ||
+            !_cache.TryCopyResidentInfo(_chatChunkInfo, out int count, out _))
+            return false;
+        Int128 radiusSquared = (Int128)radius * radius;
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!_cache.TryGetResidentView(
+                    _chatChunkInfo[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+            {
+                if (record.PrefabId != prefabId)
+                    continue;
+                Int128 dx = (Int128)point.XMillimeters - record.Position.GlobalXMillimeters;
+                Int128 dz = (Int128)point.ZMillimeters - record.Position.GlobalZMillimeters;
+                if (dx * dx + dz * dz <= radiusSquared)
+                    return true;
+            }
+        }
+        return false;
     }
 
     private void UpdatePointerWorldPoint()
@@ -1915,7 +2038,7 @@ public partial class LocalCabinClient : Node3D
         {
             Text = "LMB click select • hold steer • double-click destination • RMB/Esc stop\n" +
                 (_useConceptDemoWorld
-                    ? "MMB drag camera • wheel zoom • E use selected door/chest/telepad • I inventory\n"
+                    ? "MMB drag camera • wheel zoom • E use selected door/chest/sign/telepad/gate • I inventory\n"
                     : "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n") +
                 "Space jump (direct profiles) • 1/F1 Orbit • 2/F2 third-person • " +
                 "3/F3 fixed iso move/look • F5 save • F9 load",
@@ -1969,6 +2092,16 @@ public partial class LocalCabinClient : Node3D
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _ownedWorldUiRoot.AddChild(_overheadSpeech);
+
+        _hoverTooltip = new Label
+        {
+            Name = "WorldHoverTooltip",
+            Text = "Sign",
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            ThemeTypeVariation = "HeaderSmall",
+        };
+        _ownedWorldUiRoot.AddChild(_hoverTooltip);
 
         _inventoryHost = FullRectControl("CabinInventory");
         _ownedHudRoot.AddChild(_inventoryHost);
@@ -2170,6 +2303,8 @@ public partial class LocalCabinClient : Node3D
             new Vector3(1.8f, 0.18f, 1.8f), new Color(0.12f, 0.72f, 0.9f));
         private readonly Mesh _farGate = GroundedBox(
             new Vector3(1.5f, 2.8f, 0.35f), new Color(0.68f, 0.22f, 0.86f));
+        private readonly Mesh _informationalSign = GroundedBox(
+            new Vector3(1.25f, 1.65f, 0.16f), new Color(0.52f, 0.31f, 0.12f));
         private readonly Mesh _mountainWallEight = GroundedBox(
             new Vector3(8f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
         private readonly Mesh _mountainWallTen = GroundedBox(
@@ -2231,6 +2366,7 @@ public partial class LocalCabinClient : Node3D
             GameWorldPublicPrefabIds.WoodlandAnimal => _animal,
             GameWorldPublicPrefabIds.SkyTelepad => _telepad,
             GameWorldPublicPrefabIds.FarGate => _farGate,
+            GameWorldPublicPrefabIds.InformationalSign => _informationalSign,
             _ => _stone,
         };
 

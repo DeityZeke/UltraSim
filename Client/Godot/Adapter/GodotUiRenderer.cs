@@ -297,7 +297,10 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         Control control = element.Kind switch
         {
             UiElementKind.Panel => new Panel(),
-            UiElementKind.Text => new Label(),
+            UiElementKind.Text => new Label
+            {
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            },
             UiElementKind.Image => CreateImage(element),
             UiElementKind.Button => new Button(),
             UiElementKind.TextInput => new LineEdit(),

@@ -32,6 +32,8 @@ Run("ConceptDemoTelepadUsesAuthoritativeDestination",
     ConceptDemoTelepadUsesAuthoritativeDestination, results);
 Run("ConceptDemoFarGateUsesSparseAuthoredGeography",
     ConceptDemoFarGateUsesSparseAuthoredGeography, results);
+Run("ConceptDemoInformationalSignValidatesAuthoritativeTargetAndRange",
+    ConceptDemoInformationalSignValidatesAuthoritativeTargetAndRange, results);
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
 Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
@@ -845,6 +847,69 @@ static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
                 out GameWorldActionStatus status) && status == GameWorldActionStatus.Accepted,
             $"The actor could not approach Far Gate at {target}.");
     }
+}
+
+static TestMetrics ConceptDemoInformationalSignValidatesAuthoritativeTargetAndRange()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_D003))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0xD003));
+    Expect(entered.IsEntered, "The informational-sign participant did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.PopulateConceptDemo(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities) && entities.WelcomeSignId.IsValid,
+        "The Concept Demo population did not contain its welcome sign.");
+    host.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, input.ControlSession);
+    Expect(input.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand use),
+        "The informational-sign command could not be formed.");
+    GamePlayerCommandResult accepted = link.ApplyCommand(use, entities.WelcomeSignId);
+    Expect(accepted.Interaction == GameWorldActionStatus.Accepted,
+        "The nearby authoritative informational sign did not admit interaction.");
+
+    var wrongTarget = new GamePlayerCommand(
+        input.ControlSession,
+        use.Sequence + 1,
+        GameLocomotionUpdate.Stop,
+        GamePlayerActions.Interact,
+        GamePlayerActions.Interact);
+    GamePlayerCommandResult wrong = link.ApplyCommand(wrongTarget, entities.WoodlandAnimalId);
+    Expect(wrong.Interaction == GameWorldActionStatus.MissingTarget,
+        "A non-sign public object acquired informational-sign semantics.");
+
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.RelocateActor(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                GamePlayableWorld.CentralFarGatePosition,
+                out _),
+            out GameWorldActionStatus relocation) && relocation == GameWorldActionStatus.Accepted,
+        "The informational-sign range test could not relocate its actor.");
+    var distantCommand = wrongTarget with { Sequence = wrongTarget.Sequence + 1 };
+    GamePlayerCommandResult distant = link.ApplyCommand(distantCommand, entities.WelcomeSignId);
+    Expect(distant.Interaction == GameWorldActionStatus.OutOfRange,
+        "A distant informational sign opened without authoritative range admission.");
+
+    return new TestMetrics(
+        HashText($"{entities.WelcomeSignId.Value}|{accepted.Interaction}|" +
+            $"{wrong.Interaction}|{distant.Interaction}"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "The Concept Demo sign is a real public Game target; only its trusted identity and range admit interaction, while UI text remains outside client intent.",
+        InputCommands: 3);
 }
 
 static TestMetrics SimplePhysicsGenerationReplacement()

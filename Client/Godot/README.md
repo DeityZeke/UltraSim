@@ -46,4 +46,6 @@ window can change the counts without adding visible geometry at the current loca
 Local saves live below `user://single-player/`. Controls are shown in the in-session HUD: F1/F2/F3
 select movement profiles, WASD moves in direct profiles, pointer input drives Orbit selection and
 destination, E interacts with the selected target, Space jumps in direct profiles, and the mouse
-wheel adjusts supported camera profiles.
+wheel adjusts supported camera profiles. The Central Island welcome sign exposes a local `Sign`
+hover from resident presentation state; select it and press E to open its authoritative
+informational view, then use the view's Close action to dismiss it.

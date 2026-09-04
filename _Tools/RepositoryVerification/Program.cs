@@ -138,6 +138,12 @@ foreach (string configuration in configurations)
             "--path", "Client/Godot",
             "--", "--d0-2-smoke", "--expect-edition=SinglePlayer",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--d0-3-smoke", "--expect-edition=SinglePlayer",
+        ]);
 
         BuildClientApplication(root, configuration, "Online");
         Run(root, godot,

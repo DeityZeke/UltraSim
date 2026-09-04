@@ -13,7 +13,8 @@ public enum LocalPlayableSelection : byte
     CabinChest = 2,
     SkyTelepad = 3,
     FarGate = 4,
-    Unsupported = 5,
+    InformationalSign = 5,
+    Unsupported = 6,
 }
 
 public readonly record struct LocalPlayableCommand(
@@ -49,6 +50,7 @@ public readonly record struct LocalPlayableAuthorityView(
     bool DoorIsOpen,
     bool BreadIsInBackpack,
     ulong LastCommandSequence,
+    LocalPlayableSelection LastSelection,
     GamePlayerCommandResult LastCommandResult,
     GameWorldActionStatus LastChestAction,
     ulong LastAdministrativeSequence,

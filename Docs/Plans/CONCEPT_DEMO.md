@@ -570,6 +570,36 @@ The gate is explicitly a stronger streaming/AOI test than the nearby Sky Island.
 
 Signs are real interactable world objects.
 
+## 8.1 D0.3 authoritative informational sign — CLOSED
+
+D0.3 adds one real welcome sign near the Central Island spawn. It is an ordinary dynamic-public
+Game object with a stable prefab kind and authoritative position. Its public descriptor identifies
+it only as a sign; the informational title/body are not public-world fields and are never supplied
+by the client.
+
+The local client may derive the short `Sign` hover tooltip entirely from currently resident and
+presented public state. Selection plus Interact remains normal bounded Game intent. The local
+application adapter maps that finite selection to the trusted sign identity, and Game revalidates
+the current prefab kind and authoritative actor-to-sign range before opening anything.
+
+An accepted interaction opens the immutable server-authored welcome content through the existing
+generic UI semantic path:
+
+```text
+resident/presented sign
+    -> local hover/selection
+    -> bounded Interact intent
+    -> authoritative target + range validation
+    -> server-authored informational UI operation
+    -> Client Core apply/reject result
+    -> Godot-rendered title/body/Close action
+```
+
+The view is bounded to one informational sign window per local application session. Close is a
+compiled, validated UI action rather than a Godot-only dismissal, and the resulting close operation
+also requires client semantic application. D0.3 does not add a sign-specific Network path, hidden
+description query, generalized lore system, or Fallback Lab behavior.
+
 ## Hover
 
 Mouse/pointer hover may highlight a sign or display a short local tooltip such as `Sign` using already
@@ -1322,7 +1352,8 @@ then earn/integrate Concept Demo Round 1 consumers:
     D0.1 Render Distance + bounded structural residency          CLOSED
     F0.0c one maintained Godot project / three physical products CLOSED
     D0.2 sparse geography + Far Island + gate reset              CLOSED
-    signs/Fallback Lab
+    D0.3 authoritative informational sign                        CLOSED
+    Fallback Lab missing-content canaries                        NEXT
     guest/demo admission presentation
     animation/pickup/inventory swing
     Global/system Chat

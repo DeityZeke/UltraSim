@@ -28,7 +28,9 @@ public readonly record struct GamePlayableWorldEntities(
     Entity CentralFarGate,
     PersistentEntityId CentralFarGateId,
     Entity FarReturnGate,
-    PersistentEntityId FarReturnGateId);
+    PersistentEntityId FarReturnGateId,
+    Entity WelcomeSign,
+    PersistentEntityId WelcomeSignId);
 
 /// <summary>Concrete authoritative action outcomes for the first playable vertical.</summary>
 public enum GameWorldActionStatus : byte
@@ -796,8 +798,29 @@ public sealed class GameWorldActions
                 ActivateSkyTelepad(world, worldState, actor, target),
             GameWorldPublicPrefabIds.FarGate =>
                 ActivateFarGate(world, worldState, actor, target),
+            GameWorldPublicPrefabIds.InformationalSign =>
+                ValidateInformationalSign(world, worldState, actor, target),
             _ => GameWorldActionStatus.MissingTarget,
         };
+    }
+
+    private GameWorldActionStatus ValidateInformationalSign(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        Entity sign)
+    {
+        if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            return GameWorldActionStatus.MissingActor;
+        if (!world.IsAlive(sign) ||
+            !worldState.TryReadPosition(world, sign, out WorldPosition signPosition) ||
+            !worldState.TryReadPublic(world, sign, out WorldPublicDescriptor descriptor) ||
+            descriptor.PrefabId != GameWorldPublicPrefabIds.InformationalSign)
+            return GameWorldActionStatus.MissingTarget;
+        return WithinInteractionRange(actorPosition, signPosition)
+            ? GameWorldActionStatus.Accepted
+            : GameWorldActionStatus.OutOfRange;
     }
 
     private GameWorldActionStatus ActivateSkyTelepad(
@@ -1363,6 +1386,7 @@ public static class GamePlayableWorld
     public static WorldPosition CentralGateDestination => FromGlobal(0, 16_000);
     public static WorldPosition FarReturnGatePosition => FromGlobal(FarIslandCenterXMillimeters, 20_000);
     public static WorldPosition FarGateDestination => FromGlobal(FarIslandCenterXMillimeters, 16_000);
+    public static WorldPosition WelcomeSignPosition => FromGlobal(14_000, 6_000);
 
     public static WorldPack CreateWorldPack() => CreateWorldPackCore(conceptDemo: false);
 
@@ -1486,6 +1510,8 @@ public static class GamePlayableWorld
             Entity.Null,
             default,
             Entity.Null,
+            default,
+            Entity.Null,
             default);
     }
 
@@ -1504,6 +1530,9 @@ public static class GamePlayableWorld
             !world.TryInstantiate(game.Content.FarGate, out Entity returnGate) ||
             !game.WorldState.TrySetPosition(world, returnGate, FarReturnGatePosition))
             throw new InvalidOperationException("The Concept Demo Far Gate pair could not be created.");
+        if (!world.TryInstantiate(game.Content.InformationalSign, out Entity welcomeSign) ||
+            !game.WorldState.TrySetPosition(world, welcomeSign, WelcomeSignPosition))
+            throw new InvalidOperationException("The Concept Demo welcome sign could not be created.");
         return entities with
         {
             SkyTelepad = telepad,
@@ -1512,6 +1541,8 @@ public static class GamePlayableWorld
             CentralFarGateId = world.GetOrAssignPersistentId(centralGate),
             FarReturnGate = returnGate,
             FarReturnGateId = world.GetOrAssignPersistentId(returnGate),
+            WelcomeSign = welcomeSign,
+            WelcomeSignId = world.GetOrAssignPersistentId(welcomeSign),
         };
     }
 
