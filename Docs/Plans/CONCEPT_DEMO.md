@@ -7,8 +7,8 @@ and exercises those capabilities together.
 
 **Current baseline:** Client F0.0a, the permanent Network-free F0.0b local-session boundary, the
 F0.1 persistent shell/settings/focus foundation, A0.0/A0.1 local content resolution, and the F0.2
-Single Player Cabin/human-calibration vertical are closed. `Client.Local.Godot` is the permanent
-consumer; `Playable.Godot` remains only a thin reference/acceptance wrapper over it. Terrain T1.0
+Single Player Cabin/human-calibration vertical are closed. `Client/Godot` is the sole maintained
+native client and compiles its local consumer into the Single Player and Complete editions. Terrain T1.0
 supplies explicit base-surface presence/intentional-void semantics, and T1.1 supplies immutable
 sparse terrain shells at free absolute elevations for the Sky Island and cave. Physics support,
 grounding, and clearance are closed at P0.1c, and Physics P0.1d now supplies authoritative
@@ -419,9 +419,9 @@ detached SkyIslandShell
     + no BaseTerrain or synthetic intermediate layer beneath it
 ```
 
-The normal Single Player entry selects this world through `Client.Local`. The historical F0.2 and
-`Playable.Godot` acceptance paths deliberately retain the byte-stable Cabin fixture, so D0.0 cannot
-silently weaken earlier lifecycle/content or edge-window evidence. The two fixtures also use
+The normal Single Player entry selects this world through `Client.Local`. The F0.2 acceptance mode
+in the same maintained application deliberately retains the byte-stable Cabin fixture, so D0.0
+cannot silently weaken earlier lifecycle/content or edge-window evidence. The two fixtures also use
 separate persistent-world identities and save roots.
 
 The Sky telepad is one concrete public Game prefab. A client nominates only that admitted target;

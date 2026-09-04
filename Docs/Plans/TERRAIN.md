@@ -496,7 +496,7 @@ Client/World
     snapshot/delta apply
     render-ready immutable payloads
 
-Client/_Godot
+Client/Godot/Adapter
     private RenderChunk/render-region state
     terrain mesh build/commit
     static batching / RenderingServer resources
@@ -3817,8 +3817,8 @@ destination, double-click `Destination`, and no WASD locomotion.
 portability canaries. Game receives only world-space semantic intent and must
 not know profile identity, camera yaw, Godot input names, or screen coordinates.
 
-The launchable-client gate must use configured actions in an actual
-`Client/_Godot` application, actual OfflineDirect authority, real publication,
+The launchable-client gate must use configured actions in the maintained
+`Client/Godot` application, actual OfflineDirect authority, real publication,
 the production client semantic cache/window, and the Godot renderer. The
 configured InputMap in the Godot **test** project proves only the joined
 headless acceptance; it does not configure the launchable application.
@@ -3940,9 +3940,9 @@ pre-navigation T0.10 scope. Navigation remains unstarted.
 
 ### T0.10 launchable OfflineDirect client implementation stop — 2026-08-21
 
-`Client/Playable.Godot` is now the human-launchable woods/cabin composition
-root. The reusable `Client/_Godot` assembly remains only the native adapter and
-renderer; the application project deliberately owns the broader OfflineDirect
+The T0.10 human-launchable woods/cabin consumer now lives in the maintained
+`Client/Godot` composition root. Its native adapter/renderer source remains thin;
+the edition-fenced application project deliberately owns the broader OfflineDirect
 dependencies required to compose `ServerRuntime`, Game authority/persistence,
 Client Core semantic state, and Godot presentation.
 

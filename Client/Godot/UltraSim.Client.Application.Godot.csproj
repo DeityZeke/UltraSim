@@ -24,15 +24,40 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj" />
-    <ProjectReference Include="../Local.Godot/UltraSim.Client.Local.Godot.csproj"
+    <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
+    <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
+    <ProjectReference Include="../BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj"
+                      Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
+    <ProjectReference Include="../Local/UltraSim.Client.Local.csproj"
+                      Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
+    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj"
+                      Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
+    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj"
                       Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../Network/UltraSim.Client.Network.csproj"
                       Condition="'$(UltraSimEdition)' == 'Online' Or '$(UltraSimEdition)' == 'Complete'" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(UltraSimEdition)' == 'Online'">
+    <Compile Remove="Local/**/*.cs" />
+  </ItemGroup>
+
   <Target Name="ValidateUltraSimEdition" BeforeTargets="PrepareForBuild">
     <Error Condition="'$(UltraSimEdition)' != 'SinglePlayer' And '$(UltraSimEdition)' != 'Online' And '$(UltraSimEdition)' != 'Complete'"
            Text="UltraSimEdition must be SinglePlayer, Online, or Complete; received '$(UltraSimEdition)'." />
+  </Target>
+
+  <!-- Remove artifacts left by the pre-consolidation multi-Godot-project graph. Godot scans its
+       development output during editor reload, so a stale script assembly can otherwise recreate
+       duplicate managed type registration after upgrading an existing checkout. -->
+  <Target Name="RemoveRetiredGodotScriptAssemblies" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Bootstrap.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Local.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Playable.Godot.*" />
+    </ItemGroup>
+    <Delete Files="@(RetiredGodotScriptArtifact)" />
   </Target>
 </Project>

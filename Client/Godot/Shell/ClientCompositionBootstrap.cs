@@ -1,37 +1,7 @@
-using System.Collections.ObjectModel;
 using Godot;
 using UltraSim.Client.Core;
 
-namespace UltraSim.Client.Bootstrap.Godot;
-
-/// <summary>Names one physically composed client capability exposed by the application shell.</summary>
-public enum ClientCapability : byte
-{
-    SinglePlayer = 1,
-    Multiplayer = 2,
-    Settings = 3,
-    Exit = 4,
-}
-
-/// <summary>Immutable capability catalog supplied by one concrete executable root.</summary>
-public readonly record struct ClientCompositionManifest(
-    string Edition,
-    ReadOnlyCollection<ClientCapability> Capabilities)
-{
-    public static ClientCompositionManifest SinglePlayer { get; } = new(
-        "Single Player", Frozen(ClientCapability.SinglePlayer, ClientCapability.Settings, ClientCapability.Exit));
-
-    public static ClientCompositionManifest Online { get; } = new(
-        "Online", Frozen(ClientCapability.Multiplayer, ClientCapability.Settings, ClientCapability.Exit));
-
-    public static ClientCompositionManifest Complete { get; } = new(
-        "Complete",
-        Frozen(ClientCapability.SinglePlayer, ClientCapability.Multiplayer,
-            ClientCapability.Settings, ClientCapability.Exit));
-
-    private static ReadOnlyCollection<ClientCapability> Frozen(params ClientCapability[] capabilities) =>
-        Array.AsReadOnly(capabilities);
-}
+namespace UltraSim.Client.Godot;
 
 public readonly record struct GodotClientRootSnapshot(
     string Edition,
@@ -396,7 +366,20 @@ public abstract partial class ClientRoot : Control
         AddSetting(column, "Camera profile", camera);
         AddSetting(column, "Camera distance", distance);
         AddSetting(column, "Camera FOV", fov);
-        AddSetting(column, "Render distance (chunks)", renderDistance);
+        Label renderDistanceValue = new()
+        {
+            Text = $"Render distance: {(int)renderDistance.Value} chunks (applies on Save)",
+        };
+        renderDistance.ValueChanged += value =>
+            renderDistanceValue.Text = $"Render distance: {(int)value} chunks (applies on Save)";
+        column.AddChild(renderDistanceValue);
+        column.AddChild(renderDistance);
+        column.AddChild(new Label
+        {
+            Text = "The in-session HUD reports resident/rendered counts. Intentional-void chunks " +
+                "contain no mesh, so increasing the window may not change the visible silhouette.",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
         column.AddChild(new Label
         {
             Text = "Bindings are readable/persisted in settings/client.json. " +

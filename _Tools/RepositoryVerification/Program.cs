@@ -84,17 +84,6 @@ foreach (string configuration in configurations)
             "--path", "_Tests/UltraSim.S0.Godot.Tests",
             "--scene", "res://T010PlayableWorldAcceptance.tscn",
         ]);
-        const string playableProject = "Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj";
-        var playableBuild = new List<string> { "build", playableProject, "-c", configuration };
-        if (options.NoRestore) playableBuild.Add("--no-restore");
-        Run(root, "dotnet", playableBuild);
-        Run(root, godot,
-        [
-            "--headless",
-            "--editor",
-            "--path", "Client/Playable.Godot",
-            "--quit",
-        ]);
         BuildClientApplication(root, configuration, "Complete");
         Run(root, godot,
         [
@@ -103,13 +92,6 @@ foreach (string configuration in configurations)
             "--path", "Client/Godot",
             "--quit",
         ]);
-        Run(root, godot,
-        [
-            "--headless",
-            "--path", "Client/Playable.Godot",
-            "--", "--smoke",
-        ]);
-
         BuildClientApplication(root, configuration, "SinglePlayer");
         Run(root, godot,
         [
@@ -194,7 +176,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             "SinglePlayer",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
                 "UltraSim.Client.Content", "UltraSim.Client.Local",
-                "UltraSim.Client.Local.Godot", "UltraSim.Game.Composition", "UltraSim.Game.Replication",
+                "UltraSim.Game.Composition", "UltraSim.Game.Replication",
                 "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
@@ -202,7 +184,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             "Online",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.Network",
                 "UltraSim.Game.Protocol", "UltraSim.Network"],
-            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
+            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local",
                 "UltraSim.Game.Composition", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting",
@@ -210,7 +192,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         new(
             "Complete",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
-                "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
+                "UltraSim.Client.Local",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime"],
             []),
@@ -254,6 +236,16 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
         var outputAssemblies = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
             .Select(static path => Path.GetFileNameWithoutExtension(path))
             .ToHashSet(StringComparer.Ordinal);
+
+        string[] scriptAssemblies = outputAssemblies
+            .Where(static assembly => assembly.StartsWith("UltraSim.Client.", StringComparison.Ordinal) &&
+                assembly.EndsWith(".Godot", StringComparison.Ordinal))
+            .OrderBy(static assembly => assembly, StringComparer.Ordinal)
+            .ToArray();
+        if (!scriptAssemblies.SequenceEqual(["UltraSim.Client.Application.Godot"], StringComparer.Ordinal))
+            throw new InvalidOperationException(
+                $"{gate.Name} resolved multiple client Godot script assemblies: " +
+                string.Join(", ", scriptAssemblies));
 
         foreach (string required in gate.RequiredAssemblies)
         {
@@ -329,17 +321,11 @@ static void VerifyClientPresentationAssets(string root)
                 hash, StringComparison.Ordinal))
             throw new InvalidOperationException($"The frozen human calibration asset is missing or changed: {relative}.");
     }
-    foreach ((string composition, string link) in new[]
-    {
-        ("Godot", Path.Combine(root, "Client", "Godot", "Assets")),
-        ("Playable", Path.Combine(root, "Client", "Playable.Godot", "Assets")),
-    })
-    {
-        if (!Directory.Exists(link) ||
-            !string.Equals(new DirectoryInfo(link).LinkTarget, "../PresentationAssets", StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                $"{composition} does not expose the shared build-time presentation assets.");
-    }
+    string link = Path.Combine(root, "Client", "Godot", "Assets");
+    if (!Directory.Exists(link) ||
+        !string.Equals(new DirectoryInfo(link).LinkTarget, "../PresentationAssets", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "The maintained Godot client does not expose the shared build-time presentation assets.");
 }
 
 static void VerifyClientExportComposition(string root)
@@ -348,18 +334,21 @@ static void VerifyClientExportComposition(string root)
     string projectPath = Path.Combine(root, applicationProject.Replace('/', Path.DirectorySeparatorChar));
     XDocument project = XDocument.Load(projectPath, LoadOptions.SetLineInfo);
     XElement[] references = project.Descendants("ProjectReference").ToArray();
-    XElement local = references.Single(reference =>
-        reference.Attribute("Include")?.Value.EndsWith(
-            "Local.Godot/UltraSim.Client.Local.Godot.csproj", StringComparison.Ordinal) == true);
+    XElement[] localReferences = references.Where(reference =>
+        (reference.Attribute("Include")?.Value ?? "").Contains("BuiltInTestWorlds", StringComparison.Ordinal) ||
+        (reference.Attribute("Include")?.Value ?? "").EndsWith(
+            "Local/UltraSim.Client.Local.csproj", StringComparison.Ordinal) ||
+        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Composition", StringComparison.Ordinal) ||
+        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Contracts", StringComparison.Ordinal)).ToArray();
     XElement online = references.Single(reference =>
         reference.Attribute("Include")?.Value.EndsWith(
             "Network/UltraSim.Client.Network.csproj", StringComparison.Ordinal) == true);
-    string localCondition = local.Attribute("Condition")?.Value ?? "";
     string onlineCondition = online.Attribute("Condition")?.Value ?? "";
-    if (!localCondition.Contains("SinglePlayer", StringComparison.Ordinal) ||
-        !localCondition.Contains("Complete", StringComparison.Ordinal) ||
-        localCondition.Contains("Online", StringComparison.Ordinal))
-        throw new InvalidOperationException("The local client reference is not edition-fenced.");
+    if (localReferences.Length != 4 || localReferences.Any(reference =>
+        !(reference.Attribute("Condition")?.Value ?? "").Contains("SinglePlayer", StringComparison.Ordinal) ||
+        !(reference.Attribute("Condition")?.Value ?? "").Contains("Complete", StringComparison.Ordinal) ||
+        (reference.Attribute("Condition")?.Value ?? "").Contains("Online", StringComparison.Ordinal)))
+        throw new InvalidOperationException("The local client references are not edition-fenced.");
     if (!onlineCondition.Contains("Online", StringComparison.Ordinal) ||
         !onlineCondition.Contains("Complete", StringComparison.Ordinal) ||
         onlineCondition.Contains("SinglePlayer", StringComparison.Ordinal))
@@ -391,11 +380,15 @@ static void VerifyClientExportComposition(string root)
         !onlinePreset.Groups["body"].Value.Contains("exclude_filter=\"Assets/**\"", StringComparison.Ordinal))
         throw new InvalidOperationException("The Online export does not exclude local presentation assets.");
 
-    foreach (string retired in new[] { "SinglePlayer.Godot", "Online.Godot", "Complete.Godot" })
+    foreach (string retired in new[]
     {
-        if (File.Exists(Path.Combine(root, "Client", retired, "project.godot")))
+        "SinglePlayer.Godot", "Online.Godot", "Complete.Godot", "Playable.Godot",
+        "Bootstrap.Godot", "Local.Godot", "_Godot",
+    })
+    {
+        if (Directory.Exists(Path.Combine(root, "Client", retired)))
             throw new InvalidOperationException(
-                $"Retired duplicate Godot application project is still active: Client/{retired}.");
+                $"Retired Godot project/source root is still active: Client/{retired}.");
     }
 }
 
@@ -439,17 +432,6 @@ static void VerifyArchitecture(string root)
             "Kernels/Network/UltraSim.Network.csproj",
             "Kernels/UI/UltraSim.UI.csproj",
         ],
-        ["Client/_Godot/UltraSim.Client.Godot.csproj"] =
-        [
-            "Client/Core/UltraSim.Client.Core.csproj",
-            "Game/World/UltraSim.Game.World.csproj",
-            "Kernels/Spatial/UltraSim.Spatial.csproj",
-        ],
-        ["Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj"] =
-        [
-            "Client/Core/UltraSim.Client.Core.csproj",
-            "Client/_Godot/UltraSim.Client.Godot.csproj",
-        ],
         ["Client/Local/UltraSim.Client.Local.csproj"] =
         [
             "Client/Core/UltraSim.Client.Core.csproj",
@@ -468,26 +450,17 @@ static void VerifyArchitecture(string root)
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
-        ["Client/Local.Godot/UltraSim.Client.Local.Godot.csproj"] =
+        ["Client/Godot/UltraSim.Client.Application.Godot.csproj"] =
         [
-            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
             "Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj",
             "Client/Core/UltraSim.Client.Core.csproj",
             "Client/Local/UltraSim.Client.Local.csproj",
-            "Client/_Godot/UltraSim.Client.Godot.csproj",
+            "Client/Network/UltraSim.Client.Network.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
         ],
-        ["Client/Godot/UltraSim.Client.Application.Godot.csproj"] =
-        [
-            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
-            "Client/Local.Godot/UltraSim.Client.Local.Godot.csproj",
-            "Client/Network/UltraSim.Client.Network.csproj",
-        ],
-        ["Client/Playable.Godot/UltraSim.Client.Playable.Godot.csproj"] =
-            ["Client/Local.Godot/UltraSim.Client.Local.Godot.csproj"],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Game/Contracts/UltraSim.Game.Contracts.csproj"] =
@@ -652,9 +625,6 @@ static void VerifyDocumentation(string root)
         "Client/BuiltInTestWorlds/README.md",
         "Client/Local/README.md",
         "Client/Godot/README.md",
-        "Client/Bootstrap.Godot/README.md",
-        "Client/_Godot/README.md",
-        "Client/Playable.Godot/README.md",
         "Game/World/README.md",
         "Game/Chat/README.md",
         "Game/Physics/README.md",
@@ -684,8 +654,7 @@ static void VerifyDocumentation(string root)
             "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
             "Client/Content/README.md", "Client/BuiltInTestWorlds/README.md",
-            "Client/Local/README.md", "Client/Godot/README.md", "Client/_Godot/README.md",
-            "Client/Playable.Godot/README.md", "Game/World/README.md",
+            "Client/Local/README.md", "Client/Godot/README.md", "Game/World/README.md",
             "Game/Chat/README.md", "Game/Physics/README.md", "Game/Replication/README.md",
             "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],

@@ -1,16 +1,20 @@
 # UltraSim client application project
 
-This is the one maintained Godot application project. The `UltraSimEdition` MSBuild property creates
-three physically different dependency products from the same scene, settings, input surface, import
-database, and presentation assets:
+This is the one maintained Godot application and the only production Godot script assembly. Its
+`Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,
+`Bootstrap.Godot`, `Local.Godot`, and `Playable.Godot` projects. Keeping all native scripts in
+`UltraSim.Client.Application.Godot` avoids duplicate Godot type registration during editor reload.
+
+The `UltraSimEdition` MSBuild property creates three physically different dependency products from
+the same scene, settings, input surface, import database, and presentation assets:
 
 ```text
 SinglePlayer
-    Bootstrap.Godot + Local.Godot
+    Client Core + Client.Local + built-in local content + Godot wrapper
     no Client.Network / Game.Protocol / Network kernel
 
 Online
-    Bootstrap.Godot + Client.Network
+    Client Core + Client.Network + Godot wrapper
     no Client.Local / local Game composition / Server Runtime
 
 Complete
@@ -33,3 +37,13 @@ Client/Godot/export-client.sh Complete
 
 The Online preset excludes bundled `Assets/**`. Actual passive-content acquisition remains owned by
 the later asset-streaming checkpoints.
+
+For normal development, open this directory in Godot and run the Complete build. Choose **Single
+Player** to enter the Concept Demo island. Runtime diagnostics show the configured render radius and
+the authored/resident/rendered chunk counts; intentional-void chunks have no mesh, so a larger
+window can change the counts without adding visible geometry at the current location.
+
+Local saves live below `user://single-player/`. Controls are shown in the in-session HUD: F1/F2/F3
+select movement profiles, WASD moves in direct profiles, pointer input drives Orbit selection and
+destination, E interacts with the selected target, Space jumps in direct profiles, and the mouse
+wheel adjusts supported camera profiles.

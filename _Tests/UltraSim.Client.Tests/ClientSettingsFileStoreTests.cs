@@ -1,4 +1,3 @@
-using UltraSim.Client.Bootstrap.Godot;
 using UltraSim.Client.Core;
 
 static class ClientSettingsFileStoreTests

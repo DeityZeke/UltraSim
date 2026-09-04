@@ -135,8 +135,8 @@ and the fourth `worldview` save-set participant. Prepared client meshes honor
 overlays; empty/no-op overlay lineage is save/restore-closed; and ordinary identity
 validation uses cold bound-pack indexes rather than rescanning the immutable world.
 T0.10 is accepted: retained Direct/Destination authority and cadence semantics are
-closed, and `Client/Playable.Godot` provides the first real OfflineDirect woods/
-cabin application. Human acceptance and the broad performance matrix closed T0.
+closed, and its first OfflineDirect woods/cabin application now runs through the
+maintained `Client/Godot` project. Human acceptance and the broad performance matrix closed T0.
 
 Network N1.0-N1.4 layer bounded recipient chunk subscriptions, canonical chunk
 messages/proofs, MTU-admissible independent-unreliable delta/absence delivery,
@@ -203,14 +203,14 @@ Useful focused variants:
 ./verify.sh --all-configurations --no-restore
 ```
 
-Launch the current T0.10 client with a Godot 4.7 .NET build:
+Launch the maintained client with a Godot 4.7 .NET build:
 
 ```bash
-godot --path Client/Playable.Godot
+godot --path Client/Godot
 ```
 
-The controls and save location are documented in
-[`Client/Playable.Godot/README.md`](Client/Playable.Godot/README.md).
+The editions, controls, save locations, and export commands are documented in
+[`Client/Godot/README.md`](Client/Godot/README.md).
 
 The architecture-only gate also validates canonical documentation, relative
 links, root-document policy, XML-document generation policy, and stale claims.

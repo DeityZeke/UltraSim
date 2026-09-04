@@ -16,7 +16,8 @@ and a scoped user override. Server recommendations are deliberately absent from 
 replace reserved application actions, and cannot carry local audio/accessibility preferences. The
 current opaque `ClientSettingsScopeKey` proves the store/resolver shape only; it is not a hostname,
 Network endpoint, or authenticated realm identity. F0.3a may map a verified `ApplicationRealmId`
-into this shape. Godot owns platform file I/O and physical event translation.
+into this shape. Core's cold `ClientSettingsFileStore` owns atomic platform-local JSON persistence;
+the one Godot application assembly owns physical event translation.
 
 The world cache is owner-thread bound and fixed-capacity. Its limits describe
 client-resident chunks and rows rather than the server's ECS/public address

@@ -10,7 +10,7 @@ using UltraSim.Game.World;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
-namespace UltraSim.Client.Local.Godot;
+namespace UltraSim.Client.Godot;
 
 public enum CabinHumanBody : byte
 {
@@ -85,8 +85,8 @@ public partial class LocalCabinClient : Node3D
     private CanvasLayer? _shellHudLayer;
     private CanvasLayer? _shellWorldUiLayer;
     private CabinHumanBody _humanBody = CabinHumanBody.XBot;
-    // The unconfigured Playable.Godot reference executable retains the historical Cabin fixture.
-    // Permanent Single Player composition selects the Concept Demo explicitly.
+    // F0.2 acceptance retains the historical Cabin fixture in the maintained application;
+    // normal Single Player composition selects the Concept Demo explicitly.
     private bool _useConceptDemoWorld;
     private ResolvedClientSettings? _settings;
     private CabinCatalogAssetResolver? _assetResolver;
@@ -147,6 +147,7 @@ public partial class LocalCabinClient : Node3D
     private ulong _overheadOriginGenerationId;
     private ulong _overheadExpiresAtMilliseconds;
     private int _peakRenderedChunks;
+    private int _effectiveRenderDistanceChunks;
     private bool _gameplayInputAllowed = true;
     private bool _shutdown;
     private string? _initializationError;
@@ -188,7 +189,17 @@ public partial class LocalCabinClient : Node3D
         ApplyResolvedSettings();
         if (_initialized && previousRenderDistance != settings.RenderDistanceChunks &&
             _localSession is not null && _localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+        {
             RebuildClientProjection(view);
+            ClientStructuralResidencySnapshot residency = _residency?.GetSnapshot() ?? default;
+            GodotWorldRendererSnapshot render = _renderer?.GetSnapshot() ?? default;
+            string clamp = _effectiveRenderDistanceChunks == settings.RenderDistanceChunks
+                ? string.Empty
+                : $" (requested {settings.RenderDistanceChunks}; limited by this world)";
+            _lastOutcome = $"Render distance applied: {_effectiveRenderDistanceChunks} chunks{clamp}; " +
+                $"({residency.SemanticResidentChunks} resident / {render.ActiveRenderChunks} rendered)";
+            UpdateHud();
+        }
     }
 
     public LocalCabinPresentationSnapshot GetPresentationSnapshot()
@@ -222,7 +233,7 @@ public partial class LocalCabinClient : Node3D
             _settings?.CameraProfile ?? default,
             _cameraDistance,
             _camera?.Fov ?? 0,
-            _settings?.RenderDistanceChunks ?? 0,
+            _effectiveRenderDistanceChunks,
             residency.AuthoredChunks,
             residency.SemanticResidentChunks,
             residency.PeakSemanticResidentChunks,
@@ -236,6 +247,7 @@ public partial class LocalCabinClient : Node3D
     {
         if (!_initialized || _settings is null || !_useConceptDemoWorld)
             throw new InvalidOperationException("D0.1 requires the initialized Concept Demo consumer.");
+        ApplySettings(WithRenderDistance(_settings, 1));
         LocalCabinPresentationSnapshot before = GetPresentationSnapshot();
         if (before.RenderDistanceChunks != 1 ||
             before.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
@@ -244,18 +256,7 @@ public partial class LocalCabinClient : Node3D
                 $"The default D0.1 working set was unexpected: {before.AuthoredChunks}/" +
                 $"{before.SemanticResidentChunks}/{before.RenderedChunks}.");
 
-        var expandedLayer = new ClientSettingsLayer(
-            _settings.UiScale,
-            _settings.MasterVolume,
-            _settings.PointerSensitivity,
-            _settings.InvertY,
-            _settings.ControlGrammar,
-            _settings.CameraProfile,
-            _settings.CameraDistance,
-            _settings.CameraFovDegrees,
-            _settings.Bindings,
-            renderDistanceChunks: 2);
-        ApplySettings(ClientSettingsResolver.Resolve(new ClientSettingsDocument(expandedLayer)));
+        ApplySettings(WithRenderDistance(_settings, 2));
 
         LocalCabinPresentationSnapshot after = GetPresentationSnapshot();
         if (after.RenderDistanceChunks != 2 ||
@@ -267,6 +268,21 @@ public partial class LocalCabinClient : Node3D
                 $"{after.SemanticResidentChunks}/{after.RenderedChunks}.");
         return after;
     }
+
+    private static ResolvedClientSettings WithRenderDistance(
+        ResolvedClientSettings settings,
+        int renderDistanceChunks) =>
+        ClientSettingsResolver.Resolve(new ClientSettingsDocument(new ClientSettingsLayer(
+            settings.UiScale,
+            settings.MasterVolume,
+            settings.PointerSensitivity,
+            settings.InvertY,
+            settings.ControlGrammar,
+            settings.CameraProfile,
+            settings.CameraDistance,
+            settings.CameraFovDegrees,
+            settings.Bindings,
+            renderDistanceChunks)));
 
     public override void _Ready()
     {
@@ -567,8 +583,12 @@ public partial class LocalCabinClient : Node3D
     {
         if (_localSession is null || _boundWorld is null || !view.IsReady)
             throw new InvalidOperationException("Authority is not ready.");
-        int renderRadius = _settings?.RenderDistanceChunks ??
+        int requestedRenderRadius = _settings?.RenderDistanceChunks ??
             ClientSettingsResolver.MinimumRenderDistanceChunks;
+        int renderRadius = Math.Min(
+            requestedRenderRadius,
+            MaximumRenderRadius(view.PreparedWorld.BaseWorld));
+        _effectiveRenderDistanceChunks = renderRadius;
         _renderer?.Dispose();
         ClientWorldSemanticCacheLimits cacheLimits =
             ClientWorldSemanticCacheLimits.ForStructuralViewRadius(
@@ -602,6 +622,29 @@ public partial class LocalCabinClient : Node3D
         UpdateHumanPresentation(view.PlayerOrientation);
         TrackPresentation(reset: true);
         DrainRenderer();
+    }
+
+    private static int MaximumRenderRadius(BoundWorldPack world)
+    {
+        int minimumX = int.MaxValue;
+        int maximumX = int.MinValue;
+        int minimumZ = int.MaxValue;
+        int maximumZ = int.MinValue;
+        for (int index = 0; index < world.ChunkCount; index++)
+        {
+            if (!world.TryGetChunkKey(index, out SpatialChunkKey key))
+                throw new InvalidOperationException("A validated WorldPack lost a chunk key.");
+            minimumX = Math.Min(minimumX, key.Coord.X);
+            maximumX = Math.Max(maximumX, key.Coord.X);
+            minimumZ = Math.Min(minimumZ, key.Coord.Z);
+            maximumZ = Math.Max(maximumZ, key.Coord.Z);
+        }
+        int width = checked(maximumX - minimumX + 1);
+        int depth = checked(maximumZ - minimumZ + 1);
+        return Math.Clamp(
+            (Math.Min(width, depth) - 1) / 2,
+            ClientSettingsResolver.MinimumRenderDistanceChunks,
+            ClientSettingsResolver.MaximumRenderDistanceChunks);
     }
 
     private ClientControlProfileDecision EvaluateProfile(
@@ -1094,7 +1137,7 @@ public partial class LocalCabinClient : Node3D
         int authoredMaximumChunk = _useConceptDemoWorld
             ? GamePlayableWorld.ConceptMaximumChunk
             : GamePlayableWorld.MaximumChunk;
-        int renderRadius = _settings?.RenderDistanceChunks ?? 1;
+        int renderRadius = _effectiveRenderDistanceChunks;
         var edge = new WorldPosition(
             authoredMaximumChunk,
             authoredMaximumChunk,
@@ -1181,6 +1224,9 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The Concept Demo smoke started before composition completed.");
         if (!_useConceptDemoWorld)
             throw new InvalidOperationException("The Concept Demo smoke requires the Concept Demo world fixture.");
+        if (_settings is null)
+            throw new InvalidOperationException("The Concept Demo settings are unavailable.");
+        ApplySettings(WithRenderDistance(_settings, 1));
 
         if (!WorldPosition.TryFromGlobalMillimeters(40_000, 0, 40_000, out WorldPosition outerVoid) ||
             _boundWorld.ProbeBaseTerrainSurface(outerVoid).Status != BaseTerrainSurfaceStatus.Absent ||

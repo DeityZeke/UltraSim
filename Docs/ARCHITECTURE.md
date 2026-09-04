@@ -123,9 +123,9 @@ derived/application indexes when their ownership and scale are explicit.
   no world storage, membership, AOI, publication, or threads.
 - `Server/Runtime`, `Server/Hosting`, `Server/Persistence`: authority,
   deployment, and durable save-set mechanics.
-- `Client/Core`, `Client/Local`, `Client/Network`, `Client/_Godot`: retained
+- `Client/Core`, `Client/Local`, `Client/Network`, `Client/Godot`: retained
   projection, packet-free local application composition, remote delivery, and
-  rendering.
+  the one native Godot application/script boundary.
 - `Game/*`: concrete content, state, policy, authoritative workflows, the fixed
   game-world position profile, and replication composition.
 - `_Tests`, `_Benchmarks`, `_Tools`: executable evidence and repository gates.

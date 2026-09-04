@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using UltraSim.Client.Bootstrap.Godot;
 using UltraSim.Client.Core;
 using UltraSim.UI;
 

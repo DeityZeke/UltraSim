@@ -18,8 +18,9 @@ Client/Core
 Client/Network
     authenticated application-session bridge and remote action/apply translation
 
-Client/_Godot
-    Godot control construction, rendering, and input forwarding
+Client/Godot
+    one Godot script assembly for shell, control construction, rendering,
+    input forwarding, and edition-specific composition
 ```
 
 `Game/UI` referencing Server Runtime is intentional: it implements server-side

@@ -865,9 +865,9 @@ camera profile, or pointer gesture policy is implemented by this checkpoint.
 
 ## T0.10 launchable OfflineDirect client implementation stop — 2026-08-21
 
-The first human-launchable client now lives at `Client/Playable.Godot`. It is a
-composition root beside the reusable `Client/_Godot` adapter rather than a
-reason to give the adapter authority dependencies. It starts the real local
+The first human-launchable client was originally proven in `Client/Playable.Godot`; its accepted
+consumer now lives in the single maintained `Client/Godot` project. The native adapter remains a
+thin source layer rather than a reason to give presentation authority. The local capability starts the real
 `ServerRuntime`, populates the authored woods/cabin pack, consumes actual
 `ChunkPublicationStore` snapshots into the production semantic cache/window,
 and realizes them through `GodotWorldRenderer`.

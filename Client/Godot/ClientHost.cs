@@ -1,8 +1,6 @@
 using Godot;
-using UltraSim.Client.Bootstrap.Godot;
-#if ULTRASIM_SINGLE_PLAYER || ULTRASIM_COMPLETE
-using UltraSim.Client.Local.Godot;
-#endif
+using UltraSim.Client.Core;
+using UltraSim.Client.Godot;
 #if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
 using UltraSim.Client.Network;
 #endif

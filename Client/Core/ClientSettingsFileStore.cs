@@ -1,7 +1,6 @@
 using System.Text;
-using UltraSim.Client.Core;
 
-namespace UltraSim.Client.Bootstrap.Godot;
+namespace UltraSim.Client.Core;
 
 public enum ClientSettingsLoadStatus : byte
 {

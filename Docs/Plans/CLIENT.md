@@ -114,9 +114,10 @@ This is the correct center of the real client.
 
 That separation should become an explicit executable-composition boundary.
 
-## Godot adapter
+## Godot adapter/application
 
-`Client/_Godot` is Network-free and translates Client Core semantics into native:
+`Client/Godot` is the one production Godot script assembly. Its common adapter/shell source is
+Network-free and translates Client Core semantics into native:
 
 - rendering;
 - UI controls;
@@ -125,15 +126,14 @@ That separation should become an explicit executable-composition boundary.
 - camera/presentation;
 - fallback assets.
 
-The Godot adapter must not become the place where local-vs-remote Game semantics diverge.
+Edition-fenced project references add either `Client.Local`, `Client.Network`, or both without
+adding another Godot script assembly. The Godot adapter must not become the place where
+local-vs-remote Game semantics diverge.
 
-## Current playable harness
+## Current playable application
 
-`Client/Playable.Godot` currently composes Client Core, Client Network, Game projects, Server Runtime/Persistence, and Network into one acceptance executable. That was appropriate for vertical proof.
-
-It is not the final client ownership model.
-
-Keep it until the real shell reaches equivalent automated/manual coverage, then shrink/retire it.
+`Client/Godot` is the maintained playable application. The former `Playable.Godot` acceptance
+wrapper was retired after the permanent shell/local consumer reached equivalent automated coverage.
 
 The current harness already proves the intended authoritative local path: Godot forms a
 `GamePlayerCommand`, Game/Physics owns the result, and Client Core owns the resulting presentation
@@ -1441,9 +1441,9 @@ settings, import database, and export-preset surface. Its fixed
 `UltraSim.Client.Application.Godot` host compiles under one explicit `UltraSimEdition`:
 
 ```text
-SinglePlayer -> Bootstrap.Godot + Local.Godot
-Online       -> Bootstrap.Godot + Client.Network
-Complete     -> union
+SinglePlayer -> common Godot source + Client.Local/local content
+Online       -> common Godot source + Client.Network
+Complete     -> common Godot source + both capability families
 ```
 
 The default editor/development product is Complete. Canonical exports use the edition-specific
@@ -1454,8 +1454,12 @@ boundary. Conditional MSBuild references establish the dependency closure.
 The verifier independently publishes all three products, inspects each `.deps.json` and copied
 managed/native output, and runs the same Godot scene against all three compiled editions. Online's
 resource preset also excludes the local presentation `Assets/**`. The superseded
-`SinglePlayer.Godot`, `Online.Godot`, and `Complete.Godot` source projects were retired; the separate
-`Client/_Godot` engine adapter and `Playable.Godot` compatibility/acceptance consumer remain.
+`SinglePlayer.Godot`, `Online.Godot`, and `Complete.Godot` source projects were retired. Subsequent
+manual testing exposed duplicate C# script registration when the maintained project referenced the
+additional Godot SDK assemblies for `_Godot`, `Bootstrap.Godot`, and `Local.Godot`. Those assemblies
+and the obsolete `Playable.Godot` wrapper are now retired too: native adapter, shell, and local
+presentation source compile into the single application assembly. The shipped-output gate requires
+exactly one `UltraSim.Client.*.Godot` assembly in every edition.
 
 **Gate:** one Godot application project launches every product; capability menus match the compiled
 edition; Single Player and Online published closures still physically exclude their forbidden
@@ -1472,8 +1476,9 @@ and retained public-world/Chat/UI semantic channels. Client application returns 
 proof; rejected public/Chat debt is retried, rejected UI projection follows the existing terminal
 view-desynchronization rule, and presentation stalls do not stop authoritative ticks.
 
-`Client/Playable.Godot` now consumes this boundary. It no longer ticks or enters active Game
-generations, scans/copies the complete publication store, or constructs a local protocol loopback.
+The maintained `Client/Godot` local capability consumes this boundary. It does not tick or enter
+active Game generations, scan/copy the complete publication store, or construct a local protocol
+loopback.
 The local public recipient uses the accepted Game chunk-interest profile and cadence; dynamic-public
 AOI leave clears only public knowledge while structural Client residency remains intact.
 
@@ -1512,7 +1517,7 @@ transient and opt-in; they cannot replace reserved client controls or carry loca
 settings. The current scope key is intentionally opaque fixture/storage vocabulary rather than a
 hostname, endpoint, or claim of verified `ApplicationRealmId`; F0.3a establishes that identity.
 
-`Client/Bootstrap.Godot` now supplies one persistent `ClientRoot` with Controller,
+`Client/Godot/Shell` now supplies one persistent `ClientRoot` with Controller,
 ContentCatalogs, World, and World/HUD/Menu/Debug layer roots. It owns readable versioned
 `user://settings/client.json` persistence with fail-closed invalid-file fallback, main/settings,
 loading/error/in-session-options surfaces, and reserved-control dispatch. All three fixed
@@ -1548,8 +1553,8 @@ Do not need a live server to use/test these.
 
 ## F0.2 — Single Player Local Play + Cabin + human calibration
 
-**Status: CLOSED.** `Client/Local.Godot` is the separately composed permanent Cabin consumer used by
-Single Player and Complete. It binds `LocalPlayableSession` into the F0.1 World/HUD/session
+**Status: CLOSED.** The edition-fenced `Client/Godot/Local` source is the permanent local consumer
+used by Single Player and Complete. It binds `LocalPlayableSession` into the F0.1 World/HUD/session
 lifecycle, resolves the exact A0.1 Default catalog for normal play, and realizes the frozen
 Default/Replace/Add catalogs in headless acceptance through the same Godot consumer. Online has no
 dependency on the local capability or built-in Test World.
@@ -1558,8 +1563,8 @@ The permanent path now covers normal command input, public world presentation, d
 interaction, Chat, server-composed Inventory UI, clean leave/re-entry with fresh application/control
 lineage, the F0.1 resolved control/camera settings and bindings, and the bundled X/Y Bot human
 calibration bodies. Initial presentation anchors are 1.6 m camera pivot, 2.0 m nameplate, and 0.9 m
-effects; they are presentation evidence rather than Physics constants. `Playable.Godot` remains
-only a thin acceptance wrapper over this consumer.
+effects; they are presentation evidence rather than Physics constants. The maintained client is now
+the sole human and acceptance executable.
 
 F0.2 hardening also freezes the administrative relocation ordering used by acceptance and future
 teleport consumers: after authority reports success, the local client continues pumping until its
@@ -2022,9 +2027,8 @@ Current V3:
 - `Client/Core`
 - `Client/Core/ClientWorldControlProfiles.cs`
 - `Client/Network`
-- `Client/_Godot`
-- `Client/_Godot/GodotWorldInput.cs`
-- `Client/Playable.Godot`
+- `Client/Godot`
+- `Client/Godot/Adapter/GodotWorldInput.cs`
 - `Kernels/UI`
 - `Game/UI/InventoryUi.cs`
 - `Game/World` public/semantic records

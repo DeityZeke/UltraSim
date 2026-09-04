@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../Client/_Godot/UltraSim.Client.Godot.csproj" />
+    <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
     <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
@@ -21,7 +21,15 @@
     <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
     <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+  </ItemGroup>
+
+  <!-- Compile the production adapter source into this isolated Godot acceptance assembly. The
+       maintained application itself has exactly one script-bearing assembly and never references
+       another Godot SDK project. -->
+  <ItemGroup>
+    <Compile Include="../../Client/Godot/Adapter/*.cs" Link="ClientAdapter/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

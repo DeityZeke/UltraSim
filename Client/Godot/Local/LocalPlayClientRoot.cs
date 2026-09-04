@@ -1,9 +1,9 @@
 using Godot;
-using UltraSim.Client.Bootstrap.Godot;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Core;
+using UltraSim.Game.Composition;
 
-namespace UltraSim.Client.Local.Godot;
+namespace UltraSim.Client.Godot;
 
 /// <summary>
 /// Shared F0.2 local-capability composition used by the Single Player and Complete executables.
@@ -226,7 +226,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             snapshot.CameraProfile != EffectiveSettings.CameraProfile ||
             !Mathf.IsEqualApprox(snapshot.CameraDistance, EffectiveSettings.CameraDistance) ||
             !Mathf.IsEqualApprox(snapshot.CameraFovDegrees, EffectiveSettings.CameraFovDegrees) ||
-            snapshot.RenderDistanceChunks != EffectiveSettings.RenderDistanceChunks ||
+            snapshot.RenderDistanceChunks != Math.Min(
+                EffectiveSettings.RenderDistanceChunks, GamePlayableWorld.MaximumChunk) ||
             !EffectiveSettings.TryGetBinding(
                 ClientSemanticAction.Jump, out ClientPhysicalInput jump) ||
             jump.Kind != ClientPhysicalInputKind.Keyboard || jump.Code != "SPACE")
