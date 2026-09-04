@@ -18,16 +18,19 @@ static class ClientSettingsFileStoreTests
                 out ClientPhysicalInput input);
             var document = new ClientSettingsDocument(new ClientSettingsLayer(
                 uiScale: 1.35f,
-                bindings: [new ClientPhysicalBinding(ClientSemanticAction.Interact, input)]));
+                bindings: [new ClientPhysicalBinding(ClientSemanticAction.Interact, input)],
+                renderDistanceChunks: 2));
             store.Save(document);
             True(File.Exists(path));
             True(!File.Exists(path + ".tmp"));
             string readable = File.ReadAllText(path);
             True(readable.Contains("\"uiScale\": 1.35", StringComparison.Ordinal));
             True(readable.Contains("\"Interact\"", StringComparison.Ordinal));
+            True(readable.Contains("\"renderDistanceChunks\": 2", StringComparison.Ordinal));
             ClientSettingsLoadResult loaded = store.Load();
             Equal(ClientSettingsLoadStatus.Loaded, loaded.Status);
             Equal(1.35f, ClientSettingsResolver.Resolve(loaded.Document).UiScale);
+            Equal(2, ClientSettingsResolver.Resolve(loaded.Document).RenderDistanceChunks);
 
             File.WriteAllText(
                 path,

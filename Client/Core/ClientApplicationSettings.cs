@@ -134,7 +134,8 @@ public sealed class ClientSettingsLayer
         ClientCameraProfile? cameraProfile = null,
         float? cameraDistance = null,
         float? cameraFovDegrees = null,
-        IEnumerable<ClientPhysicalBinding>? bindings = null)
+        IEnumerable<ClientPhysicalBinding>? bindings = null,
+        int? renderDistanceChunks = null)
     {
         UiScale = uiScale;
         MasterVolume = masterVolume;
@@ -144,6 +145,7 @@ public sealed class ClientSettingsLayer
         CameraProfile = cameraProfile;
         CameraDistance = cameraDistance;
         CameraFovDegrees = cameraFovDegrees;
+        RenderDistanceChunks = renderDistanceChunks;
         ClientPhysicalBinding[] copy = bindings?.ToArray() ?? [];
         Validate(copy);
         _bindings = Array.AsReadOnly(copy);
@@ -158,6 +160,7 @@ public sealed class ClientSettingsLayer
     public ClientCameraProfile? CameraProfile { get; }
     public float? CameraDistance { get; }
     public float? CameraFovDegrees { get; }
+    public int? RenderDistanceChunks { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
 
     private void Validate(ReadOnlySpan<ClientPhysicalBinding> bindings)
@@ -172,6 +175,9 @@ public sealed class ClientSettingsLayer
                 camera is < ClientCameraProfile.Orbit or > ClientCameraProfile.IndependentMoveLook ||
             CameraDistance is float distance && (!float.IsFinite(distance) || distance is < 2f or > 80f) ||
             CameraFovDegrees is float fov && (!float.IsFinite(fov) || fov is < 40f or > 120f) ||
+            RenderDistanceChunks is int renderDistance &&
+                renderDistance is < ClientSettingsResolver.MinimumRenderDistanceChunks or
+                    > ClientSettingsResolver.MaximumRenderDistanceChunks ||
             bindings.Length > ClientSettingsResolver.MaximumBindings)
             throw new ArgumentOutOfRangeException(nameof(ClientSettingsLayer));
 
@@ -271,7 +277,7 @@ public readonly record struct ClientScopedSettings(
 /// <summary>Immutable user settings document; server recommendations are deliberately absent.</summary>
 public sealed class ClientSettingsDocument
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public const int MaximumScopes = 128;
     private readonly ReadOnlyCollection<ClientScopedSettings> _scopes;
 
@@ -352,6 +358,7 @@ public sealed class ResolvedClientSettings
         ClientCameraProfile cameraProfile,
         float cameraDistance,
         float cameraFovDegrees,
+        int renderDistanceChunks,
         ClientPhysicalBinding[] bindings)
     {
         UiScale = uiScale;
@@ -362,6 +369,7 @@ public sealed class ResolvedClientSettings
         CameraProfile = cameraProfile;
         CameraDistance = cameraDistance;
         CameraFovDegrees = cameraFovDegrees;
+        RenderDistanceChunks = renderDistanceChunks;
         _bindings = Array.AsReadOnly(bindings);
     }
 
@@ -373,6 +381,7 @@ public sealed class ResolvedClientSettings
     public ClientCameraProfile CameraProfile { get; }
     public float CameraDistance { get; }
     public float CameraFovDegrees { get; }
+    public int RenderDistanceChunks { get; }
     public ReadOnlyCollection<ClientPhysicalBinding> Bindings => _bindings;
 
     public bool TryGetBinding(ClientSemanticAction action, out ClientPhysicalInput input)
@@ -391,6 +400,8 @@ public sealed class ResolvedClientSettings
 public static class ClientSettingsResolver
 {
     public const int MaximumBindings = 32;
+    public const int MinimumRenderDistanceChunks = 1;
+    public const int MaximumRenderDistanceChunks = 3;
 
     public static ResolvedClientSettings Resolve(
         ClientSettingsDocument document,
@@ -423,7 +434,7 @@ public static class ClientSettingsResolver
         return new ResolvedClientSettings(
             current.UiScale, current.MasterVolume, current.PointerSensitivity, current.InvertY,
             current.ControlGrammar, current.CameraProfile, current.CameraDistance,
-            current.CameraFovDegrees, bindings);
+            current.CameraFovDegrees, current.RenderDistanceChunks, bindings);
     }
 
     private static MutableSettings BuiltIn()
@@ -438,6 +449,7 @@ public static class ClientSettingsResolver
             CameraProfile = ClientCameraProfile.Orbit,
             CameraDistance = 28f,
             CameraFovDegrees = 70f,
+            RenderDistanceChunks = 1,
         };
         AddDefault(settings, ClientSemanticAction.ExitApplication, ClientPhysicalInputKind.Keyboard, "F4", ClientInputModifiers.Alt);
         AddDefault(settings, ClientSemanticAction.OpenClientMenu, ClientPhysicalInputKind.Keyboard, "ESCAPE");
@@ -480,6 +492,7 @@ public static class ClientSettingsResolver
         current.CameraProfile = layer.CameraProfile ?? current.CameraProfile;
         current.CameraDistance = layer.CameraDistance ?? current.CameraDistance;
         current.CameraFovDegrees = layer.CameraFovDegrees ?? current.CameraFovDegrees;
+        current.RenderDistanceChunks = layer.RenderDistanceChunks ?? current.RenderDistanceChunks;
         foreach (ClientPhysicalBinding binding in layer.Bindings)
             current.Bindings[binding.Action] = binding.Input;
     }
@@ -523,6 +536,7 @@ public static class ClientSettingsResolver
         internal ClientCameraProfile CameraProfile;
         internal float CameraDistance;
         internal float CameraFovDegrees;
+        internal int RenderDistanceChunks;
         internal readonly Dictionary<ClientSemanticAction, ClientPhysicalInput> Bindings = [];
     }
 }
@@ -559,7 +573,7 @@ public static class ClientSettingsJsonCodec
             if (string.IsNullOrWhiteSpace(json)) throw new JsonException("The settings document is empty.");
             DocumentDto value = JsonSerializer.Deserialize<DocumentDto>(json, Options) ??
                 throw new JsonException("The settings document was null.");
-            if (value.Version != ClientSettingsDocument.CurrentVersion)
+            if (value.Version is < 1 or > ClientSettingsDocument.CurrentVersion)
                 throw new JsonException($"Unsupported client settings version {value.Version}.");
             ClientSettingsLayer global = FromDto(value.Global ?? new LayerDto());
             List<ClientScopedSettings> scopes = [];
@@ -600,6 +614,7 @@ public static class ClientSettingsJsonCodec
         CameraProfile = layer.CameraProfile,
         CameraDistance = layer.CameraDistance,
         CameraFovDegrees = layer.CameraFovDegrees,
+        RenderDistanceChunks = layer.RenderDistanceChunks,
         Bindings = layer.Bindings.Select(binding => new BindingDto
         {
             Action = binding.Action,
@@ -622,7 +637,7 @@ public static class ClientSettingsJsonCodec
         return new ClientSettingsLayer(
             value.UiScale, value.MasterVolume, value.PointerSensitivity, value.InvertY,
             value.ControlGrammar, value.CameraProfile, value.CameraDistance,
-            value.CameraFovDegrees, bindings);
+            value.CameraFovDegrees, bindings, value.RenderDistanceChunks);
     }
 
     private static JsonSerializerOptions CreateOptions()
@@ -660,6 +675,7 @@ public static class ClientSettingsJsonCodec
         public ClientCameraProfile? CameraProfile { get; set; }
         public float? CameraDistance { get; set; }
         public float? CameraFovDegrees { get; set; }
+        public int? RenderDistanceChunks { get; set; }
         public List<BindingDto>? Bindings { get; set; }
     }
 

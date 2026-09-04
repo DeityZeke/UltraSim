@@ -98,6 +98,15 @@ while earlier realization is notionally pending, reversal, reset, and bounded
 desired membership. This is a portability seam, not a renderer interface or mod
 API.
 
+Concept Demo D0.1 adds `ClientStructuralResidency` immediately before that presentation seam. The
+bound WorldPack is the authored/source catalog, not the resident set. The controller retains only
+the clipped presentation neighborhood plus one bounded structural fringe, transactionally stages
+all entrants, and retires exits after presentation admission. Its fixed arrays and semantic-cache
+capacity bound the operation; cancellation rolls back newly staged chunks. Dynamic-public debt may
+keep an otherwise undesired semantic chunk resident, but Render Distance never changes Game-owned
+public interest. The accepted local canary is authored/resident/rendered `81/25/9` at radius 1 and
+`81/49/25` at radius 2.
+
 `ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
 are ordered, append-only occurrences rather than latest state: session/server
 generation and recipient sequence fence application, exact duplicates are

@@ -1297,6 +1297,9 @@ public static class GamePlayableWorld
     public const int MinimumChunk = -2;
     public const int MaximumChunk = 2;
     public const int ChunkCount = 25;
+    public const int ConceptMinimumChunk = -4;
+    public const int ConceptMaximumChunk = 4;
+    public const int ConceptChunkCount = 81;
 
     public static WorldSurfaceId MountainSurface => new(0xD0_001);
     public static WorldSurfaceId CaveLedgeSurface => new(0xD0_002);
@@ -1325,9 +1328,12 @@ public static class GamePlayableWorld
 
     private static WorldPack CreateWorldPackCore(bool conceptDemo)
     {
+        int minimumChunk = conceptDemo ? ConceptMinimumChunk : MinimumChunk;
+        int maximumChunk = conceptDemo ? ConceptMaximumChunk : MaximumChunk;
+        int chunkCount = conceptDemo ? ConceptChunkCount : ChunkCount;
         var limits = new WorldPackLimits(
-            2 * 1024 * 1024,
-            ChunkCount,
+            (conceptDemo ? 4 : 2) * 1024 * 1024,
+            chunkCount,
             8,
             maximumFrozenStatics: 128,
             maximumMultiInstances: 8,
@@ -1340,9 +1346,9 @@ public static class GamePlayableWorld
         var heights = new int[TerrainChunkFormat.HeightVertexCount];
         var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
         var presence = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
-        for (int chunkZ = MinimumChunk; chunkZ <= MaximumChunk; chunkZ++)
+        for (int chunkZ = minimumChunk; chunkZ <= maximumChunk; chunkZ++)
         {
-            for (int chunkX = MinimumChunk; chunkX <= MaximumChunk; chunkX++)
+            for (int chunkX = minimumChunk; chunkX <= maximumChunk; chunkX++)
             {
                 FillMaterials(chunkX, chunkZ, materials);
                 FillHeights(chunkX, chunkZ, heights);
@@ -1365,7 +1371,9 @@ public static class GamePlayableWorld
                 }
                 if (!added)
                     throw new InvalidOperationException($"Authored terrain chunk {key} failed: {error}.");
-                AddWoodsStatics(builder, chunkX, chunkZ, conceptDemo);
+                AddWoodsStatics(
+                    builder, chunkX, chunkZ, conceptDemo, minimumChunk,
+                    checked(maximumChunk - minimumChunk + 1));
             }
         }
         AddCabin(builder);
@@ -1524,9 +1532,12 @@ public static class GamePlayableWorld
         WorldPackBuilder builder,
         int chunkX,
         int chunkZ,
-        bool conceptDemo)
+        bool conceptDemo,
+        int minimumChunk,
+        int chunkWidth)
     {
-        int ordinal = checked((chunkZ - MinimumChunk) * 5 + (chunkX - MinimumChunk));
+        int ordinal = checked(
+            (chunkZ - minimumChunk) * chunkWidth + (chunkX - minimumChunk));
         int[][] locations = [[3_000, 3_000], [12_000, 5_000], [5_000, 13_000]];
         for (int index = 0; index < locations.Length; index++)
         {

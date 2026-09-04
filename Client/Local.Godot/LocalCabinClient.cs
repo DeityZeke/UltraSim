@@ -41,6 +41,12 @@ public readonly record struct LocalCabinPresentationSnapshot(
     ClientCameraProfile CameraProfile,
     float CameraDistance,
     float CameraFovDegrees,
+    int RenderDistanceChunks,
+    int AuthoredChunks,
+    int SemanticResidentChunks,
+    int PeakSemanticResidentChunks,
+    int RenderedChunks,
+    int PeakRenderedChunks,
     string? InitializationError);
 
 /// <summary>
@@ -67,7 +73,6 @@ public partial class LocalCabinClient : Node3D
         WoodlandAnimal,
     }
 
-    private const int RenderRadius = 1;
     private const int MaximumChatTextCharacters = 256;
     private const float CameraPivotMeters = 1.6f;
     private const float MinimumZoomCameraDistanceMeters = 3f;
@@ -88,16 +93,18 @@ public partial class LocalCabinClient : Node3D
     private LocalPlayableSession? _localSession;
     private BoundWorldPack? _boundWorld;
     private ClientWorldSemanticCache? _cache;
+    private ClientStructuralResidency? _residency;
     private GodotWorldRenderer? _renderer;
     private GodotSlidingRenderWindow? _window;
     private ClientWorldInputSequencer? _sequencer;
     private readonly OrbitCommandProfile _orbit = new();
     private readonly ThirdPersonDirectProfile _thirdPerson = new();
     private readonly IndependentMoveLookProfile _independent = new();
-    private readonly ClientPresentationChange[] _presentationChanges = new ClientPresentationChange[18];
-    private readonly ClientSemanticHash[] _semanticHashesBeforeRefresh = new ClientSemanticHash[25];
+    private ClientPresentationChange[] _presentationChanges = [];
+    private ClientPresentationBinding[] _presentationBindings = [];
+    private ClientSemanticHash[] _semanticHashesBeforeRefresh = [];
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
-    private readonly ClientSemanticChunkInfo[] _chatChunkInfo = new ClientSemanticChunkInfo[25];
+    private ClientSemanticChunkInfo[] _chatChunkInfo = [];
     private Camera3D? _camera;
     private Label? _status;
     private Label? _details;
@@ -139,6 +146,7 @@ public partial class LocalCabinClient : Node3D
     private WorldPublicEntityId _overheadAnchor;
     private ulong _overheadOriginGenerationId;
     private ulong _overheadExpiresAtMilliseconds;
+    private int _peakRenderedChunks;
     private bool _gameplayInputAllowed = true;
     private bool _shutdown;
     private string? _initializationError;
@@ -175,13 +183,20 @@ public partial class LocalCabinClient : Node3D
     public void ApplySettings(ResolvedClientSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        int previousRenderDistance = _settings?.RenderDistanceChunks ?? settings.RenderDistanceChunks;
         _settings = settings;
         ApplyResolvedSettings();
+        if (_initialized && previousRenderDistance != settings.RenderDistanceChunks &&
+            _localSession is not null && _localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+            RebuildClientProjection(view);
     }
 
     public LocalCabinPresentationSnapshot GetPresentationSnapshot()
     {
         LocalPlayableSessionSnapshot local = _localSession?.GetSnapshot() ?? default;
+        ClientStructuralResidencySnapshot residency = _residency?.GetSnapshot() ?? default;
+        GodotWorldRendererSnapshot render = _renderer?.GetSnapshot() ?? default;
+        _peakRenderedChunks = Math.Max(_peakRenderedChunks, render.ActiveRenderChunks);
         LocalPlayableAuthorityView authority = default;
         if (_localSession is not null) _ = _localSession.TryGetLatestView(out authority);
         return new LocalCabinPresentationSnapshot(
@@ -207,7 +222,50 @@ public partial class LocalCabinClient : Node3D
             _settings?.CameraProfile ?? default,
             _cameraDistance,
             _camera?.Fov ?? 0,
+            _settings?.RenderDistanceChunks ?? 0,
+            residency.AuthoredChunks,
+            residency.SemanticResidentChunks,
+            residency.PeakSemanticResidentChunks,
+            render.ActiveRenderChunks,
+            _peakRenderedChunks,
             _initializationError);
+    }
+
+    /// <summary>Permanent D0.1 canary for a live, settings-shaped window rebuild.</summary>
+    public LocalCabinPresentationSnapshot RunD01Acceptance()
+    {
+        if (!_initialized || _settings is null || !_useConceptDemoWorld)
+            throw new InvalidOperationException("D0.1 requires the initialized Concept Demo consumer.");
+        LocalCabinPresentationSnapshot before = GetPresentationSnapshot();
+        if (before.RenderDistanceChunks != 1 ||
+            before.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
+            before.SemanticResidentChunks != 25 || before.RenderedChunks != 9)
+            throw new InvalidOperationException(
+                $"The default D0.1 working set was unexpected: {before.AuthoredChunks}/" +
+                $"{before.SemanticResidentChunks}/{before.RenderedChunks}.");
+
+        var expandedLayer = new ClientSettingsLayer(
+            _settings.UiScale,
+            _settings.MasterVolume,
+            _settings.PointerSensitivity,
+            _settings.InvertY,
+            _settings.ControlGrammar,
+            _settings.CameraProfile,
+            _settings.CameraDistance,
+            _settings.CameraFovDegrees,
+            _settings.Bindings,
+            renderDistanceChunks: 2);
+        ApplySettings(ClientSettingsResolver.Resolve(new ClientSettingsDocument(expandedLayer)));
+
+        LocalCabinPresentationSnapshot after = GetPresentationSnapshot();
+        if (after.RenderDistanceChunks != 2 ||
+            after.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
+            after.SemanticResidentChunks != 49 || after.RenderedChunks != 25 ||
+            after.PeakSemanticResidentChunks < 49 || after.PeakRenderedChunks < 25)
+            throw new InvalidOperationException(
+                $"The expanded D0.1 working set was unexpected: {after.AuthoredChunks}/" +
+                $"{after.SemanticResidentChunks}/{after.RenderedChunks}.");
+        return after;
     }
 
     public override void _Ready()
@@ -388,6 +446,7 @@ public partial class LocalCabinClient : Node3D
         _uiClient = null;
         _renderer?.Dispose();
         _renderer = null;
+        _residency = null;
         _localSession?.Dispose();
         _localSession = null;
         ReleaseExternalUi(_ownedHudRoot);
@@ -508,20 +567,34 @@ public partial class LocalCabinClient : Node3D
     {
         if (_localSession is null || _boundWorld is null || !view.IsReady)
             throw new InvalidOperationException("Authority is not ready.");
+        int renderRadius = _settings?.RenderDistanceChunks ??
+            ClientSettingsResolver.MinimumRenderDistanceChunks;
         _renderer?.Dispose();
+        ClientWorldSemanticCacheLimits cacheLimits =
+            ClientWorldSemanticCacheLimits.ForStructuralViewRadius(
+                checked(renderRadius + ClientStructuralResidency.DefaultStructuralFringeChunks),
+                spareResidentChunks: 16,
+                maximumFrozenStaticsPerChunk: 16,
+                maximumMultiFragmentsPerChunk: 16,
+                maximumPublicRecordsPerChunk: 16,
+                maximumKnownPublicIdentities: 64);
         _cache = new ClientWorldSemanticCache(
             view.PreparedWorld,
-            new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64));
-        if (!StageAllChunks())
-            throw new InvalidOperationException("The local semantic world could not stage.");
+            cacheLimits);
+        _residency = new ClientStructuralResidency(_cache, renderRadius);
 
         _assetResolver = new CabinCatalogAssetResolver(_contentOracle!, _resolvedContent!);
         _renderer = new GodotWorldRenderer(
             this,
             _cache,
-            GodotWorldRendererLimits.ForStructuralWindow(RenderRadius, 5, 32),
+            GodotWorldRendererLimits.ForStructuralWindow(renderRadius, 5, 32),
             _assetResolver);
-        _window = new GodotSlidingRenderWindow(_cache, _renderer, RenderRadius);
+        _window = new GodotSlidingRenderWindow(_cache, _renderer, renderRadius);
+        int maximumPresented = _window.MaximumActiveChunks;
+        _presentationChanges = new ClientPresentationChange[checked(maximumPresented * 2)];
+        _presentationBindings = new ClientPresentationBinding[maximumPresented];
+        _semanticHashesBeforeRefresh = new ClientSemanticHash[maximumPresented];
+        _chatChunkInfo = new ClientSemanticChunkInfo[cacheLimits.MaximumResidentChunks];
         _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
         _orbit.Reset();
         _residentGenerationId = view.GenerationId;
@@ -684,58 +757,34 @@ public partial class LocalCabinClient : Node3D
         _renderer.ProcessFrame(GodotWorldFrameBudget.Default);
     }
 
-    private bool StageAllChunks()
-    {
-        if (_cache is null)
-            return false;
-        for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
-        {
-            for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
-            {
-                SpatialChunkKey key = ChunkKey(x, z);
-                if (!_cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _))
-                    return false;
-                if (!_cache.TryStageFromBaseWorld(handle, [], default, out _) ||
-                    !_cache.TryPublish(handle, out _))
-                    return false;
-            }
-        }
-        return true;
-    }
-
     private void CaptureSemanticHashes()
     {
-        if (_cache is null) return;
-        int semanticIndex = 0;
-        for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
+        if (_cache is null || _window is null) return;
+        if (!_window.TryCopyBindings(_presentationBindings, out int count, out _))
+            throw new InvalidOperationException("The presentation bindings exceeded their fixed destination.");
+        for (int index = 0; index < count; index++)
         {
-            for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
-            {
-                SpatialChunkKey key = ChunkKey(x, z);
-                if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
-                    !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo info))
-                    throw new InvalidOperationException("A structural semantic chunk was unavailable.");
-                _semanticHashesBeforeRefresh[semanticIndex++] = info.SemanticHash;
-            }
+            ClientPresentationBinding binding = _presentationBindings[index];
+            if (!_cache.TryGetInfo(binding.SemanticHandle, out ClientSemanticChunkInfo info))
+                throw new InvalidOperationException("A presented semantic chunk was unavailable.");
+            _semanticHashesBeforeRefresh[index] = info.SemanticHash;
         }
+        if (count < _presentationBindings.Length)
+            _presentationBindings[count] = default;
     }
 
     private void QueueChangedPublicChunks()
     {
         if (_cache is null || _renderer is null) return;
-        int semanticIndex = 0;
-        for (int z = GamePlayableWorld.MinimumChunk; z <= GamePlayableWorld.MaximumChunk; z++)
+        for (int index = 0; index < _presentationBindings.Length; index++)
         {
-            for (int x = GamePlayableWorld.MinimumChunk; x <= GamePlayableWorld.MaximumChunk; x++)
-            {
-                SpatialChunkKey key = ChunkKey(x, z);
-                if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle) ||
-                    !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo after))
-                    throw new InvalidOperationException("A structural semantic chunk was unavailable after apply.");
-                if (after.SemanticHash != _semanticHashesBeforeRefresh[semanticIndex])
-                    _ = _renderer.TryQueuePublicRefresh(handle, out _);
-                semanticIndex++;
-            }
+            ClientPresentationBinding binding = _presentationBindings[index];
+            if (!binding.SemanticHandle.IsValid) break;
+            if (!_cache.TryGetResidentHandle(binding.Key, out ClientSemanticChunkHandle handle) ||
+                !_cache.TryGetInfo(handle, out ClientSemanticChunkInfo after))
+                throw new InvalidOperationException("A presented semantic chunk was unavailable after apply.");
+            if (after.SemanticHash != _semanticHashesBeforeRefresh[index])
+                _ = _renderer.TryQueuePublicRefresh(handle, out _);
         }
     }
 
@@ -776,19 +825,33 @@ public partial class LocalCabinClient : Node3D
 
     private void TrackPresentation(bool reset)
     {
-        if (_window is null)
+        if (_window is null || _residency is null)
             return;
+        SpatialChunkKey center = _residency.GetPresentationCenter(_player);
+        if (!_residency.TryPrepare(
+                center,
+                reset,
+                out ClientStructuralResidencyPlan residencyPlan,
+                out _,
+                out ClientStructuralResidencyError residencyError))
+        {
+            _lastOutcome = $"Structural residency boundary: {residencyError}";
+            return;
+        }
         bool tracked = reset && _window.GetSnapshot().ActiveChunks != 0
             ? _window.TryResetForJump(
                 _player, _presentationChanges, out _, out _, out ClientPresentationWindowError error,
                 out GodotWorldRenderQueueError rendererError)
             : _window.TryTrackPlayer(
-                _player, PresentationCenter(_player), _presentationChanges,
+                _player, center, _presentationChanges,
                 out _, out _, out error, out rendererError);
         if (!tracked)
         {
+            _residency.Cancel(residencyPlan);
             _lastOutcome = $"Presentation boundary: {error}/{rendererError}";
+            return;
         }
+        _residency.Commit(residencyPlan);
     }
 
     private void DrainRenderer()
@@ -1028,9 +1091,13 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException(
                 $"Public presentation ghosted across a chunk move: {before}/{afterCrossing}/{afterReturn}.");
 
+        int authoredMaximumChunk = _useConceptDemoWorld
+            ? GamePlayableWorld.ConceptMaximumChunk
+            : GamePlayableWorld.MaximumChunk;
+        int renderRadius = _settings?.RenderDistanceChunks ?? 1;
         var edge = new WorldPosition(
-            GamePlayableWorld.MaximumChunk,
-            GamePlayableWorld.MaximumChunk,
+            authoredMaximumChunk,
+            authoredMaximumChunk,
             15_000,
             14_000,
             0);
@@ -1038,8 +1105,8 @@ public partial class LocalCabinClient : Node3D
         DriveLocalUntil(() => _player.Chunk == edge.Chunk &&
             _player.Local.XMillimeters == edge.Local.XMillimeters);
         SpatialChunkKey expectedCenter = ChunkKey(
-            GamePlayableWorld.MaximumChunk - RenderRadius,
-            GamePlayableWorld.MaximumChunk - RenderRadius);
+            authoredMaximumChunk - renderRadius,
+            authoredMaximumChunk - renderRadius);
         ClientPresentationWindowSnapshot edgeWindow = _window?.GetSnapshot() ?? default;
         if (_player.Chunk != edge.Chunk || edgeWindow.CenterChunk != expectedCenter ||
             !Mathf.IsEqualApprox(_renderer.Root.Position.X, -15f) ||
@@ -1048,8 +1115,8 @@ public partial class LocalCabinClient : Node3D
                 "The finite structural window detached the camera from the edge-chunk player origin.");
 
         var fartherInsideEdge = new WorldPosition(
-            GamePlayableWorld.MaximumChunk,
-            GamePlayableWorld.MaximumChunk,
+            authoredMaximumChunk,
+            authoredMaximumChunk,
             15_500,
             14_500,
             0);
@@ -1846,27 +1913,26 @@ public partial class LocalCabinClient : Node3D
             return;
         }
         GodotWorldRendererSnapshot render = _renderer.GetSnapshot();
+        _peakRenderedChunks = Math.Max(_peakRenderedChunks, render.ActiveRenderChunks);
+        ClientStructuralResidencySnapshot residency = _residency?.GetSnapshot() ?? default;
+        ClientPresentationWindowSnapshot presentation = _window?.GetSnapshot() ?? default;
         _details.Text =
             $"Profile {_profile} • Selected {_selection} • Tick {view.SimulationTick}\n" +
             $"Player {_player.Chunk} + ({_player.Local.XMillimeters}, {_player.Local.ZMillimeters}) mm • " +
             $"door {(view.DoorIsOpen ? "open" : "closed")} • " +
             $"bread in {(view.BreadIsInBackpack ? "backpack" : "chest")}\n" +
-            $"rendered {render.ActiveRenderChunks} chunks • pending {render.PendingBuilds}/{render.PendingRetirements}";
+            $"distance {residency.ConfiguredRenderRadiusChunks} chunks • " +
+            $"authored/resident/rendered {residency.AuthoredChunks}/" +
+            $"{residency.SemanticResidentChunks}/{render.ActiveRenderChunks} " +
+            $"(peak {residency.PeakSemanticResidentChunks}/{_peakRenderedChunks})\n" +
+            $"semantic enter/exit {residency.SemanticEnters}/{residency.SemanticExits} • " +
+            $"presentation enter/exit {presentation.EnteredChunks}/{presentation.ExitedChunks} • " +
+            $"resets {residency.ResetTransitions}/{presentation.ResetTransitions} • " +
+            $"pending {render.PendingBuilds}/{render.PendingRetirements}";
     }
 
     private static SpatialChunkKey ChunkKey(int x, int z) =>
         new(GameWorldState.DefaultSpace, new SpatialChunkCoord(x, z));
-
-    private static SpatialChunkKey PresentationCenter(in WorldPosition player)
-    {
-        int minimum = checked(GamePlayableWorld.MinimumChunk + RenderRadius);
-        int maximum = checked(GamePlayableWorld.MaximumChunk - RenderRadius);
-        if (minimum > maximum)
-            throw new InvalidOperationException("The authored world cannot contain the render window.");
-        return ChunkKey(
-            Math.Clamp(player.Chunk.X, minimum, maximum),
-            Math.Clamp(player.Chunk.Z, minimum, maximum));
-    }
 
     private static bool Nearest(
         in ClientControlWorldPoint point,

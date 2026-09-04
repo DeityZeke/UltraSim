@@ -450,6 +450,45 @@ Physics; moving platforms and actor support are not implied.
 D0.0 does not implement render-distance policy, the Far Island/gate, terrain editing, or other
 deferred Physics features.
 
+## 7.2b D0.1 bounded structural residency + Render Distance — CLOSED
+
+D0.1 removes the Cabin-era `StageAllChunks` assumption. The local Concept Demo WorldPack now has a
+deterministic 9×9 / 81-chunk authored structural extent, while the default client admits only a
+5×5 / 25-chunk semantic structural neighborhood and presents only a 3×3 / 9-chunk render window:
+
+```text
+authored structural source       81 chunks
+    > default semantic residents 25 chunks
+        > presented/rendered      9 chunks
+```
+
+`ClientStructuralResidency` is the engine-neutral bounded controller. It derives a clipped
+one-chunk structural fringe around the requested presentation window, stages every entering chunk
+before presentation admission, and retires no-longer-desired structural-only chunks only after the
+presentation plan commits. A failed stage is rolled back without advancing desired membership.
+Chunks retaining Game-owned dynamic-public rows remain alive until their separate public-interest
+lineage retires; Render Distance does not change that entitlement.
+
+The distinction from T1.0 remains explicit:
+
+```text
+resident authored chunk + absent cell = intentional void
+authored chunk not resident            = client residency condition
+no authored chunk                      = outside authored world
+```
+
+The F0.1 settings document now persists a bounded client-owned Render Distance of 1–3 chunks. Save
+applies the value once rather than rebuilding on every slider sample. A live change reconstructs
+the bounded semantic/presentation window without replacing the authoritative local Game session.
+The permanent D0.1 Godot canary proves both the default 81/25/9 shape and an expanded 81/49/25
+shape at radius 2 through the real Single Player consumer.
+
+Diagnostics expose configured radius, authored/current/peak semantic residents,
+current/peak rendered chunks, semantic and presentation enters/exits, resets, and renderer queue
+state. The complete local structural source remains preinstalled in D0.1; CAS/remote acquisition
+is still deferred. The Far Island/gate remains D0.2 so its long-distance reset can now exercise
+real retirement and re-admission rather than teleporting between permanently resident regions.
+
 ## 7.3 Far gate
 
 A gate relocates the player thousands of metres to the Far Island.
@@ -1224,7 +1263,8 @@ then earn/integrate Concept Demo Round 1 consumers:
     Physics P0.1c support / grounding / clearance              CLOSED
     Physics P0.1d vertical motion / jump / fall / landing      CLOSED
     D0.0 physical central/Sky Island/cave + telepad integration CLOSED
-    render-distance setting
+    D0.1 Render Distance + bounded structural residency          CLOSED
+    D0.2 Far Island + gate + long-distance reset                 NEXT
     signs/Fallback Lab
     guest/demo admission presentation
     animation/pickup/inventory swing

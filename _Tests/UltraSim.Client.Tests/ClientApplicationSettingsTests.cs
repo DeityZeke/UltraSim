@@ -15,7 +15,8 @@ static class ClientApplicationSettingsTests
             pointerSensitivity: 1.4f,
             invertY: true,
             controlGrammar: ClientControlGrammar.OrbitCommand,
-            bindings: [globalInteract]));
+            bindings: [globalInteract],
+            renderDistanceChunks: 2));
         document = document.WithScope(scope, new ClientSettingsLayer(
             cameraProfile: ClientCameraProfile.IndependentMoveLook,
             cameraFovDegrees: 82f,
@@ -41,6 +42,7 @@ static class ClientApplicationSettingsTests
         Equal(ClientControlGrammar.ThirdPersonDirect, accepted.ControlGrammar);
         Equal(ClientCameraProfile.IndependentMoveLook, accepted.CameraProfile);
         Equal(82f, accepted.CameraFovDegrees);
+        Equal(2, accepted.RenderDistanceChunks);
         Equal("R", RequireBinding(accepted, ClientSemanticAction.Interact).Code);
         Equal("F10", RequireBinding(accepted, ClientSemanticAction.OpenSettings).Code);
         Equal("RIGHT", RequireBinding(accepted, ClientSemanticAction.ContextMenu).Code);
@@ -55,23 +57,31 @@ static class ClientApplicationSettingsTests
         string json = ClientSettingsJsonCodec.Write(document);
         True(json.Contains("\"uiScale\": 1.25", StringComparison.Ordinal));
         True(json.Contains("\"controlGrammar\": \"OrbitCommand\"", StringComparison.Ordinal));
+        True(json.Contains("\"renderDistanceChunks\": 2", StringComparison.Ordinal));
         True(json.Contains("fixture.realm-17", StringComparison.Ordinal));
         True(!json.Contains("ThirdPersonDirect", StringComparison.Ordinal),
             "A transient server recommendation leaked into user settings persistence.");
         True(ClientSettingsJsonCodec.TryRead(json, out ClientSettingsDocument restored, out string? error), error);
         ResolvedClientSettings roundTrip = ClientSettingsResolver.Resolve(restored, scope);
         Equal(accepted.UiScale, roundTrip.UiScale);
+        Equal(2, roundTrip.RenderDistanceChunks);
         Equal("R", RequireBinding(roundTrip, ClientSemanticAction.Interact).Code);
         True(!ClientSettingsJsonCodec.TryRead(
-            json.Replace("\"version\": 1", "\"version\": 99", StringComparison.Ordinal),
+            json.Replace("\"version\": 2", "\"version\": 99", StringComparison.Ordinal),
             out _, out _));
-        True(!ClientSettingsJsonCodec.TryRead("{ \"version\": 1, \"mystery\": true }", out _, out _));
+        True(!ClientSettingsJsonCodec.TryRead("{ \"version\": 2, \"mystery\": true }", out _, out _));
+        True(ClientSettingsJsonCodec.TryRead(
+            "{ \"version\": 1, \"global\": { \"cameraDistance\": 18 } }",
+            out ClientSettingsDocument versionOne, out _));
+        Equal(1, ClientSettingsResolver.Resolve(versionOne).RenderDistanceChunks);
 
         Throws<InvalidOperationException>(() => ClientSettingsResolver.Resolve(
             new ClientSettingsDocument(new ClientSettingsLayer(bindings:
             [
                 Binding(ClientSemanticAction.Interact, ClientPhysicalInputKind.Keyboard, "ESCAPE"),
             ]))));
+        Throws<ArgumentOutOfRangeException>(() =>
+            new ClientSettingsLayer(renderDistanceChunks: 4));
         True(!ClientSettingsScopeKey.TryCreate("host:2593/path", out _),
             "Endpoint syntax must not masquerade as a settings scope identity.");
     }

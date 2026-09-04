@@ -5,6 +5,14 @@ Network-free local playable application. It is referenced by Single Player and C
 Online. F0.2 established its Cabin lifecycle; Concept Demo D0.0 now uses the same consumer for the
 physical island world.
 
+Concept Demo D0.1 replaces unconditional `StageAllChunks` with Client Core's bounded structural
+residency controller. The 81-chunk local authored source remains available to the local application,
+but the default client keeps 25 structural semantic chunks resident and realizes 9. The persisted
+Render Distance setting supports radii 1–3; a live accepted change rebuilds only the client
+cache/window/renderer around the same authoritative session. The HUD reports authored,
+resident, rendered, peak, enter/exit, reset, and queue evidence. This is local preinstalled-source
+residency, not CAS or remote structural acquisition.
+
 ```text
 persistent ClientRoot
     +-- frozen resolved Cabin catalog

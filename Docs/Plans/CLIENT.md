@@ -1488,6 +1488,12 @@ loading/error/in-session-options surfaces, and reserved-control dispatch. All th
 compositions launch this same shell while their capability entries remain tied to physically
 installed dependencies.
 
+Concept Demo D0.1 extends the accepted settings document with the client-owned bounded
+`RenderDistanceChunks` value. The supported range is currently 1–3 chunks and the default is 1.
+It is deliberately absent from server control/camera recommendations: changing it rebuilds only
+the client semantic/presentation working set and does not expand Game AOI, disclosure, or authority.
+Settings format v2 writes the value while still admitting v1 documents as default-radius input.
+
 Implement:
 
 - persistent ClientRoot;

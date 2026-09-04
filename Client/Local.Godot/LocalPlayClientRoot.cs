@@ -19,23 +19,36 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         base._Ready();
         string[] arguments = OS.GetCmdlineUserArgs();
         bool conceptDemoSmoke = arguments.Contains("--d0-0-smoke", StringComparer.Ordinal);
+        bool residencySmoke = arguments.Contains("--d0-1-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
-            !conceptDemoSmoke && !f02Smoke)
+            !conceptDemoSmoke && !residencySmoke && !f02Smoke)
             return;
         try
         {
-            if (conceptDemoSmoke)
+            if (conceptDemoSmoke || residencySmoke)
             {
                 StartLocalCabin(
                     CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
                 _cabin!.RunD00Acceptance();
-                LocalCabinPresentationSnapshot evidence = _cabin.GetPresentationSnapshot();
+                LocalCabinPresentationSnapshot evidence = residencySmoke
+                    ? _cabin.RunD01Acceptance()
+                    : _cabin.GetPresentationSnapshot();
+                if (evidence.AuthoredChunks != UltraSim.Game.Composition.GamePlayableWorld.ConceptChunkCount ||
+                    evidence.SemanticResidentChunks >= evidence.AuthoredChunks ||
+                    evidence.RenderedChunks >= evidence.SemanticResidentChunks)
+                    throw new InvalidOperationException(
+                        "The Concept Demo did not preserve authored > resident > rendered structure.");
                 GD.Print(
-                    $"D0.0 CONCEPT DEMO PASS player={evidence.PlayerPosition} " +
+                    $"{(residencySmoke ? "D0.1 RESIDENCY" : "D0.0 CONCEPT DEMO")} PASS " +
+                    $"player={evidence.PlayerPosition} authored/resident/rendered=" +
+                    $"{evidence.AuthoredChunks}/{evidence.SemanticResidentChunks}/" +
+                    $"{evidence.RenderedChunks} radius={evidence.RenderDistanceChunks} " +
                     $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
                 RetireCurrentSession();
-                ReturnToMainMenu("Concept Demo D0.0 smoke passed.");
+                ReturnToMainMenu(residencySmoke
+                    ? "Concept Demo D0.1 residency smoke passed."
+                    : "Concept Demo D0.0 smoke passed.");
                 GetTree().Quit(0);
                 return;
             }
@@ -213,6 +226,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             snapshot.CameraProfile != EffectiveSettings.CameraProfile ||
             !Mathf.IsEqualApprox(snapshot.CameraDistance, EffectiveSettings.CameraDistance) ||
             !Mathf.IsEqualApprox(snapshot.CameraFovDegrees, EffectiveSettings.CameraFovDegrees) ||
+            snapshot.RenderDistanceChunks != EffectiveSettings.RenderDistanceChunks ||
             !EffectiveSettings.TryGetBinding(
                 ClientSemanticAction.Jump, out ClientPhysicalInput jump) ||
             jump.Kind != ClientPhysicalInputKind.Keyboard || jump.Code != "SPACE")

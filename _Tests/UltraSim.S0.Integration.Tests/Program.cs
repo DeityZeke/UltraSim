@@ -608,6 +608,10 @@ static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
     WorldPack second = GamePlayableWorld.CreateConceptDemoWorldPack();
     Expect(first.Fingerprint == second.Fingerprint && first.Fingerprint != legacy.Fingerprint,
         "The Concept Demo WorldPack is not deterministic and distinct from the preserved Cabin pack.");
+    Expect(legacy.ChunkCount == GamePlayableWorld.ChunkCount &&
+        first.ChunkCount == GamePlayableWorld.ConceptChunkCount &&
+        first.ChunkCount > legacy.ChunkCount,
+        "The enlarged Concept Demo source did not remain distinct from the historical Cabin extent.");
     Expect(first.AdditionalTerrainSurfaceFragmentCount == 3,
         "The Concept Demo pack does not contain exactly Mountain, cave-ledge, and Sky fragments.");
 

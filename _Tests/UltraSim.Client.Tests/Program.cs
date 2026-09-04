@@ -26,6 +26,7 @@ var tests = new (string Name, Action Body)[]
     ("ClientPerformanceBaselinesAreCaptured", ClientPerformanceBaselinesAreCaptured),
     ("ClientWorldSemanticCacheProductionContracts", ClientWorldSemanticCacheTests.Run),
     ("ClientPresentationWindowIsEngineNeutralAndTransactional", ClientPresentationWindowTests.Run),
+    ("ClientStructuralResidencyIsBoundedAndTransactional", ClientStructuralResidencyTests.Run),
     ("ClientWorldInputIsEngineNeutralAndSequenced", ClientWorldInputTests.Run),
     ("ClientSettingsAreLayeredReadableAndReserved", ClientApplicationSettingsTests.Run),
     ("ClientSettingsFilePersistenceIsAtomicAndFailClosed", ClientSettingsFileStoreTests.Run),

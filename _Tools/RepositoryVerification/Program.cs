@@ -143,6 +143,12 @@ foreach (string configuration in configurations)
             "--path", "Client/SinglePlayer.Godot",
             "--", "--d0-0-smoke",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/SinglePlayer.Godot",
+            "--", "--d0-1-smoke",
+        ]);
     }
 }
 

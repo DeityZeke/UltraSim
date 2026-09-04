@@ -383,6 +383,11 @@ public abstract partial class ClientRoot : Control
         OptionButton camera = EnumOptions(_resolved.CameraProfile);
         HSlider distance = Slider(2, 80, 1, _resolved.CameraDistance);
         HSlider fov = Slider(40, 120, 1, _resolved.CameraFovDegrees);
+        HSlider renderDistance = Slider(
+            ClientSettingsResolver.MinimumRenderDistanceChunks,
+            ClientSettingsResolver.MaximumRenderDistanceChunks,
+            1,
+            _resolved.RenderDistanceChunks);
         AddSetting(column, "UI scale", uiScale);
         AddSetting(column, "Master volume", volume);
         AddSetting(column, "Pointer sensitivity", sensitivity);
@@ -391,6 +396,7 @@ public abstract partial class ClientRoot : Control
         AddSetting(column, "Camera profile", camera);
         AddSetting(column, "Camera distance", distance);
         AddSetting(column, "Camera FOV", fov);
+        AddSetting(column, "Render distance (chunks)", renderDistance);
         column.AddChild(new Label
         {
             Text = "Bindings are readable/persisted in settings/client.json. " +
@@ -413,7 +419,8 @@ public abstract partial class ClientRoot : Control
                     (ClientCameraProfile)camera.GetSelectedId(),
                     (float)distance.Value,
                     (float)fov.Value,
-                    _settings.Global.Bindings));
+                    _settings.Global.Bindings,
+                    (int)renderDistance.Value));
                 _settingsStore!.Save(_settings);
                 _settingsLoadStatus = ClientSettingsLoadStatus.Loaded;
                 _resolved = ClientSettingsResolver.Resolve(_settings);
