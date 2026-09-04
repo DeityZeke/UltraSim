@@ -59,11 +59,9 @@ public sealed class ClientStructuralResidency
     private readonly SpatialSpaceId _space;
     private readonly int _renderRadius;
     private readonly int _fringe;
-    private readonly int _minimumX;
-    private readonly int _maximumX;
-    private readonly int _minimumZ;
-    private readonly int _maximumZ;
     private readonly int _authoredChunks;
+    private readonly SpatialChunkKey[] _validCenters;
+    private readonly int _validCenterCount;
     private readonly Entry[] _active;
     private readonly Entry[] _candidate;
     private readonly ClientSemanticChunkHandle[] _newlyStaged;
@@ -81,6 +79,8 @@ public sealed class ClientStructuralResidency
     private ulong _enters;
     private ulong _exits;
     private ulong _resets;
+    private SpatialChunkKey _lastPresentationCenter;
+    private bool _hasLastPresentationCenter;
 
     public ClientStructuralResidency(
         ClientWorldSemanticCache cache,
@@ -96,16 +96,21 @@ public sealed class ClientStructuralResidency
         _fringe = structuralFringeChunks;
         _space = cache.BaseWorld.Space;
         _authoredChunks = cache.BaseWorld.ChunkCount;
-        if (_authoredChunks <= 0 || !TryReadAuthoredBounds(
-                cache.BaseWorld, out _minimumX, out _maximumX, out _minimumZ, out _maximumZ))
-            throw new ArgumentException("The structural source must be a canonical rectangular WorldPack.", nameof(cache));
-        int width = checked(_maximumX - _minimumX + 1);
-        int depth = checked(_maximumZ - _minimumZ + 1);
-        int presentationDiameter = checked(renderRadiusChunks * 2 + 1);
-        if (checked(width * depth) != _authoredChunks ||
-            width < presentationDiameter || depth < presentationDiameter)
+        if (_authoredChunks <= 0)
+            throw new ArgumentException("The structural source must contain authored chunks.", nameof(cache));
+        _validCenters = new SpatialChunkKey[_authoredChunks];
+        for (int index = 0; index < _authoredChunks; index++)
+        {
+            if (!cache.BaseWorld.TryGetChunkKey(index, out SpatialChunkKey key) ||
+                key.Space != _space)
+                throw new ArgumentException(
+                    "The structural source contains an invalid authored chunk key.", nameof(cache));
+            if (IsCompletePresentationCenter(cache.BaseWorld, key, renderRadiusChunks))
+                _validCenters[_validCenterCount++] = key;
+        }
+        if (_validCenterCount == 0)
             throw new ArgumentException(
-                "The authored structural rectangle cannot contain the requested presentation window.",
+                "The authored structural source cannot contain the requested presentation window.",
                 nameof(cache));
         int residentRadius = checked(renderRadiusChunks + structuralFringeChunks);
         int diameter = checked(residentRadius * 2 + 1);
@@ -126,15 +131,33 @@ public sealed class ClientStructuralResidency
     public int StructuralFringeChunks => _fringe;
     public int AuthoredChunkCount => _authoredChunks;
 
-    /// <summary>Clamps only the presentation center; missing authored chunks are not fake void.</summary>
+    /// <summary>
+    /// Selects the nearest complete authored presentation neighborhood. Missing authored chunks
+    /// remain outside authored world; they are never synthesized as resident intentional void.
+    /// </summary>
     public SpatialChunkKey GetPresentationCenter(in WorldPosition player)
     {
         EnsureOwner();
         SpatialChunkKey playerKey = player.ToChunkKey(_space);
-        return new SpatialChunkKey(
-            _space,
-            Math.Clamp(playerKey.Coord.X, checked(_minimumX + _renderRadius), checked(_maximumX - _renderRadius)),
-            Math.Clamp(playerKey.Coord.Z, checked(_minimumZ + _renderRadius), checked(_maximumZ - _renderRadius)));
+        if (Contains(_validCenters, _validCenterCount, playerKey))
+            return playerKey;
+        if (_hasLastPresentationCenter &&
+            Distance(playerKey, _lastPresentationCenter) <= checked((ulong)_renderRadius))
+            return _lastPresentationCenter;
+
+        SpatialChunkKey nearest = _validCenters[0];
+        ulong nearestDistance = Distance(playerKey, nearest);
+        for (int index = 1; index < _validCenterCount; index++)
+        {
+            SpatialChunkKey candidate = _validCenters[index];
+            ulong distance = Distance(playerKey, candidate);
+            if (distance < nearestDistance)
+            {
+                nearest = candidate;
+                nearestDistance = distance;
+            }
+        }
+        return nearest;
     }
 
     public bool TryPrepare(
@@ -153,10 +176,7 @@ public sealed class ClientStructuralResidency
             return false;
         }
         if (!presentationCenter.Space.IsValid || presentationCenter.Space != _space ||
-            presentationCenter.Coord.X < _minimumX + _renderRadius ||
-            presentationCenter.Coord.X > _maximumX - _renderRadius ||
-            presentationCenter.Coord.Z < _minimumZ + _renderRadius ||
-            presentationCenter.Coord.Z > _maximumZ - _renderRadius)
+            !Contains(_validCenters, _validCenterCount, presentationCenter))
         {
             plan = default;
             transition = default;
@@ -166,23 +186,17 @@ public sealed class ClientStructuralResidency
 
         _candidateCount = 0;
         _newlyStagedCount = 0;
-        int extent = checked(_renderRadius + _fringe);
-        int minimumX = Math.Max(_minimumX, checked(presentationCenter.Coord.X - extent));
-        int maximumX = Math.Min(_maximumX, checked(presentationCenter.Coord.X + extent));
-        int minimumZ = Math.Max(_minimumZ, checked(presentationCenter.Coord.Z - extent));
-        int maximumZ = Math.Min(_maximumZ, checked(presentationCenter.Coord.Z + extent));
-        for (int x = minimumX; x <= maximumX; x++)
-        for (int z = minimumZ; z <= maximumZ; z++)
+        long extent = checked(_renderRadius + _fringe);
+        long minimumX = Math.Max(int.MinValue, (long)presentationCenter.Coord.X - extent);
+        long maximumX = Math.Min(int.MaxValue, (long)presentationCenter.Coord.X + extent);
+        long minimumZ = Math.Max(int.MinValue, (long)presentationCenter.Coord.Z - extent);
+        long maximumZ = Math.Min(int.MaxValue, (long)presentationCenter.Coord.Z + extent);
+        for (long x = minimumX; x <= maximumX; x++)
+        for (long z = minimumZ; z <= maximumZ; z++)
         {
-            var key = new SpatialChunkKey(_space, x, z);
+            var key = new SpatialChunkKey(_space, checked((int)x), checked((int)z));
             if (!_cache.PreparedWorld.TryGetBaseTerrain(key, out _))
-            {
-                RollbackNewlyStaged();
-                plan = default;
-                transition = default;
-                error = ClientStructuralResidencyError.InvalidAuthoredWorld;
-                return false;
-            }
+                continue;
             if (!_cache.TryGetResidentHandle(key, out ClientSemanticChunkHandle handle))
             {
                 if (!_cache.TryRequest(key, out handle, out _) ||
@@ -220,14 +234,35 @@ public sealed class ClientStructuralResidency
             if (!Contains(_candidate, _candidateCount, _active[index].Key)) exited++;
         transition = new ClientStructuralResidencyTransition(
             presentationCenter, _candidateCount, entered, retained, exited);
-        if (_nextPlanToken == 0)
-            throw new InvalidOperationException("Structural residency plan identity exhausted.");
-        _pendingToken = _nextPlanToken++;
-        _pendingTransition = transition;
-        _pendingReset = reset;
-        plan = new ClientStructuralResidencyPlan(_identity, _pendingToken);
-        error = ClientStructuralResidencyError.None;
-        return true;
+        return BeginPlan(transition, reset, out plan, out error);
+    }
+
+    /// <summary>
+    /// Prepares retirement of the complete desired structural set. Distant discontinuities use
+    /// this after presentation retirement so the old and new neighborhoods never need to coexist.
+    /// Dynamic-public rows remain resident until their independent Game interest is retired.
+    /// </summary>
+    public bool TryPrepareReset(
+        out ClientStructuralResidencyPlan plan,
+        out ClientStructuralResidencyTransition transition,
+        out ClientStructuralResidencyError error)
+    {
+        EnsureOwner();
+        if (_pendingToken != 0)
+        {
+            plan = default;
+            transition = default;
+            error = ClientStructuralResidencyError.PlanPending;
+            return false;
+        }
+        _candidateCount = 0;
+        _newlyStagedCount = 0;
+        SpatialChunkKey center = _hasLastPresentationCenter
+            ? _lastPresentationCenter
+            : _validCenters[0];
+        transition = new ClientStructuralResidencyTransition(
+            center, 0, 0, 0, _activeCount);
+        return BeginPlan(transition, reset: true, out plan, out error);
     }
 
     public void Commit(in ClientStructuralResidencyPlan plan)
@@ -251,6 +286,16 @@ public sealed class ClientStructuralResidency
         if (_activeCount > _candidateCount)
             _active.AsSpan(_candidateCount, _activeCount - _candidateCount).Clear();
         _activeCount = _candidateCount;
+        if (_activeCount == 0)
+        {
+            _hasLastPresentationCenter = false;
+            _lastPresentationCenter = default;
+        }
+        else
+        {
+            _lastPresentationCenter = _pendingTransition.PresentationCenter;
+            _hasLastPresentationCenter = true;
+        }
         _peakDesired = Math.Max(_peakDesired, _activeCount);
         int semanticResidents = checked(residentCount - retiredCount);
         _peakSemantic = Math.Max(_peakSemantic, semanticResidents);
@@ -279,6 +324,7 @@ public sealed class ClientStructuralResidency
         int semantic = _cache.GetSnapshot().ResidentChunks;
         _peakSemantic = Math.Max(_peakSemantic, semantic);
         long reserved = checked(
+            (long)_validCenters.Length * Marshal.SizeOf<SpatialChunkKey>() +
             (long)(_active.Length + _candidate.Length) * Marshal.SizeOf<Entry>() +
             (long)_newlyStaged.Length * Marshal.SizeOf<ClientSemanticChunkHandle>() +
             (long)_residentScratch.Length * Marshal.SizeOf<ClientSemanticChunkInfo>());
@@ -330,33 +376,69 @@ public sealed class ClientStructuralResidency
         return false;
     }
 
+    private static bool Contains(SpatialChunkKey[] values, int count, SpatialChunkKey key)
+    {
+        int low = 0;
+        int high = count - 1;
+        while (low <= high)
+        {
+            int middle = low + ((high - low) >> 1);
+            int order = values[middle].CompareTo(key);
+            if (order == 0) return true;
+            if (order < 0) low = middle + 1;
+            else high = middle - 1;
+        }
+        return false;
+    }
+
+    private bool BeginPlan(
+        in ClientStructuralResidencyTransition transition,
+        bool reset,
+        out ClientStructuralResidencyPlan plan,
+        out ClientStructuralResidencyError error)
+    {
+        if (_nextPlanToken == 0)
+            throw new InvalidOperationException("Structural residency plan identity exhausted.");
+        _pendingToken = _nextPlanToken++;
+        _pendingTransition = transition;
+        _pendingReset = reset;
+        plan = new ClientStructuralResidencyPlan(_identity, _pendingToken);
+        error = ClientStructuralResidencyError.None;
+        return true;
+    }
+
+    private static ulong Distance(SpatialChunkKey left, SpatialChunkKey right)
+    {
+        ulong x = checked((ulong)Math.Abs((long)left.Coord.X - right.Coord.X));
+        ulong z = checked((ulong)Math.Abs((long)left.Coord.Z - right.Coord.Z));
+        return Math.Max(x, z);
+    }
+
     private void EnsureOwner()
     {
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("Structural residency is client-owner-thread bound.");
     }
 
-    private static bool TryReadAuthoredBounds(
+    private static bool IsCompletePresentationCenter(
         BoundWorldPack world,
-        out int minimumX,
-        out int maximumX,
-        out int minimumZ,
-        out int maximumZ)
+        SpatialChunkKey center,
+        int radius)
     {
-        minimumX = int.MaxValue;
-        maximumX = int.MinValue;
-        minimumZ = int.MaxValue;
-        maximumZ = int.MinValue;
-        for (int index = 0; index < world.ChunkCount; index++)
+        long minimumX = Math.Max(int.MinValue, (long)center.Coord.X - radius);
+        long maximumX = Math.Min(int.MaxValue, (long)center.Coord.X + radius);
+        long minimumZ = Math.Max(int.MinValue, (long)center.Coord.Z - radius);
+        long maximumZ = Math.Min(int.MaxValue, (long)center.Coord.Z + radius);
+        if (maximumX - minimumX != radius * 2L || maximumZ - minimumZ != radius * 2L)
+            return false;
+        for (long x = minimumX; x <= maximumX; x++)
+        for (long z = minimumZ; z <= maximumZ; z++)
         {
-            if (!world.TryGetChunkKey(index, out SpatialChunkKey key) || key.Space != world.Space)
+            if (!world.TryGetBaseTerrain(
+                    new SpatialChunkKey(world.Space, checked((int)x), checked((int)z)), out _))
                 return false;
-            minimumX = Math.Min(minimumX, key.Coord.X);
-            maximumX = Math.Max(maximumX, key.Coord.X);
-            minimumZ = Math.Min(minimumZ, key.Coord.Z);
-            maximumZ = Math.Max(maximumZ, key.Coord.Z);
         }
-        return minimumX <= maximumX && minimumZ <= maximumZ;
+        return true;
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 32)]

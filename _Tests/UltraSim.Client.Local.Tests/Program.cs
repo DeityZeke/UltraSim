@@ -17,6 +17,7 @@ var tests = new (string Name, Action Body)[]
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
+    ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
 };
 
 foreach ((string name, Action body) in tests)
@@ -201,6 +202,45 @@ static void SaveLoadReplacesGenerationAndRebuildsPublicLineage()
     }, failure: () => fixture.Session.GetSnapshot().ToString());
 }
 
+static void DistantInterestReentryInvalidatesOldPublicDebt()
+{
+    using Fixture fixture = Fixture.CreateConcept();
+    Thread.Sleep(90);
+    True(fixture.Session.GetSnapshot().PendingWorldDeliveries > 0,
+        "The stalled central client did not retain public delivery debt.");
+
+    True(fixture.Session.TryRequestRelocation(1, GamePlayableWorld.FarGateDestination));
+    DriveUntil(() =>
+        fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 1 && view.LastAdministrativeSucceeded &&
+        view.PlayerPosition == GamePlayableWorld.FarGateDestination);
+    ClientWorldSemanticCache far = fixture.CreateCacheAround(
+        GamePlayableWorld.FarGateDestination.Chunk);
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(far);
+        return ContainsPrefab(far, GameWorldPublicPrefabIds.FarGate);
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+    LocalPlayableSessionSnapshot outbound = fixture.Session.GetSnapshot();
+    True(outbound.WorldDeliveriesInvalidated > 0,
+        "Leaving the central interest set did not invalidate its retained delivery lineage.");
+    Equal(0UL, outbound.WorldDeliveriesRejected);
+
+    True(fixture.Session.TryRequestRelocation(2, GamePlayableWorld.CentralGateDestination));
+    DriveUntil(() =>
+        fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 2 && view.LastAdministrativeSucceeded &&
+        view.PlayerPosition == GamePlayableWorld.CentralGateDestination);
+    ClientWorldSemanticCache central = fixture.CreateCacheAround(
+        GamePlayableWorld.CentralGateDestination.Chunk);
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(central);
+        return ContainsPrefab(central, GameWorldPublicPrefabIds.FarGate);
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+    Equal(0UL, fixture.Session.GetSnapshot().WorldDeliveriesRejected);
+}
+
 static bool ContainsPrefab(ClientWorldSemanticCache cache, uint prefab)
 {
     var chunks = new ClientSemanticChunkInfo[25];
@@ -258,6 +298,15 @@ sealed class Fixture : IDisposable
         return new Fixture(saveRoot, session);
     }
 
+    internal static Fixture CreateConcept()
+    {
+        string saveRoot = Path.Combine(Path.GetTempPath(), $"ultrasim-local-concept-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(saveRoot);
+        LocalPlayableSession session = LocalPlayableSession.CreateConceptDemo(saveRoot);
+        session.WaitUntilReady(TimeSpan.FromSeconds(10));
+        return new Fixture(saveRoot, session);
+    }
+
     internal ClientWorldSemanticCache CreateCache()
     {
         Require(Session.TryGetLatestView(out LocalPlayableAuthorityView view));
@@ -270,6 +319,23 @@ sealed class Fixture : IDisposable
             var key = new SpatialChunkKey(
                 GameWorldState.DefaultSpace,
                 new SpatialChunkCoord(x, z));
+            Require(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            Require(cache.TryStageFromBaseWorld(handle, [], default, out _));
+            Require(cache.TryPublish(handle, out _));
+        }
+        return cache;
+    }
+
+    internal ClientWorldSemanticCache CreateCacheAround(SpatialChunkCoord center)
+    {
+        Require(Session.TryGetLatestView(out LocalPlayableAuthorityView view));
+        var cache = new ClientWorldSemanticCache(
+            view.PreparedWorld,
+            new ClientWorldSemanticCacheLimits(25, 16, 16, 16, 64));
+        for (int z = center.Z - 2; z <= center.Z + 2; z++)
+        for (int x = center.X - 2; x <= center.X + 2; x++)
+        {
+            var key = new SpatialChunkKey(GameWorldState.DefaultSpace, x, z);
             Require(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
             Require(cache.TryStageFromBaseWorld(handle, [], default, out _));
             Require(cache.TryPublish(handle, out _));

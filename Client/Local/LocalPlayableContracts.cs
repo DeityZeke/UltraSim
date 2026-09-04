@@ -12,7 +12,8 @@ public enum LocalPlayableSelection : byte
     CabinDoor = 1,
     CabinChest = 2,
     SkyTelepad = 3,
-    Unsupported = 4,
+    FarGate = 4,
+    Unsupported = 5,
 }
 
 public readonly record struct LocalPlayableCommand(
@@ -97,6 +98,7 @@ public readonly record struct LocalPlayableSessionSnapshot(
     int ChatDeliveryHighWater,
     ulong WorldDeliveriesApplied,
     ulong WorldDeliveriesRejected,
+    ulong WorldDeliveriesInvalidated,
     ulong ChatDeliveriesApplied,
     ulong ChatDeliveriesRejected,
     ulong UiOperationsApplied,

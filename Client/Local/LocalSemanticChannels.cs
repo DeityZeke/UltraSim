@@ -32,6 +32,7 @@ internal sealed class LocalWorldDeliveryRow
     internal ChunkPublicationBatch Batch;
     internal OfflineDirectChunkDeliveryTicket Ticket;
     internal int Count;
+    internal bool Invalidated;
     internal readonly WorldPublicRecord[] Snapshot;
     internal readonly WorldPublicDeltaRecord[] Deltas;
 
@@ -43,6 +44,7 @@ internal sealed class LocalWorldDeliveryRow
         Epoch = default;
         Batch = default;
         Ticket = default;
+        Invalidated = false;
         if (Count != 0)
         {
             Snapshot.AsSpan(0, Count).Clear();
@@ -64,6 +66,7 @@ internal sealed class LocalWorldSemanticChannel
     private ulong _nextDeliveryId = 1;
     private ulong _applied;
     private ulong _rejected;
+    private ulong _invalidated;
 
     internal LocalWorldSemanticChannel(LocalPlayableSessionLimits limits, int maximumRecords)
     {
@@ -84,6 +87,7 @@ internal sealed class LocalWorldSemanticChannel
     internal int HighWater => _ready.HighWater;
     internal ulong Applied { get { lock (_gate) return _applied; } }
     internal ulong Rejected { get { lock (_gate) return _rejected; } }
+    internal ulong Invalidated { get { lock (_gate) return _invalidated; } }
     internal long ReservedBytes => checked(
         (long)_rows.Length * (_rows[0].Snapshot.Length *
             (System.Runtime.CompilerServices.Unsafe.SizeOf<WorldPublicRecord>() +
@@ -192,6 +196,15 @@ internal sealed class LocalWorldSemanticChannel
             if (!_ready.TryPeek(out int index)) return false;
             if ((uint)index >= (uint)_rows.Length || !_queued[index]) return false;
             LocalWorldDeliveryRow row = _rows[index];
+            if (row.Invalidated)
+            {
+                changed = row.Key;
+                if (!_ready.TryDequeue(out int invalidated) || invalidated != index)
+                    throw new InvalidOperationException("The local world ready queue lost invalidation ownership.");
+                _queued[index] = false;
+                Release(index);
+                return true;
+            }
             bool accepted = Apply(cache, row, out changed);
             var proof = new LocalDeliveryProof(row.DeliveryId,
                 accepted ? LocalSemanticProofStatus.Applied : LocalSemanticProofStatus.Rejected);
@@ -216,6 +229,13 @@ internal sealed class LocalWorldSemanticChannel
             {
                 LocalWorldDeliveryRow row = _rows[index];
                 if (row.DeliveryId != proof.DeliveryId) continue;
+                if (row.Invalidated)
+                {
+                    Release(index);
+                    ticket = default;
+                    applied = false;
+                    return false;
+                }
                 ticket = row.Ticket;
                 applied = proof.Status == LocalSemanticProofStatus.Applied;
                 if (applied)
@@ -234,6 +254,28 @@ internal sealed class LocalWorldSemanticChannel
         ticket = default;
         applied = false;
         return false;
+    }
+
+    /// <summary>
+    /// Terminally abandons retained delivery lineage for a chunk that left the recipient's
+    /// current interest set. The next entry for the same chunk is a fresh subscription lifetime;
+    /// an old proof must not advance it through key ABA.
+    /// </summary>
+    internal void Invalidate(SpatialChunkKey key)
+    {
+        lock (_gate)
+        {
+            for (int index = 0; index < _rows.Length; index++)
+            {
+                LocalWorldDeliveryRow row = _rows[index];
+                if (row.DeliveryId == 0 || row.Key != key || row.Invalidated ||
+                    row.Kind is not (LocalWorldDeliveryKind.Snapshot or
+                        LocalWorldDeliveryKind.Delta or LocalWorldDeliveryKind.ChunkAbsent))
+                    continue;
+                row.Invalidated = true;
+                _invalidated++;
+            }
+        }
     }
 
     internal void ResetOutstanding()

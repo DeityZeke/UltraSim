@@ -116,6 +116,42 @@ internal static class ClientStructuralResidencyTests
         ClientStructuralResidencySnapshot radiusTwoFailure = radiusTwo.GetSnapshot();
         Equal(36, radiusTwoFailure.DesiredResidentChunks);
         Equal(36, radiusTwoFailure.SemanticResidentChunks);
+
+        // Two complete authored clusters may share one WorldPack without filling the distance
+        // between them with fake chunks. A distant transition explicitly retires the old bounded
+        // working set before admitting the new one, so capacity need not hold both clusters.
+        BoundWorldPack sparseWorld = CreateSparseWorld();
+        var sparseCache = new ClientWorldSemanticCache(sparseWorld, new(41, 0, 0, 1, 1));
+        var sparse = new ClientStructuralResidency(sparseCache, 1);
+        True(sparse.TryPrepare(Key(0, 0), false, out ClientStructuralResidencyPlan central,
+            out ClientStructuralResidencyTransition centralTransition, out _));
+        Equal(25, centralTransition.DesiredChunks);
+        sparse.Commit(central);
+        Equal(162, sparse.GetSnapshot().AuthoredChunks);
+        False(sparse.TryPrepare(Key(50, 0), false, out _, out _,
+            out ClientStructuralResidencyError gap));
+        Equal(ClientStructuralResidencyError.InvalidCenter, gap);
+
+        True(sparse.TryPrepareReset(out ClientStructuralResidencyPlan clear,
+            out ClientStructuralResidencyTransition clearing, out _));
+        Equal(25, clearing.ExitedChunks);
+        Equal(0, clearing.DesiredChunks);
+        sparse.Commit(clear);
+        Equal(0, sparse.GetSnapshot().SemanticResidentChunks);
+
+        SpatialChunkKey farCenter = Key(100, 0);
+        True(sparse.TryPrepare(farCenter, false, out ClientStructuralResidencyPlan far,
+            out ClientStructuralResidencyTransition farTransition, out _));
+        Equal(25, farTransition.EnteredChunks);
+        Equal(0, farTransition.RetainedChunks);
+        sparse.Commit(far);
+        ClientStructuralResidencySnapshot farSnapshot = sparse.GetSnapshot();
+        Equal(25, farSnapshot.SemanticResidentChunks);
+        Equal((ulong)1, farSnapshot.ResetTransitions);
+        False(sparseCache.TryGetResidentHandle(Key(0, 0), out _));
+        True(sparseCache.TryGetResidentHandle(farCenter, out _));
+        Equal(Key(103, 3), sparse.GetPresentationCenter(
+            new WorldPosition(104, 4, 15_000, 0, 15_000)));
     }
 
     private static BoundWorldPack CreateWorld()
@@ -132,6 +168,29 @@ internal static class ClientStructuralResidencyTests
         True(artifact!.Open().TryBind(
             new WorldContentBinding(Content, [1]), out BoundWorldPack? bound, out _));
         return bound!;
+    }
+
+    private static BoundWorldPack CreateSparseWorld()
+    {
+        var builder = new WorldPackBuilder(
+            Space, Content, new WorldPackLimits(4 * 1024 * 1024, 162, 2, 0, 0, 0));
+        var materials = Enumerable.Repeat((ushort)1, TerrainChunkFormat.MaterialCellCount).ToArray();
+        var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+        True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
+        AddCluster(-4, 4);
+        AddCluster(96, 104);
+        True(builder.TryBuild(out WorldPackArtifact? artifact, out _));
+        True(artifact!.Open().TryBind(
+            new WorldContentBinding(Content, [1]), out BoundWorldPack? bound, out _));
+        return bound!;
+
+        void AddCluster(int minimumX, int maximumX)
+        {
+            for (int x = minimumX; x <= maximumX; x++)
+            for (int z = -4; z <= 4; z++)
+                True(builder.TryAddBaseTerrain(
+                    Key(x, z), materials, heightBase, offsets, out _));
+        }
     }
 
     private static SpatialChunkKey Key(int x, int z) => new(Space, x, z);

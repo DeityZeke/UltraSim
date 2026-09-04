@@ -20,35 +20,45 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         string[] arguments = OS.GetCmdlineUserArgs();
         bool conceptDemoSmoke = arguments.Contains("--d0-0-smoke", StringComparer.Ordinal);
         bool residencySmoke = arguments.Contains("--d0-1-smoke", StringComparer.Ordinal);
+        bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
-            !conceptDemoSmoke && !residencySmoke && !f02Smoke)
+            !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !f02Smoke)
             return;
         try
         {
-            if (conceptDemoSmoke || residencySmoke)
+            if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
             {
                 StartLocalCabin(
                     CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
-                _cabin!.RunD00Acceptance();
-                LocalCabinPresentationSnapshot evidence = residencySmoke
-                    ? _cabin.RunD01Acceptance()
-                    : _cabin.GetPresentationSnapshot();
+                LocalCabinPresentationSnapshot evidence;
+                if (farIslandSmoke)
+                    evidence = _cabin!.RunD02Acceptance();
+                else
+                {
+                    _cabin!.RunD00Acceptance();
+                    evidence = residencySmoke
+                        ? _cabin.RunD01Acceptance()
+                        : _cabin.GetPresentationSnapshot();
+                }
                 if (evidence.AuthoredChunks != UltraSim.Game.Composition.GamePlayableWorld.ConceptChunkCount ||
                     evidence.SemanticResidentChunks >= evidence.AuthoredChunks ||
                     evidence.RenderedChunks >= evidence.SemanticResidentChunks)
                     throw new InvalidOperationException(
                         "The Concept Demo did not preserve authored > resident > rendered structure.");
                 GD.Print(
-                    $"{(residencySmoke ? "D0.1 RESIDENCY" : "D0.0 CONCEPT DEMO")} PASS " +
+                    $"{(farIslandSmoke ? "D0.2 FAR ISLAND" :
+                        residencySmoke ? "D0.1 RESIDENCY" : "D0.0 CONCEPT DEMO")} PASS " +
                     $"player={evidence.PlayerPosition} authored/resident/rendered=" +
                     $"{evidence.AuthoredChunks}/{evidence.SemanticResidentChunks}/" +
                     $"{evidence.RenderedChunks} radius={evidence.RenderDistanceChunks} " +
                     $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
                 RetireCurrentSession();
-                ReturnToMainMenu(residencySmoke
-                    ? "Concept Demo D0.1 residency smoke passed."
-                    : "Concept Demo D0.0 smoke passed.");
+                ReturnToMainMenu(farIslandSmoke
+                    ? "Concept Demo D0.2 Far Island smoke passed."
+                    : residencySmoke
+                        ? "Concept Demo D0.1 residency smoke passed."
+                        : "Concept Demo D0.0 smoke passed.");
                 GetTree().Quit(0);
                 return;
             }

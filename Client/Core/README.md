@@ -101,12 +101,19 @@ API.
 
 Concept Demo D0.1 adds `ClientStructuralResidency` immediately before that presentation seam. The
 bound WorldPack is the authored/source catalog, not the resident set. The controller retains only
-the clipped presentation neighborhood plus one bounded structural fringe, transactionally stages
-all entrants, and retires exits after presentation admission. Its fixed arrays and semantic-cache
+the presentation neighborhood plus one bounded structural fringe, transactionally stages all
+entrants, and retires exits after presentation admission. Its fixed arrays and semantic-cache
 capacity bound the operation; cancellation rolls back newly staged chunks. Dynamic-public debt may
 keep an otherwise undesired semantic chunk resident, but Render Distance never changes Game-owned
-public interest. The accepted local canary is authored/resident/rendered `81/25/9` at radius 1 and
-`81/49/25` at radius 2.
+public interest. D0.1's accepted local canary was authored/resident/rendered `81/25/9` at radius 1
+and `81/49/25` at radius 2.
+
+D0.2 admits noncontiguous authored geography. Valid presentation centers are derived from actual
+sorted WorldPack keys rather than a global bounding rectangle; fringe planning skips unauthored
+coordinates instead of synthesizing blank chunks. A disjoint transition can first commit an empty
+desired structural set, allowing the old renderer/native window and structural-only semantics to
+retire before the distant set is admitted. The permanent sparse-cluster canary is `162/25/9` at
+radius 1 in either cluster and performs exact central → far → central resets without capacity growth.
 
 `ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
 are ordered, append-only occurrences rather than latest state: session/server

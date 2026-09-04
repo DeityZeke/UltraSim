@@ -1530,6 +1530,13 @@ It is deliberately absent from server control/camera recommendations: changing i
 the client semantic/presentation working set and does not expand Game AOI, disclosure, or authority.
 Settings format v2 writes the value while still admitting v1 documents as default-radius input.
 
+Concept Demo D0.2 removes the controller's remaining rectangular-source assumption. Structural
+residency now derives valid presentation centers from the sorted authored WorldPack key set, skips
+unauthored coordinates in its bounded fringe, and uses an explicit empty reset between disjoint
+windows so distant clusters do not require simultaneous old+new capacity. Missing authored keys
+remain outside authored world; the controller never turns them into intentional void. Public-state
+interest and delivery lifetime remain separate from this client-owned structural policy.
+
 Implement:
 
 - persistent ClientRoot;

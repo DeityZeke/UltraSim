@@ -61,7 +61,7 @@ public sealed class LocalPlayableSession : IDisposable
         return Create(pack, saveRoot, limits, conceptDemo: false);
     }
 
-    /// <summary>Creates the permanent local application path over the D0.0 island fixture.</summary>
+    /// <summary>Creates the permanent local application path over the sparse Concept Demo world.</summary>
     public static LocalPlayableSession CreateConceptDemo(
         string saveRoot,
         LocalPlayableSessionLimits limits = default)
@@ -236,6 +236,7 @@ public sealed class LocalPlayableSession : IDisposable
             _chatChannel.HighWater,
             _worldChannel.Applied,
             _worldChannel.Rejected,
+            _worldChannel.Invalidated,
             _chatChannel.Applied,
             _chatChannel.Rejected,
             _uiChannel.Applied,
@@ -442,6 +443,9 @@ public sealed class LocalPlayableSession : IDisposable
                             LocalPlayableSelection.CabinDoor => Resolve(world, entities.CabinDoorId),
                             LocalPlayableSelection.SkyTelepad when entities.SkyTelepadId.IsValid =>
                                 Resolve(world, entities.SkyTelepadId),
+                            LocalPlayableSelection.FarGate when
+                                entities.CentralFarGateId.IsValid && entities.FarReturnGateId.IsValid =>
+                                ResolveNearestFarGate(world, game.WorldState, actor, entities),
                             _ => Entity.Null,
                         };
                         game.WorldActions.ApplyPlayerCommand(
@@ -650,6 +654,9 @@ public sealed class LocalPlayableSession : IDisposable
                 out OfflineDirectChunkReconcileResult result);
             if (status != OfflineDirectChunkReconcileStatus.Reconciled)
                 throw new InvalidOperationException($"Local public interest failed: {status}.");
+            for (int index = 0; index < result.ChangeCount; index++)
+                if (state.Changes[index].Kind == OfflineDirectChunkSubscriptionChangeKind.Left)
+                    _worldChannel.Invalidate(state.Changes[index].Key);
             if (result.ChangeCount != 0)
             {
                 state.Changes.AsSpan(0, result.ChangeCount).CopyTo(state.Pending);
@@ -800,6 +807,30 @@ public sealed class LocalPlayableSession : IDisposable
         world.TryResolvePersistentEntity(id, out Entity entity)
             ? entity
             : throw new InvalidOperationException($"Persistent entity {id} was unavailable.");
+
+    private static Entity ResolveNearestFarGate(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        in GamePlayableWorldEntities entities)
+    {
+        Entity central = Resolve(world, entities.CentralFarGateId);
+        Entity far = Resolve(world, entities.FarReturnGateId);
+        if (!worldState.TryReadPosition(world, actor, out WorldPosition actorPosition) ||
+            !worldState.TryReadPosition(world, central, out WorldPosition centralPosition) ||
+            !worldState.TryReadPosition(world, far, out WorldPosition farPosition))
+            return Entity.Null;
+        return DistanceSquared(actorPosition, centralPosition) <= DistanceSquared(actorPosition, farPosition)
+            ? central
+            : far;
+
+        static Int128 DistanceSquared(in WorldPosition left, in WorldPosition right)
+        {
+            long x = checked(left.GlobalXMillimeters - right.GlobalXMillimeters);
+            long z = checked(left.GlobalZMillimeters - right.GlobalZMillimeters);
+            return (Int128)x * x + (Int128)z * z;
+        }
+    }
 
     private static PersistenceRestoreOptions RestoreOptions() => new(
         new PersistenceLimits(

@@ -30,6 +30,8 @@ Run("ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells",
     ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells, results);
 Run("ConceptDemoTelepadUsesAuthoritativeDestination",
     ConceptDemoTelepadUsesAuthoritativeDestination, results);
+Run("ConceptDemoFarGateUsesSparseAuthoredGeography",
+    ConceptDemoFarGateUsesSparseAuthoredGeography, results);
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
 Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
@@ -746,6 +748,103 @@ static TestMetrics ConceptDemoTelepadUsesAuthoritativeDestination()
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "The public telepad accepts only an in-range authoritative target, obtains no destination from the client, and relocates through the existing occupancy-aware Game primitive.",
         InputCommands: nextInput.Snapshot().CommandsProduced + input.Snapshot().CommandsProduced + 1);
+}
+
+static TestMetrics ConceptDemoFarGateUsesSparseAuthoredGeography()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var centralKey = new SpatialChunkKey(
+        GameWorldState.DefaultSpace,
+        GamePlayableWorld.CentralGateDestination.Chunk);
+    var farKey = new SpatialChunkKey(
+        GameWorldState.DefaultSpace,
+        GamePlayableWorld.FarGateDestination.Chunk);
+    var gapKey = new SpatialChunkKey(
+        GameWorldState.DefaultSpace,
+        (centralKey.Coord.X + farKey.Coord.X) / 2,
+        centralKey.Coord.Z);
+    Expect(pack.TryGetBaseTerrain(centralKey, out _) &&
+        pack.TryGetBaseTerrain(farKey, out _) &&
+        !pack.TryGetBaseTerrain(gapKey, out _),
+        "The Far Island fixture did not preserve two authored clusters separated by genuinely unauthored geography.");
+    Expect(GamePlayableWorld.FarGateDestination.GlobalXMillimeters -
+        GamePlayableWorld.CentralGateDestination.GlobalXMillimeters >= 2_000_000,
+        "The Far Island fixture did not establish a meaningful long-distance relocation.");
+
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_D002))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(0xD002));
+    Expect(entered.IsEntered, "The Far Island participant did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.PopulateConceptDemo(world, game, entered.Entity),
+            out GamePlayableWorldEntities entities) &&
+        entities.CentralFarGateId.IsValid && entities.FarReturnGateId.IsValid,
+        "The Concept Demo population did not contain both reciprocal Far Gates.");
+    host.Tick();
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(runtime.Game, entities.PlayerId, input.ControlSession);
+    Expect(input.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand distantUse),
+        "The distant Far Gate command could not be formed.");
+    WorldPosition before = link.ReadPosition();
+    GamePlayerCommandResult distant = link.ApplyCommand(distantUse, entities.CentralFarGateId);
+    Expect(distant.Interaction == GameWorldActionStatus.OutOfRange && link.ReadPosition() == before,
+        "An out-of-range Far Gate interaction relocated the actor.");
+
+    Relocate(GamePlayableWorld.CentralFarGatePosition);
+    var centralInput = new ClientWorldInputSequencer(input.ControlSession, distantUse.Sequence + 1);
+    Expect(centralInput.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand useCentral),
+        "The central Far Gate command could not be formed.");
+    GamePlayerCommandResult outbound = link.ApplyCommand(useCentral, entities.CentralFarGateId);
+    Expect(outbound.Interaction == GameWorldActionStatus.Accepted &&
+        link.ReadPosition() == GamePlayableWorld.FarGateDestination,
+        "The central Far Gate did not use its exact Game-owned Far Island destination.");
+
+    Relocate(GamePlayableWorld.FarReturnGatePosition);
+    var returnInput = new ClientWorldInputSequencer(input.ControlSession, useCentral.Sequence + 1);
+    Expect(returnInput.TryCreateSemanticCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+            out GamePlayerCommand useReturn),
+        "The return Far Gate command could not be formed.");
+    GamePlayerCommandResult inbound = link.ApplyCommand(useReturn, entities.FarReturnGateId);
+    Expect(inbound.Interaction == GameWorldActionStatus.Accepted &&
+        link.ReadPosition() == GamePlayableWorld.CentralGateDestination,
+        "The Far Island return gate did not use its exact Game-owned central destination.");
+
+    return new TestMetrics(
+        HashText($"{pack.Fingerprint}|{centralKey}|{farKey}|{gapKey}|{outbound.Interaction}|{inbound.Interaction}"),
+        0, 0, 0, 0, 0, pack.Length, 0, 0, 0, 0, 0,
+        "D0.2 uses two sparse authored clusters with no gap chunks and reciprocal authoritative gates whose destinations never come from the client.",
+        InputCommands: input.Snapshot().CommandsProduced +
+            centralInput.Snapshot().CommandsProduced + returnInput.Snapshot().CommandsProduced);
+
+    void Relocate(in WorldPosition destination)
+    {
+        WorldPosition target = destination;
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+                (world, generationId, game) => game.WorldActions.RelocateActor(
+                    world,
+                    game.WorldState,
+                    ResolveInWorld(world, entities.PlayerId),
+                    target,
+                    out _),
+                out GameWorldActionStatus status) && status == GameWorldActionStatus.Accepted,
+            $"The actor could not approach Far Gate at {target}.");
+    }
 }
 
 static TestMetrics SimplePhysicsGenerationReplacement()

@@ -32,10 +32,12 @@ Chat                           retained occurrence until Client apply proof
 server-composed UI             retained operation until Client apply/reject proof
 ```
 
-Rejected public-world and Chat applications retain the same semantic debt for
-retry. A rejected UI operation instead retires that operation and
-desynchronizes its view, matching the remote UI contract; later operations do
-not continue against unknown client UI state.
+Rejected public-world and Chat applications retain the same semantic debt for retry. A chunk that
+terminally leaves the current public-interest set is different: retained local world deliveries for
+that key are explicitly invalidated, not applied, so an old proof cannot advance a later same-key
+subscription after distant leave/re-entry. A rejected UI operation instead retires that operation
+and desynchronizes its view, matching the remote UI contract; later operations do not continue
+against unknown client UI state.
 
 Public disclosure uses `GameChunkInterestProfile.Default` and the accepted
 `OfflineDirectChunkCadence.EvidenceProfile`. It consumes packet-free Game
@@ -52,6 +54,8 @@ sessions around the same authority; the host player stays on this local path.
 `LocalPlayableSession` remains a concrete playable-world authority composition rather than a
 universal local-server API. `CreateCabin` preserves the historical F0.2 fixture;
 `CreateConceptDemo` composes D0.0's finite Central Island, mountain/cave, Sky Island, and public
-telepad over the same bounded bridge. The fixtures have separate persistent-world identities and
-save roots. The permanent Single Player and Complete shells select the Concept Demo explicitly;
-acceptance can still select Cabin without changing this ownership boundary.
+telepad plus D0.2's geographically separate Far Island and reciprocal public gates over the same
+bounded bridge. Its 162 authored chunks are two 9×9 clusters with no authored gap chunks. The
+fixtures have separate persistent-world identities and save roots. The permanent Single Player and
+Complete shells select the Concept Demo explicitly; acceptance can still select Cabin without
+changing this ownership boundary.

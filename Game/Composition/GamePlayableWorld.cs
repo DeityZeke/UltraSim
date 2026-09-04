@@ -24,7 +24,11 @@ public readonly record struct GamePlayableWorldEntities(
     PersistentEntityId WoodlandAnimalId,
     PersistentEntityId BreadId,
     Entity SkyTelepad,
-    PersistentEntityId SkyTelepadId);
+    PersistentEntityId SkyTelepadId,
+    Entity CentralFarGate,
+    PersistentEntityId CentralFarGateId,
+    Entity FarReturnGate,
+    PersistentEntityId FarReturnGateId);
 
 /// <summary>Concrete authoritative action outcomes for the first playable vertical.</summary>
 public enum GameWorldActionStatus : byte
@@ -790,6 +794,8 @@ public sealed class GameWorldActions
                 ToggleCabinDoorCore(world, worldState, actor, target, out doorIsOpen),
             GameWorldPublicPrefabIds.SkyTelepad =>
                 ActivateSkyTelepad(world, worldState, actor, target),
+            GameWorldPublicPrefabIds.FarGate =>
+                ActivateFarGate(world, worldState, actor, target),
             _ => GameWorldActionStatus.MissingTarget,
         };
     }
@@ -819,6 +825,34 @@ public sealed class GameWorldActions
             actor,
             GamePlayableWorld.SkyTelepadDestination,
             out _);
+    }
+
+    private GameWorldActionStatus ActivateFarGate(
+        EcsWorld world,
+        GameWorldState worldState,
+        Entity actor,
+        Entity gate)
+    {
+        if (!world.IsAlive(actor) || !world.Has(actor, _character) ||
+            !worldState.TryReadPosition(world, actor, out WorldPosition actorPosition))
+            return GameWorldActionStatus.MissingActor;
+        if (!world.IsAlive(gate) ||
+            !worldState.TryReadPosition(world, gate, out WorldPosition gatePosition) ||
+            !worldState.TryReadPublic(world, gate, out WorldPublicDescriptor descriptor) ||
+            descriptor.PrefabId != GameWorldPublicPrefabIds.FarGate)
+            return GameWorldActionStatus.MissingTarget;
+        if (!WithinInteractionRange(actorPosition, gatePosition))
+            return GameWorldActionStatus.OutOfRange;
+
+        WorldPosition destination;
+        if (gatePosition == GamePlayableWorld.CentralFarGatePosition)
+            destination = GamePlayableWorld.FarGateDestination;
+        else if (gatePosition == GamePlayableWorld.FarReturnGatePosition)
+            destination = GamePlayableWorld.CentralGateDestination;
+        else
+            return GameWorldActionStatus.InvariantViolation;
+
+        return RelocateActor(world, worldState, actor, destination, out _);
     }
 
     public bool TryReadCabinDoor(EcsWorld world, Entity door, out bool isOpen)
@@ -1302,7 +1336,11 @@ public static class GamePlayableWorld
     public const int ChunkCount = 25;
     public const int ConceptMinimumChunk = -4;
     public const int ConceptMaximumChunk = 4;
-    public const int ConceptChunkCount = 81;
+    public const int FarIslandCenterChunkX = 128;
+    public const int FarIslandMinimumChunkX = FarIslandCenterChunkX - 4;
+    public const int FarIslandMaximumChunkX = FarIslandCenterChunkX + 4;
+    public const int ConceptClusterChunkCount = 81;
+    public const int ConceptChunkCount = ConceptClusterChunkCount * 2;
 
     public static WorldSurfaceId MountainSurface => new(0xD0_001);
     public static WorldSurfaceId CaveLedgeSurface => new(0xD0_002);
@@ -1319,26 +1357,30 @@ public static class GamePlayableWorld
     public static WorldPosition CaveEntranceApproach => FromGlobal(-6_000, 2_500);
     public static WorldPosition CaveFloorPoint => FromGlobal(-6_000, 7_000);
     public static WorldPosition CaveLedgePoint => AtHeight(-6_000, 3_000, 11_000);
+    public static long FarIslandCenterXMillimeters =>
+        checked((long)FarIslandCenterChunkX * GameWorldSpatialProfile.WorldChunkEdgeUnits + 8_000);
+    public static WorldPosition CentralFarGatePosition => FromGlobal(0, 20_000);
+    public static WorldPosition CentralGateDestination => FromGlobal(0, 16_000);
+    public static WorldPosition FarReturnGatePosition => FromGlobal(FarIslandCenterXMillimeters, 20_000);
+    public static WorldPosition FarGateDestination => FromGlobal(FarIslandCenterXMillimeters, 16_000);
 
     public static WorldPack CreateWorldPack() => CreateWorldPackCore(conceptDemo: false);
 
     /// <summary>
     /// Builds the first local Concept Demo world while preserving the historical Cabin fixture.
-    /// Its BaseTerrain is a finite floating island; sparse immutable shells form the mountain,
-    /// cave ledge, and detached Sky Island.
+    /// Its BaseTerrain contains separate finite Central/Far islands; sparse immutable shells form
+    /// the central mountain, cave ledge, and detached Sky Island.
     /// </summary>
     public static WorldPack CreateConceptDemoWorldPack() => CreateWorldPackCore(conceptDemo: true);
 
     private static WorldPack CreateWorldPackCore(bool conceptDemo)
     {
-        int minimumChunk = conceptDemo ? ConceptMinimumChunk : MinimumChunk;
-        int maximumChunk = conceptDemo ? ConceptMaximumChunk : MaximumChunk;
         int chunkCount = conceptDemo ? ConceptChunkCount : ChunkCount;
         var limits = new WorldPackLimits(
-            (conceptDemo ? 4 : 2) * 1024 * 1024,
+            (conceptDemo ? 8 : 2) * 1024 * 1024,
             chunkCount,
             8,
-            maximumFrozenStatics: 128,
+            maximumFrozenStatics: conceptDemo ? 256 : 128,
             maximumMultiInstances: 8,
             maximumMultiFragments: 32);
         var builder = new WorldPackBuilder(
@@ -1349,9 +1391,29 @@ public static class GamePlayableWorld
         var heights = new int[TerrainChunkFormat.HeightVertexCount];
         var offsets = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
         var presence = new ulong[TerrainChunkFormat.SurfacePresenceWordCount];
-        for (int chunkZ = minimumChunk; chunkZ <= maximumChunk; chunkZ++)
+        int authoredOrdinal = 0;
+        if (conceptDemo)
         {
-            for (int chunkX = minimumChunk; chunkX <= maximumChunk; chunkX++)
+            AddCluster(ConceptMinimumChunk, ConceptMaximumChunk, ConceptMinimumChunk, ConceptMaximumChunk);
+            AddCluster(FarIslandMinimumChunkX, FarIslandMaximumChunkX,
+                ConceptMinimumChunk, ConceptMaximumChunk);
+        }
+        else
+            AddCluster(MinimumChunk, MaximumChunk, MinimumChunk, MaximumChunk);
+        AddCabin(builder);
+        if (conceptDemo)
+        {
+            AddConceptTerrainShells(builder);
+            AddConceptMountainWalls(builder);
+        }
+        if (!builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError))
+            throw new InvalidOperationException($"Authored playable WorldPack failed: {buildError}.");
+        return artifact!.Open();
+
+        void AddCluster(int minimumX, int maximumX, int minimumZ, int maximumZ)
+        {
+            for (int chunkZ = minimumZ; chunkZ <= maximumZ; chunkZ++)
+            for (int chunkX = minimumX; chunkX <= maximumX; chunkX++)
             {
                 FillMaterials(chunkX, chunkZ, materials);
                 FillHeights(chunkX, chunkZ, heights);
@@ -1374,20 +1436,9 @@ public static class GamePlayableWorld
                 }
                 if (!added)
                     throw new InvalidOperationException($"Authored terrain chunk {key} failed: {error}.");
-                AddWoodsStatics(
-                    builder, chunkX, chunkZ, conceptDemo, minimumChunk,
-                    checked(maximumChunk - minimumChunk + 1));
+                AddWoodsStatics(builder, chunkX, chunkZ, conceptDemo, authoredOrdinal++);
             }
         }
-        AddCabin(builder);
-        if (conceptDemo)
-        {
-            AddConceptTerrainShells(builder);
-            AddConceptMountainWalls(builder);
-        }
-        if (!builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError))
-            throw new InvalidOperationException($"Authored playable WorldPack failed: {buildError}.");
-        return artifact!.Open();
     }
 
     public static GamePlayableWorldEntities Populate(
@@ -1431,6 +1482,10 @@ public static class GamePlayableWorld
             world.GetOrAssignPersistentId(animal),
             world.GetOrAssignPersistentId(bread),
             Entity.Null,
+            default,
+            Entity.Null,
+            default,
+            Entity.Null,
             default);
     }
 
@@ -1444,10 +1499,19 @@ public static class GamePlayableWorld
         if (!world.TryInstantiate(game.Content.SkyTelepad, out Entity telepad) ||
             !game.WorldState.TrySetPosition(world, telepad, SkyTelepadPosition))
             throw new InvalidOperationException("The Concept Demo Sky Island telepad could not be created.");
+        if (!world.TryInstantiate(game.Content.FarGate, out Entity centralGate) ||
+            !game.WorldState.TrySetPosition(world, centralGate, CentralFarGatePosition) ||
+            !world.TryInstantiate(game.Content.FarGate, out Entity returnGate) ||
+            !game.WorldState.TrySetPosition(world, returnGate, FarReturnGatePosition))
+            throw new InvalidOperationException("The Concept Demo Far Gate pair could not be created.");
         return entities with
         {
             SkyTelepad = telepad,
             SkyTelepadId = world.GetOrAssignPersistentId(telepad),
+            CentralFarGate = centralGate,
+            CentralFarGateId = world.GetOrAssignPersistentId(centralGate),
+            FarReturnGate = returnGate,
+            FarReturnGateId = world.GetOrAssignPersistentId(returnGate),
         };
     }
 
@@ -1476,18 +1540,25 @@ public static class GamePlayableWorld
 
     private static bool IsConceptBasePresent(long xMillimeters, long zMillimeters)
     {
-        // An integer ellipse gives the central sheet a genuine finite edge. A deliberate east-side
-        // cutout supplies unsupported air between that sheet and the detached Sky Island shell.
-        long dx = xMillimeters - 8_000;
-        long dz = zMillimeters - 8_000;
+        // Two independently authored islands share one sparse WorldPack key set. No base chunks
+        // are synthesized across the roughly two-kilometre distance between the clusters.
         const long radiusX = 26_000;
         const long radiusZ = 24_000;
-        bool withinIsland = checked(
-            dx * dx * radiusZ * radiusZ + dz * dz * radiusX * radiusX <=
-            radiusX * radiusX * radiusZ * radiusZ);
+        bool withinCentral = WithinEllipse(xMillimeters, zMillimeters, 8_000, 8_000);
+        bool withinFar = WithinEllipse(
+            xMillimeters, zMillimeters, FarIslandCenterXMillimeters, 8_000);
         bool skyCutout = xMillimeters >= 23_000 && xMillimeters < 32_000 &&
             zMillimeters >= 5_500 && zMillimeters < 12_500;
-        return withinIsland && !skyCutout;
+        return withinFar || withinCentral && !skyCutout;
+
+        static bool WithinEllipse(long x, long z, long centerX, long centerZ)
+        {
+            long dx = x - centerX;
+            long dz = z - centerZ;
+            return (Int128)dx * dx * radiusZ * radiusZ +
+                (Int128)dz * dz * radiusX * radiusX <=
+                (Int128)radiusX * radiusX * radiusZ * radiusZ;
+        }
     }
 
     private static void FillMaterials(int chunkX, int chunkZ, Span<ushort> destination)
@@ -1536,11 +1607,8 @@ public static class GamePlayableWorld
         int chunkX,
         int chunkZ,
         bool conceptDemo,
-        int minimumChunk,
-        int chunkWidth)
+        int ordinal)
     {
-        int ordinal = checked(
-            (chunkZ - minimumChunk) * chunkWidth + (chunkX - minimumChunk));
         int[][] locations = [[3_000, 3_000], [12_000, 5_000], [5_000, 13_000]];
         for (int index = 0; index < locations.Length; index++)
         {
@@ -1557,7 +1625,7 @@ public static class GamePlayableWorld
                     ? GameWorldStaticDefinitionIds.Rock
                     : GameWorldStaticDefinitionIds.Tree),
                 position,
-                new WorldYaw(checked((ushort)(ordinal * 997 + index * 8_192))),
+                new WorldYaw(unchecked((ushort)(ordinal * 997 + index * 8_192))),
                 0,
                 WorldStaticFlags.Renderable | WorldStaticFlags.Collidable,
                 Bounds(position, index == 2 ? 500 : 650, index == 2 ? 900 : 4_500));

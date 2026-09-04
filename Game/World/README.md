@@ -290,6 +290,12 @@ main-chunk order. T1.0 adds optional `TerrainPresence/v1`; T1.1 adds optional
 frozen top-level 48-byte terrain chunk row and accepted base sections remain
 unchanged.
 
+The sorted chunk directory is an authored key set, not a promise that its global bounding box is
+fully populated. D0.2 exercises this canonical form with two distant 9×9 clusters in one space and
+no rows for the intervening geography. A missing key therefore means outside authored world;
+authored-but-nonresident data and an authored resident chunk containing T1.0 intentional void remain
+separate conditions owned by their respective consumers.
+
 The additional-shell schema keeps surface topology, material, effective physical
 behavior, observer perception, and mutable Game state distinct. An absent/`None`
 surface is topological absence, not a transparent or non-colliding material.

@@ -70,6 +70,7 @@ public partial class LocalCabinClient : Node3D
         CabinDoor,
         CabinChest,
         SkyTelepad,
+        FarGate,
         WoodlandAnimal,
     }
 
@@ -267,6 +268,107 @@ public partial class LocalCabinClient : Node3D
                 $"The expanded D0.1 working set was unexpected: {after.AuthoredChunks}/" +
                 $"{after.SemanticResidentChunks}/{after.RenderedChunks}.");
         return after;
+    }
+
+    /// <summary>
+    /// Permanent D0.2 canary for sparse authored geography and reciprocal authoritative gates.
+    /// The two structural clusters are separated by unauthored distance, so each crossing must
+    /// retire and rebuild the bounded semantic/presentation working set.
+    /// </summary>
+    public LocalCabinPresentationSnapshot RunD02Acceptance()
+    {
+        if (!_initialized || _settings is null || !_useConceptDemoWorld ||
+            _boundWorld is null || _cache is null || _residency is null ||
+            _window is null || _renderer is null || _localSession is null || _sequencer is null)
+            throw new InvalidOperationException("D0.2 requires the initialized Concept Demo consumer.");
+        ApplySettings(WithRenderDistance(_settings, 1));
+        SpatialChunkKey centralKey = GamePlayableWorld.PlayerStart.ToChunkKey(_boundWorld.Space);
+        SpatialChunkKey farKey = GamePlayableWorld.FarGateDestination.ToChunkKey(_boundWorld.Space);
+        var gapKey = new SpatialChunkKey(
+            _boundWorld.Space,
+            (GamePlayableWorld.ConceptMaximumChunk + GamePlayableWorld.FarIslandMinimumChunkX) / 2,
+            0);
+        if (_boundWorld.ChunkCount != GamePlayableWorld.ConceptChunkCount ||
+            _boundWorld.TryGetBaseTerrain(gapKey, out _))
+            throw new InvalidOperationException(
+                "The Concept Demo does not contain two sparse authored clusters separated by unauthored distance.");
+
+        ClientStructuralResidencySnapshot residencyBefore = _residency.GetSnapshot();
+        ClientPresentationWindowSnapshot presentationBefore = _window.GetSnapshot();
+        UseGate(GamePlayableWorld.CentralFarGatePosition, GamePlayableWorld.FarGateDestination);
+        DriveLocalUntil(() =>
+            _player == GamePlayableWorld.FarGateDestination &&
+            !_cache.TryGetResidentHandle(centralKey, out _) &&
+            _cache.TryGetResidentHandle(farKey, out _) &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 0 &&
+            _renderer.GetSnapshot().ActiveRenderChunks == 9);
+        ClientStructuralResidencySnapshot farResidency = _residency.GetSnapshot();
+        ClientPresentationWindowSnapshot farPresentation = _window.GetSnapshot();
+        if (farResidency.DesiredResidentChunks != 25 || farResidency.SemanticResidentChunks != 25 ||
+            farResidency.ResetTransitions != residencyBefore.ResetTransitions + 1 ||
+            farPresentation.ResetTransitions != presentationBefore.ResetTransitions + 1 ||
+            farPresentation.CenterChunk.Coord.X != GamePlayableWorld.FarIslandCenterChunkX)
+            throw new InvalidOperationException(
+                "The central-to-far gate did not perform one bounded structural/presentation reset.");
+
+        ReleaseInteraction();
+        UseGate(GamePlayableWorld.FarReturnGatePosition, GamePlayableWorld.CentralGateDestination);
+        DriveLocalUntil(() =>
+            _player == GamePlayableWorld.CentralGateDestination &&
+            _cache.TryGetResidentHandle(centralKey, out _) &&
+            !_cache.TryGetResidentHandle(farKey, out _) &&
+            CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
+            _renderer.GetSnapshot().ActiveRenderChunks == 9);
+        ClientStructuralResidencySnapshot returnedResidency = _residency.GetSnapshot();
+        ClientPresentationWindowSnapshot returnedPresentation = _window.GetSnapshot();
+        if (returnedResidency.DesiredResidentChunks != 25 ||
+            returnedResidency.SemanticResidentChunks != 25 ||
+            returnedResidency.ResetTransitions != residencyBefore.ResetTransitions + 2 ||
+            returnedPresentation.ResetTransitions != presentationBefore.ResetTransitions + 2)
+            throw new InvalidOperationException(
+                "The far-to-central gate did not retire and rebuild the bounded working set.");
+        ReleaseInteraction();
+        return GetPresentationSnapshot();
+
+        void UseGate(in WorldPosition gate, in WorldPosition destination)
+        {
+            WorldPosition expectedDestination = destination;
+            RelocateControlledActor(gate);
+            SetProfile(ControlProfile.ThirdPersonDirect);
+            if (!TrySetPointerWorldPoint(gate.GlobalXMillimeters, gate.GlobalZMillimeters))
+                throw new InvalidOperationException("The authored Far Gate had no structural pointer support.");
+            Select(new ClientControlWorldPoint(gate.GlobalXMillimeters, gate.GlobalZMillimeters));
+            if (_selection != SelectionKind.FarGate ||
+                !_sequencer.TryCreateSemanticCommand(
+                    new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop,
+                        GamePlayerActions.Interact,
+                        true),
+                    out GamePlayerCommand command))
+                throw new InvalidOperationException("The Far Gate interaction could not be formed.");
+            ApplyCommand(command, false, default, false);
+            DriveLocalUntil(() =>
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastCommandSequence == command.Sequence &&
+                view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+                _player == expectedDestination);
+        }
+
+        void ReleaseInteraction()
+        {
+            if (!_sequencer.TryCreateSemanticCommand(
+                    new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop,
+                        GamePlayerActions.None,
+                        true),
+                    out GamePlayerCommand release))
+                throw new InvalidOperationException("The Far Gate interaction release could not be formed.");
+            ApplyCommand(release, false, default, false);
+            DriveLocalUntil(() =>
+                _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastCommandSequence == release.Sequence);
+        }
     }
 
     private static ResolvedClientSettings WithRenderDistance(
@@ -492,7 +594,8 @@ public partial class LocalCabinClient : Node3D
             CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1 &&
             (!_useConceptDemoWorld ||
-                CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) == 1));
+                CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) == 1 &&
+                CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1));
         _lastOutcome = _useConceptDemoWorld
             ? "Fresh Concept Demo island started"
             : "Fresh woods/cabin world started";
@@ -626,25 +729,36 @@ public partial class LocalCabinClient : Node3D
 
     private static int MaximumRenderRadius(BoundWorldPack world)
     {
-        int minimumX = int.MaxValue;
-        int maximumX = int.MinValue;
-        int minimumZ = int.MaxValue;
-        int maximumZ = int.MinValue;
-        for (int index = 0; index < world.ChunkCount; index++)
+        for (int radius = ClientSettingsResolver.MaximumRenderDistanceChunks;
+             radius >= ClientSettingsResolver.MinimumRenderDistanceChunks;
+             radius--)
         {
-            if (!world.TryGetChunkKey(index, out SpatialChunkKey key))
-                throw new InvalidOperationException("A validated WorldPack lost a chunk key.");
-            minimumX = Math.Min(minimumX, key.Coord.X);
-            maximumX = Math.Max(maximumX, key.Coord.X);
-            minimumZ = Math.Min(minimumZ, key.Coord.Z);
-            maximumZ = Math.Max(maximumZ, key.Coord.Z);
+            for (int index = 0; index < world.ChunkCount; index++)
+            {
+                if (!world.TryGetChunkKey(index, out SpatialChunkKey center))
+                    throw new InvalidOperationException("A validated WorldPack lost a chunk key.");
+                if (IsComplete(center, radius)) return radius;
+            }
         }
-        int width = checked(maximumX - minimumX + 1);
-        int depth = checked(maximumZ - minimumZ + 1);
-        return Math.Clamp(
-            (Math.Min(width, depth) - 1) / 2,
-            ClientSettingsResolver.MinimumRenderDistanceChunks,
-            ClientSettingsResolver.MaximumRenderDistanceChunks);
+        throw new InvalidOperationException(
+            "The authored world cannot contain the minimum client presentation window.");
+
+        bool IsComplete(SpatialChunkKey center, int radius)
+        {
+            for (long x = (long)center.Coord.X - radius;
+                 x <= (long)center.Coord.X + radius;
+                 x++)
+            for (long z = (long)center.Coord.Z - radius;
+                 z <= (long)center.Coord.Z + radius;
+                 z++)
+            {
+                if (x is < int.MinValue or > int.MaxValue || z is < int.MinValue or > int.MaxValue ||
+                    !world.TryGetBaseTerrain(
+                        new SpatialChunkKey(world.Space, checked((int)x), checked((int)z)), out _))
+                    return false;
+            }
+            return true;
+        }
     }
 
     private ClientControlProfileDecision EvaluateProfile(
@@ -731,6 +845,7 @@ public partial class LocalCabinClient : Node3D
             SelectionKind.CabinDoor => LocalPlayableSelection.CabinDoor,
             SelectionKind.CabinChest => LocalPlayableSelection.CabinChest,
             SelectionKind.SkyTelepad => LocalPlayableSelection.SkyTelepad,
+            SelectionKind.FarGate => LocalPlayableSelection.FarGate,
             _ => LocalPlayableSelection.Unsupported,
         };
         if (!_localSession.TrySubmit(new LocalPlayableCommand(
@@ -871,6 +986,28 @@ public partial class LocalCabinClient : Node3D
         if (_window is null || _residency is null)
             return;
         SpatialChunkKey center = _residency.GetPresentationCenter(_player);
+        ClientPresentationWindowSnapshot current = _window.GetSnapshot();
+        if (!reset && current.ActiveChunks != 0 &&
+            PresentationWindowsAreDisjoint(current.CenterChunk, center, _window.RenderRadiusChunks))
+        {
+            if (!_window.TryResetForJump(
+                    _player, _presentationChanges, out _, out _,
+                    out ClientPresentationWindowError windowResetError,
+                    out GodotWorldRenderQueueError rendererResetError))
+            {
+                _lastOutcome = $"Distant presentation reset: {windowResetError}/{rendererResetError}";
+                return;
+            }
+            DrainRenderer();
+            if (!_residency.TryPrepareReset(
+                    out ClientStructuralResidencyPlan resetPlan, out _,
+                    out ClientStructuralResidencyError residencyResetError))
+            {
+                _lastOutcome = $"Distant structural reset: {residencyResetError}";
+                return;
+            }
+            _residency.Commit(resetPlan);
+        }
         if (!_residency.TryPrepare(
                 center,
                 reset,
@@ -897,6 +1034,16 @@ public partial class LocalCabinClient : Node3D
         _residency.Commit(residencyPlan);
     }
 
+    private static bool PresentationWindowsAreDisjoint(
+        SpatialChunkKey first,
+        SpatialChunkKey second,
+        int radius)
+    {
+        long maximumSharedCenterDistance = checked(radius * 2L);
+        return Math.Abs((long)first.Coord.X - second.Coord.X) > maximumSharedCenterDistance ||
+            Math.Abs((long)first.Coord.Z - second.Coord.Z) > maximumSharedCenterDistance;
+    }
+
     private void DrainRenderer()
     {
         if (_renderer is null)
@@ -919,9 +1066,12 @@ public partial class LocalCabinClient : Node3D
                 ? SelectionKind.CabinChest
                 : Nearest(point, GamePlayableWorld.SkyTelepadPosition, 1_750)
                     ? SelectionKind.SkyTelepad
-                    : Nearest(point, GamePlayableWorld.AnimalPosition, 1_750)
-                        ? SelectionKind.WoodlandAnimal
-                        : SelectionKind.Terrain;
+                    : Nearest(point, GamePlayableWorld.CentralFarGatePosition, 1_750) ||
+                        Nearest(point, GamePlayableWorld.FarReturnGatePosition, 1_750)
+                        ? SelectionKind.FarGate
+                        : Nearest(point, GamePlayableWorld.AnimalPosition, 1_750)
+                            ? SelectionKind.WoodlandAnimal
+                            : SelectionKind.Terrain;
         _lastOutcome = $"Selected {_selection} at ({point.XMillimeters / 1000d:F1}, {point.ZMillimeters / 1000d:F1}) m";
     }
 
@@ -2018,6 +2168,8 @@ public partial class LocalCabinClient : Node3D
             new Vector3(1.1f, 1.15f, 0.55f), new Color(0.48f, 0.35f, 0.23f));
         private readonly Mesh _telepad = GroundedBox(
             new Vector3(1.8f, 0.18f, 1.8f), new Color(0.12f, 0.72f, 0.9f));
+        private readonly Mesh _farGate = GroundedBox(
+            new Vector3(1.5f, 2.8f, 0.35f), new Color(0.68f, 0.22f, 0.86f));
         private readonly Mesh _mountainWallEight = GroundedBox(
             new Vector3(8f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
         private readonly Mesh _mountainWallTen = GroundedBox(
@@ -2078,6 +2230,7 @@ public partial class LocalCabinClient : Node3D
             GameWorldPublicPrefabIds.WorldChest => _chest,
             GameWorldPublicPrefabIds.WoodlandAnimal => _animal,
             GameWorldPublicPrefabIds.SkyTelepad => _telepad,
+            GameWorldPublicPrefabIds.FarGate => _farGate,
             _ => _stone,
         };
 

@@ -459,8 +459,8 @@ deferred Physics features.
 
 ## 7.2b D0.1 bounded structural residency + Render Distance — CLOSED
 
-D0.1 removes the Cabin-era `StageAllChunks` assumption. The local Concept Demo WorldPack now has a
-deterministic 9×9 / 81-chunk authored structural extent, while the default client admits only a
+D0.1 removes the Cabin-era `StageAllChunks` assumption. At D0.1 the local Concept Demo WorldPack had
+a deterministic 9×9 / 81-chunk authored structural extent, while the default client admitted only a
 5×5 / 25-chunk semantic structural neighborhood and presents only a 3×3 / 9-chunk render window:
 
 ```text
@@ -493,12 +493,61 @@ shape at radius 2 through the real Single Player consumer.
 Diagnostics expose configured radius, authored/current/peak semantic residents,
 current/peak rendered chunks, semantic and presentation enters/exits, resets, and renderer queue
 state. The complete local structural source remains preinstalled in D0.1; CAS/remote acquisition
-is still deferred. The Far Island/gate remains D0.2 so its long-distance reset can now exercise
-real retirement and re-admission rather than teleporting between permanently resident regions.
+is still deferred. At the D0.1 boundary the Far Island/gate remained D0.2, so its long-distance
+reset could next exercise real retirement and re-admission rather than teleporting between
+permanently resident regions.
 
-## 7.3 Far gate
+## 7.3 D0.2 sparse geography + Far Island gate reset — CLOSED
 
-A gate relocates the player thousands of metres to the Far Island.
+D0.2 expands the same canonical WorldPack to two independently authored 9×9 clusters in one
+`SpatialSpaceId`: Central at chunk X `-4..4` and Far Island at chunk X `124..132`. The resulting
+162-chunk source contains no synthesized chunks across the roughly 2.048 km gap. That gap is
+outside authored world, not resident intentional void and not authored-but-currently-nonresident
+content.
+
+`ClientStructuralResidency` now consumes the pack's sorted authored key set rather than requiring
+one complete bounding rectangle. A presentation center is admitted only where its complete render
+square is authored; the bounded structural fringe stages only authored keys. At a clipped edge the
+last valid center remains stable. A position near another authored cluster selects that cluster by
+actual key distance—no gap chunks or fake blank layers are manufactured.
+
+The two public Far Gate instances are ordinary dynamic-public Game entities. Interaction chooses
+the nearest admitted gate from trusted authoritative position, and Game maps its exact authored
+position to the reciprocal server-owned destination before using the existing occupancy-aware
+relocation primitive. The client supplies neither destination nor trusted target identity.
+
+A disjoint long-distance move performs an explicit bounded transition:
+
+```text
+retire old presentation window
+    -> drain bounded native retirement work
+    -> retire old desired structural neighborhood
+    -> admit the destination structural neighborhood
+    -> build the new presentation window
+```
+
+The old and new structural sets therefore never need to coexist merely because the relocation is
+distant. Dynamic-public knowledge remains independently owned. Local public deliveries for chunks
+that terminally leave interest are invalidated before a same-key re-entry can occur, matching the
+remote adapter's leave fencing: an old delayed proof cannot advance a new subscription lifetime.
+This invalidation is abandonment, not application proof.
+
+Permanent Core tests use two sparse clusters to prove central → empty reset → far admission and
+edge clamping. The packet-free Game regression proves both gates and the unauthored gap. The native
+Single Player D0.2 canary travels central → Far Island → central through ordinary select/Interact,
+and proves two semantic/presentation resets with the bounded radius-1 shape:
+
+```text
+authored structural source       162 chunks
+    > active semantic residents   25 chunks
+        > presented/rendered       9 chunks
+```
+
+The accepted headless journey completed with exact reciprocal positions, one visible local gate,
+no stale Cabin presentation on Far Island, no stale Far presentation after return, zero rejected
+world applications, and fresh public snapshots after re-entry.
+
+The intended effect is now real:
 
 Expected effect:
 
@@ -1272,7 +1321,7 @@ then earn/integrate Concept Demo Round 1 consumers:
     D0.0 physical central/Sky Island/cave + telepad integration CLOSED
     D0.1 Render Distance + bounded structural residency          CLOSED
     F0.0c one maintained Godot project / three physical products CLOSED
-    D0.2 Far Island + gate + long-distance reset                 NEXT
+    D0.2 sparse geography + Far Island + gate reset              CLOSED
     signs/Fallback Lab
     guest/demo admission presentation
     animation/pickup/inventory swing

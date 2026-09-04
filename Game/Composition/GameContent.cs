@@ -17,6 +17,7 @@ public static class GamePrefabKeys
     public static readonly PrefabKey Apple = new("game.item.apple");
     public static readonly PrefabKey CabinDoor = new("game.world.cabin-door");
     public static readonly PrefabKey SkyTelepad = new("game.world.sky-telepad");
+    public static readonly PrefabKey FarGate = new("game.world.far-gate");
     public static readonly PrefabKey WoodlandAnimal = new("game.world.woodland-animal");
 }
 
@@ -71,6 +72,7 @@ public static class GameWorldPublicPrefabIds
     public const uint WorldChest = 3;
     public const uint WoodlandAnimal = 4;
     public const uint SkyTelepad = 5;
+    public const uint FarGate = 6;
 }
 
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
@@ -94,6 +96,7 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryItemDefinition apple,
         PrefabHandle cabinDoor,
         PrefabHandle skyTelepad,
+        PrefabHandle farGate,
         PrefabHandle woodlandAnimal,
         WorldContentBinding world,
         Dictionary<ArchetypeHandle, GridPlacementTransitions> gridPlacementTransitions)
@@ -112,6 +115,7 @@ public sealed class GameContent : IInventoryContentCatalog
         Apple = apple;
         CabinDoor = cabinDoor;
         SkyTelepad = skyTelepad;
+        FarGate = farGate;
         WoodlandAnimal = woodlandAnimal;
         World = world;
         _gridPlacementTransitions = gridPlacementTransitions;
@@ -152,6 +156,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public InventoryItemDefinition Apple { get; }
     public PrefabHandle CabinDoor { get; }
     public PrefabHandle SkyTelepad { get; }
+    public PrefabHandle FarGate { get; }
     public PrefabHandle WoodlandAnimal { get; }
     public WorldContentBinding World { get; }
 
@@ -301,6 +306,14 @@ public sealed class GameContent : IInventoryContentCatalog
             GameWorldPublicPrefabIds.SkyTelepad, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         skyTelepad.DisplayName("Sky Island Telepad");
 
+        // The two Concept Demo instances share one public kind. Concrete Game world content maps
+        // each admitted marker position to its server-owned reciprocal destination.
+        PrefabBuilder farGate = content.Define(GamePrefabKeys.FarGate);
+        farGate.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        farGate.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.FarGate, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        farGate.DisplayName("Far Gate");
+
         PrefabBuilder woodlandAnimal = content.Define(GamePrefabKeys.WoodlandAnimal);
         woodlandAnimal.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         woodlandAnimal.With(new WorldPublicComponent(new WorldPublicDescriptor(
@@ -328,6 +341,7 @@ public sealed class GameContent : IInventoryContentCatalog
             apple,
             compiled.GetHandle(GamePrefabKeys.CabinDoor),
             compiled.GetHandle(GamePrefabKeys.SkyTelepad),
+            compiled.GetHandle(GamePrefabKeys.FarGate),
             compiled.GetHandle(GamePrefabKeys.WoodlandAnimal),
             new WorldContentBinding(WorldFingerprint,
             [
