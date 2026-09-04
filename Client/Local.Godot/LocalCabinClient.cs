@@ -70,6 +70,7 @@ public partial class LocalCabinClient : Node3D
     private const int RenderRadius = 1;
     private const int MaximumChatTextCharacters = 256;
     private const float CameraPivotMeters = 1.6f;
+    private const float MinimumZoomCameraDistanceMeters = 3f;
     private const float NameplateHeightMeters = 2.0f;
     private const float EffectsHeightMeters = 0.9f;
 
@@ -344,7 +345,8 @@ public partial class LocalCabinClient : Node3D
                 else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed &&
                     _profile != ControlProfile.IndependentMoveLook)
                 {
-                    _cameraDistance = Math.Max(7f, _cameraDistance - 2f);
+                    _cameraDistance = Math.Max(
+                        MinimumZoomCameraDistanceMeters, _cameraDistance - 2f);
                 }
                 else if (mouse.ButtonIndex == MouseButton.WheelDown && mouse.Pressed &&
                     _profile != ControlProfile.IndependentMoveLook)
@@ -566,27 +568,38 @@ public partial class LocalCabinClient : Node3D
                 _pointerPointValid,
                 _pointerPoint,
                 checked((long)Time.GetTicksMsec()))),
-            ControlProfile.ThirdPersonDirect => new ClientControlProfileDecision(
-                new ClientWorldCommandIntent(
-                    admitted.HasFocus
-                        ? _thirdPerson.Evaluate(admitted.MoveX, admitted.MoveZ, basis)
-                        : GameLocomotionUpdate.Stop,
-                    admitted.HeldActions,
-                    admitted.HasFocus),
-                false,
-                default,
-                false,
-                default),
-            ControlProfile.IndependentMoveLook => _independent.Evaluate(
+            ControlProfile.ThirdPersonDirect => AddDirectProfileSelection(
+                new ClientControlProfileDecision(
+                    new ClientWorldCommandIntent(
+                        admitted.HasFocus
+                            ? _thirdPerson.Evaluate(admitted.MoveX, admitted.MoveZ, basis)
+                            : GameLocomotionUpdate.Stop,
+                        admitted.HeldActions,
+                        admitted.HasFocus),
+                    false,
+                    default,
+                    false,
+                    default)),
+            ControlProfile.IndependentMoveLook => AddDirectProfileSelection(_independent.Evaluate(
                 admitted.MoveX,
                 admitted.MoveZ,
                 admitted.HeldActions,
                 admitted.HasFocus,
                 _pointerPointValid,
-                _pointerPoint),
+                _pointerPoint)),
             _ => throw new InvalidOperationException("Unknown control profile."),
         };
     }
+
+    private ClientControlProfileDecision AddDirectProfileSelection(
+        in ClientControlProfileDecision decision) =>
+        _primaryReleased && _pointerPointValid
+            ? decision with
+            {
+                SelectionRequested = true,
+                SelectionPoint = _pointerPoint,
+            }
+            : decision;
 
     private void ApplyCommand(
         in GamePlayerCommand command,
@@ -829,10 +842,24 @@ public partial class LocalCabinClient : Node3D
             (long)Math.Round(hit.X * 1000d, MidpointRounding.AwayFromZero));
         long globalZ = checked(_player.GlobalZMillimeters +
             (long)Math.Round(hit.Z * 1000d, MidpointRounding.AwayFromZero));
+        _ = TrySetPointerWorldPoint(globalX, globalZ);
+    }
+
+    private bool TrySetPointerWorldPoint(long globalXMillimeters, long globalZMillimeters)
+    {
+        _pointerPoint = new ClientControlWorldPoint(globalXMillimeters, globalZMillimeters);
         _pointerPointValid = WorldPosition.TryFromGlobalMillimeters(
-            globalX, _player.YMillimeters, globalZ, out WorldPosition candidate) &&
-            _cache is not null && _cache.PreparedWorld.TrySampleBaseTerrainHeight(candidate, out _);
-        _pointerPoint = new ClientControlWorldPoint(globalX, globalZ);
+                globalXMillimeters,
+                _player.YMillimeters,
+                globalZMillimeters,
+                out WorldPosition candidate) &&
+            _cache is not null &&
+            _cache.PreparedWorld.TryFindNearestSupport(
+                candidate,
+                _player.YMillimeters,
+                out WorldTerrainColumnSurface support) == WorldTerrainColumnQueryStatus.Complete &&
+            support.IsValid && support.IsSupport;
+        return _pointerPointValid;
     }
 
     private ClientHorizontalCameraBasis CameraBasis()
@@ -1159,6 +1186,38 @@ public partial class LocalCabinClient : Node3D
             _player.GlobalXMillimeters >= 25_000);
         SubmitStop();
 
+        // Pointer command/selection resolves against the actual nearby structural shell rather
+        // than requiring BaseTerrain beneath a detached island.
+        const long skyPointerX = 29_000;
+        const long skyPointerZ = 9_000;
+        if (!TrySetPointerWorldPoint(skyPointerX, skyPointerZ))
+            throw new InvalidOperationException("A Sky Island structural pointer point was rejected.");
+        SetProfile(ControlProfile.OrbitCommand);
+        _ = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true), CameraBasis());
+        _primaryDown = true;
+        _primaryPressed = true;
+        _ = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true), CameraBasis());
+        _primaryPressed = false;
+        _primaryDown = false;
+        _primaryReleased = true;
+        ClientControlProfileDecision skyTap = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true), CameraBasis());
+        _primaryReleased = false;
+        _primaryDown = true;
+        _primaryPressed = true;
+        ClientControlProfileDecision skyDoubleClick = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true), CameraBasis());
+        _primaryPressed = false;
+        _primaryDown = false;
+        if (!skyTap.SelectionRequested ||
+            skyDoubleClick.Command.Locomotion.Kind != GameLocomotionUpdateKind.Destination ||
+            skyDoubleClick.Command.Locomotion.DestinationXMillimeters != skyPointerX ||
+            skyDoubleClick.Command.Locomotion.DestinationZMillimeters != skyPointerZ)
+            throw new InvalidOperationException(
+                "OrbitCommand could not select or form a destination on the detached Sky Island.");
+
         // Orbit profile: Jump is absent from its grammar; the selected public telepad invokes the
         // server-owned destination and the accepted relocation path.
         RelocateControlledActor(GamePlayableWorld.SkyTelepadPosition);
@@ -1167,15 +1226,28 @@ public partial class LocalCabinClient : Node3D
             new ClientWorldInputSample(0, 0, GamePlayerActions.Jump, true), CameraBasis());
         if ((orbitJump.Command.HeldActions & GamePlayerActions.Jump) != 0)
             throw new InvalidOperationException("OrbitCommand unexpectedly admitted a Jump action.");
+        SetProfile(ControlProfile.ThirdPersonDirect);
+        _ = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true), CameraBasis());
+        _ = TrySetPointerWorldPoint(
+            GamePlayableWorld.SkyTelepadPosition.GlobalXMillimeters,
+            GamePlayableWorld.SkyTelepadPosition.GlobalZMillimeters);
+        _primaryReleased = true;
+        ClientControlProfileDecision directSelection = EvaluateProfile(
+            new ClientWorldInputSample(0, 0, GamePlayerActions.None, true), CameraBasis());
+        _primaryReleased = false;
+        if (!directSelection.SelectionRequested)
+            throw new InvalidOperationException(
+                "ThirdPersonDirect did not expose pointer selection for interaction.");
+        Select(directSelection.SelectionPoint);
         if (!_sequencer.TryCreateSemanticCommand(
                 new ClientWorldCommandIntent(
                     GameLocomotionUpdate.Stop,
                     GamePlayerActions.Interact,
                     true),
-                out GamePlayerCommand telepad) ||
-            !_localSession.TrySubmit(new LocalPlayableCommand(
-                telepad, LocalPlayableSelection.SkyTelepad, false, default, false)))
+                out GamePlayerCommand telepad))
             throw new InvalidOperationException("The Sky Island telepad interaction could not be submitted.");
+        ApplyCommand(telepad, false, default, false);
         DriveLocalUntil(() =>
             _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
             view.LastCommandSequence == telepad.Sequence &&

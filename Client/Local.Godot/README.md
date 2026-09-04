@@ -30,6 +30,13 @@ the direct human-control profiles. OrbitCommand deliberately retains its UO-like
 Godot presents the authoritative replicated Y position; it owns no body velocity, gravity,
 grounding decision, or recovery teleport.
 
+Human-play hardening keeps pointer semantics aligned with that structural world: Orbit destinations
+accept the nearest valid Base/Top support, including detached terrain shells, and a primary-click
+selection is available to both direct profiles before `Interact`. Orbit/third-person wheel zoom may
+approach to 3 m. Collidable static tops are resolved as bounded physical support by Game
+Physics, so landing on the authored rock returns to grounded locomotion rather than leaving a
+blocker-only airborne state.
+
 Normal Single Player entry explicitly selects the D0.0 Concept Demo fixture. Its bounded acceptance
 journey walks through the MountainShell opening on the preserved base cave floor, jumps across real
 void and lands on the detached Sky shell, exercises the Game-owned telepad with OrbitCommand, then

@@ -67,14 +67,70 @@ public enum SimpleOccupancyStatus : byte
     OutsidePreparedWorld,
 }
 
+/// <summary>
+/// One physical support selected by geometry. Terrain identity remains available when terrain is
+/// the source; projected bounds remain anonymous physical geometry at this seam.
+/// </summary>
+public enum SimplePhysicalSupportKind : byte
+{
+    None = 0,
+    Terrain,
+    StaticGeometry,
+}
+
+/// <summary>One top surface capable of supporting the complete upright body footprint.</summary>
+public readonly record struct SimplePhysicalSupport
+{
+    private SimplePhysicalSupport(
+        SimplePhysicalSupportKind kind,
+        int heightMillimeters,
+        in WorldTerrainColumnSurface terrainSurface)
+    {
+        Kind = kind;
+        HeightMillimeters = heightMillimeters;
+        TerrainSurface = terrainSurface;
+    }
+
+    public SimplePhysicalSupportKind Kind { get; }
+    public int HeightMillimeters { get; }
+    public WorldTerrainColumnSurface TerrainSurface { get; }
+
+    public bool IsValid => Kind switch
+    {
+        SimplePhysicalSupportKind.Terrain =>
+            TerrainSurface.IsValid &&
+            TerrainSurface.HeightMillimeters == HeightMillimeters,
+        SimplePhysicalSupportKind.StaticGeometry => true,
+        _ => false,
+    };
+
+    public bool IsSupport => IsValid &&
+        (Kind != SimplePhysicalSupportKind.Terrain || TerrainSurface.IsSupport);
+    public bool IsBase => Kind == SimplePhysicalSupportKind.Terrain && TerrainSurface.IsBase;
+    public WorldSurfaceId SurfaceId => TerrainSurface.SurfaceId;
+    public WorldTerrainSurfaceFace Face => TerrainSurface.Face;
+
+    internal static SimplePhysicalSupport FromTerrain(
+        in WorldTerrainColumnSurface surface) => new(
+        SimplePhysicalSupportKind.Terrain,
+        surface.HeightMillimeters,
+        surface);
+
+    internal static SimplePhysicalSupport FromStaticGeometry(int heightMillimeters) => new(
+        SimplePhysicalSupportKind.StaticGeometry,
+        heightMillimeters,
+        default);
+}
+
 /// <summary>A support-resolved legal position or a fail-closed occupancy result.</summary>
 public readonly record struct SimpleOccupancyResult(
     SimpleOccupancyStatus Status,
     WorldPosition Position,
-    WorldTerrainColumnSurface Support = default)
+    SimplePhysicalSupport Support = default)
 {
     public bool CanOccupy =>
-        Status == SimpleOccupancyStatus.Clear && Support.IsValid && Support.IsSupport;
+        Status == SimpleOccupancyStatus.Clear && Support.IsValid && Support.IsSupport &&
+        Position.YMillimeters == Support.HeightMillimeters;
     public bool IsGrounded => CanOccupy;
 }
 
@@ -92,14 +148,15 @@ public enum SimpleMotionStatus : byte
 public readonly record struct SimpleMotionResult(
     SimpleMotionStatus Status,
     WorldPosition Position,
-    WorldTerrainColumnSurface Support = default)
+    SimplePhysicalSupport Support = default)
 {
     public bool WasResolved =>
-        Status == SimpleMotionStatus.Resolved && Support.IsValid && Support.IsSupport;
+        Status == SimpleMotionStatus.Resolved && Support.IsValid && Support.IsSupport &&
+        Position.YMillimeters == Support.HeightMillimeters;
     public bool IsGrounded => WasResolved;
 }
 
-/// <summary>Bounded terrain-contact result for one airborne displacement.</summary>
+/// <summary>Bounded structural-contact result for one airborne displacement.</summary>
 public enum SimpleAirborneMotionStatus : byte
 {
     None = 0,
@@ -111,18 +168,19 @@ public enum SimpleAirborneMotionStatus : byte
 }
 
 /// <summary>
-/// One realized airborne endpoint. Landed carries a Top/Base support; CeilingBlocked carries the
-/// Bottom face that limited upward travel. Both contacts remain independently meaningful.
+/// One realized airborne endpoint. Landed carries terrain or static top support; CeilingBlocked
+/// carries the terrain Bottom face that limited upward travel. Both contacts remain meaningful.
 /// </summary>
 public readonly record struct SimpleAirborneMotionResult(
     SimpleAirborneMotionStatus Status,
     WorldPosition Position,
-    WorldTerrainColumnSurface Contact = default)
+    SimplePhysicalSupport Contact = default)
 {
     public bool WasResolved => Status is SimpleAirborneMotionStatus.Airborne or
         SimpleAirborneMotionStatus.Landed or SimpleAirborneMotionStatus.CeilingBlocked;
     public bool IsGrounded => Status == SimpleAirborneMotionStatus.Landed &&
-        Contact.IsValid && Contact.IsSupport;
+        Contact.IsValid && Contact.IsSupport &&
+        Position.YMillimeters == Contact.HeightMillimeters;
 }
 
 /// <summary>
@@ -130,8 +188,9 @@ public readonly record struct SimpleAirborneMotionResult(
 /// It understands terrain and already-projected physical bounds, never Game prefab/state meaning.
 /// </summary>
 /// <remarks>
-/// P0.1d adds bounded Top landing and Bottom ceiling contacts for Game-owned vertical integration
-/// while retaining the grounded P0.1c path and exact linear swept-AABB blocker test. It does not
+/// P0.1d adds bounded Top landing and Bottom ceiling contacts for Game-owned vertical integration;
+/// D0.0 hardening admits collidable immutable-static tops through the same bounded query. The
+/// resolver retains the grounded P0.1c path and exact linear swept-AABB blocker test. It does not
 /// slide, depenetrate, own gravity/jump policy, or provide a provider abstraction.
 /// </remarks>
 public sealed class UltraSimSimplePhysics
@@ -172,7 +231,7 @@ public sealed class UltraSimSimplePhysics
             request.TargetZMillimeters,
             request.Body,
             out WorldPosition resolved,
-            out WorldTerrainColumnSurface support);
+            out SimplePhysicalSupport support);
         if (terrain != TerrainResolutionStatus.Grounded)
             return new SimpleMotionResult(ToMotionStatus(terrain), default);
 
@@ -204,7 +263,7 @@ public sealed class UltraSimSimplePhysics
             request.Target,
             request.Body,
             out WorldPosition resolved,
-            out WorldTerrainColumnSurface support);
+            out SimplePhysicalSupport support);
         if (terrain != TerrainResolutionStatus.Grounded)
             return new SimpleOccupancyResult(ToOccupancyStatus(terrain), default);
 
@@ -220,8 +279,8 @@ public sealed class UltraSimSimplePhysics
 
     /// <summary>
     /// Resolves one combined airborne X/Y/Z displacement without support snapping. Descending
-    /// bodies acquire the first complete footprint-supporting Top/Base face crossed; ascending
-    /// bodies stop at the first Bottom face crossed by any footprint sample.
+    /// bodies acquire the first complete footprint-supporting terrain/static top crossed; ascending
+    /// bodies stop at the first terrain Bottom face crossed by any footprint sample.
     /// </summary>
     public SimpleAirborneMotionResult ResolveAirborneMotion(
         in SimpleAirborneMotionRequest request,
@@ -276,18 +335,43 @@ public sealed class UltraSimSimplePhysics
             if (y < previousY)
             {
                 WorldTerrainColumnQueryStatus query = world.TryFindHighestSupportAtOrBelow(
-                    samplePosition, previousY, out WorldTerrainColumnSurface support);
+                    samplePosition, previousY, out WorldTerrainColumnSurface terrainSupport);
                 if (query == WorldTerrainColumnQueryStatus.Unavailable)
                     return new SimpleAirborneMotionResult(
                         SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
                 if (query != WorldTerrainColumnQueryStatus.Complete)
                     return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
-                if (support.IsValid && support.IsSupport && support.HeightMillimeters >= y &&
+                TerrainResolutionStatus boundsStatus = TryFindBoundsSupport(
+                    x,
+                    z,
+                    y,
+                    previousY,
+                    previousY,
+                    chooseNearest: false,
+                    request.Body,
+                    out SimplePhysicalSupport boundsSupport);
+                if (boundsStatus == TerrainResolutionStatus.OutsidePreparedWorld)
+                    return new SimpleAirborneMotionResult(
+                        SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
+                if (boundsStatus != TerrainResolutionStatus.Grounded)
+                    return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
+
+                SimplePhysicalSupport support =
+                    terrainSupport.IsValid && terrainSupport.IsSupport &&
+                    terrainSupport.HeightMillimeters >= y
+                        ? SimplePhysicalSupport.FromTerrain(terrainSupport)
+                        : default;
+                if (boundsSupport.IsSupport &&
+                    (!support.IsSupport || boundsSupport.HeightMillimeters > support.HeightMillimeters))
+                    support = boundsSupport;
+                if (support.IsSupport &&
                     WorldPosition.TryFromGlobalMillimeters(
                         x, support.HeightMillimeters, z, out WorldPosition landing))
                 {
-                    TerrainResolutionStatus fit = ValidateFootprintAndClearance(
-                        world, landing, request.Body, support);
+                    TerrainResolutionStatus fit = support.Kind == SimplePhysicalSupportKind.Terrain
+                        ? ValidateFootprintAndClearance(
+                            world, landing, request.Body, support.TerrainSurface)
+                        : ValidateTerrainClearance(world, landing, request.Body);
                     if (fit == TerrainResolutionStatus.OutsidePreparedWorld)
                         return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
@@ -343,7 +427,9 @@ public sealed class UltraSimSimplePhysics
                         dynamicBlockingBounds,
                         dynamicProjectionComplete)
                         ? new SimpleAirborneMotionResult(
-                            SimpleAirborneMotionStatus.CeilingBlocked, stopped, contact)
+                            SimpleAirborneMotionStatus.CeilingBlocked,
+                            stopped,
+                            SimplePhysicalSupport.FromTerrain(contact))
                         : new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.Blocked, default);
                 }
@@ -366,7 +452,7 @@ public sealed class UltraSimSimplePhysics
         long targetZMillimeters,
         in SimplePhysicsBody body,
         out WorldPosition resolved,
-        out WorldTerrainColumnSurface support)
+        out SimplePhysicalSupport support)
     {
         resolved = default;
         support = default;
@@ -420,7 +506,7 @@ public sealed class UltraSimSimplePhysics
         in WorldPosition target,
         in SimplePhysicsBody body,
         out WorldPosition resolved,
-        out WorldTerrainColumnSurface support)
+        out SimplePhysicalSupport support)
     {
         resolved = default;
         support = default;
@@ -430,12 +516,33 @@ public sealed class UltraSimSimplePhysics
         WorldTerrainColumnQueryStatus query = world.TryFindNearestSupport(
             target,
             target.YMillimeters,
-            out support);
+            out WorldTerrainColumnSurface terrainSupport);
         if (query == WorldTerrainColumnQueryStatus.Unavailable)
             return TerrainResolutionStatus.OutsidePreparedWorld;
         if (query != WorldTerrainColumnQueryStatus.Complete)
             return TerrainResolutionStatus.Blocked;
-        if (!support.IsValid || !support.IsSupport)
+        TerrainResolutionStatus boundsStatus = TryFindBoundsSupport(
+            target.GlobalXMillimeters,
+            target.GlobalZMillimeters,
+            int.MinValue,
+            int.MaxValue,
+            target.YMillimeters,
+            chooseNearest: true,
+            body,
+            out SimplePhysicalSupport boundsSupport);
+        if (boundsStatus != TerrainResolutionStatus.Grounded)
+            return boundsStatus;
+
+        support = terrainSupport.IsValid && terrainSupport.IsSupport
+            ? SimplePhysicalSupport.FromTerrain(terrainSupport)
+            : default;
+        if (boundsSupport.IsSupport &&
+            (!support.IsSupport || IsNearerSupport(
+                boundsSupport.HeightMillimeters,
+                support.HeightMillimeters,
+                target.YMillimeters)))
+            support = boundsSupport;
+        if (!support.IsSupport)
             return TerrainResolutionStatus.Unsupported;
         if (!WorldPosition.TryFromGlobalMillimeters(
                 target.GlobalXMillimeters,
@@ -443,7 +550,9 @@ public sealed class UltraSimSimplePhysics
                 target.GlobalZMillimeters,
                 out resolved))
             return TerrainResolutionStatus.OutsidePreparedWorld;
-        return ValidateFootprintAndClearance(world, resolved, body, support);
+        return support.Kind == SimplePhysicalSupportKind.Terrain
+            ? ValidateFootprintAndClearance(world, resolved, body, support.TerrainSurface)
+            : ValidateTerrainClearance(world, resolved, body);
     }
 
     private TerrainResolutionStatus ResolveGroundedEndpoint(
@@ -454,7 +563,7 @@ public sealed class UltraSimSimplePhysics
         int maximumStepDownMillimeters,
         in SimplePhysicsBody body,
         out WorldPosition resolved,
-        out WorldTerrainColumnSurface support)
+        out SimplePhysicalSupport support)
     {
         resolved = default;
         support = default;
@@ -472,12 +581,31 @@ public sealed class UltraSimSimplePhysics
         WorldTerrainColumnQueryStatus query = world.TryFindHighestSupportAtOrBelow(
             probe,
             maximumY,
-            out support);
+            out WorldTerrainColumnSurface terrainSupport);
         if (query == WorldTerrainColumnQueryStatus.Unavailable)
             return TerrainResolutionStatus.OutsidePreparedWorld;
         if (query != WorldTerrainColumnQueryStatus.Complete)
             return TerrainResolutionStatus.Blocked;
-        if (!support.IsValid || !support.IsSupport || support.HeightMillimeters < minimumY)
+        TerrainResolutionStatus boundsStatus = TryFindBoundsSupport(
+            globalXMillimeters,
+            globalZMillimeters,
+            minimumY,
+            maximumY,
+            referenceYMillimeters,
+            chooseNearest: false,
+            body,
+            out SimplePhysicalSupport boundsSupport);
+        if (boundsStatus != TerrainResolutionStatus.Grounded)
+            return boundsStatus;
+
+        support = terrainSupport.IsValid && terrainSupport.IsSupport &&
+            terrainSupport.HeightMillimeters >= minimumY
+            ? SimplePhysicalSupport.FromTerrain(terrainSupport)
+            : default;
+        if (boundsSupport.IsSupport &&
+            (!support.IsSupport || boundsSupport.HeightMillimeters > support.HeightMillimeters))
+            support = boundsSupport;
+        if (!support.IsSupport)
             return TerrainResolutionStatus.Unsupported;
         if (!WorldPosition.TryFromGlobalMillimeters(
                 globalXMillimeters,
@@ -485,7 +613,142 @@ public sealed class UltraSimSimplePhysics
                 globalZMillimeters,
                 out resolved))
             return TerrainResolutionStatus.OutsidePreparedWorld;
-        return ValidateFootprintAndClearance(world, resolved, body, support);
+        return support.Kind == SimplePhysicalSupportKind.Terrain
+            ? ValidateFootprintAndClearance(world, resolved, body, support.TerrainSurface)
+            : ValidateTerrainClearance(world, resolved, body);
+    }
+
+    private TerrainResolutionStatus TryFindBoundsSupport(
+        long globalXMillimeters,
+        long globalZMillimeters,
+        int minimumYMillimeters,
+        int maximumYMillimeters,
+        int referenceYMillimeters,
+        bool chooseNearest,
+        in SimplePhysicsBody body,
+        out SimplePhysicalSupport support)
+    {
+        support = default;
+        long minimumX = globalXMillimeters - body.HalfExtentXMillimeters;
+        long maximumXExclusive = globalXMillimeters + body.HalfExtentXMillimeters + 1L;
+        long minimumZ = globalZMillimeters - body.HalfExtentZMillimeters;
+        long maximumZExclusive = globalZMillimeters + body.HalfExtentZMillimeters + 1L;
+        if (minimumX < GameWorldSpatialProfile.MinimumGlobalAxisUnits ||
+            minimumZ < GameWorldSpatialProfile.MinimumGlobalAxisUnits ||
+            maximumXExclusive > GameWorldSpatialProfile.MaximumGlobalAxisUnits + 1 ||
+            maximumZExclusive > GameWorldSpatialProfile.MaximumGlobalAxisUnits + 1)
+            return TerrainResolutionStatus.OutsidePreparedWorld;
+
+        long queryMinimumY = minimumYMillimeters == int.MinValue
+            ? int.MinValue
+            : (long)minimumYMillimeters - 1;
+        long queryMaximumYExclusive = maximumYMillimeters == int.MaxValue
+            ? (long)int.MaxValue + 1
+            : (long)maximumYMillimeters + 1;
+        var queryBounds = new WorldStaticBounds(
+            minimumX,
+            queryMinimumY,
+            minimumZ,
+            maximumXExclusive,
+            queryMaximumYExclusive,
+            maximumZExclusive);
+        if (!_world.TryQueryStaticBounds(
+                queryBounds,
+                StaticCollisionCandidateChunks,
+                _staticHits,
+                out int staticCount,
+                out _,
+                out _))
+            return TerrainResolutionStatus.Blocked;
+
+        for (int index = 0; index < staticCount; index++)
+        {
+            ref readonly WorldStaticQueryHit hit = ref _staticHits[index];
+            if ((hit.Flags & WorldStaticFlags.Collidable) == 0 ||
+                !CoversFootprint(hit.Bounds, minimumX, minimumZ,
+                    maximumXExclusive, maximumZExclusive))
+                continue;
+            TrySelectBoundsSupport(
+                hit.Bounds,
+                minimumYMillimeters,
+                maximumYMillimeters,
+                referenceYMillimeters,
+                chooseNearest,
+                ref support);
+        }
+
+        return TerrainResolutionStatus.Grounded;
+    }
+
+    private static void TrySelectBoundsSupport(
+        in WorldStaticBounds bounds,
+        int minimumYMillimeters,
+        int maximumYMillimeters,
+        int referenceYMillimeters,
+        bool chooseNearest,
+        ref SimplePhysicalSupport selected)
+    {
+        long top = bounds.MaximumYExclusiveMillimeters;
+        if (top < minimumYMillimeters || top > maximumYMillimeters || top > int.MaxValue)
+            return;
+        int candidate = (int)top;
+        bool replace = !selected.IsSupport || (chooseNearest
+            ? IsNearerSupport(candidate, selected.HeightMillimeters, referenceYMillimeters)
+            : candidate > selected.HeightMillimeters);
+        if (replace)
+            selected = SimplePhysicalSupport.FromStaticGeometry(candidate);
+    }
+
+    private static bool IsNearerSupport(int candidate, int selected, int reference)
+    {
+        long candidateDistance = Math.Abs((long)candidate - reference);
+        long selectedDistance = Math.Abs((long)selected - reference);
+        return candidateDistance < selectedDistance ||
+            candidateDistance == selectedDistance && candidate < selected;
+    }
+
+    private static bool CoversFootprint(
+        in WorldStaticBounds bounds,
+        long minimumX,
+        long minimumZ,
+        long maximumXExclusive,
+        long maximumZExclusive) =>
+        bounds.MinimumXMillimeters <= minimumX &&
+        bounds.MinimumZMillimeters <= minimumZ &&
+        bounds.MaximumXExclusiveMillimeters >= maximumXExclusive &&
+        bounds.MaximumZExclusiveMillimeters >= maximumZExclusive;
+
+    private static TerrainResolutionStatus ValidateTerrainClearance(
+        WorldPreparedView world,
+        in WorldPosition standing,
+        in SimplePhysicsBody body)
+    {
+        long bodyTopExclusive = checked((long)standing.YMillimeters + body.HeightMillimeters);
+        Span<WorldTerrainColumnSurface> surfaces =
+            stackalloc WorldTerrainColumnSurface[TerrainColumnSurfaceCapacity];
+        for (int sample = 0; sample < 5; sample++)
+        {
+            long x = checked(standing.GlobalXMillimeters + SampleOffsetX(sample, body));
+            long z = checked(standing.GlobalZMillimeters + SampleOffsetZ(sample, body));
+            if (!WorldPosition.TryFromGlobalMillimeters(
+                    x, standing.YMillimeters, z, out WorldPosition probe))
+                return TerrainResolutionStatus.OutsidePreparedWorld;
+            WorldTerrainColumnQueryStatus query = world.TryCopyTerrainColumnSurfaces(
+                probe, surfaces, out int count, out _);
+            if (query == WorldTerrainColumnQueryStatus.Unavailable)
+                return TerrainResolutionStatus.OutsidePreparedWorld;
+            if (query != WorldTerrainColumnQueryStatus.Complete)
+                return TerrainResolutionStatus.Blocked;
+            for (int index = count - 1; index >= 0; index--)
+            {
+                WorldTerrainColumnSurface ceiling = surfaces[index];
+                if (ceiling.IsCeiling &&
+                    ceiling.HeightMillimeters >= standing.YMillimeters &&
+                    ceiling.HeightMillimeters < bodyTopExclusive)
+                    return TerrainResolutionStatus.Blocked;
+            }
+        }
+        return TerrainResolutionStatus.Grounded;
     }
 
     private static TerrainResolutionStatus ValidateFootprintAndClearance(

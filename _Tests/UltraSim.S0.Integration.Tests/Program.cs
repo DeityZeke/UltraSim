@@ -37,6 +37,8 @@ Run("SimplePhysicsSelectsTerrainShellSupportStepAndClearance",
     SimplePhysicsTerrainShellSupport, results);
 Run("SimplePhysicsResolvesAirborneTerrainShellContacts",
     SimplePhysicsAirborneTerrainShellContacts, results);
+Run("SimplePhysicsStaticTopsProvideGroundedSupport",
+    SimplePhysicsStaticSupport, results);
 Run("AuthoritativeJumpFallLandingAndRecovery",
     AuthoritativeJumpFallLandingAndRecovery, results);
 Run("VerticalMomentumIsGenerationLocalAcrossRestore",
@@ -1402,6 +1404,91 @@ static TestMetrics SimplePhysicsAirborneTerrainShellContacts()
         HashText("airborne-top-bottom-contact-void-horizontal"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
         "Bounded airborne motion lands on geometry-ordered Top faces, stops at Bottom ceilings, crosses intentional void horizontally, fails closed for unavailable structure, and allocates 0 B warmed.");
+}
+
+static TestMetrics SimplePhysicsStaticSupport()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1086))));
+    host.Start();
+
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, long>(
+            (_, _, game) =>
+            {
+                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                Expect(WorldPosition.TryFromGlobalMillimeters(
+                        5_000, 0, 13_000, out WorldPosition rockColumn),
+                    "The authored Concept Demo rock column was invalid.");
+                WorldPreparedView? prepared = game.WorldState.PreparedWorld;
+                int terrainY = 0;
+                Expect(prepared is not null &&
+                    prepared.TrySampleBaseTerrainHeight(rockColumn, out terrainY),
+                    "The authored Concept Demo rock column was unavailable.");
+                int rockTopY = checked(terrainY + 900);
+                WorldPosition above = Position(5_000, rockTopY + 1_000, 13_000);
+
+                SimpleAirborneMotionResult landing = game.SimplePhysics.ResolveAirborneMotion(
+                    new SimpleAirborneMotionRequest(
+                        above, 5_000, rockTopY - 500, 13_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(landing.IsGrounded &&
+                    landing.Position.YMillimeters == rockTopY &&
+                    landing.Contact.Kind == SimplePhysicalSupportKind.StaticGeometry,
+                    $"Descending motion did not land on the authored rock top: {landing}.");
+
+                SimpleOccupancyResult occupancy = game.SimplePhysics.ProbeOccupancy(
+                    new SimpleOccupancyRequest(landing.Position, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                SimpleMotionResult groundedMove = game.SimplePhysics.ResolveMotion(
+                    new SimpleMotionRequest(landing.Position, 5_100, 13_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(occupancy.IsGrounded &&
+                    occupancy.Support.Kind == SimplePhysicalSupportKind.StaticGeometry &&
+                    groundedMove.IsGrounded &&
+                    groundedMove.Position.YMillimeters == rockTopY &&
+                    groundedMove.Support.Kind == SimplePhysicalSupportKind.StaticGeometry,
+                    "A landed actor could not remain grounded and move across the rock top.");
+
+                for (int index = 0; index < 16; index++)
+                    _ = game.SimplePhysics.ResolveMotion(
+                        new SimpleMotionRequest(landing.Position, 5_100, 13_000, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                for (int index = 0; index < 1_000; index++)
+                {
+                    SimpleMotionResult result = game.SimplePhysics.ResolveMotion(
+                        new SimpleMotionRequest(landing.Position, 5_100, 13_000, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                    if (!result.IsGrounded)
+                        throw new InvalidOperationException("The warmed rock-support result changed.");
+                }
+                return GC.GetAllocatedBytesForCurrentThread() - before;
+
+                static WorldPosition Position(long x, int y, long z)
+                {
+                    if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+                        throw new InvalidOperationException("A rock-support fixture point was invalid.");
+                    return value;
+                }
+            },
+            out long allocated) && allocated == 0,
+        $"Warmed static-support resolution allocated {allocated} caller bytes.");
+
+    return new TestMetrics(
+        HashText("static-top-support-grounded-movement"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
+        "A bounded collidable static top supports airborne landing, occupancy, and grounded movement with 0 B warmed allocation.");
 }
 
 static TestMetrics AuthoritativeJumpFallLandingAndRecovery()

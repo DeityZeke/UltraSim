@@ -436,12 +436,19 @@ Permanent D0.0 acceptance proves through the real Single Player client that:
 - sparse mountain, cave-ledge, and Sky fragments enter bounded Client Core residency and Godot
   realization without ECS terrain entities;
 - ThirdPersonDirect performs an authoritative jump with air control and lands on the Sky shell;
+- OrbitCommand pointer destinations resolve against the detached Sky shell rather than requiring
+  BaseTerrain, while ThirdPersonDirect/Independent mouse selection can nominate interaction targets;
 - OrbitCommand still filters Jump and reaches the same shell through the authoritative telepad;
 - walking off support produces normal fall/recovery to the safe occupied player start; and
 - the historical Cabin WorldPack bytes/fingerprint remain unchanged.
 
-D0.0 does not implement render-distance policy, the Far Island/gate, terrain editing, static support,
-or any deferred Physics feature.
+Subsequent human-play hardening lowers the Orbit/ThirdPerson wheel-zoom floor from 7 m to 3 m and
+makes complete collidable static bounds tops physical support, so a jump onto the authored
+rock lands grounded rather than becoming stuck in blocker-only state. This remains bounded Simple
+Physics; moving platforms and actor support are not implied.
+
+D0.0 does not implement render-distance policy, the Far Island/gate, terrain editing, or other
+deferred Physics features.
 
 ## 7.3 Far gate
 

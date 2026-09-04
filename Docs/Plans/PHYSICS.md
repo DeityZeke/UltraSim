@@ -7,9 +7,9 @@ blocker collision. Terrain T1.1 supplies multiple immutable structural surface
 candidates per X/Z column; P0.1c now selects actual support, checks footprint and
 clearance, and enforces bounded grounded steps. P0.1d adds Game-owned grounded/airborne
 state, jump admission, deterministic gravity, horizontal air control, terrain-shell
-landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. Sliding,
-general triangle time-of-impact, FrozenStatic landing support, and actor collision remain
-unstarted.
+landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. D0.0 playability
+hardening subsequently admits complete collidable frozen-static/Multi bounds tops as support.
+Sliding, general triangle time-of-impact, moving support, and actor collision remain unstarted.
 
 Concept Demo D0.0 is the accepted first integrated consumer of this chain: it traverses beneath a
 MountainShell, jumps and lands on a detached Sky shell, filters Jump from OrbitCommand, invokes an
@@ -489,6 +489,27 @@ It reports all twenty-seven integrated gates passing, the unchanged playable-wor
 reservation, and one integrated observation of 57.049 us mean / 87.739 us p95.
 The preceding P0.1c artifact observed 54.835 us / 82.309 us; these single-run integrated
 figures retain the cost change as regression context and are not a causal throughput claim.
+
+## D0.0 playability hardening — static top support
+
+Human play exposed an inconsistency after P0.1d: a collidable rock stopped downward motion but its
+top could not become support, leaving the actor airborne and unable to start grounded traversal.
+Simple Physics now considers the top of complete collidable `FrozenStatic`/Multi bounds alongside
+terrain support. The selected top must
+cover the full upright-body footprint, be within the same bounded step/landing interval, satisfy
+terrain-shell clearance, and pass the existing exact swept blocker test. Static candidate work
+retains the accepted 16-chunk/64-hit complete-or-fail limits. No gameplay prefab meaning enters
+Physics.
+
+`SimplePhysicalSupport` names whether a contact came from terrain or static geometry. Terrain
+contacts retain their `WorldSurfaceId`/face; static bounds do not acquire false terrain identity.
+Descending actors can land on these tops, occupancy/reconstruction
+recognizes them as grounded, and grounded motion can continue while the footprint remains
+supported. This does not add moving-platform attachment, inherited velocity, arbitrary triangle
+support, dynamic projected support, partial-footprint balance, or actor-on-actor support.
+
+The permanent integrated regression lands on the authored Concept Demo rock, re-probes occupancy,
+moves across its top, and records 0 B warmed allocation.
 
 ## RunUO archaeology
 
