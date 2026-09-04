@@ -1,0 +1,24 @@
+; One maintained Godot application project. UltraSimEdition selects the physical .NET capability
+; closure; export custom features only verify that the chosen preset matches that compiled product.
+
+config_version=5
+
+[application]
+
+config/name="UltraSim Client"
+run/main_scene="res://Bootstrap.tscn"
+config/features=PackedStringArray("4.7", "C#")
+
+[display]
+
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+
+[dotnet]
+
+project/assembly_name="UltraSim.Client.Application.Godot"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

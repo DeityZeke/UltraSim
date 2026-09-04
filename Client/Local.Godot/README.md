@@ -1,8 +1,9 @@
 # Local Play Godot capability
 
 `UltraSim.Client.Local.Godot` is the permanent presentation/composition consumer for the
-Network-free local playable application. It is referenced by Single Player and Complete, but not
-Online. F0.2 established its Cabin lifecycle; Concept Demo D0.0 now uses the same consumer for the
+Network-free local playable application. The maintained Godot application's SinglePlayer and
+Complete MSBuild editions reference it; Online does not. F0.2 established its Cabin lifecycle;
+Concept Demo D0.0 now uses the same consumer for the
 physical island world.
 
 Concept Demo D0.1 replaces unconditional `StageAllChunks` with Client Core's bounded structural

@@ -1271,6 +1271,7 @@ then earn/integrate Concept Demo Round 1 consumers:
     Physics P0.1d vertical motion / jump / fall / landing      CLOSED
     D0.0 physical central/Sky Island/cave + telepad integration CLOSED
     D0.1 Render Distance + bounded structural residency          CLOSED
+    F0.0c one maintained Godot project / three physical products CLOSED
     D0.2 Far Island + gate + long-distance reset                 NEXT
     signs/Fallback Lab
     guest/demo admission presentation

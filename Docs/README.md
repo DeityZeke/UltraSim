@@ -58,8 +58,10 @@ acceptance narratives remain available through git history.
   Events, and owner-private UI/Inventory.
 - [Godot client adapter](../Client/_Godot/README.md) — native UI/world presentation,
   bounded render residency, grouping, and floating origin.
+- [Godot client application](../Client/Godot/README.md) — one maintained application project with
+  physically distinct Single Player, Online, and Complete published dependency products.
 - [Persistent Godot client shell](../Client/Bootstrap.Godot/README.md) — shared
-  F0.1 application roots, local settings persistence, and fixed-composition menus.
+  F0.1 shell, local settings persistence, and capability-shaped menus.
 - [Launchable T0.10 client](../Client/Playable.Godot/README.md) — real
   OfflineDirect woods/cabin reference application over the F0.0b local bridge,
   controls, and save location.

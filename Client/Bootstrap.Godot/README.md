@@ -1,22 +1,23 @@
 # Persistent Godot client shell
 
 F0.1 uses this project for the persistent shared Godot `ClientRoot`. It contains no Local Play or
-Remote Play implementation. Each executable root supplies one fixed compile-time capability
-manifest and references only the implementation family it installs:
+Remote Play implementation. The one maintained [`Client/Godot`](../Godot/README.md) application
+project compiles three fixed products, each supplying one compile-time capability manifest and
+referencing only the implementation family it installs:
 
 ```text
-SinglePlayer.Godot
+SinglePlayer product
     Bootstrap.Godot + Core/Godot adapter
     Client.Local.Godot + Client.Local + built-in Cabin content
     transitive Game/packet-free replication/Server Runtime
     no Client.Network, Game.Protocol, or Kernels.Network
 
-Online.Godot
+Online product
     Bootstrap.Godot + Core/Godot adapter
     Client.Network + Game.Protocol + Kernels.Network
     no Game composition, packet-free authority replication, or Server Runtime
 
-Complete.Godot
+Complete product
     union of the Local Play and Remote Play capability families
 ```
 
@@ -29,8 +30,8 @@ are deferred so rebuilding a surface never frees the Godot control that is still
 signal.
 
 The shared shell renders exactly the supplied capability catalog. Missing capabilities therefore
-have no menu entry, while the repository verifier independently inspects the resolved project graph,
-generated `.deps.json`, and copied managed outputs. F0.0b's authority thread/local semantic bridge
+have no menu entry, while the repository verifier independently publishes each MSBuild edition and
+inspects its generated `.deps.json` and copied managed outputs. F0.0b's authority thread/local semantic bridge
 lives in `Client.Local`; the shared bootstrap does not depend on it. F0.2's separately composed
 `Client.Local.Godot` capability binds that session into the persistent World/HUD roots for Single
 Player and Complete while Online remains physically free of the local authority/Test World family.

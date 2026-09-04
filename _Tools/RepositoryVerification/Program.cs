@@ -11,6 +11,8 @@ VerifyArchitecture(root);
 Console.WriteLine("PASS active project dependency boundaries");
 VerifyClientPresentationAssets(root);
 Console.WriteLine("PASS built-in client presentation assets");
+VerifyClientExportComposition(root);
+Console.WriteLine("PASS single-project client export composition");
 VerifyDocumentation(root);
 Console.WriteLine("PASS documentation architecture and links");
 
@@ -55,7 +57,7 @@ foreach (string configuration in configurations)
         Run(root, "dotnet", command);
     }
 
-    VerifyClientCompositionArtifacts(root, configuration, options.NoRestore);
+    VerifyClientCompositionArtifacts(root, configuration);
 
     if (!options.SkipGodot)
     {
@@ -86,36 +88,40 @@ foreach (string configuration in configurations)
         var playableBuild = new List<string> { "build", playableProject, "-c", configuration };
         if (options.NoRestore) playableBuild.Add("--no-restore");
         Run(root, "dotnet", playableBuild);
-        foreach (string localGodotProject in new[] { "Playable", "SinglePlayer", "Complete" })
-        {
-            Run(root, godot,
-            [
-                "--headless",
-                "--editor",
-                "--path", $"Client/{localGodotProject}.Godot",
-                "--quit",
-            ]);
-        }
+        Run(root, godot,
+        [
+            "--headless",
+            "--editor",
+            "--path", "Client/Playable.Godot",
+            "--quit",
+        ]);
+        BuildClientApplication(root, configuration, "Complete");
+        Run(root, godot,
+        [
+            "--headless",
+            "--editor",
+            "--path", "Client/Godot",
+            "--quit",
+        ]);
         Run(root, godot,
         [
             "--headless",
             "--path", "Client/Playable.Godot",
             "--", "--smoke",
         ]);
-        foreach (string composition in new[] { "SinglePlayer", "Online", "Complete" })
-        {
-            Run(root, godot,
-            [
-                "--headless",
-                "--path", $"Client/{composition}.Godot",
-                "--", "--composition-smoke",
-            ]);
-        }
+
+        BuildClientApplication(root, configuration, "SinglePlayer");
         Run(root, godot,
         [
             "--headless",
-            "--path", "Client/SinglePlayer.Godot",
-            "--", "--shell-ui-smoke",
+            "--path", "Client/Godot",
+            "--", "--composition-smoke", "--expect-edition=SinglePlayer",
+        ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--shell-ui-smoke", "--expect-edition=SinglePlayer",
         ]);
         foreach ((string variant, string human) in new[]
         {
@@ -127,27 +133,51 @@ foreach (string configuration in configurations)
             Run(root, godot,
             [
                 "--headless",
-                "--path", "Client/SinglePlayer.Godot",
-                "--", "--f0-2-smoke", $"--cabin-content={variant}", $"--human={human}",
+                "--path", "Client/Godot",
+                "--", "--f0-2-smoke", "--expect-edition=SinglePlayer",
+                $"--cabin-content={variant}", $"--human={human}",
             ]);
         }
         Run(root, godot,
         [
             "--headless",
-            "--path", "Client/Complete.Godot",
-            "--", "--f0-2-smoke", "--cabin-content=default", "--human=x",
+            "--path", "Client/Godot",
+            "--", "--d0-0-smoke", "--expect-edition=SinglePlayer",
         ]);
         Run(root, godot,
         [
             "--headless",
-            "--path", "Client/SinglePlayer.Godot",
-            "--", "--d0-0-smoke",
+            "--path", "Client/Godot",
+            "--", "--d0-1-smoke", "--expect-edition=SinglePlayer",
+        ]);
+
+        BuildClientApplication(root, configuration, "Online");
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--composition-smoke", "--expect-edition=Online",
+        ]);
+        RunExpectFailure(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--composition-smoke", "--expect-edition=SinglePlayer",
+        ], "ClientProductMismatchFailsClosed");
+
+        BuildClientApplication(root, configuration, "Complete");
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--composition-smoke", "--expect-edition=Complete",
         ]);
         Run(root, godot,
         [
             "--headless",
-            "--path", "Client/SinglePlayer.Godot",
-            "--", "--d0-1-smoke",
+            "--path", "Client/Godot",
+            "--", "--f0-2-smoke", "--expect-edition=Complete",
+            "--cabin-content=default", "--human=x",
         ]);
     }
 }
@@ -156,22 +186,22 @@ Run(root, "git", ["diff", "--check"]);
 Console.WriteLine("PASS repository verification");
 return 0;
 
-static void VerifyClientCompositionArtifacts(string root, string configuration, bool noRestore)
+static void VerifyClientCompositionArtifacts(string root, string configuration)
 {
     ClientCompositionGate[] gates =
     [
         new(
             "SinglePlayer",
-            "Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj",
-            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Content", "UltraSim.Client.Local",
+            ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
+                "UltraSim.Client.Content", "UltraSim.Client.Local",
                 "UltraSim.Client.Local.Godot", "UltraSim.Game.Composition", "UltraSim.Game.Replication",
                 "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
         new(
             "Online",
-            "Client/Online.Godot/UltraSim.Client.Online.Godot.csproj",
-            ["UltraSim.Client.Network", "UltraSim.Game.Protocol", "UltraSim.Network"],
+            ["UltraSim.Client.Application.Godot", "UltraSim.Client.Network",
+                "UltraSim.Game.Protocol", "UltraSim.Network"],
             ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
                 "UltraSim.Game.Composition", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
@@ -179,8 +209,8 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
                 "UltraSim.Server.Persistence", "UltraSim.Server.Runtime"]),
         new(
             "Complete",
-            "Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj",
-            ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
+            ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
+                "UltraSim.Client.Local", "UltraSim.Client.Local.Godot",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
                 "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime"],
             []),
@@ -188,15 +218,24 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
 
     foreach (ClientCompositionGate gate in gates)
     {
-        var command = new List<string> { "build", gate.Project, "-c", configuration };
-        if (noRestore) command.Add("--no-restore");
-        Run(root, "dotnet", command);
+        string output = Path.Combine(
+            Path.GetTempPath(), "ultrasim-repository-verification", Environment.ProcessId.ToString(),
+            configuration, gate.Name);
+        if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+        Directory.CreateDirectory(output);
+        Run(root, "dotnet",
+        [
+            "publish",
+            "Client/Godot/UltraSim.Client.Application.Godot.csproj",
+            "-c", configuration,
+            $"-p:UltraSimEdition={gate.Name}",
+            "--output", output,
+        ]);
 
-        string output = Path.Combine(root, "Client", $"{gate.Name}.Godot", ".godot", "mono", "temp", "bin",
-            configuration);
-        string dependenciesPath = Path.Combine(output, $"UltraSim.Client.{gate.Name}.Godot.deps.json");
+        string dependenciesPath = Path.Combine(output, "UltraSim.Client.Application.Godot.deps.json");
         if (!File.Exists(dependenciesPath))
-            throw new InvalidOperationException($"{gate.Name} did not produce its expected .deps.json: {dependenciesPath}");
+            throw new InvalidOperationException(
+                $"{gate.Name} did not publish its expected .deps.json: {dependenciesPath}");
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(dependenciesPath));
         var dependencies = document.RootElement.GetProperty("libraries").EnumerateObject()
             .Select(static property => property.Name.Split('/')[0])
@@ -234,9 +273,10 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
         int copiedNativeAssets = Directory.EnumerateFiles(output, "*", SearchOption.TopDirectoryOnly)
             .Count(static path => Path.GetExtension(path) is ".so" or ".dylib");
         Console.WriteLine(
-            $"PASS {gate.Name}_ResolvedOutput dependencies={dependencies.Count} " +
+            $"PASS {gate.Name}_PublishedOutput dependencies={dependencies.Count} " +
             $"ultrasimAssemblies={outputAssemblies.Count} managedBytes={managedBytes} " +
             $"declaredNativeAssets={declaredNativeAssets} copiedNativeAssets={copiedNativeAssets}");
+        Directory.Delete(output, recursive: true);
     }
 
     Console.WriteLine("PASS SinglePlayer_NoClientNetwork");
@@ -245,6 +285,31 @@ static void VerifyClientCompositionArtifacts(string root, string configuration, 
     Console.WriteLine("PASS Online_NoLocalServerRuntime");
     Console.WriteLine("PASS Online_NoLocalAuthorityComposition");
     Console.WriteLine("PASS Online_NoLocalAuthorityBridge");
+}
+
+static void BuildClientApplication(string root, string configuration, string edition)
+{
+    Run(root, "dotnet",
+    [
+        "build",
+        "Client/Godot/UltraSim.Client.Application.Godot.csproj",
+        "-c", configuration,
+        $"-p:UltraSimEdition={edition}",
+    ]);
+
+    // The editor host always loads the project's Debug assembly. Release is still compiled and
+    // independently published above; build the same edition as Debug before a headless editor run
+    // so the launch cannot consume a stale, wider product from an earlier gate.
+    if (!string.Equals(configuration, "Debug", StringComparison.Ordinal))
+    {
+        Run(root, "dotnet",
+        [
+            "build",
+            "Client/Godot/UltraSim.Client.Application.Godot.csproj",
+            "-c", "Debug",
+            $"-p:UltraSimEdition={edition}",
+        ]);
+    }
 }
 
 static void VerifyClientPresentationAssets(string root)
@@ -264,13 +329,73 @@ static void VerifyClientPresentationAssets(string root)
                 hash, StringComparison.Ordinal))
             throw new InvalidOperationException($"The frozen human calibration asset is missing or changed: {relative}.");
     }
-    foreach (string composition in new[] { "SinglePlayer", "Complete", "Playable" })
+    foreach ((string composition, string link) in new[]
     {
-        string link = Path.Combine(root, "Client", $"{composition}.Godot", "Assets");
+        ("Godot", Path.Combine(root, "Client", "Godot", "Assets")),
+        ("Playable", Path.Combine(root, "Client", "Playable.Godot", "Assets")),
+    })
+    {
         if (!Directory.Exists(link) ||
             !string.Equals(new DirectoryInfo(link).LinkTarget, "../PresentationAssets", StringComparison.Ordinal))
             throw new InvalidOperationException(
                 $"{composition} does not expose the shared build-time presentation assets.");
+    }
+}
+
+static void VerifyClientExportComposition(string root)
+{
+    const string applicationProject = "Client/Godot/UltraSim.Client.Application.Godot.csproj";
+    string projectPath = Path.Combine(root, applicationProject.Replace('/', Path.DirectorySeparatorChar));
+    XDocument project = XDocument.Load(projectPath, LoadOptions.SetLineInfo);
+    XElement[] references = project.Descendants("ProjectReference").ToArray();
+    XElement local = references.Single(reference =>
+        reference.Attribute("Include")?.Value.EndsWith(
+            "Local.Godot/UltraSim.Client.Local.Godot.csproj", StringComparison.Ordinal) == true);
+    XElement online = references.Single(reference =>
+        reference.Attribute("Include")?.Value.EndsWith(
+            "Network/UltraSim.Client.Network.csproj", StringComparison.Ordinal) == true);
+    string localCondition = local.Attribute("Condition")?.Value ?? "";
+    string onlineCondition = online.Attribute("Condition")?.Value ?? "";
+    if (!localCondition.Contains("SinglePlayer", StringComparison.Ordinal) ||
+        !localCondition.Contains("Complete", StringComparison.Ordinal) ||
+        localCondition.Contains("Online", StringComparison.Ordinal))
+        throw new InvalidOperationException("The local client reference is not edition-fenced.");
+    if (!onlineCondition.Contains("Online", StringComparison.Ordinal) ||
+        !onlineCondition.Contains("Complete", StringComparison.Ordinal) ||
+        onlineCondition.Contains("SinglePlayer", StringComparison.Ordinal))
+        throw new InvalidOperationException("The remote client reference is not edition-fenced.");
+
+    string godotProject = File.ReadAllText(Path.Combine(root, "Client", "Godot", "project.godot"));
+    if (!godotProject.Contains(
+            "project/assembly_name=\"UltraSim.Client.Application.Godot\"", StringComparison.Ordinal))
+        throw new InvalidOperationException("The shared Godot project does not name the fixed host assembly.");
+
+    string presets = File.ReadAllText(Path.Combine(root, "Client", "Godot", "export_presets.cfg"));
+    foreach ((string name, string feature) in new[]
+    {
+        ("UltraSim Single Player Linux", "ultrasim_single_player"),
+        ("UltraSim Online Linux", "ultrasim_online"),
+        ("UltraSim Complete Linux", "ultrasim_complete"),
+    })
+    {
+        if (!presets.Contains($"name=\"{name}\"", StringComparison.Ordinal) ||
+            !presets.Contains($"custom_features=\"{feature}\"", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The shared Godot project is missing export product '{name}' / '{feature}'.");
+    }
+    Match onlinePreset = Regex.Match(
+        presets,
+        "name=\"UltraSim Online Linux\"(?<body>[\\s\\S]*?)(?=\\[preset\\.1\\.options\\])",
+        RegexOptions.CultureInvariant);
+    if (!onlinePreset.Success ||
+        !onlinePreset.Groups["body"].Value.Contains("exclude_filter=\"Assets/**\"", StringComparison.Ordinal))
+        throw new InvalidOperationException("The Online export does not exclude local presentation assets.");
+
+    foreach (string retired in new[] { "SinglePlayer.Godot", "Online.Godot", "Complete.Godot" })
+    {
+        if (File.Exists(Path.Combine(root, "Client", retired, "project.godot")))
+            throw new InvalidOperationException(
+                $"Retired duplicate Godot application project is still active: Client/{retired}.");
     }
 }
 
@@ -355,17 +480,7 @@ static void VerifyArchitecture(string root)
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
         ],
-        ["Client/SinglePlayer.Godot/UltraSim.Client.SinglePlayer.Godot.csproj"] =
-        [
-            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
-            "Client/Local.Godot/UltraSim.Client.Local.Godot.csproj",
-        ],
-        ["Client/Online.Godot/UltraSim.Client.Online.Godot.csproj"] =
-        [
-            "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
-            "Client/Network/UltraSim.Client.Network.csproj",
-        ],
-        ["Client/Complete.Godot/UltraSim.Client.Complete.Godot.csproj"] =
+        ["Client/Godot/UltraSim.Client.Application.Godot.csproj"] =
         [
             "Client/Bootstrap.Godot/UltraSim.Client.Bootstrap.Godot.csproj",
             "Client/Local.Godot/UltraSim.Client.Local.Godot.csproj",
@@ -536,6 +651,7 @@ static void VerifyDocumentation(string root)
         "Client/Content/README.md",
         "Client/BuiltInTestWorlds/README.md",
         "Client/Local/README.md",
+        "Client/Godot/README.md",
         "Client/Bootstrap.Godot/README.md",
         "Client/_Godot/README.md",
         "Client/Playable.Godot/README.md",
@@ -568,7 +684,8 @@ static void VerifyDocumentation(string root)
             "Docs/Plans/TERRAIN.md", "Kernels/ECS/README.md",
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
             "Client/Content/README.md", "Client/BuiltInTestWorlds/README.md",
-            "Client/Local/README.md", "Client/_Godot/README.md", "Client/Playable.Godot/README.md", "Game/World/README.md",
+            "Client/Local/README.md", "Client/Godot/README.md", "Client/_Godot/README.md",
+            "Client/Playable.Godot/README.md", "Game/World/README.md",
             "Game/Chat/README.md", "Game/Physics/README.md", "Game/Replication/README.md",
             "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
@@ -740,6 +857,26 @@ static void Run(string root, string executable, IEnumerable<string> arguments)
         throw new InvalidOperationException($"'{executable}' exited with code {process.ExitCode}.");
 }
 
+static void RunExpectFailure(
+    string root,
+    string executable,
+    IEnumerable<string> arguments,
+    string gate)
+{
+    var start = new ProcessStartInfo(executable)
+    {
+        WorkingDirectory = root,
+        UseShellExecute = false,
+    };
+    foreach (string argument in arguments) start.ArgumentList.Add(argument);
+    Console.WriteLine($"> {executable} {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    using Process process = Process.Start(start) ?? throw new InvalidOperationException($"Unable to start '{executable}'.");
+    process.WaitForExit();
+    if (process.ExitCode == 0)
+        throw new InvalidOperationException($"'{executable}' unexpectedly accepted the invalid product composition.");
+    Console.WriteLine($"PASS {gate} exitCode={process.ExitCode}");
+}
+
 static string Quote(string value) => value.Any(char.IsWhiteSpace) ? $"\"{value}\"" : value;
 static string Relative(string root, string path) => Path.GetRelativePath(root, path).Replace('\\', '/');
 
@@ -775,6 +912,5 @@ internal sealed record VerificationOptions(
 
 internal sealed record ClientCompositionGate(
     string Name,
-    string Project,
     string[] RequiredAssemblies,
     string[] ForbiddenAssemblies);

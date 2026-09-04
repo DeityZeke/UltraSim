@@ -1,7 +1,8 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
 **Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`), F0.0a executable
-composition/shipped-dependency separation, F0.0b permanent Network-free local-session extraction,
+composition/shipped-dependency separation, F0.0c single-project composition consolidation,
+F0.0b permanent Network-free local-session extraction,
 F0.1 persistent shell/settings/focus, and content A0.0 contracts/resolution accepted.
 Direct-connect trust, content activation, and later content acquisition remain separately gated
 before their consuming checkpoints.
@@ -1318,9 +1319,11 @@ Useful, but not a giant mandatory admin framework.
 
 # 27. Proposed package/composition direction
 
-Exact names remain unfrozen, but use separate thin executable composition roots sharing the shell,
-Core, and Godot adapter. Do not rely on one executable project with conditional references to prove
-that an absent capability is physically absent. Desired dependency shape is equivalent to:
+The maintained application uses one Godot project and a fixed host assembly compiled as three
+explicit MSBuild products. Conditional project references are accepted only because the permanent
+verifier publishes every edition into an isolated output and proves the forbidden dependency closure
+is physically absent. Runtime flags and hidden menu entries are not capability boundaries. Desired
+dependency shape is equivalent to:
 
 ```text
 Client.Core
@@ -1398,8 +1401,10 @@ Both capabilities; local and remote Cabin converge semantically/presentationally
 Dependency scans are permanent verifier gates.
 
 Inspect final shipped artifacts rather than only source project references. Gates include the
-resolved project graph, generated `.deps.json`, copied managed/native assemblies, and Godot export
-contents. An assembly hidden from a menu but still shipped is not an absent capability.
+resolved project graph, isolated published `.deps.json`, copied managed/native assemblies, and Godot
+export contents where the matching templates are installed. An assembly hidden from a menu but still
+shipped is not an absent capability. `UltraSimEdition` selects the physical MSBuild graph;
+Godot export custom features only detect preset/product mismatches.
 
 ---
 
@@ -1407,10 +1412,9 @@ contents. An assembly hidden from a menu but still shipped is not an absent capa
 
 ## F0.0a — Real client executable-composition foundation
 
-**Status: CLOSED.** `Client/SinglePlayer.Godot`, `Client/Online.Godot`, and
-`Client/Complete.Godot` are separate fixed composition roots over one shared
-`Client/Bootstrap.Godot` menu/bootstrap. Their built `.deps.json` and copied output assemblies are
-permanently verified: Single Player excludes Client Network/Game Protocol/the Network kernel,
+**Status: CLOSED.** F0.0a originally established three fixed thin composition roots over one shared
+`Client/Bootstrap.Godot` menu/bootstrap. Their output assemblies proved that Single Player excludes
+Client Network/Game Protocol/the Network kernel,
 Online excludes local Game composition/replication/Server Runtime, and Complete contains both
 capability families. `Playable.Godot` served as the acceptance/reference executable for F0.0b.
 
@@ -1421,7 +1425,7 @@ Implement:
 - explicit Local/Remote capabilities;
 - capability-driven menu entries;
 - Single Player/Online/Complete build matrix;
-- separate thin executable roots rather than conditional hidden references;
+- fixed explicit executable products rather than runtime-hidden references;
 - separate the current Network-facing replication integration from the Game-owned
   publication/debt dependencies enough for the Local graph to remain Network-free;
 - shipped-artifact dependency checks proving absent capabilities are physically absent.
@@ -1429,6 +1433,33 @@ Implement:
 No discovery, dynamic plugin loading, or full streaming implementation yet.
 
 **Gate:** all compositions compile with forbidden dependencies absent.
+
+## F0.0c — Single maintained Godot project / distinct physical products
+
+**Status: CLOSED.** `Client/Godot` is now the one maintained application project, scene, project
+settings, import database, and export-preset surface. Its fixed
+`UltraSim.Client.Application.Godot` host compiles under one explicit `UltraSimEdition`:
+
+```text
+SinglePlayer -> Bootstrap.Godot + Local.Godot
+Online       -> Bootstrap.Godot + Client.Network
+Complete     -> union
+```
+
+The default editor/development product is Complete. Canonical exports use the edition-specific
+wrapper and one of three named presets. Each preset contributes exactly one custom feature so the
+running product can reject a mismatched compiled edition, but that feature is not the security
+boundary. Conditional MSBuild references establish the dependency closure.
+
+The verifier independently publishes all three products, inspects each `.deps.json` and copied
+managed/native output, and runs the same Godot scene against all three compiled editions. Online's
+resource preset also excludes the local presentation `Assets/**`. The superseded
+`SinglePlayer.Godot`, `Online.Godot`, and `Complete.Godot` source projects were retired; the separate
+`Client/_Godot` engine adapter and `Playable.Godot` compatibility/acceptance consumer remain.
+
+**Gate:** one Godot application project launches every product; capability menus match the compiled
+edition; Single Player and Online published closures still physically exclude their forbidden
+families; preset and compiled edition mismatches fail closed.
 
 ---
 
@@ -2024,6 +2055,8 @@ Physics foundation                    CLOSED through P0.1b
         |
         v
 F0.0a executable composition roots / shipped-dependency proof
+        |
+F0.0c one maintained Godot project / three physical products       CLOSED
         |
 F0.0b permanent OfflineDirect local-session extraction     CLOSED
         |
