@@ -131,6 +131,11 @@ public abstract partial class ClientRoot : Control
             GD.Print(
                 $"ULTRASIM CLIENT READY edition={_composition.Edition} capabilities={capabilities} " +
                 $"screen={_shell.Snapshot().Screen} settings={_settingsLoadStatus}");
+            if (OS.GetCmdlineUserArgs().Contains("--shell-ui-smoke", StringComparer.Ordinal))
+            {
+                Callable.From(RunShellUiSmoke).CallDeferred();
+                return;
+            }
             if (OS.GetCmdlineUserArgs().Contains("--composition-smoke", StringComparer.Ordinal))
             {
                 ValidateShellSmoke();
@@ -342,17 +347,22 @@ public abstract partial class ClientRoot : Control
         foreach (ClientCapability capability in _composition.Capabilities)
         {
             Button button = MenuButton(Label(capability));
+            button.Name = $"Capability_{capability}";
             switch (capability)
             {
                 case ClientCapability.Settings:
-                    button.Pressed += () => { _shell.OpenSettings(); RenderCurrentSurface(); };
+                    ConnectDeferred(button, () =>
+                    {
+                        _shell.OpenSettings();
+                        RenderCurrentSurface();
+                    });
                     break;
                 case ClientCapability.Exit:
-                    button.Pressed += () => GetTree().Quit(0);
+                    ConnectDeferred(button, () => GetTree().Quit(0));
                     break;
                 default:
                     ClientCapability captured = capability;
-                    button.Pressed += () => BeginCapability(captured);
+                    ConnectDeferred(button, () => BeginCapability(captured));
                     break;
             }
             column.AddChild(button);
@@ -362,7 +372,7 @@ public abstract partial class ClientRoot : Control
 
     private void BuildSettingsMenu()
     {
-        VBoxContainer column = CreateCenteredColumn(420);
+        VBoxContainer column = CreateScrollableCenteredColumn(420);
         column.AddChild(Title("Client Settings"));
 
         HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
@@ -389,7 +399,8 @@ public abstract partial class ClientRoot : Control
         });
 
         Button save = MenuButton("Save");
-        save.Pressed += () =>
+        save.Name = "SettingsSave";
+        ConnectDeferred(save, () =>
         {
             try
             {
@@ -414,19 +425,25 @@ public abstract partial class ClientRoot : Control
                 _shell.Fail($"Settings could not be saved: {exception.Message}");
             }
             RenderCurrentSurface();
-        };
+        });
         column.AddChild(save);
         Button reset = MenuButton("Reset Global Defaults");
-        reset.Pressed += () =>
+        reset.Name = "SettingsReset";
+        ConnectDeferred(reset, () =>
         {
             _settings = new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes);
             _resolved = ClientSettingsResolver.Resolve(_settings);
             OnEffectiveSettingsChanged(_resolved);
             RenderCurrentSurface();
-        };
+        });
         column.AddChild(reset);
         Button back = MenuButton("Back");
-        back.Pressed += () => { _shell.CloseSettings(); RenderCurrentSurface(); };
+        back.Name = "SettingsBack";
+        ConnectDeferred(back, () =>
+        {
+            _shell.CloseSettings();
+            RenderCurrentSurface();
+        });
         column.AddChild(back);
         FocusFirstButton(column);
     }
@@ -436,18 +453,26 @@ public abstract partial class ClientRoot : Control
         VBoxContainer column = CreateCenteredColumn();
         column.AddChild(Title("Session Options"));
         Button resume = MenuButton("Resume");
-        resume.Pressed += () => { _shell.ResumeSession(); RenderCurrentSurface(); };
+        ConnectDeferred(resume, () =>
+        {
+            _shell.ResumeSession();
+            RenderCurrentSurface();
+        });
         column.AddChild(resume);
         Button settings = MenuButton("Settings");
-        settings.Pressed += () => { _shell.OpenSettings(); RenderCurrentSurface(); };
+        ConnectDeferred(settings, () =>
+        {
+            _shell.OpenSettings();
+            RenderCurrentSurface();
+        });
         column.AddChild(settings);
         Button disconnect = MenuButton("Disconnect / Main Menu");
-        disconnect.Pressed += () =>
+        ConnectDeferred(disconnect, () =>
         {
             RetireCurrentSession();
             _shell.ReturnToMainMenu("Session disconnected.");
             RenderCurrentSurface();
-        };
+        });
         column.AddChild(disconnect);
         FocusFirstButton(column);
     }
@@ -462,7 +487,7 @@ public abstract partial class ClientRoot : Control
         column.AddChild(Title(title));
         column.AddChild(CenteredLabel(message));
         Button button = MenuButton(action);
-        button.Pressed += pressed;
+        ConnectDeferred(button, pressed);
         column.AddChild(button);
         button.GrabFocus();
     }
@@ -478,6 +503,76 @@ public abstract partial class ClientRoot : Control
             snapshot.Shell.Focus.GameplayInputAllowed ||
             snapshot.CapabilityCount != _composition.Capabilities.Count)
             throw new InvalidOperationException("The persistent client shell smoke contract failed.");
+    }
+
+    private async void RunShellUiSmoke()
+    {
+        try
+        {
+            Button settings = RequiredMenuButton("Capability_Settings");
+            ValidateDeferredPress(settings);
+            settings.EmitSignal(BaseButton.SignalName.Pressed);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+
+            ScrollContainer? scroll = _menuHost?.GetNodeOrNull<ScrollContainer>("SettingsScroll");
+            if (_shell.Snapshot().Screen != ClientShellScreen.Settings || scroll is null ||
+                !scroll.GetVScrollBar().Visible)
+                throw new InvalidOperationException(
+                    "The Settings button did not open a vertically scrollable Settings surface.");
+
+            Button back = RequiredMenuButton("SettingsBack");
+            ValidateDeferredPress(back);
+            back.EmitSignal(BaseButton.SignalName.Pressed);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (_shell.Snapshot().Screen != ClientShellScreen.MainMenu)
+                throw new InvalidOperationException("The Settings Back button did not restore the main menu.");
+
+            if (_composition.Capabilities.Contains(ClientCapability.SinglePlayer))
+            {
+                Button singlePlayer = RequiredMenuButton("Capability_SinglePlayer");
+                ValidateDeferredPress(singlePlayer);
+                singlePlayer.EmitSignal(BaseButton.SignalName.Pressed);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                if (_shell.Snapshot().Screen != ClientShellScreen.InSession || _menuHost?.Visible != false)
+                    throw new InvalidOperationException(
+                        "The Single Player button did not enter the installed local-play capability.");
+                RetireCurrentSession();
+                ReturnToMainMenu("Shell UI smoke passed.");
+            }
+
+            GD.Print(
+                $"F0.1 CLIENT SHELL UI PASS edition={_composition.Edition} " +
+                "settings=scrollable transitions=deferred singlePlayer=entered");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"Client shell UI smoke failed: {exception}");
+            RetireCurrentSession();
+            GetTree().Quit(1);
+        }
+    }
+
+    private Button RequiredMenuButton(string name)
+    {
+        if (_menuHost?.FindChild(name, recursive: true, owned: false) is Button button)
+            return button;
+        throw new InvalidOperationException($"Required shell button '{name}' was not present.");
+    }
+
+    private static void ValidateDeferredPress(Button button)
+    {
+        foreach (global::Godot.Collections.Dictionary connection in
+            button.GetSignalConnectionList(BaseButton.SignalName.Pressed))
+        {
+            if ((connection["flags"].AsUInt32() & (uint)GodotObject.ConnectFlags.Deferred) != 0)
+                return;
+        }
+        throw new InvalidOperationException(
+            $"Shell button '{button.Name}' can retire itself from a synchronous signal callback.");
     }
 
     private bool Matches(InputEventKey key, ClientSemanticAction action)
@@ -506,6 +601,45 @@ public abstract partial class ClientRoot : Control
         var center = new CenterContainer();
         center.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         _menuHost.AddChild(center);
+        var column = new VBoxContainer { CustomMinimumSize = new Vector2(width, 0) };
+        column.AddThemeConstantOverride("separation", 10);
+        center.AddChild(column);
+        return column;
+    }
+
+    private VBoxContainer CreateScrollableCenteredColumn(float width)
+    {
+        var background = new ColorRect
+        {
+            Color = new Color(0.035f, 0.05f, 0.045f, 1f),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
+        background.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _menuHost!.AddChild(background);
+
+        var scroll = new ScrollContainer
+        {
+            Name = "SettingsScroll",
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+        };
+        scroll.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        _menuHost.AddChild(scroll);
+
+        var margin = new MarginContainer
+        {
+            Name = "SettingsMargin",
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ShrinkBegin,
+        };
+        margin.AddThemeConstantOverride("margin_left", 24);
+        margin.AddThemeConstantOverride("margin_top", 24);
+        margin.AddThemeConstantOverride("margin_right", 24);
+        margin.AddThemeConstantOverride("margin_bottom", 24);
+        scroll.AddChild(margin);
+
+        var center = new CenterContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill };
+        margin.AddChild(center);
         var column = new VBoxContainer { CustomMinimumSize = new Vector2(width, 0) };
         column.AddThemeConstantOverride("separation", 10);
         center.AddChild(column);
@@ -588,6 +722,17 @@ public abstract partial class ClientRoot : Control
             node.RemoveChild(child);
             child.Free();
         }
+    }
+
+    private static void ConnectDeferred(Button button, Action pressed)
+    {
+        Error result = button.Connect(
+            BaseButton.SignalName.Pressed,
+            Callable.From(pressed),
+            (uint)GodotObject.ConnectFlags.Deferred);
+        if (result != Error.Ok)
+            throw new InvalidOperationException(
+                $"Could not connect deferred button action for '{button.Name}': {result}.");
     }
 
     private static void FocusFirstButton(Node root)

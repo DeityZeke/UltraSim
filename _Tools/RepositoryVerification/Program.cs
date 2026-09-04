@@ -111,6 +111,12 @@ foreach (string configuration in configurations)
                 "--", "--composition-smoke",
             ]);
         }
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/SinglePlayer.Godot",
+            "--", "--shell-ui-smoke",
+        ]);
         foreach ((string variant, string human) in new[]
         {
             ("default", "x"),

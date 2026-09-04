@@ -24,6 +24,9 @@ The persistent root owns Controller and ContentCatalog roots, the World presenta
 World/HUD/Menu/Debug UI layers. It renders main, settings, loading, error, and in-session option
 surfaces over the engine-neutral lifecycle/focus state in `Client.Core`. Human-readable versioned
 settings live at `user://settings/client.json`; invalid documents fail closed to built-in defaults.
+Settings content is vertically scrollable at the minimum client viewport. Shell button transitions
+are deferred so rebuilding a surface never frees the Godot control that is still emitting its input
+signal.
 
 The shared shell renders exactly the supplied capability catalog. Missing capabilities therefore
 have no menu entry, while the repository verifier independently inspects the resolved project graph,
