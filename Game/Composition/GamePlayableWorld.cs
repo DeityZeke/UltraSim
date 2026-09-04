@@ -102,12 +102,15 @@ public readonly record struct GameVerticalMotionSnapshot(
 public sealed class GameWorldActions
 {
     private const int ActorCollisionRadiusMillimeters = 300;
+    private const int ActorSupportRadiusMillimeters = 150;
     private const int ActorCollisionHeightMillimeters = 1_800;
     private const int ActorMaximumStepUpMillimeters = 500;
     private const int ActorMaximumStepDownMillimeters = 500;
     private static readonly SimplePhysicsBody s_actorBody = new(
         ActorCollisionRadiusMillimeters,
         ActorCollisionRadiusMillimeters,
+        ActorSupportRadiusMillimeters,
+        ActorSupportRadiusMillimeters,
         ActorCollisionHeightMillimeters,
         ActorMaximumStepUpMillimeters,
         ActorMaximumStepDownMillimeters);

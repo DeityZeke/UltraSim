@@ -1281,6 +1281,12 @@ static void StaticBoundsQueryIsExactBoundedAndTransactional()
 
 static void FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity()
 {
+    True(WorldStaticPhysicalSemantics.BlocksBody(WorldStaticFlags.Collidable));
+    True(WorldStaticPhysicalSemantics.SupportsTop(WorldStaticFlags.Collidable));
+    WorldStaticFlags noTopSupport = WorldStaticFlags.Collidable | WorldStaticFlags.NoTopSupport;
+    True(WorldStaticPhysicalSemantics.BlocksBody(noTopSupport));
+    False(WorldStaticPhysicalSemantics.SupportsTop(noTopSupport));
+
     WorldPackBuilder duplicate = CreateTerrainBuilder();
     WorldFrozenStaticSource source = CreateFrozenStatic(1, 1, new WorldPosition(0, 0, 1_000, 1_000, 0));
     True(duplicate.TryAddFrozenStatic(source, out _));
@@ -1298,6 +1304,21 @@ static void FrozenStructureCompilerRejectsInvalidIdentityPlacementAndCapacity()
         Bounds = default,
     }, out error));
     Equal(WorldPackBuildError.InvalidStaticPlacement, error);
+    False(duplicate.TryAddFrozenStatic(source with
+    {
+        Id = new WorldStaticId(4),
+        Flags = WorldStaticFlags.Renderable | WorldStaticFlags.NoTopSupport,
+    }, out error));
+    Equal(WorldPackBuildError.InvalidStaticPlacement, error);
+
+    WorldPackBuilder noTopRoundTrip = CreateTerrainBuilder();
+    True(noTopRoundTrip.TryAddFrozenStatic(source with { Flags = noTopSupport }, out _));
+    True(noTopRoundTrip.TryBuild(out WorldPackArtifact? noTopArtifact, out _));
+    WorldPack noTopPack = noTopArtifact!.Open();
+    True(noTopPack.TryGetFrozenStatics(new SpatialChunkKey(noTopPack.Space, 0, 0),
+        out WorldFrozenStaticChunkView noTopStatics));
+    Equal(1, noTopStatics.Count);
+    Equal(noTopSupport, noTopStatics.GetRecord(0).Flags);
 
     WorldPackBuilder missing = CreateTerrainBuilder();
     True(missing.TryAddFrozenStatic(CreateFrozenStatic(9, 1,

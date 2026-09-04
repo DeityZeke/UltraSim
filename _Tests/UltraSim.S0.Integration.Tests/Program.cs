@@ -39,6 +39,8 @@ Run("SimplePhysicsResolvesAirborneTerrainShellContacts",
     SimplePhysicsAirborneTerrainShellContacts, results);
 Run("SimplePhysicsStaticTopsProvideGroundedSupport",
     SimplePhysicsStaticSupport, results);
+Run("SimplePhysicsSeparatesBodyAndStaticTopSupportPolicy",
+    SimplePhysicsStaticTopPolicy, results);
 Run("AuthoritativeJumpFallLandingAndRecovery",
     AuthoritativeJumpFallLandingAndRecovery, results);
 Run("VerticalMomentumIsGenerationLocalAcrossRestore",
@@ -870,7 +872,7 @@ static TestMetrics SimplePhysicsOccupancy()
             IGameGenerationStateProvider, long>(
             (_, _, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
                 Expect(!default(SimpleOccupancyResult).CanOccupy,
                     "A default occupancy result was interpreted as clear.");
                 bool invalidRejected = false;
@@ -978,7 +980,7 @@ static TestMetrics SimplePhysicsSweptMotion()
             IGameGenerationStateProvider, long>(
             (_, _, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
                 WorldPosition staticStart = At(13_500, 7_000);
                 WorldPosition staticTarget = At(13_500, 11_000);
                 Expect(game.SimplePhysics.ProbeOccupancy(
@@ -1109,7 +1111,7 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
             (world, generationId, game) =>
             {
                 initialPhysics = game.SimplePhysics;
-                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
                 Expect(!default(SimpleMotionResult).WasResolved &&
                     !default(SimpleOccupancyResult).CanOccupy,
                     "Default support-aware results did not fail closed.");
@@ -1129,7 +1131,7 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
                     belowBase.Support.SurfaceId == new WorldSurfaceId(333),
                     "Occupancy selected a shell by identity/rank instead of requested physical elevation.");
 
-                var tallBody = new SimplePhysicsBody(300, 300, 3_500, 500, 500);
+                var tallBody = new SimplePhysicsBody(300, 300, 150, 150, 3_500, 500, 500);
                 SimpleOccupancyResult belowMountain = game.SimplePhysics.ProbeOccupancy(
                     new SimpleOccupancyRequest(Position(3_500, 5_000, 3_500), tallBody),
                     ReadOnlySpan<WorldStaticBounds>.Empty,
@@ -1140,7 +1142,7 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
                 SimpleOccupancyResult lowCeiling = Occupy(7_000, 0, 3_500);
                 Expect(lowCeiling.Status == SimpleOccupancyStatus.Blocked,
                     "A 1.5 m terrain-shell ceiling admitted a 1.8 m body.");
-                var exactClearanceBody = new SimplePhysicsBody(300, 300, 1_500, 500, 500);
+                var exactClearanceBody = new SimplePhysicsBody(300, 300, 150, 150, 1_500, 500, 500);
                 Expect(game.SimplePhysics.ProbeOccupancy(
                         new SimpleOccupancyRequest(Position(7_000, 0, 3_500), exactClearanceBody),
                         ReadOnlySpan<WorldStaticBounds>.Empty,
@@ -1170,7 +1172,7 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
                 Expect(stepUp.WasResolved && stepUp.IsGrounded &&
                     stepUp.Position.YMillimeters == 400 &&
                     stepUp.Support.SurfaceId == new WorldSurfaceId(700),
-                    "A reachable 400 mm two-sided terrain step did not resolve onto its Top face.");
+                    $"A reachable 400 mm two-sided terrain step did not resolve onto its Top face: {stepUp}.");
                 SimpleMotionResult stepDown = Move(stepUp.Position, 1_500, 8_500);
                 Expect(stepDown.WasResolved && stepDown.Position.YMillimeters == 0 &&
                     stepDown.Support.IsBase,
@@ -1305,7 +1307,7 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
             IGameGenerationStateProvider, bool>(
             (_, _, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
                 if (!WorldPosition.TryFromGlobalMillimeters(
                         3_500, 10_000, 3_500, out WorldPosition target))
                     return false;
@@ -1341,7 +1343,7 @@ static TestMetrics SimplePhysicsAirborneTerrainShellContacts()
             IGameGenerationStateProvider, long>(
             (world, generationId, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
                 Expect(!default(SimpleAirborneMotionResult).WasResolved,
                     "A default airborne result did not fail closed.");
 
@@ -1425,7 +1427,7 @@ static TestMetrics SimplePhysicsStaticSupport()
             IGameGenerationStateProvider, long>(
             (_, _, game) =>
             {
-                var body = new SimplePhysicsBody(300, 300, 1_800, 500, 500);
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
                 Expect(WorldPosition.TryFromGlobalMillimeters(
                         5_000, 0, 13_000, out WorldPosition rockColumn),
                     "The authored Concept Demo rock column was invalid.");
@@ -1462,6 +1464,53 @@ static TestMetrics SimplePhysicsStaticSupport()
                     groundedMove.Support.Kind == SimplePhysicalSupportKind.StaticGeometry,
                     "A landed actor could not remain grounded and move across the rock top.");
 
+                WorldPosition wallColumn = Position(16_000, 0, 15_000);
+                Expect(prepared.TrySampleBaseTerrainHeight(wallColumn, out int wallTerrainY),
+                    "The authored Cabin wall column was unavailable.");
+                int wallTopY = checked(wallTerrainY + 2_500);
+                SimpleAirborneMotionResult wallLanding = game.SimplePhysics.ResolveAirborneMotion(
+                    new SimpleAirborneMotionRequest(
+                        Position(16_000, wallTopY + 1_000, 15_000),
+                        16_000, wallTopY - 500, 15_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                SimpleMotionResult alongWall = game.SimplePhysics.ResolveMotion(
+                    new SimpleMotionRequest(wallLanding.Position, 16_500, 15_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                SimpleOccupancyResult wallEdge = game.SimplePhysics.ProbeOccupancy(
+                    new SimpleOccupancyRequest(Position(19_850, wallTopY, 15_000), body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                SimpleMotionResult offWall = game.SimplePhysics.ResolveMotion(
+                    new SimpleMotionRequest(wallEdge.Position, 20_150, 15_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                SimpleAirborneMotionResult wallJumpClearance =
+                    game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            wallLanding.Position, 16_000, wallTopY + 500, 15_000, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                Expect(wallLanding.IsGrounded && alongWall.IsGrounded && wallEdge.IsGrounded &&
+                    offWall.Status == SimpleMotionStatus.Unsupported &&
+                    wallJumpClearance.Status == SimpleAirborneMotionStatus.Airborne,
+                    "The smaller support core did not permit stable wall-top landing, traversal, " +
+                    "walk-off, and upward launch semantics.");
+
+                WorldPosition shelfColumn = Position(18_500, 0, 14_000);
+                Expect(prepared.TrySampleBaseTerrainHeight(shelfColumn, out int shelfTerrainY),
+                    "The authored Cabin shelf column was unavailable.");
+                int shelfTopY = checked(shelfTerrainY + 1_800);
+                SimpleAirborneMotionResult shelfLanding = game.SimplePhysics.ResolveAirborneMotion(
+                    new SimpleAirborneMotionRequest(
+                        Position(18_500, shelfTopY + 1_000, 14_000),
+                        18_500, shelfTopY - 500, 14_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(shelfLanding.IsGrounded,
+                    "A static top wider than the support core but narrower than the body did not support landing.");
+
                 for (int index = 0; index < 16; index++)
                     _ = game.SimplePhysics.ResolveMotion(
                         new SimpleMotionRequest(landing.Position, 5_100, 13_000, body),
@@ -1490,9 +1539,66 @@ static TestMetrics SimplePhysicsStaticSupport()
         $"Warmed static-support resolution allocated {allocated} caller bytes.");
 
     return new TestMetrics(
-        HashText("static-top-support-grounded-movement"),
+        HashText("static-top-support-core-wall-shelf-grounded-movement"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
-        "A bounded collidable static top supports airborne landing, occupancy, and grounded movement with 0 B warmed allocation.");
+        "Ordinary collidable rock, thin-wall, and shelf tops support airborne landing and " +
+        "grounded traversal through the independent feet footprint with 0 B warmed allocation.");
+}
+
+static TestMetrics SimplePhysicsStaticTopPolicy()
+{
+    WorldPack pack = CreateStaticTopPolicyWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1087))));
+    host.Start();
+
+    Expect(host.RuntimeForTesting.Game.TryUseActiveGeneration<
+            IGameGenerationStateProvider, bool>(
+            (_, _, game) =>
+            {
+                var body = new SimplePhysicsBody(300, 300, 150, 150, 1_800, 500, 500);
+                Expect(body.IsValid &&
+                    !new SimplePhysicsBody(300, 300, 301, 150, 1_800, 500, 500).IsValid,
+                    "The support footprint was not bounded by the collision footprint.");
+
+                SimpleOccupancyResult tiny = Occupy(4_000, 1_000, 4_000);
+                SimpleOccupancyResult optedOut = Occupy(8_000, 1_000, 8_000);
+                SimpleMotionResult blockedByOptedOut = game.SimplePhysics.ResolveMotion(
+                    new SimpleMotionRequest(Position(6_500, 0, 8_000), 9_500, 8_000, body),
+                    ReadOnlySpan<WorldStaticBounds>.Empty,
+                    true);
+                Expect(!tiny.IsGrounded && tiny.Status == SimpleOccupancyStatus.Blocked,
+                    "A top smaller than the support core established standing support.");
+                Expect(!optedOut.IsGrounded && optedOut.Status == SimpleOccupancyStatus.Blocked &&
+                    blockedByOptedOut.Status == SimpleMotionStatus.Blocked,
+                    "NoTopSupport stopped blocking the body or incorrectly established standing support.");
+                return true;
+
+                SimpleOccupancyResult Occupy(long x, int y, long z) =>
+                    game.SimplePhysics.ProbeOccupancy(
+                        new SimpleOccupancyRequest(Position(x, y, z), body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+
+                static WorldPosition Position(long x, int y, long z)
+                {
+                    if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+                        throw new InvalidOperationException("A static-top-policy point was invalid.");
+                    return value;
+                }
+            },
+            out bool passed) && passed,
+        "The static top-support policy fixture failed.");
+
+    return new TestMetrics(
+        HashText("static-blocking-support-core-no-top-support"),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "A tiny top cannot ground the normal body; NoTopSupport remains body-blocking but cannot " +
+        "establish support. No sliding/contact response is claimed.");
 }
 
 static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
@@ -3668,6 +3774,53 @@ static WorldPack CreatePhysicsTerrainShellWorldPack()
                 sideMaterial,
                 out WorldPackBuildError error),
             $"The P0.1c terrain shell {id} could not be built: {error}.");
+    }
+}
+
+static WorldPack CreateStaticTopPolicyWorldPack()
+{
+    var limits = new WorldPackLimits(
+        1 * 1024 * 1024,
+        maximumChunks: 1,
+        maximumSections: 8,
+        maximumFrozenStatics: 2,
+        maximumMultiInstances: 0,
+        maximumMultiFragments: 0);
+    var builder = new WorldPackBuilder(
+        GameWorldState.DefaultSpace,
+        GameContent.WorldFingerprint,
+        limits);
+    var key = new SpatialChunkKey(GameWorldState.DefaultSpace, 0, 0);
+    var materials = new ushort[TerrainChunkFormat.MaterialCellCount];
+    Array.Fill(materials, checked((ushort)GameTerrainMaterialIds.Grass));
+    var heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
+    Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase) &&
+        builder.TryAddBaseTerrain(key, materials, heightBase, heights, out _),
+        "The static-top-policy BaseTerrain could not be built.");
+
+    AddStatic(1, 4_000, 4_000, 100, WorldStaticFlags.Collidable);
+    AddStatic(2, 8_000, 8_000, 500,
+        WorldStaticFlags.Collidable | WorldStaticFlags.NoTopSupport);
+    Expect(builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError error),
+        $"The static-top-policy WorldPack could not build: {error}.");
+    return artifact!.Open();
+
+    void AddStatic(ulong id, long x, long z, int halfExtent, WorldStaticFlags flags)
+    {
+        Expect(WorldPosition.TryFromGlobalMillimeters(x, 0, z, out WorldPosition position),
+            "A static-top-policy placement was invalid.");
+        var bounds = new WorldStaticBounds(
+            x - halfExtent, 0, z - halfExtent,
+            x + halfExtent + 1, 1_000, z + halfExtent + 1);
+        Expect(builder.TryAddFrozenStatic(new WorldFrozenStaticSource(
+                new WorldStaticId(id),
+                new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Rock),
+                position,
+                WorldYaw.Zero,
+                0,
+                flags,
+                bounds), out WorldPackBuildError error),
+            $"Static-top-policy placement {id} was rejected: {error}.");
     }
 }
 

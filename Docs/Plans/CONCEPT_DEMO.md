@@ -443,9 +443,16 @@ Permanent D0.0 acceptance proves through the real Single Player client that:
 - the historical Cabin WorldPack bytes/fingerprint remain unchanged.
 
 Subsequent human-play hardening lowers the Orbit/ThirdPerson wheel-zoom floor from 7 m to 3 m and
-makes complete collidable static bounds tops physical support, so a jump onto the authored
-rock lands grounded rather than becoming stuck in blocker-only state. This remains bounded Simple
-Physics; moving platforms and actor support are not implied.
+makes complete collidable static bounds tops physical support. Follow-up playability hardening
+separates the 600×600 mm body collision/clearance footprint from a 300×300 mm central support/feet
+footprint. The authored rock, Cabin wall, shelf, broad log, or plank can therefore support ordinary
+landing and traversal when the feet fit, without making the actor body narrower. Collidable frozen
+geometry supports on top by default; the rare `NoTopSupport` override remains blocking while opting
+out of standing/landing. Tightropes and ladders remain future explicit Game traversal semantics, not
+special Physics prefab cases or reasons to shrink normal support to an implausible size.
+
+This remains bounded Simple Physics; moving platforms, sliding/contact response, dynamic-projected
+support, actor support, and special narrow traversal are not implied.
 
 D0.0 does not implement render-distance policy, the Far Island/gate, terrain editing, or other
 deferred Physics features.

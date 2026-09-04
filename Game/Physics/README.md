@@ -10,7 +10,8 @@ implementation:
 SimpleMotionRequest
     current WorldPosition
     desired global X/Z endpoint
-    upright body extents + explicit step-up/down limits
+    upright collision extents + central support/feet extents
+    + explicit step-up/down limits
         ↓
 UltraSimSimplePhysics
     bounded grounded path sampling
@@ -24,7 +25,8 @@ SimpleMotionResult
 
 SimpleOccupancyRequest
     requested X/Y/Z (Y is a support-selection hint)
-    upright body extents + explicit step-up/down limits
+    upright collision extents + central support/feet extents
+    + explicit step-up/down limits
         ↓
 nearest actual support + same footprint/clearance/static/dynamic legality
         ↓
@@ -56,13 +58,16 @@ query and authoritative relocation its first Game consumer, and P0.1b changes en
 collision to a complete linear blocker sweep. P0.1c adds bounded grounded terrain support,
 clearance, and steps:
 
-- an upright 300 mm X/Z-radius, 1,800 mm-high playable body with explicit 500 mm step-up/down;
+- an upright 300 mm X/Z collision radius, independent 150 mm X/Z support radius,
+  1,800 mm height, and explicit 500 mm step-up/down;
 - support selection uses actual sampled height, never `WorldSurfaceId`, fragment order, or an
   authoring layer rank;
 - occupancy chooses the support physically nearest its requested Y, with lower support winning an
   exact distance tie;
 - motion chooses the highest support reachable from the previous grounded Y;
-- center plus four footprint corners must each have bounded reachable support;
+- center plus four support-footprint corners must each have bounded reachable support;
+- body-footprint samples remain authoritative for blockers, ceiling clearance, structural
+  residency, and grounded elevation changes across a step face;
 - Bottom faces provide low-ceiling clearance, while a shell's own Bottom does not prevent standing
   on its selected Top;
 - Present BaseTerrain and additional Top faces support; intentional void is `Unsupported`;
@@ -83,18 +88,50 @@ clearance, and steps:
 - broadphase candidates are filtered by exact swept geometry rather than becoming false hits;
 - sweep candidate/hit pressure remains bounded and fails closed.
 
-P0.1d adds the terrain-contact primitive consumed by Game-owned vertical motion. It samples at the
+P0.1d adds the structural-contact primitive consumed by Game-owned vertical motion. It samples at the
 same no-more-than-250 mm spacing and 512-sample ceiling, keeps intentional resident void as clear
-unsupported air, lands descending bodies on the first complete footprint-supporting Top/Base face,
+unsupported air, lands descending bodies on the first complete support-footprint Top/Base/static
+face,
 and stops ascending bodies at the first Bottom face reached by any footprint point. Structural data
 must be completely resident for all five footprint columns or resolution fails closed. Airborne
 requests do not snap to a nearby support merely because one exists.
 
 The resolver remains all-or-nothing: a blocked or unsupported request realizes no partial
 displacement. Fixed spatial samples are bounded Simple Physics traversal contracts, not a general
-triangle time-of-impact solver or rigid-body character controller. FrozenStatics/Multis and
+triangle time-of-impact solver or rigid-body character controller. Ordinary collidable
+FrozenStatics/Multis support on top unless authored with the rare `NoTopSupport` override;
 Game-projected dynamic bounds remain blockers rather than landing support. The resolver owns no
 gravity, jump admission, vertical state, recovery policy, sliding, depenetration, actor collision,
 navigation, Godot Physics, Jolt, or generalized provider interface. Game composition owns the
 accepted P0.1d grounded/airborne lifecycle above this physical seam; see
 [`PHYSICS.md`](../../Docs/Plans/PHYSICS.md).
+
+## D0 playability hardening — ordinary static top support
+
+Human play exposed an inconsistency after P0.1d: a collidable rock stopped downward motion but its
+top could not become support, leaving the actor airborne and unable to start grounded traversal.
+Simple Physics now considers the top of complete collidable `FrozenStatic`/Multi bounds alongside
+terrain support. A `SimplePhysicsBody` separates its 600×600 mm collision/clearance footprint from
+its 300×300 mm central support/feet footprint. A selected top must cover that support footprint, be
+within the same bounded step/landing interval, satisfy full-body structural clearance, and pass the
+existing exact swept blocker test. A grounded elevation change still requires full body-footprint
+coverage so the controller cannot snap through the vertical face of a narrow step.
+
+`Collidable` is the common-case compact physical contract: it blocks the body and supports on its
+top. `NoTopSupport` is a rare fail-closed override for a solid top that must not establish standing
+or landing; it is invalid without `Collidable` and does not weaken body blocking. This keeps ordinary
+floors, roofs, crates, walls, shelves, rocks, broad logs, and planks geometry-driven without growing
+a gameplay-object taxonomy in Physics.
+
+`SimplePhysicalSupport` names whether a contact came from terrain or static geometry. Terrain
+contacts retain their `WorldSurfaceId`/face; static bounds do not acquire false terrain identity.
+This does not add moving-platform attachment, inherited velocity, arbitrary triangle support,
+dynamic projected support, sliding/contact response, or actor-on-actor support. A tightrope or
+similarly exceptional traversal remains a future Game-owned traversal mode with an explicitly
+selected body/profile; the ordinary body is not made unrealistically narrow and Physics never learns
+what a tightrope prefab is.
+
+Permanent integrated regressions land and move on the authored Concept Demo rock, Cabin wall, and
+Cabin shelf; walk off the wall into unsupported motion; reject a top smaller than the support core;
+and prove `NoTopSupport` stays blocking without grounding. The warmed ordinary static-support path
+continues to allocate 0 B.

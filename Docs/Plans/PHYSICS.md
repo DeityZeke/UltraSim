@@ -7,8 +7,9 @@ blocker collision. Terrain T1.1 supplies multiple immutable structural surface
 candidates per X/Z column; P0.1c now selects actual support, checks footprint and
 clearance, and enforces bounded grounded steps. P0.1d adds Game-owned grounded/airborne
 state, jump admission, deterministic gravity, horizontal air control, terrain-shell
-landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. D0.0 playability
-hardening subsequently admits complete collidable frozen-static/Multi bounds tops as support.
+landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. D0 human-play
+hardening subsequently admits complete collidable frozen-static/Multi bounds tops as support and
+separates the playable body's collision/clearance footprint from its central support/feet footprint.
 Sliding, general triangle time-of-impact, moving support, and actor collision remain unstarted.
 
 Concept Demo D0.0 is the accepted first integrated consumer of this chain: it traverses beneath a
@@ -490,26 +491,54 @@ reservation, and one integrated observation of 57.049 us mean / 87.739 us p95.
 The preceding P0.1c artifact observed 54.835 us / 82.309 us; these single-run integrated
 figures retain the cost change as regression context and are not a causal throughput claim.
 
-## D0.0 playability hardening — static top support
+## D0 playability hardening — ordinary static top support
 
 Human play exposed an inconsistency after P0.1d: a collidable rock stopped downward motion but its
 top could not become support, leaving the actor airborne and unable to start grounded traversal.
 Simple Physics now considers the top of complete collidable `FrozenStatic`/Multi bounds alongside
-terrain support. The selected top must
-cover the full upright-body footprint, be within the same bounded step/landing interval, satisfy
-terrain-shell clearance, and pass the existing exact swept blocker test. Static candidate work
-retains the accepted 16-chunk/64-hit complete-or-fail limits. No gameplay prefab meaning enters
-Physics.
+terrain support. The playable `SimplePhysicsBody` now has two independent physical footprints:
+
+```text
+body collision / clearance     600 x 600 mm
+central support / feet         300 x 300 mm
+```
+
+Body extents still own blocker collision, swept clearance, ceiling checks, and structural residency.
+Terrain/static support selection and same-elevation grounded continuation use the smaller feet
+footprint. A grounded elevation change retains full body-footprint support so a narrow higher top
+cannot cause the body to snap through its vertical face. This lets authored rocks, walls, shelves,
+broad logs, and planks behave as ordinary geometry while retaining a physically meaningful normal
+walking threshold.
+
+The compact frozen-static/Multi policy is deliberately small:
+
+```text
+Collidable
+    blocks the body
+    supports on top by default
+
+Collidable | NoTopSupport
+    blocks the body
+    cannot establish standing/landing
+```
+
+`NoTopSupport` is invalid without `Collidable`. It is a rare physical override, not the beginning of
+a RunUO-style gameplay tile-flag taxonomy. A rope, ladder, or exceptional narrow beam remains future
+Game/content traversal meaning. If gameplay earns manual balance, Game may select a constrained
+movement/body profile; Physics still receives only physical geometry and an effective body profile.
+Static candidate work retains the accepted 16-chunk/64-hit complete-or-fail limits. No gameplay
+prefab meaning enters Physics.
 
 `SimplePhysicalSupport` names whether a contact came from terrain or static geometry. Terrain
 contacts retain their `WorldSurfaceId`/face; static bounds do not acquire false terrain identity.
-Descending actors can land on these tops, occupancy/reconstruction
-recognizes them as grounded, and grounded motion can continue while the footprint remains
-supported. This does not add moving-platform attachment, inherited velocity, arbitrary triangle
-support, dynamic projected support, partial-footprint balance, or actor-on-actor support.
+Descending actors can land on these tops, occupancy/reconstruction recognizes them as grounded,
+and grounded motion can continue while the feet footprint remains supported. This does not add
+moving-platform attachment, inherited velocity, arbitrary triangle support, dynamic projected
+support, sliding/contact response, or actor-on-actor support.
 
-The permanent integrated regression lands on the authored Concept Demo rock, re-probes occupancy,
-moves across its top, and records 0 B warmed allocation.
+Permanent integrated regressions cover the authored Concept Demo rock, Cabin wall and shelf,
+wall-top movement/walk-off/upward launch, a top smaller than the feet footprint, and the blocking but
+non-supporting override. The warmed ordinary static-support path remains 0 B allocated.
 
 ## RunUO archaeology
 

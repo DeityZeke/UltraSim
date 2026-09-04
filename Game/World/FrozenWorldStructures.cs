@@ -93,6 +93,21 @@ public enum WorldStaticFlags : ushort
     None = 0,
     Renderable = 1 << 0,
     Collidable = 1 << 1,
+    /// <summary>
+    /// Rare physical-policy override for a solid whose top must not establish standing/landing.
+    /// Ordinary collidable solids support on top by default.
+    /// </summary>
+    NoTopSupport = 1 << 2,
+}
+
+/// <summary>Shared physical interpretation of compact frozen-static/Multi flags.</summary>
+public static class WorldStaticPhysicalSemantics
+{
+    public static bool BlocksBody(WorldStaticFlags flags) =>
+        (flags & WorldStaticFlags.Collidable) != 0;
+
+    public static bool SupportsTop(WorldStaticFlags flags) =>
+        BlocksBody(flags) && (flags & WorldStaticFlags.NoTopSupport) == 0;
 }
 
 /// <summary>
@@ -408,7 +423,8 @@ internal static class FrozenWorldStructureFormat
     internal const int MultiHeaderBytes = 40;
     internal const int MultiInstanceRowBytes = 40;
     internal const int MultiFragmentRowBytes = 56;
-    internal const WorldStaticFlags KnownFlags = WorldStaticFlags.Renderable | WorldStaticFlags.Collidable;
+    internal const WorldStaticFlags KnownFlags =
+        WorldStaticFlags.Renderable | WorldStaticFlags.Collidable | WorldStaticFlags.NoTopSupport;
 }
 
 public sealed partial class WorldPackBuilder
@@ -500,7 +516,9 @@ public sealed partial class WorldPackBuilder
 internal static class FrozenWorldStructureCodec
 {
     internal static bool FlagsAreValid(WorldStaticFlags flags) =>
-        (flags & ~FrozenWorldStructureFormat.KnownFlags) == 0;
+        (flags & ~FrozenWorldStructureFormat.KnownFlags) == 0 &&
+        ((flags & WorldStaticFlags.NoTopSupport) == 0 ||
+         (flags & WorldStaticFlags.Collidable) != 0);
 
     internal static bool BoundsFitHomeHalo(in WorldPosition position, in WorldStaticBounds bounds)
     {
