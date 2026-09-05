@@ -24,6 +24,29 @@ public readonly struct ParticipantId : IEquatable<ParticipantId>, IComparable<Pa
     public static bool operator !=(ParticipantId left, ParticipantId right) => !left.Equals(right);
 }
 
+/// <summary>Finite Game-owned body choices admitted by the Round-1 guest/demo policy.</summary>
+public enum GameGuestBody : byte
+{
+    None = 0,
+    HumanFemale = 1,
+    HumanMale = 2,
+}
+
+/// <summary>Untrusted guest-entry intent. Admission validates and canonicalizes this value.</summary>
+public readonly record struct GameGuestAdmissionRequest(
+    GameGuestBody Body,
+    string? DisplayName);
+
+/// <summary>Canonical session-scoped guest identity accepted by authoritative Admission.</summary>
+public readonly record struct GameGuestIdentity(
+    GameGuestBody Body,
+    string? DisplayName)
+{
+    public bool IsValid =>
+        Body is GameGuestBody.HumanFemale or GameGuestBody.HumanMale &&
+        !string.IsNullOrWhiteSpace(DisplayName);
+}
+
 /// <summary>
 /// Narrow game-policy seam for creating and validating playable ECS entities.
 /// It is separate from the Admission/UI implementation so authoritative game
@@ -34,4 +57,17 @@ public interface IAdmissionEntityBinder
     bool TryCreatePlayable(EcsWorld world, ParticipantId participant, out Entity entity);
 
     bool IsPlayable(EcsWorld world, in CharacterRecord character, Entity resolvedEntity);
+}
+
+/// <summary>
+/// Optional concrete Game seam for accountless guest bodies. Admission owns validation and the
+/// binder owns which compiled playable definition realizes an accepted finite body identity.
+/// </summary>
+public interface IGuestAdmissionEntityBinder : IAdmissionEntityBinder
+{
+    bool TryCreateGuestPlayable(
+        EcsWorld world,
+        ParticipantId participant,
+        GameGuestBody body,
+        out Entity entity);
 }

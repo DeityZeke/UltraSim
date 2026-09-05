@@ -41,7 +41,7 @@ public sealed class GameStaging
 }
 
 /// <summary>Concrete game composition owning one schema, content set, and generation-state root.</summary>
-public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEntityBinder
+public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissionEntityBinder
 {
     public const int SpatialLifecycleRecordCapacity = 8_192;
     public const int NetworkLifecycleRecordCapacity = SpatialLifecycleRecordCapacity;
@@ -168,6 +168,24 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         entity = Entity.Null;
         return _contentByWorld.TryGetValue(world, out GameContent? content) &&
             world.TryInstantiate(content.Character, out entity);
+    }
+
+    public bool TryCreateGuestPlayable(
+        EcsWorld world,
+        ParticipantId participant,
+        GameGuestBody body,
+        out Entity entity)
+    {
+        entity = Entity.Null;
+        if (!_contentByWorld.TryGetValue(world, out GameContent? content))
+            return false;
+        PrefabHandle playable = body switch
+        {
+            GameGuestBody.HumanFemale => content.Character,
+            GameGuestBody.HumanMale => content.CharacterMale,
+            _ => default,
+        };
+        return playable.IsValid && world.TryInstantiate(playable, out entity);
     }
 
     public bool IsPlayable(EcsWorld world, in CharacterRecord character, Entity resolvedEntity) =>

@@ -150,6 +150,12 @@ foreach (string configuration in configurations)
             "--path", "Client/Godot",
             "--", "--d0-4-smoke", "--expect-edition=SinglePlayer",
         ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--d0-5-smoke", "--expect-edition=SinglePlayer",
+        ]);
 
         BuildClientApplication(root, configuration, "Online");
         Run(root, godot,
@@ -680,6 +686,7 @@ static void VerifyDocumentation(string root)
         "Client/BuiltInTestWorlds/README.md",
         "Client/Local/README.md",
         "Client/Godot/README.md",
+        "Game/Admission/README.md",
         "Game/World/README.md",
         "Game/Chat/README.md",
         "Game/Physics/README.md",
@@ -710,7 +717,8 @@ static void VerifyDocumentation(string root)
             "Kernels/Network/README.md", "Kernels/Spatial/README.md", "Client/Core/README.md",
             "Client/Content/README.md", "Client/BuiltInTestWorlds/README.md",
             "Client/Local/README.md", "Client/Godot/README.md", "Game/World/README.md",
-            "Game/Chat/README.md", "Game/Physics/README.md", "Game/Replication/README.md",
+            "Game/Admission/README.md", "Game/Chat/README.md", "Game/Physics/README.md",
+            "Game/Replication/README.md",
             "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =

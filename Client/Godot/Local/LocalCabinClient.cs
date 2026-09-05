@@ -4,6 +4,7 @@ using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.Client.Local;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.UI;
@@ -26,6 +27,7 @@ public readonly record struct LocalCabinPresentationSnapshot(
     ContentCatalogGenerationId ContentGeneration,
     ContentHash WallTextureHash,
     CabinHumanBody HumanBody,
+    string? DisplayName,
     int HumanMeshInstances,
     float CameraPivotMeters,
     float NameplateHeightMeters,
@@ -92,6 +94,9 @@ public partial class LocalCabinClient : Node3D
     private CanvasLayer? _shellHudLayer;
     private CanvasLayer? _shellWorldUiLayer;
     private CabinHumanBody _humanBody = CabinHumanBody.XBot;
+    private string _displayName = "Local Guest";
+    private GameGuestAdmissionRequest _guestAdmission = new(
+        GameGuestBody.HumanFemale, "Local Guest");
     // F0.2 acceptance retains the historical Cabin fixture in the maintained application;
     // normal Single Player composition selects the Concept Demo explicitly.
     private bool _useConceptDemoWorld;
@@ -168,7 +173,8 @@ public partial class LocalCabinClient : Node3D
         CanvasLayer? worldUiLayer = null,
         CabinHumanBody humanBody = CabinHumanBody.XBot,
         ResolvedClientSettings? settings = null,
-        bool useConceptDemoWorld = false)
+        bool useConceptDemoWorld = false,
+        string? guestDisplayName = null)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -183,6 +189,13 @@ public partial class LocalCabinClient : Node3D
         _shellHudLayer = hudLayer;
         _shellWorldUiLayer = worldUiLayer;
         _humanBody = humanBody;
+        _guestAdmission = new GameGuestAdmissionRequest(
+            humanBody == CabinHumanBody.XBot
+                ? GameGuestBody.HumanFemale
+                : GameGuestBody.HumanMale,
+            guestDisplayName ?? (humanBody == CabinHumanBody.XBot
+                ? "Human Female"
+                : "Human Male"));
         _useConceptDemoWorld = useConceptDemoWorld;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     }
@@ -225,6 +238,7 @@ public partial class LocalCabinClient : Node3D
             _resolvedContent?.Catalog.Generation ?? default,
             _assetResolver?.WallTextureHash ?? default,
             _humanBody,
+            _displayName,
             _humanMeshInstances,
             CameraPivotMeters,
             NameplateHeightMeters,
@@ -637,8 +651,8 @@ public partial class LocalCabinClient : Node3D
         if (_saveRoot is null || _resolvedContent is null || _contentOracle is null)
             throw new InvalidOperationException("Cabin composition was not configured.");
         _localSession = _useConceptDemoWorld
-            ? LocalPlayableSession.CreateConceptDemo(_saveRoot)
-            : LocalPlayableSession.CreateCabin(_saveRoot);
+            ? LocalPlayableSession.CreateConceptDemo(_saveRoot, _guestAdmission)
+            : LocalPlayableSession.CreateCabin(_saveRoot, _guestAdmission);
         _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
         // Command sequencing belongs to the application/control-session lineage. Presentation
         // rebuilds (render-distance changes and Game-generation replacement) must not reset it.
@@ -649,9 +663,18 @@ public partial class LocalCabinClient : Node3D
             new ClientChatLimits(64, 256, 128));
         if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The local authority did not publish its initial view.");
+        _humanBody = view.GuestIdentity.Body switch
+        {
+            GameGuestBody.HumanFemale => CabinHumanBody.XBot,
+            GameGuestBody.HumanMale => CabinHumanBody.YBot,
+            _ => throw new InvalidOperationException(
+                "The authority published an unsupported guest body."),
+        };
+        _displayName = view.GuestIdentity.DisplayName ??
+            throw new InvalidOperationException("The authority published no guest display name.");
         RebuildClientProjection(view);
         DriveLocalUntil(() =>
-            CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1 &&
+            CountPresentedCharacters() == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor) == 1 &&
             CountPresentedPrefab(GameWorldPublicPrefabIds.WorldChest) == 1 &&
             (!_useConceptDemoWorld ||
@@ -805,6 +828,52 @@ public partial class LocalCabinClient : Node3D
         return GetPresentationSnapshot();
     }
 
+    /// <summary>
+    /// Permanent D0.5 canary proving the accepted Game guest identity, selected body prefab,
+    /// controlled presentation, nameplate, and Chat label all agree.
+    /// </summary>
+    public LocalCabinPresentationSnapshot RunD05Acceptance(
+        string expectedDisplayName,
+        CabinHumanBody expectedBody)
+    {
+        if (!_initialized || !_useConceptDemoWorld || _localSession is null ||
+            _humanPresentation is null || _chatState is null)
+            throw new InvalidOperationException(
+                "D0.5 requires the initialized Concept Demo guest consumer.");
+        if (!_localSession.TryGetLatestView(out LocalPlayableAuthorityView authority) ||
+            authority.GuestIdentity.DisplayName != expectedDisplayName ||
+            authority.GuestIdentity.Body != (expectedBody == CabinHumanBody.XBot
+                ? GameGuestBody.HumanFemale
+                : GameGuestBody.HumanMale) ||
+            _displayName != expectedDisplayName || _humanBody != expectedBody)
+            throw new InvalidOperationException(
+                "The controlled presentation did not consume the authoritative guest identity.");
+        if (_humanPresentation.FindChild(
+                "ControlledPlayerNameplateCalibration", recursive: true, owned: false) is not
+                Label3D { Text: var nameplate } || nameplate != expectedDisplayName)
+            throw new InvalidOperationException(
+                "The controlled actor nameplate did not use the accepted guest display name.");
+        uint expectedPrefab = expectedBody == CabinHumanBody.XBot
+            ? GameWorldPublicPrefabIds.Character
+            : GameWorldPublicPrefabIds.CharacterMale;
+        uint otherPrefab = expectedBody == CabinHumanBody.XBot
+            ? GameWorldPublicPrefabIds.CharacterMale
+            : GameWorldPublicPrefabIds.Character;
+        if (CountPresentedPrefab(expectedPrefab) != 1 || CountPresentedPrefab(otherPrefab) != 0)
+            throw new InvalidOperationException(
+                "The authoritative guest body did not select the matching public character prefab.");
+
+        ulong before = _chatState.GetSnapshot().Applied;
+        SubmitChat("guest identity canary");
+        DriveLocalUntil(() => _chatState.GetSnapshot().Applied == before + 1);
+        int count = _chatState.CopyRecent(_chatRows);
+        if (count == 0 || _chatRows[count - 1].DisplayLabel != expectedDisplayName ||
+            _chatRows[count - 1].Text != "guest identity canary")
+            throw new InvalidOperationException(
+                "Spatial Chat did not use the accepted guest display name.");
+        return GetPresentationSnapshot();
+    }
+
     private MultiMeshInstance3D RequireFallbackLabGroup(
         ushort variant,
         GodotWorldAssetAvailability availability)
@@ -879,7 +948,7 @@ public partial class LocalCabinClient : Node3D
         var nameplate = new Label3D
         {
             Name = "ControlledPlayerNameplateCalibration",
-            Text = _humanBody == CabinHumanBody.XBot ? "Human Female" : "Human Male",
+            Text = _displayName,
             Position = new Vector3(0, NameplateHeightMeters, 0),
             Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
             NoDepthTest = true,
@@ -1568,15 +1637,15 @@ public partial class LocalCabinClient : Node3D
             WorldYaw.QuarterTurn);
         SetProfile(ControlProfile.OrbitCommand);
 
-        int before = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
+        int before = CountPresentedCharacters();
         RelocateControlledActor(GamePlayableWorld.ClearCrossChunkPosition);
         DriveLocalUntil(() => _player.Chunk == GamePlayableWorld.ClearCrossChunkPosition.Chunk &&
-            CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1);
-        int afterCrossing = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
+            CountPresentedCharacters() == 1);
+        int afterCrossing = CountPresentedCharacters();
         RelocateControlledActor(GamePlayableWorld.PlayerStart);
         DriveLocalUntil(() => _player == GamePlayableWorld.PlayerStart &&
-            CountPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1);
-        int afterReturn = CountPresentedPrefab(GameWorldPublicPrefabIds.Character);
+            CountPresentedCharacters() == 1);
+        int afterReturn = CountPresentedCharacters();
         if (before != 1 || afterCrossing != 1 || afterReturn != 1)
             throw new InvalidOperationException(
                 $"Public presentation ghosted across a chunk move: {before}/{afterCrossing}/{afterReturn}.");
@@ -2048,6 +2117,10 @@ public partial class LocalCabinClient : Node3D
         }
     }
 
+    private int CountPresentedCharacters() =>
+        CountPresentedPrefab(GameWorldPublicPrefabIds.Character) +
+        CountPresentedPrefab(GameWorldPublicPrefabIds.CharacterMale);
+
     /// <summary>
     /// Verifies the actual native public-presentation resources after the shell has committed the
     /// session. This is deliberately later than initial semantic convergence: loading may build
@@ -2055,7 +2128,8 @@ public partial class LocalCabinClient : Node3D
     /// </summary>
     private void ValidateInitialNativePresentation()
     {
-        int characters = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character);
+        int characters = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character) +
+            CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.CharacterMale);
         int doors = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor);
         int chests = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.WorldChest);
         int telepads = _useConceptDemoWorld
@@ -2641,7 +2715,7 @@ public partial class LocalCabinClient : Node3D
 
         private Mesh ResolvePublicMeshCore(uint prefabId) => prefabId switch
         {
-            GameWorldPublicPrefabIds.Character => _character,
+            GameWorldPublicPrefabIds.Character or GameWorldPublicPrefabIds.CharacterMale => _character,
             GameWorldPublicPrefabIds.CabinDoor => _door,
             GameWorldPublicPrefabIds.WorldChest => _chest,
             GameWorldPublicPrefabIds.WoodlandAnimal => _animal,

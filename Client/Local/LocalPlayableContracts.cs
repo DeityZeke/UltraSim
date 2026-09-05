@@ -1,4 +1,5 @@
 using UltraSim.Client.Core;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.World;
@@ -46,6 +47,7 @@ public readonly record struct LocalAdministrativeRequest(
 public readonly record struct LocalPlayableAuthorityView(
     ulong GenerationId,
     ulong SimulationTick,
+    GameGuestIdentity GuestIdentity,
     WorldPosition PlayerPosition,
     WorldYaw PlayerOrientation,
     bool DoorIsOpen,

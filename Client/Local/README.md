@@ -22,6 +22,13 @@ and all Game mutation. It advances at authoritative cadence independently of God
 Presentation stalls therefore accumulate only bounded domain debt; they do not
 pause the world or grant the presentation thread authority access.
 
+Local session construction accepts one untrusted `GameGuestAdmissionRequest`. The owner thread
+submits it to authoritative Admission before populating the world. Admission validates and retains
+the canonical session-scoped `GameGuestIdentity`; the immutable authority view then exposes that
+accepted result to the local Client. Body selection chooses a concrete compiled Game/public actor
+prefab, and Chat derives its sender label from the retained Admission session. The local bridge does
+not turn the typed client value into truth, create an Accounting record, or persist guest identity.
+
 The bridge is deliberately concrete rather than a transport framework:
 
 ```text

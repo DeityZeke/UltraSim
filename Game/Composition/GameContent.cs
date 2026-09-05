@@ -8,6 +8,7 @@ namespace UltraSim.Game.Composition;
 public static class GamePrefabKeys
 {
     public static readonly PrefabKey Character = new("game.character.default");
+    public static readonly PrefabKey CharacterMale = new("game.character.human-male");
     public static readonly PrefabKey CharacterDormant = new("game.character.dormant");
     public static readonly PrefabKey Backpack = new("game.container.backpack");
     public static readonly PrefabKey GridBackpack = new("game.container.grid-backpack");
@@ -80,6 +81,7 @@ public static class GameWorldPublicPrefabIds
     public const uint SkyTelepad = 5;
     public const uint FarGate = 6;
     public const uint InformationalSign = 7;
+    public const uint CharacterMale = 8;
 }
 
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
@@ -95,6 +97,7 @@ public sealed class GameContent : IInventoryContentCatalog
         CompiledPrefabCatalog prefabs,
         InventoryRuleCatalog inventoryRules,
         PrefabHandle character,
+        PrefabHandle characterMale,
         InventoryContainerDefinition backpack,
         InventoryContainerDefinition gridBackpack,
         InventoryContainerDefinition worldChest,
@@ -115,6 +118,7 @@ public sealed class GameContent : IInventoryContentCatalog
         Prefabs = prefabs;
         InventoryRules = inventoryRules;
         Character = character;
+        CharacterMale = characterMale;
         Backpack = backpack.Handle;
         GridBackpack = gridBackpack.Handle;
         WorldChest = worldChest.Handle;
@@ -157,6 +161,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public CompiledPrefabCatalog Prefabs { get; }
     public InventoryRuleCatalog InventoryRules { get; }
     public PrefabHandle Character { get; }
+    public PrefabHandle CharacterMale { get; }
     public PrefabHandle Backpack { get; }
     public PrefabHandle GridBackpack { get; }
     public PrefabHandle WorldChest { get; }
@@ -253,6 +258,13 @@ public sealed class GameContent : IInventoryContentCatalog
         character.With(new WorldPublicComponent(new WorldPublicDescriptor(
             GameWorldPublicPrefabIds.Character, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
         character.DisplayName("Character");
+        PrefabBuilder characterMale = content.Define(GamePrefabKeys.CharacterMale);
+        characterMale.With(new GameCharacter { Marker = 1 });
+        characterMale.With(new GameSimulationState { TickMarker = 0 });
+        characterMale.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        characterMale.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.CharacterMale, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        characterMale.DisplayName("Human Male");
         // The paired no-simulation shape is a real content route used when a
         // character's scheduled simulation membership is explicitly suspended.
         PrefabBuilder dormantCharacter = content.Define(GamePrefabKeys.CharacterDormant);
@@ -353,6 +365,7 @@ public sealed class GameContent : IInventoryContentCatalog
             compiled,
             inventoryRules,
             compiled.GetHandle(GamePrefabKeys.Character),
+            compiled.GetHandle(GamePrefabKeys.CharacterMale),
             BindContainer(compiled, backpackSource),
             BindContainer(compiled, gridBackpackSource),
             BindContainer(compiled, chestSource),

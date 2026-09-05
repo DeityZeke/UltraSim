@@ -33,6 +33,7 @@ public sealed class LocalPlayableSession : IDisposable
     private readonly WorldPack _worldPack;
     private readonly BoundWorldPack _boundWorld;
     private readonly bool _conceptDemo;
+    private readonly GameGuestAdmissionRequest _guestAdmission;
     private readonly string _saveRoot;
     private readonly LocalPlayableSessionLimits _limits;
     private readonly BoundedSpscQueue<LocalPlayableCommand> _commands;
@@ -56,23 +57,42 @@ public sealed class LocalPlayableSession : IDisposable
     public static LocalPlayableSession CreateCabin(
         string saveRoot,
         LocalPlayableSessionLimits limits = default)
+        => CreateCabin(
+            saveRoot,
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Local Guest"),
+            limits);
+
+    public static LocalPlayableSession CreateCabin(
+        string saveRoot,
+        in GameGuestAdmissionRequest guestAdmission,
+        LocalPlayableSessionLimits limits = default)
     {
         WorldPack pack = GamePlayableWorld.CreateWorldPack();
-        return Create(pack, saveRoot, limits, conceptDemo: false);
+        return Create(pack, saveRoot, guestAdmission, limits, conceptDemo: false);
     }
 
     /// <summary>Creates the permanent local application path over the sparse Concept Demo world.</summary>
     public static LocalPlayableSession CreateConceptDemo(
         string saveRoot,
         LocalPlayableSessionLimits limits = default)
+        => CreateConceptDemo(
+            saveRoot,
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Local Guest"),
+            limits);
+
+    public static LocalPlayableSession CreateConceptDemo(
+        string saveRoot,
+        in GameGuestAdmissionRequest guestAdmission,
+        LocalPlayableSessionLimits limits = default)
     {
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
-        return Create(pack, saveRoot, limits, conceptDemo: true);
+        return Create(pack, saveRoot, guestAdmission, limits, conceptDemo: true);
     }
 
     private static LocalPlayableSession Create(
         WorldPack pack,
         string saveRoot,
+        in GameGuestAdmissionRequest guestAdmission,
         LocalPlayableSessionLimits limits,
         bool conceptDemo)
     {
@@ -95,19 +115,22 @@ public sealed class LocalPlayableSession : IDisposable
             ]);
         if (!pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"The playable WorldPack did not bind: {error}.");
-        return new LocalPlayableSession(pack, bound!, saveRoot, limits, conceptDemo);
+        return new LocalPlayableSession(
+            pack, bound!, saveRoot, guestAdmission, limits, conceptDemo);
     }
 
     public LocalPlayableSession(
         WorldPack worldPack,
         BoundWorldPack boundWorld,
         string saveRoot,
+        GameGuestAdmissionRequest guestAdmission,
         LocalPlayableSessionLimits limits = default,
         bool conceptDemo = false)
     {
         _worldPack = worldPack ?? throw new ArgumentNullException(nameof(worldPack));
         _boundWorld = boundWorld ?? throw new ArgumentNullException(nameof(boundWorld));
         _conceptDemo = conceptDemo;
+        _guestAdmission = guestAdmission;
         ArgumentException.ThrowIfNullOrWhiteSpace(saveRoot);
         if (worldPack.Fingerprint != boundWorld.Fingerprint)
             throw new ArgumentException("The bound world does not belong to the supplied WorldPack.", nameof(boundWorld));
@@ -303,9 +326,14 @@ public sealed class LocalPlayableSession : IDisposable
             runtime.Initialize();
             runtime.Start();
             admission = new AdmissionService(runtime.Game, composition);
-            AdmissionResult entered = admission.JoinAccountless(new ParticipantId(4010));
+            AdmissionResult entered = admission.JoinGuest(
+                new ParticipantId(4010), _guestAdmission);
             if (!entered.IsEntered)
-                throw new InvalidOperationException("The local playable participant could not enter.");
+                throw new InvalidOperationException(
+                    entered.Message ?? "The local playable guest could not enter.");
+            if (!entered.GuestIdentity.IsValid)
+                throw new InvalidOperationException(
+                    "Authoritative Admission did not retain the accepted guest identity.");
             bool conceptDemo = _conceptDemo;
             if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
                     (world, _, game) => conceptDemo
@@ -348,7 +376,8 @@ public sealed class LocalPlayableSession : IDisposable
             bool lastAdminSucceeded = false;
             string? lastAdminMessage = null;
 
-            CaptureView(runtime, entities, lastCommandSequence, lastSelection, lastCommand, lastChest,
+            CaptureView(runtime, entities, entered.GuestIdentity,
+                lastCommandSequence, lastSelection, lastCommand, lastChest,
                 lastAdmin, lastAdminSucceeded, lastAdminMessage);
             _running = true;
             _ready.Set();
@@ -400,7 +429,8 @@ public sealed class LocalPlayableSession : IDisposable
                 DriveChat(chat, entered.Participant, recipients);
                 DriveWorld(
                     runtime, entities, recipient, worldPump, snapshotScratch, deltaScratch);
-                CaptureView(runtime, entities, lastCommandSequence, lastSelection, lastCommand, lastChest,
+                CaptureView(runtime, entities, entered.GuestIdentity,
+                    lastCommandSequence, lastSelection, lastCommand, lastChest,
                     lastAdmin, lastAdminSucceeded, lastAdminMessage);
             }
 
@@ -759,6 +789,7 @@ public sealed class LocalPlayableSession : IDisposable
     private void CaptureView(
         ServerRuntime runtime,
         GamePlayableWorldEntities entities,
+        GameGuestIdentity guestIdentity,
         ulong lastCommandSequence,
         LocalPlayableSelection lastSelection,
         GamePlayerCommandResult lastCommand,
@@ -784,6 +815,7 @@ public sealed class LocalPlayableSession : IDisposable
                     return new LocalPlayableAuthorityView(
                         generationId,
                         world.TickCount,
+                        guestIdentity,
                         position,
                         descriptor.Orientation,
                         doorOpen,

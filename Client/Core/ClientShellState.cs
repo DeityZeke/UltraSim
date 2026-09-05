@@ -8,6 +8,7 @@ public enum ClientShellScreen : byte
     InSessionOptions = 4,
     Settings = 5,
     Error = 6,
+    Admission = 7,
 }
 
 public enum ClientInputFocusOwner : byte
@@ -84,7 +85,8 @@ public sealed class ClientShellCoordinator
     public ClientShellSnapshot Snapshot(bool textEntryFocused = false, bool debugControlFocused = false)
     {
         EnsureOwner();
-        bool modal = _screen is ClientShellScreen.MainMenu or ClientShellScreen.Loading or
+        bool modal = _screen is ClientShellScreen.MainMenu or ClientShellScreen.Admission or
+            ClientShellScreen.Loading or
             ClientShellScreen.InSessionOptions or ClientShellScreen.Settings or ClientShellScreen.Error;
         return new ClientShellSnapshot(
             _screen,
@@ -106,6 +108,16 @@ public sealed class ClientShellCoordinator
         Transition(ClientShellScreen.Loading);
     }
 
+    public void BeginAdmission(string status)
+    {
+        EnsureOwner();
+        if (_sessionActive)
+            throw new InvalidOperationException("An active client session cannot enter admission.");
+        _status = ValidateMessage(status, nameof(status));
+        _error = null;
+        Transition(ClientShellScreen.Admission);
+    }
+
     public void EnterSession(string status)
     {
         EnsureOwner();
@@ -120,7 +132,8 @@ public sealed class ClientShellCoordinator
     public void OpenSettings()
     {
         EnsureOwner();
-        if (_screen is ClientShellScreen.Loading or ClientShellScreen.Error)
+        if (_screen is ClientShellScreen.Admission or ClientShellScreen.Loading or
+            ClientShellScreen.Error)
             throw new InvalidOperationException("Settings are unavailable during a terminal transition surface.");
         _settingsReturn = _sessionActive ? ClientShellScreen.InSessionOptions : ClientShellScreen.MainMenu;
         Transition(ClientShellScreen.Settings);

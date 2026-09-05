@@ -16,7 +16,8 @@ jump/gravity/fall/landing/recovery. Concept Demo D0.0 composes those accepted ca
 permanent Single Player client as a floating Central Island, MountainShell cave, detached Sky
 Island, and Game-owned telepad. D0.1 adds live bounded structural/render residency, D0.2 adds the
 sparse Far Island and reciprocal authoritative gates, D0.3 adds the authoritative informational
-sign, and D0.4 now closes the local Fallback Lab canaries described below.
+sign, D0.4 closes the local Fallback Lab canaries, and D0.5 closes the local guest/demo
+admission presentation described below.
 
 The demo has two purposes:
 
@@ -186,9 +187,41 @@ semantics inside the animation or Inventory implementation.
 
 ---
 
-# 4. Guest/demo admission — no Accounting requirement
+# 4. Guest/demo admission — D0.5 local path CLOSED
 
 The concept demo does not require account creation or saved character ownership.
+
+D0.5 inserts an `Enter Demo` surface between the permanent Single Player main menu and authority
+startup. It collects only a display-name candidate and one of the finite X/Human Female or Y/Human
+Male body choices. Invalid input leaves the shell on the Admission surface and does not create or
+start a local authoritative session.
+
+The client-side check exists for immediate feedback only. Authoritative Admission validates the
+same untrusted request again and retains the accepted `GameGuestIdentity` on the participant's
+session. The accepted local policy is:
+
+```text
+display name
+    trim leading/trailing whitespace
+    require 1..24 Unicode scalar values
+    require at most 96 canonical UTF-8 bytes
+    reject control characters
+    reject malformed Unicode
+
+body
+    HumanFemale or HumanMale only
+```
+
+The body choice selects a distinct compiled Game/public character prefab; it is not a Godot-only
+mesh toggle. The controlled nameplate and spatial-Chat sender label consume the canonical identity
+published by authority. The D0.5 native gate proves rejected input cannot start authority, padded
+Unicode input is canonicalized, the Y body reaches its matching public prefab, and the accepted
+name reaches both nameplate and Chat presentation.
+
+This identity remains session-scoped. D0.5 adds no Accounting record, durable Character identity,
+name uniqueness, profanity service, account persistence, or remote admission protocol. F0.3 may
+carry the same Game-owned request/accepted-result semantics across the authenticated remote path;
+it must not trust the Online client to publish its own accepted identity.
 
 Desired Online flow:
 
@@ -1378,12 +1411,17 @@ then earn/integrate Concept Demo Round 1 consumers:
     D0.2 sparse geography + Far Island + gate reset              CLOSED
     D0.3 authoritative informational sign                        CLOSED
     D0.4 Fallback Lab missing-content canaries                    CLOSED
-    guest/demo admission presentation
+    D0.5 local guest/demo admission presentation                  CLOSED
+
+then prioritize the first meaningful remote vertical:
+    F0.3a Direct Connect + deployment trust
+    F0.3b remote controlled actor + guest admission
+
+then continue Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-F0.3 remote client / Direct Connect controlled actor
 A0.2+ remote cache/source/content activation
 
 then external Concept Demo multiplayer/stress run

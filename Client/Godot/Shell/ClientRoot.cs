@@ -70,6 +70,12 @@ public abstract partial class ClientRoot : Control
         RenderCurrentSurface();
     }
 
+    protected void BeginAdmission(string status)
+    {
+        _shell.BeginAdmission(status);
+        RenderCurrentSurface();
+    }
+
     protected void CommitSession(string status)
     {
         _shell.EnterSession(status);
@@ -136,7 +142,8 @@ public abstract partial class ClientRoot : Control
         if (Matches(key, ClientSemanticAction.OpenSettings))
         {
             if (snapshot.Screen == ClientShellScreen.Settings) _shell.CloseSettings();
-            else if (snapshot.Screen is not (ClientShellScreen.Loading or ClientShellScreen.Error))
+            else if (snapshot.Screen is not (ClientShellScreen.Admission or
+                ClientShellScreen.Loading or ClientShellScreen.Error))
                 _shell.OpenSettings();
             RenderCurrentSurface();
             GetViewport().SetInputAsHandled();
@@ -162,6 +169,7 @@ public abstract partial class ClientRoot : Control
             case ClientShellScreen.Settings:
                 _shell.CloseSettings();
                 break;
+            case ClientShellScreen.Admission:
             case ClientShellScreen.Loading:
             case ClientShellScreen.Error:
                 RetireCurrentSession();
@@ -196,6 +204,14 @@ public abstract partial class ClientRoot : Control
         _shell.BeginLoading($"{Label(capability)} capability is ready for its consuming checkpoint.");
         RenderCurrentSurface();
     }
+
+    /// <summary>Capability-specific pre-session intent UI; no authority is active yet.</summary>
+    protected virtual void BuildCapabilityAdmissionSurface(in ClientShellSnapshot snapshot) =>
+        BuildMessageSurface(
+            "Enter application",
+            snapshot.Status ?? "Choose how to enter.",
+            "Back",
+            () => ReturnToMainMenu());
 
     /// <summary>Later composition roots retire their concrete session-owned presentation here.</summary>
     protected virtual void RetireCurrentSession() { }
@@ -281,6 +297,9 @@ public abstract partial class ClientRoot : Control
                 break;
             case ClientShellScreen.Settings:
                 BuildSettingsMenu();
+                break;
+            case ClientShellScreen.Admission:
+                BuildCapabilityAdmissionSurface(snapshot);
                 break;
             case ClientShellScreen.Loading:
                 BuildMessageSurface("Loading", snapshot.Status ?? "Preparing client session…", "Back", () =>
@@ -526,16 +545,17 @@ public abstract partial class ClientRoot : Control
                 singlePlayer.EmitSignal(BaseButton.SignalName.Pressed);
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-                if (_shell.Snapshot().Screen != ClientShellScreen.InSession || _menuHost?.Visible != false)
+                if (_shell.Snapshot().Screen is not (ClientShellScreen.Admission or
+                        ClientShellScreen.InSession))
                     throw new InvalidOperationException(
-                        "The Single Player button did not enter the installed local-play capability.");
+                        "The Single Player button did not enter its installed local-play flow.");
                 RetireCurrentSession();
                 ReturnToMainMenu("Shell UI smoke passed.");
             }
 
             GD.Print(
                 $"F0.1 CLIENT SHELL UI PASS edition={_composition.Edition} " +
-                "settings=scrollable transitions=deferred singlePlayer=entered");
+                "settings=scrollable transitions=deferred singlePlayer=admission");
             GetTree().Quit(0);
         }
         catch (Exception exception)
@@ -579,7 +599,7 @@ public abstract partial class ClientRoot : Control
             string.Equals(key.Keycode.ToString().ToUpperInvariant(), input.Code, StringComparison.Ordinal);
     }
 
-    private VBoxContainer CreateCenteredColumn(float width = 360)
+    protected VBoxContainer CreateCenteredColumn(float width = 360)
     {
         var background = new ColorRect
         {
@@ -642,7 +662,7 @@ public abstract partial class ClientRoot : Control
         column.AddChild(control);
     }
 
-    private static Label Title(string text)
+    protected static Label Title(string text)
     {
         var result = new Label
         {
@@ -653,14 +673,14 @@ public abstract partial class ClientRoot : Control
         return result;
     }
 
-    private static Label CenteredLabel(string? text) => new()
+    protected static Label CenteredLabel(string? text) => new()
     {
         Text = text ?? string.Empty,
         HorizontalAlignment = HorizontalAlignment.Center,
         AutowrapMode = TextServer.AutowrapMode.WordSmart,
     };
 
-    private static Button MenuButton(string text) => new()
+    protected static Button MenuButton(string text) => new()
     {
         Text = text,
         CustomMinimumSize = new Vector2(360, 42),
@@ -714,7 +734,7 @@ public abstract partial class ClientRoot : Control
         }
     }
 
-    private static void ConnectDeferred(Button button, Action pressed)
+    protected static void ConnectDeferred(Button button, Action pressed)
     {
         Error result = button.Connect(
             BaseButton.SignalName.Pressed,
@@ -725,7 +745,7 @@ public abstract partial class ClientRoot : Control
                 $"Could not connect deferred button action for '{button.Name}': {result}.");
     }
 
-    private static void FocusFirstButton(Node root)
+    protected static void FocusFirstButton(Node root)
     {
         foreach (Node child in root.GetChildren())
         {

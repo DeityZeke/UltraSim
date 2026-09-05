@@ -50,7 +50,9 @@ The Online preset excludes bundled `Assets/**`. Actual passive-content acquisiti
 the later asset-streaming checkpoints.
 
 For normal development, open this directory in Godot and run the Complete build. Choose **Single
-Player** to enter the Concept Demo island. Runtime diagnostics show the configured render radius and
+Player**, enter a temporary guest display name, choose the X/Human Female or Y/Human Male body, and
+select **Join** to enter the Concept Demo island. The accepted identity exists only for that session;
+no account or saved character is created. Runtime diagnostics show the configured render radius and
 the authored/resident/rendered chunk counts; intentional-void chunks have no mesh, so a larger
 window can change the counts without adding visible geometry at the current location.
 
@@ -73,6 +75,11 @@ magenta/yellow diagnostic material for a missing texture, and both fallbacks tog
 sign explains the cases through the same authoritative informational-UI path. These visuals never
 change the immutable objects' collision or support geometry. `--d0-4-smoke` permanently verifies
 the three fallback classes, model/material independence, native bounds, and sign UI.
+
+`--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
+does not start authority, then enters with a trimmed Unicode name and the Y body and checks the
+authoritative guest identity, selected public character prefab, controlled nameplate, and spatial
+Chat sender label.
 
 F1 Orbit starts in a close three-quarter composition: 45-degree elevation at 14 m rather than the
 older 64-degree/28 m overhead survey view. Version-2 settings that merely captured the exact old

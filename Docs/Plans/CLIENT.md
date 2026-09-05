@@ -1246,6 +1246,25 @@ The local Concept Demo D0.4 fixture proves all four combinations and an authorit
 sign. It is not evidence that CAS, HTTP acquisition, package activation, or hot resource replacement
 already exists.
 
+## D0.5 local guest/demo admission — CLOSED
+
+The permanent Single Player shell now stops on an `Enter Demo` Admission surface before creating
+local authority. The user supplies only an untrusted display-name candidate and the finite X/Human
+Female or Y/Human Male body choice. Invalid input remains on the modal Admission surface and no
+`LocalPlayableSession` exists yet.
+
+Client validation provides immediate bounded feedback, but it is not authority. `AdmissionService`
+revalidates the request, trims the accepted name, rejects empty/control/malformed/over-limit text,
+and retains one canonical session-scoped `GameGuestIdentity`. The accepted limits are 24 Unicode
+scalar values and 96 UTF-8 bytes. Body selection resolves to a concrete compiled Game/public
+character prefab. The local Client consumes the accepted identity for its controlled nameplate and
+Chat sender presentation; it does not reuse the originally typed value as truth.
+
+D0.5 creates no Accounting record, durable Character ownership, uniqueness policy, profanity
+service, or saved guest identity. It adds no remote protocol. The later F0.3 path may transport the
+same Game-owned intent and accepted result after authentication, while keeping participant/session
+identity distinct from client-supplied name/body data.
+
 ---
 
 # 24. Direct Connect first; discovery later

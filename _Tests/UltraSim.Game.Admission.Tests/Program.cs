@@ -8,6 +8,7 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("AccountlessEntryDoesNotCreateAccountingRecords", AccountlessEntryDoesNotCreateAccountingRecords),
+    ("GuestEntryValidatesAndRetainsSessionIdentity", GuestEntryValidatesAndRetainsSessionIdentity),
     ("AccountBackedCharacterSelectUsesRealUiAndBindsPersistentEntity", AccountBackedCharacterSelectUsesRealUiAndBindsPersistentEntity),
     ("EmptyCharacterSelectDisablesPlayDynamically", EmptyCharacterSelectDisablesPlayDynamically),
     ("ForeignAndMissingDurableReferencesRejectEntry", ForeignAndMissingDurableReferencesRejectEntry),
@@ -48,6 +49,47 @@ static void AccountlessEntryDoesNotCreateAccountingRecords()
     Assert.True(result.Entity.IsValid);
     Assert.Equal(default, result.AccountId);
     Assert.Equal(default, result.CharacterId);
+    Assert.False(result.GuestIdentity.IsValid);
+}
+
+static void GuestEntryValidatesAndRetainsSessionIdentity()
+{
+    var composition = new AdmissionComposition();
+    using var runtime = CreateRuntime(composition);
+    runtime.Initialize();
+    runtime.Start();
+    using var service = new AdmissionService(runtime.Game, composition);
+
+    AdmissionResult missingBody = service.JoinGuest(
+        new ParticipantId(1), new GameGuestAdmissionRequest(default, "Valid"));
+    Assert.True(missingBody.IsRejected);
+    Assert.Equal(AdmissionRejection.UnsupportedGuestBody, missingBody.Rejection);
+    AdmissionResult control = service.JoinGuest(
+        new ParticipantId(2), new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Bad\tName"));
+    Assert.True(control.IsRejected);
+    Assert.Equal(AdmissionRejection.InvalidGuestDisplayName, control.Rejection);
+    AdmissionResult tooLong = service.JoinGuest(
+        new ParticipantId(3), new GameGuestAdmissionRequest(
+            GameGuestBody.HumanFemale,
+            new string('a', GameGuestAdmissionPolicy.MaximumDisplayNameScalars + 1)));
+    Assert.True(tooLong.IsRejected);
+    Assert.Equal(AdmissionRejection.InvalidGuestDisplayName, tooLong.Rejection);
+    AdmissionResult malformed = service.JoinGuest(
+        new ParticipantId(4), new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Bad\uD800"));
+    Assert.True(malformed.IsRejected);
+    Assert.Equal(AdmissionRejection.InvalidGuestDisplayName, malformed.Rejection);
+    Assert.Equal(0, service.SessionCount);
+
+    AdmissionResult entered = service.JoinGuest(
+        new ParticipantId(5),
+        new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "  Demo Éowyn  "));
+    Assert.True(entered.IsEntered);
+    Assert.Equal(new GameGuestIdentity(GameGuestBody.HumanMale, "Demo Éowyn"), entered.GuestIdentity);
+    Assert.Equal(GameGuestBody.HumanMale, composition.LastGuestBody);
+    Assert.Equal(default, entered.AccountId);
+    Assert.Equal(default, entered.CharacterId);
+    Assert.True(service.TryGetSession(entered.Participant, out AdmissionResult retained));
+    Assert.Equal(entered.GuestIdentity, retained.GuestIdentity);
 }
 
 static void AccountBackedCharacterSelectUsesRealUiAndBindsPersistentEntity()
@@ -617,7 +659,7 @@ static ServerRuntime CreateRuntime(
         WorldClockOptions.Default));
 }
 
-sealed class AdmissionComposition : IServerComposition, IAdmissionEntityBinder
+sealed class AdmissionComposition : IServerComposition, IGuestAdmissionEntityBinder
 {
     private readonly Dictionary<WorldId, ArchetypeHandle> _archetypes = [];
 
@@ -628,6 +670,8 @@ sealed class AdmissionComposition : IServerComposition, IAdmissionEntityBinder
     public Entity LastCreated { get; private set; }
 
     public PersistentEntityKey LastPersistentKey { get; private set; }
+
+    public GameGuestBody LastGuestBody { get; private set; }
 
     internal AccountingStore? InitialAccounting { get; set; }
 
@@ -659,6 +703,16 @@ sealed class AdmissionComposition : IServerComposition, IAdmissionEntityBinder
             world.PersistentWorldId,
             world.GetOrAssignPersistentId(entity));
         return true;
+    }
+
+    public bool TryCreateGuestPlayable(
+        EcsWorld world,
+        ParticipantId participant,
+        GameGuestBody body,
+        out Entity entity)
+    {
+        LastGuestBody = body;
+        return TryCreatePlayable(world, participant, out entity);
     }
 
     public bool IsPlayable(EcsWorld world, in CharacterRecord character, Entity resolvedEntity) =>

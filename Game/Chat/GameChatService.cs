@@ -594,7 +594,7 @@ public sealed class GameChatService : IDisposable
             _entered.Add(session.Participant, session);
             _participantsByEntity.Add(session.Entity, session.Participant);
             _fallbackDisplayLabels.Add(
-                session.Participant, $"Player {session.Participant.Value}");
+                session.Participant, ResolveAdmissionDisplayLabel(session));
         }
         _admissionScratch.AsSpan(0, total).Clear();
         _recipientRegistryComplete = true;
@@ -627,7 +627,7 @@ public sealed class GameChatService : IDisposable
         }
         _entered[session.Participant] = session;
         _participantsByEntity[session.Entity] = session.Participant;
-        _fallbackDisplayLabels[session.Participant] = $"Player {session.Participant.Value}";
+        _fallbackDisplayLabels[session.Participant] = ResolveAdmissionDisplayLabel(session);
         return true;
     }
 
@@ -687,6 +687,11 @@ public sealed class GameChatService : IDisposable
             return fallback;
         throw new InvalidOperationException("An entered Chat speaker lost its bounded display label.");
     }
+
+    private static string ResolveAdmissionDisplayLabel(in AdmissionResult session) =>
+        session.GuestIdentity.IsValid
+            ? session.GuestIdentity.DisplayName!
+            : $"Player {session.Participant.Value}";
 
     private static bool IsCanonicalBoundedUtf8(string value, int maximumBytes)
     {

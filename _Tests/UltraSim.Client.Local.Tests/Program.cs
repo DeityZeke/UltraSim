@@ -1,5 +1,6 @@
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.UI;
@@ -13,6 +14,7 @@ var tests = new (string Name, Action Body)[]
     ("PublicDebtWaitsForClientApplicationProof", PublicDebtWaitsForClientApplicationProof),
     ("SequencedCommandsCrossOwnerThread", SequencedCommandsCrossOwnerThread),
     ("ChatOccurrencesApplyWithoutProtocolLoopback", ChatOccurrencesApplyWithoutProtocolLoopback),
+    ("GuestIdentityDrivesAuthoritativeBodyAndChatLabel", GuestIdentityDrivesAuthoritativeBodyAndChatLabel),
     ("ChatIngressRejectsUnboundedText", ChatIngressRejectsUnboundedText),
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
@@ -102,6 +104,33 @@ static void ChatOccurrencesApplyWithoutProtocolLoopback()
     Equal(2, chat.CopyRecent(rows));
     True(rows[1].Text.StartsWith("Where:", StringComparison.Ordinal));
     Equal(ClientChatOccurrenceKind.PrivateSystem, rows[1].Kind);
+}
+
+static void GuestIdentityDrivesAuthoritativeBodyAndChatLabel()
+{
+    using Fixture fixture = Fixture.CreateGuest(
+        new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "  Demo Éowyn  "));
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view));
+    Equal(new GameGuestIdentity(GameGuestBody.HumanMale, "Demo Éowyn"), view.GuestIdentity);
+
+    ClientWorldSemanticCache cache = fixture.CreateCache();
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return ContainsPrefab(cache, GameWorldPublicPrefabIds.CharacterMale);
+    });
+    True(!ContainsPrefab(cache, GameWorldPublicPrefabIds.Character));
+
+    var chat = new ClientChatState(fixture.Session.ApplicationSessionEpoch);
+    True(fixture.Session.TrySubmitChat(1, ClientChatSpeechMode.Say, "identity check"));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpChat(chat);
+        return chat.GetSnapshot().Applied == 1;
+    });
+    var rows = new ClientChatOccurrence[1];
+    Equal(1, chat.CopyRecent(rows));
+    Equal("Demo Éowyn", rows[0].DisplayLabel);
 }
 
 static void RejectedClientApplicationRetainsChatDebt()
@@ -427,6 +456,15 @@ sealed class Fixture : IDisposable
         string saveRoot = Path.Combine(Path.GetTempPath(), $"ultrasim-local-concept-{Guid.NewGuid():N}");
         Directory.CreateDirectory(saveRoot);
         LocalPlayableSession session = LocalPlayableSession.CreateConceptDemo(saveRoot);
+        session.WaitUntilReady(TimeSpan.FromSeconds(10));
+        return new Fixture(saveRoot, session);
+    }
+
+    internal static Fixture CreateGuest(in GameGuestAdmissionRequest request)
+    {
+        string saveRoot = Path.Combine(Path.GetTempPath(), $"ultrasim-local-guest-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(saveRoot);
+        LocalPlayableSession session = LocalPlayableSession.CreateCabin(saveRoot, request);
         session.WaitUntilReady(TimeSpan.FromSeconds(10));
         return new Fixture(saveRoot, session);
     }

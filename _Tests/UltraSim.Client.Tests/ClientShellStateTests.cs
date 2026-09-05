@@ -16,6 +16,13 @@ static class ClientShellStateTests
         shell.CloseSettings();
         Equal(ClientShellScreen.MainMenu, shell.Snapshot().Screen);
 
+        shell.BeginAdmission("Choose a guest identity");
+        ClientShellSnapshot admission = shell.Snapshot(textEntryFocused: true);
+        Equal(ClientShellScreen.Admission, admission.Screen);
+        Equal(ClientInputFocusOwner.ModalMenu, admission.Focus.Owner);
+        True(!admission.Focus.GameplayInputAllowed);
+        shell.ReturnToMainMenu();
+
         shell.BeginLoading("Entering local world");
         ClientShellSnapshot loading = shell.Snapshot();
         Equal(ClientShellScreen.Loading, loading.Screen);

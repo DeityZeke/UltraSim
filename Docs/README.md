@@ -19,6 +19,8 @@ acceptance narratives remain available through git history.
   Godot presentation.
 - [Game](GAME.md) — concrete game composition, schema/content ownership,
   Accounting, Admission, and Inventory.
+- [Game Admission](../Game/Admission/README.md) — authoritative accountless, guest/demo, and
+  account-backed entry, with session identity and playable binding kept distinct.
 - [Inventory](../Game/Inventory/README.md) — authoritative mutation, owner-private
   UI authorization, the I0.8 remote Godot vertical, the I0.9 container-policy
   foundation, I0.10 authoritative Grid placement, and I0.11 dynamic instance

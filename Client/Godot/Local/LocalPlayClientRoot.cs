@@ -1,6 +1,7 @@
 using Godot;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Core;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 
 namespace UltraSim.Client.Godot;
@@ -13,6 +14,9 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
 {
     private LocalCabinClient? _cabin;
     private Node? _catalogMarker;
+    private string _guestAdmissionName = string.Empty;
+    private GameGuestBody _guestAdmissionBody = GameGuestBody.HumanFemale;
+    private string? _guestAdmissionError;
 
     public override void _Ready()
     {
@@ -23,13 +27,19 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
         bool signSmoke = arguments.Contains("--d0-3-smoke", StringComparer.Ordinal);
         bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
+        bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
-            !fallbackLabSmoke && !f02Smoke)
+            !fallbackLabSmoke && !guestAdmissionSmoke && !f02Smoke)
             return;
         try
         {
+            if (guestAdmissionSmoke)
+            {
+                RunGuestAdmissionSmoke();
+                return;
+            }
             if (signSmoke || fallbackLabSmoke)
             {
                 StartLocalCabin(
@@ -172,16 +182,54 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             base.BeginCapability(capability);
             return;
         }
-        try
+        _guestAdmissionName = string.Empty;
+        _guestAdmissionBody = GameGuestBody.HumanFemale;
+        _guestAdmissionError = null;
+        BeginAdmission("Choose a temporary guest identity for this demo session.");
+    }
+
+    protected override void BuildCapabilityAdmissionSurface(in ClientShellSnapshot snapshot)
+    {
+        VBoxContainer column = CreateCenteredColumn(440);
+        column.AddChild(Title("Enter Demo"));
+        column.AddChild(CenteredLabel(
+            "This name and body exist only for the current session. No account or saved character is created."));
+        column.AddChild(new Label { Text = "Name" });
+        var name = new LineEdit
         {
-            StartLocalCabin(
-                CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
-        }
-        catch (Exception exception)
+            Name = "GuestDisplayName",
+            Text = _guestAdmissionName,
+            PlaceholderText = "1–24 characters",
+            MaxLength = GameGuestAdmissionPolicy.MaximumDisplayNameUtf8Bytes,
+            SelectAllOnFocus = false,
+        };
+        column.AddChild(name);
+        column.AddChild(new Label { Text = "Body" });
+        var body = new OptionButton { Name = "GuestBody" };
+        body.AddItem("X / Human Female", (int)GameGuestBody.HumanFemale);
+        body.AddItem("Y / Human Male", (int)GameGuestBody.HumanMale);
+        body.Select(_guestAdmissionBody == GameGuestBody.HumanMale ? 1 : 0);
+        column.AddChild(body);
+        if (!string.IsNullOrWhiteSpace(_guestAdmissionError))
         {
-            RetireCurrentSession();
-            FailSession(exception.Message);
+            column.AddChild(new Label
+            {
+                Name = "GuestAdmissionError",
+                Text = _guestAdmissionError,
+                Modulate = new Color(1f, 0.48f, 0.42f),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            });
         }
+        Button join = MenuButton("Join");
+        join.Name = "GuestJoin";
+        ConnectDeferred(join, () => SubmitGuestAdmission(name.Text, (GameGuestBody)body.GetSelectedId()));
+        name.TextSubmitted += _ => join.EmitSignal(BaseButton.SignalName.Pressed);
+        column.AddChild(join);
+        Button back = MenuButton("Back");
+        back.Name = "GuestBack";
+        ConnectDeferred(back, () => ReturnToMainMenu());
+        column.AddChild(back);
+        name.GrabFocus();
     }
 
     protected override void RetireCurrentSession()
@@ -207,7 +255,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     private void StartLocalCabin(
         CabinContentVariant variant,
         CabinHumanBody human,
-        bool useConceptDemoWorld)
+        bool useConceptDemoWorld,
+        string? guestDisplayName = null)
     {
         if (_cabin is not null)
             throw new InvalidOperationException("A local Cabin session is already active.");
@@ -234,7 +283,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             WorldUiLayer,
             human,
             EffectiveSettings,
-            useConceptDemoWorld);
+            useConceptDemoWorld,
+            guestDisplayName);
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();
@@ -242,9 +292,89 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             throw new InvalidOperationException(snapshot.InitializationError ??
                 "The local Cabin consumer did not initialize.");
         CommitSession(useConceptDemoWorld
-            ? $"Concept Demo — {human}"
+            ? $"Concept Demo — {snapshot.DisplayName} — {human}"
             : $"Cabin — {variant} — {human}");
     }
+
+    private void SubmitGuestAdmission(string name, GameGuestBody body)
+    {
+        _guestAdmissionName = name;
+        _guestAdmissionBody = body;
+        var request = new GameGuestAdmissionRequest(body, name);
+        if (!GameGuestAdmissionPolicy.TryNormalize(
+                request, out GameGuestIdentity identity,
+                out _, out string? message))
+        {
+            _guestAdmissionError = message;
+            BeginAdmission(message ?? "The guest identity was rejected.");
+            return;
+        }
+        try
+        {
+            _guestAdmissionError = null;
+            StartLocalCabin(
+                CabinContentVariant.Default,
+                identity.Body == GameGuestBody.HumanFemale
+                    ? CabinHumanBody.XBot
+                    : CabinHumanBody.YBot,
+                useConceptDemoWorld: true,
+                identity.DisplayName);
+        }
+        catch (Exception exception)
+        {
+            RetireCurrentSession();
+            FailSession(exception.Message);
+        }
+    }
+
+    private async void RunGuestAdmissionSmoke()
+    {
+        try
+        {
+            RequireNode<Button>("Capability_SinglePlayer").EmitSignal(BaseButton.SignalName.Pressed);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (ShellSnapshot().Screen != ClientShellScreen.Admission || _cabin is not null)
+                throw new InvalidOperationException("Single Player did not stop at guest admission.");
+
+            RequireNode<LineEdit>("GuestDisplayName").Text = "\t";
+            RequireNode<Button>("GuestJoin").EmitSignal(BaseButton.SignalName.Pressed);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (ShellSnapshot().Screen != ClientShellScreen.Admission || _cabin is not null ||
+                FindChild("GuestAdmissionError", recursive: true, owned: false) is not Label)
+                throw new InvalidOperationException(
+                    "Rejected guest input advanced or failed to produce bounded feedback.");
+
+            RequireNode<LineEdit>("GuestDisplayName").Text = "  Demo Éowyn  ";
+            OptionButton body = RequireNode<OptionButton>("GuestBody");
+            body.Select(1);
+            RequireNode<Button>("GuestJoin").EmitSignal(BaseButton.SignalName.Pressed);
+            for (int frame = 0; frame < 3; frame++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (ShellSnapshot().Screen != ClientShellScreen.InSession || _cabin is null)
+                throw new InvalidOperationException("A valid guest did not enter the local world.");
+            LocalCabinPresentationSnapshot evidence = _cabin.RunD05Acceptance(
+                "Demo Éowyn", CabinHumanBody.YBot);
+            GD.Print(
+                $"D0.5 GUEST ADMISSION PASS name={evidence.DisplayName} body={evidence.HumanBody} " +
+                $"player={evidence.PlayerPosition} authorityTicks={evidence.AuthorityTicks}");
+            RetireCurrentSession();
+            ReturnToMainMenu("Concept Demo D0.5 guest admission smoke passed.");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"D0.5 guest admission failed: {exception}");
+            RetireCurrentSession();
+            FailSession(exception.Message);
+            GetTree().Quit(1);
+        }
+    }
+
+    private T RequireNode<T>(string name) where T : Node =>
+        FindChild(name, recursive: true, owned: false) as T ??
+        throw new InvalidOperationException($"Required guest-admission node '{name}' was missing.");
 
     private static CabinContentVariant ReadVariant()
     {

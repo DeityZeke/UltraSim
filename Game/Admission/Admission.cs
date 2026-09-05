@@ -2,6 +2,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
+using System.Text;
 
 namespace UltraSim.Game.Admission;
 
@@ -34,6 +35,8 @@ public enum AdmissionRejection : byte
     PlayableAlreadyBound = 15,
     InvalidSessionStage = 16,
     GenerationReplaced = 17,
+    InvalidGuestDisplayName = 18,
+    UnsupportedGuestBody = 19,
 }
 
 /// <summary>Outcome or retained state of one admission attempt.</summary>
@@ -48,11 +51,80 @@ public readonly record struct AdmissionResult(
     AdmissionRejection Rejection,
     string? Message)
 {
+    public GameGuestIdentity GuestIdentity { get; init; }
+
     public bool IsEntered => Stage == AdmissionStage.Entered;
 
     public bool IsRejected => Stage == AdmissionStage.Rejected;
 
     public bool IsWaitingForCharacter => Stage == AdmissionStage.WaitingForCharacter;
+}
+
+/// <summary>Finite, deterministic Round-1 guest/demo identity policy.</summary>
+public static class GameGuestAdmissionPolicy
+{
+    public const int MaximumDisplayNameScalars = 24;
+    public const int MaximumDisplayNameUtf8Bytes = 96;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
+    public static bool TryNormalize(
+        in GameGuestAdmissionRequest request,
+        out GameGuestIdentity identity,
+        out AdmissionRejection rejection,
+        out string? message)
+    {
+        identity = default;
+        rejection = AdmissionRejection.None;
+        message = null;
+        if (request.Body is not (GameGuestBody.HumanFemale or GameGuestBody.HumanMale))
+        {
+            rejection = AdmissionRejection.UnsupportedGuestBody;
+            message = "Select one of the supported demo bodies.";
+            return false;
+        }
+        string? supplied = request.DisplayName;
+        if (supplied is null)
+        {
+            rejection = AdmissionRejection.InvalidGuestDisplayName;
+            message = "Enter a display name.";
+            return false;
+        }
+        foreach (char value in supplied)
+        {
+            if (!char.IsControl(value)) continue;
+            rejection = AdmissionRejection.InvalidGuestDisplayName;
+            message = "Display names cannot contain control characters.";
+            return false;
+        }
+        string normalized = supplied.Trim();
+        if (normalized.Length == 0)
+        {
+            rejection = AdmissionRejection.InvalidGuestDisplayName;
+            message = "Enter a display name.";
+            return false;
+        }
+        int scalarCount = 0;
+        try
+        {
+            foreach (Rune _ in normalized.EnumerateRunes())
+                scalarCount++;
+            if (scalarCount > MaximumDisplayNameScalars ||
+                StrictUtf8.GetByteCount(normalized) > MaximumDisplayNameUtf8Bytes)
+            {
+                rejection = AdmissionRejection.InvalidGuestDisplayName;
+                message = $"Display names are limited to {MaximumDisplayNameScalars} characters.";
+                return false;
+            }
+        }
+        catch (EncoderFallbackException)
+        {
+            rejection = AdmissionRejection.InvalidGuestDisplayName;
+            message = "The display name contains malformed Unicode.";
+            return false;
+        }
+        identity = new GameGuestIdentity(request.Body, normalized);
+        return true;
+    }
 }
 
 /// <summary>Stable identity used for exact CharacterSelect definition caching.</summary>
@@ -166,6 +238,27 @@ public sealed class AdmissionService : IDisposable
     }
 
     public AdmissionResult JoinAccountless(ParticipantId participant)
+        => JoinAccountlessCore(participant, default);
+
+    /// <summary>
+    /// Enters one session-scoped guest after authoritative name/body validation. This creates no
+    /// Accounting record and does not imply durable character ownership.
+    /// </summary>
+    public AdmissionResult JoinGuest(
+        ParticipantId participant,
+        in GameGuestAdmissionRequest request)
+    {
+        EnsureOperational();
+        if (!GameGuestAdmissionPolicy.TryNormalize(
+                request, out GameGuestIdentity identity,
+                out AdmissionRejection rejection, out string? message))
+            return RejectNew(participant, rejection, message!);
+        return JoinAccountlessCore(participant, identity);
+    }
+
+    private AdmissionResult JoinAccountlessCore(
+        ParticipantId participant,
+        in GameGuestIdentity guestIdentity)
     {
         EnsureOperational();
         if (!participant.IsValid)
@@ -175,10 +268,16 @@ public sealed class AdmissionService : IDisposable
             return RejectNew(participant, AdmissionRejection.DuplicateParticipant,
                 "The participant already has an admission session.");
         }
+        GameGuestIdentity capturedGuest = guestIdentity;
         if (!_runtime.TryUseActiveGeneration(
             (world, generationId) =>
             {
-                bool created = _binder.TryCreatePlayable(world, participant, out Entity entity) &&
+                Entity entity = Entity.Null;
+                bool created = (capturedGuest.IsValid
+                        ? _binder is IGuestAdmissionEntityBinder guestBinder &&
+                            guestBinder.TryCreateGuestPlayable(
+                                world, participant, capturedGuest.Body, out entity)
+                        : _binder.TryCreatePlayable(world, participant, out entity)) &&
                     entity.IsValid &&
                     entity.World == world.Id &&
                     world.IsAlive(entity);
@@ -213,6 +312,7 @@ public sealed class AdmissionService : IDisposable
             Entity = binding.Entity,
             ControlledEntity = binding.PersistentKey,
             GenerationId = binding.GenerationId,
+            GuestIdentity = guestIdentity,
         };
         _sessions.Add(participant, session);
         AdmissionResult result = session.Snapshot();
@@ -910,6 +1010,8 @@ public sealed class AdmissionService : IDisposable
 
         public string? Message { get; set; }
 
+        public GameGuestIdentity GuestIdentity { get; set; }
+
         public AdmissionResult Snapshot() => new(
             Participant,
             Stage,
@@ -919,6 +1021,9 @@ public sealed class AdmissionService : IDisposable
             GenerationId,
             CharacterSelectView,
             Rejection,
-            Message);
+            Message)
+        {
+            GuestIdentity = GuestIdentity,
+        };
     }
 }
