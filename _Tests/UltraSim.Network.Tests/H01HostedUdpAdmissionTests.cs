@@ -33,6 +33,9 @@ internal static class H01HostedUdpAdmissionTests
         Run("HostedUdpAdmissionAcceptsPreviousBucketAndExpiresCandidates", HostedUdpAdmissionAcceptsPreviousBucketAndExpiresCandidates);
         Run("HostedUdpNativeReceiveRoutesUnknownAdmission", HostedUdpNativeReceiveRoutesUnknownAdmission);
         Run("WarmedHostedUdpUnknownAdmissionAllocatesZero", WarmedHostedUdpUnknownAdmissionAllocatesZero);
+        Run("HostedUdpDeploymentDiscoveryIsUntrustedAndStateless",
+            HostedUdpDeploymentDiscoveryIsUntrustedAndStateless);
+        Run("HostedUdpDefaultLimitsAreOperational", HostedUdpDefaultLimitsAreOperational);
     }
 
     private static void HostedUdpCookieValidationAllocatesNoConnectionState()
@@ -223,6 +226,52 @@ internal static class H01HostedUdpAdmissionTests
         Equal(1UL, snapshot.CookieChallengesSent);
         Equal(1UL, snapshot.CookieValidations);
         Equal(0, snapshot.Listener.RegisteredPaths);
+    }
+
+    private static void HostedUdpDeploymentDiscoveryIsUntrustedAndStateless()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using var host = new HostedUdpAdmissionHost(
+            new IPEndPoint(IPAddress.Loopback, 0), identity, s_udp, s_shared,
+            new HostedUdpAdmissionLimits(2, 8, 8, 8, 2_000), s_manifest);
+        True(HostedUdpDeploymentDiscoveryClient.TryCreate(
+            host.LocalEndPoint, s_udp, out HostedUdpDeploymentDiscoveryClient? discovered,
+            s_manifest));
+        using HostedUdpDeploymentDiscoveryClient client = discovered!;
+        for (int iteration = 0;
+             iteration < 10_000 && client.State == HostedUdpDeploymentDiscoveryState.Discovering;
+             iteration++)
+        {
+            client.Pump();
+            host.Pump();
+            Thread.Yield();
+        }
+        True(client.State == HostedUdpDeploymentDiscoveryState.Discovered);
+        byte[] candidate = new byte[client.CandidatePublicKeyBytes];
+        True(client.TryCopyCandidatePublicKey(candidate, out int written));
+        Equal(candidate.Length, written);
+        True(candidate.AsSpan().SequenceEqual(identity.PublicKey));
+
+        HostedUdpAdmissionSnapshot snapshot = host.GetSnapshot();
+        Equal(1UL, snapshot.DeploymentDiscoveryRequests);
+        Equal(1UL, snapshot.DeploymentAnnouncementsSent);
+        Equal(0, snapshot.ValidatedCandidates,
+            "Untrusted deployment discovery allocated validated-candidate state.");
+        Equal(0, snapshot.EstablishedSessions,
+            "Untrusted deployment discovery allocated application-session state.");
+        Equal(0, snapshot.Listener.RegisteredPaths,
+            "Untrusted deployment discovery established a listener path.");
+        True(snapshot.UnknownBytes >= 256,
+            "The fixed discovery request was not accounted as unknown-source input.");
+    }
+
+    private static void HostedUdpDefaultLimitsAreOperational()
+    {
+        NetworkProtocolLimits.Default.Validate(DeterministicDatagramLimits.Default);
+        UdpProtocolLimits.Default.Validate();
+        SharedUdpProtocolLimits.Default.Validate(UdpProtocolLimits.Default);
+        HostedUdpAdmissionLimits.Default.Validate(UdpProtocolLimits.Default);
+        HostedUdpOwnerShardingLimits.Default.Validate();
     }
 
     private static byte[] RequestCookie(

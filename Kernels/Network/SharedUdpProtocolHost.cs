@@ -40,7 +40,15 @@ public readonly record struct SharedUdpProtocolLimits(
     int AggregateSocketSendBufferBytes = 0,
     int AggregateSocketReceiveBufferBytes = 0)
 {
-    public static SharedUdpProtocolLimits Default => new();
+    public static SharedUdpProtocolLimits Default => new(
+        MaximumSessions: 256,
+        MaximumQueuedDatagramsPerSession: 8,
+        MaximumInboundDatagramsPerPump: 4_096,
+        SocketIoMode: SharedUdpSocketIoMode.Scalar,
+        MaximumNativeSendBatchDatagrams: 32,
+        MaximumNativeReceiveBatchDatagrams: 32,
+        AggregateSocketSendBufferBytes: 0,
+        AggregateSocketReceiveBufferBytes: 0);
 
     internal void Validate(UdpProtocolLimits udp)
     {

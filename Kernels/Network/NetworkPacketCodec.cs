@@ -71,7 +71,7 @@ public ref struct NetworkPacketWriter
         return true;
     }
 
-    public bool TryWriteBytes(ReadOnlySpan<byte> value)
+    public bool TryWriteBytes(scoped ReadOnlySpan<byte> value)
     {
         if (value.Length > Remaining) return false;
         value.CopyTo(_destination[_position..]);

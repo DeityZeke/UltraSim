@@ -94,7 +94,8 @@ headroom and fewer ticks per second.
   canonical math; no runtime world storage or kernel coupling.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, semantic port,
   and bounded transport-independent semantic wire codec.
-- `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
+- `Server/*` — authority lifecycle, hosts, durable save-set coordination, and the external
+  Direct Connect identity/session gateway.
 - `Client/*` — retained client projection, bounded Network-free local application
   bridge, remote network bridge, and Godot presentation.
 - `Game/*` — concrete game schema/content/state, authoritative workflows,

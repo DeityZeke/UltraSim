@@ -21,6 +21,21 @@ public readonly struct ApplicationRealmId :
     public ulong Low { get; }
     public bool IsValid => High != 0 || Low != 0;
 
+    public static bool TryParse(string? value, out ApplicationRealmId realm)
+    {
+        realm = default;
+        if (value is null || value.Length != 32) return false;
+        if (!ulong.TryParse(value.AsSpan(0, 16),
+                System.Globalization.NumberStyles.AllowHexSpecifier,
+                System.Globalization.CultureInfo.InvariantCulture, out ulong high) ||
+            !ulong.TryParse(value.AsSpan(16, 16),
+                System.Globalization.NumberStyles.AllowHexSpecifier,
+                System.Globalization.CultureInfo.InvariantCulture, out ulong low) ||
+            (high == 0 && low == 0)) return false;
+        realm = new ApplicationRealmId(high, low);
+        return true;
+    }
+
     public int CompareTo(ApplicationRealmId other)
     {
         int high = High.CompareTo(other.High);

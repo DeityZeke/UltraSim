@@ -56,6 +56,19 @@ no account or saved character is created. Runtime diagnostics show the configure
 the authored/resident/rendered chunk counts; intentional-void chunks have no mesh, so a larger
 window can change the counts without adding visible geometry at the current location.
 
+F0.3a makes the **Multiplayer / Direct Connect** entry real in Online and Complete. Start the
+external identity gateway with:
+
+```bash
+dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj
+```
+
+Then connect to `127.0.0.1:7777`. On first use, compare the client candidate fingerprint with the
+gateway's printed fingerprint before choosing **Trust and Continue**. Reconnect uses the saved pin;
+a changed deployment key is blocked and requires an explicit forget followed by a fresh trust
+ceremony. Successful F0.3a connection stops at authenticated realm/session status—the remote guest,
+actor, world, Chat, and Inventory vertical is F0.3b.
+
 Runtime-batched frozen/public `MultiMeshInstance3D` groups publish an exact combined transformed
 custom AABB. Godot otherwise leaves these programmatic MultiMeshes with a zero native bound and may
 frustum-cull a door, chest, telepad, gate, or sign from the chunk origin even while its authoritative

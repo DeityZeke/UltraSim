@@ -42,6 +42,22 @@ Permanent rules:
 - public world, owner-private UI/state, and retained Event semantics remain
   separate application domains even though they share the same Network session.
 
+## Direct Connect trust/session lifecycle
+
+F0.3a adds `ClientDirectConnectSession` before remote Game admission. It uses Network's bounded
+deployment-key probe to obtain an untrusted candidate. An explicit supplied fingerprint must match,
+or the human must accept the displayed fingerprint; only then is `HostedUdpProtocolClient`
+constructed with that exact P-256 key pinned.
+
+The trust record is not committed at candidate acceptance. After secure transport establishes, the
+first Game Control message must contain a nonzero `ApplicationRealmId` and fresh application-session
+epoch. That authenticated pair commits key/realm/endpoint through Client Core. Known-key reconnect
+skips consent, mismatch blocks without overwriting the pin, and teardown clears candidate/session
+lineage. `ClientDirectConnectEndpoint` remains IPv4-only while Hosted H0 is IPv4-only.
+
+F0.3a creates no participant or actor and consumes no world/UI/Chat state. F0.3b attaches guest
+admission and the existing semantic consumers to the established peer.
+
 ## Dynamic public chunk state
 
 `RemoteChunkWorldStateClient` is the production client adapter for the selected

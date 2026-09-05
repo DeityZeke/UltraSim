@@ -343,6 +343,18 @@ public partial struct RemoteChatAppliedMessage
     public RemoteChatApplyStatus Status;
 }
 
+/// <summary>
+/// First application message inside an authenticated Hosted transport. The realm
+/// value is trusted only because the pinned deployment-key handshake already succeeded.
+/// </summary>
+[NetworkMessage(134, "ultrasim.game.application-session-identity", 1, NetworkLane.Control)]
+public partial struct RemoteApplicationSessionIdentityMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong ApplicationRealmHigh;
+    public ulong ApplicationRealmLow;
+}
+
 /// <summary>One complete present or absent dynamic-state operation.</summary>
 public readonly record struct RemoteWorldStateRecord(
     ulong RelationSequence,
@@ -396,7 +408,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 14,
+        version: 15,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -434,6 +446,7 @@ public static partial class UltraSimGameProtocol
             RemoteChatOccurrenceHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumChatMessageBytes },
             RemoteChatAppliedMessageCodec.Descriptor,
+            RemoteApplicationSessionIdentityMessageCodec.Descriptor,
             RemoteChunkSnapshotHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = RemoteChunkSnapshotHeaderCodec.EncodedSize +
                     MaximumChunkPublicationRecords * RemoteChunkPublicRecord.EncodedSize },

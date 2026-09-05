@@ -1,11 +1,9 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
-**Status:** frozen architectural direction with Physics P0.1b (`6bfef1e2`), F0.0a executable
-composition/shipped-dependency separation, F0.0c single-project composition consolidation,
-F0.0b permanent Network-free local-session extraction,
-F0.1 persistent shell/settings/focus, and content A0.0 contracts/resolution accepted.
-Direct-connect trust, content activation, and later content acquisition remain separately gated
-before their consuming checkpoints.
+**Status:** frozen architectural direction with executable composition, the permanent Network-free
+local path, persistent shell/settings/focus, content A0.0/A0.1, the physical Concept Demo world,
+and F0.3a Online Direct Connect trust/session lifecycle accepted. F0.3b remote guest/controlled
+actor parity is next; content activation and later acquisition remain separately gated.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -1292,8 +1290,9 @@ First connection may use either:
 - TOFU after displaying the untrusted candidate deployment-key fingerprint and obtaining explicit
   local consent.
 
-After consent, persist a trust record and perform/restart the real Hosted handshake with that exact
-key pinned. A later mismatch blocks; it never silently replaces the trusted key.
+After consent, retain the candidate in memory and perform/restart the real Hosted handshake with
+that exact key pinned. Persist the trust record only after the authenticated application realm is
+received. A later mismatch blocks; it never silently replaces the trusted key.
 
 ```text
 endpoint
@@ -1657,6 +1656,30 @@ bundled/build-time content during the first passive-content campaign.
 
 ## F0.3a — Online Direct Connect trust and session lifecycle
 
+**Status: CLOSED.** `Client/Network/ClientDirectConnectSession` owns one bounded owner-thread
+onboarding/session state machine. A fixed-size, rate-limited, non-amplifying UDP probe obtains a
+self-signed deployment-key candidate. That signature proves possession of the advertised key only;
+the candidate remains untrusted until an explicit fingerprint/invite matches or the human accepts
+the displayed TOFU fingerprint. Only then does the client construct the accepted Hosted transport
+with that exact key pinned.
+
+Trust publication is transactional. Candidate acceptance remains memory-only until the pinned
+handshake succeeds and `ApplicationRealmId` plus a fresh application-session epoch arrive as the
+first Game Control message inside the authenticated connection. Only that complete result enters
+the bounded strict `trusted-servers.json` store. The verified realm forms the durable settings
+scope; address/port remains a mutable last-authenticated location hint.
+
+A known endpoint with the same candidate key reconnects without another prompt. A different key is
+blocked before handshake and cannot replace the pin. Replacement is two-step: explicitly forget
+the old record, return to the main menu, then begin a fresh trust ceremony. Malformed trust files
+fail closed to an empty registry. Disconnect drains Hosted transport; candidate, realm, and session
+lineage do not survive teardown.
+
+`Server/DirectConnect` is the external F0.3a identity gateway. It persists an independent P-256
+deployment key and 128-bit realm, and attaches only the session-identity application. No participant,
+guest, actor, world, Chat, Inventory, or UI authority exists yet. Online continues to exclude local
+Game/server authority.
+
 Implement:
 
 - Remote Play capability;
@@ -1673,7 +1696,7 @@ Hard rules:
 
 - Hosted Network remains pinned-key-only;
 - no silent pin replacement/self-trust;
-- no discovery/list;
+- no server list, LAN registry, or matchmaking discovery;
 - no executable code in trust/profile data.
 
 **Gate:** first trust, reconnect, mismatch, explicit fingerprint, and clean teardown all preserve the
@@ -2133,9 +2156,9 @@ A0.1  local Cabin Default/Replace/Add oracle                         CLOSED
         |
 F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network     CLOSED
         |
-F0.3a Direct Connect identity trust/session lifecycle
+F0.3a Direct Connect identity trust/session lifecycle                    CLOSED
         |
-F0.3b real remote GamePlayerCommand + semantic parity
+F0.3b real remote guest/GamePlayerCommand + semantic parity              NEXT
         |
 F0.3c server client-profile consent/settings
         |

@@ -553,9 +553,25 @@ public abstract partial class ClientRoot : Control
                 ReturnToMainMenu("Shell UI smoke passed.");
             }
 
+            if (_composition.Capabilities.Contains(ClientCapability.Multiplayer))
+            {
+                Button multiplayer = RequiredMenuButton("Capability_Multiplayer");
+                ValidateDeferredPress(multiplayer);
+                multiplayer.EmitSignal(BaseButton.SignalName.Pressed);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                if (_shell.Snapshot().Screen != ClientShellScreen.Admission)
+                    throw new InvalidOperationException(
+                        "The Multiplayer button did not enter its Direct Connect admission flow.");
+                Button connect = RequiredMenuButton("DirectConnectSubmit");
+                ValidateDeferredPress(connect);
+                RetireCurrentSession();
+                ReturnToMainMenu("Shell UI smoke passed.");
+            }
+
             GD.Print(
                 $"F0.1 CLIENT SHELL UI PASS edition={_composition.Edition} " +
-                "settings=scrollable transitions=deferred singlePlayer=admission");
+                "settings=scrollable transitions=deferred capabilities=admission");
             GetTree().Quit(0);
         }
         catch (Exception exception)

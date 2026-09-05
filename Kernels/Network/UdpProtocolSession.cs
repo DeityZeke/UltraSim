@@ -19,7 +19,15 @@ public readonly record struct UdpProtocolLimits(
     int DrainTimeoutMilliseconds = 5_000,
     int KeepAliveIntervalMilliseconds = 5_000)
 {
-    public static UdpProtocolLimits Default => new();
+    public static UdpProtocolLimits Default => new(
+        MaximumDatagramBytes: 1_472,
+        SocketSendBufferBytes: 262_144,
+        SocketReceiveBufferBytes: 262_144,
+        MaximumHandshakePumps: 4_096,
+        CookieBucketMilliseconds: 30_000,
+        IdleTimeoutMilliseconds: 30_000,
+        DrainTimeoutMilliseconds: 5_000,
+        KeepAliveIntervalMilliseconds: 5_000);
 
     internal void Validate()
     {

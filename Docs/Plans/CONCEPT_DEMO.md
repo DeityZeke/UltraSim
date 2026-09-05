@@ -1414,8 +1414,8 @@ then earn/integrate Concept Demo Round 1 consumers:
     D0.5 local guest/demo admission presentation                  CLOSED
 
 then prioritize the first meaningful remote vertical:
-    F0.3a Direct Connect + deployment trust
-    F0.3b remote controlled actor + guest admission
+    F0.3a Direct Connect + deployment trust                         CLOSED
+    F0.3b remote controlled actor + guest admission                 NEXT
 
 then continue Round 1 consumers as earned:
     animation/pickup/inventory swing

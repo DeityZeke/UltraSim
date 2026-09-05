@@ -95,7 +95,12 @@ public readonly record struct HostedUdpOwnerShardingLimits(
     int MaximumQueuedPacketsPerOwner = 1_024,
     int MaximumDatagramBytes = 1_472)
 {
-    public static HostedUdpOwnerShardingLimits Default => new();
+    public static HostedUdpOwnerShardingLimits Default => new(
+        MaximumOwners: 4,
+        MaximumConnections: 4_096,
+        MaximumPacketSlots: 8_192,
+        MaximumQueuedPacketsPerOwner: 1_024,
+        MaximumDatagramBytes: 1_472);
 
     internal void Validate()
     {

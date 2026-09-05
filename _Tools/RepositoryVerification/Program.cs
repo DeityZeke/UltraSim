@@ -57,6 +57,12 @@ foreach (string configuration in configurations)
         Run(root, "dotnet", command);
     }
 
+    Run(root, "dotnet",
+    [
+        "run", "--project", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
+        "-c", configuration, "--", "--ephemeral-smoke",
+    ]);
+
     VerifyClientCompositionArtifacts(root, configuration);
 
     if (!options.SkipGodot)
@@ -163,6 +169,12 @@ foreach (string configuration in configurations)
             "--headless",
             "--path", "Client/Godot",
             "--", "--composition-smoke", "--expect-edition=Online",
+        ]);
+        Run(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--", "--shell-ui-smoke", "--expect-edition=Online",
         ]);
         RunExpectFailure(root, godot,
         [
@@ -471,6 +483,12 @@ static void VerifyArchitecture(string root)
             ["Kernels/ECS/UltraSim.ECS.csproj"],
         ["Server/Hosting/UltraSim.Server.Hosting.csproj"] =
             ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
+        ["Server/DirectConnect/UltraSim.Server.DirectConnect.csproj"] =
+        [
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+        ],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
         [
             "Game/Contracts/UltraSim.Game.Contracts.csproj",

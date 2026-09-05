@@ -55,9 +55,11 @@ acceptance narratives remain available through git history.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
   Network-free authority-owner-thread composition with bounded command,
   semantic-debt, and application-proof handoff.
-- [Client Network](../Client/Network/README.md) — hostile authenticated protocol-
-  to-client semantic application for public chunk state, retained entity controls,
-  Events, and owner-private UI/Inventory.
+- [Client Network](../Client/Network/README.md) — F0.3a Direct Connect deployment trust/session
+  establishment plus hostile authenticated protocol-to-client semantic application for public
+  chunk state, retained entity controls, Events, and owner-private UI/Inventory.
+- [Direct Connect identity gateway](../Server/DirectConnect/README.md) — external F0.3a Hosted
+  endpoint with durable deployment key/realm identity and no participant/world authority yet.
 - [Godot client application](../Client/Godot/README.md) — the single maintained native adapter,
   persistent shell, and local presentation project, with physically distinct Single Player,
   Online, and Complete published dependency products.

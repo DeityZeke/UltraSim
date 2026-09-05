@@ -14,10 +14,16 @@ to leak through a text field or modal surface.
 built-in defaults, global user choices, an explicitly accepted declarative server recommendation,
 and a scoped user override. Server recommendations are deliberately absent from persistence, cannot
 replace reserved application actions, and cannot carry local audio/accessibility preferences. The
-current opaque `ClientSettingsScopeKey` proves the store/resolver shape only; it is not a hostname,
-Network endpoint, or authenticated realm identity. F0.3a may map a verified `ApplicationRealmId`
-into this shape. Core's cold `ClientSettingsFileStore` owns atomic platform-local JSON persistence;
+opaque `ClientSettingsScopeKey` is not a hostname or Network endpoint. F0.3a maps a verified
+`ApplicationRealmId` to `realm-<32 lowercase hex>` only after the pinned Hosted session authenticates
+it. Core's cold `ClientSettingsFileStore` owns atomic platform-local JSON persistence;
 the one Godot application assembly owns physical event translation.
+
+F0.3a also adds `ClientServerTrustRegistry` and `ClientServerTrustFileStore`. The bounded registry
+retains the deployment public key, SHA-256 fingerprint, verified realm, and last authenticated
+endpoint hint. Same-endpoint or same-realm key conflicts reject, invalid JSON falls back to an empty
+registry, and replacement requires an explicit forget operation. Candidate discovery and Network
+lifecycle remain outside Core.
 
 The world cache is owner-thread bound and fixed-capacity. Its limits describe
 client-resident chunks and rows rather than the server's ECS/public address

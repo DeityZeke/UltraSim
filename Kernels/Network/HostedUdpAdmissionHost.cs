@@ -48,7 +48,12 @@ public readonly record struct HostedUdpAdmissionLimits(
     int MaximumValidationsPerAddressPerBucket = 4,
     int ValidatedCandidateTimeoutMilliseconds = 5_000)
 {
-    public static HostedUdpAdmissionLimits Default => new();
+    public static HostedUdpAdmissionLimits Default => new(
+        MaximumValidatedCandidates: 64,
+        MaximumTrackedSourceAddresses: 1_024,
+        MaximumChallengesPerAddressPerBucket: 8,
+        MaximumValidationsPerAddressPerBucket: 4,
+        ValidatedCandidateTimeoutMilliseconds: 5_000);
 
     internal void Validate(UdpProtocolLimits udp)
     {
@@ -120,6 +125,8 @@ public readonly record struct HostedUdpAdmissionSnapshot(
     ulong DuplicatePathProofs,
     ulong PathRebindTimeouts,
     ulong PathRebindRejections,
+    ulong DeploymentDiscoveryRequests,
+    ulong DeploymentAnnouncementsSent,
     long ReservedBytes,
     SharedUdpListenerSnapshot Listener,
     NetworkConnectionSnapshot Connections);
@@ -213,6 +220,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private ulong _duplicatePathProofs;
     private ulong _pathRebindTimeouts;
     private ulong _pathRebindRejections;
+    private ulong _deploymentDiscoveryRequests;
+    private ulong _deploymentAnnouncementsSent;
     private ulong _lastMilliseconds;
     private bool _disposed;
 
@@ -639,6 +648,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             _duplicatePathProofs,
             _pathRebindTimeouts,
             _pathRebindRejections,
+            _deploymentDiscoveryRequests,
+            _deploymentAnnouncementsSent,
             checked(_listener.ReservedBytes + _serverPublicKey.Length +
                 _admissionLimits.EstimateReservedBytes() + promotionReserved),
             _listener.GetSnapshot(),
@@ -659,6 +670,40 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 listener, datagram, remoteAddress, now)) return;
         ulong bucket = now / checked((ulong)_udpLimits.CookieBucketMilliseconds);
         ulong addressKey = PackAddressKey(remoteAddress);
+
+        if (HostedUdpDeploymentDiscoveryCodec.TryReadRequest(
+                datagram, _manifest, out ReadOnlySpan<byte> discoveryNonce))
+        {
+            _deploymentDiscoveryRequests = SaturatingIncrement(_deploymentDiscoveryRequests);
+            if (!TryConsumeRate(addressKey, bucket, challenge: true)) return;
+            Span<byte> announcement = stackalloc byte[
+                HostedUdpDeploymentDiscoveryCodec.RequestBytes];
+            int length;
+            try
+            {
+                length = HostedUdpDeploymentDiscoveryCodec.WriteAnnouncement(
+                    announcement, _manifest, discoveryNonce, _serverIdentity);
+            }
+            catch (CryptographicException)
+            {
+                _invalidDatagrams = SaturatingIncrement(_invalidDatagrams);
+                return;
+            }
+            if (length > datagram.Length)
+            {
+                _amplificationDrops = SaturatingIncrement(_amplificationDrops);
+                return;
+            }
+            if (listener.TrySendUnknown(announcement[..length], remoteAddress) !=
+                DatagramSendStatus.Accepted)
+            {
+                _sendCapacityDrops = SaturatingIncrement(_sendCapacityDrops);
+                return;
+            }
+            _deploymentAnnouncementsSent = SaturatingIncrement(
+                _deploymentAnnouncementsSent);
+            return;
+        }
 
         if (ProtocolLoopbackHandshake.TryReadClientHello(
                 datagram, _manifest, out ReadOnlySpan<byte> nonce,

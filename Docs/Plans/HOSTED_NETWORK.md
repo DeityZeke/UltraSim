@@ -67,9 +67,22 @@ creates a self-trusted client and never silently changes an empty key into
 trust-on-first-use. Controlled in-process tests may use explicitly named self-trusted
 helpers outside the external Hosted boundary.
 
+Client F0.3a adds a bounded pre-handshake deployment-key announcement on the same listener solely
+for human onboarding. The request is a fixed 256 bytes, manifest- and nonce-bound, rate-limited
+through the existing unknown-source table, and its response cannot exceed the request. The
+announcement is self-signed to reject corruption and prove possession of the advertised private
+key, but remains explicitly **untrusted**. It cannot construct a secure peer or bypass the pin:
+after human or explicit-fingerprint selection, the ordinary Hosted client is restarted with that
+exact public key supplied as its required pin.
+
 The handshake authenticates the pinned server endpoint/transport transcript. Game
 account/participant authentication remains an application protocol above the secure
 connection.
+
+The first current Game application message supplies an independent `ApplicationRealmId` and fresh
+application-session epoch inside that authenticated transport. Network does not interpret either
+value. Realm verification and durable client trust persistence are Client/Game composition policy
+above Hosted Network.
 
 ## H0.0/H0.1 — stateless unknown-path admission
 
