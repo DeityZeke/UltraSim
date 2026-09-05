@@ -461,6 +461,9 @@ public sealed class LocalPlayableSession : IDisposable
                                 ResolveNearestFarGate(world, game.WorldState, actor, entities),
                             LocalPlayableSelection.InformationalSign when entities.WelcomeSignId.IsValid =>
                                 Resolve(world, entities.WelcomeSignId),
+                            LocalPlayableSelection.FallbackLabSign when
+                                entities.FallbackLabSignId.IsValid =>
+                                Resolve(world, entities.FallbackLabSignId),
                             _ => Entity.Null,
                         };
                         game.WorldActions.ApplyPlayerCommand(
@@ -482,11 +485,14 @@ public sealed class LocalPlayableSession : IDisposable
                             chest = ToggleBreadContainer(world, game, entities);
                         else if (unsupported)
                             chest = GameWorldActionStatus.MissingTarget;
-                        if (captured.Selection == LocalPlayableSelection.InformationalSign &&
+                        if ((captured.Selection is LocalPlayableSelection.InformationalSign or
+                                LocalPlayableSelection.FallbackLabSign) &&
                             result.Interaction == GameWorldActionStatus.Accepted)
                         {
                             InformationalSignUiOpenResult opened = signUi.Open(
-                                GameInformationalSigns.ConceptDemoWelcome);
+                                captured.Selection == LocalPlayableSelection.FallbackLabSign
+                                    ? GameInformationalSigns.FallbackLab
+                                    : GameInformationalSigns.ConceptDemoWelcome);
                             if (!opened.Succeeded)
                                 result = result with { Interaction = GameWorldActionStatus.InvariantViolation };
                         }

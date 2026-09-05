@@ -22,17 +22,19 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool residencySmoke = arguments.Contains("--d0-1-smoke", StringComparer.Ordinal);
         bool farIslandSmoke = arguments.Contains("--d0-2-smoke", StringComparer.Ordinal);
         bool signSmoke = arguments.Contains("--d0-3-smoke", StringComparer.Ordinal);
+        bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
-            !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke && !f02Smoke)
+            !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
+            !fallbackLabSmoke && !f02Smoke)
             return;
         try
         {
-            if (signSmoke)
+            if (signSmoke || fallbackLabSmoke)
             {
                 StartLocalCabin(
                     CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
-                RunSignSmokeAfterNativeFrames();
+                RunPresentationSmokeAfterNativeFrames(fallbackLabSmoke);
                 return;
             }
             if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
@@ -113,7 +115,7 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         }
     }
 
-    private async void RunSignSmokeAfterNativeFrames()
+    private async void RunPresentationSmokeAfterNativeFrames(bool fallbackLab)
     {
         try
         {
@@ -121,25 +123,29 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             // construction in _Ready. Cross that native boundary before claiming visible output.
             for (int frame = 0; frame < 3; frame++)
                 await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
-            LocalCabinPresentationSnapshot evidence = _cabin!.RunD03Acceptance();
+            LocalCabinPresentationSnapshot evidence = fallbackLab
+                ? _cabin!.RunD04Acceptance()
+                : _cabin!.RunD03Acceptance();
             if (evidence.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
                 evidence.SemanticResidentChunks >= evidence.AuthoredChunks ||
                 evidence.RenderedChunks >= evidence.SemanticResidentChunks)
                 throw new InvalidOperationException(
                     "The Concept Demo did not preserve authored > resident > rendered structure.");
             GD.Print(
-                "D0.3 INFORMATIONAL SIGN PASS " +
+                (fallbackLab ? "D0.4 FALLBACK LAB PASS " : "D0.3 INFORMATIONAL SIGN PASS ") +
                 $"player={evidence.PlayerPosition} authored/resident/rendered=" +
                 $"{evidence.AuthoredChunks}/{evidence.SemanticResidentChunks}/" +
                 $"{evidence.RenderedChunks} radius={evidence.RenderDistanceChunks} " +
                 $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
             RetireCurrentSession();
-            ReturnToMainMenu("Concept Demo D0.3 informational-sign smoke passed.");
+            ReturnToMainMenu(fallbackLab
+                ? "Concept Demo D0.4 Fallback Lab smoke passed."
+                : "Concept Demo D0.3 informational-sign smoke passed.");
             GetTree().Quit(0);
         }
         catch (Exception exception)
         {
-            GD.PushError($"D0.3 native presentation failed: {exception}");
+            GD.PushError($"D0.{(fallbackLab ? 4 : 3)} native presentation failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
             GetTree().Quit(1);

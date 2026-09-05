@@ -21,6 +21,14 @@ public static class GameInformationalSigns
         "This floating world demonstrates intentional void, terrain shells, authoritative movement, " +
         "the Sky Island telepad, and the distant Far Gate. Select a world object and press E to " +
         "interact. Third-person and independent controls can jump; Orbit controls use the telepad.");
+
+    public static InformationalSignContent FallbackLab { get; } = new(
+        "FALLBACK LAB",
+        "The four pedestals demonstrate client presentation availability, left to right: " +
+        "CORRECT uses its model and material; MODEL MISSING uses a neutral category primitive; " +
+        "TEXTURE MISSING keeps the real model with the diagnostic magenta/yellow material; " +
+        "MODEL + TEXTURE MISSING uses both fallbacks. Their authoritative identity, collision, " +
+        "support, and interaction truth do not change when presentation is incomplete.");
 }
 
 /// <summary>Compiled informational view shared by every concrete sign-content instance.</summary>

@@ -224,9 +224,56 @@ static void ConceptDemoSignUsesAuthoritativeInformationalUi()
     DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
         view.LastCommandSequence == release.Sequence);
 
-    True(fixture.Session.TryRequestRelocation(1, GamePlayableWorld.CentralFarGatePosition));
+    True(fixture.Session.TryRequestRelocation(1, GamePlayableWorld.FallbackLabApproachPosition));
     DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
         view.LastAdministrativeSequence == 1 && view.LastAdministrativeSucceeded);
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Interact,
+            true),
+        out GamePlayerCommand labUse));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        labUse,
+        LocalPlayableSelection.FallbackLabSign,
+        false,
+        default,
+        false)));
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == labUse.Sequence &&
+            view.LastSelection == LocalPlayableSelection.FallbackLabSign &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            client.OpenViewCount == 1;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+    UiViewInstanceId labView = renderer.LastInstance;
+    True(string.Equals(
+        GameInformationalSigns.FallbackLab.Title,
+        client.GetValue(labView, InformationalSignUi.Title).Text,
+        StringComparison.Ordinal));
+    True(string.Equals(
+        GameInformationalSigns.FallbackLab.Body,
+        client.GetValue(labView, InformationalSignUi.Body).Text,
+        StringComparison.Ordinal));
+    client.SubmitAction(labView, InformationalSignUi.Close);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 0;
+    });
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+        out GamePlayerCommand labRelease));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        labRelease, LocalPlayableSelection.None, false, default, false)));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastCommandSequence == labRelease.Sequence);
+
+    True(fixture.Session.TryRequestRelocation(2, GamePlayableWorld.CentralFarGatePosition));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 2 && view.LastAdministrativeSucceeded);
     True(input.TryCreateSemanticCommand(
         new ClientWorldCommandIntent(
             GameLocomotionUpdate.Stop,

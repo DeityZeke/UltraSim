@@ -1226,6 +1226,26 @@ missing animation
 
 Fallback never changes authoritative collision/Game truth.
 
+## D0.4 local fallback canary — CLOSED
+
+The permanent Godot renderer now consumes an explicit presentation-only mesh resolution result:
+
+```text
+Available
+ModelMissing
+TextureMissing
+ModelAndTextureMissing
+```
+
+Model absence selects the renderer-owned category primitive. Texture absence preserves an available
+model and applies the configured diagnostic or neutral fallback material. The outcome is named and
+counted in bounded native chunk diagnostics. It never alters the World render key, static/Multi
+identity, collision bounds, support policy, public identity, or Game interaction semantics.
+
+The local Concept Demo D0.4 fixture proves all four combinations and an authoritative explanatory
+sign. It is not evidence that CAS, HTTP acquisition, package activation, or hot resource replacement
+already exists.
+
 ---
 
 # 24. Direct Connect first; discovery later

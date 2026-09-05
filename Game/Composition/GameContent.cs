@@ -63,6 +63,11 @@ public static class GameWorldStaticVariants
     public const ushort CabinRoofEightBySixMeters = 1;
     public const ushort MountainWallEightMeters = 100;
     public const ushort MountainWallTenMeters = 101;
+    public const ushort FallbackLabPedestal = 200;
+    public const ushort FallbackLabCorrect = 201;
+    public const ushort FallbackLabModelMissing = 202;
+    public const ushort FallbackLabTextureMissing = 203;
+    public const ushort FallbackLabModelAndTextureMissing = 204;
 }
 
 /// <summary>Compact public-projection prefab identities admitted by the concrete game.</summary>

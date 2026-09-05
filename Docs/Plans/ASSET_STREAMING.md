@@ -1371,6 +1371,12 @@ Important:
 - a required package may still block entry when fallback is declared insufficient;
 - optional/missing content fails visibly/diagnosably.
 
+The local Concept Demo D0.4 canary now proves that the maintained Godot renderer can distinguish
+model absence from texture absence and degrade only presentation while immutable World identity and
+physical bounds remain unchanged. Its four fixture outcomes are local/preinstalled test resolution,
+not CAS/source/download evidence. A0.2+ must eventually drive the same renderer contract from
+verified catalog/blob availability without changing these semantics.
+
 ---
 
 # 26. Control/settings profiles as server data

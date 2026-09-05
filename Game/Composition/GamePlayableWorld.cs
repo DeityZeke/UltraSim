@@ -30,7 +30,9 @@ public readonly record struct GamePlayableWorldEntities(
     Entity FarReturnGate,
     PersistentEntityId FarReturnGateId,
     Entity WelcomeSign,
-    PersistentEntityId WelcomeSignId);
+    PersistentEntityId WelcomeSignId,
+    Entity FallbackLabSign,
+    PersistentEntityId FallbackLabSignId);
 
 /// <summary>Concrete authoritative action outcomes for the first playable vertical.</summary>
 public enum GameWorldActionStatus : byte
@@ -1387,6 +1389,12 @@ public static class GamePlayableWorld
     public static WorldPosition FarReturnGatePosition => FromGlobal(FarIslandCenterXMillimeters, 20_000);
     public static WorldPosition FarGateDestination => FromGlobal(FarIslandCenterXMillimeters, 16_000);
     public static WorldPosition WelcomeSignPosition => FromGlobal(14_000, 6_000);
+    public static WorldPosition FallbackLabSignPosition => FromGlobal(7_500, -1_000);
+    public static WorldPosition FallbackLabApproachPosition => FromGlobal(7_500, 1_000);
+    public static WorldPosition FallbackLabCorrectPosition => FromGlobal(3_000, -4_000);
+    public static WorldPosition FallbackLabModelMissingPosition => FromGlobal(6_000, -4_000);
+    public static WorldPosition FallbackLabTextureMissingPosition => FromGlobal(9_000, -4_000);
+    public static WorldPosition FallbackLabBothMissingPosition => FromGlobal(12_000, -4_000);
 
     public static WorldPack CreateWorldPack() => CreateWorldPackCore(conceptDemo: false);
 
@@ -1429,6 +1437,7 @@ public static class GamePlayableWorld
         {
             AddConceptTerrainShells(builder);
             AddConceptMountainWalls(builder);
+            AddFallbackLab(builder);
         }
         if (!builder.TryBuild(out WorldPackArtifact? artifact, out WorldPackBuildError buildError))
             throw new InvalidOperationException($"Authored playable WorldPack failed: {buildError}.");
@@ -1512,6 +1521,8 @@ public static class GamePlayableWorld
             Entity.Null,
             default,
             Entity.Null,
+            default,
+            Entity.Null,
             default);
     }
 
@@ -1531,8 +1542,10 @@ public static class GamePlayableWorld
             !game.WorldState.TrySetPosition(world, returnGate, FarReturnGatePosition))
             throw new InvalidOperationException("The Concept Demo Far Gate pair could not be created.");
         if (!world.TryInstantiate(game.Content.InformationalSign, out Entity welcomeSign) ||
-            !game.WorldState.TrySetPosition(world, welcomeSign, WelcomeSignPosition))
-            throw new InvalidOperationException("The Concept Demo welcome sign could not be created.");
+            !game.WorldState.TrySetPosition(world, welcomeSign, WelcomeSignPosition) ||
+            !world.TryInstantiate(game.Content.InformationalSign, out Entity fallbackLabSign) ||
+            !game.WorldState.TrySetPosition(world, fallbackLabSign, FallbackLabSignPosition))
+            throw new InvalidOperationException("The Concept Demo informational signs could not be created.");
         return entities with
         {
             SkyTelepad = telepad,
@@ -1543,6 +1556,8 @@ public static class GamePlayableWorld
             FarReturnGateId = world.GetOrAssignPersistentId(returnGate),
             WelcomeSign = welcomeSign,
             WelcomeSignId = world.GetOrAssignPersistentId(welcomeSign),
+            FallbackLabSign = fallbackLabSign,
+            FallbackLabSignId = world.GetOrAssignPersistentId(fallbackLabSign),
         };
     }
 
@@ -1783,6 +1798,65 @@ public static class GamePlayableWorld
                 new MultiInstanceId(2), root, WorldYaw.Zero, pieces,
                 out WorldPackBuildError error))
             throw new InvalidOperationException($"Concept Demo mountain walls failed: {error}.");
+    }
+
+    private static void AddFallbackLab(WorldPackBuilder builder)
+    {
+        const int pedestalHalfExtent = 1_000;
+        const int pedestalHeight = 400;
+        const int canaryHalfExtent = 500;
+        const int canaryHeight = 1_600;
+        WorldStaticFlags physical = WorldStaticFlags.Renderable | WorldStaticFlags.Collidable;
+        WorldPosition root = FallbackLabModelMissingPosition;
+        WorldMultiPieceSource[] pieces =
+        [
+            LabPiece(1, FallbackLabCorrectPosition, GameWorldStaticVariants.FallbackLabPedestal,
+                pedestalHalfExtent, pedestalHeight),
+            LabPiece(2, FallbackLabCorrectPosition, GameWorldStaticVariants.FallbackLabCorrect,
+                canaryHalfExtent, canaryHeight, pedestalHeight),
+            LabPiece(3, FallbackLabModelMissingPosition, GameWorldStaticVariants.FallbackLabPedestal,
+                pedestalHalfExtent, pedestalHeight),
+            LabPiece(4, FallbackLabModelMissingPosition,
+                GameWorldStaticVariants.FallbackLabModelMissing,
+                canaryHalfExtent, canaryHeight, pedestalHeight),
+            LabPiece(5, FallbackLabTextureMissingPosition,
+                GameWorldStaticVariants.FallbackLabPedestal,
+                pedestalHalfExtent, pedestalHeight),
+            LabPiece(6, FallbackLabTextureMissingPosition,
+                GameWorldStaticVariants.FallbackLabTextureMissing,
+                canaryHalfExtent, canaryHeight, pedestalHeight),
+            LabPiece(7, FallbackLabBothMissingPosition,
+                GameWorldStaticVariants.FallbackLabPedestal,
+                pedestalHalfExtent, pedestalHeight),
+            LabPiece(8, FallbackLabBothMissingPosition,
+                GameWorldStaticVariants.FallbackLabModelAndTextureMissing,
+                canaryHalfExtent, canaryHeight, pedestalHeight),
+        ];
+        if (!builder.TryAddStaticMulti(
+                new MultiInstanceId(3), root, WorldYaw.Zero, pieces,
+                out WorldPackBuildError error))
+            throw new InvalidOperationException($"Concept Demo Fallback Lab failed: {error}.");
+
+        WorldMultiPieceSource LabPiece(
+            uint pieceId,
+            WorldPosition ground,
+            ushort variant,
+            int halfExtent,
+            int height,
+            int verticalOffset = 0)
+        {
+            WorldPosition position = verticalOffset == 0
+                ? ground
+                : WithVerticalOffset(ground, verticalOffset);
+            return new WorldMultiPieceSource(
+                new MultiPieceId(pieceId),
+                new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Rock),
+                position,
+                WorldYaw.Zero,
+                variant,
+                physical,
+                Bounds(position, halfExtent, halfExtent, height));
+        }
     }
 
     private static void AddCabin(WorldPackBuilder builder)

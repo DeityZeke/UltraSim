@@ -8,9 +8,58 @@ namespace UltraSim.Client.Godot;
 
 public interface IGodotWorldAssetResolver
 {
-    Mesh? ResolveStaticMesh(WorldStaticRenderKey key);
-    Mesh? ResolvePublicMesh(uint prefabId);
+    GodotWorldMeshResolution ResolveStaticMesh(WorldStaticRenderKey key);
+    GodotWorldMeshResolution ResolvePublicMesh(uint prefabId);
     Material? ResolveTerrainMaterial(ushort materialId);
+}
+
+/// <summary>
+/// Presentation-only availability of one resolved model/material pair. This is deliberately not
+/// authoritative content state: World identity, collision, and interaction remain unchanged.
+/// </summary>
+public enum GodotWorldAssetAvailability : byte
+{
+    None = 0,
+    Available,
+    ModelMissing,
+    TextureMissing,
+    ModelAndTextureMissing,
+}
+
+/// <summary>Bounded result of resolving one semantic world presentation key.</summary>
+public readonly record struct GodotWorldMeshResolution(
+    GodotWorldAssetAvailability Availability,
+    Mesh? Mesh)
+{
+    public bool IsValid => Availability switch
+    {
+        GodotWorldAssetAvailability.Available or GodotWorldAssetAvailability.TextureMissing =>
+            Mesh is not null,
+        GodotWorldAssetAvailability.ModelMissing or
+            GodotWorldAssetAvailability.ModelAndTextureMissing => Mesh is null,
+        _ => false,
+    };
+
+    public static GodotWorldMeshResolution Available(Mesh mesh) =>
+        new(GodotWorldAssetAvailability.Available,
+            mesh ?? throw new ArgumentNullException(nameof(mesh)));
+
+    public static GodotWorldMeshResolution MissingModel() =>
+        new(GodotWorldAssetAvailability.ModelMissing, null);
+
+    public static GodotWorldMeshResolution MissingTexture(Mesh mesh) =>
+        new(GodotWorldAssetAvailability.TextureMissing,
+            mesh ?? throw new ArgumentNullException(nameof(mesh)));
+
+    public static GodotWorldMeshResolution MissingModelAndTexture() =>
+        new(GodotWorldAssetAvailability.ModelAndTextureMissing, null);
+}
+
+/// <summary>Client presentation policy for a missing texture; never authoritative Game state.</summary>
+public enum GodotWorldFallbackMaterialMode : byte
+{
+    Diagnostic = 1,
+    Neutral = 2,
 }
 
 /// <param name="MaximumRenderChunks">Maximum concurrently realized presentation chunks.</param>
@@ -135,7 +184,10 @@ public readonly record struct GodotWorldRenderChunkDiagnostics(
     ulong TerrainMeshObjectId,
     int AdditionalTerrainSurfaceFragmentCount,
     int AdditionalTerrainTriangleCount,
-    float FirstAdditionalTerrainLocalY);
+    float FirstAdditionalTerrainLocalY,
+    int ModelFallbackGroups,
+    int TextureFallbackGroups,
+    int ModelAndTextureFallbackGroups);
 
 /// <summary>
 /// Engine-thread presentation over the production semantic cache. Private render slots are mapped
@@ -169,8 +221,11 @@ public sealed class GodotWorldRenderer : IDisposable
         new ushort[TerrainSurfaceBandMesh.MaximumIndexCount];
     private readonly ushort[] _additionalTerrainMaterials =
         new ushort[TerrainSurfaceBandMesh.MaximumTriangleCount];
-    private readonly BoxMesh _fallbackStaticMesh;
-    private readonly BoxMesh _fallbackPublicMesh;
+    private readonly ArrayMesh _fallbackStaticMesh;
+    private readonly ArrayMesh _fallbackPublicMesh;
+    private readonly StandardMaterial3D _neutralFallbackMaterial;
+    private readonly ShaderMaterial _diagnosticFallbackMaterial;
+    private readonly GodotWorldFallbackMaterialMode _fallbackMaterialMode;
     private int _freeRenderSlotCount;
     private int _buildHead;
     private int _buildCount;
@@ -205,7 +260,9 @@ public sealed class GodotWorldRenderer : IDisposable
     private int _verticalAnchorMillimeters;
 
     public GodotWorldRenderer(Node3D host, ClientWorldSemanticCache cache,
-        GodotWorldRendererLimits limits = default, IGodotWorldAssetResolver? assets = null)
+        GodotWorldRendererLimits limits = default, IGodotWorldAssetResolver? assets = null,
+        GodotWorldFallbackMaterialMode fallbackMaterialMode =
+            GodotWorldFallbackMaterialMode.Diagnostic)
     {
         ArgumentNullException.ThrowIfNull(host);
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -218,6 +275,10 @@ public sealed class GodotWorldRenderer : IDisposable
         limits.Validate(cache);
         _limits = limits;
         _assets = assets;
+        if (fallbackMaterialMode is not (GodotWorldFallbackMaterialMode.Diagnostic or
+                GodotWorldFallbackMaterialMode.Neutral))
+            throw new ArgumentOutOfRangeException(nameof(fallbackMaterialMode));
+        _fallbackMaterialMode = fallbackMaterialMode;
         _renderChunks = new RenderChunk[limits.MaximumRenderChunks];
         _associations = new RenderAssociation[cache.Limits.MaximumResidentChunks];
         _freeRenderSlots = new int[limits.MaximumRenderChunks];
@@ -229,8 +290,30 @@ public sealed class GodotWorldRenderer : IDisposable
         _desiredVisible = new bool[cache.Limits.MaximumResidentChunks];
         _desiredResident = new bool[cache.Limits.MaximumResidentChunks];
         _desiredWindowOffsets = new ClientPresentationOffset[cache.Limits.MaximumResidentChunks];
-        _fallbackStaticMesh = new BoxMesh { Size = Vector3.One };
-        _fallbackPublicMesh = new BoxMesh { Size = new Vector3(0.6f, 1.8f, 0.6f) };
+        _neutralFallbackMaterial = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.48f, 0.5f, 0.52f),
+            Roughness = 0.95f,
+        };
+        _diagnosticFallbackMaterial = new ShaderMaterial
+        {
+            Shader = new Shader
+            {
+                Code = "shader_type spatial;\n" +
+                    "render_mode diffuse_lambert;\n" +
+                    "void fragment() {\n" +
+                    "  vec3 world = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;\n" +
+                    "  vec3 p = floor(world * 5.0);\n" +
+                    "  float c = mod(p.x + p.y + p.z, 2.0);\n" +
+                    "  ALBEDO = mix(vec3(1.0, 0.0, 0.85), vec3(1.0, 0.95, 0.0), c);\n" +
+                    "  ROUGHNESS = 0.8;\n" +
+                    "}\n",
+            },
+        };
+        _fallbackStaticMesh = GodotMeshGeometry.CreateGroundedBox(
+            Vector3.One, _neutralFallbackMaterial);
+        _fallbackPublicMesh = GodotMeshGeometry.CreateGroundedBox(
+            new Vector3(0.6f, 1.8f, 0.6f), _neutralFallbackMaterial);
         Root = new Node3D { Name = "UltraSimWorld" };
         host.AddChild(Root);
         _activeNodes = 1;
@@ -238,6 +321,7 @@ public sealed class GodotWorldRenderer : IDisposable
 
     public Node3D Root { get; }
     public GodotWorldRendererLimits Limits => _limits;
+    public GodotWorldFallbackMaterialMode FallbackMaterialMode => _fallbackMaterialMode;
 
     public bool TryEnterPresentation(ClientSemanticChunkHandle handle, bool visible,
         out GodotWorldRenderQueueError error)
@@ -575,7 +659,10 @@ public sealed class GodotWorldRenderer : IDisposable
             chunk.FirstStaticLocalY, chunk.FirstPublicLocalY,
             chunk.StructuralRoot.GetInstanceId(), chunk.PublicRoot.GetInstanceId(),
             chunk.TerrainMesh.GetInstanceId(), chunk.AdditionalTerrainSurfaceFragmentCount,
-            chunk.AdditionalTerrainTriangleCount, chunk.FirstAdditionalTerrainLocalY);
+            chunk.AdditionalTerrainTriangleCount, chunk.FirstAdditionalTerrainLocalY,
+            (chunk.StructuralFallbacks + chunk.PublicFallbacks).Model,
+            (chunk.StructuralFallbacks + chunk.PublicFallbacks).Texture,
+            (chunk.StructuralFallbacks + chunk.PublicFallbacks).ModelAndTexture);
         return true;
     }
 
@@ -680,6 +767,9 @@ public sealed class GodotWorldRenderer : IDisposable
         if (GodotObject.IsInstanceValid(Root)) Root.Free();
         _fallbackStaticMesh.Dispose();
         _fallbackPublicMesh.Dispose();
+        _diagnosticFallbackMaterial.Shader?.Dispose();
+        _diagnosticFallbackMaterial.Dispose();
+        _neutralFallbackMaterial.Dispose();
         _buildHead = 0;
         _buildCount = 0;
         _retireHead = 0;
@@ -746,6 +836,7 @@ public sealed class GodotWorldRenderer : IDisposable
         chunk.PublicRoot = candidate.Root;
         chunk.PublicNodeCount = candidate.NodeCount;
         chunk.PublicResourceCount = candidate.ResourceCount;
+        chunk.PublicFallbacks = candidate.Fallbacks;
         chunk.FirstPublicLocalY = candidate.FirstLocalY;
         chunk.SemanticHash = semantic.Info.SemanticHash;
         chunk.Root.AddChild(candidate.Root);
@@ -786,6 +877,7 @@ public sealed class GodotWorldRenderer : IDisposable
 
             var staticGroups = new SortedDictionary<WorldStaticRenderKey, List<Transform3D>>();
             float firstStaticY = float.NaN;
+            FallbackCounts structuralFallbacks = default;
             foreach (WorldFrozenStaticRecord record in semantic.FrozenStatics)
                 AddStatic(staticGroups, semantic.Info.Key, record.RenderKey, record.Position,
                     record.Orientation, record.Flags, yAnchor, ref firstStaticY);
@@ -794,9 +886,18 @@ public sealed class GodotWorldRenderer : IDisposable
                     record.Orientation, record.Flags, yAnchor, ref firstStaticY);
             foreach ((WorldStaticRenderKey key, List<Transform3D> transforms) in staticGroups)
             {
-                Mesh mesh = _assets?.ResolveStaticMesh(key) ?? _fallbackStaticMesh;
+                ResolvedMesh presentation = ResolveMesh(
+                    _assets?.ResolveStaticMesh(key) ??
+                        GodotWorldMeshResolution.MissingModelAndTexture(),
+                    _fallbackStaticMesh);
+                structuralFallbacks += FallbackCounts.From(presentation.Availability);
                 structural.AddChild(CreateMultiMesh(
-                    $"Static_{key.DefinitionId.Value}_{key.Variant}_{(ushort)key.Flags}", mesh, transforms));
+                    $"Static_{key.DefinitionId.Value}_{key.Variant}_{(ushort)key.Flags}" +
+                        (_assets is null ? string.Empty :
+                            FallbackNameSuffix(presentation.Availability)),
+                    presentation.Mesh,
+                    transforms,
+                    presentation.MaterialOverride));
             }
 
             RenderLayer publicLayer = CreatePublicLayer(semantic, yAnchor);
@@ -810,7 +911,8 @@ public sealed class GodotWorldRenderer : IDisposable
                 1 + semantic.AdditionalTerrainSurfaces.Count + staticGroups.Count,
                 semantic.AdditionalTerrainSurfaces.Count, additionalTerrainTriangles,
                 firstAdditionalTerrainY,
-                publicLayer.NodeCount, publicLayer.ResourceCount);
+                structuralFallbacks,
+                publicLayer.NodeCount, publicLayer.ResourceCount, publicLayer.Fallbacks);
         }
         catch
         {
@@ -826,6 +928,7 @@ public sealed class GodotWorldRenderer : IDisposable
         {
             var groups = new SortedDictionary<uint, List<Transform3D>>();
             float firstY = float.NaN;
+            FallbackCounts fallbacks = default;
             foreach (WorldPublicRecord record in semantic.PublicRecords)
             {
                 if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0) continue;
@@ -838,10 +941,18 @@ public sealed class GodotWorldRenderer : IDisposable
             }
             foreach ((uint prefab, List<Transform3D> transforms) in groups)
             {
-                Mesh mesh = _assets?.ResolvePublicMesh(prefab) ?? _fallbackPublicMesh;
-                root.AddChild(CreateMultiMesh($"Public_{prefab}", mesh, transforms));
+                GodotWorldMeshResolution resolution = _assets?.ResolvePublicMesh(prefab) ??
+                    GodotWorldMeshResolution.MissingModelAndTexture();
+                ResolvedMesh presentation = ResolveMesh(resolution, _fallbackPublicMesh);
+                fallbacks += FallbackCounts.From(presentation.Availability);
+                root.AddChild(CreateMultiMesh(
+                    $"Public_{prefab}" + (_assets is null ? string.Empty :
+                        FallbackNameSuffix(presentation.Availability)),
+                    presentation.Mesh,
+                    transforms,
+                    presentation.MaterialOverride));
             }
-            return new RenderLayer(root, 1 + groups.Count, groups.Count, firstY);
+            return new RenderLayer(root, 1 + groups.Count, groups.Count, firstY, fallbacks);
         }
         catch
         {
@@ -963,8 +1074,11 @@ public sealed class GodotWorldRenderer : IDisposable
         return mesh;
     }
 
-    private static MultiMeshInstance3D CreateMultiMesh(string name, Mesh mesh,
-        List<Transform3D> transforms)
+    private static MultiMeshInstance3D CreateMultiMesh(
+        string name,
+        Mesh mesh,
+        List<Transform3D> transforms,
+        Material? materialOverride = null)
     {
         if (transforms.Count == 0)
             throw new ArgumentException("A MultiMesh render group cannot be empty.", nameof(transforms));
@@ -989,8 +1103,36 @@ public sealed class GodotWorldRenderer : IDisposable
             Name = name,
             Multimesh = multiMesh,
             CustomAabb = combinedBounds,
+            MaterialOverride = materialOverride,
         };
     }
+
+    private ResolvedMesh ResolveMesh(
+        in GodotWorldMeshResolution resolution,
+        Mesh fallbackMesh)
+    {
+        if (!resolution.IsValid)
+            throw new InvalidOperationException(
+                $"The world asset resolver returned an invalid {resolution.Availability} result.");
+        bool modelMissing = resolution.Availability is GodotWorldAssetAvailability.ModelMissing or
+            GodotWorldAssetAvailability.ModelAndTextureMissing;
+        bool textureMissing = resolution.Availability is GodotWorldAssetAvailability.TextureMissing or
+            GodotWorldAssetAvailability.ModelAndTextureMissing;
+        Material? materialOverride = textureMissing
+            ? _fallbackMaterialMode == GodotWorldFallbackMaterialMode.Diagnostic
+                ? _diagnosticFallbackMaterial
+                : _neutralFallbackMaterial
+            : null;
+        return new ResolvedMesh(
+            modelMissing ? fallbackMesh : resolution.Mesh!,
+            materialOverride,
+            resolution.Availability);
+    }
+
+    private static string FallbackNameSuffix(GodotWorldAssetAvailability availability) =>
+        availability == GodotWorldAssetAvailability.Available
+            ? string.Empty
+            : $"_Fallback_{availability}";
 
     private static void AddStatic(SortedDictionary<WorldStaticRenderKey, List<Transform3D>> groups,
         SpatialChunkKey key, WorldStaticRenderKey renderKey, WorldPosition position,
@@ -1345,7 +1487,34 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly record struct RenderAssociation(uint Generation, int RenderSlotPlusOne);
     private readonly record struct RenderWorkItem(ClientSemanticChunkHandle Handle, RenderWorkKind Kind);
     private enum RenderWorkKind : byte { FullBuild, PublicRefresh }
-    private readonly record struct RenderLayer(Node3D Root, int NodeCount, int ResourceCount, float FirstLocalY);
+    private readonly record struct ResolvedMesh(
+        Mesh Mesh,
+        Material? MaterialOverride,
+        GodotWorldAssetAvailability Availability);
+
+    private readonly record struct FallbackCounts(int Model, int Texture, int ModelAndTexture)
+    {
+        internal static FallbackCounts From(GodotWorldAssetAvailability availability) =>
+            availability switch
+            {
+                GodotWorldAssetAvailability.ModelMissing => new(1, 0, 0),
+                GodotWorldAssetAvailability.TextureMissing => new(0, 1, 0),
+                GodotWorldAssetAvailability.ModelAndTextureMissing => new(0, 0, 1),
+                _ => default,
+            };
+
+        public static FallbackCounts operator +(FallbackCounts left, FallbackCounts right) =>
+            new(left.Model + right.Model,
+                left.Texture + right.Texture,
+                left.ModelAndTexture + right.ModelAndTexture);
+    }
+
+    private readonly record struct RenderLayer(
+        Node3D Root,
+        int NodeCount,
+        int ResourceCount,
+        float FirstLocalY,
+        FallbackCounts Fallbacks);
 
     private sealed class RenderChunk
     {
@@ -1358,7 +1527,9 @@ public sealed class GodotWorldRenderer : IDisposable
             int structuralNodeCount, int structuralResourceCount,
             int additionalTerrainSurfaceFragmentCount, int additionalTerrainTriangleCount,
             float firstAdditionalTerrainLocalY,
-            int publicNodeCount, int publicResourceCount)
+            FallbackCounts structuralFallbacks,
+            int publicNodeCount, int publicResourceCount,
+            FallbackCounts publicFallbacks)
         {
             Handle = handle;
             Key = key;
@@ -1378,8 +1549,10 @@ public sealed class GodotWorldRenderer : IDisposable
             AdditionalTerrainSurfaceFragmentCount = additionalTerrainSurfaceFragmentCount;
             AdditionalTerrainTriangleCount = additionalTerrainTriangleCount;
             FirstAdditionalTerrainLocalY = firstAdditionalTerrainLocalY;
+            StructuralFallbacks = structuralFallbacks;
             PublicNodeCount = publicNodeCount;
             PublicResourceCount = publicResourceCount;
+            PublicFallbacks = publicFallbacks;
         }
 
         internal ClientSemanticChunkHandle Handle { get; }
@@ -1398,6 +1571,8 @@ public sealed class GodotWorldRenderer : IDisposable
         internal float FirstAdditionalTerrainLocalY { get; }
         internal float FirstStaticLocalY { get; }
         internal float FirstPublicLocalY { get; set; }
+        internal FallbackCounts StructuralFallbacks { get; }
+        internal FallbackCounts PublicFallbacks { get; set; }
         internal int StructuralNodeCount { get; }
         internal int StructuralResourceCount { get; }
         internal int PublicNodeCount { get; set; }

@@ -67,6 +67,13 @@ direct profiles; and the mouse wheel adjusts supported camera profiles. The Cent
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
 
+The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
+complete model/material, a neutral category primitive for a missing model, the real model with a
+magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby
+sign explains the cases through the same authoritative informational-UI path. These visuals never
+change the immutable objects' collision or support geometry. `--d0-4-smoke` permanently verifies
+the three fallback classes, model/material independence, native bounds, and sign UI.
+
 F1 Orbit starts in a close three-quarter composition: 45-degree elevation at 14 m rather than the
 older 64-degree/28 m overhead survey view. Version-2 settings that merely captured the exact old
 28 m Orbit default migrate to the new composition; distinct user-selected distances remain intact.

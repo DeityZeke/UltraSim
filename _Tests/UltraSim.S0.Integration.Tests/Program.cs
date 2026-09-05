@@ -34,6 +34,8 @@ Run("ConceptDemoFarGateUsesSparseAuthoredGeography",
     ConceptDemoFarGateUsesSparseAuthoredGeography, results);
 Run("ConceptDemoInformationalSignValidatesAuthoritativeTargetAndRange",
     ConceptDemoInformationalSignValidatesAuthoritativeTargetAndRange, results);
+Run("ConceptDemoFallbackLabKeepsPresentationFailureOutOfAuthority",
+    ConceptDemoFallbackLabKeepsPresentationFailureOutOfAuthority, results);
 Run("SimplePhysicsIsFreshAndRebuildsOpenDoorProjection", SimplePhysicsGenerationReplacement, results);
 Run("SimplePhysicsOccupancyIsFirstClassBoundedAndAllocationFree", SimplePhysicsOccupancy, results);
 Run("SimplePhysicsSweepPreventsTunnelingAndCornerCutting", SimplePhysicsSweptMotion, results);
@@ -910,6 +912,78 @@ static TestMetrics ConceptDemoInformationalSignValidatesAuthoritativeTargetAndRa
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         "The Concept Demo sign is a real public Game target; only its trusted identity and range admit interaction, while UI text remains outside client intent.",
         InputCommands: 3);
+}
+
+static TestMetrics ConceptDemoFallbackLabKeepsPresentationFailureOutOfAuthority()
+{
+    WorldPack first = GamePlayableWorld.CreateConceptDemoWorldPack();
+    WorldPack second = GamePlayableWorld.CreateConceptDemoWorldPack();
+    Expect(first.Fingerprint == second.Fingerprint && first.MultiInstanceCount == 3,
+        "The Fallback Lab WorldPack was not canonical or did not retain its authored Multi identity.");
+    Expect(first.TryGetMultiInstance(new MultiInstanceId(3), out WorldMultiInstanceRecord lab) &&
+        lab.PieceCount == 8,
+        "The Fallback Lab did not retain four pedestal/object pairs under one stable Multi identity.");
+
+    WorldPosition[] positions =
+    [
+        GamePlayableWorld.FallbackLabCorrectPosition,
+        GamePlayableWorld.FallbackLabModelMissingPosition,
+        GamePlayableWorld.FallbackLabTextureMissingPosition,
+        GamePlayableWorld.FallbackLabBothMissingPosition,
+    ];
+    ushort[] variants =
+    [
+        GameWorldStaticVariants.FallbackLabCorrect,
+        GameWorldStaticVariants.FallbackLabModelMissing,
+        GameWorldStaticVariants.FallbackLabTextureMissing,
+        GameWorldStaticVariants.FallbackLabModelAndTextureMissing,
+    ];
+    Span<WorldStaticQueryHit> hits = stackalloc WorldStaticQueryHit[16];
+    WorldStaticBounds canaryBounds = default;
+    for (int index = 0; index < positions.Length; index++)
+    {
+        WorldPosition position = positions[index];
+        var query = new WorldStaticBounds(
+            position.GlobalXMillimeters - 1_100,
+            position.YMillimeters,
+            position.GlobalZMillimeters - 1_100,
+            position.GlobalXMillimeters + 1_101,
+            position.YMillimeters + 2_100,
+            position.GlobalZMillimeters + 1_101);
+        Expect(first.TryQueryStaticBounds(
+                query, 9, hits, out int count, out _, out WorldStaticQueryError error),
+            $"The Fallback Lab authority query failed: {error}.");
+        WorldStaticQueryHit canary = default;
+        int labPieces = 0;
+        for (int hit = 0; hit < count; hit++)
+        {
+            if (hits[hit].MultiId != new MultiInstanceId(3)) continue;
+            labPieces++;
+            if (hits[hit].Variant == variants[index]) canary = hits[hit];
+        }
+        Expect(labPieces >= 2 && canary.Kind == WorldStaticQueryKind.MultiFragment &&
+            canary.DefinitionId == new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Rock) &&
+            canary.Flags == (WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
+            $"Fallback Lab canary {variants[index]} lost canonical authority geometry.");
+        if (index == 0)
+            canaryBounds = canary.Bounds;
+        else
+            Expect(
+                canary.Bounds.MaximumXExclusiveMillimeters - canary.Bounds.MinimumXMillimeters ==
+                    canaryBounds.MaximumXExclusiveMillimeters - canaryBounds.MinimumXMillimeters &&
+                canary.Bounds.MaximumYExclusiveMillimeters - canary.Bounds.MinimumYMillimeters ==
+                    canaryBounds.MaximumYExclusiveMillimeters - canaryBounds.MinimumYMillimeters &&
+                canary.Bounds.MaximumZExclusiveMillimeters - canary.Bounds.MinimumZMillimeters ==
+                    canaryBounds.MaximumZExclusiveMillimeters - canaryBounds.MinimumZMillimeters,
+                "A presentation-failure class changed the canary's authoritative collision size.");
+    }
+
+    return new TestMetrics(
+        HashText($"{first.Fingerprint}|{lab.Id.Value}|{lab.PieceCount}|" +
+            string.Join(',', variants)),
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        "D0.4 keeps correct/model-missing/texture-missing/both-missing canaries in one immutable " +
+        "World Multi with identical authoritative collision semantics; only Godot presentation degrades.");
 }
 
 static TestMetrics SimplePhysicsGenerationReplacement()

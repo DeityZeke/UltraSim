@@ -73,6 +73,7 @@ public partial class LocalCabinClient : Node3D
         SkyTelepad,
         FarGate,
         InformationalSign,
+        FallbackLabSign,
         WoodlandAnimal,
     }
 
@@ -656,7 +657,7 @@ public partial class LocalCabinClient : Node3D
             (!_useConceptDemoWorld ||
                 CountPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad) == 1 &&
                 CountPresentedPrefab(GameWorldPublicPrefabIds.FarGate) == 1 &&
-                CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 1));
+                CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) == 2));
         _lastOutcome = _useConceptDemoWorld
             ? "Fresh Concept Demo island started"
             : "Fresh woods/cabin world started";
@@ -673,7 +674,7 @@ public partial class LocalCabinClient : Node3D
             _inventoryHost is null || _hoverTooltip is null)
             throw new InvalidOperationException("D0.3 requires the initialized Concept Demo UI consumer.");
         ValidateInitialNativePresentation();
-        if (CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) != 1 ||
+        if (CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) != 2 ||
             !TrySetPointerWorldPoint(
                 GamePlayableWorld.WelcomeSignPosition.GlobalXMillimeters,
                 GamePlayableWorld.WelcomeSignPosition.GlobalZMillimeters))
@@ -725,6 +726,114 @@ public partial class LocalCabinClient : Node3D
         if (_inventoryHost.GetChildCount() != 0)
             throw new InvalidOperationException("Closing the informational sign left stale Godot UI presentation.");
         return GetPresentationSnapshot();
+    }
+
+    /// <summary>
+    /// Permanent D0.4 canary for presentation-only missing-model/material fallbacks. The four
+    /// objects retain immutable World identity and collision regardless of the chosen visual.
+    /// </summary>
+    public LocalCabinPresentationSnapshot RunD04Acceptance()
+    {
+        if (!_initialized || !_useConceptDemoWorld || _localSession is null ||
+            _sequencer is null || _uiClient is null || _inventoryHost is null ||
+            _cache is null || _renderer is null || _settings is null)
+            throw new InvalidOperationException("D0.4 requires the initialized Concept Demo consumer.");
+        if (default(GodotWorldMeshResolution).IsValid ||
+            _renderer.FallbackMaterialMode != GodotWorldFallbackMaterialMode.Diagnostic)
+            throw new InvalidOperationException("The fallback result or presentation policy did not fail closed.");
+        ValidateInitialNativePresentation();
+        SpatialChunkKey labKey = GamePlayableWorld.FallbackLabCorrectPosition.ToChunkKey(
+            GameWorldState.DefaultSpace);
+        if (!_cache.TryGetResidentHandle(labKey, out ClientSemanticChunkHandle handle) ||
+            !_renderer.TryGetChunkDiagnostics(handle, out GodotWorldRenderChunkDiagnostics diagnostics) ||
+            diagnostics.ModelFallbackGroups != 1 || diagnostics.TextureFallbackGroups != 1 ||
+            diagnostics.ModelAndTextureFallbackGroups != 1)
+            throw new InvalidOperationException(
+                "The resident Fallback Lab did not retain one group for each failure class.");
+
+        MultiMeshInstance3D correct = RequireFallbackLabGroup(
+            GameWorldStaticVariants.FallbackLabCorrect, GodotWorldAssetAvailability.Available);
+        MultiMeshInstance3D modelMissing = RequireFallbackLabGroup(
+            GameWorldStaticVariants.FallbackLabModelMissing,
+            GodotWorldAssetAvailability.ModelMissing);
+        MultiMeshInstance3D textureMissing = RequireFallbackLabGroup(
+            GameWorldStaticVariants.FallbackLabTextureMissing,
+            GodotWorldAssetAvailability.TextureMissing);
+        MultiMeshInstance3D bothMissing = RequireFallbackLabGroup(
+            GameWorldStaticVariants.FallbackLabModelAndTextureMissing,
+            GodotWorldAssetAvailability.ModelAndTextureMissing);
+        if (correct.Multimesh!.Mesh!.GetInstanceId() != textureMissing.Multimesh!.Mesh!.GetInstanceId() ||
+            modelMissing.Multimesh!.Mesh!.GetInstanceId() != bothMissing.Multimesh!.Mesh!.GetInstanceId() ||
+            correct.Multimesh.Mesh.GetInstanceId() == modelMissing.Multimesh.Mesh.GetInstanceId() ||
+            correct.MaterialOverride is not null || modelMissing.MaterialOverride is not null ||
+            textureMissing.MaterialOverride is not ShaderMaterial ||
+            bothMissing.MaterialOverride is not ShaderMaterial)
+            throw new InvalidOperationException(
+                "The Fallback Lab did not preserve model and material failure as independent axes.");
+
+        RelocateControlledActor(GamePlayableWorld.FallbackLabApproachPosition);
+        if (!TrySetPointerWorldPoint(
+                GamePlayableWorld.FallbackLabSignPosition.GlobalXMillimeters,
+                GamePlayableWorld.FallbackLabSignPosition.GlobalZMillimeters))
+            throw new InvalidOperationException("The Fallback Lab sign had no selectable support point.");
+        Select(_pointerPoint);
+        if (_selection != SelectionKind.FallbackLabSign ||
+            !_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop,
+                    GamePlayerActions.Interact,
+                    true),
+                out GamePlayerCommand use))
+            throw new InvalidOperationException("The Fallback Lab sign interaction could not be formed.");
+        ApplyCommand(use, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == use.Sequence &&
+            view.LastSelection == LocalPlayableSelection.FallbackLabSign &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            _uiClient.OpenViewCount == 1);
+        Control? signView = FindOpenUiView();
+        Label? title = signView?.FindChild("Element_title", recursive: true, owned: false) as Label;
+        Label? body = signView?.FindChild("Element_body", recursive: true, owned: false) as Label;
+        Button? close = signView?.FindChild("Element_close", recursive: true, owned: false) as Button;
+        if (title?.Text != GameInformationalSigns.FallbackLab.Title ||
+            body?.Text != GameInformationalSigns.FallbackLab.Body || close is null)
+            throw new InvalidOperationException(
+                "Godot did not realize the authoritative Fallback Lab explanation.");
+        close.EmitSignal(BaseButton.SignalName.Pressed);
+        DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
+        return GetPresentationSnapshot();
+    }
+
+    private MultiMeshInstance3D RequireFallbackLabGroup(
+        ushort variant,
+        GodotWorldAssetAvailability availability)
+    {
+        if (_renderer is null)
+            throw new InvalidOperationException("The Fallback Lab renderer is unavailable.");
+        string suffix = availability == GodotWorldAssetAvailability.Available
+            ? string.Empty
+            : $"_Fallback_{availability}";
+        string expected = $"Static_{GameWorldStaticDefinitionIds.Rock}_{variant}_" +
+            $"{(ushort)(WorldStaticFlags.Renderable | WorldStaticFlags.Collidable)}{suffix}";
+        MultiMeshInstance3D? found = _renderer.Root.FindChild(
+            expected, recursive: true, owned: false) as MultiMeshInstance3D;
+        if (found?.Multimesh is not { InstanceCount: 1, Mesh: not null } ||
+            found.CustomAabb.Size.LengthSquared() <= 0f)
+            throw new InvalidOperationException($"Fallback Lab native group '{expected}' was incomplete.");
+        return found;
+    }
+
+    private Control? FindOpenUiView()
+    {
+        if (_inventoryHost is null) return null;
+        foreach (Node child in _inventoryHost.GetChildren())
+        {
+            if (child is Control candidate && candidate.Name.ToString().StartsWith(
+                    "UiView_", StringComparison.Ordinal))
+                return candidate;
+        }
+        return null;
     }
 
     private void CreateInventoryConsumer()
@@ -972,6 +1081,7 @@ public partial class LocalCabinClient : Node3D
             SelectionKind.SkyTelepad => LocalPlayableSelection.SkyTelepad,
             SelectionKind.FarGate => LocalPlayableSelection.FarGate,
             SelectionKind.InformationalSign => LocalPlayableSelection.InformationalSign,
+            SelectionKind.FallbackLabSign => LocalPlayableSelection.FallbackLabSign,
             _ => LocalPlayableSelection.Unsupported,
         };
         if (!_localSession.TrySubmit(new LocalPlayableCommand(
@@ -1095,6 +1205,7 @@ public partial class LocalCabinClient : Node3D
                         LocalPlayableSelection.SkyTelepad => "Sky Island telepad activated",
                         LocalPlayableSelection.FarGate => "Far Gate activated",
                         LocalPlayableSelection.InformationalSign => "Sign opened",
+                        LocalPlayableSelection.FallbackLabSign => "Fallback Lab sign opened",
                         _ => "Interaction accepted",
                     }
                     : $"{view.LastSelection} interaction: {view.LastCommandResult.Interaction}";
@@ -1194,9 +1305,12 @@ public partial class LocalCabinClient : Node3D
 
     private void Select(in ClientControlWorldPoint point)
     {
-        _selection = _useConceptDemoWorld &&
-            IsKnownPresentedPrefabNear(
-                GameWorldPublicPrefabIds.InformationalSign, point, radius: 1_500)
+        bool signPresented = _useConceptDemoWorld && IsKnownPresentedPrefabNear(
+            GameWorldPublicPrefabIds.InformationalSign, point, radius: 1_500);
+        _selection = signPresented && Nearest(
+                point, GamePlayableWorld.FallbackLabSignPosition, 1_500)
+            ? SelectionKind.FallbackLabSign
+            : signPresented && Nearest(point, GamePlayableWorld.WelcomeSignPosition, 1_500)
             ? SelectionKind.InformationalSign
             : Nearest(point, GamePlayableWorld.DoorPosition, 1_750)
             ? SelectionKind.CabinDoor
@@ -1955,7 +2069,7 @@ public partial class LocalCabinClient : Node3D
             : 0;
         if (characters != 1 || doors != 1 || chests != 1 ||
             _useConceptDemoWorld &&
-            (telepads != 1 || gates != 1 || signs != 1))
+            (telepads != 1 || gates != 1 || signs != 2))
             throw new InvalidOperationException(
                 "The initial public world does not own complete visible native mesh presentation: " +
                 $"characters={characters}, doors={doors}, chests={chests}, telepads={telepads}, " +
@@ -2435,6 +2549,14 @@ public partial class LocalCabinClient : Node3D
             new Vector3(8f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
         private readonly Mesh _mountainWallTen = GroundedBox(
             new Vector3(10f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
+        private readonly Mesh _fallbackLabPedestal = GroundedBox(
+            new Vector3(2f, 0.4f, 2f), new Color(0.23f, 0.24f, 0.26f));
+        private readonly Mesh _fallbackLabModel = GodotMeshGeometry.CreateGroundedPointerWedge(
+            0.5f,
+            0.42f,
+            0.72f,
+            1.6f,
+            Material(new Color(0.18f, 0.78f, 0.36f)));
 
         public CabinCatalogAssetResolver(
             CabinContentOracle oracle,
@@ -2462,13 +2584,35 @@ public partial class LocalCabinClient : Node3D
         public ContentHash WallTextureHash { get; }
         public StandardMaterial3D? AddedMaterial { get; }
 
-        public Mesh? ResolveStaticMesh(WorldStaticRenderKey key) => key.DefinitionId switch
+        private GodotWorldMeshResolution ResolveFallbackLabMesh(ushort variant) => variant switch
+        {
+            GameWorldStaticVariants.FallbackLabCorrect =>
+                GodotWorldMeshResolution.Available(_fallbackLabModel),
+            GameWorldStaticVariants.FallbackLabModelMissing =>
+                GodotWorldMeshResolution.MissingModel(),
+            GameWorldStaticVariants.FallbackLabTextureMissing =>
+                GodotWorldMeshResolution.MissingTexture(_fallbackLabModel),
+            GameWorldStaticVariants.FallbackLabModelAndTextureMissing =>
+                GodotWorldMeshResolution.MissingModelAndTexture(),
+            _ => GodotWorldMeshResolution.Available(ResolveStaticMeshCore(
+                new WorldStaticRenderKey(
+                    new WorldStaticDefinitionId(GameWorldStaticDefinitionIds.Rock),
+                    variant,
+                    WorldStaticFlags.Renderable))),
+        };
+
+        private Mesh ResolveStaticMeshCore(WorldStaticRenderKey key) => key.DefinitionId switch
         {
             var id when id.Value == GameWorldStaticDefinitionIds.Tree => _wood,
             var id when id.Value == GameWorldStaticDefinitionIds.Rock => key.Variant switch
             {
                 GameWorldStaticVariants.MountainWallEightMeters => _mountainWallEight,
                 GameWorldStaticVariants.MountainWallTenMeters => _mountainWallTen,
+                GameWorldStaticVariants.FallbackLabPedestal => _fallbackLabPedestal,
+                GameWorldStaticVariants.FallbackLabCorrect or
+                    GameWorldStaticVariants.FallbackLabModelMissing or
+                    GameWorldStaticVariants.FallbackLabTextureMissing or
+                    GameWorldStaticVariants.FallbackLabModelAndTextureMissing => _fallbackLabModel,
                 _ => _stone,
             },
             var id when id.Value == GameWorldStaticDefinitionIds.CabinWall => key.Variant switch
@@ -2484,7 +2628,18 @@ public partial class LocalCabinClient : Node3D
             _ => _fallbackStructure,
         };
 
-        public Mesh? ResolvePublicMesh(uint prefabId) => prefabId switch
+        GodotWorldMeshResolution IGodotWorldAssetResolver.ResolveStaticMesh(
+            WorldStaticRenderKey key) =>
+            key.DefinitionId.Value == GameWorldStaticDefinitionIds.Rock &&
+            key.Variant is >= GameWorldStaticVariants.FallbackLabCorrect and
+                <= GameWorldStaticVariants.FallbackLabModelAndTextureMissing
+                ? ResolveFallbackLabMesh(key.Variant)
+                : GodotWorldMeshResolution.Available(ResolveStaticMeshCore(key));
+
+        public GodotWorldMeshResolution ResolvePublicMesh(uint prefabId) =>
+            GodotWorldMeshResolution.Available(ResolvePublicMeshCore(prefabId));
+
+        private Mesh ResolvePublicMeshCore(uint prefabId) => prefabId switch
         {
             GameWorldPublicPrefabIds.Character => _character,
             GameWorldPublicPrefabIds.CabinDoor => _door,

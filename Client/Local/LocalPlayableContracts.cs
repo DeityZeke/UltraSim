@@ -14,7 +14,8 @@ public enum LocalPlayableSelection : byte
     SkyTelepad = 3,
     FarGate = 4,
     InformationalSign = 5,
-    Unsupported = 6,
+    FallbackLabSign = 6,
+    Unsupported = 7,
 }
 
 public readonly record struct LocalPlayableCommand(

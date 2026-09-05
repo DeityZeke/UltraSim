@@ -12,10 +12,11 @@ native client and compiles its local consumer into the Single Player and Complet
 supplies explicit base-surface presence/intentional-void semantics, and T1.1 supplies immutable
 sparse terrain shells at free absolute elevations for the Sky Island and cave. Physics support,
 grounding, and clearance are closed at P0.1c, and Physics P0.1d now supplies authoritative
-jump/gravity/fall/landing/recovery. Concept Demo D0.0 now composes those accepted capabilities into
-the permanent Single Player client as a floating Central Island, MountainShell cave, detached Sky
-Island, and Game-owned telepad. The next local world checkpoint is render-distance/larger-residency
-policy before adding the geographically separate Far Island and gate.
+jump/gravity/fall/landing/recovery. Concept Demo D0.0 composes those accepted capabilities into the
+permanent Single Player client as a floating Central Island, MountainShell cave, detached Sky
+Island, and Game-owned telepad. D0.1 adds live bounded structural/render residency, D0.2 adds the
+sparse Far Island and reciprocal authoritative gates, D0.3 adds the authoritative informational
+sign, and D0.4 now closes the local Fallback Lab canaries described below.
 
 The demo has two purposes:
 
@@ -639,9 +640,9 @@ The sign UI is content/data. Godot remains the renderer.
 
 ---
 
-# 9. Fallback Lab
+# 9. Fallback Lab — D0.4 CLOSED
 
-Place four obvious demonstration objects on labeled pedestals near the welcome area.
+D0.4 places four obvious demonstration objects on pedestals near the welcome area.
 
 ```text
 1. CORRECT
@@ -664,7 +665,9 @@ Place four obvious demonstration objects on labeled pedestals near the welcome a
    -> primitive + diagnostic texture/material fallback
 ```
 
-Each pedestal has a sign explaining that the result is deliberate diagnostic behavior.
+One nearby authoritative Fallback Lab sign labels the four positions from left to right and explains
+that the result is deliberate diagnostic behavior. It reuses the D0.3 public-sign interaction and
+server-composed UI path; the client does not supply the explanation text.
 
 This area exists so testers understand why other unfinished content may use primitives or ugly
 textures, and so fallback behavior becomes observable acceptance instead of a hidden code path.
@@ -672,6 +675,19 @@ textures, and so fallback behavior becomes observable acceptance instead of a hi
 Texture-debug mode may use the intentionally obnoxious checker/rainbow material; neutral/debug-off
 fallback may use a simple grey/default presentation. Fallback never changes authoritative collision,
 item identity, interaction, or Game truth.
+
+D0.4 freezes one narrow Godot presentation result with independent `Available`, `ModelMissing`,
+`TextureMissing`, and `ModelAndTextureMissing` axes. The renderer selects a bottom-anchored category
+box when the model is absent. A missing texture retains the admitted model and receives either the
+diagnostic magenta/yellow material or the neutral material according to client presentation policy.
+The same outcome is recorded in native group names and bounded per-chunk diagnostics.
+
+The canaries themselves are eight immutable chunk-native Multi pieces: four ordinary pedestals plus
+four equal authoritative object bounds. Their stable Multi/piece identity, render keys, collision,
+and top-support flags exist before Godot resolution and remain identical across presentation-failure
+classes. No CAS lookup, download failure, HTTP source, package activation, or remote streaming is
+claimed by this local fixture; A0.2+ must feed the same presentation outcomes from real content
+availability later.
 
 ---
 
@@ -1361,7 +1377,7 @@ then earn/integrate Concept Demo Round 1 consumers:
     F0.0c one maintained Godot project / three physical products CLOSED
     D0.2 sparse geography + Far Island + gate reset              CLOSED
     D0.3 authoritative informational sign                        CLOSED
-    Fallback Lab missing-content canaries                        NEXT
+    D0.4 Fallback Lab missing-content canaries                    CLOSED
     guest/demo admission presentation
     animation/pickup/inventory swing
     Global/system Chat
