@@ -490,6 +490,14 @@ the bounded semantic/presentation window without replacing the authoritative loc
 The permanent D0.1 Godot canary proves both the default 81/25/9 shape and an expanded 81/49/25
 shape at radius 2 through the real Single Player consumer.
 
+Post-D0.3 human-play hardening makes that change visually observable as well as structurally true.
+The Central Island's present BaseTerrain footprint now crosses the radius-1 presentation boundary
+while remaining inside the same sparse 9×9 authored cluster; the Far Island and intentional Sky
+cutout are unchanged. The native D0.1 gate requires the expanded window to realize strictly more
+terrain triangles and then submits an accepted movement command after the live resize. A radius
+change remains presentation/residency policy and does not replace the local authority or reset its
+control-session sequence.
+
 Diagnostics expose configured radius, authored/current/peak semantic residents,
 current/peak rendered chunks, semantic and presentation enters/exits, resets, and renderer queue
 state. The complete local structural source remains preinstalled in D0.1; CAS/remote acquisition

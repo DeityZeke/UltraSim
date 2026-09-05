@@ -314,6 +314,22 @@ static void BuildClientApplication(string root, string configuration, string edi
             $"-p:UltraSimEdition={edition}",
         ]);
     }
+
+    string liveOutput = Path.Combine(
+        root, "Client", "Godot", ".godot", "mono", "temp", "bin");
+    string[] liveScriptAssemblies = Directory.Exists(liveOutput)
+        ? Directory.EnumerateFiles(
+                liveOutput,
+                "UltraSim.Client.Application.Godot.dll",
+                SearchOption.AllDirectories)
+            .Select(path => Relative(root, path))
+            .OrderBy(static path => path, StringComparer.Ordinal)
+            .ToArray()
+        : [];
+    if (liveScriptAssemblies.Length != 1)
+        throw new InvalidOperationException(
+            "The live Godot development tree must contain exactly one active configuration of " +
+            $"the sole script assembly; found: {string.Join(", ", liveScriptAssemblies)}");
 }
 
 static void VerifyClientPresentationAssets(string root)
@@ -370,6 +386,16 @@ static void VerifyClientExportComposition(string root)
     if (!godotProject.Contains(
             "project/assembly_name=\"UltraSim.Client.Application.Godot\"", StringComparison.Ordinal))
         throw new InvalidOperationException("The shared Godot project does not name the fixed host assembly.");
+
+    foreach (string internalSource in new[] { "Adapter", "Local", "Shell" })
+    {
+        string marker = Path.Combine(root, "Client", "Godot", internalSource, ".gdignore");
+        if (!File.Exists(marker))
+            throw new InvalidOperationException(
+                $"Internal Godot C# source '{internalSource}' is exposed to native script import. " +
+                "Only the scene-attached ClientHost may be imported; all sources still compile " +
+                "into the one application assembly.");
+    }
 
     string presets = File.ReadAllText(Path.Combine(root, "Client", "Godot", "export_presets.cfg"));
     foreach ((string name, string feature) in new[]

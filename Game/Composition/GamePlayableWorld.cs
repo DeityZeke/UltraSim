@@ -1573,16 +1573,21 @@ public static class GamePlayableWorld
     {
         // Two independently authored islands share one sparse WorldPack key set. No base chunks
         // are synthesized across the roughly two-kilometre distance between the clusters.
-        const long radiusX = 26_000;
-        const long radiusZ = 24_000;
-        bool withinCentral = WithinEllipse(xMillimeters, zMillimeters, 8_000, 8_000);
+        bool withinCentral = WithinEllipse(
+            xMillimeters, zMillimeters, 8_000, 8_000, 54_000, 50_000);
         bool withinFar = WithinEllipse(
-            xMillimeters, zMillimeters, FarIslandCenterXMillimeters, 8_000);
+            xMillimeters, zMillimeters, FarIslandCenterXMillimeters, 8_000, 26_000, 24_000);
         bool skyCutout = xMillimeters >= 23_000 && xMillimeters < 32_000 &&
             zMillimeters >= 5_500 && zMillimeters < 12_500;
         return withinFar || withinCentral && !skyCutout;
 
-        static bool WithinEllipse(long x, long z, long centerX, long centerZ)
+        static bool WithinEllipse(
+            long x,
+            long z,
+            long centerX,
+            long centerZ,
+            long radiusX,
+            long radiusZ)
         {
             long dx = x - centerX;
             long dz = z - centerZ;

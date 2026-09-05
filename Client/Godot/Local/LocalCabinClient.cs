@@ -251,11 +251,18 @@ public partial class LocalCabinClient : Node3D
     {
         if (!_initialized || _settings is null || !_useConceptDemoWorld)
             throw new InvalidOperationException("D0.1 requires the initialized Concept Demo consumer.");
+        // Normalize through an actual resize even when D0.0 left the requested radius at one.
+        ApplySettings(WithRenderDistance(_settings, 2));
         ApplySettings(WithRenderDistance(_settings, 1));
         LocalCabinPresentationSnapshot before = GetPresentationSnapshot();
+        ClientStructuralResidencySnapshot residencyBefore = _residency!.GetSnapshot();
+        int terrainTrianglesBefore = CountRenderedTerrainTriangles();
+        ClientWorldInputSnapshot inputBefore = _sequencer?.Snapshot() ?? default;
         if (before.RenderDistanceChunks != 1 ||
             before.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
-            before.SemanticResidentChunks != 25 || before.RenderedChunks != 9)
+            residencyBefore.DesiredResidentChunks != 25 ||
+            before.SemanticResidentChunks < residencyBefore.DesiredResidentChunks ||
+            before.RenderedChunks != 9)
             throw new InvalidOperationException(
                 $"The default D0.1 working set was unexpected: {before.AuthoredChunks}/" +
                 $"{before.SemanticResidentChunks}/{before.RenderedChunks}.");
@@ -263,14 +270,57 @@ public partial class LocalCabinClient : Node3D
         ApplySettings(WithRenderDistance(_settings, 2));
 
         LocalCabinPresentationSnapshot after = GetPresentationSnapshot();
+        ClientStructuralResidencySnapshot residencyAfter = _residency!.GetSnapshot();
+        int terrainTrianglesAfter = CountRenderedTerrainTriangles();
+        ClientWorldInputSnapshot inputAfter = _sequencer?.Snapshot() ?? default;
         if (after.RenderDistanceChunks != 2 ||
             after.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
-            after.SemanticResidentChunks != 49 || after.RenderedChunks != 25 ||
-            after.PeakSemanticResidentChunks < 49 || after.PeakRenderedChunks < 25)
+            residencyAfter.DesiredResidentChunks != 49 ||
+            after.SemanticResidentChunks < residencyAfter.DesiredResidentChunks ||
+            after.RenderedChunks != 25 ||
+            after.PeakSemanticResidentChunks < 49 || after.PeakRenderedChunks < 25 ||
+            terrainTrianglesAfter <= terrainTrianglesBefore)
             throw new InvalidOperationException(
                 $"The expanded D0.1 working set was unexpected: {after.AuthoredChunks}/" +
-                $"{after.SemanticResidentChunks}/{after.RenderedChunks}.");
+                $"{after.SemanticResidentChunks}/{after.RenderedChunks}; terrain triangles " +
+                $"{terrainTrianglesBefore}->{terrainTrianglesAfter}.");
+        if (inputBefore.ControlSession != inputAfter.ControlSession ||
+            inputBefore.CommandsProduced != inputAfter.CommandsProduced ||
+            inputBefore.LastSequence != inputAfter.LastSequence)
+            throw new InvalidOperationException(
+                "A render-distance projection rebuild reset the live control-session sequence.");
+
+        WorldPosition movementStart = _player;
+        if (_sequencer is null || !_sequencer.TryCreateSemanticCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.CreateDirect(
+                        checked((short)-GamePlayerCommand.MaximumAxisMagnitude), 0),
+                    GamePlayerActions.None,
+                    true),
+                out GamePlayerCommand movement))
+            throw new InvalidOperationException("The post-settings movement probe could not be formed.");
+        ApplyCommand(movement, false, default, false);
+        DriveLocalUntil(() =>
+            _localSession!.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+            current.LastCommandSequence == movement.Sequence &&
+            _player.GlobalXMillimeters < movementStart.GlobalXMillimeters);
+        SubmitStopAfterSettings();
         return after;
+
+        void SubmitStopAfterSettings()
+        {
+            if (!_sequencer.TryCreateSemanticCommand(
+                    new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop,
+                        GamePlayerActions.None,
+                        true),
+                    out GamePlayerCommand stop))
+                throw new InvalidOperationException("The post-settings movement stop could not be formed.");
+            ApplyCommand(stop, false, default, false);
+            DriveLocalUntil(() =>
+                _localSession!.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == stop.Sequence);
+        }
     }
 
     /// <summary>
@@ -586,6 +636,9 @@ public partial class LocalCabinClient : Node3D
             ? LocalPlayableSession.CreateConceptDemo(_saveRoot)
             : LocalPlayableSession.CreateCabin(_saveRoot);
         _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
+        // Command sequencing belongs to the application/control-session lineage. Presentation
+        // rebuilds (render-distance changes and Game-generation replacement) must not reset it.
+        _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
         _boundWorld = _localSession.BoundWorld;
         _chatState = new ClientChatState(
             _localSession.ApplicationSessionEpoch,
@@ -787,7 +840,6 @@ public partial class LocalCabinClient : Node3D
         _presentationBindings = new ClientPresentationBinding[maximumPresented];
         _semanticHashesBeforeRefresh = new ClientSemanticHash[maximumPresented];
         _chatChunkInfo = new ClientSemanticChunkInfo[cacheLimits.MaximumResidentChunks];
-        _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
         _orbit.Reset();
         _residentGenerationId = view.GenerationId;
         _player = view.PlayerPosition;
@@ -1154,7 +1206,10 @@ public partial class LocalCabinClient : Node3D
                         : Nearest(point, GamePlayableWorld.AnimalPosition, 1_750)
                             ? SelectionKind.WoodlandAnimal
                             : SelectionKind.Terrain;
-        _lastOutcome = $"Selected {_selection} at ({point.XMillimeters / 1000d:F1}, {point.ZMillimeters / 1000d:F1}) m";
+        _lastOutcome = _profile == ControlProfile.OrbitCommand && _selection == SelectionKind.Terrain
+            ? "Terrain selected — hold LMB to steer or double-click to travel"
+            : $"Selected {_selection} at ({point.XMillimeters / 1000d:F1}, " +
+                $"{point.ZMillimeters / 1000d:F1}) m";
     }
 
     private void UpdateWorldHover()
@@ -1501,7 +1556,7 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The Concept Demo settings are unavailable.");
         ApplySettings(WithRenderDistance(_settings, 1));
 
-        if (!WorldPosition.TryFromGlobalMillimeters(40_000, 0, 40_000, out WorldPosition outerVoid) ||
+        if (!WorldPosition.TryFromGlobalMillimeters(63_000, 0, 60_000, out WorldPosition outerVoid) ||
             _boundWorld.ProbeBaseTerrainSurface(outerVoid).Status != BaseTerrainSurfaceStatus.Absent ||
             _boundWorld.ProbeBaseTerrainSurface(GamePlayableWorld.SkyTelepadDestination).Status !=
                 BaseTerrainSurfaceStatus.Absent)
@@ -1874,6 +1929,23 @@ public partial class LocalCabinClient : Node3D
         }
     }
 
+    private int CountRenderedTerrainTriangles()
+    {
+        if (_cache is null || _renderer is null ||
+            !_cache.TryCopyResidentInfo(_chatChunkInfo, out int count, out _))
+            return 0;
+        int triangles = 0;
+        for (int index = 0; index < count; index++)
+        {
+            if (_renderer.TryGetChunkDiagnostics(
+                    _chatChunkInfo[index].Handle,
+                    out GodotWorldRenderChunkDiagnostics diagnostics))
+                triangles = checked(triangles + diagnostics.TerrainTriangleCount +
+                    diagnostics.AdditionalTerrainTriangleCount);
+        }
+        return triangles;
+    }
+
     private void ApplyProfileCameraDefaults()
     {
         switch (_profile)
@@ -2036,7 +2108,7 @@ public partial class LocalCabinClient : Node3D
         AddProfileButton("3/F3 Iso move/look", ControlProfile.IndependentMoveLook);
         stack.AddChild(new Label
         {
-            Text = "LMB click select • hold steer • double-click destination • RMB/Esc stop\n" +
+            Text = "F1: single-click selects • hold LMB steers • double-click ground travels • RMB/Esc stops\n" +
                 (_useConceptDemoWorld
                     ? "MMB drag camera • wheel zoom • E use selected door/chest/sign/telepad/gate • I inventory\n"
                     : "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n") +

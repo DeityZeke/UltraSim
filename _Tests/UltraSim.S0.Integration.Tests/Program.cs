@@ -642,7 +642,7 @@ static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
         $"The Concept Demo WorldPack did not bind: {bindError}.");
     BoundWorldPack world = bound!;
 
-    Expect(WorldPosition.TryFromGlobalMillimeters(40_000, 0, 40_000, out WorldPosition outer) &&
+    Expect(WorldPosition.TryFromGlobalMillimeters(63_000, 0, 60_000, out WorldPosition outer) &&
         world.ProbeBaseTerrainSurface(outer).Status == BaseTerrainSurfaceStatus.Absent,
         "The central terrain does not have a real intentional-void outer edge.");
     Expect(world.ProbeBaseTerrainSurface(GamePlayableWorld.SkyJumpStart).IsPresent &&

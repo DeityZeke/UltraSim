@@ -52,11 +52,20 @@
        development output during editor reload, so a stale script assembly can otherwise recreate
        duplicate managed type registration after upgrading an existing checkout. -->
   <Target Name="RemoveRetiredGodotScriptAssemblies" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <InactiveGodotConfiguration Condition="'$(Configuration)' == 'Debug'">Release</InactiveGodotConfiguration>
+      <InactiveGodotConfiguration Condition="'$(Configuration)' == 'Release'">Debug</InactiveGodotConfiguration>
+    </PropertyGroup>
     <ItemGroup>
-      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Bootstrap.Godot.*" />
-      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Local.Godot.*" />
-      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Godot.*" />
-      <RetiredGodotScriptArtifact Include="$(TargetDir)UltraSim.Client.Playable.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(BaseOutputPath)**/UltraSim.Client.Bootstrap.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(BaseOutputPath)**/UltraSim.Client.Local.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(BaseOutputPath)**/UltraSim.Client.Godot.*" />
+      <RetiredGodotScriptArtifact Include="$(BaseOutputPath)**/UltraSim.Client.Playable.Godot.*" />
+      <!-- Keep exactly one active configuration of the sole script assembly in the live Godot
+           development tree. Product publication is independently staged and inspected. -->
+      <RetiredGodotScriptArtifact
+          Include="$(BaseOutputPath)$(InactiveGodotConfiguration)/UltraSim.Client.Application.Godot.*"
+          Condition="'$(InactiveGodotConfiguration)' != ''" />
     </ItemGroup>
     <Delete Files="@(RetiredGodotScriptArtifact)" />
   </Target>

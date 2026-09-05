@@ -1578,6 +1578,10 @@ teleport consumers: after authority reports success, the local client continues 
 controlled-player semantic projection equals the committed authoritative position before deriving
 a following absolute facing/movement point. Authority completion alone is not presentation
 convergence. This closes the reproduced stale-origin facing race without changing command meaning.
+Later interactive hardening also makes the input sequencer application/control-session-owned rather
+than projection-owned. Rebuilding the semantic/render window for a saved Render Distance change—or
+for a replacement Game generation in the same application session—therefore preserves its monotonic
+command sequence; authority no longer rejects post-Settings movement as stale.
 
 Implement:
 

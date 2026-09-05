@@ -1,0 +1,1 @@
+# Internal C# types compile into the one application assembly; they are not scene scripts.

@@ -4,6 +4,11 @@ This is the one maintained Godot application and the only production Godot scrip
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,
 `Bootstrap.Godot`, `Local.Godot`, and `Playable.Godot` projects. Keeping all native scripts in
 `UltraSim.Client.Application.Godot` avoids duplicate Godot type registration during editor reload.
+Only the scene-attached `ClientHost.cs` is imported as a Godot script. Internal adapter, shell, and
+local-play C# sources are `.gdignore`d from Godot's resource scanner while continuing to compile
+into that same assembly; this prevents inherited native base types from being registered again
+during editor hot reload. The build also keeps only the active Debug/Release copy of the sole script
+assembly in the live development tree.
 
 The `UltraSimEdition` MSBuild property creates three physically different dependency products from
 the same scene, settings, input surface, import database, and presentation assets:
@@ -44,8 +49,8 @@ the authored/resident/rendered chunk counts; intentional-void chunks have no mes
 window can change the counts without adding visible geometry at the current location.
 
 Local saves live below `user://single-player/`. Controls are shown in the in-session HUD: F1/F2/F3
-select movement profiles, WASD moves in direct profiles, pointer input drives Orbit selection and
-destination, E interacts with the selected target, Space jumps in direct profiles, and the mouse
-wheel adjusts supported camera profiles. The Central Island welcome sign exposes a local `Sign`
+select movement profiles; F1 single-click selects, hold steers, and double-clicking ground creates a
+destination; WASD moves in direct profiles; E interacts with the selected target; Space jumps in
+direct profiles; and the mouse wheel adjusts supported camera profiles. The Central Island welcome sign exposes a local `Sign`
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
