@@ -277,7 +277,7 @@ public readonly record struct ClientScopedSettings(
 /// <summary>Immutable user settings document; server recommendations are deliberately absent.</summary>
 public sealed class ClientSettingsDocument
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public const int MaximumScopes = 128;
     private readonly ReadOnlyCollection<ClientScopedSettings> _scopes;
 
@@ -402,6 +402,7 @@ public static class ClientSettingsResolver
     public const int MaximumBindings = 32;
     public const int MinimumRenderDistanceChunks = 1;
     public const int MaximumRenderDistanceChunks = 3;
+    public const float DefaultOrbitCameraDistance = 14f;
 
     public static ResolvedClientSettings Resolve(
         ClientSettingsDocument document,
@@ -447,7 +448,7 @@ public static class ClientSettingsResolver
             InvertY = false,
             ControlGrammar = ClientControlGrammar.OrbitCommand,
             CameraProfile = ClientCameraProfile.Orbit,
-            CameraDistance = 28f,
+            CameraDistance = DefaultOrbitCameraDistance,
             CameraFovDegrees = 70f,
             RenderDistanceChunks = 1,
         };
@@ -544,6 +545,7 @@ public static class ClientSettingsResolver
 /// <summary>Current human-readable persistence codec; versioned and replaceable.</summary>
 public static class ClientSettingsJsonCodec
 {
+    private const float VersionTwoOrbitCameraDistance = 28f;
     private static readonly JsonSerializerOptions Options = CreateOptions();
 
     public static string Write(ClientSettingsDocument document)
@@ -575,13 +577,16 @@ public static class ClientSettingsJsonCodec
                 throw new JsonException("The settings document was null.");
             if (value.Version is < 1 or > ClientSettingsDocument.CurrentVersion)
                 throw new JsonException($"Unsupported client settings version {value.Version}.");
-            ClientSettingsLayer global = FromDto(value.Global ?? new LayerDto());
+            LayerDto globalDto = value.Global ?? new LayerDto();
+            MigrateLegacyDefaults(value.Version, globalDto);
+            ClientSettingsLayer global = FromDto(globalDto);
             List<ClientScopedSettings> scopes = [];
             foreach (ScopeDto scope in value.Scopes ?? [])
             {
                 if (!ClientSettingsScopeKey.TryCreate(scope.Scope, out ClientSettingsScopeKey key))
                     throw new JsonException("A settings scope key is invalid.");
-                scopes.Add(new ClientScopedSettings(key, FromDto(scope.Settings ?? new LayerDto())));
+                LayerDto scopedDto = scope.Settings ?? new LayerDto();
+                scopes.Add(new ClientScopedSettings(key, FromDto(scopedDto)));
             }
             document = new ClientSettingsDocument(global, scopes);
             ValidateDocument(document);
@@ -602,6 +607,17 @@ public static class ClientSettingsJsonCodec
         _ = ClientSettingsResolver.Resolve(document);
         foreach (ClientScopedSettings scoped in document.Scopes)
             _ = ClientSettingsResolver.Resolve(document, scoped.Scope);
+    }
+
+    private static void MigrateLegacyDefaults(int version, LayerDto layer)
+    {
+        // F0.1 persisted the complete Settings form, so merely saving an unrelated option pinned
+        // the then-default 28 m Orbit distance as if it were an intentional override. Version 3
+        // moves that exact legacy Orbit default to the new closer composition while retaining all
+        // genuinely distinct user distances and every other preference.
+        if (version <= 2 && layer.CameraDistance == VersionTwoOrbitCameraDistance &&
+            layer.CameraProfile is null or ClientCameraProfile.Orbit)
+            layer.CameraDistance = ClientSettingsResolver.DefaultOrbitCameraDistance;
     }
 
     private static LayerDto ToDto(ClientSettingsLayer layer) => new()

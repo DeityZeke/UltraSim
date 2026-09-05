@@ -66,3 +66,7 @@ destination; WASD moves in direct profiles; E interacts with the selected target
 direct profiles; and the mouse wheel adjusts supported camera profiles. The Central Island welcome sign exposes a local `Sign`
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
+
+F1 Orbit starts in a close three-quarter composition: 45-degree elevation at 14 m rather than the
+older 64-degree/28 m overhead survey view. Version-2 settings that merely captured the exact old
+28 m Orbit default migrate to the new composition; distinct user-selected distances remain intact.

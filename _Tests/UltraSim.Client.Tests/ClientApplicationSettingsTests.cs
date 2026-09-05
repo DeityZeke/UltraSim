@@ -4,6 +4,10 @@ static class ClientApplicationSettingsTests
 {
     internal static void Run()
     {
+        ResolvedClientSettings defaults = ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
+        Equal(ClientCameraProfile.Orbit, defaults.CameraProfile);
+        Equal(ClientSettingsResolver.DefaultOrbitCameraDistance, defaults.CameraDistance);
+
         True(ClientSettingsScopeKey.TryCreate("fixture.realm-17", out ClientSettingsScopeKey scope));
         ClientPhysicalBinding globalInteract = Binding(
             ClientSemanticAction.Interact, ClientPhysicalInputKind.Keyboard, "Q");
@@ -67,9 +71,24 @@ static class ClientApplicationSettingsTests
         Equal(2, roundTrip.RenderDistanceChunks);
         Equal("R", RequireBinding(roundTrip, ClientSemanticAction.Interact).Code);
         True(!ClientSettingsJsonCodec.TryRead(
-            json.Replace("\"version\": 2", "\"version\": 99", StringComparison.Ordinal),
+            json.Replace(
+                $"\"version\": {ClientSettingsDocument.CurrentVersion}",
+                "\"version\": 99",
+                StringComparison.Ordinal),
             out _, out _));
-        True(!ClientSettingsJsonCodec.TryRead("{ \"version\": 2, \"mystery\": true }", out _, out _));
+        True(!ClientSettingsJsonCodec.TryRead(
+            $"{{ \"version\": {ClientSettingsDocument.CurrentVersion}, \"mystery\": true }}",
+            out _, out _));
+        True(ClientSettingsJsonCodec.TryRead(
+            "{ \"version\": 2, \"global\": { \"cameraProfile\": \"Orbit\", \"cameraDistance\": 28 } }",
+            out ClientSettingsDocument versionTwo, out _));
+        Equal(ClientSettingsResolver.DefaultOrbitCameraDistance,
+            ClientSettingsResolver.Resolve(versionTwo).CameraDistance);
+        True(ClientSettingsJsonCodec.TryRead(
+            $"{{ \"version\": {ClientSettingsDocument.CurrentVersion}, \"global\": " +
+            "{ \"cameraProfile\": \"Orbit\", \"cameraDistance\": 28 } }",
+            out ClientSettingsDocument currentExplicitDistance, out _));
+        Equal(28f, ClientSettingsResolver.Resolve(currentExplicitDistance).CameraDistance);
         True(ClientSettingsJsonCodec.TryRead(
             "{ \"version\": 1, \"global\": { \"cameraDistance\": 18 } }",
             out ClientSettingsDocument versionOne, out _));

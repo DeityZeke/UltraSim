@@ -79,6 +79,9 @@ public partial class LocalCabinClient : Node3D
     private const int MaximumChatTextCharacters = 256;
     private const float CameraPivotMeters = 1.6f;
     private const float MinimumZoomCameraDistanceMeters = 3f;
+    private const float OrbitDefaultPitchRadians = MathF.PI * 0.25f;
+    private const float OrbitDefaultCameraDistanceMeters =
+        ClientSettingsResolver.DefaultOrbitCameraDistance;
     private const float NameplateHeightMeters = 2.0f;
     private const float EffectsHeightMeters = 0.9f;
 
@@ -133,8 +136,8 @@ public partial class LocalCabinClient : Node3D
     private bool _secondaryPressed;
     private bool _cancelPressed;
     private float _cameraYaw = -0.7f;
-    private float _cameraPitch = 1.12f;
-    private float _cameraDistance = 28f;
+    private float _cameraPitch = OrbitDefaultPitchRadians;
+    private float _cameraDistance = OrbitDefaultCameraDistanceMeters;
     private ControlProfile _profile;
     private bool _profileStopPending;
     private SelectionKind _selection;
@@ -1381,7 +1384,7 @@ public partial class LocalCabinClient : Node3D
         {
             case ClientCameraProfile.Orbit:
                 _cameraYaw = -0.7f;
-                _cameraPitch = 1.12f;
+                _cameraPitch = OrbitDefaultPitchRadians;
                 break;
             case ClientCameraProfile.ThirdPersonFollow:
                 _cameraYaw = -0.7f;
@@ -1427,7 +1430,8 @@ public partial class LocalCabinClient : Node3D
         if (!(thirdPersonCamera.Length() < orbitCamera.Length() &&
             thirdPersonCamera.Y < orbitCamera.Y &&
             independentCamera.DistanceTo(thirdPersonCamera) > 0.5f &&
-            _camera.Position.DistanceTo(orbitCamera) < 0.001f))
+            Mathf.IsEqualApprox(_cameraPitch, OrbitDefaultPitchRadians) &&
+            Mathf.IsEqualApprox(_cameraDistance, OrbitDefaultCameraDistanceMeters)))
             throw new InvalidOperationException("Control profile switches did not realize distinct camera modes.");
 
         ValidateCatalogAndHumanPresentation();
@@ -2002,8 +2006,8 @@ public partial class LocalCabinClient : Node3D
         {
             case ControlProfile.OrbitCommand:
                 _cameraYaw = -0.7f;
-                _cameraPitch = 1.12f;
-                _cameraDistance = 28f;
+                _cameraPitch = OrbitDefaultPitchRadians;
+                _cameraDistance = OrbitDefaultCameraDistanceMeters;
                 break;
             case ControlProfile.ThirdPersonDirect:
                 _cameraYaw = -0.7f;
