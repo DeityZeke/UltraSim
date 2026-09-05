@@ -966,15 +966,30 @@ public sealed class GodotWorldRenderer : IDisposable
     private static MultiMeshInstance3D CreateMultiMesh(string name, Mesh mesh,
         List<Transform3D> transforms)
     {
+        if (transforms.Count == 0)
+            throw new ArgumentException("A MultiMesh render group cannot be empty.", nameof(transforms));
+        Aabb meshBounds = mesh.GetAabb();
+        Aabb combinedBounds = transforms[0] * meshBounds;
+        for (int index = 1; index < transforms.Count; index++)
+            combinedBounds = combinedBounds.Merge(transforms[index] * meshBounds);
         var multiMesh = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
             Mesh = mesh,
             InstanceCount = transforms.Count,
+            // Runtime-created MultiMeshes otherwise report a zero AABB until Godot happens to
+            // recalculate one. Frustum culling would then use the chunk origin and could hide a
+            // visible door/chest/sign whose actual instance lies inside the camera.
+            CustomAabb = combinedBounds,
         };
         for (int index = 0; index < transforms.Count; index++)
             multiMesh.SetInstanceTransform(index, transforms[index]);
-        return new MultiMeshInstance3D { Name = name, Multimesh = multiMesh };
+        return new MultiMeshInstance3D
+        {
+            Name = name,
+            Multimesh = multiMesh,
+            CustomAabb = combinedBounds,
+        };
     }
 
     private static void AddStatic(SortedDictionary<WorldStaticRenderKey, List<Transform3D>> groups,

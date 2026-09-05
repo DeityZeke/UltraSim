@@ -1583,6 +1583,17 @@ than projection-owned. Rebuilding the semantic/render window for a saved Render 
 for a replacement Game generation in the same application session—therefore preserves its monotonic
 command sequence; authority no longer rejects post-Settings movement as stale.
 
+The consolidated Godot composition also preserves the C# script generator's class/file identity:
+native-derived `ClientRoot` resides in `ClientRoot.cs`, while generated internal-source resources are
+kept out of Godot's filesystem scan and only one Debug/Release application script assembly remains
+in the live editor output. This closes the reproduced editor-Play duplicate `ClientRoot` registration
+without multiplying Godot projects or script assemblies.
+
+Programmatic batched world instances also own exact transformed custom AABBs. A zero Godot
+`MultiMesh` bound is not accepted as presentation merely because semantic records, selection, and
+collision exist: it permits camera-dependent false culling from the chunk origin. Native acceptance
+now crosses render frames and requires nonzero render bounds for the initial public-object groups.
+
 Implement:
 
 - consume the existing `Client.Local` capability;

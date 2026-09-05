@@ -397,6 +397,17 @@ static void VerifyClientExportComposition(string root)
                 "into the one application assembly.");
     }
 
+    string clientRootSource = Path.Combine(
+        root, "Client", "Godot", "Shell", "ClientRoot.cs");
+    if (!File.Exists(clientRootSource) ||
+        File.Exists(Path.Combine(
+            root, "Client", "Godot", "Shell", "ClientCompositionBootstrap.cs")) ||
+        !File.ReadAllText(clientRootSource).Contains(
+            "class ClientRoot : Control", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "The Godot ClientRoot script class must remain in matching ClientRoot.cs source. " +
+            "Godot's C# script-path generator uses that pairing during editor hot reload.");
+
     string presets = File.ReadAllText(Path.Combine(root, "Client", "Godot", "export_presets.cfg"));
     foreach ((string name, string feature) in new[]
     {

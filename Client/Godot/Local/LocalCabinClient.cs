@@ -669,7 +669,8 @@ public partial class LocalCabinClient : Node3D
             _sequencer is null || _uiClient is null || _uiBridge is null ||
             _inventoryHost is null || _hoverTooltip is null)
             throw new InvalidOperationException("D0.3 requires the initialized Concept Demo UI consumer.");
-        if (CountPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) != 1 ||
+        ValidateInitialNativePresentation();
+        if (CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign) != 1 ||
             !TrySetPointerWorldPoint(
                 GamePlayableWorld.WelcomeSignPosition.GlobalXMillimeters,
                 GamePlayableWorld.WelcomeSignPosition.GlobalZMillimeters))
@@ -1925,6 +1926,55 @@ public partial class LocalCabinClient : Node3D
             if (node is MultiMeshInstance3D instance && instance.Name == expectedName &&
                 instance.Multimesh is not null)
                 count += instance.Multimesh.InstanceCount;
+            foreach (Node child in node.GetChildren()) Count(child);
+        }
+    }
+
+    /// <summary>
+    /// Verifies the actual native public-presentation resources after the shell has committed the
+    /// session. This is deliberately later than initial semantic convergence: loading may build
+    /// nodes before their render resources and bounds have been validated.
+    /// </summary>
+    private void ValidateInitialNativePresentation()
+    {
+        int characters = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character);
+        int doors = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.CabinDoor);
+        int chests = CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.WorldChest);
+        int telepads = _useConceptDemoWorld
+            ? CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.SkyTelepad)
+            : 0;
+        int gates = _useConceptDemoWorld
+            ? CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.FarGate)
+            : 0;
+        int signs = _useConceptDemoWorld
+            ? CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.InformationalSign)
+            : 0;
+        if (characters != 1 || doors != 1 || chests != 1 ||
+            _useConceptDemoWorld &&
+            (telepads != 1 || gates != 1 || signs != 1))
+            throw new InvalidOperationException(
+                "The initial public world does not own complete visible native mesh presentation: " +
+                $"characters={characters}, doors={doors}, chests={chests}, telepads={telepads}, " +
+                $"gates={gates}, signs={signs}.");
+    }
+
+    private int CountVisiblyPresentedPrefab(uint prefabId)
+    {
+        if (_renderer is null) return 0;
+        string expectedName = $"Public_{prefabId}";
+        int count = 0;
+        Count(_renderer.Root);
+        return count;
+
+        void Count(Node node)
+        {
+            if (node is MultiMeshInstance3D instance && instance.Name == expectedName &&
+                instance.Visible &&
+                instance.Multimesh is { } multiMesh &&
+                multiMesh.VisibleInstanceCount != 0 &&
+                multiMesh.Mesh is { } mesh && mesh.GetSurfaceCount() > 0 &&
+                instance.CustomAabb.Size.LengthSquared() > 0f)
+                count += multiMesh.InstanceCount;
             foreach (Node child in node.GetChildren()) Count(child);
         }
     }

@@ -1,5 +1,10 @@
-; One maintained Godot application project. UltraSimEdition selects the physical .NET capability
-; closure; export custom features only verify that the chosen preset matches that compiled product.
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 

@@ -28,14 +28,19 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             return;
         try
         {
-            if (conceptDemoSmoke || residencySmoke || farIslandSmoke || signSmoke)
+            if (signSmoke)
+            {
+                StartLocalCabin(
+                    CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
+                RunSignSmokeAfterNativeFrames();
+                return;
+            }
+            if (conceptDemoSmoke || residencySmoke || farIslandSmoke)
             {
                 StartLocalCabin(
                     CabinContentVariant.Default, CabinHumanBody.XBot, useConceptDemoWorld: true);
                 LocalCabinPresentationSnapshot evidence;
-                if (signSmoke)
-                    evidence = _cabin!.RunD03Acceptance();
-                else if (farIslandSmoke)
+                if (farIslandSmoke)
                     evidence = _cabin!.RunD02Acceptance();
                 else
                 {
@@ -50,17 +55,14 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                     throw new InvalidOperationException(
                         "The Concept Demo did not preserve authored > resident > rendered structure.");
                 GD.Print(
-                    $"{(signSmoke ? "D0.3 INFORMATIONAL SIGN" :
-                        farIslandSmoke ? "D0.2 FAR ISLAND" :
+                    $"{(farIslandSmoke ? "D0.2 FAR ISLAND" :
                         residencySmoke ? "D0.1 RESIDENCY" : "D0.0 CONCEPT DEMO")} PASS " +
                     $"player={evidence.PlayerPosition} authored/resident/rendered=" +
                     $"{evidence.AuthoredChunks}/{evidence.SemanticResidentChunks}/" +
                     $"{evidence.RenderedChunks} radius={evidence.RenderDistanceChunks} " +
                     $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
                 RetireCurrentSession();
-                ReturnToMainMenu(signSmoke
-                    ? "Concept Demo D0.3 informational-sign smoke passed."
-                    : farIslandSmoke
+                ReturnToMainMenu(farIslandSmoke
                     ? "Concept Demo D0.2 Far Island smoke passed."
                     : residencySmoke
                         ? "Concept Demo D0.1 residency smoke passed."
@@ -105,6 +107,39 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         catch (Exception exception)
         {
             GD.PushError($"F0.2 local composition failed: {exception}");
+            RetireCurrentSession();
+            FailSession(exception.Message);
+            GetTree().Quit(1);
+        }
+    }
+
+    private async void RunSignSmokeAfterNativeFrames()
+    {
+        try
+        {
+            // MultiMesh render bounds are committed by RenderingServer frames, not by semantic
+            // construction in _Ready. Cross that native boundary before claiming visible output.
+            for (int frame = 0; frame < 3; frame++)
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            LocalCabinPresentationSnapshot evidence = _cabin!.RunD03Acceptance();
+            if (evidence.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
+                evidence.SemanticResidentChunks >= evidence.AuthoredChunks ||
+                evidence.RenderedChunks >= evidence.SemanticResidentChunks)
+                throw new InvalidOperationException(
+                    "The Concept Demo did not preserve authored > resident > rendered structure.");
+            GD.Print(
+                "D0.3 INFORMATIONAL SIGN PASS " +
+                $"player={evidence.PlayerPosition} authored/resident/rendered=" +
+                $"{evidence.AuthoredChunks}/{evidence.SemanticResidentChunks}/" +
+                $"{evidence.RenderedChunks} radius={evidence.RenderDistanceChunks} " +
+                $"authorityTicks={evidence.AuthorityTicks} content={evidence.ContentFingerprint}");
+            RetireCurrentSession();
+            ReturnToMainMenu("Concept Demo D0.3 informational-sign smoke passed.");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"D0.3 native presentation failed: {exception}");
             RetireCurrentSession();
             FailSession(exception.Message);
             GetTree().Quit(1);
