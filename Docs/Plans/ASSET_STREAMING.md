@@ -1,9 +1,10 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
-**Status:** frozen ownership/security direction with A0.0 content contracts/resolution and the
-local A0.1 Cabin Default/Replace/Add oracle accepted,
+**Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
+local A0.1 Cabin Default/Replace/Add oracle, and A0.2 persistent CAS/install/reopen accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0/A0.1 are closed; A0.2 is the next content checkpoint. Runtime mesh/audio
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.2 are closed; A0.3 authenticated
+requirements and source-independent acquisition is next. Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
@@ -75,17 +76,17 @@ V3 should **not** recreate two competing semantic notions of a patch. The server
 
 ## Current V3 baseline
 
-The current repository has useful content-adjacent authority, but not the A0 acquisition/catalog
-pipeline yet:
+The current repository now has the first source-free content pipeline:
 
 - World owns canonical complete `WorldPackArtifact` bytes/fingerprints and bounded open/validation;
 - World owns mutable overlay revisions and per-chunk content hashes plus persistence serialization,
   but no public independently downloadable chunk artifact;
-- Client Core/UI already retain typed definition/cache identity and generation-aware semantic state,
-  but there is no general passive-content activation plan, CAS, or HTTP acquisition service;
+- Client Core/UI retain typed definition/cache identity and generation-aware semantic state;
+- Client Content owns canonical passive manifests, exact payload verification, deterministic
+  activation/catalog resolution, and the A0.2 persistent CAS described below;
 - the playable Cabin and X/Y calibration assets are currently build-time/fixture composition;
-- no `ContentSetApplied`, immutable resolved content catalog, or lazy downloaded-resource realization
-  contract is implemented yet.
+- immutable resolved content catalogs and `ContentSetApplied` proof vocabulary exist, but remote
+  requirement advertisement, source acquisition, and lazy downloaded-resource realization do not.
 
 A0 extracts/builds those missing content contracts. It does not reinterpret current persistence,
 UI cache keys, or World chunk hashes as if they already formed a streaming package system.
@@ -647,7 +648,21 @@ Cache/
     Mods/            future user-managed local mods if kept distinct
 ```
 
-Exact folders are not frozen.
+A0.2 selected the following version-1 physical layout:
+
+```text
+Cache/
+    blobs/sha256/ab/<BlobHash>.blob
+    realms/<ApplicationRealmId>/manifests/<ManifestHash>.manifest
+    realms/<ApplicationRealmId>/activations/<ContentActivationId>.activation
+    metadata/access/<BlobHash>.access
+    staging/<opaque>.tmp
+    writer.lock
+```
+
+All variable path components are fixed-width canonical identity encodings. The initial cache root
+has one owning client process so live pins and mutation remain coherent; simultaneous clients use
+separate roots until cross-process pin coordination is explicitly designed.
 
 Rules:
 
@@ -1523,6 +1538,12 @@ integration.
 
 ## A0.2 — persistent cache/install substrate
 
+**Status: CLOSED.** The engine-neutral `Client.Content` assembly now owns a source-free persistent
+CAS with canonical realm manifest/activation metadata. It admits verified
+`ServerAuthorizedPassive` packages, stages and atomically publishes immutable blobs before realm
+metadata, and reopens catalogs after process restart by revalidating the exact blobs and stored
+resolved fingerprint.
+
 Reintroduce/harden:
 
 - global hash-addressed immutable blob store;
@@ -1537,6 +1558,13 @@ Reintroduce/harden:
 - passive allowlist/active-content rejection.
 
 **Gate:** local harness installs/reopens package bytes through the same cache format Online uses.
+
+Accepted gate evidence also covers global blob deduplication without cross-realm authorization,
+abandoned staging cleanup, reparse-point/path rejection, corruption detection, activation conflict
+fencing, live catalog/blob pins, persistent activation pins, quota failure without partial
+deletion, and reachability-consistent activation/manifest/blob eviction. A0.2 has no source
+URL, HTTP, Network requirement advertisement, repair, UI streaming, WorldPack streaming, or native
+Online entry.
 
 ---
 

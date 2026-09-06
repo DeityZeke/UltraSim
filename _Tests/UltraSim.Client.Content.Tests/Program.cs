@@ -14,6 +14,14 @@ var tests = new (string Name, Action Body)[]
     ("DefaultReplaceAddResolveDeterministically", DefaultReplaceAddResolveDeterministically),
     ("ResolutionFailuresAreTransactionalAndDiagnosable", ResolutionFailuresAreTransactionalAndDiagnosable),
     ("OptionalPackageFallbackAndApplicationProofAreExact", OptionalPackageFallbackAndApplicationProofAreExact),
+    ("PersistentCacheInstallsPublishesAndReopensWithoutSource", PersistentCacheInstallsPublishesAndReopensWithoutSource),
+    ("GlobalBlobDedupDoesNotGrantCrossRealmAuthorization", GlobalBlobDedupDoesNotGrantCrossRealmAuthorization),
+    ("FailedInstallAndInterruptedStagingNeverPublish", FailedInstallAndInterruptedStagingNeverPublish),
+    ("CorruptBlobCannotReopenOrPublish", CorruptBlobCannotReopenOrPublish),
+    ("CorruptCanonicalMetadataFailsClosedAtOpen", CorruptCanonicalMetadataFailsClosedAtOpen),
+    ("PinnedReachabilityControlsQuotaEviction", PinnedReachabilityControlsQuotaEviction),
+    ("OptionalBytesDoNotRetargetPersistedCatalogImplicitly", OptionalBytesDoNotRetargetPersistedCatalogImplicitly),
+    ("CacheRejectsReparsePointStorage", CacheRejectsReparsePointStorage),
 };
 
 foreach ((string name, Action body) in tests)
@@ -289,6 +297,310 @@ static void OptionalPackageFallbackAndApplicationProofAreExact()
     Equal(ContentApplicationState.None, default(ContentApplicationState));
 }
 
+static void PersistentCacheInstallsPublishesAndReopensWithoutSource()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(100, 200);
+        PackageFixture replace = CreateReplacePackage();
+        PackageFixture add = CreateAddPackage();
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        ContentActivationPlan plan = Plan(realm, new ContentActivationId(300, 400),
+            baseCatalog.Fingerprint, [Required(replace.Manifest), Required(add.Manifest)]);
+        ContentHash fingerprint;
+        ContentCatalogGenerationId firstGeneration;
+
+        True(ContentCache.TryOpen(root, out ContentCache? first, out ContentCacheError openError),
+            openError.ToString());
+        using (first)
+        {
+            False(ContentCache.TryOpen(root, out _, out ContentCacheError busy));
+            Equal(ContentCacheError.CacheBusy, busy);
+            True(first!.TryInstallPackage(realm, replace.Manifest, replace.Payloads, out _, out var replaceError),
+                replaceError.ToString());
+            True(first.TryInstallPackage(realm, add.Manifest, add.Payloads, out _, out var addError),
+                addError.ToString());
+            True(first.TryPublishCatalog(baseCatalog, plan, persistentlyPinned: false,
+                out ContentCatalogLease? lease, out var publishError), publishError.ToString());
+            using (lease)
+            {
+                fingerprint = lease!.Catalog.Fingerprint;
+                firstGeneration = lease.Catalog.Generation;
+            }
+            ContentActivationPlan conflicting = Plan(realm, plan.Activation, baseCatalog.Fingerprint,
+                [Required(add.Manifest), Required(replace.Manifest)]);
+            False(first.TryPublishCatalog(baseCatalog, conflicting, false, out _,
+                out ContentCacheError conflict));
+            Equal(ContentCacheError.ActivationConflict, conflict);
+            ContentCacheSnapshot snapshot = first.GetSnapshot();
+            Equal(2, snapshot.BlobCount);
+            Equal(2, snapshot.RealmManifestCount);
+            Equal(1, snapshot.RealmActivationCount);
+            long manifestBytes = Directory.GetFiles(Path.Combine(root, "realms"), "*.manifest",
+                SearchOption.AllDirectories).Sum(static path => new FileInfo(path).Length);
+            long activationBytes = Directory.GetFiles(Path.Combine(root, "realms"), "*.activation",
+                SearchOption.AllDirectories).Sum(static path => new FileInfo(path).Length);
+            Console.WriteLine($"A0.2 CACHE EVIDENCE blobs={snapshot.BlobCount}/{snapshot.BlobBytes}B " +
+                $"manifests={snapshot.RealmManifestCount}/{manifestBytes}B " +
+                $"activations={snapshot.RealmActivationCount}/{activationBytes}B");
+        }
+
+        True(ContentCache.TryOpen(root, out ContentCache? reopened, out openError), openError.ToString());
+        using (reopened)
+        {
+            var key = new ContentRealmActivationKey(plan.RealmActivation, plan.PlanHash);
+            True(reopened!.TryOpenCatalog(baseCatalog, key, out ContentCatalogLease? lease,
+                out var reopenError), reopenError.ToString());
+            using (lease)
+            {
+                Equal(fingerprint, lease!.Catalog.Fingerprint);
+                NotEqual(firstGeneration, lease.Catalog.Generation);
+            }
+            True(reopened.TryOpenBlob(replace.Manifest.Files[0], out ContentBlobLease? blob, out var blobError),
+                blobError.ToString());
+            using (blob)
+                Equal((long)replace.Payloads[0].Bytes.Length, blob!.Stream.Length);
+        }
+    });
+}
+
+static void GlobalBlobDedupDoesNotGrantCrossRealmAuthorization()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId firstRealm = new(1, 1000);
+        ApplicationRealmId secondRealm = new(2, 1000);
+        ApplicationRealmId unauthorizedRealm = new(3, 1000);
+        PackageFixture package = CreateReplacePackage();
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(firstRealm, package.Manifest, package.Payloads, out _, out var firstError),
+                firstError.ToString());
+            True(cache.TryInstallPackage(secondRealm, package.Manifest, package.Payloads, out _, out var secondError),
+                secondError.ToString());
+            ContentCacheSnapshot snapshot = cache.GetSnapshot();
+            Equal(1, snapshot.BlobCount);
+            Equal(2, snapshot.RealmManifestCount);
+            True(snapshot.ReusedBlobs >= 1);
+            False(cache.TryOpenPackage(unauthorizedRealm, package.Manifest.PackageId,
+                package.Manifest.ManifestHash, out _, out ContentCacheError unauthorized));
+            Equal(ContentCacheError.MissingManifest, unauthorized);
+        }
+        string[] blobs = Directory.GetFiles(Path.Combine(root, "blobs", "sha256"), "*.blob",
+            SearchOption.AllDirectories);
+        Equal(1, blobs.Length);
+        Equal(package.Manifest.Files[0].Sha256 + ".blob", Path.GetFileName(blobs[0]));
+        False(blobs[0].Contains(package.Manifest.Files[0].Path.Value!, StringComparison.Ordinal));
+    });
+}
+
+static void FailedInstallAndInterruptedStagingNeverPublish()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(4, 1000);
+        PackageFixture package = CreateReplacePackage();
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            PackageFixture builtIn = CreateBasePackage();
+            False(cache!.TryInstallPackage(realm, builtIn.Manifest, builtIn.Payloads, out _,
+                out ContentCacheError trustError));
+            Equal(ContentCacheError.UnsupportedTrustClass, trustError);
+            ContentFilePayload[] corrupt = package.Payloads.ToArray();
+            byte[] bytes = corrupt[0].Bytes.ToArray();
+            bytes[^1] ^= 0xff;
+            corrupt[0] = new ContentFilePayload(corrupt[0].Path, bytes);
+            False(cache.TryInstallPackage(realm, package.Manifest, corrupt, out _, out var installError));
+            Equal(ContentCacheError.PayloadValidationFailed, installError);
+            Equal(0, cache.GetSnapshot().BlobCount);
+            Equal(0, cache.GetSnapshot().RealmManifestCount);
+        }
+
+        string staging = Path.Combine(root, "staging");
+        string abandoned = Path.Combine(staging, "abandoned.tmp");
+        System.IO.File.WriteAllBytes(abandoned, "partial"u8.ToArray());
+        True(ContentCache.TryOpen(root, out ContentCache? reopened, out openError), openError.ToString());
+        using (reopened)
+        {
+            False(System.IO.File.Exists(abandoned));
+            False(reopened!.TryOpenPackage(realm, package.Manifest.PackageId,
+                package.Manifest.ManifestHash, out _, out ContentCacheError missing));
+            Equal(ContentCacheError.MissingManifest, missing);
+        }
+    });
+}
+
+static void CorruptBlobCannotReopenOrPublish()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(5, 1000);
+        PackageFixture package = CreateReplacePackage();
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        ContentActivationPlan plan = Plan(realm, new ContentActivationId(5, 2),
+            baseCatalog.Fingerprint, [Required(package.Manifest)]);
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(realm, package.Manifest, package.Payloads, out _, out var installError),
+                installError.ToString());
+            ContentHash hash = package.Manifest.Files[0].Sha256;
+            string blobPath = CacheBlobPath(root, hash);
+            byte[] corrupt = System.IO.File.ReadAllBytes(blobPath);
+            corrupt[^1] ^= 0x1;
+            System.IO.File.WriteAllBytes(blobPath, corrupt);
+
+            False(cache.TryOpenPackage(realm, package.Manifest.PackageId, package.Manifest.ManifestHash,
+                out _, out ContentCacheError packageError));
+            Equal(ContentCacheError.CorruptBlob, packageError);
+            False(cache.TryPublishCatalog(baseCatalog, plan, false, out _, out ContentCacheError catalogError));
+            Equal(ContentCacheError.CorruptBlob, catalogError);
+            True(cache.GetSnapshot().CorruptionsDetected >= 2);
+        }
+    });
+}
+
+static void CorruptCanonicalMetadataFailsClosedAtOpen()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(5, 1001);
+        PackageFixture package = CreateReplacePackage();
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+            True(cache!.TryInstallPackage(realm, package.Manifest, package.Payloads, out _,
+                out var installError), installError.ToString());
+
+        string manifestPath = Directory.GetFiles(Path.Combine(root, "realms"), "*.manifest",
+            SearchOption.AllDirectories).Single();
+        byte[] metadata = System.IO.File.ReadAllBytes(manifestPath);
+        metadata[^1] ^= 0x1;
+        System.IO.File.WriteAllBytes(manifestPath, metadata);
+        False(ContentCache.TryOpen(root, out _, out ContentCacheError corrupt));
+        Equal(ContentCacheError.CorruptManifest, corrupt);
+    });
+}
+
+static void PinnedReachabilityControlsQuotaEviction()
+{
+    WithCacheRoot(root =>
+    {
+        var limits = new ContentCacheLimits(50, 25, 8, 8, 8, 1024 * 1024);
+        ApplicationRealmId realm = new(6, 1000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture pinned = CreateSingleTexturePackage("quota.pinned", "quota",
+            "cabin:texture/wall", ContentDefinitionOperation.Replace, "textures/pinned.png", 0x41);
+        PackageFixture old = CreateSingleTexturePackage("quota.old", "quota",
+            "cabin:texture/wall", ContentDefinitionOperation.Replace, "textures/old.png", 0x42);
+        PackageFixture recent = CreateSingleTexturePackage("quota.recent", "quota",
+            "cabin:texture/wall", ContentDefinitionOperation.Replace, "textures/recent.png", 0x43);
+        ContentActivationPlan pinnedPlan = Plan(realm, new ContentActivationId(6, 1),
+            baseCatalog.Fingerprint, [Required(pinned.Manifest)]);
+
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError, limits),
+            openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(realm, pinned.Manifest, pinned.Payloads, out _, out var pinInstall),
+                pinInstall.ToString());
+            True(cache.TryPublishCatalog(baseCatalog, pinnedPlan, persistentlyPinned: true,
+                out ContentCatalogLease? pinnedLease, out var publishError), publishError.ToString());
+            pinnedLease!.Dispose();
+            True(cache.TryInstallPackage(realm, old.Manifest, old.Payloads, out _, out var oldError),
+                oldError.ToString());
+            True(cache.TryInstallPackage(realm, recent.Manifest, recent.Payloads, out _, out var recentError),
+                recentError.ToString());
+
+            True(cache.TryOpenPackage(realm, pinned.Manifest.PackageId, pinned.Manifest.ManifestHash,
+                out _, out var pinnedOpen), pinnedOpen.ToString());
+            False(cache.TryOpenPackage(realm, old.Manifest.PackageId, old.Manifest.ManifestHash,
+                out _, out ContentCacheError oldMissing));
+            Equal(ContentCacheError.MissingManifest, oldMissing);
+            True(cache.TryOpenPackage(realm, recent.Manifest.PackageId, recent.Manifest.ManifestHash,
+                out _, out var recentOpen), recentOpen.ToString());
+
+            True(cache.TryOpenBlob(recent.Manifest.Files[0], out ContentBlobLease? live, out var blobError),
+                blobError.ToString());
+            False(cache.TryEnforceQuota(out _, out ContentCacheError pinnedError));
+            Equal(ContentCacheError.QuotaExceeded, pinnedError);
+            live!.Dispose();
+            True(cache.TryEnforceQuota(out ContentCacheEvictionResult eviction, out var evictionError),
+                evictionError.ToString());
+            Equal(1, eviction.BlobsRemoved);
+            Equal(25L, eviction.RemainingBlobBytes);
+            True(cache.TryOpenPackage(realm, pinned.Manifest.PackageId, pinned.Manifest.ManifestHash,
+                out _, out pinnedOpen), pinnedOpen.ToString());
+            False(cache.TryOpenPackage(realm, recent.Manifest.PackageId, recent.Manifest.ManifestHash,
+                out _, out ContentCacheError recentMissing));
+            Equal(ContentCacheError.MissingManifest, recentMissing);
+        }
+    });
+}
+
+static void OptionalBytesDoNotRetargetPersistedCatalogImplicitly()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(7, 1000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture optionalPackage = CreateAddPackage();
+        var optional = new ContentActivationPackage(optionalPackage.Manifest.PackageId,
+            optionalPackage.Manifest.ManifestHash, ContentRequirementPolicy.Optional);
+        ContentActivationPlan plan = Plan(realm, new ContentActivationId(7, 1),
+            baseCatalog.Fingerprint, [optional]);
+        var key = new ContentRealmActivationKey(plan.RealmActivation, plan.PlanHash);
+
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryPublishCatalog(baseCatalog, plan, false, out ContentCatalogLease? initial,
+                out var initialError), initialError.ToString());
+            ContentHash fallbackFingerprint;
+            using (initial) fallbackFingerprint = initial!.Catalog.Fingerprint;
+
+            True(cache.TryInstallPackage(realm, optionalPackage.Manifest, optionalPackage.Payloads,
+                out _, out var installError), installError.ToString());
+            True(cache.TryOpenCatalog(baseCatalog, key, out ContentCatalogLease? unchanged,
+                out var unchangedError), unchangedError.ToString());
+            using (unchanged)
+            {
+                Equal(fallbackFingerprint, unchanged!.Catalog.Fingerprint);
+                False(unchanged.Catalog.TryGet(Logical("server:texture/banner"), out _));
+            }
+
+            True(cache.TryPublishCatalog(baseCatalog, plan, false, out ContentCatalogLease? refreshed,
+                out var refreshError), refreshError.ToString());
+            using (refreshed)
+            {
+                NotEqual(fallbackFingerprint, refreshed!.Catalog.Fingerprint);
+                True(refreshed.Catalog.TryGet(Logical("server:texture/banner"), out _));
+            }
+        }
+    });
+}
+
+static void CacheRejectsReparsePointStorage()
+{
+    string root = NewCacheRoot();
+    string outside = NewCacheRoot();
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        cache!.Dispose();
+        string link = Path.Combine(root, "blobs", "sha256", "ff");
+        Directory.CreateSymbolicLink(link, outside);
+        False(ContentCache.TryOpen(root, out _, out ContentCacheError unsafeError));
+        Equal(ContentCacheError.UnsafePath, unsafeError);
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        if (Directory.Exists(outside)) Directory.Delete(outside, recursive: true);
+    }
+}
+
 static ContentBaseCatalog BaseCatalog(PackageFixture? fixture = null)
 {
     PackageFixture selected = fixture ?? CreateBasePackage();
@@ -481,6 +793,22 @@ static byte[] WorldPackBytes()
     byte[] bytes = new byte[artifact!.Length];
     artifact.CopyTo(bytes);
     return bytes;
+}
+
+static void WithCacheRoot(Action<string> body)
+{
+    string root = NewCacheRoot();
+    try { body(root); }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static string NewCacheRoot() =>
+    Path.Combine(Path.GetTempPath(), "ultrasim-content-cache-tests", Guid.NewGuid().ToString("N"));
+
+static string CacheBlobPath(string root, ContentHash hash)
+{
+    string value = hash.ToString();
+    return Path.Combine(root, "blobs", "sha256", value[..2], value + ".blob");
 }
 
 static void True(bool value, string? message = null)

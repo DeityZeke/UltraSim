@@ -215,6 +215,13 @@ public static class ContentPackageValidator
         return true;
     }
 
+    internal static bool TryValidatePayload(
+        in ContentFileDescriptor descriptor,
+        ReadOnlySpan<byte> bytes) =>
+        bytes.Length == descriptor.SizeBytes &&
+        ContentHash.Compute(bytes) == descriptor.Sha256 &&
+        EnvelopeMatches(descriptor.Kind, bytes);
+
     private static bool EnvelopeMatches(ContentFileKind kind, ReadOnlySpan<byte> bytes) => kind switch
     {
         ContentFileKind.PngTexture => bytes.Length >= 24 && bytes[..8].SequenceEqual(PngSignature) &&

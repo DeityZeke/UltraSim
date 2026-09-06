@@ -1,7 +1,7 @@
 # Client Content
 
-`UltraSim.Client.Content` is the engine-neutral A0.0 contract and deterministic resolver for
-passive client content. It contains no Godot or Network dependency.
+`UltraSim.Client.Content` is the engine-neutral A0.0/A0.2 contract, deterministic resolver, and
+persistent store for passive client content. It contains no Godot or Network dependency.
 
 The accepted boundary is:
 
@@ -58,13 +58,59 @@ Patch, dependencies/version solving, and executable extensions are outside A0.0.
 packs and executable extensions have vocabulary values so they cannot be confused with normal
 server-passive trust, but the A0.0 manifest factory rejects both.
 
+## A0.2 persistent cache
+
+The accepted source-independent cache uses only fixed, validated identities in physical paths:
+
+```text
+root/
+    blobs/sha256/ab/<64-lowercase-hex>.blob
+    realms/<32-lowercase-hex ApplicationRealmId>/
+        manifests/<ManifestHash>.manifest
+        activations/<ContentActivationId>.activation
+    metadata/access/<BlobHash>.access
+    staging/<opaque temporary name>.tmp
+    writer.lock
+```
+
+Manifest-controlled relative paths and source URLs never become cache paths. Exact blobs deduplicate
+globally, but manifest and activation metadata remain realm-scoped: physical possession of bytes
+does not authorize another realm to publish them. A0.2's realm cache admits only
+`ServerAuthorizedPassive` packages. Local/default installation and future user/executable content
+retain separate lifecycles.
+
+Install first validates the complete supplied package through the A0.0 passive allowlist. Missing
+blobs are written and flushed through private staging names, verified by their descriptors, and
+atomically moved before the realm manifest becomes visible. A crash may leave an unreferenced
+immutable blob; it cannot leave a published partial package, and abandoned staging is removed on
+the next open. Canonical binary manifest/activation metadata is strictly decoded and re-encoded on
+reopen. No source location is persisted.
+
+Catalog publication reloads every selected package from the cache, resolves privately, persists
+the exact realm/activation/plan/result tuple, and only then returns a new immutable catalog
+generation. Restart reopening repeats that validation and must reproduce the stored fingerprint.
+Required packages fail closed; primitive/local presentation fallback does not manufacture a
+successful activation.
+
+Quota eviction is reachability-based and oldest-access-first. Persistently pinned activations,
+live catalog leases, and live blob/resource leases protect their manifests and blobs. Unpinned
+activation/manifest metadata is retired before an unreachable blob is deleted. If enough safe
+space cannot be reclaimed, admission fails without partial arbitrary eviction. Corruption is
+detected on use and is not repaired in A0.2; repair/source fallback belongs to A0.5.
+
+The initial implementation gives one owning client process exclusive mutation ownership for a
+cache root. Multiple simultaneously running clients use distinct roots until cross-process live-pin
+coordination is explicitly earned; this does not alter the canonical on-disk identities.
+
 ## Current boundary
 
 A0.0 provides contracts, validation, local package descriptors, deterministic base/activation
-resolution, immutable catalog generations, and application-proof values. It does not fetch, cache,
-install, activate over Network, realize Godot resources, or contain Cabin-specific catalogs. The
+resolution, immutable catalog generations, and application-proof values. A0.2 persists verified
+server-passive packages and resolved activations without acquiring them from any source. The
 accepted A0.1 Cabin Default/Replace/Add oracle lives in the optional
 [`Client.BuiltInTestWorlds`](../BuiltInTestWorlds/README.md) capability rather than coupling the
-generic resolver to one Test World. A0.2 later owns persistent CAS/install.
+generic resolver to one Test World. A0.2 adds persistent CAS/install/reopen but deliberately does
+not advertise requirements, fetch bytes, use HTTP/Network, stream a WorldPack, or realize native
+resources. Those remain A0.3+ work.
 
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.
