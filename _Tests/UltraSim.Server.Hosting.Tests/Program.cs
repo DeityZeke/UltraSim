@@ -2,6 +2,8 @@ using UltraSim.ECS;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Runtime;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 
 var tests = new (string Name, Action Body)[]
 {
@@ -17,6 +19,8 @@ var tests = new (string Name, Action Body)[]
     ("InternalHostHasNoImplicitLoggingCapability", InternalHostHasNoImplicitLoggingCapability),
     ("WarmedHostDrivingAllocatesZeroManagedBytes", WarmedHostDrivingAllocatesZeroManagedBytes),
     ("HostWrapperBenchmarkIsCaptured", HostWrapperBenchmarkIsCaptured),
+    ("StaticContentHttpHostServesExactImmutableBytes", StaticContentHttpHostServesExactImmutableBytes),
+    ("StaticContentHttpHostBoundsAndRejectsRequests", StaticContentHttpHostBoundsAndRejectsRequests),
 };
 
 foreach ((string name, Action body) in tests)
@@ -77,6 +81,66 @@ static void HostLifecyclePreservesRuntimeRejections()
 }
 
 Console.WriteLine($"All {tests.Length} Server Hosting S0.2 tests passed.");
+
+static void StaticContentHttpHostServesExactImmutableBytes()
+{
+    byte[] original = "canonical-package-bytes"u8.ToArray();
+    int port = ReserveLoopbackPort();
+    using var host = new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, port),
+        [new StaticContentHttpResource("/content/package.uspkg", original)]);
+    original[0] = (byte)'X';
+    using var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
+    using HttpResponseMessage response = client.GetAsync(host.GetUri("/content/package.uspkg"))
+        .GetAwaiter().GetResult();
+    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    byte[] received = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+    Assert.True(received.AsSpan().SequenceEqual("canonical-package-bytes"u8));
+    Assert.Equal("application/vnd.ultrasim.content-package", response.Content.Headers.ContentType?.MediaType);
+    StaticContentHttpHostSnapshot snapshot = host.GetSnapshot();
+    Assert.Equal(1, snapshot.ResourceCount);
+    Assert.Equal(1UL, snapshot.Requests);
+    Assert.Equal(1UL, snapshot.Served);
+    Assert.Equal((long)received.Length, snapshot.BytesServed);
+}
+
+static void StaticContentHttpHostBoundsAndRejectsRequests()
+{
+    Assert.Throws<ArgumentOutOfRangeException>(() => new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, 0),
+        [new StaticContentHttpResource("/one", "x"u8.ToArray())]));
+    Assert.Throws<ArgumentException>(() => new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [new StaticContentHttpResource("/../escape", "x"u8.ToArray())]));
+    Assert.Throws<ArgumentException>(() => new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [new StaticContentHttpResource("/one", "too-large"u8.ToArray())],
+        new StaticContentHttpHostLimits(1, 2)));
+
+    using var host = new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [new StaticContentHttpResource("/content/package.uspkg", "ok"u8.ToArray())]);
+    using var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false });
+    using HttpResponseMessage missing = client.GetAsync(new Uri(host.BaseUri, "content/missing.uspkg"))
+        .GetAwaiter().GetResult();
+    Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+    using var post = new HttpRequestMessage(HttpMethod.Post, host.GetUri("/content/package.uspkg"));
+    using HttpResponseMessage rejected = client.Send(post);
+    Assert.Equal(HttpStatusCode.NotFound, rejected.StatusCode);
+    StaticContentHttpHostSnapshot snapshot = host.GetSnapshot();
+    Assert.Equal(2UL, snapshot.Requests);
+    Assert.Equal(0UL, snapshot.Served);
+    Assert.Equal(2UL, snapshot.Rejected);
+}
+
+static int ReserveLoopbackPort()
+{
+    using var reservation = new TcpListener(IPAddress.Loopback, 0);
+    reservation.Start();
+    int port = ((IPEndPoint)reservation.LocalEndpoint).Port;
+    reservation.Stop();
+    return port;
+}
 
 static void HostsUseTheSameConcreteRuntimeType()
 {

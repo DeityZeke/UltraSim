@@ -1,0 +1,143 @@
+{
+  "Checkpoint": "A0.4",
+  "Workload": "remote-content-semantic-and-physical-source-parity",
+  "CaptureDate": "2026-09-06",
+  "Configurations": [
+    "Debug",
+    "Release"
+  ],
+  "Protocol": {
+    "ManifestVersion": 18,
+    "SchemaFingerprint": 5737918084883930340,
+    "Change": "ServerHostedStatic admits explicitly policy-authorized HTTP or HTTPS; ExternalHttps remains HTTPS-only."
+  },
+  "BaseCatalog": {
+    "PackageId": "ultrasim.cabin.default",
+    "ManifestHash": "c9f176e8165a8b630a9146861b3b82eaf2d0e9b9544dcfb50fc6dc2dd9973a8f",
+    "Fingerprint": "573b0486d7914f7640b109fcae10e0712c033844ca2325db889e0443adcd7a31",
+    "Definitions": 6
+  },
+  "Scenarios": [
+    {
+      "Name": "Default",
+      "Sources": [
+        "None"
+      ],
+      "PackagesRequired": 0,
+      "PackagesFetched": 0,
+      "FilesFetched": 0,
+      "PayloadBytesFetched": 0,
+      "ArchiveBytesFetched": 0,
+      "PlanHash": "8e5349302bad28c986dee5d99dde311d7d383d6c552d4ebf45b672262eda3843",
+      "ResolvedCatalogFingerprint": "633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503",
+      "Ownership": "All six definitions remain owned by the built-in Cabin package."
+    },
+    {
+      "Name": "Replace",
+      "Sources": [
+        "Local",
+        "ServerHostedStaticHttp",
+        "ExternalHttps"
+      ],
+      "PackageId": "test-cabin.replace-wall",
+      "ManifestHash": "b5f0975917d171340a700b37d294140bc7f91c11b9e0f418079b6bb3820d8569",
+      "FileHashes": [
+        "f82269792600628414296a0fde4e6e7c86a805b94e87f9f8b9d67652896efc32"
+      ],
+      "FilesFetched": 1,
+      "PayloadBytesFetched": 70,
+      "CanonicalArchiveBytesFetched": 403,
+      "PlanHash": "c860f3d9a6289576797928c00a50906d0dea7b362b0a433bfd8c7992085aaa98",
+      "ResolvedCatalogFingerprint": "f1f223d3c1ccf94560b8fbbb4d50bf036a98b043cb117ced63257ac4ecdd7f44",
+      "OwnershipDelta": {
+        "cabin:texture/wall": "Owner and file hash change to test-cabin.replace-wall.",
+        "cabin:material/wall": "Definition and owner remain from the base package; its resolved referenced texture hash changes.",
+        "UnrelatedDefinitions": "The other four base definitions remain semantically identical."
+      },
+      "SourceIdentityResult": "Different local paths and HTTP/HTTPS URIs produce the same package, plan, ownership, and resolved fingerprint."
+    },
+    {
+      "Name": "Add",
+      "Sources": [
+        "ExternalHttps"
+      ],
+      "LocalOracle": true,
+      "PackageId": "test-cabin.add",
+      "ManifestHash": "2972a82568ca6356f3175e825357380a75c324d95b2d50f099f95c5359f2d9a5",
+      "FileHashes": [
+        "4f526ba76843f68c6e92c2855c79f6efd1c34696f5647a2a4be0afa7b60496e6",
+        "61b39854cf5594c52f2d6056e80192d94034071fed9ad952fb1f580a78e866c7"
+      ],
+      "FilesFetched": 2,
+      "PayloadBytesFetched": 140,
+      "CanonicalArchiveBytesFetched": 705,
+      "PlanHash": "b942d12974d9121812263aa597bc2467c0509c053ae37452df5fcac1d1b0f904",
+      "ResolvedCatalogFingerprint": "919d13d6572bf0df807891783d3ea4e25dea16010717df8a2223081ab1df8564",
+      "AddedDefinitions": [
+        "test-cabin:icon/streamed-badge",
+        "test-cabin:material/blue-glow",
+        "test-cabin:texture/blue-glow"
+      ],
+      "OwnershipDelta": "All six base definitions remain semantically identical; exactly three test-cabin definitions are added and owned by test-cabin.add."
+    }
+  ],
+  "CanonicalPackageEnvelope": {
+    "Magic": "USCPKG1",
+    "FormatVersion": 1,
+    "SemanticAuthority": false,
+    "Validation": [
+      "expected package identity",
+      "expected canonical manifest hash",
+      "exact canonical file order and paths",
+      "bounded file and package sizes",
+      "exact payload SHA-256",
+      "existing passive-format allowlist",
+      "complete input with no trailing bytes"
+    ]
+  },
+  "SourcePolicy": {
+    "DefaultMaximumArchiveBytes": 805306368,
+    "DefaultRequestTimeoutMilliseconds": 30000,
+    "RedirectLimit": 0,
+    "AutomaticDecompression": false,
+    "ExternalHttpsRequiresTls": true,
+    "ServerHostedPlainHttpRequiresExplicitPolicy": true,
+    "LiteralPrivateOrLoopbackTargetsRequireExplicitPolicy": true,
+    "LocalSourceRootConfined": true,
+    "LocalSourceRejectsReparseTraversal": true,
+    "CurrentSelectedSourceAttemptsPerPackage": 1,
+    "CurrentMaximumConnectionsPerServer": 1
+  },
+  "FailClosedCases": [
+    "plaintext server-hosted HTTP without explicit policy",
+    "literal loopback/private target without explicit policy",
+    "archive larger than configured capacity",
+    "damaged canonical archive",
+    "wrong package or manifest identity",
+    "unsafe local path or reparse traversal"
+  ],
+  "SemanticAcceptance": [
+    "ContentSetApplied remains required per authenticated application session.",
+    "Guest admission remains blocked before exact application proof.",
+    "Guest admission and authoritative movement continue after proof.",
+    "Public door and chest semantics continue after proof.",
+    "Owner-private Inventory UI continues after proof.",
+    "Spatial Chat continues after proof."
+  ],
+  "Environment": {
+    "ServerHostedHttp": "Real loopback HTTP served by the independent bounded Server.Hosting static-content worker.",
+    "ExternalHttps": "Real loopback TCP/TLS/HTTP fixture with an ephemeral self-signed certificate pinned only by the test client.",
+    "Local": "Real rooted filesystem package read.",
+    "Classification": "Semantic/source parity evidence; not public-WAN, CDN load, operating-system trust-store, native resource-realization, or Contentless Online evidence."
+  },
+  "Deferred": [
+    "mirror retry and failover",
+    "corrupt-cache repair",
+    "partial-file and changed-file delta acquisition",
+    "DNS-rebinding-resistant private-target enforcement",
+    "bounded parallel acquisition workers",
+    "UI definition streaming",
+    "WorldPack streaming",
+    "native Contentless Online entry"
+  ]
+}

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
@@ -10,13 +11,15 @@ using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.World;
 using UltraSim.Network;
+using UltraSim.Server.Hosting;
 using UltraSim.UI;
 
 internal static class F03bRemotePlayableTests
 {
     internal const int F03bTestCount = 4;
     internal const int A03TestCount = 6;
-    internal const int TestCount = F03bTestCount + A03TestCount;
+    internal const int A04TestCount = 5;
+    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount;
 
     internal static void RunAll()
     {
@@ -40,6 +43,16 @@ internal static class F03bRemotePlayableTests
             PriorSessionContentProofCannotUnlockReconnect);
         Run("MismatchedSourceCandidateCannotPublish",
             MismatchedSourceCandidateCannotPublish);
+        Run("RemoteDefaultTransfersNothingAndPreservesGameSemantics",
+            RemoteDefaultTransfersNothingAndPreservesGameSemantics);
+        Run("RemoteReplaceOverServerHttpMatchesLocalOracle",
+            RemoteReplaceOverServerHttpMatchesLocalOracle);
+        Run("RemoteReplaceOverExternalHttpsMatchesServerAndLocal",
+            RemoteReplaceOverExternalHttpsMatchesServerAndLocal);
+        Run("RemoteAddOverExternalHttpsMatchesLocalOracle",
+            RemoteAddOverExternalHttpsMatchesLocalOracle);
+        Run("HttpSourcePolicyAndEnvelopeFailureStayFailClosed",
+            HttpSourcePolicyAndEnvelopeFailureStayFailClosed);
     }
 
     private static void RemotePlayableProtocolIsCanonicalAndTrustMinimal()
@@ -292,7 +305,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)17, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)18, UltraSimGameProtocol.Manifest.Version);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()
@@ -417,6 +430,283 @@ internal static class F03bRemotePlayableTests
         False(fixture.SessionSnapshot.SemanticConsumersActive);
     }
 
+    private static void RemoteDefaultTransfersNothingAndPreservesGameSemantics()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        var source = new RejectingSource();
+        using var fixture = RemotePlayableFixture.CreateWithContent(
+            oracle, oracle.Default, [], source);
+        fixture.DriveUntil(() => fixture.Content!.Applied && fixture.SessionSnapshot.RequiredContentApplied);
+        RemoteContentClientSnapshot content = fixture.Content!.GetSnapshot();
+        Equal(oracle.Default.Catalog.Fingerprint, content.ResolvedCatalogFingerprint);
+        Equal(0, content.Acquisition.PackagesRequired);
+        Equal(0, content.Acquisition.PackagesFetched);
+        Equal(0, content.Acquisition.FilesFetched);
+        Equal(0L, content.Acquisition.BytesFetched);
+        Equal(0, source.Fetches);
+        AssertCatalogEqual(oracle.Default.Catalog, fixture.Content.Catalog);
+        AssertBasicRemoteGameUnaffected(fixture, "Default Guest");
+        Console.WriteLine(
+            $"EVIDENCE A0.4 scenario=Default source=none transfer=0 " +
+            $"plan={oracle.Default.Plan.PlanHash} fingerprint={content.ResolvedCatalogFingerprint}");
+    }
+
+    private static void RemoteReplaceOverServerHttpMatchesLocalOracle()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        byte[] archive = Archive(oracle.ReplacePackage);
+        using var host = new StaticContentHttpHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+            [new StaticContentHttpResource("/content/cabin-replace.uspkg", archive)]);
+        var acquisition = Acquisition(
+            oracle.ReplacePackage, ContentSourceKind.ServerHostedStatic,
+            host.GetUri("/content/cabin-replace.uspkg").ToString());
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithContent(
+            oracle, oracle.Replace, [acquisition], source);
+        fixture.DriveUntil(() => fixture.Content!.Applied && fixture.SessionSnapshot.RequiredContentApplied);
+        AssertCatalogEqual(oracle.Replace.Catalog, fixture.Content!.Catalog);
+        RemoteContentClientSnapshot content = fixture.Content.GetSnapshot();
+        Equal(ContentSourceKind.ServerHostedStatic, content.Acquisition.SelectedSource.Kind);
+        Equal(1, content.Acquisition.PackagesFetched);
+        Equal(1, content.Acquisition.FilesFetched);
+        Equal(oracle.ReplacePackage.Payloads.Sum(static value => (long)value.Bytes.Length),
+            content.Acquisition.BytesFetched);
+        Equal((long)archive.Length, source.GetSnapshot().ArchiveBytesRead);
+        Equal(1UL, host.GetSnapshot().Served);
+        AssertBasicRemoteGameUnaffected(fixture, "HTTP Replace Guest");
+        Console.WriteLine(
+            $"EVIDENCE A0.4 scenario=Replace source=ServerHostedStatic " +
+            $"package={oracle.ReplacePackage.Manifest.PackageId} manifest={oracle.ReplacePackage.Manifest.ManifestHash} " +
+            $"file={oracle.ReplacePackage.Manifest.Files[0].Sha256} " +
+            $"plan={oracle.Replace.Plan.PlanHash} " +
+            $"payload_bytes={content.Acquisition.BytesFetched} archive_bytes={archive.Length} " +
+            $"fingerprint={content.ResolvedCatalogFingerprint}");
+    }
+
+    private static void RemoteReplaceOverExternalHttpsMatchesServerAndLocal()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        byte[] archive = Archive(oracle.ReplacePackage);
+        ContentHash localFingerprint;
+        ContentPackageAcquisition localAcquisition = Acquisition(
+            oracle.ReplacePackage, ContentSourceKind.Local, "packages/replace.uspkg");
+        string localRoot = TemporaryDirectory("ultrasim-a04-local-source");
+        Directory.CreateDirectory(Path.Combine(localRoot, "packages"));
+        try
+        {
+            File.WriteAllBytes(Path.Combine(localRoot, "packages", "replace.uspkg"), archive);
+            var localSource = new LocalContentPackageSource(localRoot);
+            using var local = RemotePlayableFixture.CreateWithContent(
+                oracle, oracle.Replace, [localAcquisition], localSource);
+            local.DriveUntil(() => local.Content!.Applied && local.SessionSnapshot.RequiredContentApplied);
+            AssertCatalogEqual(oracle.Replace.Catalog, local.Content!.Catalog);
+            localFingerprint = local.Content.GetSnapshot().ResolvedCatalogFingerprint;
+        }
+        finally
+        {
+            if (Directory.Exists(localRoot)) Directory.Delete(localRoot, recursive: true);
+        }
+
+        using var host = new LoopbackHttpsContentHost("/content/cabin-replace.uspkg", archive);
+        var externalAcquisition = Acquisition(
+            oracle.ReplacePackage, ContentSourceKind.ExternalHttps, host.ResourceUri.ToString());
+        using var externalSource = new HttpContentPackageSource(
+            host.CreatePinnedClientHandler(), FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
+        using var external = RemotePlayableFixture.CreateWithContent(
+            oracle, oracle.Replace, [externalAcquisition], externalSource);
+        external.DriveUntil(() =>
+            external.Content!.Applied && external.SessionSnapshot.RequiredContentApplied);
+        AssertCatalogEqual(oracle.Replace.Catalog, external.Content!.Catalog);
+        RemoteContentClientSnapshot content = external.Content.GetSnapshot();
+        Equal(ContentSourceKind.ExternalHttps, content.Acquisition.SelectedSource.Kind);
+        Equal(localFingerprint, content.ResolvedCatalogFingerprint);
+        Equal(oracle.Replace.Catalog.Fingerprint, content.ResolvedCatalogFingerprint);
+        Equal((long)archive.Length, externalSource.GetSnapshot().ArchiveBytesRead);
+        AssertBasicRemoteGameUnaffected(external, "HTTPS Replace Guest");
+
+        RemoteContentAuthorization localAuthorization = RemoteContentAuthorizationProjection.Create(
+            oracle.Replace.Plan, oracle.Replace.Catalog.Fingerprint, [localAcquisition]);
+        RemoteContentAuthorization externalAuthorization = RemoteContentAuthorizationProjection.Create(
+            oracle.Replace.Plan, oracle.Replace.Catalog.Fingerprint, [externalAcquisition]);
+        Equal(localAuthorization.PlanHash, externalAuthorization.PlanHash);
+        Equal(localAuthorization.ExpectedResolvedCatalogFingerprint,
+            externalAuthorization.ExpectedResolvedCatalogFingerprint);
+        True(localAuthorization.Packages[0].Sources[0].Locator !=
+            externalAuthorization.Packages[0].Sources[0].Locator);
+        Console.WriteLine(
+            $"EVIDENCE A0.4 scenario=Replace source=ExternalHttps archive_bytes={archive.Length} " +
+            $"manifest={oracle.ReplacePackage.Manifest.ManifestHash} plan={oracle.Replace.Plan.PlanHash} " +
+            $"fingerprint={content.ResolvedCatalogFingerprint} local_source_parity=true");
+    }
+
+    private static void RemoteAddOverExternalHttpsMatchesLocalOracle()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        byte[] archive = Archive(oracle.AddPackage);
+        using var host = new LoopbackHttpsContentHost("/content/cabin-add.uspkg", archive);
+        var acquisition = Acquisition(
+            oracle.AddPackage, ContentSourceKind.ExternalHttps, host.ResourceUri.ToString());
+        using var source = new HttpContentPackageSource(
+            host.CreatePinnedClientHandler(), FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
+        using var fixture = RemotePlayableFixture.CreateWithContent(
+            oracle, oracle.Add, [acquisition], source);
+        fixture.DriveUntil(() => fixture.Content!.Applied && fixture.SessionSnapshot.RequiredContentApplied);
+        AssertCatalogEqual(oracle.Add.Catalog, fixture.Content!.Catalog);
+        foreach (LogicalContentId id in new[]
+                 {
+                     CabinContentIds.BlueGlowMaterial,
+                     CabinContentIds.BlueGlowTexture,
+                     CabinContentIds.StreamedBadgeIcon,
+                 })
+        {
+            True(fixture.Content.Catalog.TryGet(id, out ResolvedContentEntry? entry));
+            Equal(oracle.AddPackage.Manifest.PackageId, entry!.OwnerPackageId);
+        }
+        AssertBasicRemoteGameUnaffected(fixture, "HTTPS Add Guest");
+        RemoteContentClientSnapshot content = fixture.Content.GetSnapshot();
+        Console.WriteLine(
+            $"EVIDENCE A0.4 scenario=Add source=ExternalHttps files={content.Acquisition.FilesFetched} " +
+            $"package={oracle.AddPackage.Manifest.PackageId} manifest={oracle.AddPackage.Manifest.ManifestHash} " +
+            $"file0={oracle.AddPackage.Manifest.Files[0].Sha256} " +
+            $"file1={oracle.AddPackage.Manifest.Files[1].Sha256} " +
+            $"plan={oracle.Add.Plan.PlanHash} " +
+            $"payload_bytes={content.Acquisition.BytesFetched} archive_bytes={archive.Length} " +
+            $"fingerprint={content.ResolvedCatalogFingerprint}");
+    }
+
+    private static void HttpSourcePolicyAndEnvelopeFailureStayFailClosed()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        byte[] archive = Archive(oracle.ReplacePackage);
+        archive[^1] ^= 0x7F;
+        using var host = new StaticContentHttpHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+            [new StaticContentHttpResource("/content/damaged.uspkg", archive)]);
+        var acquisition = Acquisition(
+            oracle.ReplacePackage, ContentSourceKind.ServerHostedStatic,
+            host.GetUri("/content/damaged.uspkg").ToString());
+
+        using (var denied = new HttpContentPackageSource())
+        {
+            var deniedRequest = new ContentPackageFetchRequest(
+                CabinContentOracle.FixtureRealm, oracle.ReplacePackage.Manifest.PackageId,
+                oracle.ReplacePackage.Manifest.ManifestHash, acquisition.Sources[0]);
+            False(denied.TryFetch(in deniedRequest, out _, out ContentSourceFetchError policyError));
+            Equal(ContentSourceFetchError.InvalidRequest, policyError);
+            Equal(0L, denied.GetSnapshot().ArchiveBytesRead);
+        }
+
+        using (var bounded = new HttpContentPackageSource(new ContentPackageSourceLimits(
+                   maximumArchiveBytes: archive.Length - 1,
+                   requestTimeoutMilliseconds: 10_000,
+                   allowInsecureServerHostedHttp: true,
+                   allowPrivateNetworkTargets: true)))
+        {
+            var boundedRequest = new ContentPackageFetchRequest(
+                CabinContentOracle.FixtureRealm, oracle.ReplacePackage.Manifest.PackageId,
+                oracle.ReplacePackage.Manifest.ManifestHash, acquisition.Sources[0]);
+            False(bounded.TryFetch(in boundedRequest, out _, out ContentSourceFetchError capacityError));
+            Equal(ContentSourceFetchError.CapacityExceeded, capacityError);
+            Equal(0L, bounded.GetSnapshot().ArchiveBytesRead);
+        }
+
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithContent(
+            oracle, oracle.Replace, [acquisition], source);
+        fixture.DriveUntil(() =>
+            fixture.Content!.GetSnapshot().State == RemoteContentClientState.Rejected);
+        Equal(ContentActivationAcquisitionStatus.SourceFailure,
+            fixture.Content!.GetSnapshot().Acquisition.Status);
+        Equal(ContentSourceFetchError.SourceFailure,
+            fixture.Content.GetSnapshot().Acquisition.SourceError);
+        ContentCacheSnapshot cache = fixture.ContentStore!.GetSnapshot();
+        Equal(0, cache.BlobCount);
+        Equal(0, cache.RealmManifestCount);
+        Equal(0, cache.RealmActivationCount);
+        False(fixture.SessionSnapshot.SemanticConsumersActive);
+    }
+
+    private static byte[] Archive(CabinLocalContentPackage package)
+    {
+        True(ContentPackageArchive.TryEncodeCanonical(
+            package.Manifest, package.Payloads, out byte[] archive));
+        return archive;
+    }
+
+    private static ContentPackageAcquisition Acquisition(
+        CabinLocalContentPackage package,
+        ContentSourceKind kind,
+        string locator) => new(
+            package.Manifest.PackageId,
+            package.Manifest.ManifestHash,
+            [new ContentSourceDescriptor(kind, locator)]);
+
+    private static ContentPackageSourceLimits FixtureHttpLimits(
+        int archiveBytes,
+        bool allowInsecureHttp) => new(
+            maximumArchiveBytes: archiveBytes,
+            requestTimeoutMilliseconds: 10_000,
+            allowInsecureServerHostedHttp: allowInsecureHttp,
+            allowPrivateNetworkTargets: true);
+
+    private static void AssertCatalogEqual(
+        ResolvedContentCatalog expected,
+        ResolvedContentCatalog actual)
+    {
+        Equal(expected.Fingerprint, actual.Fingerprint);
+        Equal(expected.PlanHash, actual.PlanHash);
+        Equal(expected.RequiredBaseCatalogFingerprint, actual.RequiredBaseCatalogFingerprint);
+        Equal(expected.Entries.Count, actual.Entries.Count);
+        for (int index = 0; index < expected.Entries.Count; index++)
+        {
+            ResolvedContentEntry left = expected.Entries[index];
+            ResolvedContentEntry right = actual.Entries[index];
+            Equal(left.Id, right.Id);
+            Equal(left.Kind, right.Kind);
+            Equal(left.OwnerPackageId, right.OwnerPackageId);
+            Equal(left.OwnerManifestHash, right.OwnerManifestHash);
+            Equal(left.Definition.DefinitionHash, right.Definition.DefinitionHash);
+            True(left.ReferencedFiles.SequenceEqual(right.ReferencedFiles));
+        }
+    }
+
+    private static void AssertBasicRemoteGameUnaffected(
+        RemotePlayableFixture fixture,
+        string displayName)
+    {
+        fixture.Admit(displayName, GameGuestBody.HumanFemale);
+        fixture.DriveUntil(() =>
+            fixture.TryFindPublic(GameWorldPublicPrefabIds.Character, out _) &&
+            fixture.TryFindPublic(GameWorldPublicPrefabIds.CabinDoor, out _) &&
+            fixture.TryFindPublic(GameWorldPublicPrefabIds.WorldChest, out _));
+        WorldPosition before = fixture.Playable.GetSnapshot().Position;
+        True(fixture.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.CreateDirect(GamePlayerCommand.MaximumAxisMagnitude, 0),
+            GamePlayerActions.None, true)));
+        ulong movement = fixture.Playable.Input.Snapshot().LastSequence;
+        fixture.DriveUntil(() =>
+            fixture.Playable.GetSnapshot().LastProcessedCommandSequence >= movement &&
+            fixture.Playable.GetSnapshot().Position.GlobalXMillimeters > before.GlobalXMillimeters);
+        True(fixture.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+            flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+        fixture.DriveUntil(() => fixture.UiClient.OpenViewCount == 1);
+        True(fixture.Chat.TrySubmit("content parity", ClientChatSpeechMode.Say));
+        fixture.DriveUntil(() => fixture.ChatState.GetSnapshot().Applied == 1);
+    }
+
+    private static int ReserveLoopbackPort()
+    {
+        using var reservation = new TcpListener(IPAddress.Loopback, 0);
+        reservation.Start();
+        int port = ((IPEndPoint)reservation.LocalEndpoint).Port;
+        reservation.Stop();
+        return port;
+    }
+
     private static RemoteContentSetAppliedMessage CreateAppliedProof(
         CabinContentOracle oracle,
         ulong applicationSessionEpoch)
@@ -533,6 +823,24 @@ internal static class F03bRemotePlayableTests
         }
     }
 
+    private sealed class RejectingSource : IContentPackageSource
+    {
+        internal int Fetches { get; private set; }
+
+        public bool CanFetch(ContentSourceKind kind) => false;
+
+        public bool TryFetch(
+            in ContentPackageFetchRequest request,
+            out FetchedContentPackage? package,
+            out ContentSourceFetchError error)
+        {
+            Fetches++;
+            package = null;
+            error = ContentSourceFetchError.UnsupportedSource;
+            return false;
+        }
+    }
+
     private sealed class RemotePlayableFixture : IDisposable
     {
         private static readonly NetworkProtocolLimits Protocol = NetworkProtocolLimits.Default;
@@ -612,7 +920,18 @@ internal static class F03bRemotePlayableTests
 
         internal static RemotePlayableFixture CreateWithContent(
             CabinContentOracle oracle,
-            CabinReplaceSource source,
+            IContentPackageSource source,
+            string? contentRoot = null,
+            bool preserveContentRoot = false)
+            => CreateWithContent(
+                oracle, oracle.Replace, [RemoteReplaceAcquisition(oracle)], source,
+                contentRoot, preserveContentRoot);
+
+        internal static RemotePlayableFixture CreateWithContent(
+            CabinContentOracle oracle,
+            CabinResolvedContent expected,
+            ContentPackageAcquisition[] acquisitions,
+            IContentPackageSource source,
             string? contentRoot = null,
             bool preserveContentRoot = false)
         {
@@ -621,9 +940,8 @@ internal static class F03bRemotePlayableTests
                 throw new InvalidOperationException($"The A0.3 cache could not open: {error}.");
             try
             {
-                ContentPackageAcquisition acquisition = RemoteReplaceAcquisition(oracle);
                 RemoteContentAuthorization authorization = RemoteContentAuthorizationProjection.Create(
-                    oracle.Replace.Plan, oracle.Replace.Catalog.Fingerprint, [acquisition]);
+                    expected.Plan, expected.Catalog.Fingerprint, acquisitions);
                 var binding = new RemoteRequiredContentBinding(
                     CabinContentOracle.FixtureRealm, contentCache!, oracle.BaseCatalog, source);
                 return CreateCore(

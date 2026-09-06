@@ -46,7 +46,10 @@ static void FrozenFingerprintsAreDeterministic()
     NotEqual(first.Add.Catalog.Generation, second.Add.Catalog.Generation);
 
     Console.WriteLine($"ORACLE base={first.BaseCatalog.Fingerprint} default={first.Default.Catalog.Fingerprint} " +
-        $"replace={first.Replace.Catalog.Fingerprint} add={first.Add.Catalog.Fingerprint}");
+        $"replace={first.Replace.Catalog.Fingerprint} add={first.Add.Catalog.Fingerprint} " +
+        $"base_manifest={first.BasePackage.Manifest.ManifestHash} " +
+        $"replace_manifest={first.ReplacePackage.Manifest.ManifestHash} " +
+        $"add_manifest={first.AddPackage.Manifest.ManifestHash}");
 
     Equal(CabinContentFingerprints.BaseCatalog, first.BaseCatalog.Fingerprint.ToString());
     Equal(CabinContentFingerprints.DefaultCatalog, first.Default.Catalog.Fingerprint.ToString());

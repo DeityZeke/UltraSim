@@ -45,9 +45,12 @@ public readonly record struct RemoteContentSource(RemoteContentSourceKind Kind, 
                     !Locator.Contains('\\') && !Locator.Contains(':') &&
                     Locator.Split('/').All(static segment => segment.Length > 0 &&
                         segment is not "." and not "..");
-            return Uri.TryCreate(Locator, UriKind.Absolute, out Uri? uri) &&
-                uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo) &&
-                string.IsNullOrEmpty(uri.Fragment);
+            if (!Uri.TryCreate(Locator, UriKind.Absolute, out Uri? uri) ||
+                !string.IsNullOrEmpty(uri.UserInfo) || !string.IsNullOrEmpty(uri.Fragment))
+                return false;
+            return Kind == RemoteContentSourceKind.ServerHostedStatic
+                ? uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps
+                : uri.Scheme == Uri.UriSchemeHttps;
         }
     }
 }

@@ -10,6 +10,8 @@ var tests = new (string Name, Action Body)[]
     ("ManifestIdentityIsCanonicalAndBounded", ManifestIdentityIsCanonicalAndBounded),
     ("BoundedAdmissionsStopBeforeOversizedMaterialization", BoundedAdmissionsStopBeforeOversizedMaterialization),
     ("PassivePayloadsRequireExactBytesAndAllowedEnvelopes", PassivePayloadsRequireExactBytesAndAllowedEnvelopes),
+    ("CanonicalPackageArchiveRoundTripsAndRejectsDamage", CanonicalPackageArchiveRoundTripsAndRejectsDamage),
+    ("LocalPackageSourceIsRootedBoundedAndExact", LocalPackageSourceIsRootedBoundedAndExact),
     ("ActivationIdentityPreservesAuthorityOrderNotByteSource", ActivationIdentityPreservesAuthorityOrderNotByteSource),
     ("DefaultReplaceAddResolveDeterministically", DefaultReplaceAddResolveDeterministically),
     ("ResolutionFailuresAreTransactionalAndDiagnosable", ResolutionFailuresAreTransactionalAndDiagnosable),
@@ -30,6 +32,100 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} Client Content tests passed.");
+
+static void CanonicalPackageArchiveRoundTripsAndRejectsDamage()
+{
+    PackageFixture fixture = CreateReplacePackage();
+    True(ContentPackageArchive.TryEncodeCanonical(
+        fixture.Manifest, fixture.Payloads.Reverse(), out byte[] first));
+    True(ContentPackageArchive.TryEncodeCanonical(
+        fixture.Manifest, fixture.Payloads, out byte[] second));
+    True(first.AsSpan().SequenceEqual(second));
+    True(ContentPackageArchive.TryDecodeCanonical(
+        first, fixture.Manifest.PackageId, fixture.Manifest.ManifestHash,
+        out FetchedContentPackage? decoded));
+    Equal(fixture.Manifest.ManifestHash, decoded!.Manifest.ManifestHash);
+    Equal(fixture.Payloads.Length, decoded.Payloads.Count);
+    for (int index = 0; index < fixture.Payloads.Length; index++)
+    {
+        Equal(fixture.Payloads[index].Path, decoded.Payloads[index].Path);
+        True(fixture.Payloads[index].Bytes.Span.SequenceEqual(decoded.Payloads[index].Bytes.Span));
+    }
+
+    byte[] damaged = first.ToArray();
+    damaged[^1] ^= 0x5A;
+    False(ContentPackageArchive.TryDecodeCanonical(
+        damaged, fixture.Manifest.PackageId, fixture.Manifest.ManifestHash, out _));
+    False(ContentPackageArchive.TryDecodeCanonical(
+        first.AsMemory(0, first.Length - 1), fixture.Manifest.PackageId,
+        fixture.Manifest.ManifestHash, out _));
+    False(ContentPackageArchive.TryDecodeCanonical(
+        first, Package("wrong.package"), fixture.Manifest.ManifestHash, out _));
+    False(ContentPackageArchive.TryDecodeCanonical(
+        first, fixture.Manifest.PackageId, ContentHash.Compute("wrong"u8), out _));
+}
+
+static void LocalPackageSourceIsRootedBoundedAndExact()
+{
+    PackageFixture fixture = CreateReplacePackage();
+    True(ContentPackageArchive.TryEncodeCanonical(
+        fixture.Manifest, fixture.Payloads, out byte[] archive));
+    string root = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-local-source-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(Path.Combine(root, "packages"));
+    try
+    {
+        System.IO.File.WriteAllBytes(Path.Combine(root, "packages", "replace.uspkg"), archive);
+        var descriptor = new ContentSourceDescriptor(
+            ContentSourceKind.Local, "packages/replace.uspkg");
+        var request = new ContentPackageFetchRequest(
+            new ApplicationRealmId(9, 9), fixture.Manifest.PackageId,
+            fixture.Manifest.ManifestHash, descriptor);
+        var source = new LocalContentPackageSource(root);
+        True(source.TryFetch(in request, out FetchedContentPackage? fetched,
+            out ContentSourceFetchError error), error.ToString());
+        Equal(fixture.Manifest.ManifestHash, fetched!.Manifest.ManifestHash);
+        Equal(1UL, source.GetSnapshot().Completed);
+        Equal((long)archive.Length, source.GetSnapshot().ArchiveBytesRead);
+
+        var tiny = new LocalContentPackageSource(root,
+            new ContentPackageSourceLimits(
+                archive.Length - 1, 1_000,
+                allowInsecureServerHostedHttp: false,
+                allowPrivateNetworkTargets: false));
+        False(tiny.TryFetch(in request, out _, out ContentSourceFetchError capacity));
+        Equal(ContentSourceFetchError.CapacityExceeded, capacity);
+
+        string outside = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-local-source-outside-{Environment.ProcessId}-{Guid.NewGuid():N}.uspkg");
+        System.IO.File.WriteAllBytes(outside, archive);
+        string link = Path.Combine(root, "packages", "linked.uspkg");
+        try
+        {
+            System.IO.File.CreateSymbolicLink(link, outside);
+            var linkedRequest = request with
+            {
+                Source = new ContentSourceDescriptor(ContentSourceKind.Local, "packages/linked.uspkg"),
+            };
+            False(source.TryFetch(in linkedRequest, out _, out ContentSourceFetchError unsafeError));
+            Equal(ContentSourceFetchError.Unavailable, unsafeError);
+        }
+        finally
+        {
+            if (System.IO.File.Exists(link)) System.IO.File.Delete(link);
+            if (System.IO.File.Exists(outside)) System.IO.File.Delete(outside);
+        }
+
+        True(new ContentSourceDescriptor(
+            ContentSourceKind.ServerHostedStatic, "http://127.0.0.1:8080/content.uspkg").IsValid);
+        False(new ContentSourceDescriptor(
+            ContentSourceKind.ExternalHttps, "http://cdn.example/content.uspkg").IsValid);
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
 
 static void IdentityGrammarAndDefaultsFailClosed()
 {

@@ -265,10 +265,14 @@ public readonly record struct ContentSourceDescriptor(ContentSourceKind Kind, st
             return Kind switch
             {
                 ContentSourceKind.Local => ContentFilePath.TryCreate(Locator, out _),
-                ContentSourceKind.ServerHostedStatic or ContentSourceKind.ExternalHttps =>
-                    Uri.TryCreate(Locator, UriKind.Absolute, out Uri? uri) &&
-                    uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo) &&
-                    string.IsNullOrEmpty(uri.Fragment),
+                ContentSourceKind.ServerHostedStatic =>
+                    Uri.TryCreate(Locator, UriKind.Absolute, out Uri? serverUri) &&
+                    (serverUri.Scheme == Uri.UriSchemeHttp || serverUri.Scheme == Uri.UriSchemeHttps) &&
+                    string.IsNullOrEmpty(serverUri.UserInfo) && string.IsNullOrEmpty(serverUri.Fragment),
+                ContentSourceKind.ExternalHttps =>
+                    Uri.TryCreate(Locator, UriKind.Absolute, out Uri? externalUri) &&
+                    externalUri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(externalUri.UserInfo) &&
+                    string.IsNullOrEmpty(externalUri.Fragment),
                 _ => false,
             };
         }

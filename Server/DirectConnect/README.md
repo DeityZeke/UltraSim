@@ -13,7 +13,13 @@ A0.3 adds an optional immutable content authorization to the same application fa
 configured, it publishes the bounded requirement after authenticated realm/session identity and
 does not admit guest/Game semantics until an exact `ContentSetApplied` proof matches the session,
 realm, activation, plan, and expected resolved fingerprint. The development executable does not
-yet configure a concrete HTTP content endpoint; server-hosted/external source parity is A0.4.
+yet configure a deployment package set or content endpoint.
+
+A0.4 adds a neutral bounded immutable-byte `StaticContentHttpHost` in `Server.Hosting`. It runs
+outside Game/Network progression and knows no realm, manifest, or package semantics. The accepted
+source-parity fixture composes it with an exact authenticated requirement; wiring operator-facing
+routes/certificates/package configuration into this development executable remains later
+deployment/contentless-Online composition work.
 
 Run the development endpoint with:
 

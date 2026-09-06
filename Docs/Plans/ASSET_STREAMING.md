@@ -1,11 +1,12 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
-local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, and A0.3
-authenticated requirement/acquisition/application proof accepted,
+local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, A0.3
+authenticated requirement/acquisition/application proof, and A0.4 remote semantic/source parity
+accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.3 are closed; A0.4 remote semantic/source parity is
-next. Runtime mesh/audio
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.4 are closed; A0.5 cache/delta/corruption/mirror
+hardening is next. Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
@@ -87,8 +88,11 @@ The current repository now has the first source-free content pipeline:
   activation/catalog resolution, and the A0.2 persistent CAS described below;
 - the playable Cabin and X/Y calibration assets are currently build-time/fixture composition;
 - authenticated remote content requirements, source-neutral package acquisition, persistent cache
-  reuse, immutable catalog publication, and session-fenced `ContentSetApplied` now exist; concrete
-  HTTP source adapters, source parity, and lazy downloaded-resource realization remain later gates.
+  reuse, immutable catalog publication, and session-fenced `ContentSetApplied` now exist;
+- canonical package envelopes, rooted local files, bounded server-hosted HTTP, and external HTTPS
+  now converge on the same verified package/catalog identity;
+- mirror retry/repair, lazy downloaded-resource realization, UI schemas, and WorldPack streaming
+  remain later gates.
 
 A0 extracts/builds those missing content contracts. It does not reinterpret current persistence,
 UI cache keys, or World chunk hashes as if they already formed a streaming package system.
@@ -943,6 +947,10 @@ Redirect count, response size, timeout, retry count, and concurrent download cou
 
 # 15. Source failover and mirrors
 
+The ordered-list contract is frozen here, but trying another source after an unavailable or corrupt
+first source is an **A0.5** implementation gate. A0.4 proves each source class independently and
+continues to select only the first supported approved source.
+
 A package may advertise a bounded ordered source list.
 
 Example:
@@ -1624,6 +1632,52 @@ Replace result matches Single Player local Replace fingerprint exactly.
 ---
 
 ## A0.4 — Default / Replace / Add remote parity + source parity
+
+**Status: CLOSED.** Game protocol v18 admits `http` or `https` for an explicitly classified
+`ServerHostedStatic` source while retaining HTTPS-only `ExternalHttps`. `Client.Content` now owns
+one canonical passive `.uspkg` envelope plus rooted local-file and bounded HTTP(S) byte-source
+adapters. The package envelope carries the canonical manifest and its exact ordered payloads; it
+does not introduce another semantic package identity. All bytes still pass package/manifest/path,
+size, SHA-256, and passive-format validation before A0.2 installation and catalog publication.
+
+`Server.Hosting` now provides a small immutable-byte `StaticContentHttpHost` that is independent of
+Game ticks, Network lanes, realm authorization, and content meaning. Its admitted route/resource
+set and total retained bytes are fixed at construction, it handles one request at a time, accepts
+GET for exact lowercase routes only, and copies configured bytes before serving them. The initial
+client source disables redirects and decompression, bounds response bytes and request time, and
+allows plaintext server-hosted HTTP or loopback/private targets only through explicit policy.
+External sources remain HTTPS-only. Literal private/loopback addresses are rejected by default;
+DNS-rebinding-resistant resolution policy, bounded parallel acquisition, retry, and mirrors remain
+A0.5.
+
+The accepted Cabin matrix proves:
+
+```text
+Default
+    zero package/file/archive transfer
+    catalog 633eed18a9856474e43c4a6fb61db0bd80fbade8a40f6d884728b29024afb503
+
+Replace
+    exact package through local file, server-hosted HTTP, and external HTTPS
+    70 payload bytes / 403 canonical archive bytes
+    catalog f1f223d3c1ccf94560b8fbbb4d50bf036a98b043cb117ced63257ac4ecdd7f44
+
+Add
+    exact package through external HTTPS, two files
+    140 payload bytes / 705 canonical archive bytes
+    catalog 919d13d6572bf0df807891783d3ea4e25dea16010717df8a2223081ab1df8564
+```
+
+Local path and HTTP/HTTPS URI differ without changing plan or resolved identity. The remote
+fixtures also continue through session-scoped `ContentSetApplied`, guest admission, public
+door/chest state, authoritative movement, Inventory UI, and spatial Chat. A damaged envelope or
+disallowed/capacity-exceeding source leaves the cache/catalog and Game admission closed.
+
+The committed machine-readable evidence is
+[`content-a0.4-remote-source-parity-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.4-remote-source-parity-2026-09-06.json).
+Its HTTP and HTTPS observations use real loopback transports (the TLS fixture uses a pinned
+self-signed test certificate); they are source/protocol parity evidence, not public-WAN/CDN load or
+trust-store evidence. Native resource realization and contentless Online entry remain A0.8.
 
 Run all three semantic scenarios remotely.
 

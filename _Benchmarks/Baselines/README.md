@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `content-a0.4-remote-source-parity-2026-09-06.json` — frozen Cabin
+  Default/Replace/Add semantic matrix across zero-transfer Default, rooted local package files,
+  bounded server-hosted HTTP, and external TLS/HTTPS. It records canonical envelope/payload bytes,
+  exact package/manifest/file/plan/catalog identities, source-policy bounds, and continued remote
+  Game-consumer acceptance. The network observations use real loopback transports and are not
+  public-WAN/CDN load or platform trust-store evidence;
 - `network-hosted-h0.1-external-admission-*` — first real externally sourced
   IPv4 listener boundary: deployment-key pin copy, listener-lifetime stateless
   cookie, fixed per-source rate table, non-amplifying challenge, bounded expiring

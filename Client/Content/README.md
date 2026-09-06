@@ -1,7 +1,7 @@
 # Client Content
 
-`UltraSim.Client.Content` is the engine-neutral A0.0-A0.3 contract, deterministic resolver,
-persistent store, and source-neutral acquisition transaction for passive client content. It
+`UltraSim.Client.Content` is the engine-neutral A0.0-A0.4 contract, deterministic resolver,
+persistent store, and source-independent acquisition transaction for passive client content. It
 contains no Godot or Network dependency.
 
 The accepted boundary is:
@@ -116,7 +116,22 @@ A0.3 adds `IContentPackageSource` and `ContentActivationAcquirer`. An authentica
 only approved source descriptors; the acquirer reuses an exact realm manifest when available or
 fetches one bounded untrusted package candidate, checks package/manifest identity, installs through
 A0.2, and publishes the complete catalog last. The content assembly still does not know Network or
-Godot. Concrete HTTP/HTTPS adapters and mirror/repair policy remain A0.4/A0.5; WorldPack streaming
-and native resource realization remain later work.
+Godot.
+
+A0.4 adds one canonical passive `.uspkg` byte envelope plus concrete rooted-local and HTTP(S)
+sources. The envelope contains the canonical manifest followed by exact ordered file paths and
+payload bytes; decode requires the expected package/manifest identity, complete canonical order,
+bounded sizes, exact SHA-256, and the existing passive-format admission. It is a delivery envelope,
+not a second package or catalog model.
+
+`LocalContentPackageSource` admits safe package-relative paths beneath one configured ordinary
+directory and rejects reparse-point traversal. `HttpContentPackageSource` disables redirects,
+automatic decompression, and cookies; bounds response size and request time; requires HTTPS for
+external sources; and requires explicit policy for plaintext server-hosted HTTP or literal
+loopback/private targets. Its current default archive cap is 768 MiB and timeout is 30 seconds;
+these are bounded implementation profiles, not permanent product limits. Acquisition remains a
+synchronous owner-thread operation with one selected supported source in A0.4. Bounded parallel
+workers, DNS-rebinding-resistant private-target policy, retry/mirrors, and corrupt-cache repair are
+A0.5. WorldPack streaming and native resource realization remain later work.
 
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.

@@ -72,7 +72,10 @@ independently blocks hostile bypass until the exact session proof arrives. Cache
 not proof, and reconnect always requires fresh application-session proof.
 
 The contentless Online native world remains a later A0.7/A0.8 consumer even though F0.3b's external
-semantic path and A0.3's headless authenticated content gate are accepted.
+semantic path and A0.3's headless authenticated content gate are accepted. A0.4 now feeds that same
+gate from canonical local-file, server-hosted HTTP, and external HTTPS package envelopes and proves
+Default/Replace/Add parity with the A0.1 oracle. Source URIs remain authorization hints outside
+plan/catalog identity; no package bytes use realtime Network lanes.
 
 ## Dynamic public chunk state
 
