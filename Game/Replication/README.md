@@ -48,6 +48,24 @@ but not Game Protocol or `Kernels/Network`. `Game/Replication.Remote` is the sep
 Network-dependent assembly containing codecs/protocol-peer adapters. The Network kernel
 remains independent of ECS, Game, Server, UI, and Client.
 
+## F0.3b remote playable application
+
+`RemoteGuestPlayableApplication` is the narrow external Direct Connect composition above the
+accepted remote adapters. An authenticated application session may submit one bounded guest
+identity. Game revalidates it, creates the canonical session-scoped identity/actor, issues the
+control session, and retains the result until explicit client semantic application.
+
+Player commands are reliable non-coalescible Events carrying only application/control lineage,
+exact command sequence, the existing `GamePlayerCommand` intent, and an optional public-entity
+interaction nomination. They contain no participant, ECS entity, authoritative position, range, or
+recipient set. Public identity is resolved back to current Game authority before interaction. The
+command is admitted through `GameWorldActions`; owner state, `ChunkPublication`, Chat, Inventory,
+and informational UI continue through their distinct accepted semantic paths.
+
+The current external executable intentionally admits one remote participant on one Hosted owner.
+Shared multi-participant authority, remotely acquired structural World bytes, and generalized native
+actor presentation are not claimed by F0.3b.
+
 ## Remote Chat occurrence delivery
 
 Chat C0.1 consumes the packet-free `GameChatService` through a bounded

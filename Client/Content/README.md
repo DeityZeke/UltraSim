@@ -29,6 +29,12 @@ addresses, never semantic identity. Exact SHA-256 identifies immutable blobs glo
 identity with different plan bytes. Download URLs, local paths, connection identity, and
 process-local catalog-generation handles do not enter resolved fingerprints.
 
+The catalog is above the renderer-owned primitive/bootstrap emergency substrate. Local/default
+content is optional ordinary verified content and may be absent without changing Game semantics;
+primitive fallback is not a package and never satisfies a missing required activation or
+application proof. Server-authorized Add/Replace content and future user presentation-leaf
+overrides resolve above local/default content while preserving independent model/material fallback.
+
 Payload validation produces a `VerifiedContentPackage` capability. Base-catalog construction and
 activation resolution accept that capability, not a bare manifest, so parsed metadata or
 partially/hash-failed bytes cannot become publishable catalog content.

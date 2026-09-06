@@ -1328,6 +1328,13 @@ optional; supplying a pack makes binding part of private generation construction
 so failure occurs before generation publication. Hot reads retain compact numeric
 material IDs and never callback into Composition.
 
+Those numeric material IDs are authoritative World render/material identities, not Godot resource
+paths. Their visual material definitions may resolve through primitive, local/default, server, and
+allowed user presentation layers without changing terrain topology, height, presence, shells,
+collision, or support. The canonical WorldPack/prepared view remains the shared structural artifact
+for authority and client projection; Asset Streaming transports World-owned artifacts rather than
+inventing a parallel client map.
+
 The current concrete game is single-space: dynamic membership uses
 `GameWorldState.DefaultSpace`, and a bound base pack must carry that same
 `SpatialSpaceId`. A correctly fingerprinted pack from another space rejects

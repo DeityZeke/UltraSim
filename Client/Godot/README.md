@@ -66,8 +66,12 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj
 Then connect to `127.0.0.1:7777`. On first use, compare the client candidate fingerprint with the
 gateway's printed fingerprint before choosing **Trust and Continue**. Reconnect uses the saved pin;
 a changed deployment key is blocked and requires an explicit forget followed by a fresh trust
-ceremony. Successful F0.3a connection stops at authenticated realm/session status—the remote guest,
-actor, world, Chat, and Inventory vertical is F0.3b.
+ceremony. Successful native Direct Connect currently stops at authenticated realm/session status.
+F0.3b accepts the engine-neutral remote guest, controlled actor, public world, Chat, and
+Inventory/UI semantic vertical against verified preinstalled structural bytes. The contentless
+Online product does not embed those bytes or pretend cache presence is application proof, so native
+remote world entry waits for A0.2+ acquisition/installation and the later Godot presentation
+binding.
 
 Runtime-batched frozen/public `MultiMeshInstance3D` groups publish an exact combined transformed
 custom AABB. Godot otherwise leaves these programmatic MultiMeshes with a zero native bound and may

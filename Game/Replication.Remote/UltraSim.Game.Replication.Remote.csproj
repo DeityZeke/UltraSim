@@ -20,6 +20,7 @@
     <Compile Include="../Replication/RemoteDirtyChunkSpatialFanoutServer.cs" Link="RemoteDirtyChunkSpatialFanoutServer.cs" />
     <Compile Include="../Replication/RemoteDirtyEntitySpatialFanoutServer.cs" Link="RemoteDirtyEntitySpatialFanoutServer.cs" />
     <Compile Include="../Replication/RemoteGameApplicationSession.cs" Link="RemoteGameApplicationSession.cs" />
+    <Compile Include="../Replication/RemoteGuestPlayableApplication.cs" Link="RemoteGuestPlayableApplication.cs" />
     <Compile Include="../Replication/RemoteWorldStateCompactionScheduler.cs" Link="RemoteWorldStateCompactionScheduler.cs" />
     <Compile Include="../Replication/RemoteWorldStateServer.cs" Link="RemoteWorldStateServer.cs" />
   </ItemGroup>
@@ -34,6 +35,7 @@
     <ProjectReference Include="../Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../Protocol/UltraSim.Game.Protocol.csproj" />
     <ProjectReference Include="../Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../UI/UltraSim.Game.UI.csproj" />
     <ProjectReference Include="../World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
   </ItemGroup>

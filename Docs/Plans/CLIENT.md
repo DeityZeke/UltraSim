@@ -2,8 +2,9 @@
 
 **Status:** frozen architectural direction with executable composition, the permanent Network-free
 local path, persistent shell/settings/focus, content A0.0/A0.1, the physical Concept Demo world,
-and F0.3a Online Direct Connect trust/session lifecycle accepted. F0.3b remote guest/controlled
-actor parity is next; content activation and later acquisition remain separately gated.
+F0.3a Online Direct Connect trust/session lifecycle, and the F0.3b remote guest/controlled-actor
+semantic vertical accepted. A0.2 persistent content installation/cache is next; remote content
+acquisition and final native actor presentation remain separately gated.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -256,7 +257,8 @@ CONTENT AUTHORITY AND CONTENT BYTE ORIGIN ARE SEPARATE.
 
 THE GAME SERVER AUTHORIZES EXACT CONTENT IDENTITY; LOCAL FILES, SERVER STATIC HOSTING, OR EXTERNAL HTTPS/CDN MAY SUPPLY THE VERIFIED BYTES.
 
-A CONTENTLESS CLIENT RETAINS A SMALL BUILT-IN BOOTSTRAP/FALLBACK PRESENTATION SET.
+A CONTENTLESS CLIENT RETAINS A TINY RENDERER-OWNED PRIMITIVE/BOOTSTRAP SUBSTRATE BELOW THE CONTENT
+SYSTEM; IT NEED NOT BUNDLE AN OPTIONAL LOCAL/DEFAULT PRESENTATION PACK.
 
 SINGLE PLAYER MAY USE AN EMBEDDED AUTHORITATIVE SERVER WITHOUT USING NETWORK TRANSPORT.
 
@@ -1224,6 +1226,12 @@ missing animation
 
 Fallback never changes authoritative collision/Game truth.
 
+This primitive/bootstrap substrate sits below the content system. It is not the built-in/default
+content catalog and does not participate in package activation. Local/default presentation is an
+optional ordinary verified content layer; server-authorized content may Add/Replace it, and permitted
+user resource packs may remap presentation leaves afterward. Failure walks back down that chain to
+the primitive substrate without manufacturing content authorization or application proof.
+
 ## D0.4 local fallback canary — CLOSED
 
 The permanent Godot renderer now consumes an explicit presentation-only mesh resolution result:
@@ -1675,10 +1683,10 @@ the old record, return to the main menu, then begin a fresh trust ceremony. Malf
 fail closed to an empty registry. Disconnect drains Hosted transport; candidate, realm, and session
 lineage do not survive teardown.
 
-`Server/DirectConnect` is the external F0.3a identity gateway. It persists an independent P-256
-deployment key and 128-bit realm, and attaches only the session-identity application. No participant,
-guest, actor, world, Chat, Inventory, or UI authority exists yet. Online continues to exclude local
-Game/server authority.
+At F0.3a, `Server/DirectConnect` was the external identity-only gateway. It persists an independent
+P-256 deployment key and 128-bit realm. F0.3b now attaches the separately owned remote playable
+application after that accepted trust/session boundary; the F0.3a trust semantics remain unchanged.
+Online continues to exclude local Game/server authority.
 
 Implement:
 
@@ -1705,6 +1713,31 @@ Network trust boundary and realm-scoped client state.
 ---
 
 ## F0.3b — Remote controlled actor and semantic parity
+
+**Status: CLOSED for the engine-neutral authenticated semantic vertical.** Protocol v16 adds a
+bounded guest request/result/application-proof exchange, retained `GamePlayerCommand` Event ingress,
+and complete latest owner state. The guest request contains only application-session epoch, attempt,
+body choice, and bounded display name. Game derives participant, canonical name, actor, control
+session, position, public identity, range, recipients, and authority.
+
+`RemoteGuestPlayableApplication` is the external Concept Demo composition on the existing Hosted
+connection-owner thread. The current Direct Connect product admits one external participant; it does
+not manufacture one isolated runtime per member of a claimed multiplayer world. Commands are exact
+next-sequence, application/control-lineage fenced, resolve optional interaction nominations through
+Game's public-entity table, and execute through the same `GameWorldActions`/Physics path as Local
+Play. UI capture occurs after the authoritative callback, avoiding nested Game-generation access.
+
+`RemotePlayableSession` composes the client owner-state, `RemoteChunkWorldStateClient`,
+`RemoteChatClient`, and `RemoteUiClientBridge` into the existing bounded Client Core destinations.
+The F0.3b external test binds the exact deterministic Concept Demo WorldPack as verified/preinstalled
+structural input, then proves movement, public player/door/chest state, spatial and private-command
+Chat, owner-private Inventory UI, duplicate command fencing, future-sequence rejection, and fresh
+reconnect lineage over real localhost UDP.
+
+This checkpoint does **not** acquire World/content bytes. A contentless Online product cannot claim
+native world realization until A0.2+ supplies and verifies the required structural/content artifact.
+Supplying a semantic cache to `RemotePlayableSession` is not content authorization or application
+proof. F0.4 remains responsible for generalized remote actor/nameplate/overhead presentation.
 
 Implement:
 
@@ -2158,7 +2191,9 @@ F0.2  Single Player + Cabin + X/Y human scale/camera, NO Network     CLOSED
         |
 F0.3a Direct Connect identity trust/session lifecycle                    CLOSED
         |
-F0.3b real remote guest/GamePlayerCommand + semantic parity              NEXT
+F0.3b real remote guest/GamePlayerCommand + semantic parity              CLOSED
+        |
+A0.2  persistent verified CAS/install substrate                         NEXT
         |
 F0.3c server client-profile consent/settings
         |

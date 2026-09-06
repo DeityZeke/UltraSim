@@ -1,8 +1,13 @@
 # Direct Connect identity gateway
 
-This F0.3a executable hosts the accepted external UDP transport and the minimal
-authenticated application-session identity message. It deliberately does not yet
-create a participant, guest, actor, world, Chat, Inventory, or UI session.
+This executable hosts the accepted F0.3a deployment-trust/session transport and the
+F0.3b external Concept Demo application. After authenticated trust, one connection may
+submit a bounded guest identity, receive a server-issued control session, and use the
+real Game/Physics, public-world, Chat, Inventory, and informational-UI semantic paths.
+
+F0.3b deliberately admits one external participant. The Game runtime stays on the
+existing Hosted connection-owner thread; shared multi-participant world ownership is a
+later checkpoint rather than one runtime being silently constructed per player.
 
 Run the development endpoint with:
 

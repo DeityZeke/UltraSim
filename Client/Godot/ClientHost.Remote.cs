@@ -55,7 +55,8 @@ public partial class ClientHost
                     ClientDirectConnectSnapshot snapshot = _remoteSession.GetSnapshot();
                     CommitSession(
                         $"Connected to realm {snapshot.Realm} at {snapshot.Endpoint}. " +
-                        "Guest entry and world admission follow in F0.3b.");
+                        "Remote guest/control semantics are available; this contentless client " +
+                        "requires A0.2 structural/content acquisition before native world entry.");
                     GD.Print(
                         $"F0.3a DIRECT CONNECT ESTABLISHED endpoint={snapshot.Endpoint} " +
                         $"realm={snapshot.Realm} session={snapshot.ApplicationSessionEpoch} " +

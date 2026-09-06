@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using UltraSim.Game.Application;
 using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
 using UltraSim.Network;
 
 DirectConnectOptions options;
@@ -24,7 +25,7 @@ if (options.EphemeralSmoke)
         new ApplicationRealmId(0xF03A, 0x534D4F4B45));
     smokeHost.Pump();
     Console.WriteLine(
-        $"F0.3a DIRECT CONNECT SERVER SMOKE PASS endpoint={smokeHost.LocalEndPoint} " +
+        $"F0.3b DIRECT CONNECT PLAYABLE SERVER SMOKE PASS endpoint={smokeHost.LocalEndPoint} " +
         $"protocol={UltraSimGameProtocol.Manifest.Version}/" +
         $"{UltraSimGameProtocol.Manifest.Fingerprint:x16}");
     return 0;
@@ -35,11 +36,11 @@ using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDire
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
 using HostedUdpAdmissionHost host = CreateHost(options.BindEndPoint, identity, realm);
 string fingerprint = Fingerprint(identity.PublicKey);
-Console.WriteLine("UltraSim Direct Connect identity gateway ready.");
+Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
 Console.WriteLine($"Application realm: {realm}");
 Console.WriteLine($"Deployment key SHA-256: {Group(fingerprint)}");
-Console.WriteLine("F0.3a establishes trust/session identity only; guest/world entry follows in F0.3b.");
+Console.WriteLine("This F0.3b endpoint admits one authenticated remote guest into the Concept Demo.");
 Console.WriteLine("Press Ctrl+C to stop.");
 
 using var stopping = new CancellationTokenSource();
@@ -61,7 +62,17 @@ static HostedUdpAdmissionHost CreateHost(
     ApplicationRealmId realm)
 {
     UdpProtocolLimits udp = UdpProtocolLimits.Default;
-    SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default;
+    SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default with
+    {
+        // F0.3b proves one external remote participant against one owner-thread Game runtime.
+        // A shared multi-participant authority is a separate, explicit later checkpoint.
+        MaximumSessions = 1,
+    };
+    HostedUdpOwnerShardingLimits owners = HostedUdpOwnerShardingLimits.Default with
+    {
+        MaximumOwners = 1,
+        MaximumConnections = 1,
+    };
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,
@@ -69,8 +80,8 @@ static HostedUdpAdmissionHost CreateHost(
         udp,
         shared,
         HostedUdpAdmissionLimits.Default,
-        HostedUdpOwnerShardingLimits.Default,
-        new RemoteApplicationSessionIdentityFactory(realm),
+        owners,
+        new RemoteGuestPlayableApplicationFactory(realm),
         UltraSimGameProtocol.Manifest);
 }
 

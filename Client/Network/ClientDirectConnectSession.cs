@@ -226,7 +226,8 @@ public sealed class ClientDirectConnectSession : IDisposable
             return;
         }
         if (_state is not (ClientDirectConnectState.Connecting or
-            ClientDirectConnectState.AwaitingRealm or ClientDirectConnectState.Draining))
+            ClientDirectConnectState.AwaitingRealm or ClientDirectConnectState.Established or
+            ClientDirectConnectState.Draining))
             return;
         _transport!.Pump();
         if (_transport.State == HostedUdpClientState.Failed)
@@ -241,6 +242,9 @@ public sealed class ClientDirectConnectSession : IDisposable
                 CloseTransport();
             return;
         }
+        // F0.3a stopped at establishment. F0.3b keeps the accepted transport pumping while
+        // higher Game-owned adapters consume application messages from the exposed peer.
+        if (_state == ClientDirectConnectState.Established) return;
         if (_transport.State != HostedUdpClientState.Established) return;
         if (_state == ClientDirectConnectState.Connecting)
             _state = ClientDirectConnectState.AwaitingRealm;

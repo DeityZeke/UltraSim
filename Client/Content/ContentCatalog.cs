@@ -44,7 +44,7 @@ public sealed class ResolvedContentEntry
     public ReadOnlyCollection<ContentHash> ReferencedFiles => _referencedFiles;
 }
 
-/// <summary>Deterministic built-in fallback catalog required by an activation plan.</summary>
+/// <summary>Deterministic verified local/default catalog required by an activation plan.</summary>
 public sealed class ContentBaseCatalog
 {
     private readonly ReadOnlyCollection<ResolvedContentEntry> _entries;

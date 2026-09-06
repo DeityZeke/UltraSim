@@ -389,7 +389,7 @@ public readonly record struct RemoteDirtyEntityRecord(
     public const int EncodedSize = RemoteWorldStateRecord.EncodedSize;
 }
 
-/// <summary>Accepted game application protocol manifest and bounded codecs through N1.3.</summary>
+/// <summary>Accepted bounded Game application protocol manifest, including F0.3b remote play.</summary>
 public static partial class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
@@ -408,7 +408,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 15,
+        version: 16,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -447,6 +447,13 @@ public static partial class UltraSimGameProtocol
                 { MaximumEncodedBytes = MaximumChatMessageBytes },
             RemoteChatAppliedMessageCodec.Descriptor,
             RemoteApplicationSessionIdentityMessageCodec.Descriptor,
+            RemoteGuestAdmissionRequestHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumGuestAdmissionMessageBytes },
+            RemoteGuestAdmissionResultHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumGuestAdmissionMessageBytes },
+            RemoteGuestAdmissionAppliedMessageCodec.Descriptor,
+            RemotePlayableCommandMessageCodec.Descriptor,
+            RemotePlayableOwnerStateMessageCodec.Descriptor,
             RemoteChunkSnapshotHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = RemoteChunkSnapshotHeaderCodec.EncodedSize +
                     MaximumChunkPublicationRecords * RemoteChunkPublicRecord.EncodedSize },

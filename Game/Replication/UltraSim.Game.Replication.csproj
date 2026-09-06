@@ -19,6 +19,7 @@
     <Compile Remove="RemoteDirtyChunkSpatialFanoutServer.cs" />
     <Compile Remove="RemoteDirtyEntitySpatialFanoutServer.cs" />
     <Compile Remove="RemoteGameApplicationSession.cs" />
+    <Compile Remove="RemoteGuestPlayableApplication.cs" />
     <Compile Remove="RemoteWorldStateCompactionScheduler.cs" />
     <Compile Remove="RemoteWorldStateServer.cs" />
   </ItemGroup>

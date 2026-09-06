@@ -722,6 +722,18 @@ classes. No CAS lookup, download failure, HTTP source, package activation, or re
 claimed by this local fixture; A0.2+ must feed the same presentation outcomes from real content
 availability later.
 
+The final multiplayer demo must reuse this ordinary resolution path rather than preserve a
+Fallback-Lab-only switch. It should deliberately exercise more than one real origin: the
+renderer-owned primitive substrate, an optional verified local/default pack, server-authorized
+Add/Replace content, and an allowed user presentation-leaf override. Model and material resolution
+remain independent, and an absent presentation leaf never erases the authoritative body, object,
+collision, support, or interaction identity.
+
+The intended X/Y canary is that Game/public body semantics exist for both bodies even when only one
+presentation is installed locally. Missing local presentation degrades to the humanoid primitive;
+later server Add/Replace and optional user overrides change presentation through catalog generations,
+not through a demo-specific Godot object.
+
 ---
 
 # 10. Human actor presentation and minimal animations
@@ -1415,14 +1427,16 @@ then earn/integrate Concept Demo Round 1 consumers:
 
 then prioritize the first meaningful remote vertical:
     F0.3a Direct Connect + deployment trust                         CLOSED
-    F0.3b remote controlled actor + guest admission                 NEXT
+    F0.3b remote controlled actor + guest admission                 CLOSED
+
+    A0.2 persistent verified content installation/cache             NEXT
 
 then continue Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-A0.2+ remote cache/source/content activation
+A0.2+ remote cache/source/content activation                          NEXT
 
 then external Concept Demo multiplayer/stress run
 ```
@@ -1499,5 +1513,10 @@ Round 1 is ready to hand to external concept-demo testers when:
 14. server diagnostics record bounded broad operational evidence and marker timelines;
 15. the permanent functional multiplayer gate is proven at a modest controlled population before larger stress runs;
 16. external larger-population tests are labeled and retained as stress/failure-characterization evidence rather than production capacity promises.
+
+The final remote proof also routes informational signs, container/player Inventory surfaces, and
+appropriate Server Monitor panels through the typed UI-definition/cache/application-proof path.
+D0.3/D0.4's compiled informational definition is the accepted local canary, not a claim that remote
+UI-definition acquisition is already complete.
 
 Round 2 combat remains separately authorized after this baseline is useful and stable.

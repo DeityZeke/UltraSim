@@ -487,6 +487,7 @@ static void VerifyArchitecture(string root)
         [
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
         ],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
@@ -617,6 +618,7 @@ static void VerifyArchitecture(string root)
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
             "Game/Replication/UltraSim.Game.Replication.csproj",
+            "Game/UI/UltraSim.Game.UI.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Kernels/UI/UltraSim.UI.csproj",

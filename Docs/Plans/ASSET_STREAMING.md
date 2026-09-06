@@ -44,7 +44,7 @@ Recovered ideas include:
 - stable logical content ids;
 - file entries separate from semantic definitions;
 - partial packs rather than giant complete replacements;
-- built-in fallback content;
+- primitive emergency fallback plus optional local/default content;
 - layered logical-id resolution;
 - resource-pack remaps;
 - server-scoped content/cache namespaces;
@@ -101,7 +101,9 @@ CONTENT FILES AND CONTENT DEFINITIONS ARE DIFFERENT THINGS.
 
 A PACKAGE MAY BE PARTIAL.
 
-BUILT-IN CONTENT IS THE ALWAYS-AVAILABLE FALLBACK LAYER, NOT THE ONLY CONTENT SOURCE.
+PRIMITIVE EMERGENCY PRESENTATION IS BELOW THE CONTENT SYSTEM AND REMAINS AVAILABLE WITHOUT A CONTENT PACK.
+
+LOCAL/DEFAULT CONTENT IS OPTIONAL ORDINARY VERIFIED CONTENT, NOT AUTHORITY OR PRIVILEGED PRESENTATION CODE.
 
 NORMAL SERVER CONTENT IS PASSIVE, ALLOWLISTED DATA/ASSETS.
 
@@ -181,7 +183,8 @@ TERRAIN/STATIC CHUNK REVISION IS NOT AN ITEM/MOBILE/TEXTURE LOGICAL CONTENT ID.
 ASSET STREAMING CARRIES WORLD-OWNED CANONICAL ARTIFACTS; IT DOES NOT INVENT WORLD ARTIFACT OR
 TRANSITION SEMANTICS.
 
-THE CONTENTLESS ONLINE CLIENT REMAINS BOOTABLE THROUGH BUILT-IN BOOTSTRAP UI/FALLBACK ASSETS.
+THE CONTENTLESS ONLINE CLIENT REMAINS BOOTABLE THROUGH THE PRIMITIVE/BOOTSTRAP SUBSTRATE EVEN WHEN
+NO OPTIONAL LOCAL/DEFAULT PRESENTATION PACK OR PLAYABLE WORLD IS BUNDLED.
 ```
 
 ---
@@ -190,9 +193,10 @@ THE CONTENTLESS ONLINE CLIENT REMAINS BOOTABLE THROUGH BUILT-IN BOOTSTRAP UI/FAL
 
 ## 3.1 Source / trust classes
 
-### Built-in / bootstrap defaults
+### Primitive / bootstrap emergency substrate
 
-Always available in a client distribution that chooses to ship them.
+Always available to the renderer/client and deliberately outside normal package/catalog activation.
+It is the floor beneath the content system, not a privileged content package.
 
 Examples:
 
@@ -200,11 +204,19 @@ Examples:
 - fallback font;
 - missing-content checker texture;
 - primitive box/capsule fallback;
-- standard compiled UI definitions;
-- X Bot / Y Bot human calibration bodies in builds that include the normal presentation pack;
-- Cabin Test World content in Single Player/Complete builds that explicitly include it.
+- only essential bootstrap UI/font resources required to start and diagnose the client.
 
-Built-in content is lowest-level fallback content. A Contentless Online distribution may intentionally ship only the bootstrap/fallback subset.
+This substrate must stay extremely small. A distribution containing only it can boot and represent
+admitted semantics as blockout/debug presentation, but primitive substitution never satisfies a
+missing required content activation or its application proof.
+
+### Local / default verified content
+
+Optional preinstalled presentation content resolved through the ordinary verified content identity
+and catalog machinery. It may include X/Y bodies, normal world models/materials, standard compiled
+UI definitions, or the Cabin Test World content in products that choose to bundle them. An identical
+local and remotely acquired package converges on the same semantic identity; local origin grants no
+Game authority or special resolver privilege.
 
 ### Server-authorized passive content
 
@@ -277,7 +289,8 @@ For the first V3 proof, use the simpler observable triad.
 
 ### Default
 
-No higher permitted layer owns the logical id. Resolve the built-in/lower-layer definition.
+No higher permitted content layer owns the logical id. Resolve the local/default definition when
+present, otherwise degrade to the renderer-owned primitive substrate where policy permits.
 
 ```text
 ultrasim:mobile/human_female
@@ -291,7 +304,7 @@ ultrasim:mobile/human_female
 A higher permitted layer defines an already-known logical id and replaces its presentation definition/resource resolution.
 
 ```text
-built-in:
+local/default:
     ultrasim:test/cabin_wall_material -> default material
 
 server layer:
@@ -741,7 +754,7 @@ Important distinctions:
 - blobs unreachable from pinned realm activations/live resource handles are quota-managed;
 - user-installed resource packs are not ordinary server-cache eviction candidates;
 - executable extensions, if implemented, are explicit installations and are not silently quota-evicted like transient server asset cache;
-- built-in content is installation content, not server cache.
+- local/preinstalled content is installation content, not server cache.
 
 ---
 
@@ -1316,6 +1329,11 @@ exact artifact hash. Asset Streaming must not define that contract on World's be
 The bytes may use the same cache/source/download substrate, but structural publication/application
 remains World/Client Core semantics.
 
+The canonical World-owned artifact/prepared view is shared semantic identity, not a second
+client-only visual map. A server authority and a client projection may consume the same verified
+artifact bytes in Single Player, but the authority binds the artifact; mutable client cache state
+does not become structural truth.
+
 ---
 
 # 24. Terrain/static hot patching
@@ -1344,11 +1362,25 @@ Do not treat camera visibility as structural content lifetime.
 
 Preserve the current T0 distinction between immutable base content, mutable overlay, client semantic residency, and Godot render slots.
 
+Structural activation is authority-first:
+
+```text
+candidate structural revision
+    -> privately validate/prepare on the authority
+    -> commit authoritative revision/hash and prepared World view
+    -> interested clients acquire/verify/apply that exact committed revision
+```
+
+The authority may distribute immutable candidate bytes before commit so clients can prefetch them,
+but no client may make the revision current before the authoritative server does. Structural
+revision/hash identity remains separate from dynamic-public publication lineage, and cache presence
+never constitutes application proof or authority.
+
 ---
 
 # 25. Fallback and diagnostic presentation
 
-Built-in fallback should include at least:
+The renderer-owned primitive/bootstrap substrate should include at least:
 
 ```text
 missing model/object
@@ -1427,7 +1459,7 @@ Document/test:
 - exact required lower/base catalog fingerprint so `Default` cannot depend on an unspecified client
   installation/version;
 - Replace and Add/Append;
-- built-in/default fallback;
+- primitive fallback plus optional local/default content;
 - source/trust identity;
 - required/optional package requirement;
 - required activation/application-proof state values;

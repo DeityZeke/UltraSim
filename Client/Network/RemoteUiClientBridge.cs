@@ -1,4 +1,5 @@
 using UltraSim.Client.Core;
+using UltraSim.Game.Admission;
 using UltraSim.Game.Protocol;
 using UltraSim.Network;
 using UltraSim.UI;
@@ -84,6 +85,24 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
             throw new InvalidOperationException(
                 "The remote client bridge already has an additional protocol handler.");
         _additionalHandler = handler;
+    }
+
+    /// <summary>
+    /// Activates this semantic bridge from an already authenticated guest/application admission.
+    /// This bypasses only the older provider-credential message pair; it does not manufacture
+    /// participant or application-session identity.
+    /// </summary>
+    public bool TryActivateAdmittedSession(ParticipantId participant, ulong applicationSessionEpoch)
+    {
+        EnsureOperational();
+        if (_state != RemoteClientApplicationState.AwaitingAuthentication ||
+            _pendingAuthenticationAttempt != 0 || !participant.IsValid ||
+            applicationSessionEpoch == 0)
+            return false;
+        _participantId = participant.Value;
+        _applicationSessionEpoch = applicationSessionEpoch;
+        _state = RemoteClientApplicationState.Active;
+        return true;
     }
 
     public bool TryBeginAuthentication(ulong attemptId, string provider, string credential)

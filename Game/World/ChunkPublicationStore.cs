@@ -385,6 +385,27 @@ public sealed class ChunkPublicationStore
         return false;
     }
 
+    /// <summary>
+    /// Resolves one current Game-owned public presentation identity back to its live ECS entity.
+    /// This is an authority-side validation seam for untrusted public-target nominations; the
+    /// public identity remains non-durable and grants no interaction authority by itself.
+    /// </summary>
+    public bool TryResolvePublicEntity(WorldPublicEntityId id, out Entity entity)
+    {
+        EnsureOwner();
+        if (id.IsValid && id.Index < _slots.Length)
+        {
+            ref readonly PublicSlot slot = ref _slots[id.Index];
+            if (slot.Active && slot.Generation == id.Generation)
+            {
+                entity = slot.Entity;
+                return entity.IsValid;
+            }
+        }
+        entity = Entity.Null;
+        return false;
+    }
+
     public bool TryCommit(
         ReadOnlySpan<WorldPublicChange> changes,
         out ChunkPublicationCommitError error)

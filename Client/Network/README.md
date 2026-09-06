@@ -55,8 +55,17 @@ epoch. That authenticated pair commits key/realm/endpoint through Client Core. K
 skips consent, mismatch blocks without overwriting the pin, and teardown clears candidate/session
 lineage. `ClientDirectConnectEndpoint` remains IPv4-only while Hosted H0 is IPv4-only.
 
-F0.3a creates no participant or actor and consumes no world/UI/Chat state. F0.3b attaches guest
-admission and the existing semantic consumers to the established peer.
+F0.3a creates no participant or actor and consumes no world/UI/Chat state. F0.3b now attaches
+`RemotePlayableSession` to the established peer. Its bounded guest exchange yields server-issued
+participant/control/public identity; retained exact-sequence `GamePlayerCommand` events then use the
+same Game authority path as local play. Complete owner state is latest-state, while public chunk,
+Chat occurrence, and generic UI adapters preserve their existing independent application-proof
+contracts.
+
+The remote playable composition receives an already verified/preinstalled `ClientWorldSemanticCache`.
+It does not acquire structural bytes, silently treat cache presence as required-content proof, or
+create a remote-only presentation model. The contentless Online native world therefore remains an
+A0.2+ consumer even though F0.3b's external semantic path is accepted.
 
 ## Dynamic public chunk state
 
