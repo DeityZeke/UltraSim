@@ -218,7 +218,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
         new(
             "Online",
-            ["UltraSim.Client.Application.Godot", "UltraSim.Client.Network",
+            ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Network",
                 "UltraSim.Game.Protocol", "UltraSim.Network"],
             ["UltraSim.Client.BuiltInTestWorlds", "UltraSim.Client.Local",
                 "UltraSim.Game.Composition", "UltraSim.Game.Persistence",
@@ -506,6 +506,7 @@ static void VerifyArchitecture(string root)
             ["Client/Content/UltraSim.Client.Content.csproj"],
         ["Client/Network/UltraSim.Client.Network.csproj"] =
         [
+            "Client/Content/UltraSim.Client.Content.csproj",
             "Client/Core/UltraSim.Client.Core.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",

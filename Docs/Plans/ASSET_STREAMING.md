@@ -1,10 +1,11 @@
 # UltraSim Asset Streaming / Content Layering Plan
 
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
-local A0.1 Cabin Default/Replace/Add oracle, and A0.2 persistent CAS/install/reopen accepted,
+local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, and A0.3
+authenticated requirement/acquisition/application proof accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.2 are closed; A0.3 authenticated
-requirements and source-independent acquisition is next. Runtime mesh/audio
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.3 are closed; A0.4 remote semantic/source parity is
+next. Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
@@ -85,8 +86,9 @@ The current repository now has the first source-free content pipeline:
 - Client Content owns canonical passive manifests, exact payload verification, deterministic
   activation/catalog resolution, and the A0.2 persistent CAS described below;
 - the playable Cabin and X/Y calibration assets are currently build-time/fixture composition;
-- immutable resolved content catalogs and `ContentSetApplied` proof vocabulary exist, but remote
-  requirement advertisement, source acquisition, and lazy downloaded-resource realization do not.
+- authenticated remote content requirements, source-neutral package acquisition, persistent cache
+  reuse, immutable catalog publication, and session-fenced `ContentSetApplied` now exist; concrete
+  HTTP source adapters, source parity, and lazy downloaded-resource realization remain later gates.
 
 A0 extracts/builds those missing content contracts. It does not reinterpret current persistence,
 UI cache keys, or World chunk hashes as if they already formed a streaming package system.
@@ -1570,7 +1572,33 @@ Online entry.
 
 ## A0.3 — authenticated requirement + source-independent required-package join
 
-Add the Remote Play/Game/content-owned package requirement advertisement.
+**Status: CLOSED.** Game protocol v17 now carries one bounded authenticated content requirement on
+reliable `Event` and its exact semantic application result on `Control`. The wire authorization
+contains application-session lineage, verified realm, activation/base/plan hashes, ordered package
+identity/manifest/requirement policy, and ordered approved source descriptors. Physical source is
+absent from plan/catalog identity. The authority retains the requirement and blocks guest/Game
+admission until an `Applied` result matches the same session, realm, activation, plan, and expected
+resolved fingerprint. Rejected, stale, forged, and default proofs do not advance knowledge;
+duplicate exact proof is idempotent.
+
+`Client.Content` now owns a source-neutral acquisition transaction. It first attempts exact A0.2
+realm-package reuse. A missing manifest is fetched through an injected approved-source adapter,
+then candidate package/manifest identity and all payloads are validated and installed through A0.2
+before the exact catalog publishes. Cache corruption does not silently trigger repair in this
+checkpoint. The first supported source is selected once; mirror retry remains A0.5.
+
+The accepted authenticated Hosted/Online fixture uses the frozen Cabin Replace package. A cold
+cache fetched one package/one file/70 bytes and reproduced
+`f1f223d3c1ccf94560b8fbbb4d50bf036a98b043cb117ced63257ac4ecdd7f44` exactly. A new application
+session reopened the same activation with one package reused, zero source fetches/bytes, and a fresh
+session proof. Source failure and a source returning the wrong package leave no catalog admission;
+prior-session proof cannot unlock a reconnect.
+
+This checkpoint establishes the source-neutral source contract with a deterministic out-of-band
+fixture adapter. Concrete server-hosted static HTTP and external HTTPS parity remain A0.4; realtime
+Network `Bulk` does not carry package bytes. Native contentless Online world entry remains A0.8.
+
+Original flow:
 
 First prove one required Replace package with source-independent fetching.
 

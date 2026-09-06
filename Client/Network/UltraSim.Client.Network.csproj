@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="../Content/UltraSim.Client.Content.csproj" />
     <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../../Game/Protocol/UltraSim.Game.Protocol.csproj" />

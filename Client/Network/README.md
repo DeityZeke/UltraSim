@@ -62,10 +62,17 @@ same Game authority path as local play. Complete owner state is latest-state, wh
 Chat occurrence, and generic UI adapters preserve their existing independent application-proof
 contracts.
 
-The remote playable composition receives an already verified/preinstalled `ClientWorldSemanticCache`.
-It does not acquire structural bytes, silently treat cache presence as required-content proof, or
-create a remote-only presentation model. The contentless Online native world therefore remains an
-A0.2+ consumer even though F0.3b's external semantic path is accepted.
+The remote playable composition still receives an already verified/preinstalled
+`ClientWorldSemanticCache`; A0.7 owns structural WorldPack acquisition. A0.3 adds a separate optional
+`RemoteContentClient` before guest admission. It validates the Game-protocol requirement against the
+authenticated application realm, drives exact A0.2 reuse or source-neutral acquisition, retains the
+catalog lease, and emits `ContentSetApplied` only after catalog publication. `RemotePlayableSession`
+will not submit guest admission before that local application succeeds, while the authority also
+independently blocks hostile bypass until the exact session proof arrives. Cache presence alone is
+not proof, and reconnect always requires fresh application-session proof.
+
+The contentless Online native world remains a later A0.7/A0.8 consumer even though F0.3b's external
+semantic path and A0.3's headless authenticated content gate are accepted.
 
 ## Dynamic public chunk state
 

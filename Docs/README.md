@@ -50,7 +50,7 @@ acceptance narratives remain available through git history.
 - [Client Content](../Client/Content/README.md) — A0.0 passive package identities,
   exact payload validation, realm-scoped activation plans, deterministic Add/Replace
   resolution, immutable catalogs, application-proof vocabulary, and the A0.2 persistent
-  hash-addressed install/reopen/pinning/eviction substrate.
+  hash-addressed install/reopen/pinning/eviction substrate plus A0.3 source-neutral acquisition.
 - [Built-in Test Worlds](../Client/BuiltInTestWorlds/README.md) — A0.1 local Cabin
   Default/Replace/Add package oracle, frozen catalog fingerprints, and exact ownership deltas.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
@@ -58,7 +58,8 @@ acceptance narratives remain available through git history.
   semantic-debt, and application-proof handoff.
 - [Client Network](../Client/Network/README.md) — F0.3a Direct Connect deployment trust/session
   establishment plus the F0.3b guest/control composition over public chunk state, Chat Events,
-  owner state, and owner-private UI/Inventory.
+  owner state, and owner-private UI/Inventory, with A0.3 authenticated content requirement and
+  exact application-proof gating before guest admission.
 - [Direct Connect Concept Demo server](../Server/DirectConnect/README.md) — external Hosted endpoint
   with durable deployment key/realm identity and one bounded F0.3b remote playable application.
 - [Godot client application](../Client/Godot/README.md) — the single maintained native adapter,

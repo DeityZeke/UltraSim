@@ -4,7 +4,8 @@
 local path, persistent shell/settings/focus, content A0.0/A0.1, the physical Concept Demo world,
 F0.3a Online Direct Connect trust/session lifecycle, and the F0.3b remote guest/controlled-actor
 semantic vertical accepted. A0.2 persistent content installation/cache is accepted; A0.3 remote
-content authorization/acquisition and final native actor presentation remain separately gated.
+content authorization/acquisition/application proof is accepted; source parity, structural
+streaming, and final native actor presentation remain separately gated.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2195,7 +2196,7 @@ F0.3b real remote guest/GamePlayerCommand + semantic parity              CLOSED
         |
 A0.2  persistent verified CAS/install substrate                         CLOSED
         |
-A0.3  authenticated requirement + source-independent acquisition        NEXT
+A0.3  authenticated requirement + source-independent acquisition        CLOSED
         |
 F0.3c server client-profile consent/settings
         |

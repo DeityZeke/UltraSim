@@ -9,6 +9,12 @@ F0.3b deliberately admits one external participant. The Game runtime stays on th
 existing Hosted connection-owner thread; shared multi-participant world ownership is a
 later checkpoint rather than one runtime being silently constructed per player.
 
+A0.3 adds an optional immutable content authorization to the same application factory. When
+configured, it publishes the bounded requirement after authenticated realm/session identity and
+does not admit guest/Game semantics until an exact `ContentSetApplied` proof matches the session,
+realm, activation, plan, and expected resolved fingerprint. The development executable does not
+yet configure a concrete HTTP content endpoint; server-hosted/external source parity is A0.4.
+
 Run the development endpoint with:
 
 ```bash

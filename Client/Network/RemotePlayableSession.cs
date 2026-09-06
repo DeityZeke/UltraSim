@@ -1,4 +1,5 @@
 using UltraSim.Client.Core;
+using UltraSim.Client.Content;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
@@ -9,8 +10,10 @@ namespace UltraSim.Client.Network;
 
 public readonly record struct RemotePlayableSessionSnapshot(
     bool SemanticConsumersActive,
+    bool RequiredContentApplied,
     ulong MessagesProcessedBeforeAdmission,
     ulong RejectedPreAdmissionMessages,
+    RemoteContentClientSnapshot Content,
     RemotePlayableClientSnapshot Playable,
     RemoteChunkWorldStateClientSnapshot World,
     RemoteChatClientSnapshot Chat,
@@ -30,6 +33,7 @@ public sealed class RemotePlayableSession : IDisposable
     private readonly NetworkProtocolPeer _peer;
     private readonly RemoteGameProtocolComposition _protocol;
     private readonly RemoteUiClientBridge _ui;
+    private readonly RemoteContentClient? _content;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _semanticConsumersActive;
     private ulong _messagesBeforeAdmission;
@@ -43,7 +47,8 @@ public sealed class RemotePlayableSession : IDisposable
         IUiRenderer uiRenderer,
         ClientChatLimits chatLimits = default,
         UiClientLimits uiLimits = default,
-        int maximumPendingWorldProofs = 256)
+        int maximumPendingWorldProofs = 256,
+        RemoteRequiredContentBinding? requiredContent = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -55,6 +60,10 @@ public sealed class RemotePlayableSession : IDisposable
         if (uiLimits == default) uiLimits = UiClientLimits.Default;
 
         Playable = new RemotePlayableClient(peer, applicationSessionEpoch);
+        if (requiredContent is not null)
+            _content = new RemoteContentClient(
+                peer, applicationSessionEpoch, requiredContent.Realm,
+                requiredContent.Cache, requiredContent.BaseCatalog, requiredContent.Source);
         World = new RemoteChunkWorldStateClient(
             peer, worldCache, applicationSessionEpoch,
             worldCache.Limits.MaximumPublicRecordsPerChunk,
@@ -63,7 +72,8 @@ public sealed class RemotePlayableSession : IDisposable
         Chat = new RemoteChatClient(peer, applicationSessionEpoch, ChatState);
         UiClient = new UiClientRuntime(uiRenderer, uiLimits);
         _ui = new RemoteUiClientBridge(peer, UiClient);
-        _protocol = new RemoteGameProtocolComposition(4);
+        _protocol = new RemoteGameProtocolComposition(5);
+        if (_content is not null) _protocol.Add(_content);
         _protocol.Add(Playable);
         _protocol.Add(World);
         _protocol.Add(Chat);
@@ -75,10 +85,12 @@ public sealed class RemotePlayableSession : IDisposable
     public ClientChatState ChatState { get; }
     public RemoteChatClient Chat { get; }
     public UiClientRuntime UiClient { get; }
+    public RemoteContentClient? Content => _content;
 
     public bool TrySubmitGuest(in GameGuestAdmissionRequest request)
     {
         EnsureOperational();
+        if (_content is not null && !_content.Applied) return false;
         return Playable.TrySubmitGuest(in request);
     }
 
@@ -95,12 +107,17 @@ public sealed class RemotePlayableSession : IDisposable
                    out ReadOnlySpan<byte> payload))
         {
             bool claimed;
-            try { claimed = Playable.TryProcess(in message, payload); }
+            try
+            {
+                claimed = _content?.TryProcess(in message, payload) == true ||
+                    Playable.TryProcess(in message, payload);
+            }
             finally { _ = _peer.TryConsumeReceived(); }
             processed++;
             SaturatingIncrement(ref _messagesBeforeAdmission);
             if (!claimed) SaturatingIncrement(ref _rejectedBeforeAdmission);
         }
+        _ = _content?.TryProgress();
         _ = Playable.TryProgress();
         if (Playable.GetSnapshot().State == RemotePlayableClientState.Active)
         {
@@ -118,9 +135,10 @@ public sealed class RemotePlayableSession : IDisposable
     {
         EnsureOperational();
         return new RemotePlayableSessionSnapshot(
-            _semanticConsumersActive,
+            _semanticConsumersActive, _content is null || _content.Applied,
             _messagesBeforeAdmission,
             _rejectedBeforeAdmission,
+            _content?.GetSnapshot() ?? default,
             Playable.GetSnapshot(),
             World.GetSnapshot(),
             Chat.GetSnapshot(),
@@ -133,6 +151,7 @@ public sealed class RemotePlayableSession : IDisposable
         if (_disposed) return;
         _disposed = true;
         _ui.Dispose();
+        _content?.Dispose();
     }
 
     private static void SaturatingIncrement(ref ulong value)

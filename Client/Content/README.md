@@ -1,7 +1,8 @@
 # Client Content
 
-`UltraSim.Client.Content` is the engine-neutral A0.0/A0.2 contract, deterministic resolver, and
-persistent store for passive client content. It contains no Godot or Network dependency.
+`UltraSim.Client.Content` is the engine-neutral A0.0-A0.3 contract, deterministic resolver,
+persistent store, and source-neutral acquisition transaction for passive client content. It
+contains no Godot or Network dependency.
 
 The accepted boundary is:
 
@@ -109,8 +110,13 @@ resolution, immutable catalog generations, and application-proof values. A0.2 pe
 server-passive packages and resolved activations without acquiring them from any source. The
 accepted A0.1 Cabin Default/Replace/Add oracle lives in the optional
 [`Client.BuiltInTestWorlds`](../BuiltInTestWorlds/README.md) capability rather than coupling the
-generic resolver to one Test World. A0.2 adds persistent CAS/install/reopen but deliberately does
-not advertise requirements, fetch bytes, use HTTP/Network, stream a WorldPack, or realize native
-resources. Those remain A0.3+ work.
+generic resolver to one Test World.
+
+A0.3 adds `IContentPackageSource` and `ContentActivationAcquirer`. An authenticated adapter supplies
+only approved source descriptors; the acquirer reuses an exact realm manifest when available or
+fetches one bounded untrusted package candidate, checks package/manifest identity, installs through
+A0.2, and publishes the complete catalog last. The content assembly still does not know Network or
+Godot. Concrete HTTP/HTTPS adapters and mirror/repair policy remain A0.4/A0.5; WorldPack streaming
+and native resource realization remain later work.
 
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.

@@ -19,6 +19,8 @@ namespace UltraSim.Game.Replication;
 
 public readonly record struct RemoteGuestPlayableServerSnapshot(
     bool IdentityQueued,
+    bool ContentRequired,
+    bool ContentApplied,
     bool GuestAdmitted,
     bool AdmissionApplied,
     ulong ApplicationSessionEpoch,
@@ -29,6 +31,10 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     ulong DuplicateCommands,
     ulong RejectedCommands,
     ulong OwnerStatesQueued,
+    ulong ContentRequirementsQueued,
+    ulong DuplicateContentProofs,
+    ulong RejectedContentProofs,
+    ulong RejectedPreContentMessages,
     RemoteChunkWorldStateServerSnapshot World,
     RemoteChatDeliveryServiceSnapshot Chat);
 
@@ -41,12 +47,22 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
 public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApplicationFactory
 {
     private readonly ApplicationRealmId _realm;
+    private readonly RemoteContentAuthorization? _contentAuthorization;
     private long _nextParticipant;
 
-    public RemoteGuestPlayableApplicationFactory(ApplicationRealmId realm)
+    public RemoteGuestPlayableApplicationFactory(
+        ApplicationRealmId realm,
+        RemoteContentAuthorization? contentAuthorization = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
+        if (contentAuthorization is not null &&
+            (!contentAuthorization.IsAuthorityValid ||
+             contentAuthorization.RealmHigh != realm.High || contentAuthorization.RealmLow != realm.Low))
+            throw new ArgumentException(
+                "The required content authorization must belong to this realm and include the expected result.",
+                nameof(contentAuthorization));
         _realm = realm;
+        _contentAuthorization = contentAuthorization;
     }
 
     public IHostedUdpSessionApplication Create(ConnectionId connection, NetworkProtocolPeer peer)
@@ -56,7 +72,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         if (value <= 0)
             throw new InvalidOperationException("The remote participant identity space is exhausted.");
         return new RemoteGuestPlayableApplication(
-            peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch());
+            peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(), _contentAuthorization);
     }
 
     private static ulong CreateEpoch()
@@ -86,6 +102,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
 
     private readonly NetworkProtocolPeer _peer;
     private readonly ApplicationRealmId _realm;
+    private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly ParticipantId _participant;
     private readonly ulong _applicationSessionEpoch;
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
@@ -93,6 +110,12 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         new OfflineDirectChunkSubscriptionChange[MaximumTopologyChanges];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _identityQueued;
+    private bool _contentApplied;
+    private long _lastContentRequirementQueue;
+    private ulong _contentRequirementsQueued;
+    private ulong _duplicateContentProofs;
+    private ulong _rejectedContentProofs;
+    private ulong _rejectedPreContentMessages;
     private ulong _admissionAttempt;
     private RemoteGuestAdmissionResultHeader _admissionResult;
     private string? _admissionResultText;
@@ -132,7 +155,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         NetworkProtocolPeer peer,
         ApplicationRealmId realm,
         ParticipantId participant,
-        ulong applicationSessionEpoch)
+        ulong applicationSessionEpoch,
+        RemoteContentAuthorization? contentAuthorization = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -141,11 +165,23 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         _realm = realm;
         _participant = participant;
         _applicationSessionEpoch = applicationSessionEpoch;
+        if (contentAuthorization is not null &&
+            (!contentAuthorization.IsAuthorityValid ||
+             contentAuthorization.RealmHigh != realm.High || contentAuthorization.RealmLow != realm.Low))
+            throw new ArgumentException("The required content authorization is invalid.",
+                nameof(contentAuthorization));
+        _contentAuthorization = contentAuthorization;
+        _contentApplied = contentAuthorization is null;
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();
+        if (message.MessageId == RemoteContentSetAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessContentProof(payload);
+            return true;
+        }
         if (message.MessageId == RemoteGuestAdmissionRequestHeaderCodec.Descriptor.Id)
         {
             ProcessGuestRequest(payload);
@@ -181,6 +217,13 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     {
         EnsureOperational();
         bool complete = QueueIdentity();
+        if (!_identityQueued) return complete;
+        if (_applicationFaulted) return complete;
+        if (!_contentApplied)
+        {
+            complete &= QueueContentRequirement(force: false);
+            return complete;
+        }
         if (_admissionAttempt != 0 && !_admissionResultApplied)
             complete &= QueueAdmissionResult(force: false);
         if (!_guestAdmitted || !_admissionResultApplied || _applicationFaulted)
@@ -209,9 +252,12 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     {
         EnsureOperational();
         return new RemoteGuestPlayableServerSnapshot(
-            _identityQueued, _guestAdmitted, _admissionResultApplied,
+            _identityQueued, _contentAuthorization is not null, _contentApplied,
+            _guestAdmitted, _admissionResultApplied,
             _applicationSessionEpoch, _participant, _controlSession, _authorityTicks,
             _commandsApplied, _duplicateCommands, _rejectedCommands, _ownerStatesQueued,
+            _contentRequirementsQueued, _duplicateContentProofs, _rejectedContentProofs,
+            _rejectedPreContentMessages,
             _worldDelivery?.GetSnapshot() ?? default,
             _chatDelivery?.GetSnapshot() ?? default);
     }
@@ -267,8 +313,77 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         return true;
     }
 
+    private bool QueueContentRequirement(bool force)
+    {
+        if (_contentApplied || _contentAuthorization is null) return true;
+        long now = Environment.TickCount64;
+        if (!force && _lastContentRequirementQueue != 0 &&
+            now - _lastContentRequirementQueue < AdmissionRetryMilliseconds)
+            return true;
+        var requirement = new RemoteContentRequirement(
+            _applicationSessionEpoch, 1, _contentAuthorization);
+        if (!UltraSimGameProtocol.TryWriteContentRequirement(
+                _messageScratch, in requirement, out int written))
+            throw new InvalidOperationException("The retained content requirement became invalid.");
+        if (_peer.TryQueue(RemoteContentRequirementHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        _lastContentRequirementQueue = now;
+        SaturatingIncrement(ref _contentRequirementsQueued);
+        return true;
+    }
+
+    private void ProcessContentProof(ReadOnlySpan<byte> payload)
+    {
+        if (_contentAuthorization is null ||
+            !RemoteContentSetAppliedMessageCodec.TryReadExact(
+                payload, out RemoteContentSetAppliedMessage proof) ||
+            !UltraSimGameProtocol.IsValidContentApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.RequirementSequence != 1 ||
+            proof.ApplicationRealmHigh != _realm.High || proof.ApplicationRealmLow != _realm.Low ||
+            proof.ActivationHigh != _contentAuthorization.ActivationHigh ||
+            proof.ActivationLow != _contentAuthorization.ActivationLow ||
+            new RemoteContentHash(
+                proof.PlanHash0, proof.PlanHash1, proof.PlanHash2, proof.PlanHash3) !=
+                _contentAuthorization.PlanHash)
+        {
+            SaturatingIncrement(ref _rejectedContentProofs);
+            return;
+        }
+        if (proof.Status == RemoteContentApplyStatus.Rejected)
+        {
+            if (_contentApplied)
+            {
+                SaturatingIncrement(ref _rejectedContentProofs);
+                return;
+            }
+            _applicationFaulted = true;
+            return;
+        }
+        if (new RemoteContentHash(
+                proof.ResolvedHash0, proof.ResolvedHash1,
+                proof.ResolvedHash2, proof.ResolvedHash3) !=
+            _contentAuthorization.ExpectedResolvedCatalogFingerprint)
+        {
+            SaturatingIncrement(ref _rejectedContentProofs);
+            return;
+        }
+        if (_contentApplied)
+        {
+            SaturatingIncrement(ref _duplicateContentProofs);
+            return;
+        }
+        _contentApplied = true;
+    }
+
     private void ProcessGuestRequest(ReadOnlySpan<byte> payload)
     {
+        if (!_contentApplied)
+        {
+            SaturatingIncrement(ref _rejectedPreContentMessages);
+            return;
+        }
         if (!UltraSimGameProtocol.TryReadGuestAdmissionRequest(
                 payload, out RemoteGuestAdmissionRequestHeader header,
                 out GameGuestAdmissionRequest request) ||

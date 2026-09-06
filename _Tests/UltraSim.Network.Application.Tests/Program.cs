@@ -108,7 +108,8 @@ internal static class Program
         Console.WriteLine(
             $"All {tests.Length} Network N0.4 through N0.10 application tests plus " +
             $"{F03aDirectConnectTests.TestCount} Client F0.3a Direct Connect and " +
-            $"{F03bRemotePlayableTests.TestCount} F0.3b remote playable tests passed.");
+            $"{F03bRemotePlayableTests.F03bTestCount} F0.3b remote playable and " +
+            $"{F03bRemotePlayableTests.A03TestCount} A0.3 content tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
             RunN09Benchmark(args);
         else if (args.Contains("--benchmark-n08", StringComparer.Ordinal))

@@ -18,8 +18,10 @@ Island, and Game-owned telepad. D0.1 adds live bounded structural/render residen
 sparse Far Island and reciprocal authoritative gates, D0.3 adds the authoritative informational
 sign, D0.4 closes the local Fallback Lab canaries, and D0.5 closes the local guest/demo
 admission presentation described below. F0.3a/F0.3b close Direct Connect trust and the first remote
-controlled-actor semantic vertical. A0.2 now supplies the source-free persistent verified content
-cache; authenticated requirements/source acquisition remain A0.3 work.
+controlled-actor semantic vertical. A0.2 supplies the persistent verified content cache, and A0.3
+now closes authenticated requirements, source-neutral acquisition, exact catalog application
+proof, cold-cache Cabin Replace parity, and warm-cache fresh-session proof. Concrete HTTP source
+parity and native contentless Online world entry remain later content checkpoints.
 
 The demo has two purposes:
 
@@ -1432,14 +1434,14 @@ then prioritize the first meaningful remote vertical:
     F0.3b remote controlled actor + guest admission                 CLOSED
 
     A0.2 persistent verified content installation/cache             CLOSED
-    A0.3 authenticated requirement/source acquisition               NEXT
+    A0.3 authenticated requirement/source acquisition               CLOSED
 
 then continue Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-A0.3+ remote requirement/source/content activation                    NEXT
+A0.4+ remote source parity/content expansion                           NEXT
 
 then external Concept Demo multiplayer/stress run
 ```
