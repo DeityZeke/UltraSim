@@ -1,0 +1,108 @@
+{
+  "Checkpoint": "A0.5",
+  "Workload": "content-cache-delta-corruption-mirror-hardening",
+  "CaptureDate": "2026-09-06",
+  "Configurations": [
+    "Debug",
+    "Release"
+  ],
+  "SemanticIdentity": {
+    "ChangedBySourceLocation": false,
+    "DeltaUnit": "complete content-addressed file/SHA-256 blob",
+    "FieldPatchFormatAdded": false,
+    "BinaryDiffFormatAdded": false
+  },
+  "SourceForms": {
+    "CompleteCompatibilityEnvelope": ".uspkg",
+    "GranularLayout": {
+      "Manifest": "<authorized-root>/manifest.usmanifest",
+      "Blob": "<authorized-root>/blobs/<sha256>.blob"
+    },
+    "ManifestEnvelopeIsSemanticAuthority": false
+  },
+  "DefaultBounds": {
+    "MaximumSourceAttemptsPerPackage": 8,
+    "MaximumConcurrentFileFetches": 4,
+    "MaximumConcurrentHttpRequests": 4,
+    "RequestTimeoutMilliseconds": 30000,
+    "MaximumArchiveOrManifestBytes": 805306368
+  },
+  "Acceptance": {
+    "ColdTwoFilePackage": {
+      "FilesFetched": 2,
+      "FilesReused": 0,
+      "ObservedPeakConcurrentFileFetches": 2
+    },
+    "OneFileChange": {
+      "FilesFetched": 1,
+      "FilesReused": 1,
+      "PayloadBytesFetched": 25
+    },
+    "UnavailableFirstMirror": {
+      "SourceAttempts": 2,
+      "RejectedSources": 1,
+      "FinalResult": "Applied from exact second mirror"
+    },
+    "CorruptFirstMirror": {
+      "SourceAttempts": 2,
+      "RejectedSources": 1,
+      "FinalResult": "Hash-invalid candidate rejected; exact second mirror applied"
+    },
+    "CorruptCacheRepair": {
+      "CorruptBlobRefetched": true,
+      "BlobRepairCount": 1,
+      "CorruptManifestReplacedFromExactCandidate": true,
+      "ManifestRepairCount": 1,
+      "AtomicStagingRetained": true,
+      "LivePinnedReplacement": "CacheBusy"
+    },
+    "InterruptedCandidate": {
+      "PublishedBlobs": 0,
+      "PublishedRealmManifests": 0,
+      "PublishedActivations": 0
+    },
+    "OptionalHotUpgrade": {
+      "UnavailableSourcePublishesFallback": true,
+      "LaterBytesRetargetPersistedCatalogImplicitly": false,
+      "ExplicitRepublishAppliesOptionalPackage": true
+    },
+    "DnsPrivateTarget": {
+      "TextualHost": "public-looking.example",
+      "FixtureResolution": "loopback",
+      "RejectedInsideConnectionPolicy": true,
+      "ResponseBytesRead": 0
+    },
+    "RealGranularServerHttp": {
+      "Scenario": "A0.1 Cabin Add",
+      "FilesFetched": 2,
+      "PayloadBytesFetched": 140,
+      "ManifestBytesFetched": 475,
+      "ResolvedCatalogFingerprint": "919d13d6572bf0df807891783d3ea4e25dea16010717df8a2223081ab1df8564"
+    },
+    "WarmReconnectRetainedFromA0.3": {
+      "PackagesReused": 1,
+      "PayloadBytesFetched": 0,
+      "FreshApplicationSessionProofRequired": true
+    },
+    "ExistingA0.2GatesRetained": [
+      "global blob deduplication without cross-realm semantic authorization",
+      "restart reopen with exact catalog fingerprint",
+      "abandoned staging cleanup",
+      "quota pressure and reachability eviction",
+      "live catalog/blob and persisted activation pins"
+    ]
+  },
+  "FocusedTests": {
+    "ClientContentTotal": 23,
+    "NewClientContentA05": 5,
+    "NetworkApplicationA05": 1
+  },
+  "Deferred": [
+    "UI schema/content convergence (A0.6)",
+    "canonical WorldPack streaming (A0.7)",
+    "native Contentless Online entry (A0.8)",
+    "cross-process cache-root leases",
+    "binary delta patches",
+    "background content scheduler"
+  ]
+}

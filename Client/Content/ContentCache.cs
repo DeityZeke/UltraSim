@@ -31,6 +31,8 @@ public sealed class ContentCache : IDisposable
     private ulong _installs;
     private ulong _reusedBlobs;
     private ulong _corruptionsDetected;
+    private ulong _blobsRepaired;
+    private ulong _manifestsRepaired;
     private ulong _blobsEvicted;
     private long _bytesEvicted;
 
@@ -137,103 +139,124 @@ public sealed class ContentCache : IDisposable
         out InstalledContentPackage installed,
         out ContentCacheError error)
     {
+        ArgumentNullException.ThrowIfNull(manifest);
         installed = default;
         error = ContentCacheError.None;
+        if (!TryCopyPayloads(payloads, manifest.Files.Count, out ContentFilePayload[] copy) ||
+            !ContentPackageValidator.TryValidatePayloads(manifest, copy, out _, out _))
+            return Fail(ContentCacheError.PayloadValidationFailed, out error);
+        lock (_sync)
+            return TryInstallPackageCore(realm, manifest, copy, out installed, out error);
+    }
+
+    /// <summary>
+    /// Installs a complete package from only the payloads not already valid in the global CAS.
+    /// Publication remains transactional: every descriptor is valid before realm metadata moves.
+    /// </summary>
+    public bool TryInstallPackageDelta(
+        ApplicationRealmId realm,
+        ContentPackageManifest manifest,
+        IEnumerable<ContentFilePayload>? acquiredPayloads,
+        out InstalledContentPackage installed,
+        out ContentCacheError error)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        installed = default;
+        error = ContentCacheError.None;
+        if (!TryCopyPayloads(acquiredPayloads, manifest.Files.Count, out ContentFilePayload[] copy))
+            return Fail(ContentCacheError.PayloadValidationFailed, out error);
+        lock (_sync)
+            return TryInstallPackageCore(realm, manifest, copy, out installed, out error);
+    }
+
+    /// <summary>Plans exact missing/corrupt blob work without publishing or mutating the cache.</summary>
+    public bool TryPlanPackageInstall(
+        ApplicationRealmId realm,
+        ContentPackageManifest manifest,
+        out ContentPackageInstallPlan? plan,
+        out ContentCacheError error)
+    {
         ArgumentNullException.ThrowIfNull(manifest);
         lock (_sync)
         {
+            plan = null;
             if (_disposed || !realm.IsValid)
                 return Fail(ContentCacheError.InvalidRequest, out error);
             if (manifest.TrustClass != ContentTrustClass.ServerAuthorizedPassive)
                 return Fail(ContentCacheError.UnsupportedTrustClass, out error);
-            if (!TryCopyPayloads(payloads, manifest.Files.Count, out ContentFilePayload[] copy) ||
-                !ContentPackageValidator.TryValidatePayloads(manifest, copy, out _, out _))
-                return Fail(ContentCacheError.PayloadValidationFailed, out error);
-
             try
             {
-                if (!TryEnsureRealmDirectories(realm, out error)) return false;
                 string manifestPath = GetManifestPath(realm, manifest.ManifestHash);
-                byte[] metadata = ContentCacheMetadata.EncodeManifest(manifest);
-                if (metadata.Length > _cacheLimits.MaximumMetadataFileBytes)
-                    return Fail(ContentCacheError.CapacityExceeded, out error);
-
-                if (File.Exists(manifestPath))
+                bool manifestNeedsRepair = false;
+                if (File.Exists(manifestPath) &&
+                    (!TryReadCanonicalManifest(manifestPath, manifest.ManifestHash,
+                        out ContentPackageManifest? existing) || existing!.PackageId != manifest.PackageId))
                 {
-                    if (!TryReadCanonicalManifest(manifestPath, manifest.ManifestHash,
-                            out ContentPackageManifest? existing) ||
-                        existing!.PackageId != manifest.PackageId)
-                        return Corrupt(ContentCacheError.CorruptManifest, out error);
+                    manifestNeedsRepair = true;
+                    SaturatingIncrement(ref _corruptionsDetected);
                 }
-
-                var byPath = copy.ToDictionary(static value => value.Path);
-                var missing = new Dictionary<ContentHash, ReadOnlyMemory<byte>>();
-                long packageBytes = 0;
+                var required = new List<ContentFileDescriptor>();
+                var visited = new HashSet<ContentHash>();
+                int reused = 0, corrupt = 0;
                 foreach (ContentFileDescriptor descriptor in manifest.Files)
                 {
-                    packageBytes = checked(packageBytes + descriptor.SizeBytes);
+                    if (!visited.Add(descriptor.Sha256)) continue;
                     string blobPath = GetBlobPath(descriptor.Sha256);
-                    if (File.Exists(blobPath))
+                    if (!File.Exists(blobPath))
                     {
-                        if (!TryValidateBlob(blobPath, descriptor))
-                            return Corrupt(ContentCacheError.CorruptBlob, out error);
-                        _reusedBlobs++;
+                        required.Add(descriptor);
                     }
-                    else if (!missing.ContainsKey(descriptor.Sha256))
+                    else if (TryValidateBlob(blobPath, descriptor))
                     {
-                        missing.Add(descriptor.Sha256, byPath[descriptor.Path].Bytes);
+                        reused++;
+                    }
+                    else
+                    {
+                        corrupt++;
+                        SaturatingIncrement(ref _corruptionsDetected);
+                        required.Add(descriptor);
                     }
                 }
-
-                ContentHash[] installPins = manifest.Files.Select(static value => value.Sha256)
-                    .Distinct().ToArray();
-                foreach (ContentHash hash in installPins) AddPin(_liveBlobPins, hash);
-                try
-                {
-                    StoreCensus census = ScanStore();
-                    if (census.BlobCount + missing.Count > _cacheLimits.MaximumBlobs ||
-                        census.ManifestCount + (File.Exists(manifestPath) ? 0 : 1) >
-                        _cacheLimits.MaximumManifests)
-                        return Fail(ContentCacheError.CapacityExceeded, out error);
-                    long incomingBytes = 0;
-                    foreach (ReadOnlyMemory<byte> bytes in missing.Values)
-                        incomingBytes = checked(incomingBytes + bytes.Length);
-                    if (!TryMakeRoom(census.BlobBytes, incomingBytes, out _, out error)) return false;
-
-                    foreach ((ContentHash hash, ReadOnlyMemory<byte> bytes) in missing)
-                    {
-                        string blobPath = GetBlobPath(hash);
-                        Directory.CreateDirectory(Path.GetDirectoryName(blobPath)!);
-                        if (IsReparsePoint(Path.GetDirectoryName(blobPath)!))
-                            return Fail(ContentCacheError.UnsafePath, out error);
-                        if (!TryWriteAtomic(blobPath, bytes.Span, overwrite: false, out error)) return false;
-                        Touch(hash);
-                    }
-
-                    // Re-read staged/install results through the exact descriptor and passive
-                    // envelope before publishing realm metadata.
-                    foreach (ContentFileDescriptor descriptor in manifest.Files)
-                        if (!TryValidateBlob(GetBlobPath(descriptor.Sha256), descriptor))
-                            return Corrupt(ContentCacheError.CorruptBlob, out error);
-
-                    // Publication is last: orphaned immutable blobs are safe and later evictable.
-                    if (!File.Exists(manifestPath) &&
-                        !TryWriteAtomic(manifestPath, metadata, overwrite: false, out error))
-                        return false;
-                    foreach (ContentFileDescriptor descriptor in manifest.Files) Touch(descriptor.Sha256);
-                }
-                finally
-                {
-                    foreach (ContentHash hash in installPins) RemovePin(_liveBlobPins, hash);
-                }
-                _installs++;
-                installed = new InstalledContentPackage(
-                    realm, manifest.PackageId, manifest.ManifestHash,
-                    manifest.Files.Select(static value => value.Sha256).Distinct().Count(), packageBytes);
+                plan = new ContentPackageInstallPlan(required.ToArray(), reused, corrupt, manifestNeedsRepair);
+                error = ContentCacheError.None;
                 return true;
             }
             catch (Exception exception) when (IsStorageException(exception))
             {
+                return Fail(ContentCacheError.IoFailure, out error);
+            }
+        }
+    }
+
+    /// <summary>Reads authorized realm manifest metadata without treating blob absence as success.</summary>
+    public bool TryOpenPackageManifest(
+        ApplicationRealmId realm,
+        ContentPackageId packageId,
+        ContentHash manifestHash,
+        out ContentPackageManifest? manifest,
+        out ContentCacheError error)
+    {
+        lock (_sync)
+        {
+            manifest = null;
+            if (_disposed || !realm.IsValid || !packageId.IsValid || !manifestHash.IsValid)
+                return Fail(ContentCacheError.InvalidRequest, out error);
+            try
+            {
+                string path = GetManifestPath(realm, manifestHash);
+                if (!File.Exists(path)) return Fail(ContentCacheError.MissingManifest, out error);
+                if (!TryReadCanonicalManifest(path, manifestHash, out manifest) ||
+                    manifest!.PackageId != packageId)
+                {
+                    manifest = null;
+                    return Corrupt(ContentCacheError.CorruptManifest, out error);
+                }
+                error = ContentCacheError.None;
+                return true;
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                manifest = null;
                 return Fail(ContentCacheError.IoFailure, out error);
             }
         }
@@ -248,6 +271,135 @@ public sealed class ContentCache : IDisposable
     {
         lock (_sync)
             return TryOpenPackageCore(realm, packageId, manifestHash, out package, out error);
+    }
+
+    private bool TryInstallPackageCore(
+        ApplicationRealmId realm,
+        ContentPackageManifest manifest,
+        ContentFilePayload[] payloads,
+        out InstalledContentPackage installed,
+        out ContentCacheError error)
+    {
+        installed = default;
+        error = ContentCacheError.None;
+        if (_disposed || !realm.IsValid)
+            return Fail(ContentCacheError.InvalidRequest, out error);
+        if (manifest.TrustClass != ContentTrustClass.ServerAuthorizedPassive)
+            return Fail(ContentCacheError.UnsupportedTrustClass, out error);
+
+        var descriptorsByPath = manifest.Files.ToDictionary(static value => value.Path);
+        var payloadsByHash = new Dictionary<ContentHash, ReadOnlyMemory<byte>>();
+        var payloadPaths = new HashSet<ContentFilePath>();
+        foreach (ContentFilePayload payload in payloads)
+        {
+            if (!payloadPaths.Add(payload.Path) ||
+                !descriptorsByPath.TryGetValue(payload.Path, out ContentFileDescriptor descriptor) ||
+                !ContentPackageValidator.TryValidatePayload(descriptor, payload.Bytes.Span))
+                return Fail(ContentCacheError.PayloadValidationFailed, out error);
+            if (payloadsByHash.TryGetValue(descriptor.Sha256, out ReadOnlyMemory<byte> duplicate))
+            {
+                if (!duplicate.Span.SequenceEqual(payload.Bytes.Span))
+                    return Fail(ContentCacheError.PayloadValidationFailed, out error);
+            }
+            else
+            {
+                payloadsByHash.Add(descriptor.Sha256, payload.Bytes);
+            }
+        }
+
+        try
+        {
+            if (!TryEnsureRealmDirectories(realm, out error)) return false;
+            string manifestPath = GetManifestPath(realm, manifest.ManifestHash);
+            byte[] metadata = ContentCacheMetadata.EncodeManifest(manifest);
+            if (metadata.Length > _cacheLimits.MaximumMetadataFileBytes)
+                return Fail(ContentCacheError.CapacityExceeded, out error);
+
+            bool manifestCorrupt = false;
+            if (File.Exists(manifestPath) &&
+                (!TryReadCanonicalManifest(manifestPath, manifest.ManifestHash,
+                    out ContentPackageManifest? existing) || existing!.PackageId != manifest.PackageId))
+            {
+                var manifestKey = new ContentCacheManifestKey(realm, manifest.ManifestHash);
+                if (_liveManifestPins.ContainsKey(manifestKey))
+                    return Fail(ContentCacheError.CacheBusy, out error);
+                manifestCorrupt = true;
+                SaturatingIncrement(ref _corruptionsDetected);
+            }
+
+            var writes = new Dictionary<ContentHash, BlobWrite>();
+            var visited = new HashSet<ContentHash>();
+            long packageBytes = 0;
+            int reused = 0, newBlobCount = 0;
+            long incomingGrowth = 0;
+            foreach (ContentFileDescriptor descriptor in manifest.Files)
+            {
+                packageBytes = checked(packageBytes + descriptor.SizeBytes);
+                if (!visited.Add(descriptor.Sha256)) continue;
+                string blobPath = GetBlobPath(descriptor.Sha256);
+                bool exists = File.Exists(blobPath);
+                if (exists && TryValidateBlob(blobPath, descriptor))
+                {
+                    reused++;
+                    continue;
+                }
+                if (!payloadsByHash.TryGetValue(descriptor.Sha256, out ReadOnlyMemory<byte> bytes))
+                    return Fail(ContentCacheError.PayloadValidationFailed, out error);
+                if (exists && _liveBlobPins.ContainsKey(descriptor.Sha256))
+                    return Fail(ContentCacheError.CacheBusy, out error);
+                long previousBytes = exists ? new FileInfo(blobPath).Length : 0;
+                if (!exists) newBlobCount++;
+                incomingGrowth = checked(incomingGrowth + Math.Max(0, descriptor.SizeBytes - previousBytes));
+                writes.Add(descriptor.Sha256, new BlobWrite(bytes, exists));
+            }
+
+            ContentHash[] installPins = visited.ToArray();
+            foreach (ContentHash hash in installPins) AddPin(_liveBlobPins, hash);
+            try
+            {
+                StoreCensus census = ScanStore();
+                if (census.BlobCount + newBlobCount > _cacheLimits.MaximumBlobs ||
+                    census.ManifestCount + (File.Exists(manifestPath) ? 0 : 1) >
+                    _cacheLimits.MaximumManifests)
+                    return Fail(ContentCacheError.CapacityExceeded, out error);
+                if (!TryMakeRoom(census.BlobBytes, incomingGrowth, out _, out error)) return false;
+
+                foreach ((ContentHash hash, BlobWrite write) in writes)
+                {
+                    string blobPath = GetBlobPath(hash);
+                    Directory.CreateDirectory(Path.GetDirectoryName(blobPath)!);
+                    if (IsReparsePoint(Path.GetDirectoryName(blobPath)!))
+                        return Fail(ContentCacheError.UnsafePath, out error);
+                    if (!TryWriteAtomic(blobPath, write.Bytes.Span, overwrite: write.Repair, out error))
+                        return false;
+                    if (write.Repair) SaturatingIncrement(ref _blobsRepaired);
+                    Touch(hash);
+                }
+
+                foreach (ContentFileDescriptor descriptor in manifest.Files)
+                    if (!TryValidateBlob(GetBlobPath(descriptor.Sha256), descriptor))
+                        return Corrupt(ContentCacheError.CorruptBlob, out error);
+
+                if ((!File.Exists(manifestPath) || manifestCorrupt) &&
+                    !TryWriteAtomic(manifestPath, metadata, overwrite: manifestCorrupt, out error))
+                    return false;
+                if (manifestCorrupt) SaturatingIncrement(ref _manifestsRepaired);
+                foreach (ContentFileDescriptor descriptor in manifest.Files) Touch(descriptor.Sha256);
+            }
+            finally
+            {
+                foreach (ContentHash hash in installPins) RemovePin(_liveBlobPins, hash);
+            }
+            _reusedBlobs = checked(_reusedBlobs + (ulong)reused);
+            SaturatingIncrement(ref _installs);
+            installed = new InstalledContentPackage(
+                realm, manifest.PackageId, manifest.ManifestHash, visited.Count, packageBytes);
+            return true;
+        }
+        catch (Exception exception) when (IsStorageException(exception))
+        {
+            return Fail(ContentCacheError.IoFailure, out error);
+        }
     }
 
     public bool TryPublishCatalog(
@@ -444,7 +596,8 @@ public sealed class ContentCache : IDisposable
                 census.BlobCount, census.BlobBytes, census.ManifestCount, census.ActivationCount,
                 _liveBlobPins.Values.Sum(), _liveCatalogLeases,
                 _cacheLimits.QuotaBytes, _cacheLimits.HighWaterBytes,
-                _installs, _reusedBlobs, _corruptionsDetected, _blobsEvicted, _bytesEvicted);
+                _installs, _reusedBlobs, _corruptionsDetected, _blobsRepaired,
+                _manifestsRepaired, _blobsEvicted, _bytesEvicted);
         }
     }
 
@@ -997,6 +1150,11 @@ public sealed class ContentCache : IDisposable
         return false;
     }
 
+    private static void SaturatingIncrement(ref ulong value)
+    {
+        if (value != ulong.MaxValue) value++;
+    }
+
     private readonly record struct StoreCensus(
         int BlobCount,
         long BlobBytes,
@@ -1008,6 +1166,8 @@ public sealed class ContentCache : IDisposable
         string Path,
         long Bytes,
         long AccessTicks);
+
+    private readonly record struct BlobWrite(ReadOnlyMemory<byte> Bytes, bool Repair);
 
     private readonly record struct ManifestRecord(
         ContentCacheManifestKey Key,

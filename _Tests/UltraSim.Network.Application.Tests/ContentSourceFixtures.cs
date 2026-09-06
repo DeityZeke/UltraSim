@@ -34,17 +34,11 @@ internal sealed class LoopbackHttpsContentHost : IDisposable
     internal Uri BaseUri { get; }
     internal Uri ResourceUri { get; }
 
-    internal HttpMessageHandler CreatePinnedClientHandler()
+    internal RemoteCertificateValidationCallback CreatePinnedCertificateValidation()
     {
         string expected = _certificate.Thumbprint;
-        return new HttpClientHandler
-        {
-            AllowAutoRedirect = false,
-            UseCookies = false,
-            ServerCertificateCustomValidationCallback = (_, certificate, _, _) =>
-                certificate is not null &&
-                string.Equals(certificate.Thumbprint, expected, StringComparison.OrdinalIgnoreCase),
-        };
+        return (_, certificate, _, _) => certificate is not null &&
+            string.Equals(certificate.GetCertHashString(), expected, StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()

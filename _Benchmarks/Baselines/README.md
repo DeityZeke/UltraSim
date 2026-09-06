@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `content-a0.5-cache-hardening-2026-09-06.json` — bounded ordered mirror retry, canonical
+  manifest/content-addressed blob acquisition, one-file SHA delta reuse, corrupt blob/manifest
+  atomic repair, interrupted-source transactionality, Optional fallback/explicit hot upgrade,
+  connection-time private DNS rejection, and real granular server-HTTP Cabin Add parity;
 - `content-a0.4-remote-source-parity-2026-09-06.json` — frozen Cabin
   Default/Replace/Add semantic matrix across zero-transfer Default, rooted local package files,
   bounded server-hosted HTTP, and external TLS/HTTPS. It records canonical envelope/payload bytes,

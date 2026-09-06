@@ -90,8 +90,34 @@ public readonly record struct ContentCacheSnapshot(
     ulong Installs,
     ulong ReusedBlobs,
     ulong CorruptionsDetected,
+    ulong BlobsRepaired,
+    ulong ManifestsRepaired,
     ulong BlobsEvicted,
     long BytesEvicted);
+
+/// <summary>
+/// Immutable preflight for one package install. Required payloads are the unique missing or
+/// corrupt content-addressed blobs; already-valid blobs remain reusable regardless of realm.
+/// </summary>
+public sealed class ContentPackageInstallPlan
+{
+    internal ContentPackageInstallPlan(
+        ContentFileDescriptor[] requiredPayloads,
+        int reusedBlobCount,
+        int corruptBlobCount,
+        bool manifestNeedsRepair)
+    {
+        RequiredPayloads = Array.AsReadOnly(requiredPayloads);
+        ReusedBlobCount = reusedBlobCount;
+        CorruptBlobCount = corruptBlobCount;
+        ManifestNeedsRepair = manifestNeedsRepair;
+    }
+
+    public IReadOnlyList<ContentFileDescriptor> RequiredPayloads { get; }
+    public int ReusedBlobCount { get; }
+    public int CorruptBlobCount { get; }
+    public bool ManifestNeedsRepair { get; }
+}
 
 public readonly record struct ContentCacheEvictionResult(
     int BlobsRemoved,

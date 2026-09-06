@@ -1,6 +1,6 @@
 # Client Content
 
-`UltraSim.Client.Content` is the engine-neutral A0.0-A0.4 contract, deterministic resolver,
+`UltraSim.Client.Content` is the engine-neutral A0.0-A0.5 contract, deterministic resolver,
 persistent store, and source-independent acquisition transaction for passive client content. It
 contains no Godot or Network dependency.
 
@@ -80,9 +80,11 @@ does not authorize another realm to publish them. A0.2's realm cache admits only
 `ServerAuthorizedPassive` packages. Local/default installation and future user/executable content
 retain separate lifecycles.
 
-Install first validates the complete supplied package through the A0.0 passive allowlist. Missing
-blobs are written and flushed through private staging names, verified by their descriptors, and
-atomically moved before the realm manifest becomes visible. A crash may leave an unreferenced
+Install validates supplied payloads through the A0.0 passive allowlist. A full-package call
+requires the complete payload set; A0.5's delta call requires every missing/corrupt unique hash and
+permits already-valid CAS hashes to be omitted. New or repaired blobs are written and flushed
+through private staging names, verified by their descriptors, and atomically moved before the
+realm manifest becomes visible. A crash may leave an unreferenced
 immutable blob; it cannot leave a published partial package, and abandoned staging is removed on
 the next open. Canonical binary manifest/activation metadata is strictly decoded and re-encoded on
 reopen. No source location is persisted.
@@ -96,8 +98,9 @@ successful activation.
 Quota eviction is reachability-based and oldest-access-first. Persistently pinned activations,
 live catalog leases, and live blob/resource leases protect their manifests and blobs. Unpinned
 activation/manifest metadata is retired before an unreachable blob is deleted. If enough safe
-space cannot be reclaimed, admission fails without partial arbitrary eviction. Corruption is
-detected on use and is not repaired in A0.2; repair/source fallback belongs to A0.5.
+space cannot be reclaimed, admission fails without partial arbitrary eviction. A0.5 repairs a
+corrupt blob or canonical realm manifest only from a newly hash-validated candidate; a live-pinned
+artifact returns `CacheBusy` rather than being replaced underneath its consumer.
 
 The initial implementation gives one owning client process exclusive mutation ownership for a
 cache root. Multiple simultaneously running clients use distinct roots until cross-process live-pin
@@ -129,9 +132,31 @@ directory and rejects reparse-point traversal. `HttpContentPackageSource` disabl
 automatic decompression, and cookies; bounds response size and request time; requires HTTPS for
 external sources; and requires explicit policy for plaintext server-hosted HTTP or literal
 loopback/private targets. Its current default archive cap is 768 MiB and timeout is 30 seconds;
-these are bounded implementation profiles, not permanent product limits. Acquisition remains a
-synchronous owner-thread operation with one selected supported source in A0.4. Bounded parallel
-workers, DNS-rebinding-resistant private-target policy, retry/mirrors, and corrupt-cache repair are
-A0.5. WorldPack streaming and native resource realization remain later work.
+these are bounded implementation profiles, not permanent product limits.
+
+A0.5 keeps that full `.uspkg` route for compatibility and adds a hash-granular source layout:
+
+```text
+authorized package source root/
+    manifest.usmanifest
+    blobs/<SHA-256>.blob
+```
+
+The manifest envelope is canonical but carries no new semantic identity. The client verifies the
+expected package/manifest, preflights the global CAS, and requests only unique invalid or missing
+hashes. Up to four file requests run concurrently by default; one mirror is completely validated
+in private memory before any of its bytes are installed. Approved mirrors are attempted in order,
+up to eight attempts per package by default. Unavailable, interrupted, or hash-invalid candidates
+do not publish partial realm state and may fall through to the next mirror. Required packages fail
+closed after exhaustion; unavailable Optional packages publish the explicit fallback catalog and
+may be applied later only by a new explicit catalog publication.
+
+The production-owned HTTP handler resolves hostnames inside its connection callback, rejects an
+entire resolution containing loopback/private/link-local targets unless explicitly permitted, and
+connects to one of those exact admitted addresses. Redirects remain disabled, so a textual public
+hostname cannot bypass policy through DNS rebinding or a redirect. Source URLs still do not enter
+package, plan, or catalog identity. The activation transaction remains synchronous; its
+concurrency is bounded file acquisition, not a background content framework. WorldPack streaming
+and native resource realization remain later work.
 
 See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.

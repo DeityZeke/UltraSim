@@ -2,11 +2,11 @@
 
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
 local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, A0.3
-authenticated requirement/acquisition/application proof, and A0.4 remote semantic/source parity
-accepted,
+authenticated requirement/acquisition/application proof, A0.4 remote semantic/source parity, and
+A0.5 cache/delta/corruption/mirror hardening accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.4 are closed; A0.5 cache/delta/corruption/mirror
-hardening is next. Runtime mesh/audio
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.5 are closed; A0.6 UI schema/content convergence is next.
+Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
 artifacts remain deferred.
@@ -1647,8 +1647,8 @@ GET for exact lowercase routes only, and copies configured bytes before serving 
 client source disables redirects and decompression, bounds response bytes and request time, and
 allows plaintext server-hosted HTTP or loopback/private targets only through explicit policy.
 External sources remain HTTPS-only. Literal private/loopback addresses are rejected by default;
-DNS-rebinding-resistant resolution policy, bounded parallel acquisition, retry, and mirrors remain
-A0.5.
+DNS-rebinding-resistant resolution policy, bounded parallel acquisition, retry, and mirrors were
+deliberately deferred here and are closed by A0.5 below.
 
 The accepted Cabin matrix proves:
 
@@ -1701,6 +1701,41 @@ Required:
 ---
 
 ## A0.5 — warm cache / delta / corruption / mirror hardening
+
+**Status: CLOSED.** The accepted source contract now has two compatible physical forms: the A0.4
+complete `.uspkg` envelope and an A0.5 canonical manifest plus content-addressed blob layout. A
+granular acquisition obtains the exact expected manifest, asks the CAS which unique hashes are
+already valid, and fetches only missing or corrupt descriptors. File/hash reuse is the delta; no
+field patch or binary-diff format was added.
+
+One mirror candidate is fully materialized and hash/passive-format validated in private bounded
+memory before installation. Unavailable, interrupted, and corrupt candidates fall through to the
+next approved source without publishing partial work. Defaults bound this to eight source attempts
+per package and four concurrent file requests. Required source exhaustion fails closed; an
+unavailable Optional package may explicitly publish its fallback catalog, then later replace it
+only through another complete catalog publication. Cache presence still does not persist
+application-session proof.
+
+Corrupt global blobs and realm manifest metadata are repairable only from an exact newly verified
+candidate. Repair uses the existing staging/atomic-move path and refuses to replace a live-pinned
+artifact. Realm authorization remains metadata-scoped even where two realms deduplicate one
+physical blob; repair does not grant package authority to another realm. Interrupted file sets
+never publish a manifest or activation, while any safely written orphan remains ordinary
+unreachable CAS data.
+
+The default HTTP transport now binds hostname policy to the actual connection. It resolves inside
+`SocketsHttpHandler.ConnectCallback`, rejects a resolution set containing a private, loopback,
+link-local, multicast, or otherwise prohibited endpoint unless private targets were explicitly
+authorized, and connects to an admitted resolved address with redirects still disabled. This
+closes the hostname/DNS-rebinding bypass left explicit at A0.4.
+
+Permanent evidence covers zero-byte warm reuse from A0.3, unavailable and corrupt first-mirror
+fallback, a two-file revision transferring only one changed 25-byte payload while reusing the
+other hash, bounded two-way concurrency under a four-worker cap, corrupt-blob refetch/atomic
+repair, interrupted acquisition with zero published cache state, Optional fallback/hot upgrade,
+connection-time private DNS rejection, existing restart/realm/quota/pin gates, and real granular
+server-hosted HTTP reproducing the A0.1 Add fingerprint. See
+[`content-a0.5-cache-hardening-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.5-cache-hardening-2026-09-06.json).
 
 Add:
 

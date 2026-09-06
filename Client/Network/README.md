@@ -77,6 +77,12 @@ gate from canonical local-file, server-hosted HTTP, and external HTTPS package e
 Default/Replace/Add parity with the A0.1 oracle. Source URIs remain authorization hints outside
 plan/catalog identity; no package bytes use realtime Network lanes.
 
+A0.5 leaves this protocol authorization/proof boundary unchanged while hardening the injected
+source/cache transaction. Approved mirrors retry in order, granular sources transfer only missing
+or corrupt SHA-256 blobs, Optional source exhaustion can publish an explicit fallback catalog, and
+successful cache repair still requires fresh application-session proof before authority knowledge
+advances. UI and WorldPack streaming remain A0.6/A0.7 consumers.
+
 ## Dynamic public chunk state
 
 `RemoteChunkWorldStateClient` is the production client adapter for the selected

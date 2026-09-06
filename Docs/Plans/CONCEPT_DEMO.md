@@ -21,8 +21,10 @@ admission presentation described below. F0.3a/F0.3b close Direct Connect trust a
 controlled-actor semantic vertical. A0.2 supplies the persistent verified content cache, and A0.3
 now closes authenticated requirements, source-neutral acquisition, exact catalog application
 proof, cold-cache Cabin Replace parity, and warm-cache fresh-session proof. A0.4 now closes remote
-Default/Replace/Add parity across rooted local files, server-hosted HTTP, and external HTTPS.
-Cache/delta/mirror hardening and native contentless Online world entry remain later checkpoints.
+Default/Replace/Add parity across rooted local files, server-hosted HTTP, and external HTTPS. A0.5
+closes hash-level delta, repair, mirrors, Optional hot upgrade, bounded concurrency, and
+connection-time private-target enforcement. Cached/streamed UI and native contentless Online world
+entry remain later checkpoints.
 
 The demo has two purposes:
 
@@ -1437,13 +1439,14 @@ then prioritize the first meaningful remote vertical:
     A0.2 persistent verified content installation/cache             CLOSED
     A0.3 authenticated requirement/source acquisition               CLOSED
     A0.4 remote Default/Replace/Add + source parity                  CLOSED
+    A0.5 cache/delta/corruption/mirror hardening                     CLOSED
 
 then continue Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-A0.5+ cache hardening/content expansion                                NEXT
+A0.6+ UI/structural content expansion                                  NEXT
 
 then external Concept Demo multiplayer/stress run
 ```

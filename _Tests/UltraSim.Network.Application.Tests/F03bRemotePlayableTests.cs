@@ -19,7 +19,8 @@ internal static class F03bRemotePlayableTests
     internal const int F03bTestCount = 4;
     internal const int A03TestCount = 6;
     internal const int A04TestCount = 5;
-    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount;
+    internal const int A05TestCount = 1;
+    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount;
 
     internal static void RunAll()
     {
@@ -53,6 +54,8 @@ internal static class F03bRemotePlayableTests
             RemoteAddOverExternalHttpsMatchesLocalOracle);
         Run("HttpSourcePolicyAndEnvelopeFailureStayFailClosed",
             HttpSourcePolicyAndEnvelopeFailureStayFailClosed);
+        Run("RemoteGranularHttpAcquisitionUsesCanonicalManifestAndBlobs",
+            RemoteGranularHttpAcquisitionUsesCanonicalManifestAndBlobs);
     }
 
     private static void RemotePlayableProtocolIsCanonicalAndTrustMinimal()
@@ -467,7 +470,7 @@ internal static class F03bRemotePlayableTests
             oracle, oracle.Replace, [acquisition], source);
         fixture.DriveUntil(() => fixture.Content!.Applied && fixture.SessionSnapshot.RequiredContentApplied);
         AssertCatalogEqual(oracle.Replace.Catalog, fixture.Content!.Catalog);
-        RemoteContentClientSnapshot content = fixture.Content.GetSnapshot();
+        RemoteContentClientSnapshot content = fixture.Content!.GetSnapshot();
         Equal(ContentSourceKind.ServerHostedStatic, content.Acquisition.SelectedSource.Kind);
         Equal(1, content.Acquisition.PackagesFetched);
         Equal(1, content.Acquisition.FilesFetched);
@@ -513,7 +516,7 @@ internal static class F03bRemotePlayableTests
         var externalAcquisition = Acquisition(
             oracle.ReplacePackage, ContentSourceKind.ExternalHttps, host.ResourceUri.ToString());
         using var externalSource = new HttpContentPackageSource(
-            host.CreatePinnedClientHandler(), FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
+            host.CreatePinnedCertificateValidation(), FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
         using var external = RemotePlayableFixture.CreateWithContent(
             oracle, oracle.Replace, [externalAcquisition], externalSource);
         external.DriveUntil(() =>
@@ -549,7 +552,7 @@ internal static class F03bRemotePlayableTests
         var acquisition = Acquisition(
             oracle.AddPackage, ContentSourceKind.ExternalHttps, host.ResourceUri.ToString());
         using var source = new HttpContentPackageSource(
-            host.CreatePinnedClientHandler(), FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
+            host.CreatePinnedCertificateValidation(), FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
         using var fixture = RemotePlayableFixture.CreateWithContent(
             oracle, oracle.Add, [acquisition], source);
         fixture.DriveUntil(() => fixture.Content!.Applied && fixture.SessionSnapshot.RequiredContentApplied);
@@ -565,7 +568,7 @@ internal static class F03bRemotePlayableTests
             Equal(oracle.AddPackage.Manifest.PackageId, entry!.OwnerPackageId);
         }
         AssertBasicRemoteGameUnaffected(fixture, "HTTPS Add Guest");
-        RemoteContentClientSnapshot content = fixture.Content.GetSnapshot();
+        RemoteContentClientSnapshot content = fixture.Content!.GetSnapshot();
         Console.WriteLine(
             $"EVIDENCE A0.4 scenario=Add source=ExternalHttps files={content.Acquisition.FilesFetched} " +
             $"package={oracle.AddPackage.Manifest.PackageId} manifest={oracle.AddPackage.Manifest.ManifestHash} " +
@@ -627,6 +630,49 @@ internal static class F03bRemotePlayableTests
         Equal(0, cache.RealmManifestCount);
         Equal(0, cache.RealmActivationCount);
         False(fixture.SessionSnapshot.SemanticConsumersActive);
+    }
+
+    private static void RemoteGranularHttpAcquisitionUsesCanonicalManifestAndBlobs()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        True(ContentPackageManifestEnvelope.TryEncodeCanonical(
+            oracle.AddPackage.Manifest, out byte[] manifestBytes));
+        var resources = new List<StaticContentHttpResource>
+        {
+            new("/content/add/manifest.usmanifest", manifestBytes),
+        };
+        foreach (ContentFilePayload payload in oracle.AddPackage.Payloads)
+        {
+            ContentFileDescriptor descriptor = oracle.AddPackage.Manifest.Files.Single(
+                value => value.Path == payload.Path);
+            resources.Add(new StaticContentHttpResource(
+                $"/content/add/blobs/{descriptor.Sha256}.blob", payload.Bytes));
+        }
+        using var host = new StaticContentHttpHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()), resources);
+        string root = new Uri(host.BaseUri, "content/add/").ToString();
+        var acquisition = Acquisition(
+            oracle.AddPackage, ContentSourceKind.ServerHostedStatic, root);
+        int maximumBytes = Math.Max(manifestBytes.Length,
+            oracle.AddPackage.Payloads.Max(static value => value.Bytes.Length));
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(maximumBytes, allowInsecureHttp: true));
+        using var fixture = RemotePlayableFixture.CreateWithContent(
+            oracle, oracle.Add, [acquisition], source);
+        fixture.DriveUntil(() => fixture.Content!.GetSnapshot().State == RemoteContentClientState.Applied);
+        RemoteContentClientSnapshot content = fixture.Content!.GetSnapshot();
+        Equal(oracle.Add.Catalog.Fingerprint, content.ResolvedCatalogFingerprint);
+        Equal(oracle.AddPackage.Payloads.Count, content.Acquisition.FilesFetched);
+        Equal(1, content.Acquisition.SourceAttempts);
+        Equal(oracle.AddPackage.Payloads.Sum(static value => (long)value.Bytes.Length),
+            content.Acquisition.BytesFetched);
+        ContentPackageSourceSnapshot sourceSnapshot = source.GetSnapshot();
+        Equal((long)manifestBytes.Length, sourceSnapshot.ManifestBytesRead);
+        Equal(content.Acquisition.BytesFetched, sourceSnapshot.PayloadBytesRead);
+        True(sourceSnapshot.PeakConcurrentRequests is >= 1 and <= 4);
+        Console.WriteLine($"EVIDENCE A0.5 granular_http files={content.Acquisition.FilesFetched} " +
+            $"payload_bytes={content.Acquisition.BytesFetched} manifest_bytes={sourceSnapshot.ManifestBytesRead} " +
+            $"peak_parallel={sourceSnapshot.PeakConcurrentRequests} fingerprint={content.ResolvedCatalogFingerprint}");
     }
 
     private static byte[] Archive(CabinLocalContentPackage package)

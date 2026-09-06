@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Net;
 using UltraSim.Client.Content;
 using UltraSim.Game.Application;
 using UltraSim.Game.World;
@@ -24,6 +25,11 @@ var tests = new (string Name, Action Body)[]
     ("PinnedReachabilityControlsQuotaEviction", PinnedReachabilityControlsQuotaEviction),
     ("OptionalBytesDoNotRetargetPersistedCatalogImplicitly", OptionalBytesDoNotRetargetPersistedCatalogImplicitly),
     ("CacheRejectsReparsePointStorage", CacheRejectsReparsePointStorage),
+    ("ManifestEnvelopeIsCanonicalAndExact", ManifestEnvelopeIsCanonicalAndExact),
+    ("MirrorsAndHashDeltaConvergeWithBoundedParallelism", MirrorsAndHashDeltaConvergeWithBoundedParallelism),
+    ("CorruptAndInterruptedAcquisitionRepairTransactionally", CorruptAndInterruptedAcquisitionRepairTransactionally),
+    ("OptionalAcquisitionFallsBackThenHotUpgradesExplicitly", OptionalAcquisitionFallsBackThenHotUpgradesExplicitly),
+    ("ResolvedPrivateDnsTargetIsRejectedAtConnectTime", ResolvedPrivateDnsTargetIsRejectedAtConnectTime),
 };
 
 foreach ((string name, Action body) in tests)
@@ -511,7 +517,7 @@ static void FailedInstallAndInterruptedStagingNeverPublish()
             False(cache.TryInstallPackage(realm, package.Manifest, corrupt, out _, out var installError));
             Equal(ContentCacheError.PayloadValidationFailed, installError);
             Equal(0, cache.GetSnapshot().BlobCount);
-            Equal(0, cache.GetSnapshot().RealmManifestCount);
+            Equal(0, cache!.GetSnapshot().RealmManifestCount);
         }
 
         string staging = Path.Combine(root, "staging");
@@ -697,6 +703,264 @@ static void CacheRejectsReparsePointStorage()
     }
 }
 
+static void ManifestEnvelopeIsCanonicalAndExact()
+{
+    PackageFixture fixture = CreateDeltaPackage(0x72);
+    True(ContentPackageManifestEnvelope.TryEncodeCanonical(fixture.Manifest, out byte[] first));
+    True(ContentPackageManifestEnvelope.TryEncodeCanonical(fixture.Manifest, out byte[] second));
+    True(first.AsSpan().SequenceEqual(second));
+    True(ContentPackageManifestEnvelope.TryDecodeCanonical(
+        first, fixture.Manifest.PackageId, fixture.Manifest.ManifestHash,
+        out ContentPackageManifest? decoded));
+    Equal(fixture.Manifest.ManifestHash, decoded!.ManifestHash);
+    byte[] damaged = first.ToArray();
+    damaged[^1] ^= 0x40;
+    False(ContentPackageManifestEnvelope.TryDecodeCanonical(
+        damaged, fixture.Manifest.PackageId, fixture.Manifest.ManifestHash, out _));
+}
+
+static void MirrorsAndHashDeltaConvergeWithBoundedParallelism()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(20, 1000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture first = CreateDeltaPackage(0x72);
+        PackageFixture second = CreateDeltaPackage(0x73);
+        using var source = new GranularFixtureSource([first, second],
+            new Dictionary<string, GranularSourceBehavior>
+            {
+                ["https://unavailable.example/package/"] = GranularSourceBehavior.Unavailable,
+                ["https://corrupt.example/package/"] = GranularSourceBehavior.Corrupt,
+                ["https://good.example/package/"] = GranularSourceBehavior.Valid,
+            });
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            ContentActivationPlan firstPlan = Plan(realm, new ContentActivationId(20, 1),
+                baseCatalog.Fingerprint, [Required(first.Manifest)]);
+            ContentPackageAcquisition firstAcquisition = Acquisition(first.Manifest,
+                "https://unavailable.example/package/", "https://good.example/package/");
+            True(ContentActivationAcquirer.TryAcquireAndPublish(
+                cache!, baseCatalog, firstPlan, [firstAcquisition], source, false,
+                out ContentCatalogLease? firstLease, out ContentActivationAcquisitionResult cold));
+            using (firstLease)
+            {
+                Equal(2, cold.SourceAttempts);
+                Equal(1, cold.SourcesRejected);
+                Equal(2, cold.FilesFetched);
+                Equal(0, cold.FilesReused);
+                True(cold.PeakConcurrentFileFetches is >= 1 and <= 2);
+            }
+
+            ContentActivationPlan secondPlan = Plan(realm, new ContentActivationId(20, 2),
+                baseCatalog.Fingerprint, [Required(second.Manifest)]);
+            ContentPackageAcquisition secondAcquisition = Acquisition(second.Manifest,
+                "https://corrupt.example/package/", "https://good.example/package/");
+            True(ContentActivationAcquirer.TryAcquireAndPublish(
+                cache!, baseCatalog, secondPlan, [secondAcquisition], source, false,
+                out ContentCatalogLease? secondLease, out ContentActivationAcquisitionResult delta));
+            using (secondLease)
+            {
+                Equal(1, delta.FilesFetched);
+                Equal(1, delta.FilesReused);
+                Equal(2, delta.SourceAttempts);
+                Equal(1, delta.SourcesRejected);
+                Equal((long)second.Payloads.Single(value =>
+                    value.Path.Value == "textures/changed.png").Bytes.Length, delta.BytesFetched);
+            }
+            Console.WriteLine($"A0.5 DELTA EVIDENCE cold_files={cold.FilesFetched} " +
+                $"delta_files={delta.FilesFetched} delta_reused={delta.FilesReused} " +
+                $"delta_bytes={delta.BytesFetched} mirrors={cold.SourceAttempts} " +
+                $"peak_parallel={cold.PeakConcurrentFileFetches}");
+        }
+    });
+
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(20, 2000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture package = CreateDeltaPackage(0x76);
+        using var source = new GranularFixtureSource([package],
+            new Dictionary<string, GranularSourceBehavior>
+            {
+                ["https://first.example/package/"] = GranularSourceBehavior.Unavailable,
+                ["https://second.example/package/"] = GranularSourceBehavior.Unavailable,
+                ["https://third.example/package/"] = GranularSourceBehavior.Valid,
+            });
+        ContentActivationPlan plan = Plan(realm, new ContentActivationId(20, 3),
+            baseCatalog.Fingerprint, [Required(package.Manifest)]);
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            False(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, plan,
+                [Acquisition(package.Manifest,
+                    "https://first.example/package/",
+                    "https://second.example/package/",
+                    "https://third.example/package/")],
+                source, false, out _, out ContentActivationAcquisitionResult bounded,
+                new ContentActivationAcquirerLimits(2, 1)));
+            Equal(2, bounded.SourceAttempts);
+            Equal(2, bounded.SourcesRejected);
+            Equal(0, cache!.GetSnapshot().RealmManifestCount);
+        }
+    });
+}
+
+static void CorruptAndInterruptedAcquisitionRepairTransactionally()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(21, 1000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture package = CreateDeltaPackage(0x74);
+        ContentActivationPlan initialPlan = Plan(realm, new ContentActivationId(21, 1),
+            baseCatalog.Fingerprint, [Required(package.Manifest)]);
+        using var valid = new GranularFixtureSource([package],
+            new Dictionary<string, GranularSourceBehavior>
+            {
+                ["https://good.example/package/"] = GranularSourceBehavior.Valid,
+            });
+        ContentPackageAcquisition acquisition = Acquisition(package.Manifest,
+            "https://good.example/package/");
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            True(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, initialPlan,
+                [acquisition], valid, false, out ContentCatalogLease? initial, out _));
+            ContentFileDescriptor damaged = package.Manifest.Files[0];
+            byte[] bytes = System.IO.File.ReadAllBytes(CacheBlobPath(root, damaged.Sha256));
+            bytes[^1] ^= 0x20;
+            System.IO.File.WriteAllBytes(CacheBlobPath(root, damaged.Sha256), bytes);
+
+            ContentActivationPlan repairPlan = Plan(realm, new ContentActivationId(21, 2),
+                baseCatalog.Fingerprint, [Required(package.Manifest)]);
+            False(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, repairPlan,
+                [acquisition], valid, false, out _, out ContentActivationAcquisitionResult busyRepair));
+            Equal(ContentActivationAcquisitionStatus.InstallFailure, busyRepair.Status);
+            Equal(ContentCacheError.CacheBusy, busyRepair.CacheError);
+            initial!.Dispose();
+            True(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, repairPlan,
+                [acquisition], valid, false, out ContentCatalogLease? repaired,
+                out ContentActivationAcquisitionResult repair));
+            repaired!.Dispose();
+            Equal(1, repair.FilesFetched);
+            Equal(1UL, cache!.GetSnapshot().BlobsRepaired);
+            True(cache.TryOpenPackage(realm, package.Manifest.PackageId,
+                package.Manifest.ManifestHash, out _, out var packageError), packageError.ToString());
+
+            string manifestPath = Directory.GetFiles(Path.Combine(root, "realms"), "*.manifest",
+                SearchOption.AllDirectories).Single();
+            byte[] manifestBytes = System.IO.File.ReadAllBytes(manifestPath);
+            manifestBytes[^1] ^= 0x10;
+            System.IO.File.WriteAllBytes(manifestPath, manifestBytes);
+            ContentActivationPlan manifestRepairPlan = Plan(realm, new ContentActivationId(21, 3),
+                baseCatalog.Fingerprint, [Required(package.Manifest)]);
+            True(ContentActivationAcquirer.TryAcquireAndPublish(cache, baseCatalog, manifestRepairPlan,
+                [acquisition], valid, false, out ContentCatalogLease? manifestRepaired,
+                out ContentActivationAcquisitionResult manifestRepair));
+            manifestRepaired!.Dispose();
+            Equal(0, manifestRepair.FilesFetched);
+            Equal(2, manifestRepair.FilesReused);
+            Equal(1UL, cache.GetSnapshot().ManifestsRepaired);
+        }
+    });
+
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(21, 2000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture package = CreateDeltaPackage(0x75);
+        ContentActivationPlan plan = Plan(realm, new ContentActivationId(21, 3),
+            baseCatalog.Fingerprint, [Required(package.Manifest)]);
+        using var interrupted = new GranularFixtureSource([package],
+            new Dictionary<string, GranularSourceBehavior>
+            {
+                ["https://interrupted.example/package/"] = GranularSourceBehavior.Interrupted,
+            });
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            False(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, plan,
+                [Acquisition(package.Manifest, "https://interrupted.example/package/")],
+                interrupted, false, out _, out ContentActivationAcquisitionResult failed));
+            Equal(ContentActivationAcquisitionStatus.SourceFailure, failed.Status);
+            Equal(0, cache!.GetSnapshot().BlobCount);
+            Equal(0, cache.GetSnapshot().RealmManifestCount);
+            Equal(0, cache.GetSnapshot().RealmActivationCount);
+        }
+    });
+}
+
+static void OptionalAcquisitionFallsBackThenHotUpgradesExplicitly()
+{
+    WithCacheRoot(root =>
+    {
+        ApplicationRealmId realm = new(22, 1000);
+        ContentBaseCatalog baseCatalog = BaseCatalog();
+        PackageFixture package = CreateAddPackage();
+        var optional = new ContentActivationPackage(package.Manifest.PackageId,
+            package.Manifest.ManifestHash, ContentRequirementPolicy.Optional);
+        ContentActivationPlan plan = Plan(realm, new ContentActivationId(22, 1),
+            baseCatalog.Fingerprint, [optional]);
+        string locator = "https://optional.example/package/";
+        ContentPackageAcquisition acquisition = Acquisition(package.Manifest, locator);
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out var openError), openError.ToString());
+        using (cache)
+        {
+            ContentCatalogLease? fallback = null;
+            using (var unavailable = new GranularFixtureSource([package],
+                       new Dictionary<string, GranularSourceBehavior>
+                       {
+                           [locator] = GranularSourceBehavior.Unavailable,
+                       }))
+            {
+                True(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, plan,
+                    [acquisition], unavailable, false, out fallback,
+                    out ContentActivationAcquisitionResult deferred));
+                Equal(1, deferred.OptionalPackagesDeferred);
+                False(fallback!.Catalog.TryGet(Logical("server:texture/banner"), out _));
+            }
+            using (var available = new GranularFixtureSource([package],
+                       new Dictionary<string, GranularSourceBehavior>
+                       {
+                           [locator] = GranularSourceBehavior.Valid,
+                       }))
+            {
+                True(ContentActivationAcquirer.TryAcquireAndPublish(cache!, baseCatalog, plan,
+                    [acquisition], available, false, out ContentCatalogLease? upgraded,
+                    out ContentActivationAcquisitionResult applied));
+                using (upgraded)
+                {
+                    Equal(0, applied.OptionalPackagesDeferred);
+                    True(upgraded!.Catalog.TryGet(Logical("server:texture/banner"), out _));
+                    False(fallback!.Catalog.TryGet(Logical("server:texture/banner"), out _));
+                }
+            }
+            fallback!.Dispose();
+        }
+    });
+}
+
+static void ResolvedPrivateDnsTargetIsRejectedAtConnectTime()
+{
+    PackageFixture package = CreateReplacePackage();
+    var resolver = new FixedContentHostResolver(IPAddress.Loopback);
+    using var source = new HttpContentPackageSource(
+        resolver, certificateValidation: null,
+        new ContentPackageSourceLimits(1024 * 1024, 2_000,
+            allowInsecureServerHostedHttp: false, allowPrivateNetworkTargets: false));
+    var request = new ContentPackageManifestFetchRequest(
+        new ApplicationRealmId(23, 1000), package.Manifest.PackageId,
+        package.Manifest.ManifestHash,
+        new ContentSourceDescriptor(ContentSourceKind.ExternalHttps,
+            "https://public-looking.example/package/"));
+    False(source.TryFetchManifest(in request, out _, out ContentSourceFetchError error));
+    Equal(ContentSourceFetchError.Unavailable, error);
+    Equal(1, resolver.Resolutions);
+    Equal(0L, source.GetSnapshot().ManifestBytesRead);
+}
+
 static ContentBaseCatalog BaseCatalog(PackageFixture? fixture = null)
 {
     PackageFixture selected = fixture ?? CreateBasePackage();
@@ -776,6 +1040,34 @@ static PackageFixture CreateAddPackage()
         ContentTrustClass.ServerAuthorizedPassive, [file], [texture, material!]);
     return new PackageFixture(manifest, [new ContentFilePayload(path, png)]);
 }
+
+static PackageFixture CreateDeltaPackage(byte changedMarker)
+{
+    byte[] commonBytes = Png(0x71);
+    byte[] changedBytes = Png(changedMarker);
+    ContentFilePath commonPath = FilePath("textures/common.png");
+    ContentFilePath changedPath = FilePath("textures/changed.png");
+    ContentDefinitionDescriptor changed = TextureDefinition(
+        "cabin:texture/wall", ContentDefinitionOperation.Replace, changedPath.Value!);
+    ContentDefinitionDescriptor common = TextureDefinition(
+        "delta:texture/common", ContentDefinitionOperation.Add, commonPath.Value!);
+    ContentPackageManifest manifest = Manifest(
+        "delta.presentation", "delta", ContentTrustClass.ServerAuthorizedPassive,
+        [File(commonPath, ContentFileKind.PngTexture, commonBytes),
+         File(changedPath, ContentFileKind.PngTexture, changedBytes)],
+        [common, changed]);
+    return new PackageFixture(manifest,
+        [new ContentFilePayload(commonPath, commonBytes),
+         new ContentFilePayload(changedPath, changedBytes)]);
+}
+
+static ContentPackageAcquisition Acquisition(
+    ContentPackageManifest manifest,
+    params string[] locators) => new(
+        manifest.PackageId,
+        manifest.ManifestHash,
+        locators.Select(static value => new ContentSourceDescriptor(
+            ContentSourceKind.ExternalHttps, value)));
 
 static PackageFixture CreateSingleTexturePackage(
     string packageId,
@@ -937,3 +1229,137 @@ static void NotEqual<T>(T left, T right) where T : notnull
 internal sealed record PackageFixture(
     ContentPackageManifest Manifest,
     ContentFilePayload[] Payloads);
+
+internal enum GranularSourceBehavior : byte
+{
+    Valid = 1,
+    Unavailable = 2,
+    Corrupt = 3,
+    Interrupted = 4,
+}
+
+internal sealed class GranularFixtureSource : IContentPackageFileSource, IDisposable
+{
+    private readonly Dictionary<ContentHash, PackageFixture> _packages;
+    private readonly IReadOnlyDictionary<string, GranularSourceBehavior> _behaviors;
+    private int _active;
+    private int _peak;
+
+    internal GranularFixtureSource(
+        IEnumerable<PackageFixture> packages,
+        IReadOnlyDictionary<string, GranularSourceBehavior> behaviors)
+    {
+        _packages = packages.ToDictionary(static value => value.Manifest.ManifestHash);
+        _behaviors = behaviors;
+    }
+
+    internal int PeakConcurrency => Volatile.Read(ref _peak);
+
+    public bool CanFetch(ContentSourceKind kind) => false;
+
+    public bool CanFetchFiles(in ContentSourceDescriptor source) =>
+        source.Kind == ContentSourceKind.ExternalHttps && _behaviors.ContainsKey(source.Locator);
+
+    public bool TryFetch(
+        in ContentPackageFetchRequest request,
+        out FetchedContentPackage? package,
+        out ContentSourceFetchError error)
+    {
+        package = null;
+        error = ContentSourceFetchError.UnsupportedSource;
+        return false;
+    }
+
+    public bool TryFetchManifest(
+        in ContentPackageManifestFetchRequest request,
+        out ContentPackageManifest? manifest,
+        out ContentSourceFetchError error)
+    {
+        manifest = null;
+        if (!_behaviors.TryGetValue(request.Source.Locator, out GranularSourceBehavior behavior) ||
+            behavior == GranularSourceBehavior.Unavailable ||
+            !_packages.TryGetValue(request.ManifestHash, out PackageFixture? package))
+        {
+            error = ContentSourceFetchError.Unavailable;
+            return false;
+        }
+        manifest = package.Manifest;
+        error = ContentSourceFetchError.None;
+        return true;
+    }
+
+    public bool TryFetchFile(
+        in ContentFileFetchRequest request,
+        out ContentFilePayload payload,
+        out ContentSourceFetchError error)
+    {
+        payload = default;
+        if (!_behaviors.TryGetValue(request.Source.Locator, out GranularSourceBehavior behavior) ||
+            behavior == GranularSourceBehavior.Unavailable ||
+            !_packages.TryGetValue(request.ManifestHash, out PackageFixture? package))
+        {
+            error = ContentSourceFetchError.Unavailable;
+            return false;
+        }
+        int active = Interlocked.Increment(ref _active);
+        UpdatePeak(active);
+        try
+        {
+            Thread.Sleep(20);
+            if (behavior == GranularSourceBehavior.Interrupted &&
+                request.File.Path.Value!.Contains("changed", StringComparison.Ordinal))
+            {
+                error = ContentSourceFetchError.Unavailable;
+                return false;
+            }
+            ContentFilePath requestedPath = request.File.Path;
+            ContentFilePayload expected = package.Payloads.Single(value => value.Path == requestedPath);
+            if (behavior == GranularSourceBehavior.Corrupt)
+            {
+                byte[] damaged = expected.Bytes.ToArray();
+                damaged[^1] ^= 0x40;
+                payload = new ContentFilePayload(expected.Path, damaged);
+            }
+            else
+            {
+                payload = expected;
+            }
+            error = ContentSourceFetchError.None;
+            return true;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _active);
+        }
+    }
+
+    public void Dispose()
+    {
+    }
+
+    private void UpdatePeak(int value)
+    {
+        while (true)
+        {
+            int current = Volatile.Read(ref _peak);
+            if (current >= value || Interlocked.CompareExchange(ref _peak, value, current) == current) return;
+        }
+    }
+}
+
+internal sealed class FixedContentHostResolver : IContentHostResolver
+{
+    private readonly IPAddress[] _addresses;
+
+    internal FixedContentHostResolver(params IPAddress[] addresses) => _addresses = addresses;
+
+    internal int Resolutions { get; private set; }
+
+    public ValueTask<IReadOnlyList<IPAddress>> ResolveAsync(
+        string host,
+        CancellationToken cancellationToken)
+    {
+        Resolutions++;
+        return ValueTask.FromResult<IReadOnlyList<IPAddress>>(_addresses);
+    }
+}
