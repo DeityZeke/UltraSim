@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-f0.3c-profile-consent-2026-09-07.json` — authenticated protocol-v19 finite
+  control/camera profile advertisement, exact realm/revision/hash consent persistence, application
+  proof gating, layered settings/reserved-control preservation, and the actual exported Online
+  cold/remembered/changed-profile product journey;
 - `content-a0.8-native-export-closure-2026-09-07.json` — follow-up after the matching Godot Mono
   export templates became available: the actual Online Linux export, exact exported managed and
   content closure, and the full cold/warm external-deployment journey executed by that exported

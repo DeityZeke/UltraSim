@@ -139,6 +139,16 @@ public sealed class ClientShellCoordinator
         Transition(ClientShellScreen.Settings);
     }
 
+    public void OpenAdmissionSettings()
+    {
+        EnsureOwner();
+        if (_screen != ClientShellScreen.Admission || _sessionActive)
+            throw new InvalidOperationException(
+                "Scoped pre-session settings require an active admission surface.");
+        _settingsReturn = ClientShellScreen.Admission;
+        Transition(ClientShellScreen.Settings);
+    }
+
     public void CloseSettings()
     {
         EnsureOwner();

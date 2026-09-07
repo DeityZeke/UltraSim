@@ -24,6 +24,15 @@ opaque `ClientSettingsScopeKey` is not a hostname or Network endpoint. F0.3a map
 it. Core's cold `ClientSettingsFileStore` owns atomic platform-local JSON persistence;
 the one Godot application assembly owns physical event translation.
 
+F0.3c adds a second, deliberately narrower durable document for client-profile consent. It stores
+only the verified `ApplicationRealmId`, exact profile revision/hash, and selected application mode;
+the server recommendation itself remains transient. Exact identity reconnect can therefore skip a
+repeat prompt without turning endpoint text, cached bytes, or an earlier application session into
+profile authority. A changed revision or hash has no matching decision and returns to consent.
+Core's existing resolver remains the only precedence oracle: built-in defaults → global user
+settings → accepted recommendation → realm-scoped user override. `Keep My Controls` omits only the
+recommended physical mappings, and client-reserved controls can never be displaced.
+
 F0.3a also adds `ClientServerTrustRegistry` and `ClientServerTrustFileStore`. The bounded registry
 retains the deployment public key, SHA-256 fingerprint, verified realm, and last authenticated
 endpoint hint. Same-endpoint or same-realm key conflicts reject, invalid JSON falls back to an empty

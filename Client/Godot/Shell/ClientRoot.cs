@@ -28,6 +28,9 @@ public abstract partial class ClientRoot : Control
     private ResolvedClientSettings _resolved = ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     private ClientSettingsFileStore? _settingsStore;
     private ClientSettingsLoadStatus _settingsLoadStatus;
+    private ClientSettingsScopeKey _activeSettingsScope;
+    private ClientProfileRecommendation? _activeProfileRecommendation;
+    private ClientProfileApplicationMode _activeProfileMode = ClientProfileApplicationMode.Ignore;
     private Node? _controllerRoot;
     private Node? _contentCatalogRoot;
     private Node? _worldRoot;
@@ -60,6 +63,38 @@ public abstract partial class ClientRoot : Control
         throw new InvalidOperationException("The client shell is not ready.");
 
     protected ResolvedClientSettings EffectiveSettings => _resolved;
+
+    protected void ActivateServerProfile(
+        ClientSettingsScopeKey scope,
+        ClientProfileRecommendation recommendation,
+        ClientProfileApplicationMode mode)
+    {
+        if (!scope.IsValid) throw new ArgumentException("A verified realm settings scope is required.", nameof(scope));
+        ArgumentNullException.ThrowIfNull(recommendation);
+        if (mode is not (ClientProfileApplicationMode.UseServerDefaults or
+            ClientProfileApplicationMode.KeepMyControls or ClientProfileApplicationMode.Customize))
+            throw new ArgumentOutOfRangeException(nameof(mode));
+        _activeSettingsScope = scope;
+        _activeProfileRecommendation = recommendation;
+        _activeProfileMode = mode;
+        ResolveEffectiveSettings();
+    }
+
+    protected void ClearServerProfile()
+    {
+        _activeSettingsScope = default;
+        _activeProfileRecommendation = null;
+        _activeProfileMode = ClientProfileApplicationMode.Ignore;
+        ResolveEffectiveSettings();
+    }
+
+    protected void OpenServerProfileCustomization()
+    {
+        if (!_activeSettingsScope.IsValid || _activeProfileRecommendation is null)
+            throw new InvalidOperationException("No authenticated server profile is active.");
+        _shell.OpenAdmissionSettings();
+        RenderCurrentSurface();
+    }
 
     protected ClientShellSnapshot ShellSnapshot() => _shell.Snapshot(
         textEntryFocused: GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit);
@@ -229,7 +264,7 @@ public abstract partial class ClientRoot : Control
         ClientSettingsLoadResult loaded = _settingsStore.Load();
         _settingsLoadStatus = loaded.Status;
         _settings = loaded.Document;
-        _resolved = ClientSettingsResolver.Resolve(_settings);
+        ResolveEffectiveSettings(notify: false);
     }
 
     private void BuildPersistentRoots()
@@ -362,7 +397,12 @@ public abstract partial class ClientRoot : Control
     private void BuildSettingsMenu()
     {
         VBoxContainer column = CreateScrollableCenteredColumn(420);
-        column.AddChild(Title("Client Settings"));
+        bool scoped = _activeSettingsScope.IsValid && _activeProfileRecommendation is not null;
+        column.AddChild(Title(scoped ? "Server-Specific Settings" : "Client Settings"));
+        if (scoped)
+            column.AddChild(CenteredLabel(
+                "These user-owned overrides apply only to the verified application realm. " +
+                "The server recommendation is not copied into global settings."));
 
         HSlider uiScale = Slider(0.5, 3, 0.05, _resolved.UiScale);
         HSlider volume = Slider(0, 1, 0.05, _resolved.MasterVolume);
@@ -412,7 +452,7 @@ public abstract partial class ClientRoot : Control
         {
             try
             {
-                _settings = _settings.WithGlobal(new ClientSettingsLayer(
+                ClientSettingsLayer saved = new(
                     (float)uiScale.Value,
                     (float)volume.Value,
                     (float)sensitivity.Value,
@@ -421,12 +461,16 @@ public abstract partial class ClientRoot : Control
                     (ClientCameraProfile)camera.GetSelectedId(),
                     (float)distance.Value,
                     (float)fov.Value,
-                    _settings.Global.Bindings,
-                    (int)renderDistance.Value));
+                    scoped && _settings.TryGetScope(_activeSettingsScope, out ClientSettingsLayer existing)
+                        ? existing.Bindings
+                        : _settings.Global.Bindings,
+                    (int)renderDistance.Value);
+                _settings = scoped
+                    ? _settings.WithScope(_activeSettingsScope, saved)
+                    : _settings.WithGlobal(saved);
                 _settingsStore!.Save(_settings);
                 _settingsLoadStatus = ClientSettingsLoadStatus.Loaded;
-                _resolved = ClientSettingsResolver.Resolve(_settings);
-                OnEffectiveSettingsChanged(_resolved);
+                ResolveEffectiveSettings();
                 _shell.CloseSettings();
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -436,13 +480,14 @@ public abstract partial class ClientRoot : Control
             RenderCurrentSurface();
         });
         column.AddChild(save);
-        Button reset = MenuButton("Reset Global Defaults");
+        Button reset = MenuButton(scoped ? "Reset Realm Overrides" : "Reset Global Defaults");
         reset.Name = "SettingsReset";
         ConnectDeferred(reset, () =>
         {
-            _settings = new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes);
-            _resolved = ClientSettingsResolver.Resolve(_settings);
-            OnEffectiveSettingsChanged(_resolved);
+            _settings = scoped
+                ? _settings.WithScope(_activeSettingsScope, ClientSettingsLayer.Empty)
+                : new ClientSettingsDocument(ClientSettingsLayer.Empty, _settings.Scopes);
+            ResolveEffectiveSettings();
             RenderCurrentSurface();
         });
         column.AddChild(reset);
@@ -615,6 +660,16 @@ public abstract partial class ClientRoot : Control
             string.Equals(key.Keycode.ToString().ToUpperInvariant(), input.Code, StringComparison.Ordinal);
     }
 
+    private void ResolveEffectiveSettings(bool notify = true)
+    {
+        _resolved = ClientSettingsResolver.Resolve(
+            _settings,
+            _activeSettingsScope,
+            _activeProfileRecommendation,
+            _activeProfileMode);
+        if (notify) OnEffectiveSettingsChanged(_resolved);
+    }
+
     protected VBoxContainer CreateCenteredColumn(float width = 360)
     {
         var background = new ColorRect
@@ -633,7 +688,7 @@ public abstract partial class ClientRoot : Control
         return column;
     }
 
-    private VBoxContainer CreateScrollableCenteredColumn(float width)
+    protected VBoxContainer CreateScrollableCenteredColumn(float width)
     {
         var background = new ColorRect
         {

@@ -62,6 +62,14 @@ same Game authority path as local play. Complete owner state is latest-state, wh
 Chat occurrence, and generic UI adapters preserve their existing independent application-proof
 contracts.
 
+F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
+guest admission. It hostile-validates the finite protocol-v19 profile vocabulary, maps it into
+Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
+decision or waits for explicit local consent. Only after durable decision persistence does it emit
+the exact application-session/profile proof that lets the server continue. Cached decisions do not
+cross realms or changed profile identities, endpoint text is never a scope, and the adapter owns no
+input execution or Godot presentation.
+
 The remote playable composition accepts either an already verified/preinstalled
 `ClientWorldSemanticCache` or, after A0.7, one exact required WorldPack binding. A0.3 adds a
 separate optional `RemoteContentClient` before guest admission. It validates the Game-protocol requirement against the

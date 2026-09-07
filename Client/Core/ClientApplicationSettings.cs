@@ -238,8 +238,9 @@ public enum ClientProfileApplicationMode : byte
 
 /// <summary>
 /// Opaque persistence scope supplied by composition. It is not a Network
-/// endpoint and does not claim authenticated realm identity. F0.3a will map a
-/// verified ApplicationRealmId into this store shape.
+/// endpoint and does not claim authenticated realm identity. Remote composition
+/// maps a verified ApplicationRealmId into this store shape; an endpoint never
+/// becomes a settings owner.
 /// </summary>
 public readonly record struct ClientSettingsScopeKey
 {
@@ -274,7 +275,11 @@ public readonly record struct ClientScopedSettings(
     ClientSettingsScopeKey Scope,
     ClientSettingsLayer Layer);
 
-/// <summary>Immutable user settings document; server recommendations are deliberately absent.</summary>
+/// <summary>
+/// Immutable user settings document; server recommendations are deliberately absent.
+/// F0.3c persists the consent decision identity separately while the accepted
+/// recommendation remains transient application-session state.
+/// </summary>
 public sealed class ClientSettingsDocument
 {
     public const int CurrentVersion = 3;

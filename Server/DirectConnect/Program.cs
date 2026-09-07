@@ -39,9 +39,11 @@ using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDire
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
 using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
     realm, options.ContentEndPoint);
+RemoteClientProfileAdvertisement clientProfile =
+    ConceptDemoClientProfiles.Create(options.ClientProfile);
 using HostedUdpAdmissionHost host = CreateHost(
     options.BindEndPoint, identity, realm, content.Authorization,
-    [UiDefinitionIdentity.From(InventoryUi.Definition)]);
+    [UiDefinitionIdentity.From(InventoryUi.Definition)], clientProfile);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
@@ -51,6 +53,9 @@ Console.WriteLine($"Content archive: {content.Snapshot.ArchiveUri} ({content.Sna
 Console.WriteLine(
     $"WorldPack: {content.Snapshot.WorldPackFingerprint} " +
     $"({content.Snapshot.WorldChunks} chunks / {content.Snapshot.WorldPackBytes} bytes)");
+Console.WriteLine(
+    $"Client profile: {options.ClientProfile} revision={clientProfile.Revision} " +
+    $"hash={ProfileHash(clientProfile.Hash)}");
 Console.WriteLine("This A0.8 endpoint admits one authenticated remote guest into the Concept Demo.");
 Console.WriteLine("Press Ctrl+C to stop.");
 WriteReady(options.ReadyFile, new DirectConnectReady(
@@ -59,7 +64,8 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     content.Snapshot.WorldPackBytes, content.Snapshot.UiBytes,
     content.Snapshot.ManifestHash.ToString(), content.Snapshot.PlanHash.ToString(),
     content.Snapshot.CatalogFingerprint.ToString(),
-    content.Snapshot.WorldPackFingerprint.ToString(), content.Snapshot.WorldChunks));
+    content.Snapshot.WorldPackFingerprint.ToString(), content.Snapshot.WorldChunks,
+    options.ClientProfile, clientProfile.Revision, ProfileHash(clientProfile.Hash)));
 
 using var stopping = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -79,7 +85,8 @@ static HostedUdpAdmissionHost CreateHost(
     NetworkServerIdentity identity,
     ApplicationRealmId realm,
     RemoteContentAuthorization? contentAuthorization = null,
-    IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
+    IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
+    RemoteClientProfileAdvertisement? clientProfile = null)
 {
     UdpProtocolLimits udp = UdpProtocolLimits.Default;
     SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default with
@@ -102,7 +109,7 @@ static HostedUdpAdmissionHost CreateHost(
         HostedUdpAdmissionLimits.Default,
         owners,
         new RemoteGuestPlayableApplicationFactory(
-            realm, contentAuthorization, contentBackedUiDefinitions),
+            realm, contentAuthorization, contentBackedUiDefinitions, clientProfile),
         UltraSimGameProtocol.Manifest);
 }
 
@@ -224,11 +231,22 @@ static string Group(string fingerprint) => string.Join(':',
     Enumerable.Range(0, fingerprint.Length / 2)
         .Select(index => fingerprint.Substring(index * 2, 2)));
 
+static string ProfileHash(RemoteClientProfileHash hash)
+{
+    Span<byte> bytes = stackalloc byte[32];
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes, hash.Part0);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], hash.Part1);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes[16..], hash.Part2);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes[24..], hash.Part3);
+    return Convert.ToHexString(bytes).ToLowerInvariant();
+}
+
 internal readonly record struct DirectConnectOptions(
     IPEndPoint BindEndPoint,
     IPEndPoint ContentEndPoint,
     string IdentityDirectory,
     string? ReadyFile,
+    string ClientProfile,
     bool EphemeralSmoke)
 {
     internal static DirectConnectOptions Parse(string[] arguments)
@@ -240,6 +258,7 @@ internal readonly record struct DirectConnectOptions(
             "UltraSim", "Server", "DirectConnect");
         bool smoke = false;
         string? readyFile = null;
+        string clientProfile = "third-person";
         foreach (string argument in arguments)
         {
             if (argument == "--ephemeral-smoke")
@@ -282,9 +301,18 @@ internal readonly record struct DirectConnectOptions(
                 readyFile = Path.GetFullPath(value);
                 continue;
             }
+            if (argument.StartsWith("--client-profile=", StringComparison.Ordinal))
+            {
+                clientProfile = argument["--client-profile=".Length..].Trim().ToLowerInvariant();
+                if (clientProfile is not ("orbit" or "third-person" or "independent"))
+                    throw new ArgumentException(
+                        "--client-profile must be orbit, third-person, or independent.");
+                continue;
+            }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
-        return new DirectConnectOptions(endpoint, contentEndpoint, identity, readyFile, smoke);
+        return new DirectConnectOptions(
+            endpoint, contentEndpoint, identity, readyFile, clientProfile, smoke);
 
         static IPEndPoint ParseEndpoint(string value, string option)
         {
@@ -312,4 +340,7 @@ internal readonly record struct DirectConnectReady(
     string PlanHash,
     string CatalogFingerprint,
     string WorldPackFingerprint,
-    int WorldChunks);
+    int WorldChunks,
+    string ClientProfile,
+    ulong ClientProfileRevision,
+    string ClientProfileHash);

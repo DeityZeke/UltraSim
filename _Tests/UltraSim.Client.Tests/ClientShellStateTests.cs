@@ -21,6 +21,10 @@ static class ClientShellStateTests
         Equal(ClientShellScreen.Admission, admission.Screen);
         Equal(ClientInputFocusOwner.ModalMenu, admission.Focus.Owner);
         True(!admission.Focus.GameplayInputAllowed);
+        shell.OpenAdmissionSettings();
+        Equal(ClientShellScreen.Settings, shell.Snapshot().Screen);
+        shell.CloseSettings();
+        Equal(ClientShellScreen.Admission, shell.Snapshot().Screen);
         shell.ReturnToMainMenu();
 
         shell.BeginLoading("Entering local world");

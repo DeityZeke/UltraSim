@@ -105,6 +105,7 @@ internal static class Program
         }
         F03aDirectConnectTests.RunAll();
         F03bRemotePlayableTests.RunAll();
+        F03cClientProfileTests.RunAll();
         Console.WriteLine(
             $"All {tests.Length} Network N0.4 through N0.10 application tests plus " +
             $"{F03aDirectConnectTests.TestCount} Client F0.3a Direct Connect and " +
@@ -113,7 +114,8 @@ internal static class Program
             $"{F03bRemotePlayableTests.A04TestCount} A0.4 plus " +
             $"{F03bRemotePlayableTests.A05TestCount} A0.5 plus " +
             $"{F03bRemotePlayableTests.A06TestCount} A0.6 plus " +
-            $"{F03bRemotePlayableTests.A07TestCount} A0.7 content/World tests passed.");
+            $"{F03bRemotePlayableTests.A07TestCount} A0.7 content/World plus " +
+            $"{F03cClientProfileTests.TestCount} F0.3c client-profile tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
             RunN09Benchmark(args);
         else if (args.Contains("--benchmark-n08", StringComparer.Ordinal))

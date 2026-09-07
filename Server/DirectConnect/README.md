@@ -34,6 +34,13 @@ deployment P-256 key and independent
 on Unix. The printed SHA-256 fingerprint is what a tester compares on the client's
 first-use trust screen.
 
+F0.3c publishes one finite stock client profile after authenticated realm identity and gates
+content/admission on its exact application-session proof. Select the development profile with
+`--client-profile=orbit`, `--client-profile=third-person` (the default), or
+`--client-profile=independent`. The deployment publishes only canonical grammar, camera parameters,
+and physical-binding recommendations; it never supplies client code. Profile revision/hash are
+printed and included in the verifier readiness record.
+
 The default content source is plain loopback HTTP for explicit local development. The stock client
 requires the corresponding private/insecure-source opt-in; production deployment is expected to
 advertise HTTPS or an equivalently admitted immutable-byte source rather than silently weakening

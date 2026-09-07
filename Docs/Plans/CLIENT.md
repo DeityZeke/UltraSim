@@ -1757,7 +1757,30 @@ the accepted local semantic result under relevant loss/reconnect cases.
 
 ## F0.3c — Server client-profile negotiation and consent
 
-Implement:
+**Status: CLOSED.** Game protocol v19 now places one bounded, canonical declarative client-profile
+advertisement immediately after authenticated application-realm identity and before required
+content or guest admission. The exact revision/hash covers only finite stock control grammar,
+camera profile, bounded camera parameters, and canonical physical bindings. The decoder rejects
+unknown vocabulary, malformed values, duplicate or noncanonical binding order, trailing bytes, and
+oversized input. No assembly, script, resource path, or executable payload can enter the profile.
+
+The client maps that wire vocabulary into the existing `ClientProfileRecommendation` and stops at a
+local consent surface. `Use Server Defaults`, `Keep My Controls`, and `Customize for This Server`
+record only the selected mode plus exact `(ApplicationRealmId, profile revision, profile hash)` in
+a separate atomic settings document. The recommendation remains transient and never rewrites the
+global user settings file. Exact reconnect reuses the remembered decision; either a changed hash or
+a changed revision requires a new choice. A decision is durable before the client queues the exact
+profile-handled proof, and the server refuses content/admission progress until that proof matches
+the current application-session lineage and profile identity.
+
+The Godot Online path consumes the resulting layered settings rather than retaining the old
+hard-coded third-person controller. OrbitCommand, ThirdPersonDirect, and IndependentMoveLook now
+select their corresponding stock control/camera behavior in the same exported executable. Scoped
+user overrides remain above the accepted recommendation, and reserved application controls remain
+client-owned. The development Direct Connect deployment selects its finite profile with
+`--client-profile=orbit|third-person|independent`.
+
+Accepted scope:
 
 - server-advertised declarative client profile identity/hash;
 - `Use Server Defaults / Keep My Controls / Customize` flow;
@@ -1771,8 +1794,15 @@ Hard rules:
 - client-reserved controls remain available;
 - no executable code in client profile.
 
-**Gate:** materially different supported control profiles can be selected without changing the
-client executable, while user settings and reserved controls remain intact.
+**Gate:** focused Client Core and external Network application tests prove exact realm/profile
+decision persistence, changed-profile prompting, stale-proof rejection, pre-profile admission
+blocking, layered precedence, and reserved-control retention. The actual exported Contentless
+Online product proves cold decision, exact remembered reconnect, and same-realm/same-revision
+changed-hash re-consent while switching from ThirdPersonDirect/ThirdPersonFollow to
+OrbitCommand/Orbit without changing the executable or refetching warm content.
+
+F0.3c does not advertise executable controls, add arbitrary action vocabularies, or implement
+general remote actor/selection/nameplate presentation; those remain later consumers.
 
 ---
 
@@ -2210,9 +2240,9 @@ A0.7  complete canonical WorldPack streaming                              CLOSED
         |
 A0.8  native Contentless Online world entry                              CLOSED
         |
-F0.3c server client-profile consent/settings                              NEXT
+F0.3c server client-profile consent/settings                              CLOSED
         |
-F0.4  actor definitions/nameplates/Ctrl/chat presentation parity
+F0.4  actor definitions/nameplates/Ctrl/chat presentation parity          NEXT
         |
 F0.5  server-composed UI + standard compiled definitions + Inventory
         |

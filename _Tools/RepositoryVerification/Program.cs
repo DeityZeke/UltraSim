@@ -491,6 +491,7 @@ static void VerifyContentlessOnlineNative(
     string identity = Path.Combine(scope, "deployment");
     string cache = Path.Combine(scope, "content-cache");
     string trust = Path.Combine(scope, "client", "trusted-servers.json");
+    string profileDecisions = Path.Combine(scope, "client", "server-profiles.json");
     Directory.CreateDirectory(scope);
 
     NativeDeploymentReady coldReady;
@@ -509,12 +510,14 @@ static void VerifyContentlessOnlineNative(
                 $"--a0-8-fingerprint={coldReady.Fingerprint}",
                 $"--a0-8-cache={cache}",
                 $"--a0-8-trust={trust}",
+                $"--f0-3c-profile-decisions={profileDecisions}",
                 "--a0-8-allow-private-content",
                 "--a0-8-expect=cold",
                 "--expect-edition=Online",
             ]), 45_000);
             RequireNativeA08Result(cold, "cold", coldReady.WorldPackFingerprint,
-                expectedWarm: false);
+                expectedWarm: false, expectedRememberedProfile: false,
+                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow");
         }
         finally { StopOwnedProcess(coldServer); }
     }
@@ -530,9 +533,12 @@ static void VerifyContentlessOnlineNative(
             if (warmReady.Realm != coldReady.Realm ||
                 warmReady.Fingerprint != coldReady.Fingerprint ||
                 warmReady.CatalogFingerprint != coldReady.CatalogFingerprint ||
-                warmReady.WorldPackFingerprint != coldReady.WorldPackFingerprint)
+                warmReady.WorldPackFingerprint != coldReady.WorldPackFingerprint ||
+                warmReady.ClientProfile != coldReady.ClientProfile ||
+                warmReady.ClientProfileRevision != coldReady.ClientProfileRevision ||
+                warmReady.ClientProfileHash != coldReady.ClientProfileHash)
                 throw new InvalidOperationException(
-                    "The restarted Direct Connect deployment did not retain its realm/key/content identity.");
+                    "The restarted Direct Connect deployment did not retain its realm/key/content/profile identity.");
             string warm = RunCaptured(root, clientExecutable,
             clientArgumentPrefix.Concat(
             [
@@ -541,20 +547,62 @@ static void VerifyContentlessOnlineNative(
                 $"--a0-8-fingerprint={warmReady.Fingerprint}",
                 $"--a0-8-cache={cache}",
                 $"--a0-8-trust={trust}",
+                $"--f0-3c-profile-decisions={profileDecisions}",
                 "--a0-8-allow-private-content",
                 "--a0-8-expect=warm",
                 "--expect-edition=Online",
             ]), 45_000);
             RequireNativeA08Result(warm, "warm", warmReady.WorldPackFingerprint,
-                expectedWarm: true);
+                expectedWarm: true, expectedRememberedProfile: true,
+                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow");
         }
         finally { StopOwnedProcess(warmServer); }
     }
 
+    NativeDeploymentReady changedReady;
+    using (Process changedServer = StartNativeDeployment(
+               root, configuration, identity, Path.Combine(scope, "changed-ready.json"),
+               ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+               ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp), out changedReady,
+               clientProfile: "orbit"))
+    {
+        try
+        {
+            if (changedReady.Realm != coldReady.Realm ||
+                changedReady.Fingerprint != coldReady.Fingerprint ||
+                changedReady.CatalogFingerprint != coldReady.CatalogFingerprint ||
+                changedReady.WorldPackFingerprint != coldReady.WorldPackFingerprint ||
+                changedReady.ClientProfileRevision != coldReady.ClientProfileRevision ||
+                changedReady.ClientProfileHash == coldReady.ClientProfileHash ||
+                changedReady.ClientProfile == coldReady.ClientProfile)
+                throw new InvalidOperationException(
+                    "The changed-profile deployment did not preserve authority/content identity " +
+                    "while changing only the exact profile hash/selection.");
+            string changed = RunCaptured(root, clientExecutable,
+            clientArgumentPrefix.Concat(
+            [
+                "--a0-8-smoke",
+                $"--a0-8-endpoint={changedReady.Endpoint}",
+                $"--a0-8-fingerprint={changedReady.Fingerprint}",
+                $"--a0-8-cache={cache}",
+                $"--a0-8-trust={trust}",
+                $"--f0-3c-profile-decisions={profileDecisions}",
+                "--a0-8-allow-private-content",
+                "--a0-8-expect=warm",
+                "--expect-edition=Online",
+            ]), 45_000);
+            RequireNativeA08Result(changed, "warm", changedReady.WorldPackFingerprint,
+                expectedWarm: true, expectedRememberedProfile: false,
+                expectedProfile: "grammar=OrbitCommand camera=Orbit");
+        }
+        finally { StopOwnedProcess(changedServer); }
+    }
+
     Console.WriteLine(
-        $"PASS A0.8_ContentlessOnlineNative coldWarm=true realm={coldReady.Realm} " +
+        $"PASS A0.8_ContentlessOnlineNative coldWarm=true profileChange=true realm={coldReady.Realm} " +
         $"world={coldReady.WorldPackFingerprint} chunks={coldReady.WorldChunks} " +
-        $"archiveBytes={coldReady.ArchiveBytes}");
+        $"archiveBytes={coldReady.ArchiveBytes} profileRevision={coldReady.ClientProfileRevision} " +
+        $"thirdPersonHash={coldReady.ClientProfileHash} orbitHash={changedReady.ClientProfileHash}");
     Directory.Delete(scope, recursive: true);
 }
 
@@ -565,7 +613,8 @@ static Process StartNativeDeployment(
     string readyFile,
     int applicationPort,
     int contentPort,
-    out NativeDeploymentReady ready)
+    out NativeDeploymentReady ready,
+    string clientProfile = "third-person")
 {
     var start = new ProcessStartInfo("dotnet")
     {
@@ -580,6 +629,7 @@ static Process StartNativeDeployment(
         $"--content-bind=127.0.0.1:{contentPort}",
         $"--identity-dir={identityDirectory}",
         $"--ready-file={readyFile}",
+        $"--client-profile={clientProfile}",
     }) start.ArgumentList.Add(argument);
     Console.WriteLine($"> dotnet {string.Join(' ', start.ArgumentList.Select(Quote))}");
     Process process = Process.Start(start) ??
@@ -605,7 +655,10 @@ static Process StartNativeDeployment(
             RequiredString(value, "CatalogFingerprint"),
             RequiredString(value, "WorldPackFingerprint"),
             value.GetProperty("ArchiveBytes").GetInt64(),
-            value.GetProperty("WorldChunks").GetInt32());
+            value.GetProperty("WorldChunks").GetInt32(),
+            RequiredString(value, "ClientProfile"),
+            value.GetProperty("ClientProfileRevision").GetUInt64(),
+            RequiredString(value, "ClientProfileHash"));
         return process;
     }
     catch
@@ -628,10 +681,15 @@ static void RequireNativeA08Result(
     string output,
     string mode,
     string worldPackFingerprint,
-    bool expectedWarm)
+    bool expectedWarm,
+    bool expectedRememberedProfile,
+    string expectedProfile)
 {
     string pass = $"A0.8 CONTENTLESS ONLINE PASS mode={mode}";
     if (!output.Contains(pass, StringComparison.Ordinal) ||
+        !output.Contains("F0.3c CLIENT PROFILE APPLIED", StringComparison.Ordinal) ||
+        !output.Contains(expectedRememberedProfile ? "remembered=True" : "remembered=False", StringComparison.Ordinal) ||
+        !output.Contains(expectedProfile, StringComparison.Ordinal) ||
         !output.Contains($"world={worldPackFingerprint}", StringComparison.Ordinal) ||
         !output.Contains("chunks=9", StringComparison.Ordinal) ||
         !output.Contains("proofs=1", StringComparison.Ordinal) ||
@@ -1337,7 +1395,10 @@ internal sealed record NativeDeploymentReady(
     string CatalogFingerprint,
     string WorldPackFingerprint,
     long ArchiveBytes,
-    int WorldChunks);
+    int WorldChunks,
+    string ClientProfile,
+    ulong ClientProfileRevision,
+    string ClientProfileHash);
 
 internal sealed record ContentlessOnlineExport(
     string Scope,

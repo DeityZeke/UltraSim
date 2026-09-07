@@ -1,4 +1,5 @@
 using UltraSim.Client.Core;
+using UltraSim.Game.Application;
 
 static class ClientApplicationSettingsTests
 {
@@ -103,6 +104,48 @@ static class ClientApplicationSettingsTests
             new ClientSettingsLayer(renderDistanceChunks: 4));
         True(!ClientSettingsScopeKey.TryCreate("host:2593/path", out _),
             "Endpoint syntax must not masquerade as a settings scope identity.");
+
+        ProfileDecisionsAreRealmAndExactIdentityScoped();
+    }
+
+    private static void ProfileDecisionsAreRealmAndExactIdentityScoped()
+    {
+        string root = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-profile-decisions-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        string path = Path.Combine(root, "settings", "server-profiles.json");
+        try
+        {
+            var realm = new ApplicationRealmId(0xF03C, 1);
+            var hashA = new ClientProfileHash(1, 2, 3, 4);
+            var hashB = new ClientProfileHash(5, 6, 7, 8);
+            var decision = new ClientProfileDecision(
+                realm, 7, hashA, ClientProfileApplicationMode.KeepMyControls);
+            ClientProfileDecisionDocument document =
+                ClientProfileDecisionDocument.Empty.WithDecision(in decision);
+            var store = new ClientProfileDecisionFileStore(path);
+            store.Save(document);
+            Equal(ClientProfileDecisionLoadStatus.Loaded, store.Load().Status);
+            ClientProfileDecisionDocument restored = store.Load().Document;
+            True(restored.TryFindExact(realm, 7, hashA, out ClientProfileDecision exact));
+            Equal(ClientProfileApplicationMode.KeepMyControls, exact.Mode);
+            True(!restored.TryFindExact(realm, 8, hashA, out _),
+                "A changed profile revision reused an old consent decision.");
+            True(!restored.TryFindExact(realm, 7, hashB, out _),
+                "A changed profile hash reused an old consent decision.");
+            True(!restored.TryFindExact(new ApplicationRealmId(0xF03C, 2), 7, hashA, out _),
+                "A different verified realm reused another realm's profile consent.");
+            string persisted = File.ReadAllText(path);
+            True(!persisted.Contains("recommendation", StringComparison.OrdinalIgnoreCase),
+                "Transient server recommendation data leaked into durable consent persistence.");
+            File.WriteAllText(path, persisted.Replace(
+                realm.ToString(), realm.ToString().ToUpperInvariant(), StringComparison.Ordinal));
+            Equal(ClientProfileDecisionLoadStatus.InvalidFallback, store.Load().Status);
+            Equal(0, store.Load().Document.Decisions.Count);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 
     private static ClientPhysicalBinding Binding(

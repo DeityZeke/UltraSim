@@ -13,13 +13,18 @@ public partial class ClientHost
     private ClientServerTrustRegistry? _serverTrust;
     private ClientServerTrustFileStore? _serverTrustStore;
     private ClientDirectConnectSession? _remoteSession;
+    private ClientProfileDecisionFileStore? _profileDecisionStore;
+    private ClientProfileDecisionDocument _profileDecisions = ClientProfileDecisionDocument.Empty;
+    private RemoteClientProfileClient? _remoteProfile;
     private RemoteConceptDemoClient? _remotePlayable;
     private string _directEndpoint = "127.0.0.1:7777";
     private string _directFingerprint = string.Empty;
     private string? _trustLoadWarning;
+    private string? _profileDecisionLoadWarning;
     private bool _remoteAdmission;
     private bool _remoteMismatch;
     private bool _remoteRetiring;
+    private bool _remoteProfileActivated;
     private bool _allowInsecurePrivateContent;
     private bool _remoteSmokeStarted;
     private bool _remoteSmokeDisconnectStarted;
@@ -41,6 +46,7 @@ public partial class ClientHost
         try
         {
             _remoteSession.Pump();
+            _remoteProfile?.ProcessReceived();
             _remotePlayable?.Pump(ShellSnapshot().Focus.GameplayInputAllowed);
             ClientDirectConnectState current = _remoteSession.State;
             if (_remoteRetiring)
@@ -99,6 +105,52 @@ public partial class ClientHost
                     return;
                 }
             }
+            if (_remoteProfile is not null && _remotePlayable is null)
+            {
+                RemoteClientProfileSnapshot profile = _remoteProfile.GetSnapshot();
+                if (profile.State == RemoteClientProfileState.Faulted)
+                {
+                    FailSession(BoundedShellMessage(
+                        profile.Detail ?? "The server client profile was rejected."));
+                    if (IsRemoteSmoke()) GetTree().Quit(1);
+                    return;
+                }
+                if (profile.State == RemoteClientProfileState.AwaitingDecision)
+                {
+                    if (IsRemoteSmoke())
+                    {
+                        if (!_remoteProfile.TryChoose(ClientProfileApplicationMode.UseServerDefaults))
+                            throw new InvalidOperationException(
+                                _remoteProfile.GetSnapshot().Detail ??
+                                "The native smoke profile decision could not be persisted.");
+                    }
+                    else if (ShellSnapshot().Screen != ClientShellScreen.Admission)
+                        BeginAdmission("Review this server's declarative client profile.");
+                    return;
+                }
+                if (profile.State == RemoteClientProfileState.Applied)
+                {
+                    if (!_remoteProfileActivated)
+                    {
+                        ActivateServerProfile(
+                            _remoteSession.GetSnapshot().SettingsScope,
+                            _remoteProfile.Recommendation,
+                            profile.Mode);
+                        _remoteProfileActivated = true;
+                        GD.Print(
+                            $"F0.3c CLIENT PROFILE APPLIED realm={profile.Realm} " +
+                            $"revision={profile.ProfileRevision} hash={profile.ProfileHash} " +
+                            $"mode={profile.Mode} remembered={profile.RememberedDecision} " +
+                            $"grammar={EffectiveSettings.ControlGrammar} camera={EffectiveSettings.CameraProfile}");
+                    }
+                    if (ShellSnapshot().Screen == ClientShellScreen.Settings) return;
+                    ClientDirectConnectSnapshot connected = _remoteSession.GetSnapshot();
+                    StartRemotePlayable(connected);
+                    BeginSessionLoading(
+                        $"Client profile {profile.ProfileRevision}/{profile.ProfileHash} applied; " +
+                        "acquiring required content…");
+                }
+            }
             if (current == _lastRemoteState) return;
             _lastRemoteState = current;
             switch (current)
@@ -115,9 +167,16 @@ public partial class ClientHost
                 case ClientDirectConnectState.Established:
                 {
                     ClientDirectConnectSnapshot snapshot = _remoteSession.GetSnapshot();
-                    StartRemotePlayable(snapshot);
+                    EnsureProfileDecisionStore();
+                    _remoteProfile = new RemoteClientProfileClient(
+                        _remoteSession.Peer ?? throw new InvalidOperationException(
+                            "The authenticated remote peer is absent."),
+                        snapshot.ApplicationSessionEpoch,
+                        snapshot.Realm,
+                        _profileDecisions,
+                        _profileDecisionStore!);
                     BeginSessionLoading(
-                        $"Connected to realm {snapshot.Realm}; acquiring and applying required content…");
+                        $"Connected to realm {snapshot.Realm}; awaiting its declarative client profile…");
                     GD.Print(
                         $"F0.3a DIRECT CONNECT ESTABLISHED endpoint={snapshot.Endpoint} " +
                         $"realm={snapshot.Realm} session={snapshot.ApplicationSessionEpoch} " +
@@ -161,6 +220,8 @@ public partial class ClientHost
         ReleaseRemotePlayable();
         _remoteSession?.Dispose();
         _remoteSession = null;
+        _remoteProfile = null;
+        _remoteProfileActivated = false;
     }
 
     protected override void BeginCapability(ClientCapability capability)
@@ -176,6 +237,9 @@ public partial class ClientHost
             _remoteSession = null;
         }
         ReleaseRemotePlayable();
+        _remoteProfile = null;
+        _remoteProfileActivated = false;
+        ClearServerProfile();
         EnsureTrustStore();
         _remoteAdmission = true;
         _remoteMismatch = false;
@@ -200,6 +264,11 @@ public partial class ClientHost
             BuildRemoteGuestSurface();
             return;
         }
+        if (_remoteProfile?.GetSnapshot().State == RemoteClientProfileState.AwaitingDecision)
+        {
+            BuildClientProfileSurface(_remoteProfile.GetSnapshot());
+            return;
+        }
         if (_remoteSession?.State == ClientDirectConnectState.AwaitingTrust)
         {
             BuildTrustCandidateSurface(_remoteSession.GetSnapshot());
@@ -215,6 +284,8 @@ public partial class ClientHost
             // Presentation consumers share the authenticated peer but do not own its transport
             // lifetime. Retire them before Direct Connect begins closing/disposes that peer.
             ReleaseRemotePlayable();
+            _remoteProfile = null;
+            _remoteProfileActivated = false;
             if (_remoteSession.State == ClientDirectConnectState.Established)
             {
                 _remoteSession.BeginDisconnect();
@@ -229,7 +300,94 @@ public partial class ClientHost
         }
         _remoteAdmission = false;
         _remoteMismatch = false;
+        _remoteProfileActivated = false;
+        ClearServerProfile();
         base.RetireCurrentSession();
+    }
+
+    protected override void OnEffectiveSettingsChanged(ResolvedClientSettings settings)
+    {
+        base.OnEffectiveSettingsChanged(settings);
+        _remotePlayable?.ApplySettings(settings);
+    }
+
+    private void BuildClientProfileSurface(in RemoteClientProfileSnapshot profile)
+    {
+        ClientProfileRecommendation recommendation = _remoteProfile!.Recommendation;
+        VBoxContainer column = CreateScrollableCenteredColumn(620);
+        column.AddChild(Title("Server Client Profile"));
+        column.AddChild(CenteredLabel(
+            "This authenticated server recommends stock client controls and camera settings. " +
+            "It cannot provide scripts or take away reserved client controls."));
+        column.AddChild(new Label
+        {
+            Text = $"Realm: {profile.Realm}\nRevision: {profile.ProfileRevision}\n" +
+                $"Hash: {profile.ProfileHash}\nGrammar: {recommendation.ControlGrammar}\n" +
+                $"Camera: {recommendation.CameraProfile}\nDistance: {recommendation.CameraDistance:0.0} m\n" +
+                $"FOV: {recommendation.CameraFovDegrees:0.#}°",
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        });
+        if (!string.IsNullOrWhiteSpace(_profileDecisionLoadWarning))
+            column.AddChild(new Label
+            {
+                Text = _profileDecisionLoadWarning,
+                Modulate = new Color(1f, 0.62f, 0.28f),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            });
+        foreach (ClientPhysicalBinding binding in recommendation.Bindings)
+        {
+            if (ClientReservedControls.IsReserved(binding.Action)) continue;
+            column.AddChild(new Label
+            {
+                Text = $"{binding.Action}: {binding.Input.Modifiers}{binding.Input.Code}",
+            });
+        }
+        Button defaults = MenuButton("Use Server Defaults");
+        defaults.Name = "ClientProfileUseDefaults";
+        ConnectDeferred(defaults, () => ChooseRemoteProfile(
+            ClientProfileApplicationMode.UseServerDefaults, customize: false));
+        column.AddChild(defaults);
+        Button keep = MenuButton("Keep My Controls");
+        keep.Name = "ClientProfileKeepControls";
+        ConnectDeferred(keep, () => ChooseRemoteProfile(
+            ClientProfileApplicationMode.KeepMyControls, customize: false));
+        column.AddChild(keep);
+        Button customize = MenuButton("Customize for This Server");
+        customize.Name = "ClientProfileCustomize";
+        ConnectDeferred(customize, () => ChooseRemoteProfile(
+            ClientProfileApplicationMode.Customize, customize: true));
+        column.AddChild(customize);
+        Button disconnect = MenuButton("Disconnect / Back");
+        ConnectDeferred(disconnect, () =>
+        {
+            RetireCurrentSession();
+            ReturnToMainMenu("Server profile was not accepted.");
+        });
+        column.AddChild(disconnect);
+        defaults.GrabFocus();
+    }
+
+    private void ChooseRemoteProfile(ClientProfileApplicationMode mode, bool customize)
+    {
+        if (_remoteProfile?.TryChoose(mode) != true)
+        {
+            FailSession(_remoteProfile?.GetSnapshot().Detail ??
+                "The server profile decision could not be saved.");
+            return;
+        }
+        RemoteClientProfileSnapshot profile = _remoteProfile.GetSnapshot();
+        _profileDecisions = _remoteProfile.DecisionDocument;
+        ActivateServerProfile(
+            _remoteSession!.GetSnapshot().SettingsScope,
+            _remoteProfile.Recommendation,
+            profile.Mode);
+        _remoteProfileActivated = true;
+        if (customize)
+        {
+            OpenServerProfileCustomization();
+            return;
+        }
+        BeginSessionLoading("Applying the accepted server profile…");
     }
 
     private void BuildDirectConnectSurface()
@@ -542,6 +700,19 @@ public partial class ClientHost
         if (loaded.Status == ClientServerTrustLoadStatus.Invalid)
             _trustLoadWarning =
                 $"Invalid saved server trust was ignored (fail closed): {loaded.Error}";
+    }
+
+    private void EnsureProfileDecisionStore()
+    {
+        if (_profileDecisionStore is not null) return;
+        string path = ReadArgument("--f0-3c-profile-decisions=") ??
+            ProjectSettings.GlobalizePath("user://settings/server-profiles.json");
+        _profileDecisionStore = new ClientProfileDecisionFileStore(path);
+        ClientProfileDecisionLoadResult loaded = _profileDecisionStore.Load();
+        _profileDecisions = loaded.Document;
+        if (loaded.Status == ClientProfileDecisionLoadStatus.InvalidFallback)
+            _profileDecisionLoadWarning =
+                $"Invalid saved server-profile decisions were ignored: {loaded.Error}";
     }
 
     private static string GroupFingerprint(string fingerprint)

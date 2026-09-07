@@ -81,6 +81,15 @@ reopens the authorized package, applies a fresh session proof, binds the WorldPa
 same remote guest/control/public-world/Chat/Inventory path. A warm cache transfers no package
 payload but never reuses prior-session application knowledge.
 
+After realm authentication, F0.3c displays the deployment's declarative stock client profile before
+content acquisition. **Use Server Defaults** accepts its camera/grammar/bindings, **Keep My
+Controls** retains the user's physical mappings, and **Customize for This Server** opens the normal
+settings surface against that verified realm's override layer. Only the exact realm/revision/hash
+decision is remembered in `user://settings/server-profiles.json`; recommendations never enter the
+user settings document. An exact reconnect does not prompt, while a changed revision or hash does.
+The server may be launched with `--client-profile=orbit|third-person|independent`, and the same
+Online executable applies the corresponding stock camera/control implementation.
+
 Godot lifecycle overrides remain in the canonical scene script, `ClientHost.cs`; partial remote
 implementation files provide helpers but do not declare `_Process`/`_ExitTree`. This preserves
 Godot's generated native dispatch while retaining compile-time product separation.

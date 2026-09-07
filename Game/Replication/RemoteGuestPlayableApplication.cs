@@ -36,6 +36,12 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     ulong DuplicateContentProofs,
     ulong RejectedContentProofs,
     ulong RejectedPreContentMessages,
+    bool ClientProfileRequired,
+    bool ClientProfileApplied,
+    ulong ClientProfilesQueued,
+    ulong DuplicateClientProfileProofs,
+    ulong RejectedClientProfileProofs,
+    ulong RejectedPreProfileMessages,
     RemoteChunkWorldStateServerSnapshot World,
     RemoteChatDeliveryServiceSnapshot Chat);
 
@@ -51,12 +57,14 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
+    private readonly RemoteClientProfileAdvertisement? _clientProfile;
     private long _nextParticipant;
 
     public RemoteGuestPlayableApplicationFactory(
         ApplicationRealmId realm,
         RemoteContentAuthorization? contentAuthorization = null,
-        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
+        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
+        RemoteClientProfileAdvertisement? clientProfile = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (contentAuthorization is not null &&
@@ -68,6 +76,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         _realm = realm;
         _contentAuthorization = contentAuthorization;
         _contentBackedUiDefinitions = CopyContentBackedDefinitions(contentBackedUiDefinitions);
+        _clientProfile = clientProfile;
         if (_contentBackedUiDefinitions.Length != 0 && contentAuthorization is null)
             throw new ArgumentException(
                 "Content-backed UI definitions require an exact authenticated content authorization.",
@@ -82,7 +91,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
             throw new InvalidOperationException("The remote participant identity space is exhausted.");
         return new RemoteGuestPlayableApplication(
             peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(),
-            _contentAuthorization, _contentBackedUiDefinitions);
+            _contentAuthorization, _contentBackedUiDefinitions, _clientProfile);
     }
 
     private static ulong CreateEpoch()
@@ -129,6 +138,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
+    private readonly RemoteClientProfileAdvertisement? _clientProfile;
     private readonly ParticipantId _participant;
     private readonly ulong _applicationSessionEpoch;
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
@@ -136,6 +146,12 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         new OfflineDirectChunkSubscriptionChange[MaximumTopologyChanges];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _identityQueued;
+    private bool _clientProfileApplied;
+    private long _lastClientProfileQueue;
+    private ulong _clientProfilesQueued;
+    private ulong _duplicateClientProfileProofs;
+    private ulong _rejectedClientProfileProofs;
+    private ulong _rejectedPreProfileMessages;
     private bool _contentApplied;
     private long _lastContentRequirementQueue;
     private ulong _contentRequirementsQueued;
@@ -184,7 +200,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         ParticipantId participant,
         ulong applicationSessionEpoch,
         RemoteContentAuthorization? contentAuthorization = null,
-        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
+        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
+        RemoteClientProfileAdvertisement? clientProfile = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -199,6 +216,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             throw new ArgumentException("The required content authorization is invalid.",
                 nameof(contentAuthorization));
         _contentAuthorization = contentAuthorization;
+        _clientProfile = clientProfile;
         _contentBackedUiDefinitions = (contentBackedUiDefinitions ?? [])
             .Take(257).ToArray();
         if (_contentBackedUiDefinitions.Length > 256 ||
@@ -209,11 +227,22 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
                 "Content-backed UI definitions require bounded exact content authorization.",
                 nameof(contentBackedUiDefinitions));
         _contentApplied = contentAuthorization is null;
+        _clientProfileApplied = clientProfile is null;
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();
+        if (message.MessageId == RemoteClientProfileAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessClientProfileProof(payload);
+            return true;
+        }
+        if (!_clientProfileApplied)
+        {
+            SaturatingIncrement(ref _rejectedPreProfileMessages);
+            return false;
+        }
         if (message.MessageId == RemoteContentSetAppliedMessageCodec.Descriptor.Id)
         {
             ProcessContentProof(payload);
@@ -256,6 +285,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         bool complete = QueueIdentity();
         if (!_identityQueued) return complete;
         if (_applicationFaulted) return complete;
+        if (!_clientProfileApplied)
+        {
+            complete &= QueueClientProfile(force: false);
+            return complete;
+        }
         if (!_contentApplied)
         {
             complete &= QueueContentRequirement(force: false);
@@ -295,6 +329,9 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             _commandsApplied, _duplicateCommands, _rejectedCommands, _ownerStatesQueued,
             _contentRequirementsQueued, _duplicateContentProofs, _rejectedContentProofs,
             _rejectedPreContentMessages,
+            _clientProfile is not null, _clientProfileApplied, _clientProfilesQueued,
+            _duplicateClientProfileProofs, _rejectedClientProfileProofs,
+            _rejectedPreProfileMessages,
             _worldDelivery?.GetSnapshot() ?? default,
             _chatDelivery?.GetSnapshot() ?? default);
     }
@@ -373,6 +410,55 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         _lastContentRequirementQueue = now;
         SaturatingIncrement(ref _contentRequirementsQueued);
         return true;
+    }
+
+    private bool QueueClientProfile(bool force)
+    {
+        if (_clientProfileApplied || _clientProfile is null) return true;
+        long now = Environment.TickCount64;
+        if (!force && _lastClientProfileQueue != 0 &&
+            now - _lastClientProfileQueue < AdmissionRetryMilliseconds)
+            return true;
+        if (!UltraSimGameProtocol.TryWriteClientProfile(
+                _messageScratch, _applicationSessionEpoch, _clientProfile, out int written))
+            throw new InvalidOperationException("The retained client profile became invalid.");
+        if (_peer.TryQueue(RemoteClientProfileHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        _lastClientProfileQueue = now;
+        SaturatingIncrement(ref _clientProfilesQueued);
+        return true;
+    }
+
+    private void ProcessClientProfileProof(ReadOnlySpan<byte> payload)
+    {
+        if (_clientProfile is null ||
+            !RemoteClientProfileAppliedMessageCodec.TryReadExact(
+                payload, out RemoteClientProfileAppliedMessage proof) ||
+            !UltraSimGameProtocol.IsValidClientProfileApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.ProfileRevision != _clientProfile.Revision ||
+            new RemoteClientProfileHash(
+                proof.ProfileHash0, proof.ProfileHash1,
+                proof.ProfileHash2, proof.ProfileHash3) != _clientProfile.Hash)
+        {
+            SaturatingIncrement(ref _rejectedClientProfileProofs);
+            return;
+        }
+        if (proof.Status == RemoteClientProfileApplyStatus.Rejected)
+        {
+            if (_clientProfileApplied)
+                SaturatingIncrement(ref _rejectedClientProfileProofs);
+            else
+                _applicationFaulted = true;
+            return;
+        }
+        if (_clientProfileApplied)
+        {
+            SaturatingIncrement(ref _duplicateClientProfileProofs);
+            return;
+        }
+        _clientProfileApplied = true;
     }
 
     private void ProcessContentProof(ReadOnlySpan<byte> payload)

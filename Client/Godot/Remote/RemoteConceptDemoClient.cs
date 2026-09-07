@@ -41,7 +41,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 {
     private const int RenderRadiusChunks = 1;
     private const float CameraPivotMeters = 1.6f;
+    private const float MinimumCameraDistanceMeters = 3f;
+    private readonly OrbitCommandProfile _orbit = new();
     private readonly ThirdPersonDirectProfile _direct = new();
+    private readonly IndependentMoveLookProfile _independent = new();
     private readonly ClientPresentationChange[] _presentationChanges = new ClientPresentationChange[18];
     private readonly ClientPresentationBinding[] _presentationBindings = new ClientPresentationBinding[9];
     private ContentCache? _cache;
@@ -61,6 +64,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ulong _lastOwnerState;
     private ulong _lastChatApplied;
     private bool _inventoryRequested;
+    private bool _primaryDown;
+    private bool _primaryPressed;
+    private bool _primaryReleased;
+    private bool _secondaryPressed;
+    private bool _pointerPointValid;
+    private ClientControlWorldPoint _pointerPoint;
+    private float _cameraYaw = -0.7f;
+    private float _cameraPitch = 0.34f;
+    private float _cameraDistance = 8.5f;
     private bool _smoke;
     private int _smokePhase;
     private int _terrainTriangles;
@@ -127,6 +139,20 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     public RemoteConceptDemoClientState State => _state;
 
+    public void ApplySettings(ResolvedClientSettings settings)
+    {
+        EnsureOperational();
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _orbit.Reset();
+        _direct.Reset();
+        _independent.Reset();
+        _primaryDown = false;
+        _primaryPressed = false;
+        _primaryReleased = false;
+        _secondaryPressed = false;
+        ApplyCameraProfile();
+    }
+
     public bool TrySubmitGuest(in GameGuestAdmissionRequest request)
     {
         EnsureOperational();
@@ -174,7 +200,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
             SynchronizePresentation(snapshot.Playable);
             if (!_smoke)
+            {
+                UpdatePointerWorldPoint();
                 SubmitPhysicalInput(gameplayInputAllowed);
+            }
             else
                 ProgressSmoke(snapshot);
             UpdateChat();
@@ -206,6 +235,41 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         {
             _inventoryRequested = true;
             GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (_chatInput?.HasFocus() == true) return;
+        if (inputEvent is InputEventMouseButton mouse)
+        {
+            if (GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.Select) ||
+                GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.Destination))
+            {
+                _primaryDown = mouse.Pressed;
+                _primaryPressed |= mouse.Pressed;
+                _primaryReleased |= !mouse.Pressed;
+            }
+            else if (mouse.Pressed &&
+                GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.ContextMenu))
+                _secondaryPressed = true;
+            else if (mouse.ButtonIndex == MouseButton.WheelUp && mouse.Pressed)
+            {
+                _cameraDistance = Math.Max(MinimumCameraDistanceMeters, _cameraDistance - 2f);
+                UpdateCamera();
+            }
+            else if (mouse.ButtonIndex == MouseButton.WheelDown && mouse.Pressed)
+            {
+                _cameraDistance = Math.Min(55f, _cameraDistance + 2f);
+                UpdateCamera();
+            }
+        }
+        else if (inputEvent is InputEventMouseMotion motion &&
+            (motion.ButtonMask & MouseButtonMask.Middle) != 0)
+        {
+            float sensitivity = _settings.PointerSensitivity * 0.006f;
+            float invert = _settings.InvertY ? -1f : 1f;
+            _cameraYaw -= motion.Relative.X * sensitivity;
+            _cameraPitch = Math.Clamp(
+                _cameraPitch - motion.Relative.Y * sensitivity * invert, 0.2f, 1.35f);
+            UpdateCamera();
         }
     }
 
@@ -260,10 +324,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             Near = 0.1f,
             Far = 500f,
             Fov = _settings?.CameraFovDegrees ?? 70f,
-            Position = new Vector3(-7.5f, 7.5f, 7.5f),
         };
         AddChild(_camera);
-        _camera.LookAt(new Vector3(0, CameraPivotMeters, 0), Vector3.Up);
+        ApplyCameraProfile();
         AddChild(new DirectionalLight3D
         {
             Name = "RemoteSun",
@@ -311,14 +374,94 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ClientWorldInputSample sample = GodotWorldInput.Capture(
             _settings!, allowed && GetWindow().HasFocus() && _chatInput?.HasFocus() != true);
         ClientHorizontalCameraBasis basis = CameraBasis();
-        GameLocomotionUpdate locomotion = _direct.Evaluate(sample.MoveX, sample.MoveZ, basis);
+        ClientControlProfileDecision decision = EvaluateProfile(in sample, in basis);
         RemotePlayableCommandFlags flags = _inventoryRequested
             ? RemotePlayableCommandFlags.OpenInventoryRequested
             : RemotePlayableCommandFlags.None;
+        long faceX = 0;
+        long faceZ = 0;
+        if (TryResolveFacing(in decision, out ClientControlWorldPoint facing,
+                out bool requiresLocomotion))
+        {
+            flags |= RemotePlayableCommandFlags.FaceRequested;
+            if (requiresLocomotion)
+                flags |= RemotePlayableCommandFlags.FacingRequiresAcceptedLocomotion;
+            faceX = facing.XMillimeters;
+            faceZ = facing.ZMillimeters;
+        }
         if (_session!.Playable.TrySubmitCommand(
-                new ClientWorldCommandIntent(locomotion, sample.HeldActions, sample.HasFocus),
-                flags: flags))
+                decision.Command,
+                flags: flags,
+                faceXMillimeters: faceX,
+                faceZMillimeters: faceZ))
             _inventoryRequested = false;
+        _primaryPressed = false;
+        _primaryReleased = false;
+        _secondaryPressed = false;
+    }
+
+    private ClientControlProfileDecision EvaluateProfile(
+        in ClientWorldInputSample physical,
+        in ClientHorizontalCameraBasis basis)
+    {
+        return _settings!.ControlGrammar switch
+        {
+            ClientControlGrammar.OrbitCommand => _orbit.Evaluate(new ClientOrbitCommandSample(
+                physical.HeldActions & ~GamePlayerActions.Jump,
+                physical.HasFocus,
+                _player.GlobalXMillimeters,
+                _player.GlobalZMillimeters,
+                _primaryDown,
+                _primaryPressed,
+                _primaryReleased,
+                _secondaryPressed,
+                CancelPressed: false,
+                _pointerPointValid,
+                _pointerPoint,
+                checked((long)Time.GetTicksMsec()))),
+            ClientControlGrammar.ThirdPersonDirect => new ClientControlProfileDecision(
+                new ClientWorldCommandIntent(
+                    _direct.Evaluate(physical.MoveX, physical.MoveZ, basis),
+                    physical.HeldActions,
+                    physical.HasFocus),
+                false, default, false, default),
+            ClientControlGrammar.IndependentMoveLook => _independent.Evaluate(
+                physical.MoveX, physical.MoveZ, physical.HeldActions, physical.HasFocus,
+                _pointerPointValid, _pointerPoint),
+            _ => throw new InvalidOperationException(
+                "The resolved remote control grammar is unsupported."),
+        };
+    }
+
+    private bool TryResolveFacing(
+        in ClientControlProfileDecision decision,
+        out ClientControlWorldPoint point,
+        out bool requiresLocomotion)
+    {
+        switch (_settings!.ControlGrammar)
+        {
+            case ClientControlGrammar.OrbitCommand when decision.LookRequested &&
+                decision.Command.Locomotion.Kind is GameLocomotionUpdateKind.Direct or
+                    GameLocomotionUpdateKind.Destination:
+                point = decision.LookPoint;
+                requiresLocomotion = true;
+                return true;
+            case ClientControlGrammar.ThirdPersonDirect when
+                decision.Command.Locomotion.Kind == GameLocomotionUpdateKind.Direct:
+                point = new ClientControlWorldPoint(
+                    checked(_player.GlobalXMillimeters + decision.Command.Locomotion.DirectX),
+                    checked(_player.GlobalZMillimeters + decision.Command.Locomotion.DirectZ));
+                requiresLocomotion = true;
+                return true;
+            case ClientControlGrammar.IndependentMoveLook when decision.LookRequested:
+                point = decision.LookPoint;
+                requiresLocomotion = false;
+                return true;
+            default:
+                point = default;
+                requiresLocomotion = false;
+                return false;
+        }
     }
 
     private void ProgressSmoke(in RemotePlayableSessionSnapshot snapshot)
@@ -385,7 +528,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         stack.AddChild(new Label
         {
             Text = "Remote content supplies World/UI. Unresolved models and materials use the " +
-                "always-available primitive substrate. WASD moves, Space jumps, I opens Inventory.",
+                "always-available primitive substrate. Movement and camera follow the accepted " +
+                "server profile; I opens Inventory.",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
         _chatFeed = new RichTextLabel
@@ -467,6 +611,74 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         right = right.Normalized();
         forward = forward.Normalized();
         return new ClientHorizontalCameraBasis(right.X, right.Z, forward.X, forward.Z);
+    }
+
+    private void UpdatePointerWorldPoint()
+    {
+        if (_camera is null || _session is null) return;
+        Vector2 mouse = GetViewport().GetMousePosition();
+        Vector3 origin = _camera.ProjectRayOrigin(mouse);
+        Vector3 direction = _camera.ProjectRayNormal(mouse);
+        if (Math.Abs(direction.Y) < 0.0001f)
+        {
+            _pointerPointValid = false;
+            return;
+        }
+        float distance = -origin.Y / direction.Y;
+        if (distance <= 0)
+        {
+            _pointerPointValid = false;
+            return;
+        }
+        Vector3 hit = origin + direction * distance;
+        long x = checked(_player.GlobalXMillimeters +
+            (long)Math.Round(hit.X * 1_000d, MidpointRounding.AwayFromZero));
+        long z = checked(_player.GlobalZMillimeters +
+            (long)Math.Round(hit.Z * 1_000d, MidpointRounding.AwayFromZero));
+        _pointerPoint = new ClientControlWorldPoint(x, z);
+        _pointerPointValid = WorldPosition.TryFromGlobalMillimeters(
+                x, _player.YMillimeters, z, out WorldPosition candidate) &&
+            _session.WorldCache.PreparedWorld.TryFindNearestSupport(
+                candidate, _player.YMillimeters, out WorldTerrainColumnSurface support) ==
+                WorldTerrainColumnQueryStatus.Complete && support.IsValid && support.IsSupport;
+    }
+
+    private void ApplyCameraProfile()
+    {
+        if (_settings is null) return;
+        switch (_settings.CameraProfile)
+        {
+            case ClientCameraProfile.Orbit:
+                _cameraYaw = -0.7f;
+                _cameraPitch = MathF.PI * 0.25f;
+                break;
+            case ClientCameraProfile.ThirdPersonFollow:
+                _cameraYaw = -0.7f;
+                _cameraPitch = 0.34f;
+                break;
+            case ClientCameraProfile.IndependentMoveLook:
+                _cameraYaw = -MathF.PI * 0.25f;
+                _cameraPitch = 0.61548f;
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "The resolved remote camera profile is unsupported.");
+        }
+        _cameraDistance = _settings.CameraDistance;
+        if (_camera is not null) _camera.Fov = _settings.CameraFovDegrees;
+        UpdateCamera();
+    }
+
+    private void UpdateCamera()
+    {
+        if (_camera is null) return;
+        float horizontal = MathF.Cos(_cameraPitch) * _cameraDistance;
+        Vector3 pivot = new(0, CameraPivotMeters, 0);
+        _camera.Position = new Vector3(
+            MathF.Sin(_cameraYaw) * horizontal,
+            MathF.Sin(_cameraPitch) * _cameraDistance + CameraPivotMeters,
+            MathF.Cos(_cameraYaw) * horizontal);
+        _camera.LookAt(pivot, Vector3.Up);
     }
 
     private void Fault(string detail)
