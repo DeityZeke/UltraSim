@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.ObjectModel;
 using UltraSim.Game.World;
+using UltraSim.UI;
 
 namespace UltraSim.Client.Content;
 
@@ -207,7 +208,7 @@ public static class ContentPackageValidator
             if (payload.Path != expected.Path || payload.Bytes.Length != expected.SizeBytes ||
                 ContentHash.Compute(payload.Bytes.Span) != expected.Sha256)
                 return Fail("A package payload does not match its exact path, size, or SHA-256 descriptor.", out error);
-            if (!EnvelopeMatches(expected.Kind, payload.Bytes.Span))
+            if (!EnvelopeMatches(expected, payload.Bytes.Span))
                 return Fail("A package payload does not match its declared passive format.", out error);
         }
         package = new VerifiedContentPackage(manifest);
@@ -220,9 +221,11 @@ public static class ContentPackageValidator
         ReadOnlySpan<byte> bytes) =>
         bytes.Length == descriptor.SizeBytes &&
         ContentHash.Compute(bytes) == descriptor.Sha256 &&
-        EnvelopeMatches(descriptor.Kind, bytes);
+        EnvelopeMatches(descriptor, bytes);
 
-    private static bool EnvelopeMatches(ContentFileKind kind, ReadOnlySpan<byte> bytes) => kind switch
+    private static bool EnvelopeMatches(
+        in ContentFileDescriptor descriptor,
+        ReadOnlySpan<byte> bytes) => descriptor.Kind switch
     {
         ContentFileKind.PngTexture => bytes.Length >= 24 && bytes[..8].SequenceEqual(PngSignature) &&
             bytes[12..16].SequenceEqual("IHDR"u8) &&
@@ -232,8 +235,18 @@ public static class ContentPackageValidator
             bytes[8..12].SequenceEqual("WEBP"u8) &&
             BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]) + 8UL == (ulong)bytes.Length,
         ContentFileKind.WorldPack => ValidateCompleteWorldPack(bytes),
+        ContentFileKind.UiDefinition => ValidateUiDefinition(descriptor.Path, bytes),
         _ => false,
     };
+
+    private static bool ValidateUiDefinition(ContentFilePath path, ReadOnlySpan<byte> bytes)
+    {
+        if (!UiDefinitionArtifactCodec.TryReadCanonical(
+                bytes, out CompiledUiDefinition? definition)) return false;
+        return ContentUiDefinitionPath.TryCreate(
+                UiDefinitionIdentity.From(definition!), out ContentFilePath expected) &&
+            expected == path;
+    }
 
     private static bool ValidateCompleteWorldPack(ReadOnlySpan<byte> bytes)
     {

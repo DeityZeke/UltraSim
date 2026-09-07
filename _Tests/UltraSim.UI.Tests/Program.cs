@@ -25,6 +25,7 @@ var tests = new (string Name, Action Body)[]
     ("RowActionsRequireListProvenanceAndExistingRows", RowActionsRequireListProvenanceAndExistingRows),
     ("DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode", DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode),
     ("SemanticWireCodecIsCanonicalBoundedAndTransactional", SemanticWireCodecIsCanonicalBoundedAndTransactional),
+    ("DefinitionArtifactIsCanonicalBoundedAndExact", DefinitionArtifactIsCanonicalBoundedAndExact),
 };
 
 foreach ((string name, Action body) in tests)
@@ -653,6 +654,33 @@ static void SemanticWireCodecIsCanonicalBoundedAndTransactional()
     Assert.Equal(hot.Instance, decodedHot.Instance);
     Assert.False(UiSemanticWireCodec.TryReadHotOpen(
         encoded.AsSpan(0, written), limits, _ => null, out _));
+}
+
+static void DefinitionArtifactIsCanonicalBoundedAndExact()
+{
+    CompiledUiDefinition source = UiDefinitionCompiler.Compile(CreateFixture());
+    Assert.True(UiDefinitionArtifactCodec.TryEncodeCanonical(source, out byte[] first));
+    Assert.True(UiDefinitionArtifactCodec.TryEncodeCanonical(source, out byte[] second));
+    Assert.True(first.AsSpan().SequenceEqual(second));
+    Assert.True(UiDefinitionArtifactCodec.TryReadCanonical(
+        first, out CompiledUiDefinition? restored));
+    CompiledUiDefinition actual = restored!;
+    Assert.Equal(UiDefinitionIdentity.From(source), UiDefinitionIdentity.From(actual));
+    Assert.Equal(source.LayoutNodeCount, actual.LayoutNodeCount);
+    Assert.Equal(source.ElementCount, actual.ElementCount);
+    Assert.Equal(source.SlotCount, actual.SlotCount);
+    Assert.Equal(source.ActionCount, actual.ActionCount);
+
+    for (int length = 0; length < first.Length; length++)
+        Assert.False(UiDefinitionArtifactCodec.TryReadCanonical(first.AsSpan(0, length), out _));
+    byte[] damaged = first.ToArray();
+    damaged[^1] ^= 0x40;
+    Assert.False(UiDefinitionArtifactCodec.TryReadCanonical(damaged, out _));
+    Assert.False(UiDefinitionArtifactCodec.TryReadCanonical(
+        first.AsSpan(0, first.Length - 1), out _));
+
+    var tooSmall = new UiDefinitionArtifactLimits(64, UiCompileLimits.Default);
+    Assert.False(UiDefinitionArtifactCodec.TryEncodeCanonical(source, out _, tooSmall));
 }
 
 static UiDefinitionBuilder CreateMixedOrderFixture(bool layoutLast)

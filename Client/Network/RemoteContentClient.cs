@@ -3,6 +3,7 @@ using UltraSim.Client.Content;
 using UltraSim.Game.Application;
 using UltraSim.Game.Protocol;
 using UltraSim.Network;
+using UltraSim.UI;
 
 namespace UltraSim.Client.Network;
 
@@ -157,6 +158,33 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
             return _catalog?.Catalog ??
                 throw new InvalidOperationException("The required remote content catalog is not applied.");
         }
+    }
+
+    /// <summary>
+    /// Resolves an exact passive UI definition from this application session's applied realm
+    /// catalog. Possessing a blob outside that selected catalog is deliberately insufficient.
+    /// </summary>
+    public bool TryResolveUiDefinition(
+        UiDefinitionCacheKey cacheKey,
+        out CompiledUiDefinition? definition,
+        out ContentUiDefinitionResolutionError error)
+    {
+        EnsureOperational();
+        definition = null;
+        error = ContentUiDefinitionResolutionError.None;
+        if (_state != RemoteContentClientState.Applied || _catalog is null)
+        {
+            error = ContentUiDefinitionResolutionError.InvalidRequest;
+            return false;
+        }
+        return ContentUiDefinitionResolver.TryResolve(
+            _catalog,
+            new UiDefinitionIdentity(
+                cacheKey.DefinitionKey,
+                cacheKey.DefinitionVersion,
+                cacheKey.DefinitionHash),
+            out definition,
+            out error);
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)

@@ -3,13 +3,17 @@ using UltraSim.UI;
 
 namespace UltraSim.Game.Protocol;
 
-public readonly record struct RemoteUiPortLimits(int MaximumOpenViews = 1_024)
+public readonly record struct RemoteUiPortLimits(
+    int MaximumOpenViews = 1_024,
+    int MaximumContentBackedDefinitions = 256)
 {
-    public static RemoteUiPortLimits Default => new(1_024);
+    public static RemoteUiPortLimits Default => new(1_024, 256);
     internal void Validate()
     {
         if (MaximumOpenViews <= 0 || MaximumOpenViews > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumOpenViews));
+        if (MaximumContentBackedDefinitions <= 0 || MaximumContentBackedDefinitions > 4_096)
+            throw new ArgumentOutOfRangeException(nameof(MaximumContentBackedDefinitions));
     }
 }
 
@@ -20,7 +24,8 @@ public readonly record struct RemoteUiPortSnapshot(
     ulong LastAppliedOperationId,
     ulong AcceptedActions,
     ulong RejectedActions,
-    int DesynchronizedViews);
+    int DesynchronizedViews,
+    ulong ContentBackedHotOpens);
 
 /// <summary>
 /// Server-owned semantic UI adapter over one authenticated protocol peer.
@@ -34,6 +39,7 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
     private readonly byte[] _semanticScratch;
     private readonly byte[] _messageScratch;
     private readonly Dictionary<UiViewInstanceId, ViewState> _views = [];
+    private readonly HashSet<UiDefinitionIdentity> _contentBackedDefinitions;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private ulong _applicationSessionEpoch;
     private ulong _nextView = 1;
@@ -41,13 +47,15 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
     private ulong _lastAppliedOperation;
     private ulong _acceptedActions;
     private ulong _rejectedActions;
+    private ulong _contentBackedHotOpens;
     private bool _disposed;
 
     public RemoteUiSemanticPort(
         NetworkProtocolPeer peer,
         ulong applicationSessionEpoch,
         UiSemanticWireLimits wireLimits = default,
-        RemoteUiPortLimits limits = default)
+        RemoteUiPortLimits limits = default,
+        IEnumerable<UiDefinitionIdentity>? contentBackedDefinitions = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (applicationSessionEpoch == 0)
@@ -61,6 +69,18 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
             throw new ArgumentOutOfRangeException(nameof(wireLimits));
         _wireLimits = wireLimits;
         _limits = limits;
+        UiDefinitionIdentity[] admitted = (contentBackedDefinitions ?? [])
+            .Take(limits.MaximumContentBackedDefinitions + 1).ToArray();
+        if (admitted.Length > limits.MaximumContentBackedDefinitions ||
+            admitted.Any(static identity => !identity.IsValid))
+            throw new ArgumentException(
+                "The content-backed UI definition set is invalid or exceeds its bounded capacity.",
+                nameof(contentBackedDefinitions));
+        _contentBackedDefinitions = new HashSet<UiDefinitionIdentity>(admitted);
+        if (_contentBackedDefinitions.Count != admitted.Length)
+            throw new ArgumentException(
+                "The content-backed UI definition set contains duplicates.",
+                nameof(contentBackedDefinitions));
         _applicationSessionEpoch = applicationSessionEpoch;
         _semanticScratch = new byte[wireLimits.MaximumOperationBytes];
         _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
@@ -72,16 +92,32 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
     {
         EnsureOperational();
         UiViewInstanceId instance = AllocateView(operation.Instance);
-        var remote = new UiOpenView(
-            operation.CacheKey,
-            operation.Definition,
-            operation.SnapshotModel(),
-            instance,
-            operation.Sequence);
-        if (!UiSemanticWireCodec.TryWriteColdOpen(
-                _semanticScratch, remote, _wireLimits, out int bytes))
-            throw new InvalidOperationException("The cold UI operation exceeds its bounded wire representation.");
-        ulong operationId = QueueOperation(RemoteUiOperationKind.ColdOpen, _semanticScratch.AsSpan(0, bytes));
+        UiModel model = operation.SnapshotModel();
+        bool contentBacked = _contentBackedDefinitions.Contains(
+            UiDefinitionIdentity.From(operation.Definition));
+        RemoteUiOperationKind kind;
+        int bytes;
+        if (contentBacked)
+        {
+            var hot = new UiHotOpenView(
+                operation.CacheKey, model, instance, operation.Sequence);
+            if (!UiSemanticWireCodec.TryWriteHotOpen(
+                    _semanticScratch, hot, _wireLimits, out bytes))
+                throw new InvalidOperationException("The content-backed UI operation exceeds its bounded wire representation.");
+            kind = RemoteUiOperationKind.HotOpen;
+        }
+        else
+        {
+            var remote = new UiOpenView(
+                operation.CacheKey, operation.Definition, model, instance, operation.Sequence);
+            if (!UiSemanticWireCodec.TryWriteColdOpen(
+                    _semanticScratch, remote, _wireLimits, out bytes))
+                throw new InvalidOperationException("The cold UI operation exceeds its bounded wire representation.");
+            kind = RemoteUiOperationKind.ColdOpen;
+        }
+        ulong operationId = QueueOperation(kind, _semanticScratch.AsSpan(0, bytes));
+        if (contentBacked && _contentBackedHotOpens != ulong.MaxValue)
+            _contentBackedHotOpens++;
         _views.Add(instance, new ViewState(instance, operation.CacheKey, operation.Definition.Hash,
             operation.Sequence, operationId));
         return instance;
@@ -205,7 +241,8 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
         foreach (ViewState view in _views.Values)
             if (view.Desynchronized) desynchronized++;
         return new(_applicationSessionEpoch, _views.Count, _nextOperation,
-            _lastAppliedOperation, _acceptedActions, _rejectedActions, desynchronized);
+            _lastAppliedOperation, _acceptedActions, _rejectedActions, desynchronized,
+            _contentBackedHotOpens);
     }
 
     public void Dispose()

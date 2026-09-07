@@ -9,6 +9,7 @@ using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
+using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Hosting;
@@ -20,7 +21,8 @@ internal static class F03bRemotePlayableTests
     internal const int A03TestCount = 6;
     internal const int A04TestCount = 5;
     internal const int A05TestCount = 1;
-    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount;
+    internal const int A06TestCount = 2;
+    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount + A06TestCount;
 
     internal static void RunAll()
     {
@@ -56,6 +58,10 @@ internal static class F03bRemotePlayableTests
             HttpSourcePolicyAndEnvelopeFailureStayFailClosed);
         Run("RemoteGranularHttpAcquisitionUsesCanonicalManifestAndBlobs",
             RemoteGranularHttpAcquisitionUsesCanonicalManifestAndBlobs);
+        Run("UiDefinitionArtifactMatchesAcrossLocalCacheHttpAndHttps",
+            UiDefinitionArtifactMatchesAcrossLocalCacheHttpAndHttps);
+        Run("ContentBackedRemoteInventoryUsesHotOpenAndGameActions",
+            ContentBackedRemoteInventoryUsesHotOpenAndGameActions);
     }
 
     private static void RemotePlayableProtocolIsCanonicalAndTrustMinimal()
@@ -675,10 +681,229 @@ internal static class F03bRemotePlayableTests
             $"peak_parallel={sourceSnapshot.PeakConcurrentRequests} fingerprint={content.ResolvedCatalogFingerprint}");
     }
 
+    private static void UiDefinitionArtifactMatchesAcrossLocalCacheHttpAndHttps()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        UiContentFixture fixture = CreateInventoryUiContent(oracle);
+        byte[] archive = Archive(fixture.Manifest, fixture.Payloads);
+        string localRoot = TemporaryDirectory("ultrasim-a06-local-source");
+        string cacheRoot = TemporaryDirectory("ultrasim-a06-warm-cache");
+        Directory.CreateDirectory(Path.Combine(localRoot, "packages"));
+        try
+        {
+            File.WriteAllBytes(Path.Combine(localRoot, "packages", "inventory.uspkg"), archive);
+            var localAcquisition = Acquisition(
+                fixture.Manifest, ContentSourceKind.Local, "packages/inventory.uspkg");
+            var localSource = new LocalContentPackageSource(localRoot);
+            ResolveUiDefinition(
+                oracle.BaseCatalog, fixture, localAcquisition, localSource, cacheRoot,
+                out ContentHash localFingerprint, out ContentActivationAcquisitionResult cold,
+                preserveCacheRoot: true);
+            Equal(1, cold.FilesFetched);
+
+            // Persistent bytes reopen, but catalog/application publication is performed again.
+            using (ContentCache warmCache = OpenCache(cacheRoot))
+            {
+                var unavailable = new RejectingSource();
+                True(ContentActivationAcquirer.TryAcquireAndPublish(
+                    warmCache, oracle.BaseCatalog, fixture.Plan, [localAcquisition], unavailable,
+                    false, out ContentCatalogLease? lease,
+                    out ContentActivationAcquisitionResult warm));
+                using (lease)
+                {
+                    Equal(0, warm.FilesFetched);
+                    AssertInventoryDefinition(lease!, fixture.Definition);
+                }
+                Equal(0, unavailable.Fetches);
+            }
+
+            using var httpHost = new StaticContentHttpHost(
+                new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+                [new StaticContentHttpResource("/content/inventory.uspkg", archive)]);
+            var httpAcquisition = Acquisition(
+                fixture.Manifest, ContentSourceKind.ServerHostedStatic,
+                httpHost.GetUri("/content/inventory.uspkg").ToString());
+            using var httpSource = new HttpContentPackageSource(
+                FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
+            ResolveUiDefinition(
+                oracle.BaseCatalog, fixture, httpAcquisition, httpSource,
+                TemporaryDirectory("ultrasim-a06-http-cache"),
+                out ContentHash httpFingerprint, out _);
+
+            using var httpsHost = new LoopbackHttpsContentHost(
+                "/content/inventory.uspkg", archive);
+            var httpsAcquisition = Acquisition(
+                fixture.Manifest, ContentSourceKind.ExternalHttps,
+                httpsHost.ResourceUri.ToString());
+            using var httpsSource = new HttpContentPackageSource(
+                httpsHost.CreatePinnedCertificateValidation(),
+                FixtureHttpLimits(archive.Length, allowInsecureHttp: false));
+            ResolveUiDefinition(
+                oracle.BaseCatalog, fixture, httpsAcquisition, httpsSource,
+                TemporaryDirectory("ultrasim-a06-https-cache"),
+                out ContentHash httpsFingerprint, out _);
+
+            Equal(fixture.Catalog.Fingerprint, localFingerprint);
+            Equal(localFingerprint, httpFingerprint);
+            Equal(localFingerprint, httpsFingerprint);
+            Console.WriteLine(
+                $"EVIDENCE A0.6 ui_definition bytes={fixture.ArtifactBytes.Length} " +
+                $"definition={fixture.Definition.Key}/v{fixture.Definition.Version} " +
+                $"hash={fixture.Definition.Hash} artifact_sha={ContentHash.Compute(fixture.ArtifactBytes)} " +
+                $"manifest={fixture.Manifest.ManifestHash} fingerprint={localFingerprint} " +
+                "origins=local,warm-cache,server-http,external-https");
+        }
+        finally
+        {
+            if (Directory.Exists(localRoot)) Directory.Delete(localRoot, recursive: true);
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+        }
+    }
+
+    private static void ContentBackedRemoteInventoryUsesHotOpenAndGameActions()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        UiContentFixture content = CreateInventoryUiContent(oracle);
+        byte[] archive = Archive(content.Manifest, content.Payloads);
+        using var host = new StaticContentHttpHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+            [new StaticContentHttpResource("/content/inventory.uspkg", archive)]);
+        ContentPackageAcquisition acquisition = Acquisition(
+            content.Manifest, ContentSourceKind.ServerHostedStatic,
+            host.GetUri("/content/inventory.uspkg").ToString());
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
+        using var remote = RemotePlayableFixture.CreateWithContent(
+            CabinContentOracle.FixtureRealm,
+            oracle.BaseCatalog,
+            content.Plan,
+            content.Catalog.Fingerprint,
+            [acquisition],
+            source,
+            [UiDefinitionIdentity.From(content.Definition)]);
+        remote.DriveUntil(() =>
+            remote.Content!.Applied && remote.SessionSnapshot.RequiredContentApplied);
+        remote.Admit("UI Content Guest", GameGuestBody.HumanFemale);
+        True(remote.Playable.TrySubmitCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+            flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+        remote.DriveUntil(() => remote.UiClient.OpenViewCount == 1);
+        RemoteUiClientSnapshot ui = remote.SessionSnapshot.Ui;
+        Equal(1UL, ui.ContentDefinitionsResolved);
+        Equal(1, remote.UiClient.CachedDefinitionCount);
+
+        var view = new UiViewInstanceId(1);
+        _ = remote.UiClient.GetView(view);
+        ReadOnlySpan<UiListRow> rows = remote.UiClient.GetRows(view, InventoryUi.Items);
+        True(rows.Length != 0);
+        ulong before = remote.UiClient.GetView(view).LastSequence;
+        remote.UiClient.SubmitAction(view, InventoryUi.Select, rows[0].Id);
+        remote.DriveUntil(() => remote.UiClient.GetView(view).LastSequence > before);
+        Equal("Item selected.", remote.UiClient.GetValue(view, InventoryUi.Status).Text);
+        Console.WriteLine(
+            $"EVIDENCE A0.6 remote_inventory hot_content_resolutions={ui.ContentDefinitionsResolved} " +
+            $"cached_definitions={remote.UiClient.CachedDefinitionCount} " +
+            $"action_model_sequence={remote.UiClient.GetView(view).LastSequence}");
+    }
+
+    private static UiContentFixture CreateInventoryUiContent(CabinContentOracle oracle)
+    {
+        CompiledUiDefinition definition = InventoryUi.Definition;
+        True(UiDefinitionArtifactCodec.TryEncodeCanonical(definition, out byte[] artifact));
+        True(ContentUiDefinitionPath.TryCreate(
+            UiDefinitionIdentity.From(definition), out ContentFilePath path));
+        True(ContentFileDescriptor.TryCreate(
+            path, ContentFileKind.UiDefinition, artifact.Length, ContentHash.Compute(artifact),
+            default, out ContentFileDescriptor file));
+        True(ContentPackageId.TryCreate(
+            "server.ui.standard", out ContentPackageId packageId));
+        True(ContentNamespaceId.TryCreate(
+            "server-ui", out ContentNamespaceId contentNamespace));
+        True(ContentPackageManifest.TryCreate(
+            1, 1, packageId, contentNamespace,
+            "Standard remote UI definitions", "1.0.0",
+            ContentTrustClass.ServerAuthorizedPassive,
+            [file], [], out ContentPackageManifest? manifest, out _));
+        var payloads = new[] { new ContentFilePayload(path, artifact) };
+        True(ContentPackageValidator.TryValidatePayloads(
+            manifest!, payloads, out VerifiedContentPackage? verified, out _));
+        var requirement = new ContentActivationPackage(
+            packageId, manifest!.ManifestHash, ContentRequirementPolicy.Required);
+        True(ContentActivationPlan.TryCreate(
+            CabinContentOracle.FixtureRealm,
+            new ContentActivationId(0x4130_2E36_2D55_4900UL, 1),
+            oracle.BaseCatalog.Fingerprint,
+            [requirement], out ContentActivationPlan? plan, out _));
+        True(ContentCatalogResolver.TryResolve(
+            oracle.BaseCatalog, plan!, [verified!], out ResolvedContentCatalog? catalog,
+            out ContentCatalogResolutionError resolutionError));
+        Equal(ContentCatalogResolutionError.None, resolutionError);
+        return new UiContentFixture(definition, artifact, manifest, payloads, plan!, catalog!);
+    }
+
+    private static void ResolveUiDefinition(
+        ContentBaseCatalog baseCatalog,
+        UiContentFixture fixture,
+        ContentPackageAcquisition acquisition,
+        IContentPackageSource source,
+        string cacheRoot,
+        out ContentHash fingerprint,
+        out ContentActivationAcquisitionResult acquisitionResult,
+        bool preserveCacheRoot = false)
+    {
+        try
+        {
+            using ContentCache cache = OpenCache(cacheRoot);
+            True(ContentActivationAcquirer.TryAcquireAndPublish(
+                cache, baseCatalog, fixture.Plan, [acquisition], source,
+                false, out ContentCatalogLease? lease, out acquisitionResult));
+            using (lease)
+            {
+                fingerprint = lease!.Catalog.Fingerprint;
+                AssertInventoryDefinition(lease, fixture.Definition);
+            }
+        }
+        finally
+        {
+            if (!preserveCacheRoot && Directory.Exists(cacheRoot))
+                Directory.Delete(cacheRoot, recursive: true);
+        }
+    }
+
+    private static void AssertInventoryDefinition(
+        ContentCatalogLease lease,
+        CompiledUiDefinition expected)
+    {
+        True(ContentUiDefinitionResolver.TryResolve(
+            lease, UiDefinitionIdentity.From(expected), out CompiledUiDefinition? actual,
+            out ContentUiDefinitionResolutionError error));
+        Equal(ContentUiDefinitionResolutionError.None, error);
+        Equal(UiDefinitionIdentity.From(expected), UiDefinitionIdentity.From(actual!));
+        True(UiDefinitionArtifactCodec.TryEncodeCanonical(actual!, out byte[] actualBytes));
+        True(UiDefinitionArtifactCodec.TryEncodeCanonical(expected, out byte[] expectedBytes));
+        True(actualBytes.AsSpan().SequenceEqual(expectedBytes));
+    }
+
+    private static ContentCache OpenCache(string root)
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError error));
+        Equal(ContentCacheError.None, error);
+        return cache!;
+    }
+
     private static byte[] Archive(CabinLocalContentPackage package)
     {
         True(ContentPackageArchive.TryEncodeCanonical(
             package.Manifest, package.Payloads, out byte[] archive));
+        return archive;
+    }
+
+    private static byte[] Archive(
+        ContentPackageManifest manifest,
+        IEnumerable<ContentFilePayload> payloads)
+    {
+        True(ContentPackageArchive.TryEncodeCanonical(manifest, payloads, out byte[] archive));
         return archive;
     }
 
@@ -688,6 +913,14 @@ internal static class F03bRemotePlayableTests
         string locator) => new(
             package.Manifest.PackageId,
             package.Manifest.ManifestHash,
+            [new ContentSourceDescriptor(kind, locator)]);
+
+    private static ContentPackageAcquisition Acquisition(
+        ContentPackageManifest package,
+        ContentSourceKind kind,
+        string locator) => new(
+            package.PackageId,
+            package.ManifestHash,
             [new ContentSourceDescriptor(kind, locator)]);
 
     private static ContentPackageSourceLimits FixtureHttpLimits(
@@ -818,6 +1051,14 @@ internal static class F03bRemotePlayableTests
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
             throw new InvalidOperationException($"Expected {expected}, got {actual}.");
     }
+
+    private sealed record UiContentFixture(
+        CompiledUiDefinition Definition,
+        byte[] ArtifactBytes,
+        ContentPackageManifest Manifest,
+        ContentFilePayload[] Payloads,
+        ContentActivationPlan Plan,
+        ResolvedContentCatalog Catalog);
 
     private sealed class CabinReplaceSource : IContentPackageSource
     {
@@ -1003,13 +1244,46 @@ internal static class F03bRemotePlayableTests
             }
         }
 
+        internal static RemotePlayableFixture CreateWithContent(
+            UltraSim.Game.Application.ApplicationRealmId realm,
+            ContentBaseCatalog baseCatalog,
+            ContentActivationPlan plan,
+            ContentHash expectedFingerprint,
+            ContentPackageAcquisition[] acquisitions,
+            IContentPackageSource source,
+            IEnumerable<UiDefinitionIdentity> contentBackedUiDefinitions)
+        {
+            string contentRoot = TemporaryDirectory("ultrasim-a06-cache");
+            if (!ContentCache.TryOpen(
+                    contentRoot, out ContentCache? contentCache, out ContentCacheError error))
+                throw new InvalidOperationException($"The A0.6 cache could not open: {error}.");
+            try
+            {
+                RemoteContentAuthorization authorization = RemoteContentAuthorizationProjection.Create(
+                    plan, expectedFingerprint, acquisitions);
+                var binding = new RemoteRequiredContentBinding(
+                    realm, contentCache!, baseCatalog, source);
+                return CreateCore(
+                    realm, authorization, binding, contentCache, contentRoot,
+                    preserveContentRoot: false,
+                    contentBackedUiDefinitions: contentBackedUiDefinitions);
+            }
+            catch
+            {
+                contentCache!.Dispose();
+                if (Directory.Exists(contentRoot)) Directory.Delete(contentRoot, recursive: true);
+                throw;
+            }
+        }
+
         private static RemotePlayableFixture CreateCore(
             UltraSim.Game.Application.ApplicationRealmId realm,
             RemoteContentAuthorization? contentAuthorization = null,
             RemoteRequiredContentBinding? requiredContent = null,
             ContentCache? contentCache = null,
             string? contentRoot = null,
-            bool preserveContentRoot = false)
+            bool preserveContentRoot = false,
+            IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
         {
             string trustDirectory = Path.Combine(Path.GetTempPath(),
                 $"ultrasim-f03b-{Environment.ProcessId}-{Guid.NewGuid():N}");
@@ -1025,7 +1299,8 @@ internal static class F03bRemotePlayableTests
                     Shared,
                     Admission,
                     Owners,
-                    new RemoteGuestPlayableApplicationFactory(realm, contentAuthorization),
+                    new RemoteGuestPlayableApplicationFactory(
+                        realm, contentAuthorization, contentBackedUiDefinitions),
                     UltraSimGameProtocol.Manifest);
                 try
                 {

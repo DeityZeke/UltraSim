@@ -111,7 +111,8 @@ internal static class Program
             $"{F03bRemotePlayableTests.F03bTestCount} F0.3b remote playable and " +
             $"{F03bRemotePlayableTests.A03TestCount} A0.3 plus " +
             $"{F03bRemotePlayableTests.A04TestCount} A0.4 plus " +
-            $"{F03bRemotePlayableTests.A05TestCount} A0.5 content tests passed.");
+            $"{F03bRemotePlayableTests.A05TestCount} A0.5 plus " +
+            $"{F03bRemotePlayableTests.A06TestCount} A0.6 content/UI tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
             RunN09Benchmark(args);
         else if (args.Contains("--benchmark-n08", StringComparer.Ordinal))

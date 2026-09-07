@@ -1,6 +1,6 @@
 # Client Content
 
-`UltraSim.Client.Content` is the engine-neutral A0.0-A0.5 contract, deterministic resolver,
+`UltraSim.Client.Content` is the engine-neutral A0.0-A0.6 contract, deterministic resolver,
 persistent store, and source-independent acquisition transaction for passive client content. It
 contains no Godot or Network dependency.
 
@@ -42,11 +42,12 @@ partially/hash-failed bytes cannot become publishable catalog content.
 
 ## A0.0 formats and operations
 
-The first normal passive manifest permits only:
+The current passive manifest permits only:
 
 - typed Texture and Icon definitions backed by PNG/WebP;
 - declarative `StandardLit` materials;
 - typed complete WorldPack definitions backed by World-owned canonical artifacts;
+- canonical `.usui` compiled UI-definition artifacts retaining UI-kernel key/version/hash identity;
 - `Add` and complete `Replace` operations.
 
 Raster admission performs exact path/size/SHA verification plus a bounded passive envelope check;
@@ -159,4 +160,26 @@ package, plan, or catalog identity. The activation transaction remains synchrono
 concurrency is bounded file acquisition, not a background content framework. WorldPack streaming
 and native resource realization remain later work.
 
-See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan.
+## A0.6 typed UI-definition convergence
+
+`.usui` is a canonical, bounded passive artifact for one `CompiledUiDefinition`. It preserves the
+UI kernel's exact `UiDefinitionKey + version + hash`; it is deliberately not assigned a generic
+content logical ID. Passive validation decodes and canonically re-encodes the complete artifact
+before a package can install. Its package-local `ui/<UiDefinitionHash>.usui` address is a canonical
+lookup convention, not semantic identity; the decoded key/version/hash must still match exactly.
+
+`ContentUiDefinitionResolver` searches only the packages selected by one live applied realm
+catalog lease and opens their exact CAS blobs. A globally present blob, a manifest authorized to a
+different realm, or an unselected package is insufficient. Duplicate exact typed identities fail
+closed. The resolved definition may prime Client Core's bounded definition cache, but it carries no
+model values, application action endpoint, or executable behavior.
+
+The remote UI adapter reuses its existing `HotOpen` semantic operation for an exact definition the
+authority declared content-backed after content application. Game still creates the authoritative
+model and binds every action handler; a missing, corrupt, or mismatched client definition rejects
+semantic application and desynchronizes the view rather than falling back to invented actions.
+Rooted local archives, process-reopened warm cache, server-hosted HTTP, and external HTTPS all
+produce the same canonical Inventory definition and resolved catalog fingerprint.
+
+See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan. Complete
+WorldPack streaming remains A0.7.

@@ -81,7 +81,11 @@ A0.5 leaves this protocol authorization/proof boundary unchanged while hardening
 source/cache transaction. Approved mirrors retry in order, granular sources transfer only missing
 or corrupt SHA-256 blobs, Optional source exhaustion can publish an explicit fallback catalog, and
 successful cache repair still requires fresh application-session proof before authority knowledge
-advances. UI and WorldPack streaming remain A0.6/A0.7 consumers.
+advances. A0.6 now lets `RemoteContentClient` resolve an exact typed `.usui` artifact only through
+its live applied realm catalog. `RemoteUiClientBridge` uses that definition to decode the existing
+compact `HotOpen`, primes Client Core's bounded cache, and sends the ordinary semantic apply proof
+only after the view opens. Game continues to own model values/actions; cache possession alone does
+not authorize a definition. WorldPack streaming remains A0.7.
 
 ## Dynamic public chunk state
 

@@ -14,6 +14,7 @@ using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
+using UltraSim.UI;
 
 namespace UltraSim.Game.Replication;
 
@@ -46,13 +47,16 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
 /// </summary>
 public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApplicationFactory
 {
+    private const int MaximumContentBackedUiDefinitions = 256;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
+    private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private long _nextParticipant;
 
     public RemoteGuestPlayableApplicationFactory(
         ApplicationRealmId realm,
-        RemoteContentAuthorization? contentAuthorization = null)
+        RemoteContentAuthorization? contentAuthorization = null,
+        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (contentAuthorization is not null &&
@@ -63,6 +67,11 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
                 nameof(contentAuthorization));
         _realm = realm;
         _contentAuthorization = contentAuthorization;
+        _contentBackedUiDefinitions = CopyContentBackedDefinitions(contentBackedUiDefinitions);
+        if (_contentBackedUiDefinitions.Length != 0 && contentAuthorization is null)
+            throw new ArgumentException(
+                "Content-backed UI definitions require an exact authenticated content authorization.",
+                nameof(contentBackedUiDefinitions));
     }
 
     public IHostedUdpSessionApplication Create(ConnectionId connection, NetworkProtocolPeer peer)
@@ -72,7 +81,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         if (value <= 0)
             throw new InvalidOperationException("The remote participant identity space is exhausted.");
         return new RemoteGuestPlayableApplication(
-            peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(), _contentAuthorization);
+            peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(),
+            _contentAuthorization, _contentBackedUiDefinitions);
     }
 
     private static ulong CreateEpoch()
@@ -85,6 +95,20 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
             epoch = BinaryPrimitives.ReadUInt64LittleEndian(random);
         } while (epoch == 0);
         return epoch;
+    }
+
+    private static UiDefinitionIdentity[] CopyContentBackedDefinitions(
+        IEnumerable<UiDefinitionIdentity>? source)
+    {
+        UiDefinitionIdentity[] values = (source ?? [])
+            .Take(MaximumContentBackedUiDefinitions + 1).ToArray();
+        if (values.Length > MaximumContentBackedUiDefinitions ||
+            values.Any(static value => !value.IsValid) ||
+            values.Distinct().Count() != values.Length)
+            throw new ArgumentException(
+                "The content-backed UI definition set is invalid, duplicated, or over capacity.",
+                nameof(source));
+        return values;
     }
 }
 
@@ -103,6 +127,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private readonly NetworkProtocolPeer _peer;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
+    private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly ParticipantId _participant;
     private readonly ulong _applicationSessionEpoch;
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
@@ -156,7 +181,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         ApplicationRealmId realm,
         ParticipantId participant,
         ulong applicationSessionEpoch,
-        RemoteContentAuthorization? contentAuthorization = null)
+        RemoteContentAuthorization? contentAuthorization = null,
+        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -171,6 +197,15 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             throw new ArgumentException("The required content authorization is invalid.",
                 nameof(contentAuthorization));
         _contentAuthorization = contentAuthorization;
+        _contentBackedUiDefinitions = (contentBackedUiDefinitions ?? [])
+            .Take(257).ToArray();
+        if (_contentBackedUiDefinitions.Length > 256 ||
+            _contentBackedUiDefinitions.Any(static value => !value.IsValid) ||
+            _contentBackedUiDefinitions.Distinct().Count() != _contentBackedUiDefinitions.Length ||
+            (_contentBackedUiDefinitions.Length != 0 && contentAuthorization is null))
+            throw new ArgumentException(
+                "Content-backed UI definitions require bounded exact content authorization.",
+                nameof(contentBackedUiDefinitions));
         _contentApplied = contentAuthorization is null;
     }
 
@@ -465,7 +500,10 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
                 WorldClockOptions.Default));
         _runtime.Initialize();
         _runtime.Start();
-        _ui = new RemoteUiSemanticPort(_peer, _applicationSessionEpoch);
+        _ui = new RemoteUiSemanticPort(
+            _peer,
+            _applicationSessionEpoch,
+            contentBackedDefinitions: _contentBackedUiDefinitions);
         _admission = new AdmissionService(_runtime.Game, _composition);
         AdmissionResult entered = _admission.JoinGuest(_participant, request);
         if (!entered.IsEntered) return entered;

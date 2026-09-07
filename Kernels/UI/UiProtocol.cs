@@ -337,6 +337,8 @@ public readonly struct UiHotOpenView
     }
 
     public UiDefinitionCacheKey CacheKey { get; }
+    public CompiledUiDefinition Definition => _model?.Definition ??
+        throw new InvalidOperationException("The hot-open model is not initialized.");
     public UiViewInstanceId Instance { get; }
     public ulong Sequence { get; }
 

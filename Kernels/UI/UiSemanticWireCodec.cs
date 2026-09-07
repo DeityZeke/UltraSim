@@ -29,6 +29,72 @@ public readonly record struct UiSemanticWireLimits(
 /// </summary>
 public static class UiSemanticWireCodec
 {
+    private const ulong DefinitionArtifactMagic = 0x5553554944454631UL; // USUIDEF1
+    private const uint DefinitionArtifactVersion = 1;
+
+    internal static bool TryWriteDefinitionArtifactCore(
+        Span<byte> destination,
+        CompiledUiDefinition definition,
+        out int written,
+        UiDefinitionArtifactLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        written = 0;
+        limits.Validate();
+        if (!Within(definition.Limits, limits.MaximumDefinitionLimits)) return false;
+        if (destination.Length > limits.MaximumArtifactBytes)
+            destination = destination[..limits.MaximumArtifactBytes];
+        try
+        {
+            var writer = new WireWriter(destination);
+            if (!writer.TryWriteUInt64(DefinitionArtifactMagic) ||
+                !writer.TryWriteUInt32(DefinitionArtifactVersion) ||
+                !writer.TryWriteUInt64(definition.Hash.Low) ||
+                !writer.TryWriteUInt64(definition.Hash.High) ||
+                !WriteDefinition(ref writer, definition)) return false;
+            written = writer.WrittenCount;
+            return true;
+        }
+        catch (Exception exception) when (IsDecodeFailure(exception)) { return false; }
+    }
+
+    internal static bool TryReadDefinitionArtifactCore(
+        ReadOnlySpan<byte> source,
+        out CompiledUiDefinition? definition,
+        UiDefinitionArtifactLimits limits)
+    {
+        definition = null;
+        limits.Validate();
+        if (source.Length < 32 || source.Length > limits.MaximumArtifactBytes) return false;
+        try
+        {
+            var reader = new WireReader(source);
+            if (!reader.TryReadUInt64(out ulong magic) || magic != DefinitionArtifactMagic ||
+                !reader.TryReadUInt32(out uint version) || version != DefinitionArtifactVersion ||
+                !reader.TryReadUInt64(out ulong hashLow) ||
+                !reader.TryReadUInt64(out ulong hashHigh) || (hashLow | hashHigh) == 0 ||
+                !ReadDefinition(ref reader, new UiDefinitionHash(hashLow, hashHigh),
+                    limits.MaximumDefinitionLimits, out definition) || !reader.IsComplete)
+            {
+                definition = null;
+                return false;
+            }
+            byte[] canonical = new byte[source.Length];
+            if (!TryWriteDefinitionArtifactCore(canonical, definition!, out int written, limits) ||
+                written != source.Length || !source.SequenceEqual(canonical))
+            {
+                definition = null;
+                return false;
+            }
+            return true;
+        }
+        catch (Exception exception) when (IsDecodeFailure(exception))
+        {
+            definition = null;
+            return false;
+        }
+    }
+
     public static bool TryWriteColdOpen(
         Span<byte> destination,
         in UiOpenView operation,
@@ -59,10 +125,13 @@ public static class UiSemanticWireCodec
             if (!reader.TryReadUInt64(out ulong instanceValue) || instanceValue == 0 ||
                 !reader.TryReadUInt64(out ulong sequence) ||
                 !ReadCacheKey(ref reader, out UiDefinitionCacheKey cacheKey) ||
-                !ReadDefinition(ref reader, cacheKey, limits.MaximumDefinitionLimits,
+                !ReadDefinition(ref reader, cacheKey.DefinitionHash, limits.MaximumDefinitionLimits,
                     out CompiledUiDefinition? definition) ||
-                !ReadModel(ref reader, definition!, out UiModel? model) || !reader.IsComplete)
+                definition!.Key != cacheKey.DefinitionKey ||
+                definition.Version != cacheKey.DefinitionVersion ||
+                !ReadModel(ref reader, definition, out UiModel? model) || !reader.IsComplete)
                 return false;
+            cacheKey.Validate(definition);
             operation = new UiOpenView(
                 cacheKey, definition!, model!, new UiViewInstanceId(instanceValue), sequence);
             return true;
@@ -328,7 +397,7 @@ public static class UiSemanticWireCodec
 
     private static bool ReadDefinition(
         ref WireReader reader,
-        in UiDefinitionCacheKey cacheKey,
+        UiDefinitionHash expectedHash,
         UiCompileLimits admitted,
         out CompiledUiDefinition? definition)
     {
@@ -388,13 +457,19 @@ public static class UiSemanticWireCodec
                 new UiActionId(checked((ushort)index)), key, rows, (UiValueKind)input);
         }
         var definitionKey = new UiDefinitionKey(keyText);
-        if (definitionKey != cacheKey.DefinitionKey || version != cacheKey.DefinitionVersion)
-            return false;
         definition = UiDefinitionCompiler.RestoreCompiled(
-            definitionKey, version, limits, nodes, elements, slots, actions, cacheKey.DefinitionHash);
-        cacheKey.Validate(definition);
+            definitionKey, version, limits, nodes, elements, slots, actions, expectedHash);
         return true;
     }
+
+    private static bool Within(UiCompileLimits value, UiCompileLimits admitted) =>
+        value.MaximumDepth <= admitted.MaximumDepth &&
+        value.MaximumLayoutNodes <= admitted.MaximumLayoutNodes &&
+        value.MaximumElements <= admitted.MaximumElements &&
+        value.MaximumSlots <= admitted.MaximumSlots &&
+        value.MaximumActions <= admitted.MaximumActions &&
+        value.MaximumTextCharacters <= admitted.MaximumTextCharacters &&
+        value.MaximumRowsPerList <= admitted.MaximumRowsPerList;
 
     private static bool WriteModel(ref WireWriter writer, UiModel model)
     {

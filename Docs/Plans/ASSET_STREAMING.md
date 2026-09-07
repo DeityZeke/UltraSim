@@ -2,10 +2,10 @@
 
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
 local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, A0.3
-authenticated requirement/acquisition/application proof, A0.4 remote semantic/source parity, and
-A0.5 cache/delta/corruption/mirror hardening accepted,
+authenticated requirement/acquisition/application proof, A0.4 remote semantic/source parity,
+A0.5 cache/delta/corruption/mirror hardening, and A0.6 typed UI schema convergence accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.5 are closed; A0.6 UI schema/content convergence is next.
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.6 are closed; A0.7 complete WorldPack streaming is next.
 Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
@@ -1759,8 +1759,30 @@ Do not add arbitrary field-level Patch just to call this a delta.
 
 ## A0.6 — UI schema/content convergence
 
-Ensure server-composed UI cold/hot cache uses the same verified application-realm/content ownership,
-validation, quota, and source substrate without losing typed UI identity.
+**Status: CLOSED.** One compiled UI definition now has a canonical bounded `.usui` passive
+artifact. Its identity remains the UI kernel's exact key/version/hash and does not become a generic
+texture/model logical ID. Content package validation performs complete canonical decode/re-encode;
+the canonical package-local hash address permits bounded package lookups without decoding every
+unrelated file, but never replaces the decoded typed identity;
+an applied `ContentCatalogLease` pins selected realm manifests/blobs, and typed resolution searches
+only those selected packages. Global CAS possession or another realm's metadata grants no UI
+authority, while missing, duplicate, corrupt, or mismatched artifacts fail closed.
+
+Client Core can prime its bounded exact definition cache without opening a view. For definitions
+explicitly configured as content-backed under an exact required activation, the server reuses the
+existing non-coalescible `HotOpen` operation rather than embedding a cold definition. The remote
+client resolves the definition from its applied catalog, decodes the Game-owned model, opens the
+view, and only then proves semantic application. Game retains authoritative model values, allowed
+actions, action handlers, and validation; passive schema bytes cannot install code or invent an
+authority endpoint. A semantic rejection desynchronizes the server view and does not advance
+application knowledge.
+
+Permanent evidence uses the real standard Inventory definition. Rooted local `.uspkg`, a
+process-reopened warm CAS, server-hosted HTTP, and external HTTPS produce byte-identical compiled
+definitions and one catalog fingerprint. The authenticated remote canary applies the required
+catalog, opens Inventory through content-backed `HotOpen`, then submits a normal row-selection
+action and receives the authoritative Game update. See
+[`content-a0.6-ui-schema-convergence-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.6-ui-schema-convergence-2026-09-06.json).
 
 **Gate:** Inventory/standard UI definition can be preinstalled, cached, self-hosted, or externally obtained with exact equivalent result.
 

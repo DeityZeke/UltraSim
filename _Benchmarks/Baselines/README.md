@@ -26,6 +26,9 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `content-a0.6-ui-schema-convergence-2026-09-06.json` — canonical typed `.usui` Inventory
+  definition identity across rooted local, warm CAS, server HTTP, and external HTTPS, plus the
+  authenticated content-backed HotOpen/action/application-proof canary;
 - `content-a0.5-cache-hardening-2026-09-06.json` — bounded ordered mirror retry, canonical
   manifest/content-addressed blob acquisition, one-file SHA delta reuse, corrupt blob/manifest
   atomic repair, interrupted-source transactionality, Optional fallback/explicit hot upgrade,

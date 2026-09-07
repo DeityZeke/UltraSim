@@ -226,6 +226,31 @@ public sealed class UiClientRuntime : IDisposable
         return _definitions.TryGetValue(cacheKey, out definition);
     }
 
+    /// <summary>
+    /// Publishes one exact passive definition into the bounded client cache without opening a
+    /// view. Authoritative model values and action endpoints are deliberately not part of this
+    /// operation.
+    /// </summary>
+    public bool CacheDefinition(
+        UiDefinitionCacheKey cacheKey,
+        CompiledUiDefinition definition)
+    {
+        EnsureOperational();
+        cacheKey.Validate(definition);
+        if (_definitions.ContainsKey(cacheKey)) return false;
+
+        UiDefinitionFamilyKey family = cacheKey.Family;
+        UiDefinitionCacheKey? superseded = GetSupersededDefinition(cacheKey);
+        bool newFamily = !_currentDefinitions.ContainsKey(family);
+        if (newFamily && _currentDefinitions.Count >= _limits.MaximumCachedDefinitionFamilies)
+            throw new InvalidOperationException("The retained UI definition-family limit was reached.");
+        if (superseded.HasValue)
+            Supersede(family, superseded.Value);
+        _definitions.Add(cacheKey, definition);
+        _currentDefinitions.Add(family, cacheKey);
+        return true;
+    }
+
     public UiModel SnapshotModel(UiViewInstanceId instance) => GetViewState(instance).Model.Clone();
 
     public UiValue GetValue(UiViewInstanceId instance, UiSlotId slot) =>

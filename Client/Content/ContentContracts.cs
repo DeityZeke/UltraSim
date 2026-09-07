@@ -60,6 +60,7 @@ public enum ContentFileKind : byte
     PngTexture = 1,
     WebpTexture = 2,
     WorldPack = 3,
+    UiDefinition = 4,
 }
 
 public enum ContentDefinitionKind : byte
@@ -110,7 +111,7 @@ public readonly record struct ContentFileDescriptor(
     long SizeBytes,
     ContentHash Sha256)
 {
-    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.WorldPack &&
+    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.UiDefinition &&
         SizeBytes >= 0 && Sha256.IsValid && ExtensionMatches(Path, Kind);
 
     public static bool TryCreate(
@@ -133,6 +134,7 @@ public readonly record struct ContentFileDescriptor(
         ContentFileKind.PngTexture => path.Value!.EndsWith(".png", StringComparison.Ordinal),
         ContentFileKind.WebpTexture => path.Value!.EndsWith(".webp", StringComparison.Ordinal),
         ContentFileKind.WorldPack => path.Value!.EndsWith(".usworldpack", StringComparison.Ordinal),
+        ContentFileKind.UiDefinition => path.Value!.EndsWith(".usui", StringComparison.Ordinal),
         _ => false,
     };
 }

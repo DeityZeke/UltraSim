@@ -5,6 +5,7 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("ColdAndHotOpenUseExactDefinitionCache", ColdAndHotOpenUseExactDefinitionCache),
+    ("PassiveDefinitionCanPrimeExactCacheWithoutOpeningView", PassiveDefinitionCanPrimeExactCacheWithoutOpeningView),
     ("SupersessionClosesOldViewsAndRejectsOldHotOpen", SupersessionClosesOldViewsAndRejectsOldHotOpen),
     ("SequenceAwareDeltaPatchesExistingView", SequenceAwareDeltaPatchesExistingView),
     ("DeltaApplicationIsAtomicOnValidationFailure", DeltaApplicationIsAtomicOnValidationFailure),
@@ -52,6 +53,29 @@ static void CapabilityMenuMatchesComposition()
     Assert.Equal(
         "SinglePlayer,Multiplayer,Settings,Exit",
         string.Join(',', ClientCompositionManifest.Complete.Capabilities));
+}
+
+static void PassiveDefinitionCanPrimeExactCacheWithoutOpeningView()
+{
+    CompiledUiDefinition v1 = CreateDefinition(800, version: 1);
+    CompiledUiDefinition v2 = CreateDefinition(801, version: 2);
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(1, 2));
+    UiDefinitionCacheKey key1 = CreateCacheKey(v1);
+    UiDefinitionCacheKey key2 = CreateCacheKey(v2);
+
+    Assert.True(client.CacheDefinition(key1, v1));
+    Assert.False(client.CacheDefinition(key1, v1));
+    Assert.Equal(1, client.CachedDefinitionCount);
+    Assert.Equal(0, client.OpenViewCount);
+    UiViewInstanceId view = client.OpenHotView(new UiHotOpenView(key1, CreateModel(v1, "v1")));
+    Assert.True(view.IsValid);
+
+    Assert.True(client.CacheDefinition(key2, v2));
+    Assert.Equal(1, client.CachedDefinitionCount);
+    Assert.Equal(0, client.OpenViewCount);
+    Assert.Equal(1, renderer.CloseCount);
+    Assert.Throws<UiViewSupersededException>(() => client.CacheDefinition(key1, v1));
 }
 
 static void ColdAndHotOpenUseExactDefinitionCache()

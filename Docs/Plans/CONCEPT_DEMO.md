@@ -23,8 +23,9 @@ now closes authenticated requirements, source-neutral acquisition, exact catalog
 proof, cold-cache Cabin Replace parity, and warm-cache fresh-session proof. A0.4 now closes remote
 Default/Replace/Add parity across rooted local files, server-hosted HTTP, and external HTTPS. A0.5
 closes hash-level delta, repair, mirrors, Optional hot upgrade, bounded concurrency, and
-connection-time private-target enforcement. Cached/streamed UI and native contentless Online world
-entry remain later checkpoints.
+connection-time private-target enforcement. A0.6 now closes typed cached/streamed Inventory UI
+definition convergence without moving models/actions out of Game. Complete WorldPack streaming and
+native contentless Online world entry remain later checkpoints.
 
 The demo has two purposes:
 
@@ -1440,13 +1441,14 @@ then prioritize the first meaningful remote vertical:
     A0.3 authenticated requirement/source acquisition               CLOSED
     A0.4 remote Default/Replace/Add + source parity                  CLOSED
     A0.5 cache/delta/corruption/mirror hardening                     CLOSED
+    A0.6 cached/streamed typed UI definition convergence             CLOSED
 
 then continue Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-A0.6+ UI/structural content expansion                                  NEXT
+A0.7+ structural content expansion                                     NEXT
 
 then external Concept Demo multiplayer/stress run
 ```

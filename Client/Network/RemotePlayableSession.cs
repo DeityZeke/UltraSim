@@ -71,7 +71,13 @@ public sealed class RemotePlayableSession : IDisposable
         ChatState = new ClientChatState(applicationSessionEpoch, chatLimits);
         Chat = new RemoteChatClient(peer, applicationSessionEpoch, ChatState);
         UiClient = new UiClientRuntime(uiRenderer, uiLimits);
-        _ui = new RemoteUiClientBridge(peer, UiClient);
+        _ui = new RemoteUiClientBridge(
+            peer,
+            UiClient,
+            contentDefinitionResolver: _content is null
+                ? null
+                : key => _content.TryResolveUiDefinition(
+                    key, out CompiledUiDefinition? definition, out _) ? definition : null);
         _protocol = new RemoteGameProtocolComposition(5);
         if (_content is not null) _protocol.Add(_content);
         _protocol.Add(Playable);

@@ -883,6 +883,21 @@ public readonly struct UiDefinitionHash : IEquatable<UiDefinitionHash>
         BinaryPrimitives.ReadUInt64LittleEndian(digest[8..]));
 }
 
+/// <summary>Exact typed identity of one immutable compiled UI definition.</summary>
+public readonly record struct UiDefinitionIdentity(
+    UiDefinitionKey Key,
+    ushort Version,
+    UiDefinitionHash Hash)
+{
+    public bool IsValid => Key.IsValid && Version != 0 && Hash.IsValid;
+
+    public static UiDefinitionIdentity From(CompiledUiDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return new UiDefinitionIdentity(definition.Key, definition.Version, definition.Hash);
+    }
+}
+
 internal static class UiFloat
 {
     internal static float Canonicalize(float value) => value == 0 ? 0 : value;

@@ -4,6 +4,11 @@ Client Core owns retained engine-neutral client projections. UI retention uses
 the neutral UI kernel. Terrain T0.8 adds `ClientWorldSemanticCache`, the one
 production semantic world cache consumed by presentation.
 
+A0.6 permits an exact already-validated passive UI definition to enter the bounded
+`UiClientRuntime` cache before a view opens. Publication retains the existing definition-family
+supersession rules and does not publish model values or action handlers. A subsequent semantic
+`HotOpen` still carries the Game-owned model and must match that exact cached definition.
+
 F0.1 also places the application-shell state and local settings model here. The owner-thread-bound
 `ClientShellCoordinator` owns Main Menu/loading/session/options/settings/error transitions, while
 `ClientInputFocusPolicy` produces one finite World/HUD-text/modal/debug focus decision for engine

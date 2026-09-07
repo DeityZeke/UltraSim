@@ -66,6 +66,14 @@ The current external executable intentionally admits one remote participant on o
 Shared multi-participant authority, remotely acquired structural World bytes, and generalized native
 actor presentation are not claimed by F0.3b.
 
+A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
+identities, but only when the application also requires an exact authenticated content activation.
+After that activation is semantically applied, `RemoteUiSemanticPort` translates a normal Game
+cold-open request for one of those definitions into the existing compact `HotOpen`. This policy
+does not move the definition, model, action handlers, or validation into Network: Game UI remains
+the semantic owner, while a client unable to resolve/apply the exact passive definition rejects the
+view and does not advance server presentation knowledge.
+
 ## Remote Chat occurrence delivery
 
 Chat C0.1 consumes the packet-free `GameChatService` through a bounded

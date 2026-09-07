@@ -22,7 +22,8 @@ public readonly record struct RemoteUiClientSnapshot(
     ulong ActionsQueued,
     ulong OperationsApplied,
     ulong DuplicateOperations,
-    ulong RejectedOperations);
+    ulong RejectedOperations,
+    ulong ContentDefinitionsResolved);
 
 /// <summary>
 /// Client-owned translation between the game application protocol and the
@@ -42,6 +43,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private readonly UiSemanticWireLimits _wireLimits;
     private readonly byte[] _semanticScratch;
     private readonly byte[] _messageScratch;
+    private readonly Func<UiDefinitionCacheKey, CompiledUiDefinition?>? _contentDefinitionResolver;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private RemoteClientApplicationState _state;
     private ulong _pendingAuthenticationAttempt;
@@ -53,13 +55,15 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private ulong _operationsApplied;
     private ulong _duplicateOperations;
     private ulong _rejectedOperations;
+    private ulong _contentDefinitionsResolved;
     private IRemoteGameProtocolHandler? _additionalHandler;
     private bool _disposed;
 
     public RemoteUiClientBridge(
         NetworkProtocolPeer peer,
         UiClientRuntime client,
-        UiSemanticWireLimits wireLimits = default)
+        UiSemanticWireLimits wireLimits = default,
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? contentDefinitionResolver = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -71,6 +75,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
         _wireLimits = wireLimits;
         _semanticScratch = new byte[wireLimits.MaximumOperationBytes];
         _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        _contentDefinitionResolver = contentDefinitionResolver;
         _client.AttachActionSink(this);
     }
 
@@ -176,7 +181,8 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     {
         EnsureOwnerThread();
         return new(_state, _applicationSessionEpoch, _participantId, _lastOperationId,
-            _actionsQueued, _operationsApplied, _duplicateOperations, _rejectedOperations);
+            _actionsQueued, _operationsApplied, _duplicateOperations, _rejectedOperations,
+            _contentDefinitionsResolved);
     }
 
     public void Dispose()
@@ -276,15 +282,29 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
                     }
                     break;
                 case RemoteUiOperationKind.HotOpen:
+                    CompiledUiDefinition? resolvedFromContent = null;
                     decoded = UiSemanticWireCodec.TryReadHotOpen(
                         semantic, _wireLimits,
-                        key => _client.TryGetCachedDefinition(key, out CompiledUiDefinition? definition)
-                            ? definition : null,
+                        key =>
+                        {
+                            if (_client.TryGetCachedDefinition(
+                                    key, out CompiledUiDefinition? cached)) return cached;
+                            resolvedFromContent = _contentDefinitionResolver?.Invoke(key);
+                            return resolvedFromContent;
+                        },
                         out UiHotOpenView hot);
                     if (decoded)
                     {
                         instance = hot.Instance;
                         modelSequence = hot.Sequence;
+                        if (resolvedFromContent is not null)
+                        {
+                            if (_client.CacheDefinition(hot.CacheKey, resolvedFromContent))
+                            {
+                                if (_contentDefinitionsResolved != ulong.MaxValue)
+                                    _contentDefinitionsResolved++;
+                            }
+                        }
                         if (_client.OpenHotView(hot) != instance) decoded = false;
                     }
                     break;

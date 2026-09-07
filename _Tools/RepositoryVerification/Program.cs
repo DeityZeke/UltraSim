@@ -501,6 +501,7 @@ static void VerifyArchitecture(string root)
         [
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
         ],
         ["Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj"] =
             ["Client/Content/UltraSim.Client.Content.csproj"],

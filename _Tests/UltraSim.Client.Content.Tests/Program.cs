@@ -4,6 +4,7 @@ using UltraSim.Client.Content;
 using UltraSim.Game.Application;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
+using UltraSim.UI;
 
 var tests = new (string Name, Action Body)[]
 {
@@ -30,6 +31,7 @@ var tests = new (string Name, Action Body)[]
     ("CorruptAndInterruptedAcquisitionRepairTransactionally", CorruptAndInterruptedAcquisitionRepairTransactionally),
     ("OptionalAcquisitionFallsBackThenHotUpgradesExplicitly", OptionalAcquisitionFallsBackThenHotUpgradesExplicitly),
     ("ResolvedPrivateDnsTargetIsRejectedAtConnectTime", ResolvedPrivateDnsTargetIsRejectedAtConnectTime),
+    ("UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog", UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog),
 };
 
 foreach ((string name, Action body) in tests)
@@ -961,6 +963,75 @@ static void ResolvedPrivateDnsTargetIsRejectedAtConnectTime()
     Equal(0L, source.GetSnapshot().ManifestBytesRead);
 }
 
+static void UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog()
+{
+    CompiledUiDefinition expected = CreateUiDefinition();
+    PackageFixture package = CreateUiPackage(expected);
+    ContentFilePath noncanonicalPath = FilePath("ui/not-the-definition-hash.usui");
+    byte[] canonicalBytes = package.Payloads[0].Bytes.ToArray();
+    ContentPackageManifest noncanonical = Manifest(
+        "server.ui.bad-address", "server-ui", ContentTrustClass.ServerAuthorizedPassive,
+        [File(noncanonicalPath, ContentFileKind.UiDefinition, canonicalBytes)], []);
+    False(ContentPackageValidator.TryValidatePayloads(
+        noncanonical, [new ContentFilePayload(noncanonicalPath, canonicalBytes)], out _, out _));
+    ContentBaseCatalog baseCatalog = BaseCatalog();
+    var realm = new ApplicationRealmId(24, 1000);
+    ContentActivationPlan plan = Plan(
+        realm,
+        new ContentActivationId(24, 1),
+        baseCatalog.Fingerprint,
+        [Required(package.Manifest)]);
+    string root = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-ui-content-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError openError),
+            openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(
+                realm, package.Manifest, package.Payloads, out _, out ContentCacheError installError),
+                installError.ToString());
+            False(cache.TryOpenPackage(
+                new ApplicationRealmId(24, 2), package.Manifest.PackageId,
+                package.Manifest.ManifestHash, out _, out _));
+            True(cache.TryPublishCatalog(
+                baseCatalog, plan, false, out ContentCatalogLease? lease,
+                out ContentCacheError publishError), publishError.ToString());
+            using (lease)
+            {
+                Equal(baseCatalog.Entries.Count, lease!.Catalog.Entries.Count);
+                True(ContentUiDefinitionResolver.TryResolve(
+                    lease, UiDefinitionIdentity.From(expected), out CompiledUiDefinition? actual,
+                    out ContentUiDefinitionResolutionError resolveError), resolveError.ToString());
+                Equal(UiDefinitionIdentity.From(expected), UiDefinitionIdentity.From(actual!));
+                False(ContentUiDefinitionResolver.TryResolve(
+                    lease,
+                    new UiDefinitionIdentity(expected.Key, checked((ushort)(expected.Version + 1)), expected.Hash),
+                    out _, out ContentUiDefinitionResolutionError missing));
+                Equal(ContentUiDefinitionResolutionError.InvalidArtifact, missing);
+            }
+            False(ContentUiDefinitionResolver.TryResolve(
+                lease!, UiDefinitionIdentity.From(expected), out _,
+                out ContentUiDefinitionResolutionError disposed));
+            Equal(ContentUiDefinitionResolutionError.CatalogDisposed, disposed);
+        }
+
+        ContentFilePayload[] damaged = package.Payloads
+            .Select(static payload => new ContentFilePayload(payload.Path, payload.Bytes.ToArray()))
+            .ToArray();
+        byte[] damagedBytes = damaged[0].Bytes.ToArray();
+        damagedBytes[^1] ^= 0x40;
+        damaged[0] = new ContentFilePayload(damaged[0].Path, damagedBytes);
+        False(ContentPackageValidator.TryValidatePayloads(
+            package.Manifest, damaged, out _, out _));
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
 static ContentBaseCatalog BaseCatalog(PackageFixture? fixture = null)
 {
     PackageFixture selected = fixture ?? CreateBasePackage();
@@ -1039,6 +1110,36 @@ static PackageFixture CreateAddPackage()
     ContentPackageManifest manifest = Manifest("server.add", "server",
         ContentTrustClass.ServerAuthorizedPassive, [file], [texture, material!]);
     return new PackageFixture(manifest, [new ContentFilePayload(path, png)]);
+}
+
+static CompiledUiDefinition CreateUiDefinition()
+{
+    var builder = new UiDefinitionBuilder("content.inventory-standard");
+    builder.DeclareSlot("title", UiSlotValueKind.Text);
+    builder.DeclareAction("close");
+    builder.AddCanvas(canvas => canvas.AddVertical(
+        "root",
+        vertical =>
+        {
+            vertical.AddText("title", "title");
+            vertical.AddButton("close", "close", "title");
+        },
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 320, 200))));
+    return UiDefinitionCompiler.Compile(builder);
+}
+
+static PackageFixture CreateUiPackage(CompiledUiDefinition definition)
+{
+    True(UiDefinitionArtifactCodec.TryEncodeCanonical(definition, out byte[] bytes));
+    True(ContentUiDefinitionPath.TryCreate(
+        UiDefinitionIdentity.From(definition), out ContentFilePath path));
+    ContentPackageManifest manifest = Manifest(
+        "server.ui.standard",
+        "server-ui",
+        ContentTrustClass.ServerAuthorizedPassive,
+        [File(path, ContentFileKind.UiDefinition, bytes)],
+        []);
+    return new PackageFixture(manifest, [new ContentFilePayload(path, bytes)]);
 }
 
 static PackageFixture CreateDeltaPackage(byte changedMarker)

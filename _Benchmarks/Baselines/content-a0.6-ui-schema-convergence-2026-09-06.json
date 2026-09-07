@@ -1,0 +1,81 @@
+{
+  "Checkpoint": "A0.6",
+  "Workload": "typed-ui-definition-content-convergence",
+  "CaptureDate": "2026-09-06",
+  "Configurations": [
+    "Debug",
+    "Release"
+  ],
+  "DefinitionArtifact": {
+    "Extension": ".usui",
+    "SemanticIdentity": "UiDefinitionKey + version + UiDefinitionHash",
+    "GenericLogicalContentIdAdded": false,
+    "ExecutableBehaviorAllowed": false,
+    "DefaultMaximumArtifactBytes": 1048576,
+    "InventoryDefinition": {
+      "Key": "game.inventory.gump",
+      "Version": 5,
+      "UiDefinitionHash": "63ebb257c6c59b3949772fb5fe00f252",
+      "ArtifactSha256": "aca516a09a74a2a2f6318cc36c61ad3be64ec116408b47fe92c21102cb8b9fb2",
+      "ArtifactBytes": 895,
+      "PackageManifestHash": "cedde9a6dd7c83f2d4c86916a510e1dc5eb7f31116ca5e718204a7964ed9eebe",
+      "ResolvedCatalogFingerprint": "5a2de3703a52117e04b274d5aaac88c83e9c688578ed202587b87fd3cd7201ed"
+    }
+  },
+  "Ownership": {
+    "Content": "passive artifact bytes, realm authorization, CAS/source/quota/catalog lease",
+    "UiKernel": "typed compiled definition identity and canonical schema",
+    "GameUi": "authoritative model values, allowed actions, handlers, validation",
+    "ClientCore": "bounded exact definition cache and semantic view application",
+    "Network": "existing HotOpen/operation/application-proof transport only"
+  },
+  "SourceParity": {
+    "RootedLocalArchive": "exact",
+    "ProcessReopenedWarmCache": {
+      "Exact": true,
+      "FilesFetched": 0,
+      "FreshCatalogPublication": true
+    },
+    "ServerHostedHttp": "exact",
+    "ExternalHttps": "exact",
+    "SourceLocationChangesDefinitionOrCatalogIdentity": false
+  },
+  "RemoteInventory": {
+    "AuthenticatedRequiredActivationAppliedFirst": true,
+    "ExistingHotOpenUsed": true,
+    "ContentDefinitionsResolved": 1,
+    "ClientCachedDefinitions": 1,
+    "SelectionActionReachedGame": true,
+    "AuthoritativeResultModelSequence": 2,
+    "ClientSemanticApplicationProofRetained": true
+  },
+  "DefaultBounds": {
+    "MaximumContentBackedDefinitionsPerRemoteUiPort": 256,
+    "MaximumClientDefinitionFamilies": 1024,
+    "MaximumUiDefinitionArtifactBytes": 1048576
+  },
+  "FailClosed": [
+    "artifact canonical decode/re-encode and exact SHA-256 validation",
+    "resolution only through packages selected by a live applied realm catalog lease",
+    "global CAS possession and other-realm manifest ownership are insufficient",
+    "missing, corrupt, mismatched, or duplicate typed identity rejects",
+    "semantic UI rejection does not advance server application knowledge"
+  ],
+  "FocusedTests": {
+    "UiTotal": 24,
+    "NewUiA06": 1,
+    "ClientContentTotal": 24,
+    "NewClientContentA06": 1,
+    "ClientCoreTotal": 28,
+    "NewClientCoreA06": 1,
+    "NetworkApplicationA06": 2
+  },
+  "Deferred": [
+    "complete canonical WorldPack streaming (A0.7)",
+    "native Contentless Online entry (A0.8)",
+    "generalized Godot server-composed UI renderer polish",
+    "user presentation-leaf overrides",
+    "manifest-specific HTTP byte cap split",
+    "executable UI behavior"
+  ]
+}

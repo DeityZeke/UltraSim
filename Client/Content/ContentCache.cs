@@ -739,7 +739,9 @@ public sealed class ContentCache : IDisposable
         }
         foreach (ContentHash blob in blobs) AddPin(_liveBlobPins, blob);
         _liveCatalogLeases++;
-        return new ContentCatalogLease(this, catalog, manifests, blobs);
+        PackageManifestIdentity[] selectedPackages = selected.Select(static package =>
+            new PackageManifestIdentity(package.PackageId, package.ManifestHash)).ToArray();
+        return new ContentCatalogLease(this, catalog, selectedPackages, manifests, blobs);
     }
 
     private bool TryMakeRoom(
@@ -1183,22 +1185,28 @@ public sealed class ContentCache : IDisposable
 public sealed class ContentCatalogLease : IDisposable
 {
     private ContentCache? _owner;
+    private readonly PackageManifestIdentity[] _selectedPackages;
     private readonly ContentCacheManifestKey[] _manifests;
     private readonly ContentHash[] _blobs;
 
     internal ContentCatalogLease(
         ContentCache owner,
         ResolvedContentCatalog catalog,
+        PackageManifestIdentity[] selectedPackages,
         ContentCacheManifestKey[] manifests,
         ContentHash[] blobs)
     {
         _owner = owner;
         Catalog = catalog;
+        _selectedPackages = selectedPackages;
         _manifests = manifests;
         _blobs = blobs;
     }
 
     public ResolvedContentCatalog Catalog { get; }
+
+    internal ContentCache? Owner => Volatile.Read(ref _owner);
+    internal ReadOnlySpan<PackageManifestIdentity> SelectedPackages => _selectedPackages;
 
     public void Dispose() =>
         Interlocked.Exchange(ref _owner, null)?.ReleaseCatalog(_manifests, _blobs);
