@@ -23,10 +23,12 @@ now closes authenticated requirements, source-neutral acquisition, exact catalog
 proof, cold-cache Cabin Replace parity, and warm-cache fresh-session proof. A0.4 now closes remote
 Default/Replace/Add parity across rooted local files, server-hosted HTTP, and external HTTPS. A0.5
 closes hash-level delta, repair, mirrors, Optional hot upgrade, bounded concurrency, and
-connection-time private-target enforcement. A0.6 now closes typed cached/streamed Inventory UI
-definition convergence without moving models/actions out of Game. A0.7 now closes complete
-canonical WorldPack acquisition, typed World open/bind, and atomic initial client structural
-publication with exact local semantic parity. Native contentless Online world entry remains A0.8.
+connection-time private-target enforcement. A0.6 closes typed cached/streamed Inventory UI
+definition convergence without moving models/actions out of Game. A0.7 closes complete canonical
+WorldPack acquisition, typed World open/bind, and atomic initial client structural publication
+with exact local semantic parity. A0.8 now closes the native Contentless Online journey through a
+separately running deployment, persistent CAS, primitive presentation fallback, guest admission,
+movement, dynamic-public state, typed Inventory UI, and Chat.
 
 The demo has two purposes:
 
@@ -1444,15 +1446,15 @@ then prioritize the first meaningful remote vertical:
     A0.5 cache/delta/corruption/mirror hardening                     CLOSED
     A0.6 cached/streamed typed UI definition convergence             CLOSED
     A0.7 complete canonical WorldPack streaming                      CLOSED
+    A0.8 native Contentless Online world entry                       CLOSED
 
 then continue Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-A0.8 native Contentless Online world entry                              NEXT
-
-then external Concept Demo multiplayer/stress run
+then shared multi-participant authority, actor presentation, and the external Concept Demo
+multiplayer/stress run
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

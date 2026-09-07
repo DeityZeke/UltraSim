@@ -58,6 +58,12 @@ public sealed class ContentBaseCatalog
     public ReadOnlyCollection<ResolvedContentEntry> Entries => _entries;
     public ContentHash Fingerprint { get; }
 
+    /// <summary>
+    /// Canonical absence of an optional local/default content pack. Primitive emergency rendering
+    /// lives below Content, so a contentless client still has a valid empty base-catalog identity.
+    /// </summary>
+    public static ContentBaseCatalog Empty { get; } = new([]);
+
     public static bool TryCreate(
         IEnumerable<VerifiedContentPackage>? builtInPackages,
         out ContentBaseCatalog? catalog,

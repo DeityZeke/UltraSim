@@ -1,6 +1,6 @@
 # Client Content
 
-`UltraSim.Client.Content` is the engine-neutral A0.0-A0.6 contract, deterministic resolver,
+`UltraSim.Client.Content` is the engine-neutral A0.0-A0.7 contract, deterministic resolver,
 persistent store, and source-independent acquisition transaction for passive client content. It
 contains no Godot or Network dependency.
 
@@ -194,5 +194,6 @@ resolver does not publish semantic chunks, create renderer resources, interpret 
 define downloadable overlays/chunks. Those remain World, Client Core, and later World-artifact
 contracts respectively.
 
-See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan. Native
-Contentless Online realization remains A0.8.
+See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan. A0.8 now
+consumes this resolver in the native Online product; Client Content still does not own structural
+publication or Godot realization.

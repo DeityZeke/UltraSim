@@ -529,6 +529,16 @@ public sealed class NetworkProtocolPeer : IDisposable
         get { EnsureOperational(); return _reliableCount; }
     }
 
+    /// <summary>
+    /// Fixed reliable-message reservation owned by this peer. Application schedulers may use this
+    /// with <see cref="ReliableQueued"/> to preserve bounded headroom for control-plane work while
+    /// bulk semantic producers are active.
+    /// </summary>
+    public int MaximumReliableMessages
+    {
+        get { EnsureOperational(); return _limits.MaximumReliableMessages; }
+    }
+
     public int IndependentUnreliableQueued
     {
         get { EnsureOperational(); return _independentCount; }

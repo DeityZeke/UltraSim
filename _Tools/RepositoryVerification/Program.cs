@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -20,6 +23,7 @@ if (options.ArchitectureOnly)
     return 0;
 
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];
+bool contentlessOnlineVerified = false;
 string[] testProjects =
 [
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
@@ -176,6 +180,11 @@ foreach (string configuration in configurations)
             "--path", "Client/Godot",
             "--", "--shell-ui-smoke", "--expect-edition=Online",
         ]);
+        if (!contentlessOnlineVerified)
+        {
+            VerifyContentlessOnlineNative(root, configuration, godot);
+            contentlessOnlineVerified = true;
+        }
         RunExpectFailure(root, godot,
         [
             "--headless",
@@ -298,6 +307,18 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
 
         long managedBytes = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
             .Sum(static path => new FileInfo(path).Length);
+        if (string.Equals(gate.Name, "Online", StringComparison.Ordinal))
+        {
+            string[] forbiddenPayloads = Directory.EnumerateFiles(
+                    output, "*", SearchOption.AllDirectories)
+                .Where(static path => Path.GetExtension(path) is ".usworldpack" or ".uspkg")
+                .Select(path => Relative(output, path))
+                .ToArray();
+            if (forbiddenPayloads.Length != 0)
+                throw new InvalidOperationException(
+                    "The Online product physically contains bundled playable content: " +
+                    string.Join(", ", forbiddenPayloads));
+        }
         int copiedNativeAssets = Directory.EnumerateFiles(output, "*", SearchOption.TopDirectoryOnly)
             .Count(static path => Path.GetExtension(path) is ".so" or ".dylib");
         Console.WriteLine(
@@ -356,6 +377,218 @@ static void BuildClientApplication(string root, string configuration, string edi
             $"the sole script assembly; found: {string.Join(", ", liveScriptAssemblies)}");
 }
 
+static void VerifyContentlessOnlineNative(string root, string configuration, string godot)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "a0.8-native");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    string identity = Path.Combine(scope, "deployment");
+    string cache = Path.Combine(scope, "content-cache");
+    string trust = Path.Combine(scope, "client", "trusted-servers.json");
+    Directory.CreateDirectory(scope);
+
+    NativeDeploymentReady coldReady;
+    using (Process coldServer = StartNativeDeployment(
+               root, configuration, identity, Path.Combine(scope, "cold-ready.json"),
+               ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+               ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp), out coldReady))
+    {
+        try
+        {
+            string cold = RunCaptured(root, godot,
+            [
+                "--headless", "--path", "Client/Godot", "--",
+                "--a0-8-smoke",
+                $"--a0-8-endpoint={coldReady.Endpoint}",
+                $"--a0-8-fingerprint={coldReady.Fingerprint}",
+                $"--a0-8-cache={cache}",
+                $"--a0-8-trust={trust}",
+                "--a0-8-allow-private-content",
+                "--a0-8-expect=cold",
+                "--expect-edition=Online",
+            ], 45_000);
+            RequireNativeA08Result(cold, "cold", coldReady.WorldPackFingerprint,
+                expectedWarm: false);
+        }
+        finally { StopOwnedProcess(coldServer); }
+    }
+
+    NativeDeploymentReady warmReady;
+    using (Process warmServer = StartNativeDeployment(
+               root, configuration, identity, Path.Combine(scope, "warm-ready.json"),
+               ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+               ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp), out warmReady))
+    {
+        try
+        {
+            if (warmReady.Realm != coldReady.Realm ||
+                warmReady.Fingerprint != coldReady.Fingerprint ||
+                warmReady.CatalogFingerprint != coldReady.CatalogFingerprint ||
+                warmReady.WorldPackFingerprint != coldReady.WorldPackFingerprint)
+                throw new InvalidOperationException(
+                    "The restarted Direct Connect deployment did not retain its realm/key/content identity.");
+            string warm = RunCaptured(root, godot,
+            [
+                "--headless", "--path", "Client/Godot", "--",
+                "--a0-8-smoke",
+                $"--a0-8-endpoint={warmReady.Endpoint}",
+                $"--a0-8-fingerprint={warmReady.Fingerprint}",
+                $"--a0-8-cache={cache}",
+                $"--a0-8-trust={trust}",
+                "--a0-8-allow-private-content",
+                "--a0-8-expect=warm",
+                "--expect-edition=Online",
+            ], 45_000);
+            RequireNativeA08Result(warm, "warm", warmReady.WorldPackFingerprint,
+                expectedWarm: true);
+        }
+        finally { StopOwnedProcess(warmServer); }
+    }
+
+    Console.WriteLine(
+        $"PASS A0.8_ContentlessOnlineNative coldWarm=true realm={coldReady.Realm} " +
+        $"world={coldReady.WorldPackFingerprint} chunks={coldReady.WorldChunks} " +
+        $"archiveBytes={coldReady.ArchiveBytes}");
+    Directory.Delete(scope, recursive: true);
+}
+
+static Process StartNativeDeployment(
+    string root,
+    string configuration,
+    string identityDirectory,
+    string readyFile,
+    int applicationPort,
+    int contentPort,
+    out NativeDeploymentReady ready)
+{
+    var start = new ProcessStartInfo("dotnet")
+    {
+        WorkingDirectory = root,
+        UseShellExecute = false,
+    };
+    foreach (string argument in new[]
+    {
+        "run", "--project", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
+        "-c", configuration, "--no-build", "--",
+        $"--bind=127.0.0.1:{applicationPort}",
+        $"--content-bind=127.0.0.1:{contentPort}",
+        $"--identity-dir={identityDirectory}",
+        $"--ready-file={readyFile}",
+    }) start.ArgumentList.Add(argument);
+    Console.WriteLine($"> dotnet {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    Process process = Process.Start(start) ??
+        throw new InvalidOperationException("Unable to start the A0.8 Direct Connect deployment.");
+    try
+    {
+        long deadline = Environment.TickCount64 + 20_000;
+        while (!File.Exists(readyFile) && Environment.TickCount64 < deadline)
+        {
+            if (process.HasExited)
+                throw new InvalidOperationException(
+                    $"The A0.8 deployment exited before readiness with code {process.ExitCode}.");
+            Thread.Sleep(10);
+        }
+        if (!File.Exists(readyFile))
+            throw new TimeoutException("The A0.8 deployment did not publish readiness in 20 seconds.");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(readyFile));
+        JsonElement value = document.RootElement;
+        ready = new NativeDeploymentReady(
+            RequiredString(value, "Endpoint"),
+            RequiredString(value, "Realm"),
+            RequiredString(value, "Fingerprint"),
+            RequiredString(value, "CatalogFingerprint"),
+            RequiredString(value, "WorldPackFingerprint"),
+            value.GetProperty("ArchiveBytes").GetInt64(),
+            value.GetProperty("WorldChunks").GetInt32());
+        return process;
+    }
+    catch
+    {
+        StopOwnedProcess(process);
+        process.Dispose();
+        throw;
+    }
+}
+
+static string RequiredString(JsonElement parent, string property)
+{
+    string? value = parent.GetProperty(property).GetString();
+    return string.IsNullOrWhiteSpace(value)
+        ? throw new InvalidOperationException($"A0.8 readiness omitted '{property}'.")
+        : value;
+}
+
+static void RequireNativeA08Result(
+    string output,
+    string mode,
+    string worldPackFingerprint,
+    bool expectedWarm)
+{
+    string pass = $"A0.8 CONTENTLESS ONLINE PASS mode={mode}";
+    if (!output.Contains(pass, StringComparison.Ordinal) ||
+        !output.Contains($"world={worldPackFingerprint}", StringComparison.Ordinal) ||
+        !output.Contains("chunks=9", StringComparison.Ordinal) ||
+        !output.Contains("proofs=1", StringComparison.Ordinal) ||
+        !output.Contains("ui=1", StringComparison.Ordinal) ||
+        !output.Contains("chat=1", StringComparison.Ordinal) ||
+        expectedWarm && !output.Contains("filesFetched=0 bytesFetched=0", StringComparison.Ordinal) ||
+        !expectedWarm && output.Contains("bytesFetched=0", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            $"The A0.8 {mode} native product output was incomplete:\n{Tail(output, 8_000)}");
+}
+
+static string RunCaptured(
+    string root,
+    string executable,
+    IEnumerable<string> arguments,
+    int timeoutMilliseconds)
+{
+    var start = new ProcessStartInfo(executable)
+    {
+        WorkingDirectory = root,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+    };
+    foreach (string argument in arguments) start.ArgumentList.Add(argument);
+    Console.WriteLine($"> {executable} {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    using Process process = Process.Start(start) ??
+        throw new InvalidOperationException($"Unable to start '{executable}'.");
+    Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
+    Task<string> standardError = process.StandardError.ReadToEndAsync();
+    if (!process.WaitForExit(timeoutMilliseconds))
+    {
+        process.Kill(entireProcessTree: true);
+        process.WaitForExit();
+        throw new TimeoutException($"'{executable}' exceeded {timeoutMilliseconds} ms.");
+    }
+    string output = standardOutput.GetAwaiter().GetResult() + standardError.GetAwaiter().GetResult();
+    Console.Write(output);
+    if (process.ExitCode != 0)
+        throw new InvalidOperationException(
+            $"'{executable}' exited with code {process.ExitCode}:\n{Tail(output, 8_000)}");
+    return output;
+}
+
+static void StopOwnedProcess(Process process)
+{
+    if (process.HasExited) return;
+    process.Kill(entireProcessTree: true);
+    if (!process.WaitForExit(5_000))
+        throw new TimeoutException("The owned A0.8 deployment process did not stop.");
+}
+
+static int ReserveLoopbackPort(SocketType type, ProtocolType protocol)
+{
+    using var socket = new Socket(AddressFamily.InterNetwork, type, protocol);
+    socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+    return ((IPEndPoint)socket.LocalEndPoint!).Port;
+}
+
+static string Tail(string text, int maximumCharacters) =>
+    text.Length <= maximumCharacters ? text : text[^maximumCharacters..];
+
 static void VerifyClientPresentationAssets(string root)
 {
     var expected = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -411,7 +644,7 @@ static void VerifyClientExportComposition(string root)
             "project/assembly_name=\"UltraSim.Client.Application.Godot\"", StringComparison.Ordinal))
         throw new InvalidOperationException("The shared Godot project does not name the fixed host assembly.");
 
-    foreach (string internalSource in new[] { "Adapter", "Local", "Shell" })
+    foreach (string internalSource in new[] { "Adapter", "Local", "Remote", "Shell" })
     {
         string marker = Path.Combine(root, "Client", "Godot", internalSource, ".gdignore");
         if (!File.Exists(marker))
@@ -485,10 +718,14 @@ static void VerifyArchitecture(string root)
             ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
         ["Server/DirectConnect/UltraSim.Server.DirectConnect.csproj"] =
         [
+            "Client/Content/UltraSim.Client.Content.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/Protocol/UltraSim.Game.Protocol.csproj",
             "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
+            "Game/UI/UltraSim.Game.UI.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
+            "Server/Hosting/UltraSim.Server.Hosting.csproj",
         ],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
         [
@@ -968,3 +1205,12 @@ internal sealed record ClientCompositionGate(
     string Name,
     string[] RequiredAssemblies,
     string[] ForbiddenAssemblies);
+
+internal sealed record NativeDeploymentReady(
+    string Endpoint,
+    string Realm,
+    string Fingerprint,
+    string CatalogFingerprint,
+    string WorldPackFingerprint,
+    long ArchiveBytes,
+    int WorldChunks);

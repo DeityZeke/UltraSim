@@ -3,10 +3,10 @@
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
 local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, A0.3
 authenticated requirement/acquisition/application proof, A0.4 remote semantic/source parity,
-A0.5 cache/delta/corruption/mirror hardening, A0.6 typed UI schema convergence, and A0.7 complete
-canonical WorldPack streaming accepted,
+A0.5 cache/delta/corruption/mirror hardening, A0.6 typed UI schema convergence, A0.7 complete
+canonical WorldPack streaming, and A0.8 native Contentless Online product closure accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.7 are closed; A0.8 native Contentless Online closure is next.
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.8 are closed.
 Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
@@ -1831,13 +1831,39 @@ earned afterward, an independently downloadable chunk artifact.
 
 ## A0.8 — Contentless Online closure
 
+**Status: CLOSED.** The physically Online-only Godot composition now launches with
+`ContentBaseCatalog.Empty`, Direct Connects to a separately running deployment, applies the exact
+authenticated package through A0.2-A0.5, opens/binds the A0.7 WorldPack, privately publishes all
+162 structural chunks, admits a remote guest, and realizes a nine-chunk native Godot window using
+the always-available neutral primitive substrate for presentation leaves not supplied by content.
+
+The development Direct Connect deployment serves one canonical package containing the 731,158-byte
+Concept Demo WorldPack and the 895-byte standard Inventory `.usui`. The remote native journey proves
+authoritative movement, dynamic-public state, cached typed Inventory UI, Chat occurrence/application
+proof, and clean presentation-before-transport teardown. A cold run fetches two files / 732,053
+payload bytes; after deployment restart with the same persisted key and `ApplicationRealmId`, the
+same client cache fetches zero bytes but emits a fresh session-scoped `ContentSetApplied` proof.
+
+The Online published dependency closure contains 12 `UltraSim` assemblies / 2,208,256 managed bytes
+in the accepted Release census. It contains no `Client.Local`, built-in Test Worlds, Game
+Composition/authority, Game Replication implementation, Server Runtime/Hosting/Persistence,
+`.usworldpack`, or `.uspkg`. Its compatible Concept Demo profile contains stable binding vocabulary
+and the expected WorldPack fingerprint, never the WorldPack bytes.
+
+The permanent verifier runs the external cold/warm native journey and inspects the isolated
+published `.deps.json` plus copied payload. A Linux Godot export was attempted at closure, but this
+machine has no 4.7.1 Mono export templates installed; therefore no export-content claim is made
+beyond the preset exclusion gate and the independently inspected published managed closure. See
+[`content-a0.8-contentless-online-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.8-contentless-online-2026-09-06.json).
+
 Use the Contentless Online composition:
 
 - no bundled playable WorldPack;
 - no local authoritative Game/server implementation;
 - only bootstrap/fallback assets plus Remote Play/content pipeline.
 
-Direct Connect to external Cabin server and acquire required content through the source-independent pipeline.
+Direct Connect to the external Concept Demo deployment and acquire required content through the
+source-independent pipeline.
 
 **Gate:** external world becomes playable and matches the equivalent Complete/Single Player oracle where semantics are intended to match.
 

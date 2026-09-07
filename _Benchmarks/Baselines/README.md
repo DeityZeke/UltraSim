@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `content-a0.8-contentless-online-2026-09-06.json` — the physically Online-only native Godot
+  product's external cold/warm journey against a separately restarted Direct Connect deployment:
+  empty local catalog, authenticated World/UI acquisition, fresh application proof, World-owned
+  binding, native primitive realization, gameplay/UI/Chat canaries, warm zero-byte reopen, and
+  inspected dependency/payload absence. It records the missing local Godot export templates rather
+  than claiming an export artifact that was not produced;
 - `content-a0.7-worldpack-streaming-2026-09-06.json` — exact complete Concept Demo
   WorldPack acquisition through server-hosted HTTP and the applied realm catalog, one-allocation
   World stream open, typed pack/content binding, private atomic 162-chunk client publication,

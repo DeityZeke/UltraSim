@@ -122,6 +122,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private const int MaximumPublicationRecords = 64;
     private const int MaximumSubscriptions = 1_024;
     private const int MaximumTopologyChanges = MaximumSubscriptions * 2;
+    private const int ReservedReliableControlMessages = 16;
     private const long AdmissionRetryMilliseconds = 1_000;
 
     private readonly NetworkProtocolPeer _peer;
@@ -171,6 +172,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private ulong _commandsApplied;
     private ulong _duplicateCommands;
     private ulong _rejectedCommands;
+    private ulong _uiBackpressureRejections;
     private ulong _ownerStatesQueued;
     private long _nextTickTimestamp;
     private long _tickInterval;
@@ -304,8 +306,13 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         _disposed = true;
         _chatSession?.Dispose();
         _chatDelivery?.Dispose();
-        _signUi?.Dispose();
-        _inventoryUi?.Dispose();
+        // Connection retirement is terminal for this presentation lineage. Best-effort Close
+        // messages are useful while transport accepts them, but backpressure or a vanished peer
+        // must not turn terminal application cleanup into an owner-worker failure.
+        try { _signUi?.Dispose(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        try { _inventoryUi?.Dispose(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { }
         _chat?.Dispose();
         _admission?.Dispose();
         _ui?.Dispose();
@@ -626,7 +633,15 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             return;
         }
         _lastProcessedCommand = command.Sequence;
-        _lastCommandResult = ApplyPostCommandSemantic(outcome);
+        try { _lastCommandResult = ApplyPostCommandSemantic(outcome); }
+        catch (RemoteUiTransportBackpressureException)
+        {
+            SaturatingIncrement(ref _uiBackpressureRejections);
+            _lastCommandResult = outcome.Result with
+            {
+                Interaction = GameWorldActionStatus.InvariantViolation,
+            };
+        }
         SaturatingIncrement(ref _commandsApplied);
         _ = QueueOwnerState();
     }
@@ -772,6 +787,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         int scheduled = 0;
         for (int index = 0; index < subscriptions.Length && scheduled < 16; index++)
         {
+            // Bulk public-state snapshots must leave bounded reliable headroom for owner state,
+            // UI, Chat and other control-plane semantics on this same application session.
+            if (_peer.ReliableQueued >=
+                Math.Max(1, _peer.MaximumReliableMessages - ReservedReliableControlMessages))
+                break;
             // Public disclosure does not manufacture structural residency. F0.3b's preinstalled
             // Concept Demo consumer stages the canonical authored WorldPack; unauthored spatial
             // keys have neither structural pages nor a client semantic destination. Later remote

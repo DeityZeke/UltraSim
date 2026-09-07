@@ -59,6 +59,26 @@ public partial class ClientHost :
         base._Ready();
     }
 
+    // Godot's native script dispatch generator binds lifecycle overrides from the canonical
+    // native-derived class source. Keep these overrides here and delegate capability-specific
+    // work to partial implementation files; a lifecycle override in a secondary partial file can
+    // compile normally yet remain invisible to native dispatch.
+    public override void _Process(double delta)
+    {
+        base._Process(delta);
+#if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
+        ProcessRemote(delta);
+#endif
+    }
+
+    public override void _ExitTree()
+    {
+#if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
+        ExitRemote();
+#endif
+        base._ExitTree();
+    }
+
     private static void ValidateProductIdentity()
     {
         string? expectedArgument = OS.GetCmdlineUserArgs()

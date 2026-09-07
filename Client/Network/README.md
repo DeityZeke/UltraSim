@@ -71,11 +71,13 @@ will not submit guest admission before that local application succeeds, while th
 independently blocks hostile bypass until the exact session proof arrives. Cache presence alone is
 not proof, and reconnect always requires fresh application-session proof.
 
-The contentless Online native world remains an A0.8 consumer even though F0.3b's external
-semantic path and A0.3's headless authenticated content gate are accepted. A0.4 now feeds that same
-gate from canonical local-file, server-hosted HTTP, and external HTTPS package envelopes and proves
-Default/Replace/Add parity with the A0.1 oracle. Source URIs remain authorization hints outside
-plan/catalog identity; no package bytes use realtime Network lanes.
+The A0.8 contentless Online product now composes F0.3b's external semantic path with the accepted
+content pipeline. It starts from `ContentBaseCatalog.Empty`, applies the authenticated realm
+catalog, resolves and binds the exact required WorldPack, publishes the private structural
+candidate, and only then permits guest admission. A0.4 feeds that same gate from canonical
+local-file, server-hosted HTTP, and external HTTPS package envelopes and proves Default/Replace/Add
+parity with the A0.1 oracle. Source URIs remain authorization hints outside plan/catalog identity;
+no package bytes use realtime Network lanes.
 
 A0.5 leaves this protocol authorization/proof boundary unchanged while hardening the injected
 source/cache transaction. Approved mirrors retry in order, granular sources transfer only missing
@@ -91,8 +93,10 @@ A0.7 resolves a selected complete WorldPack only after the realm catalog applies
 canonical open/fingerprint/content binding, then `RemotePlayableSession` constructs and publishes
 the complete initial `ClientWorldSemanticCache` privately before exposing it or permitting guest
 submission. Failure publishes no partial structural state. The existing dynamic-public adapter is
-attached afterward and keeps its independent application-proof lineage. No overlay/chunk artifact,
-native Godot world entry, or new protocol message is introduced.
+attached afterward and keeps its independent application-proof lineage. No overlay/chunk artifact
+or new protocol message is introduced. A0.8 supplies the native Godot consumer: its primitive
+substrate can boot before content exists, required World/UI content still fails closed, and a warm
+cache still requires fresh application-session proof.
 
 ## Dynamic public chunk state
 

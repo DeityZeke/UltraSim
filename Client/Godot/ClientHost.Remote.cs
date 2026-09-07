@@ -3,6 +3,8 @@ using Godot;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.Client.Network;
+using UltraSim.Game.Admission;
+using UltraSim.Network;
 
 namespace UltraSim.Client.Application.Godot;
 
@@ -11,21 +13,35 @@ public partial class ClientHost
     private ClientServerTrustRegistry? _serverTrust;
     private ClientServerTrustFileStore? _serverTrustStore;
     private ClientDirectConnectSession? _remoteSession;
+    private RemoteConceptDemoClient? _remotePlayable;
     private string _directEndpoint = "127.0.0.1:7777";
     private string _directFingerprint = string.Empty;
     private string? _trustLoadWarning;
     private bool _remoteAdmission;
     private bool _remoteMismatch;
     private bool _remoteRetiring;
+    private bool _allowInsecurePrivateContent;
+    private bool _remoteSmokeStarted;
+    private bool _remoteSmokeDisconnectStarted;
+    private bool _remoteProcessObserved;
+    private string _remoteGuestName = string.Empty;
+    private GameGuestBody _remoteGuestBody = GameGuestBody.HumanFemale;
+    private string? _remoteGuestError;
     private ClientDirectConnectState _lastRemoteState;
 
-    public override void _Process(double delta)
+    private void ProcessRemote(double delta)
     {
-        base._Process(delta);
+        if (!_remoteProcessObserved)
+        {
+            _remoteProcessObserved = true;
+            if (IsRemoteSmoke()) GD.Print("A0.8 remote process loop started");
+        }
+        TryStartRemoteSmoke();
         if (_remoteSession is null) return;
         try
         {
             _remoteSession.Pump();
+            _remotePlayable?.Pump(ShellSnapshot().Focus.GameplayInputAllowed);
             ClientDirectConnectState current = _remoteSession.State;
             if (_remoteRetiring)
             {
@@ -34,8 +50,54 @@ public partial class ClientHost
                     _remoteSession.Dispose();
                     _remoteSession = null;
                     _remoteRetiring = false;
+                    if (_remoteSmokeDisconnectStarted)
+                        GetTree().Quit(0);
                 }
                 return;
+            }
+            if (_remotePlayable is not null)
+            {
+                RemoteConceptDemoClientSnapshot playable = _remotePlayable.GetSnapshot();
+                if (playable.State == RemoteConceptDemoClientState.Faulted)
+                {
+                    string fault = playable.Fault ?? "Remote playable session failed.";
+                    GD.PushError($"A0.8 remote playable fault: {fault}");
+                    FailSession(BoundedShellMessage(fault));
+                    if (IsRemoteSmoke()) GetTree().Quit(1);
+                    return;
+                }
+                if (playable.State == RemoteConceptDemoClientState.AwaitingGuest &&
+                    ShellSnapshot().Screen == ClientShellScreen.Loading)
+                {
+                    if (IsRemoteSmoke())
+                    {
+                        _ = _remotePlayable.TrySubmitGuest(new GameGuestAdmissionRequest(
+                            GameGuestBody.HumanFemale, "A0.8 Native Guest"));
+                    }
+                    else
+                    {
+                        BeginAdmission("Required remote content is ready. Choose a temporary guest identity.");
+                    }
+                }
+                if (playable.State == RemoteConceptDemoClientState.Active &&
+                    ShellSnapshot().Screen != ClientShellScreen.InSession)
+                    CommitSession("Remote Concept Demo active.");
+                if (playable.SmokeComplete && !_remoteSmokeDisconnectStarted)
+                {
+                    ValidateRemoteSmoke(playable);
+                    _remoteSmokeDisconnectStarted = true;
+                    GD.Print(
+                        $"A0.8 CONTENTLESS ONLINE PASS mode={ReadArgument("--a0-8-expect=") ?? "unspecified"} " +
+                        $"catalog={playable.Session.Content.ResolvedCatalogFingerprint} " +
+                        $"world={playable.Session.StructuralWorld.WorldPackFingerprint} " +
+                        $"chunks={playable.RenderedChunks} triangles={playable.TerrainTriangles} " +
+                        $"filesFetched={playable.Session.Content.Acquisition.FilesFetched} " +
+                        $"bytesFetched={playable.Session.Content.Acquisition.BytesFetched} " +
+                        $"proofs={playable.Session.Content.ProofsQueued} " +
+                        $"ui={playable.OpenUiViews} chat={playable.Session.Chat.OccurrencesApplied}");
+                    RetireCurrentSession();
+                    return;
+                }
             }
             if (current == _lastRemoteState) return;
             _lastRemoteState = current;
@@ -53,10 +115,9 @@ public partial class ClientHost
                 case ClientDirectConnectState.Established:
                 {
                     ClientDirectConnectSnapshot snapshot = _remoteSession.GetSnapshot();
-                    CommitSession(
-                        $"Connected to realm {snapshot.Realm} at {snapshot.Endpoint}. " +
-                        "Remote guest/control semantics are available; this contentless client " +
-                        "requires A0.2 structural/content acquisition before native world entry.");
+                    StartRemotePlayable(snapshot);
+                    BeginSessionLoading(
+                        $"Connected to realm {snapshot.Realm}; acquiring and applying required content…");
                     GD.Print(
                         $"F0.3a DIRECT CONNECT ESTABLISHED endpoint={snapshot.Endpoint} " +
                         $"realm={snapshot.Realm} session={snapshot.ApplicationSessionEpoch} " +
@@ -73,21 +134,33 @@ public partial class ClientHost
                     }
                     else
                         FailSession(snapshot.Detail ?? $"Direct Connect failed: {snapshot.Failure}.");
+                    if (IsRemoteSmoke())
+                    {
+                        GD.PushError(
+                            $"A0.8 Direct Connect smoke failed: {snapshot.Failure}: {snapshot.Detail}");
+                        GetTree().Quit(1);
+                    }
                     break;
                 }
             }
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
-            FailSession($"Direct Connect failed safely: {exception.Message}");
+            GD.PushError($"A0.8 remote client failure: {exception}");
+            FailSession(BoundedShellMessage(
+                $"Direct Connect failed safely: {exception.Message}"));
+            if (IsRemoteSmoke())
+            {
+                GetTree().Quit(1);
+            }
         }
     }
 
-    public override void _ExitTree()
+    private void ExitRemote()
     {
+        ReleaseRemotePlayable();
         _remoteSession?.Dispose();
         _remoteSession = null;
-        base._ExitTree();
     }
 
     protected override void BeginCapability(ClientCapability capability)
@@ -102,6 +175,7 @@ public partial class ClientHost
             _remoteSession.Dispose();
             _remoteSession = null;
         }
+        ReleaseRemotePlayable();
         EnsureTrustStore();
         _remoteAdmission = true;
         _remoteMismatch = false;
@@ -121,6 +195,11 @@ public partial class ClientHost
             BuildTrustMismatchSurface();
             return;
         }
+        if (_remotePlayable?.State == RemoteConceptDemoClientState.AwaitingGuest)
+        {
+            BuildRemoteGuestSurface();
+            return;
+        }
         if (_remoteSession?.State == ClientDirectConnectState.AwaitingTrust)
         {
             BuildTrustCandidateSurface(_remoteSession.GetSnapshot());
@@ -133,6 +212,9 @@ public partial class ClientHost
     {
         if (_remoteSession is not null)
         {
+            // Presentation consumers share the authenticated peer but do not own its transport
+            // lifetime. Retire them before Direct Connect begins closing/disposes that peer.
+            ReleaseRemotePlayable();
             if (_remoteSession.State == ClientDirectConnectState.Established)
             {
                 _remoteSession.BeginDisconnect();
@@ -183,9 +265,20 @@ public partial class ClientHost
             MaxLength = 96,
         };
         column.AddChild(fingerprint);
+        var privateContent = new CheckBox
+        {
+            Name = "DirectConnectAllowPrivateContent",
+            Text = "Allow this deployment to source hash-verified content over private/insecure HTTP",
+            ButtonPressed = _allowInsecurePrivateContent,
+        };
+        column.AddChild(privateContent);
         Button connect = MenuButton("Connect");
         connect.Name = "DirectConnectSubmit";
-        ConnectDeferred(connect, () => SubmitDirectConnect(endpoint.Text, fingerprint.Text));
+        ConnectDeferred(connect, () =>
+        {
+            _allowInsecurePrivateContent = privateContent.ButtonPressed;
+            SubmitDirectConnect(endpoint.Text, fingerprint.Text);
+        });
         endpoint.TextSubmitted += _ => connect.EmitSignal(BaseButton.SignalName.Pressed);
         fingerprint.TextSubmitted += _ => connect.EmitSignal(BaseButton.SignalName.Pressed);
         column.AddChild(connect);
@@ -299,10 +392,150 @@ public partial class ClientHost
         BeginSessionLoading("Discovering the deployment-key candidate…");
     }
 
+    private void StartRemotePlayable(in ClientDirectConnectSnapshot connected)
+    {
+        if (_remotePlayable is not null) return;
+        NetworkProtocolPeer peer = _remoteSession?.Peer ??
+            throw new InvalidOperationException("The authenticated remote peer is absent.");
+        string cacheRoot = ReadArgument("--a0-8-cache=") ??
+            ProjectSettings.GlobalizePath("user://content-cache");
+        var playable = new RemoteConceptDemoClient { Name = "RemoteConceptDemoSession" };
+        playable.Configure(
+            peer,
+            connected.ApplicationSessionEpoch,
+            connected.Realm,
+            cacheRoot,
+            HudLayer,
+            EffectiveSettings,
+            _allowInsecurePrivateContent,
+            IsRemoteSmoke());
+        WorldRoot.AddChild(playable);
+        _remotePlayable = playable;
+    }
+
+    private void BuildRemoteGuestSurface()
+    {
+        VBoxContainer column = CreateCenteredColumn(440);
+        column.AddChild(Title("Enter Remote Demo"));
+        column.AddChild(CenteredLabel(
+            "Required World/UI content is verified and applied. This identity exists only for the current session."));
+        column.AddChild(new Label { Text = "Name" });
+        var name = new LineEdit
+        {
+            Name = "RemoteGuestDisplayName",
+            Text = _remoteGuestName,
+            PlaceholderText = "1–24 characters",
+            MaxLength = GameGuestAdmissionPolicy.MaximumDisplayNameUtf8Bytes,
+        };
+        column.AddChild(name);
+        column.AddChild(new Label { Text = "Body" });
+        var body = new OptionButton { Name = "RemoteGuestBody" };
+        body.AddItem("X / Human Female", (int)GameGuestBody.HumanFemale);
+        body.AddItem("Y / Human Male", (int)GameGuestBody.HumanMale);
+        body.Select(_remoteGuestBody == GameGuestBody.HumanMale ? 1 : 0);
+        column.AddChild(body);
+        if (!string.IsNullOrWhiteSpace(_remoteGuestError))
+            column.AddChild(new Label
+            {
+                Name = "RemoteGuestAdmissionError",
+                Text = _remoteGuestError,
+                Modulate = new Color(1f, 0.48f, 0.42f),
+                AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            });
+        Button join = MenuButton("Join");
+        join.Name = "RemoteGuestJoin";
+        ConnectDeferred(join, () => SubmitRemoteGuest(name.Text, (GameGuestBody)body.GetSelectedId()));
+        column.AddChild(join);
+        Button back = MenuButton("Disconnect / Back");
+        ConnectDeferred(back, () =>
+        {
+            RetireCurrentSession();
+            ReturnToMainMenu("Remote session disconnected.");
+        });
+        column.AddChild(back);
+        name.GrabFocus();
+    }
+
+    private void SubmitRemoteGuest(string name, GameGuestBody body)
+    {
+        _remoteGuestName = name;
+        _remoteGuestBody = body;
+        var request = new GameGuestAdmissionRequest(body, name);
+        if (!GameGuestAdmissionPolicy.TryNormalize(
+                request, out GameGuestIdentity identity, out _, out string? error))
+        {
+            _remoteGuestError = error;
+            BeginAdmission(error ?? "The guest identity was rejected.");
+            return;
+        }
+        _remoteGuestError = null;
+        if (_remotePlayable?.TrySubmitGuest(new GameGuestAdmissionRequest(
+                identity.Body, identity.DisplayName!)) != true)
+        {
+            _remoteGuestError = "The remote guest request could not be queued.";
+            BeginAdmission(_remoteGuestError);
+            return;
+        }
+        BeginSessionLoading("Remote Game admission pending…");
+    }
+
+    private void ReleaseRemotePlayable()
+    {
+        if (_remotePlayable is null) return;
+        _remotePlayable.DisposeComposition();
+        _remotePlayable.GetParent()?.RemoveChild(_remotePlayable);
+        _remotePlayable.QueueFree();
+        _remotePlayable = null;
+    }
+
+    private void TryStartRemoteSmoke()
+    {
+        if (_remoteSmokeStarted || !IsRemoteSmoke()) return;
+        _remoteSmokeStarted = true;
+        string endpoint = ReadArgument("--a0-8-endpoint=") ??
+            throw new InvalidOperationException("A0.8 smoke requires --a0-8-endpoint.");
+        string fingerprint = ReadArgument("--a0-8-fingerprint=") ??
+            throw new InvalidOperationException("A0.8 smoke requires --a0-8-fingerprint.");
+        _allowInsecurePrivateContent = OS.GetCmdlineUserArgs().Contains(
+            "--a0-8-allow-private-content", StringComparer.Ordinal);
+        EnsureTrustStore();
+        _remoteAdmission = true;
+        SubmitDirectConnect(endpoint, fingerprint);
+    }
+
+    private void ValidateRemoteSmoke(in RemoteConceptDemoClientSnapshot snapshot)
+    {
+        string expected = ReadArgument("--a0-8-expect=") ?? "cold";
+        bool cold = string.Equals(expected, "cold", StringComparison.OrdinalIgnoreCase);
+        bool warm = string.Equals(expected, "warm", StringComparison.OrdinalIgnoreCase);
+        if (!cold && !warm || snapshot.RenderedChunks != 9 || snapshot.TerrainTriangles <= 0 ||
+            snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
+            snapshot.Session.Content.ProofsQueued == 0 ||
+            snapshot.Session.StructuralWorld.State != RemoteStructuralWorldState.Ready ||
+            snapshot.Session.World.AppliedSnapshots == 0 ||
+            cold && snapshot.Session.Content.Acquisition.BytesFetched == 0 ||
+            warm && snapshot.Session.Content.Acquisition.BytesFetched != 0)
+            throw new InvalidOperationException(
+                $"The A0.8 {expected} native acceptance did not converge: {snapshot}.");
+    }
+
+    private static bool IsRemoteSmoke() => OS.GetCmdlineUserArgs().Contains(
+        "--a0-8-smoke", StringComparer.Ordinal);
+
+    private static string? ReadArgument(string prefix) => OS.GetCmdlineUserArgs()
+        .FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.Ordinal))?
+        [prefix.Length..];
+
+    private static string BoundedShellMessage(string message) =>
+        message.Length <= ClientShellCoordinator.MaximumMessageCharacters
+            ? message
+            : message[..(ClientShellCoordinator.MaximumMessageCharacters - 1)] + "…";
+
     private void EnsureTrustStore()
     {
         if (_serverTrust is not null) return;
-        string path = ProjectSettings.GlobalizePath("user://settings/trusted-servers.json");
+        string path = ReadArgument("--a0-8-trust=") ??
+            ProjectSettings.GlobalizePath("user://settings/trusted-servers.json");
         _serverTrustStore = new ClientServerTrustFileStore(path);
         ClientServerTrustLoadResult loaded = _serverTrustStore.Load();
         _serverTrust = loaded.Registry;

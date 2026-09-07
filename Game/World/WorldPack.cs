@@ -81,6 +81,24 @@ public readonly struct WorldPackFingerprint : IEquatable<WorldPackFingerprint>
         BinaryPrimitives.ReadUInt64LittleEndian(source[16..]),
         BinaryPrimitives.ReadUInt64LittleEndian(source[24..]));
 
+    /// <summary>Parses the canonical 64-character uppercase fingerprint used by deployment data.</summary>
+    public static bool TryParse(string? value, out WorldPackFingerprint fingerprint)
+    {
+        fingerprint = default;
+        if (value is null || value.Length != 64 ||
+            value.Any(static character => character is not (>= '0' and <= '9' or >= 'A' and <= 'F')))
+            return false;
+        byte[] bytes;
+        try { bytes = Convert.FromHexString(value); }
+        catch (FormatException) { return false; }
+        fingerprint = new WorldPackFingerprint(
+            BinaryPrimitives.ReadUInt64BigEndian(bytes[24..]),
+            BinaryPrimitives.ReadUInt64BigEndian(bytes[16..24]),
+            BinaryPrimitives.ReadUInt64BigEndian(bytes[8..16]),
+            BinaryPrimitives.ReadUInt64BigEndian(bytes[..8]));
+        return fingerprint.IsValid && string.Equals(value, fingerprint.ToString(), StringComparison.Ordinal);
+    }
+
     internal void Write(Span<byte> destination)
     {
         BinaryPrimitives.WriteUInt64LittleEndian(destination, Part0);

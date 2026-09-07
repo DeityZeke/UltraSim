@@ -27,6 +27,15 @@ public readonly record struct RemoteUiPortSnapshot(
     int DesynchronizedViews,
     ulong ContentBackedHotOpens);
 
+/// <summary>Normal bounded transport backpressure while publishing a remote UI operation.</summary>
+public sealed class RemoteUiTransportBackpressureException : InvalidOperationException
+{
+    public RemoteUiTransportBackpressureException(NetworkQueueStatus status)
+        : base($"The remote UI operation was not queued: {status}.") => Status = status;
+
+    public NetworkQueueStatus Status { get; }
+}
+
 /// <summary>
 /// Server-owned semantic UI adapter over one authenticated protocol peer.
 /// It allocates view identities locally and never waits for a network round trip.
@@ -292,7 +301,7 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
             RemoteUiOperationHeaderCodec.Descriptor.Id,
             _messageScratch.AsSpan(0, bytes));
         if (status != NetworkQueueStatus.Accepted)
-            throw new InvalidOperationException($"The remote UI operation was not queued: {status}.");
+            throw new RemoteUiTransportBackpressureException(status);
         _nextOperation = operationId == ulong.MaxValue ? 0 : operationId + 1;
         return operationId;
     }

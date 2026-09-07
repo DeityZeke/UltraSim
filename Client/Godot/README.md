@@ -4,8 +4,8 @@ This is the one maintained Godot application and the only production Godot scrip
 `Adapter/`, `Shell/`, and conditionally compiled `Local/` sources replace the former `_Godot`,
 `Bootstrap.Godot`, `Local.Godot`, and `Playable.Godot` projects. Keeping all native scripts in
 `UltraSim.Client.Application.Godot` avoids duplicate Godot type registration during editor reload.
-Only the scene-attached `ClientHost.cs` is imported as a Godot script. Internal adapter, shell, and
-local-play C# sources are `.gdignore`d from Godot's resource scanner while continuing to compile
+Only the scene-attached `ClientHost.cs` is imported as a Godot script. Internal adapter, shell,
+local-play, and remote-play C# sources are `.gdignore`d from Godot's resource scanner while continuing to compile
 into that same assembly; this prevents inherited native base types from being registered again
 during editor hot reload. The build also keeps only the active Debug/Release copy of the sole script
 assembly in the live development tree.
@@ -46,8 +46,10 @@ Client/Godot/export-client.sh Online
 Client/Godot/export-client.sh Complete
 ```
 
-The Online preset excludes bundled `Assets/**`. Actual passive-content acquisition remains owned by
-the later asset-streaming checkpoints.
+The Online preset excludes bundled `Assets/**`. A0.8 launches that product from the primitive
+bootstrap substrate and an empty local/default catalog; its playable WorldPack and typed Inventory
+UI definition arrive only through the authenticated content requirement, persistent CAS, and
+World/UI-owned validation paths.
 
 For normal development, open this directory in Godot and run the Complete build. Choose **Single
 Player**, enter a temporary guest display name, choose the X/Human Female or Y/Human Male body, and
@@ -66,12 +68,15 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj
 Then connect to `127.0.0.1:7777`. On first use, compare the client candidate fingerprint with the
 gateway's printed fingerprint before choosing **Trust and Continue**. Reconnect uses the saved pin;
 a changed deployment key is blocked and requires an explicit forget followed by a fresh trust
-ceremony. Successful native Direct Connect currently stops at authenticated realm/session status.
-F0.3b accepts the engine-neutral remote guest, controlled actor, public world, Chat, and
-Inventory/UI semantic vertical against verified preinstalled structural bytes. The contentless
-Online product does not embed those bytes or pretend cache presence is application proof, so native
-remote world entry waits for A0.2+ acquisition/installation and the later Godot presentation
-binding.
+ceremony. The server's content endpoint defaults to `127.0.0.1:7778`; local HTTP/private-address
+use requires the explicit development opt-in in the Direct Connect form. A0.8 then acquires or
+reopens the authorized package, applies a fresh session proof, binds the WorldPack, and enters the
+same remote guest/control/public-world/Chat/Inventory path. A warm cache transfers no package
+payload but never reuses prior-session application knowledge.
+
+Godot lifecycle overrides remain in the canonical scene script, `ClientHost.cs`; partial remote
+implementation files provide helpers but do not declare `_Process`/`_ExitTree`. This preserves
+Godot's generated native dispatch while retaining compile-time product separation.
 
 Runtime-batched frozen/public `MultiMeshInstance3D` groups publish an exact combined transformed
 custom AABB. Godot otherwise leaves these programmatic MultiMeshes with a zero native bound and may

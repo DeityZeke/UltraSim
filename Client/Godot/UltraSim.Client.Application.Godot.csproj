@@ -66,6 +66,9 @@
       <RetiredGodotScriptArtifact
           Include="$(BaseOutputPath)$(InactiveGodotConfiguration)/UltraSim.Client.Application.Godot.*"
           Condition="'$(InactiveGodotConfiguration)' != ''" />
+      <RetiredGodotScriptArtifact
+          Include="$(BaseOutputPath)ExportRelease/UltraSim.Client.Application.Godot.*"
+          Condition="'$(Configuration)' != 'ExportRelease'" />
     </ItemGroup>
     <Delete Files="@(RetiredGodotScriptArtifact)" />
   </Target>

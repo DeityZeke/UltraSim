@@ -53,8 +53,8 @@ acceptance narratives remain available through git history.
   hash-addressed install/reopen/pinning/eviction substrate, A0.3 source-neutral acquisition, and
   A0.4 canonical local/server-HTTP/external-HTTPS source parity, A0.5 hash-level delta,
   repair, mirror, Optional-upgrade, bounded-concurrency, and DNS-target hardening, A0.6 canonical
-  typed UI-definition resolution, and A0.7 complete WorldPack resolution through the applied realm
-  catalog with World-owned open/bind validation.
+  typed UI-definition resolution, A0.7 complete WorldPack resolution through the applied realm
+  catalog with World-owned open/bind validation, and A0.8 native Contentless Online closure.
 - [Built-in Test Worlds](../Client/BuiltInTestWorlds/README.md) — A0.1 local Cabin
   Default/Replace/Add package oracle, frozen catalog fingerprints, and exact ownership deltas.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
@@ -64,12 +64,13 @@ acceptance narratives remain available through git history.
   establishment plus the F0.3b guest/control composition over public chunk state, Chat Events,
   owner state, and owner-private UI/Inventory, with A0.3 authenticated content requirement,
   A0.4 physical byte-source parity, A0.5 resilient granular acquisition, A0.6 content-backed
-  remote UI HotOpen, A0.7 atomic initial structural publication, and exact application-proof
-  gating before guest admission.
+  remote UI HotOpen, A0.7 atomic initial structural publication, A0.8 native Godot composition,
+  and exact application-proof gating before guest admission.
 - [Direct Connect Concept Demo server](../Server/DirectConnect/README.md) — external Hosted endpoint
-  with durable deployment key/realm identity and one bounded F0.3b remote playable application.
+  with durable deployment key/realm identity, authenticated Concept Demo World/UI content, and one
+  bounded remote playable application.
 - [Godot client application](../Client/Godot/README.md) — the single maintained native adapter,
-  persistent shell, and local presentation project, with physically distinct Single Player,
+  persistent shell, and local/remote presentation project, with physically distinct Single Player,
   Online, and Complete published dependency products.
 - [Client shell/composition plan](Plans/CLIENT.md) — the real-client reconstruction
   roadmap: Single Player/Online/Complete/Contentless compositions, local-vs-remote

@@ -1,10 +1,13 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using UltraSim.Game.Application;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Network;
+using UltraSim.Game.UI;
+using UltraSim.UI;
 
 DirectConnectOptions options;
 try
@@ -34,14 +37,29 @@ if (options.EphemeralSmoke)
 Directory.CreateDirectory(options.IdentityDirectory);
 using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
-using HostedUdpAdmissionHost host = CreateHost(options.BindEndPoint, identity, realm);
+using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
+    realm, options.ContentEndPoint);
+using HostedUdpAdmissionHost host = CreateHost(
+    options.BindEndPoint, identity, realm, content.Authorization,
+    [UiDefinitionIdentity.From(InventoryUi.Definition)]);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
 Console.WriteLine($"Application realm: {realm}");
 Console.WriteLine($"Deployment key SHA-256: {Group(fingerprint)}");
-Console.WriteLine("This F0.3b endpoint admits one authenticated remote guest into the Concept Demo.");
+Console.WriteLine($"Content archive: {content.Snapshot.ArchiveUri} ({content.Snapshot.ArchiveBytes} bytes)");
+Console.WriteLine(
+    $"WorldPack: {content.Snapshot.WorldPackFingerprint} " +
+    $"({content.Snapshot.WorldChunks} chunks / {content.Snapshot.WorldPackBytes} bytes)");
+Console.WriteLine("This A0.8 endpoint admits one authenticated remote guest into the Concept Demo.");
 Console.WriteLine("Press Ctrl+C to stop.");
+WriteReady(options.ReadyFile, new DirectConnectReady(
+    host.LocalEndPoint.ToString(), realm.ToString(), fingerprint,
+    content.Snapshot.ArchiveUri.ToString(), content.Snapshot.ArchiveBytes,
+    content.Snapshot.WorldPackBytes, content.Snapshot.UiBytes,
+    content.Snapshot.ManifestHash.ToString(), content.Snapshot.PlanHash.ToString(),
+    content.Snapshot.CatalogFingerprint.ToString(),
+    content.Snapshot.WorldPackFingerprint.ToString(), content.Snapshot.WorldChunks));
 
 using var stopping = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -59,7 +77,9 @@ return 0;
 static HostedUdpAdmissionHost CreateHost(
     IPEndPoint endpoint,
     NetworkServerIdentity identity,
-    ApplicationRealmId realm)
+    ApplicationRealmId realm,
+    RemoteContentAuthorization? contentAuthorization = null,
+    IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
 {
     UdpProtocolLimits udp = UdpProtocolLimits.Default;
     SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default with
@@ -81,8 +101,32 @@ static HostedUdpAdmissionHost CreateHost(
         shared,
         HostedUdpAdmissionLimits.Default,
         owners,
-        new RemoteGuestPlayableApplicationFactory(realm),
+        new RemoteGuestPlayableApplicationFactory(
+            realm, contentAuthorization, contentBackedUiDefinitions),
         UltraSimGameProtocol.Manifest);
+}
+
+static void WriteReady(string? path, DirectConnectReady ready)
+{
+    if (string.IsNullOrEmpty(path)) return;
+    string full = Path.GetFullPath(path);
+    string? directory = Path.GetDirectoryName(full);
+    if (string.IsNullOrEmpty(directory))
+        throw new InvalidOperationException("The ready-file path has no parent directory.");
+    Directory.CreateDirectory(directory);
+    string temporary = full + $".{Environment.ProcessId}.tmp";
+    try
+    {
+        File.WriteAllText(
+            temporary,
+            JsonSerializer.Serialize(ready) + Environment.NewLine,
+            new UTF8Encoding(false, true));
+        File.Move(temporary, full, overwrite: true);
+    }
+    finally
+    {
+        if (File.Exists(temporary)) File.Delete(temporary);
+    }
 }
 
 static NetworkServerIdentity LoadOrCreateIdentity(string directory)
@@ -182,16 +226,20 @@ static string Group(string fingerprint) => string.Join(':',
 
 internal readonly record struct DirectConnectOptions(
     IPEndPoint BindEndPoint,
+    IPEndPoint ContentEndPoint,
     string IdentityDirectory,
+    string? ReadyFile,
     bool EphemeralSmoke)
 {
     internal static DirectConnectOptions Parse(string[] arguments)
     {
         var endpoint = new IPEndPoint(IPAddress.Loopback, 7777);
+        var contentEndpoint = new IPEndPoint(IPAddress.Loopback, 7778);
         string identity = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "UltraSim", "Server", "DirectConnect");
         bool smoke = false;
+        string? readyFile = null;
         foreach (string argument in arguments)
         {
             if (argument == "--ephemeral-smoke")
@@ -220,8 +268,48 @@ internal readonly record struct DirectConnectOptions(
                 identity = Path.GetFullPath(value);
                 continue;
             }
+            if (argument.StartsWith("--content-bind=", StringComparison.Ordinal))
+            {
+                contentEndpoint = ParseEndpoint(
+                    argument["--content-bind=".Length..], "--content-bind");
+                continue;
+            }
+            if (argument.StartsWith("--ready-file=", StringComparison.Ordinal))
+            {
+                string value = argument["--ready-file=".Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException("--ready-file cannot be empty.");
+                readyFile = Path.GetFullPath(value);
+                continue;
+            }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
-        return new DirectConnectOptions(endpoint, identity, smoke);
+        return new DirectConnectOptions(endpoint, contentEndpoint, identity, readyFile, smoke);
+
+        static IPEndPoint ParseEndpoint(string value, string option)
+        {
+            int separator = value.LastIndexOf(':');
+            if (separator <= 0 ||
+                !IPAddress.TryParse(value.AsSpan(0, separator), out IPAddress? address) ||
+                address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+                !int.TryParse(value.AsSpan(separator + 1), out int port) ||
+                port is <= IPEndPoint.MinPort or > IPEndPoint.MaxPort)
+                throw new ArgumentException($"{option} must be one IPv4 address and nonzero port.");
+            return new IPEndPoint(address, port);
+        }
     }
 }
+
+internal readonly record struct DirectConnectReady(
+    string Endpoint,
+    string Realm,
+    string Fingerprint,
+    string ContentUri,
+    int ArchiveBytes,
+    int WorldPackBytes,
+    int UiBytes,
+    string ManifestHash,
+    string PlanHash,
+    string CatalogFingerprint,
+    string WorldPackFingerprint,
+    int WorldChunks);

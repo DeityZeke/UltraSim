@@ -2,7 +2,6 @@ using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
-using System.Text;
 
 namespace UltraSim.Game.Admission;
 
@@ -12,31 +11,6 @@ public enum AdmissionStage : byte
     WaitingForCharacter = 0,
     Entered = 1,
     Rejected = 2,
-}
-
-/// <summary>Expected fail-closed reason that an admission or character action was rejected.</summary>
-public enum AdmissionRejection : byte
-{
-    None = 0,
-    RuntimeNotRunning = 1,
-    InvalidParticipant = 2,
-    DuplicateParticipant = 3,
-    AccountingUnavailable = 4,
-    TrustedIdentityUnknown = 5,
-    AccountDisabled = 6,
-    UiUnavailable = 7,
-    EntityCreationFailed = 8,
-    CharacterNotOwned = 9,
-    DurableIdentityUnavailable = 10,
-    DurableWorldMismatch = 11,
-    DurableEntityMissing = 12,
-    PlayableBindingRejected = 13,
-    InvalidCharacterSelectAction = 14,
-    PlayableAlreadyBound = 15,
-    InvalidSessionStage = 16,
-    GenerationReplaced = 17,
-    InvalidGuestDisplayName = 18,
-    UnsupportedGuestBody = 19,
 }
 
 /// <summary>Outcome or retained state of one admission attempt.</summary>
@@ -58,73 +32,6 @@ public readonly record struct AdmissionResult(
     public bool IsRejected => Stage == AdmissionStage.Rejected;
 
     public bool IsWaitingForCharacter => Stage == AdmissionStage.WaitingForCharacter;
-}
-
-/// <summary>Finite, deterministic Round-1 guest/demo identity policy.</summary>
-public static class GameGuestAdmissionPolicy
-{
-    public const int MaximumDisplayNameScalars = 24;
-    public const int MaximumDisplayNameUtf8Bytes = 96;
-    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
-
-    public static bool TryNormalize(
-        in GameGuestAdmissionRequest request,
-        out GameGuestIdentity identity,
-        out AdmissionRejection rejection,
-        out string? message)
-    {
-        identity = default;
-        rejection = AdmissionRejection.None;
-        message = null;
-        if (request.Body is not (GameGuestBody.HumanFemale or GameGuestBody.HumanMale))
-        {
-            rejection = AdmissionRejection.UnsupportedGuestBody;
-            message = "Select one of the supported demo bodies.";
-            return false;
-        }
-        string? supplied = request.DisplayName;
-        if (supplied is null)
-        {
-            rejection = AdmissionRejection.InvalidGuestDisplayName;
-            message = "Enter a display name.";
-            return false;
-        }
-        foreach (char value in supplied)
-        {
-            if (!char.IsControl(value)) continue;
-            rejection = AdmissionRejection.InvalidGuestDisplayName;
-            message = "Display names cannot contain control characters.";
-            return false;
-        }
-        string normalized = supplied.Trim();
-        if (normalized.Length == 0)
-        {
-            rejection = AdmissionRejection.InvalidGuestDisplayName;
-            message = "Enter a display name.";
-            return false;
-        }
-        int scalarCount = 0;
-        try
-        {
-            foreach (Rune _ in normalized.EnumerateRunes())
-                scalarCount++;
-            if (scalarCount > MaximumDisplayNameScalars ||
-                StrictUtf8.GetByteCount(normalized) > MaximumDisplayNameUtf8Bytes)
-            {
-                rejection = AdmissionRejection.InvalidGuestDisplayName;
-                message = $"Display names are limited to {MaximumDisplayNameScalars} characters.";
-                return false;
-            }
-        }
-        catch (EncoderFallbackException)
-        {
-            rejection = AdmissionRejection.InvalidGuestDisplayName;
-            message = "The display name contains malformed Unicode.";
-            return false;
-        }
-        identity = new GameGuestIdentity(request.Body, normalized);
-        return true;
-    }
 }
 
 /// <summary>Stable identity used for exact CharacterSelect definition caching.</summary>

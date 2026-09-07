@@ -347,6 +347,12 @@ static void WorldPackFormatAndFingerprintsAreFrozen()
     Equal(1U, WorldPackFormat.AdditionalTerrainSurfacesSchemaVersion);
     Equal(16, Marshal.SizeOf<WorldContentFingerprint>());
     Equal(32, Marshal.SizeOf<WorldPackFingerprint>());
+    var fingerprint = new WorldPackFingerprint(
+        0xABCD_EF01_2345_6789, 2, 3, 4);
+    True(WorldPackFingerprint.TryParse(fingerprint.ToString(), out WorldPackFingerprint parsed));
+    Equal(fingerprint, parsed);
+    False(WorldPackFingerprint.TryParse(fingerprint.ToString().ToLowerInvariant(), out _));
+    False(WorldPackFingerprint.TryParse(fingerprint.ToString()[1..], out _));
     Equal(1U, (uint)WorldPackSectionKind.TerrainMaterials);
     Equal(2U, (uint)WorldPackSectionKind.TerrainHeights);
     Equal(3U, (uint)WorldPackSectionKind.FrozenStatics);

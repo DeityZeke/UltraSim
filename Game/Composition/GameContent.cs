@@ -31,59 +31,6 @@ public static class GameInventoryRuleProfileIds
     public static readonly InventoryRuleProfileId GridBackpack = new(3);
 }
 
-/// <summary>Compact structural terrain identities admitted by the first game world content profile.</summary>
-public static class GameTerrainMaterialIds
-{
-    public const ushort Water = 1;
-    public const ushort Sand = 2;
-    public const ushort Grass = 3;
-    public const ushort Rock = 4;
-    public const ushort Snow = 5;
-}
-
-/// <summary>Compact immutable-world definition identities admitted by the first game world profile.</summary>
-public static class GameWorldStaticDefinitionIds
-{
-    public const uint Tree = 1;
-    public const uint Rock = 2;
-    public const uint CabinWall = 3;
-    public const uint CabinRoof = 4;
-    public const uint Shelf = 5;
-    public const uint Book = 6;
-}
-
-/// <summary>
-/// Definition-local presentation variants used by the concrete authored woods/cabin fixture.
-/// These are content semantics rather than renderer slot or engine identities.
-/// </summary>
-public static class GameWorldStaticVariants
-{
-    public const ushort CabinWallEightMeters = 1;
-    public const ushort CabinWallSixMeters = 2;
-    public const ushort CabinWallThreeMeters = 3;
-    public const ushort CabinRoofEightBySixMeters = 1;
-    public const ushort MountainWallEightMeters = 100;
-    public const ushort MountainWallTenMeters = 101;
-    public const ushort FallbackLabPedestal = 200;
-    public const ushort FallbackLabCorrect = 201;
-    public const ushort FallbackLabModelMissing = 202;
-    public const ushort FallbackLabTextureMissing = 203;
-    public const ushort FallbackLabModelAndTextureMissing = 204;
-}
-
-/// <summary>Compact public-projection prefab identities admitted by the concrete game.</summary>
-public static class GameWorldPublicPrefabIds
-{
-    public const uint Character = 1;
-    public const uint CabinDoor = 2;
-    public const uint WorldChest = 3;
-    public const uint WoodlandAnimal = 4;
-    public const uint SkyTelepad = 5;
-    public const uint FarGate = 6;
-    public const uint InformationalSign = 7;
-    public const uint CharacterMale = 8;
-}
-
 /// <summary>World-bound compiled content owned by the concrete game composition.</summary>
 public sealed class GameContent : IInventoryContentCatalog
 {
@@ -178,7 +125,8 @@ public sealed class GameContent : IInventoryContentCatalog
     // Governance: bump this identity whenever the semantic meaning of any packed numeric world-content
     // ID changes incompatibly, even when the numeric value itself remains admitted and unchanged.
     public static WorldContentFingerprint WorldFingerprint { get; } =
-        new(0x3B8D_14CB_E652_EE21UL, 0xD241_8739_B74F_10A5UL);
+        new(GameWorldContentProfile.ContentFingerprintLow,
+            GameWorldContentProfile.ContentFingerprintHigh);
 
     public bool TryGetContainer(PrefabHandle handle, out InventoryContainerDefinition definition)
     {

@@ -1,0 +1,81 @@
+{
+  "Checkpoint": "A0.8",
+  "Workload": "native-contentless-online-cold-warm-product-canary",
+  "CaptureDate": "2026-09-06",
+  "CanonicalRepositoryConfigurations": [
+    "Debug",
+    "Release"
+  ],
+  "NativeJourneyConfiguration": "Debug",
+  "DeploymentFixture": {
+    "PackageId": "server.concept-demo.bootstrap",
+    "Files": 2,
+    "ArchiveBytes": 732559,
+    "WorldPackBytes": 731158,
+    "UiDefinitionBytes": 895,
+    "WorldPackFingerprint": "DD5DC0F6710BBD9C2D0DC90271E3B18BEAA5325AFDE80D902328AABB086EA228",
+    "WorldChunks": 162,
+    "Source": "separate Direct Connect process plus bounded immutable HTTP host"
+  },
+  "ColdNativeRun": {
+    "FilesFetched": 2,
+    "PayloadBytesFetched": 732053,
+    "FreshContentSetAppliedProofs": 1,
+    "PublishedStructuralChunks": 162,
+    "RenderedChunks": 9,
+    "TerrainTriangles": 20120,
+    "DynamicPublicSnapshotsAppliedAtLeast": 1,
+    "InventoryUiOpened": 1,
+    "ChatOccurrencesApplied": 1,
+    "AuthoritativeMovementObserved": true
+  },
+  "WarmNativeRunAfterDeploymentRestart": {
+    "DeploymentKeyStable": true,
+    "ApplicationRealmIdStable": true,
+    "CatalogIdentityStable": true,
+    "FilesFetched": 0,
+    "PayloadBytesFetched": 0,
+    "FreshContentSetAppliedProofs": 1,
+    "WorldPackReopenedFromCas": true,
+    "RenderedChunks": 9,
+    "InventoryUiOpened": 1,
+    "ChatOccurrencesApplied": 1
+  },
+  "OnlineReleasePublishedClosure": {
+    "UltraSimManagedAssemblies": 12,
+    "UltraSimManagedBytes": 2208256,
+    "BundledWorldPacks": 0,
+    "BundledPackageEnvelopes": 0,
+    "ClientLocalAbsent": true,
+    "BuiltInTestWorldsAbsent": true,
+    "GameCompositionAbsent": true,
+    "ServerRuntimeAbsent": true,
+    "LocalAuthorityBridgeAbsent": true
+  },
+  "PrimitiveFallback": {
+    "BaseCatalogEntries": 0,
+    "BootstrapAndPrimitiveSubstratePresent": true,
+    "RequiredContentStillFailsClosed": true
+  },
+  "Hardening": [
+    "Godot lifecycle dispatch remains on the canonical scene-attached ClientHost script",
+    "bulk dynamic-public scheduling reserves reliable headroom for control, UI, and Chat",
+    "UI transport backpressure rejects the interaction instead of crashing the authority owner",
+    "terminal UI cleanup is best-effort after transport retirement",
+    "remote presentation retires before its transport peer"
+  ],
+  "GodotExport": {
+    "Attempted": true,
+    "Produced": false,
+    "Reason": "Godot 4.7.1 Mono Linux export templates were not installed in the verification environment",
+    "OnlinePresetExcludesBundledAssets": true
+  },
+  "Deferred": [
+    "shared multi-participant authority",
+    "general other-player actor and nameplate presentation",
+    "authenticated server profile recommendations",
+    "production public-TLS deployment",
+    "runtime model/audio content-origin migration",
+    "independent World overlay and chunk artifacts"
+  ]
+}

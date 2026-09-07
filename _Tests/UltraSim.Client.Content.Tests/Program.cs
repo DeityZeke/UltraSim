@@ -9,6 +9,7 @@ using UltraSim.UI;
 var tests = new (string Name, Action Body)[]
 {
     ("IdentityGrammarAndDefaultsFailClosed", IdentityGrammarAndDefaultsFailClosed),
+    ("EmptyBaseCatalogIsCanonicalPrimitiveOnlyBaseline", EmptyBaseCatalogIsCanonicalPrimitiveOnlyBaseline),
     ("ManifestIdentityIsCanonicalAndBounded", ManifestIdentityIsCanonicalAndBounded),
     ("BoundedAdmissionsStopBeforeOversizedMaterialization", BoundedAdmissionsStopBeforeOversizedMaterialization),
     ("PassivePayloadsRequireExactBytesAndAllowedEnvelopes", PassivePayloadsRequireExactBytesAndAllowedEnvelopes),
@@ -41,6 +42,16 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} Client Content tests passed.");
+
+static void EmptyBaseCatalogIsCanonicalPrimitiveOnlyBaseline()
+{
+    ContentBaseCatalog empty = ContentBaseCatalog.Empty;
+    Equal(0, empty.Entries.Count);
+    Equal(ContentBaseCatalog.Empty.Fingerprint, empty.Fingerprint);
+    True(empty.Fingerprint.IsValid);
+    False(ContentBaseCatalog.TryCreate([], out _, out ContentCatalogResolutionError error));
+    Equal(ContentCatalogResolutionError.InvalidBaseCatalog, error);
+}
 
 static void CanonicalPackageArchiveRoundTripsAndRejectsDamage()
 {

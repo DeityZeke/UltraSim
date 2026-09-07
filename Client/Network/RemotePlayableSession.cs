@@ -1,6 +1,7 @@
 using UltraSim.Client.Core;
 using UltraSim.Client.Content;
 using UltraSim.Game.Admission;
+using UltraSim.Game.Composition;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Network;
@@ -31,6 +32,36 @@ public sealed class RemoteRequiredWorldBinding
     public WorldPackFingerprint ExpectedPackFingerprint { get; }
     public WorldContentBinding ContentBinding { get; }
     public ClientWorldSemanticCacheLimits SemanticLimits { get; }
+}
+
+/// <summary>
+/// Compatible-client structural profile for the current Concept Demo deployment. This is stable
+/// vocabulary/fingerprint data only; the Online product still contains no WorldPack bytes.
+/// </summary>
+public static class RemoteConceptDemoWorldProfile
+{
+    public static RemoteRequiredWorldBinding CreateRequiredBinding(
+        ClientWorldSemanticCacheLimits semanticLimits = default)
+    {
+        if (!LogicalContentId.TryCreate(
+                GameWorldContentProfile.ConceptDemoDefinitionId, out LogicalContentId definition) ||
+            !WorldPackFingerprint.TryParse(
+                GameWorldContentProfile.ConceptDemoPackFingerprint, out WorldPackFingerprint pack))
+            throw new InvalidOperationException("The compiled Concept Demo world profile is invalid.");
+        var content = new WorldContentBinding(
+            new WorldContentFingerprint(
+                GameWorldContentProfile.ContentFingerprintLow,
+                GameWorldContentProfile.ContentFingerprintHigh),
+            GameWorldContentProfile.TerrainMaterialIds.ToArray(),
+            GameWorldContentProfile.StaticDefinitionIds.ToArray());
+        return new RemoteRequiredWorldBinding(
+            definition,
+            pack,
+            content,
+            semanticLimits == default
+                ? new ClientWorldSemanticCacheLimits(192, 256, 32, 64, 4_096)
+                : semanticLimits);
+    }
 }
 
 public enum RemoteStructuralWorldState : byte
