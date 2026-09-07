@@ -505,8 +505,14 @@ geometry supports on top by default; the rare `NoTopSupport` override remains bl
 out of standing/landing. Tightropes and ladders remain future explicit Game traversal semantics, not
 special Physics prefab cases or reasons to shrink normal support to an implausible size.
 
-This remains bounded Simple Physics; moving platforms, sliding/contact response, dynamic-projected
-support, actor support, and special narrow traversal are not implied.
+Human play also found the complementary rock-edge case: the feet could correctly lose support while
+the wider body remained in exact top-edge contact, making every downward all-or-nothing sweep block.
+The accepted narrow hardening preserves support eligibility and full body collision, realizes clear
+outward X/Z motion first, and otherwise performs one bounded deterministic shortest-edge release so
+gravity can resume. This is not a general capsule/slide controller.
+
+This remains bounded Simple Physics; moving platforms, general sliding/contact response,
+dynamic-projected support, actor support, and special narrow traversal are not implied.
 
 D0.0 does not implement render-distance policy, the Far Island/gate, terrain editing, or other
 deferred Physics features.

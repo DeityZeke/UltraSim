@@ -446,13 +446,179 @@ public sealed class UltraSimSimplePhysics
             previousY = y;
         }
 
-        return IsSweepClear(
-            Bounds(request.Current, request.Body),
-            Bounds(target, request.Body),
-            dynamicBlockingBounds,
-            dynamicProjectionComplete)
-            ? new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Airborne, target)
-            : new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
+        WorldStaticBounds currentBounds = Bounds(request.Current, request.Body);
+        WorldStaticBounds targetBounds = Bounds(target, request.Body);
+        if (IsSweepClear(
+                currentBounds,
+                targetBounds,
+                dynamicBlockingBounds,
+                dynamicProjectionComplete))
+            return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Airborne, target);
+
+        // The central support footprint is intentionally narrower than the collision body. When
+        // that footprint leaves a supporting top, the body's wider AABB can still touch its edge.
+        // Preserve exact blocker sweep, but resolve the downward contact by first advancing any
+        // clear requested horizontal component and, if needed, by one bounded shortest-edge
+        // release. This prevents the valid state "unsupported but vertically blocked forever"
+        // without weakening ordinary support or allowing a horizontal wall penetration.
+        if (deltaY < 0 && TryResolveDescendingEdgeMotion(
+                world,
+                request,
+                dynamicBlockingBounds,
+                dynamicProjectionComplete,
+                out WorldPosition edgeMotion))
+            return new SimpleAirborneMotionResult(
+                SimpleAirborneMotionStatus.Airborne, edgeMotion);
+
+        return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
+    }
+
+    private bool TryResolveDescendingEdgeMotion(
+        WorldPreparedView world,
+        in SimpleAirborneMotionRequest request,
+        ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
+        bool dynamicProjectionComplete,
+        out WorldPosition resolved)
+    {
+        resolved = default;
+        if (!dynamicProjectionComplete) return false;
+
+        WorldStaticBounds currentBounds = Bounds(request.Current, request.Body);
+        bool hasRequestedHorizontal =
+            request.TargetXMillimeters != request.Current.GlobalXMillimeters ||
+            request.TargetZMillimeters != request.Current.GlobalZMillimeters;
+        if (hasRequestedHorizontal &&
+            WorldPosition.TryFromGlobalMillimeters(
+                request.TargetXMillimeters,
+                request.Current.YMillimeters,
+                request.TargetZMillimeters,
+                out WorldPosition horizontal) &&
+            ValidateStructuralFootprint(world, horizontal, request.Body) ==
+                TerrainResolutionStatus.Grounded &&
+            IsSweepClear(
+                currentBounds,
+                Bounds(horizontal, request.Body),
+                dynamicBlockingBounds,
+                dynamicProjectionComplete))
+        {
+            resolved = horizontal;
+            return true;
+        }
+
+        long supportMinimumX = request.Current.GlobalXMillimeters -
+            request.Body.SupportHalfExtentXMillimeters;
+        long supportMaximumXExclusive = request.Current.GlobalXMillimeters +
+            request.Body.SupportHalfExtentXMillimeters + 1L;
+        long supportMinimumZ = request.Current.GlobalZMillimeters -
+            request.Body.SupportHalfExtentZMillimeters;
+        long supportMaximumZExclusive = request.Current.GlobalZMillimeters +
+            request.Body.SupportHalfExtentZMillimeters + 1L;
+        long currentX = request.Current.GlobalXMillimeters;
+        long currentZ = request.Current.GlobalZMillimeters;
+        int halfExtentX = request.Body.HalfExtentXMillimeters;
+        int halfExtentZ = request.Body.HalfExtentZMillimeters;
+        var edgeBand = new WorldStaticBounds(
+            currentBounds.MinimumXMillimeters,
+            (long)request.Current.YMillimeters - 1,
+            currentBounds.MinimumZMillimeters,
+            currentBounds.MaximumXExclusiveMillimeters,
+            (long)request.Current.YMillimeters + 1,
+            currentBounds.MaximumZExclusiveMillimeters);
+        if (!_world.TryQueryStaticBounds(
+                edgeBand,
+                StaticCollisionCandidateChunks,
+                _staticHits,
+                out int staticCount,
+                out _,
+                out _))
+            return false;
+
+        long bestX = request.Current.GlobalXMillimeters;
+        long bestZ = request.Current.GlobalZMillimeters;
+        long bestDistance = long.MaxValue;
+        for (int index = 0; index < staticCount; index++)
+        {
+            ref readonly WorldStaticQueryHit hit = ref _staticHits[index];
+            if (WorldStaticPhysicalSemantics.BlocksBody(hit.Flags) &&
+                hit.Bounds.MaximumYExclusiveMillimeters == request.Current.YMillimeters)
+                ConsiderEdge(hit.Bounds);
+        }
+        for (int index = 0; index < dynamicBlockingBounds.Length; index++)
+        {
+            if (!dynamicBlockingBounds[index].IsValid) return false;
+            if (dynamicBlockingBounds[index].MaximumYExclusiveMillimeters ==
+                request.Current.YMillimeters)
+                ConsiderEdge(dynamicBlockingBounds[index]);
+        }
+
+        long maximumRelease = Math.Max(
+            checked((long)request.Body.HalfExtentXMillimeters +
+                request.Body.SupportHalfExtentXMillimeters),
+            checked((long)request.Body.HalfExtentZMillimeters +
+                request.Body.SupportHalfExtentZMillimeters));
+        if (bestDistance is <= 0 or long.MaxValue || bestDistance > maximumRelease ||
+            !WorldPosition.TryFromGlobalMillimeters(
+                bestX,
+                request.Current.YMillimeters,
+                bestZ,
+                out WorldPosition escape) ||
+            ValidateStructuralFootprint(world, escape, request.Body) !=
+                TerrainResolutionStatus.Grounded ||
+            !IsSweepClear(
+                currentBounds,
+                Bounds(escape, request.Body),
+                dynamicBlockingBounds,
+                dynamicProjectionComplete))
+            return false;
+
+        resolved = escape;
+        return true;
+
+        void ConsiderEdge(in WorldStaticBounds obstacle)
+        {
+            if (currentBounds.MinimumXMillimeters >= obstacle.MaximumXExclusiveMillimeters ||
+                currentBounds.MaximumXExclusiveMillimeters <= obstacle.MinimumXMillimeters ||
+                currentBounds.MinimumZMillimeters >= obstacle.MaximumZExclusiveMillimeters ||
+                currentBounds.MaximumZExclusiveMillimeters <= obstacle.MinimumZMillimeters ||
+                CoversFootprint(
+                    obstacle,
+                    supportMinimumX,
+                    supportMinimumZ,
+                    supportMaximumXExclusive,
+                    supportMaximumZExclusive))
+                return;
+
+            Consider(
+                checked(obstacle.MinimumXMillimeters -
+                    halfExtentX - 1L),
+                currentZ);
+            Consider(
+                checked(obstacle.MaximumXExclusiveMillimeters +
+                    halfExtentX),
+                currentZ);
+            Consider(
+                currentX,
+                checked(obstacle.MinimumZMillimeters -
+                    halfExtentZ - 1L));
+            Consider(
+                currentX,
+                checked(obstacle.MaximumZExclusiveMillimeters +
+                    halfExtentZ));
+        }
+
+        void Consider(long x, long z)
+        {
+            long distance = checked(
+                Math.Abs(x - currentX) +
+                Math.Abs(z - currentZ));
+            if (distance < bestDistance ||
+                distance == bestDistance && (x < bestX || x == bestX && z < bestZ))
+            {
+                bestDistance = distance;
+                bestX = x;
+                bestZ = z;
+            }
+        }
     }
 
     private TerrainResolutionStatus ResolveGroundedPath(

@@ -96,14 +96,18 @@ and stops ascending bodies at the first Bottom face reached by any footprint poi
 must be completely resident for all five footprint columns or resolution fails closed. Airborne
 requests do not snap to a nearby support merely because one exists.
 
-The resolver remains all-or-nothing: a blocked or unsupported request realizes no partial
-displacement. Fixed spatial samples are bounded Simple Physics traversal contracts, not a general
-triangle time-of-impact solver or rigid-body character controller. Ordinary collidable
+Grounded motion and ordinary blocked airborne motion remain all-or-nothing. One later human-play
+hardening admits bounded horizontal/shortest-edge progress for a descending airborne body whose
+smaller support footprint has left a static top while its wider collision body still touches that
+top edge; this prevents a permanent unsupported vertical wedge. Fixed spatial samples are bounded
+Simple Physics traversal contracts, not a general triangle time-of-impact solver or rigid-body
+character controller. Ordinary collidable
 FrozenStatics/Multis support on top unless authored with the rare `NoTopSupport` override;
 Game-projected dynamic bounds remain blockers rather than landing support. The resolver owns no
-gravity, jump admission, vertical state, recovery policy, sliding, depenetration, actor collision,
-navigation, Godot Physics, Jolt, or generalized provider interface. Game composition owns the
-accepted P0.1d grounded/airborne lifecycle above this physical seam; see
+gravity, jump admission, vertical state, recovery policy, general contact sliding, capsule
+narrowphase, depenetration, actor collision, navigation, Godot Physics, Jolt, or generalized
+provider interface. Game composition owns the accepted P0.1d grounded/airborne lifecycle above this
+physical seam; see
 [`PHYSICS.md`](../../Docs/Plans/PHYSICS.md).
 
 ## D0 playability hardening — ordinary static top support
@@ -133,5 +137,6 @@ what a tightrope prefab is.
 
 Permanent integrated regressions land and move on the authored Concept Demo rock, Cabin wall, and
 Cabin shelf; walk off the wall into unsupported motion; reject a top smaller than the support core;
-and prove `NoTopSupport` stays blocking without grounding. The warmed ordinary static-support path
-continues to allocate 0 B.
+prove `NoTopSupport` stays blocking without grounding; and prove that leaving a rock's legal support
+cannot become `Airborne` at one unchanged position forever merely because the wider body still
+touches its old top edge. The warmed ordinary static-support/edge path continues to allocate 0 B.

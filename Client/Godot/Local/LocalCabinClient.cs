@@ -563,6 +563,7 @@ public partial class LocalCabinClient : Node3D
 
     public override void _Input(InputEvent inputEvent)
     {
+        if (TryHandleFocusedChatInput(inputEvent)) return;
         if (!_gameplayInputAllowed) return;
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
         {
@@ -577,16 +578,6 @@ public partial class LocalCabinClient : Node3D
             if (_chatInput is not null && !_chatInput.HasFocus())
             {
                 _chatInput.GrabFocus();
-                GetViewport().SetInputAsHandled();
-            }
-            return;
-        }
-        if (_chatInput?.HasFocus() == true)
-        {
-            if (inputEvent is InputEventKey escape && escape.Pressed && !escape.Echo &&
-                escape.Keycode == global::Godot.Key.Escape)
-            {
-                _chatInput.ReleaseFocus();
                 GetViewport().SetInputAsHandled();
             }
             return;
@@ -917,6 +908,18 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException(
                 "Spatial Chat did not use and anchor the accepted guest display name.");
         return GetPresentationSnapshot();
+    }
+
+    /// <summary>Native acceptance observation for shell/Chat focus ownership.</summary>
+    public LocalChatInputSnapshot GetChatInputSnapshot()
+    {
+        if (!_initialized || _chatInput is null || _chatState is null)
+            throw new InvalidOperationException("Chat input is not initialized.");
+        return new LocalChatInputSnapshot(
+            _chatInput.HasFocus(),
+            _chatInput.Text,
+            _gameplayInputAllowed,
+            _chatState.GetSnapshot().Applied);
     }
 
     private MultiMeshInstance3D RequireFallbackLabGroup(
@@ -2463,6 +2466,7 @@ public partial class LocalCabinClient : Node3D
         chatStack.AddChild(new Label { Text = "Chat", ThemeTypeVariation = "HeaderSmall" });
         _chatFeed = new RichTextLabel
         {
+            Name = "ChatFeed",
             BbcodeEnabled = false,
             CustomMinimumSize = new Vector2(540, 145),
             ScrollFollowing = true,
@@ -2478,6 +2482,7 @@ public partial class LocalCabinClient : Node3D
         chatEntry.AddChild(_chatMode);
         _chatInput = new LineEdit
         {
+            Name = "ChatInput",
             PlaceholderText = "Enter chat or /help /where",
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             MaxLength = MaximumChatTextCharacters,
@@ -2525,8 +2530,10 @@ public partial class LocalCabinClient : Node3D
         ClientChatSpeechMode mode = _chatMode is null
             ? ClientChatSpeechMode.Say
             : (ClientChatSpeechMode)_chatMode.GetSelectedId();
-        if (_localSession.TrySubmitChat(_nextChatSubmission++, mode, text))
+        ulong submission = _nextChatSubmission;
+        if (_localSession.TrySubmitChat(submission, mode, text))
         {
+            _nextChatSubmission = checked(submission + 1);
             _chatInput.Clear();
             _chatInput.ReleaseFocus();
             _lastOutcome = "Chat submitted";
@@ -2536,6 +2543,39 @@ public partial class LocalCabinClient : Node3D
             _lastOutcome = "Chat input rejected or transport busy";
         }
     }
+
+    private bool TryHandleFocusedChatInput(InputEvent inputEvent)
+    {
+        if (_chatInput?.HasFocus() != true) return false;
+        if (inputEvent is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            if (IsChatSubmitKey(key))
+            {
+                SubmitChat(_chatInput.Text);
+                GetViewport().SetInputAsHandled();
+            }
+            else if (key.Keycode == global::Godot.Key.Escape ||
+                     key.PhysicalKeycode == global::Godot.Key.Escape)
+            {
+                _chatInput.ReleaseFocus();
+                _lastOutcome = "Chat focus released";
+                GetViewport().SetInputAsHandled();
+            }
+        }
+        else if (inputEvent is InputEventMouseButton mouse && mouse.Pressed &&
+            !_chatInput.GetGlobalRect().HasPoint(mouse.Position))
+        {
+            // Do not mark this click handled: the clicked HUD control may still consume it. This
+            // client stops here, so the same event can never also become a world interaction.
+            _chatInput.ReleaseFocus();
+            _lastOutcome = "Chat focus released";
+        }
+        return true;
+    }
+
+    private static bool IsChatSubmitKey(InputEventKey input) =>
+        input.Keycode is global::Godot.Key.Enter or global::Godot.Key.KpEnter ||
+        input.PhysicalKeycode is global::Godot.Key.Enter or global::Godot.Key.KpEnter;
 
     private void PumpChat()
     {
@@ -2898,3 +2938,9 @@ public partial class LocalCabinClient : Node3D
         }
     }
 }
+
+public readonly record struct LocalChatInputSnapshot(
+    bool HasFocus,
+    string Draft,
+    bool GameplayInputAllowed,
+    ulong AppliedOccurrences);

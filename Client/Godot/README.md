@@ -117,7 +117,10 @@ the three fallback classes, model/material independence, native bounds, and sign
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the
 authoritative guest identity, selected public character prefab, controlled nameplate, and spatial
-Chat sender label. F0.4 routes that controlled human and the nearby woodland animal through the
+Chat sender label. It also drives the native Chat input lifecycle: Enter submits exactly once,
+Escape releases Chat without opening the shell menu, click-away preserves the draft, and gameplay
+input resumes after focus is released. Focused Chat owns those events even though shared shell focus
+policy has already disabled gameplay input. F0.4 routes that controlled human and the nearby woodland animal through the
 same renderer-neutral actor state used by Online, verifies Ctrl reveal over already-known eligible
 actors, and anchors spatial speech to the exact presented public identity. Online has no bundled
 X/Y scenes, so its same presenter deliberately realizes the current actors through the primitive

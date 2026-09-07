@@ -875,7 +875,11 @@ Use the accepted Chat C0.1a semantics directly:
 - bounded ClientChatState retains feed history;
 - incompatible/missing actor suppresses overhead presentation only, not the feed fact.
 
-Overhead belongs to World layer. Feed/input belongs to HUD/Menu. Text focus suppresses movement via shared focus policy.
+Overhead belongs to World layer. Feed/input belongs to HUD/Menu. Text focus suppresses movement via
+shared focus policy, but the focused Chat owner must continue receiving its own submit/cancel/click-
+away events even after gameplay input is suppressed. Enter submits once and releases focus only on
+accepted ingress; Escape or click-away releases focus without discarding the draft; the next shell
+focus evaluation restores gameplay input. Escape consumed by Chat must not also open the shell menu.
 
 No second Godot-only chat protocol.
 
@@ -1855,6 +1859,11 @@ native admission journey, and the exported Online cold/warm journey with control
 another resident actor, Ctrl reveal, primitive fallback, and anchored overhead speech. This does
 not claim a shared many-participant authority; the current external deployment still owns one
 participant runtime per accepted connection.
+
+Human-play hardening after F0.4 makes local and remote Chat focus an explicit input owner above the
+gameplay gate. The Single Player native admission journey now types/submits through the real Enter
+event, proves Escape remains local to Chat, proves click-away preserves the draft, and verifies that
+gameplay input resumes after focus is released.
 
 ---
 

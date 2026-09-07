@@ -83,6 +83,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private float _cameraDistance = 8.5f;
     private float _cameraPivotMeters = CameraPivotMeters;
     private bool _smoke;
+    private bool _gameplayInputAllowed;
     private int _smokePhase;
     private ulong _lastSmokeDiagnosticMilliseconds;
     private int _terrainTriangles;
@@ -177,6 +178,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     public void Pump(bool gameplayInputAllowed)
     {
         EnsureOperational();
+        _gameplayInputAllowed = gameplayInputAllowed &&
+            _state == RemoteConceptDemoClientState.Active;
         if (_state == RemoteConceptDemoClientState.Faulted) return;
         try
         {
@@ -244,6 +247,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     public override void _Input(InputEvent inputEvent)
     {
         if (_state != RemoteConceptDemoClientState.Active || _settings is null) return;
+        if (TryHandleFocusedChatInput(inputEvent)) return;
+        if (!_gameplayInputAllowed) return;
+        if (inputEvent is InputEventKey chat && chat.Pressed && !chat.Echo &&
+            GodotWorldInput.Matches(chat, _settings, ClientSemanticAction.Chat))
+        {
+            _chatInput?.GrabFocus();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
         {
             _actorPresenter?.SetRevealHeld(reveal.Pressed);
@@ -257,7 +269,6 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             GetViewport().SetInputAsHandled();
             return;
         }
-        if (_chatInput?.HasFocus() == true) return;
         if (inputEvent is InputEventMouseButton mouse)
         {
             if (GodotWorldInput.Matches(mouse, _settings, ClientSemanticAction.Select) ||
@@ -615,14 +626,43 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             PlaceholderText = "Say…",
             MaxLength = 256,
         };
-        _chatInput.TextSubmitted += text =>
-        {
-            if (_state == RemoteConceptDemoClientState.Active &&
-                _session?.Chat.TrySubmit(text) == true)
-                _chatInput.Text = string.Empty;
-        };
+        _chatInput.TextSubmitted += SubmitChat;
         _ownedHud.AddChild(_chatInput);
         UpdateHud("Authenticated session established; acquiring required content…");
+    }
+
+    private void SubmitChat(string text)
+    {
+        if (_chatInput is null || _state != RemoteConceptDemoClientState.Active ||
+            _session?.Chat.TrySubmit(text) != true)
+            return;
+        _chatInput.Clear();
+        _chatInput.ReleaseFocus();
+    }
+
+    private bool TryHandleFocusedChatInput(InputEvent inputEvent)
+    {
+        if (_chatInput?.HasFocus() != true) return false;
+        if (inputEvent is InputEventKey key && key.Pressed && !key.Echo)
+        {
+            if (IsChatSubmitKey(key))
+            {
+                SubmitChat(_chatInput.Text);
+                GetViewport().SetInputAsHandled();
+            }
+            else if (key.Keycode == global::Godot.Key.Escape ||
+                     key.PhysicalKeycode == global::Godot.Key.Escape)
+            {
+                _chatInput.ReleaseFocus();
+                GetViewport().SetInputAsHandled();
+            }
+        }
+        else if (inputEvent is InputEventMouseButton mouse && mouse.Pressed &&
+            !_chatInput.GetGlobalRect().HasPoint(mouse.Position))
+        {
+            _chatInput.ReleaseFocus();
+        }
+        return true;
     }
 
     private void UpdateChat()
@@ -804,6 +844,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private static bool IsControlKey(InputEventKey input) =>
         input.Keycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta ||
         input.PhysicalKeycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta;
+
+    private static bool IsChatSubmitKey(InputEventKey input) =>
+        input.Keycode is global::Godot.Key.Enter or global::Godot.Key.KpEnter ||
+        input.PhysicalKeycode is global::Godot.Key.Enter or global::Godot.Key.KpEnter;
 
     private static Control FullRectControl(string name)
     {

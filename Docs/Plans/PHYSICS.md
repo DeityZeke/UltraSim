@@ -10,7 +10,10 @@ state, jump admission, deterministic gravity, horizontal air control, terrain-sh
 landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. D0 human-play
 hardening subsequently admits complete collidable frozen-static/Multi bounds tops as support and
 separates the playable body's collision/clearance footprint from its central support/feet footprint.
-Sliding, general triangle time-of-impact, moving support, and actor collision remain unstarted.
+A later human-play hardening adds one bounded static-top edge release so an unsupported airborne
+body cannot remain vertically wedged against the support it just left. General contact sliding,
+rounded/capsule narrowphase, triangle time-of-impact, moving support, and actor collision remain
+unstarted.
 
 Concept Demo D0.0 is the accepted first integrated consumer of this chain: it traverses beneath a
 MountainShell, jumps and lands on a detached Sky shell, filters Jump from OrbitCommand, invokes an
@@ -539,6 +542,45 @@ support, sliding/contact response, or actor-on-actor support.
 Permanent integrated regressions cover the authored Concept Demo rock, Cabin wall and shelf,
 wall-top movement/walk-off/upward launch, a top smaller than the feet footprint, and the blocking but
 non-supporting override. The warmed ordinary static-support path remains 0 B allocated.
+
+## D0 playability hardening — unsupported static-top edge release
+
+Human play found a second state made possible by the intentionally independent footprints:
+
+```text
+feet no longer fully supported
+    -> actor correctly becomes Airborne
+
+wider body still touches the former static top edge
+    -> exact downward AABB sweep is Blocked
+
+old all-or-nothing response
+    -> no motion forever
+```
+
+Simple Physics preserves the exact blocker sweep and ordinary support rule. When an airborne request
+is descending and its full combined sweep blocks, it may first realize the requested X/Z component
+at the current contact Y if that horizontal sweep is structurally complete and physically clear. If
+the actor has no usable outward input, the resolver may make one deterministic shortest-axis release
+from an exact static/projected-bound top contact that overlaps the body but no longer covers the
+support footprint. The release distance is bounded by the body plus support half extents, is checked
+through the same complete structural and exact horizontal blocker queries, and leaves vertical
+velocity/state in Game. A later gravity request can then descend normally.
+
+This is a narrow escape from the invalid stable state `Airborne + unchanged position forever`. It
+does not make a corner count as support, shrink the collision body, allow stepping through a raised
+face, or introduce a general slide/depenetration/contact-normal solver. Inside/multiple-obstacle
+corners still fail closed when the one admitted release is not clear. Permanent regression starts at
+the last legal rock support point, moves one millimeter beyond legal support while the wider body
+still overlaps, proves horizontal/automatic release progress, then proves downward progress. One
+thousand warmed rock support plus edge resolutions continue to allocate 0 B.
+
+The accepted Release evidence is
+[`physics-static-edge-chat-focus-hardening-2026-09-07.json`](../../_Benchmarks/Baselines/physics-static-edge-chat-focus-hardening-2026-09-07.json).
+It records all thirty-four integrated gates passing, the unchanged playable-world
+`B764...F220` hash and 16,704 B `GameWorldActions` reservation, and 0 B warmed static-support/edge
+allocation. Chat focus is independently exercised by the real `--d0-5-smoke` Godot journey rather
+than being represented as a Physics metric in this artifact.
 
 ## RunUO archaeology
 

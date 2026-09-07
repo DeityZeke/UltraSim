@@ -1669,10 +1669,11 @@ static TestMetrics SimplePhysicsStaticSupport()
                 Expect(WorldPosition.TryFromGlobalMillimeters(
                         5_000, 0, 13_000, out WorldPosition rockColumn),
                     "The authored Concept Demo rock column was invalid.");
-                WorldPreparedView? prepared = game.WorldState.PreparedWorld;
+                WorldPreparedView prepared = game.WorldState.PreparedWorld ??
+                    throw new InvalidOperationException(
+                        "The Concept Demo prepared world was unavailable.");
                 int terrainY = 0;
-                Expect(prepared is not null &&
-                    prepared.TrySampleBaseTerrainHeight(rockColumn, out terrainY),
+                Expect(prepared.TrySampleBaseTerrainHeight(rockColumn, out terrainY),
                     "The authored Concept Demo rock column was unavailable.");
                 int rockTopY = checked(terrainY + 900);
                 WorldPosition above = Position(5_000, rockTopY + 1_000, 13_000);
@@ -1701,6 +1702,48 @@ static TestMetrics SimplePhysicsStaticSupport()
                     groundedMove.Position.YMillimeters == rockTopY &&
                     groundedMove.Support.Kind == SimplePhysicalSupportKind.StaticGeometry,
                     "A landed actor could not remain grounded and move across the rock top.");
+
+                // Human play found the exact state where the independent support core has left
+                // the rock but the full body still overlaps its top edge. Descending AABB sweep
+                // must not leave that airborne actor permanently fixed in place.
+                WorldPosition lastRockSupport = Position(5_350, rockTopY, 13_000);
+                SimpleAirborneMotionResult departingRock =
+                    game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            lastRockSupport, 5_417, rockTopY - 1, 13_000, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                SimpleAirborneMotionResult rockEdgeEscape =
+                    game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            departingRock.Position,
+                            departingRock.Position.GlobalXMillimeters,
+                            departingRock.Position.YMillimeters - 4,
+                            departingRock.Position.GlobalZMillimeters,
+                            body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                SimpleAirborneMotionResult afterRockEdge =
+                    game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            rockEdgeEscape.Position,
+                            rockEdgeEscape.Position.GlobalXMillimeters,
+                            rockEdgeEscape.Position.YMillimeters - 10,
+                            rockEdgeEscape.Position.GlobalZMillimeters,
+                            body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                Expect(departingRock.WasResolved &&
+                    departingRock.Position.GlobalXMillimeters >
+                        lastRockSupport.GlobalXMillimeters &&
+                    rockEdgeEscape.WasResolved &&
+                    rockEdgeEscape.Position.GlobalXMillimeters >
+                        departingRock.Position.GlobalXMillimeters &&
+                    afterRockEdge.WasResolved &&
+                    afterRockEdge.Position.YMillimeters <
+                        rockEdgeEscape.Position.YMillimeters,
+                    "An unsupported airborne body remained wedged forever against its former " +
+                    "static top edge.");
 
                 WorldPosition wallColumn = Position(16_000, 0, 15_000);
                 Expect(prepared.TrySampleBaseTerrainHeight(wallColumn, out int wallTerrainY),
@@ -1750,10 +1793,17 @@ static TestMetrics SimplePhysicsStaticSupport()
                     "A static top wider than the support core but narrower than the body did not support landing.");
 
                 for (int index = 0; index < 16; index++)
+                {
                     _ = game.SimplePhysics.ResolveMotion(
                         new SimpleMotionRequest(landing.Position, 5_100, 13_000, body),
                         ReadOnlySpan<WorldStaticBounds>.Empty,
                         true);
+                    _ = game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            lastRockSupport, 5_417, rockTopY - 1, 13_000, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                }
                 long before = GC.GetAllocatedBytesForCurrentThread();
                 for (int index = 0; index < 1_000; index++)
                 {
@@ -1763,6 +1813,17 @@ static TestMetrics SimplePhysicsStaticSupport()
                         true);
                     if (!result.IsGrounded)
                         throw new InvalidOperationException("The warmed rock-support result changed.");
+                    SimpleAirborneMotionResult edge =
+                        game.SimplePhysics.ResolveAirborneMotion(
+                            new SimpleAirborneMotionRequest(
+                                lastRockSupport, 5_417, rockTopY - 1, 13_000, body),
+                            ReadOnlySpan<WorldStaticBounds>.Empty,
+                            true);
+                    if (!edge.WasResolved ||
+                        edge.Position.GlobalXMillimeters <=
+                            lastRockSupport.GlobalXMillimeters)
+                        throw new InvalidOperationException(
+                            "The warmed static-edge escape result changed.");
                 }
                 return GC.GetAllocatedBytesForCurrentThread() - before;
 
@@ -1780,7 +1841,8 @@ static TestMetrics SimplePhysicsStaticSupport()
         HashText("static-top-support-core-wall-shelf-grounded-movement"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
         "Ordinary collidable rock, thin-wall, and shelf tops support airborne landing and " +
-        "grounded traversal through the independent feet footprint with 0 B warmed allocation.");
+        "grounded traversal through the independent feet footprint; unsupported rock-edge " +
+        "contact escapes without a permanent airborne wedge and allocates 0 B warmed.");
 }
 
 static TestMetrics SimplePhysicsStaticTopPolicy()

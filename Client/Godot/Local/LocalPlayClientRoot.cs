@@ -356,9 +356,11 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
                 throw new InvalidOperationException("A valid guest did not enter the local world.");
             LocalCabinPresentationSnapshot evidence = _cabin.RunD05Acceptance(
                 "Demo Éowyn", CabinHumanBody.YBot);
+            await RunChatFocusSmoke(_cabin);
             GD.Print(
                 $"D0.5 GUEST ADMISSION PASS name={evidence.DisplayName} body={evidence.HumanBody} " +
-                $"player={evidence.PlayerPosition} authorityTicks={evidence.AuthorityTicks}");
+                $"player={evidence.PlayerPosition} authorityTicks={evidence.AuthorityTicks} " +
+                "chatFocus=pass");
             RetireCurrentSession();
             ReturnToMainMenu("Concept Demo D0.5 guest admission smoke passed.");
             GetTree().Quit(0);
@@ -370,6 +372,80 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             FailSession(exception.Message);
             GetTree().Quit(1);
         }
+    }
+
+    private async Task RunChatFocusSmoke(LocalCabinClient cabin)
+    {
+        LineEdit chat = RequireNode<LineEdit>("ChatInput");
+        LocalChatInputSnapshot before = cabin.GetChatInputSnapshot();
+        chat.Text = "keyboard submit canary";
+        chat.GrabFocus();
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (cabin.GetChatInputSnapshot() is not { HasFocus: true, GameplayInputAllowed: false })
+            throw new InvalidOperationException(
+                "Chat focus did not become the shell's exclusive text-input owner.");
+
+        Input.ParseInputEvent(new InputEventKey
+        {
+            Keycode = Key.Enter,
+            PhysicalKeycode = Key.Enter,
+            Pressed = true,
+        });
+        LocalChatInputSnapshot submitted = default;
+        for (int frame = 0; frame < 240; frame++)
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            submitted = cabin.GetChatInputSnapshot();
+            if (submitted.AppliedOccurrences == before.AppliedOccurrences + 1) break;
+        }
+        if (submitted.HasFocus || submitted.Draft.Length != 0 ||
+            submitted.AppliedOccurrences != before.AppliedOccurrences + 1)
+            throw new InvalidOperationException(
+                "Enter did not submit and retire the focused Chat draft exactly once.");
+
+        chat.Text = "preserved draft";
+        chat.GrabFocus();
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        Input.ParseInputEvent(new InputEventKey
+        {
+            Keycode = Key.Escape,
+            PhysicalKeycode = Key.Escape,
+            Pressed = true,
+        });
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        LocalChatInputSnapshot escaped = cabin.GetChatInputSnapshot();
+        if (escaped.HasFocus || escaped.Draft != "preserved draft" ||
+            ShellSnapshot().Screen != ClientShellScreen.InSession)
+            throw new InvalidOperationException(
+                "Escape did not release Chat focus locally while preserving the draft.");
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!cabin.GetChatInputSnapshot().GameplayInputAllowed)
+            throw new InvalidOperationException(
+                "Gameplay input did not resume after Chat released focus.");
+
+        chat.Text = "click-away draft";
+        chat.GrabFocus();
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        Rect2 chatBounds = chat.GetGlobalRect();
+        Input.ParseInputEvent(new InputEventMouseButton
+        {
+            ButtonIndex = MouseButton.Left,
+            Pressed = true,
+            Position = new Vector2(chatBounds.Position.X, chatBounds.Position.Y - 32),
+        });
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        LocalChatInputSnapshot clickedAway = cabin.GetChatInputSnapshot();
+        if (clickedAway.HasFocus || clickedAway.Draft != "click-away draft" ||
+            ShellSnapshot().Screen != ClientShellScreen.InSession)
+            throw new InvalidOperationException(
+                "Clicking outside Chat did not release focus while preserving the draft.");
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (!cabin.GetChatInputSnapshot().GameplayInputAllowed)
+            throw new InvalidOperationException(
+                "Gameplay input did not resume after clicking away from Chat.");
+
+        chat.Text = string.Empty;
     }
 
     private T RequireNode<T>(string name) where T : Node =>
