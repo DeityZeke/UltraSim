@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-f0.4-actor-presentation-2026-09-07.json` — bounded renderer-neutral actor
+  definitions and cold per-instance metadata beside unchanged hot public movement, ABA-safe exact
+  identity/application proof, shared Local/Online Godot realization, client-local Ctrl reveal,
+  anchored overhead speech, primitive Contentless Online actors, and the actual exported cold/warm
+  product journey. It also records the bounded round-robin public-scheduling hardening earned by
+  real reliable-queue pressure;
 - `client-f0.3c-profile-consent-2026-09-07.json` — authenticated protocol-v19 finite
   control/camera profile advertisement, exact realm/revision/hash consent persistence, application
   proof gating, layered settings/reserved-control preservation, and the actual exported Online

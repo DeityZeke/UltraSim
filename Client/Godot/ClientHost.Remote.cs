@@ -100,7 +100,12 @@ public partial class ClientHost
                         $"filesFetched={playable.Session.Content.Acquisition.FilesFetched} " +
                         $"bytesFetched={playable.Session.Content.Acquisition.BytesFetched} " +
                         $"proofs={playable.Session.Content.ProofsQueued} " +
-                        $"ui={playable.OpenUiViews} chat={playable.Session.Chat.OccurrencesApplied}");
+                        $"ui={playable.OpenUiViews} chat={playable.Session.Chat.OccurrencesApplied} " +
+                        $"actors={playable.Actors.ActiveActors} primitiveActors=" +
+                        $"{playable.Actors.PrimitiveFallbackActors} nameplates=" +
+                        $"{playable.Actors.VisibleNameplates} overhead=" +
+                        $"{playable.Actors.VisibleOverheadLabels} publicMetadataProofs=" +
+                        $"{playable.Session.PublicPresentation.ProofsQueued}");
                     RetireCurrentSession();
                     return;
                 }
@@ -668,6 +673,10 @@ public partial class ClientHost
         bool warm = string.Equals(expected, "warm", StringComparison.OrdinalIgnoreCase);
         if (!cold && !warm || snapshot.RenderedChunks != 9 || snapshot.TerrainTriangles <= 0 ||
             snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
+            snapshot.Actors.ActiveActors < 2 || snapshot.Actors.PrimitiveFallbackActors < 2 ||
+            snapshot.Actors.VisibleNameplates < 2 || snapshot.Actors.VisibleOverheadLabels < 1 ||
+            snapshot.Session.PublicPresentation.Applied == 0 ||
+            snapshot.Session.PublicPresentation.ProofsQueued == 0 ||
             snapshot.Session.Content.ProofsQueued == 0 ||
             snapshot.Session.StructuralWorld.State != RemoteStructuralWorldState.Ready ||
             snapshot.Session.World.AppliedSnapshots == 0 ||

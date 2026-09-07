@@ -912,8 +912,8 @@ internal static class N1OfflineDirectChunkTests
         }
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - proofEnvelopeAllocations);
 
-        Equal((ushort)19, UltraSimGameProtocol.Manifest.Version);
-        Equal(5_678_494_301_408_572_564UL, UltraSimGameProtocol.Manifest.Fingerprint);
+        Equal((ushort)20, UltraSimGameProtocol.Manifest.Version);
+        Equal(12_562_603_566_017_359_107UL, UltraSimGameProtocol.Manifest.Fingerprint);
         Equal(6_148_331_928_277_823_537UL,
             UltraSimGameProtocol.ChunkPublicationSchemaFingerprint);
         True(UltraSimGameProtocol.Manifest.TryGet(

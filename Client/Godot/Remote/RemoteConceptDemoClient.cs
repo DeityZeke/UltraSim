@@ -28,6 +28,7 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     int RenderedChunks,
     int TerrainTriangles,
     int OpenUiViews,
+    GodotActorPresenterSnapshot Actors,
     bool UsedPrimitiveSubstrate,
     bool SmokeComplete,
     string? Fault);
@@ -47,11 +48,18 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private readonly IndependentMoveLookProfile _independent = new();
     private readonly ClientPresentationChange[] _presentationChanges = new ClientPresentationChange[18];
     private readonly ClientPresentationBinding[] _presentationBindings = new ClientPresentationBinding[9];
+    private readonly ClientSemanticChunkHandle[] _actorPresentedChunks =
+        new ClientSemanticChunkHandle[9];
+    private readonly ClientActorPresentationChange[] _actorChanges =
+        new ClientActorPresentationChange[128];
+    private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
     private ContentCache? _cache;
     private HttpContentPackageSource? _source;
     private RemotePlayableSession? _session;
     private GodotWorldRenderer? _renderer;
     private GodotSlidingRenderWindow? _window;
+    private ClientActorPresentationState? _actorState;
+    private GodotActorPresenter? _actorPresenter;
     private ResolvedClientSettings? _settings;
     private Camera3D? _camera;
     private Control? _ownedHud;
@@ -73,8 +81,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private float _cameraYaw = -0.7f;
     private float _cameraPitch = 0.34f;
     private float _cameraDistance = 8.5f;
+    private float _cameraPivotMeters = CameraPivotMeters;
     private bool _smoke;
     private int _smokePhase;
+    private ulong _lastSmokeDiagnosticMilliseconds;
     private int _terrainTriangles;
     private bool _configured;
     private bool _disposed;
@@ -172,6 +182,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         {
             _ = _session!.ProcessReceived();
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
+            ReportSmokeProgress(in snapshot);
             if (snapshot.StructuralWorld.State == RemoteStructuralWorldState.Rejected ||
                 snapshot.Content.State == RemoteContentClientState.Rejected ||
                 snapshot.Playable.State is RemotePlayableClientState.Rejected or
@@ -198,6 +209,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             }
             if (_state != RemoteConceptDemoClientState.Active) return;
 
+            if (!gameplayInputAllowed) _actorPresenter?.SetRevealHeld(false);
+
             SynchronizePresentation(snapshot.Playable);
             if (!_smoke)
             {
@@ -222,6 +235,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _state, _session!.GetSnapshot(), renderer, _player,
             renderer.ActiveRenderChunks, _terrainTriangles,
             _session.UiClient.OpenViewCount,
+            _actorPresenter?.GetSnapshot() ?? default,
             true,
             _smokePhase == 6,
             _fault);
@@ -230,6 +244,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     public override void _Input(InputEvent inputEvent)
     {
         if (_state != RemoteConceptDemoClientState.Active || _settings is null) return;
+        if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
+        {
+            _actorPresenter?.SetRevealHeld(reveal.Pressed);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey key && key.Pressed && !key.Echo &&
             GodotWorldInput.Matches(key, _settings, ClientSemanticAction.OpenInventory))
         {
@@ -279,11 +299,14 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         if (_disposed) return;
         _disposed = true;
+        _actorPresenter?.Dispose();
         _renderer?.Dispose();
         _session?.Dispose();
         _source?.Dispose();
         _cache?.Dispose();
         _renderer = null;
+        _actorPresenter = null;
+        _actorState = null;
         _session = null;
         _source = null;
         _cache = null;
@@ -298,12 +321,22 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private void BuildWorldPresentation(in RemotePlayableClientSnapshot playable)
     {
         _player = playable.Position;
+        ClientPublicPresentationMetadataSnapshot metadata =
+            _session!.PublicPresentationState.GetSnapshot();
+        if (metadata.ServerGenerationId != playable.ServerGenerationId)
+            _session.PublicPresentationState.ResetServerGeneration(playable.ServerGenerationId);
+        _actorState = new ClientActorPresentationState(
+            ClientActorDefinitionCatalog.ConceptDemo, 64);
+        _actorPresenter = new GodotActorPresenter(
+            this, ClientActorDefinitionCatalog.ConceptDemo, 64);
+        _actorPresenter.SetControlledActor(playable.PublicActor);
         _renderer = new GodotWorldRenderer(
             this,
-            _session!.WorldCache,
+            _session.WorldCache,
             GodotWorldRendererLimits.ForStructuralWindow(RenderRadiusChunks, 5, 32),
             assets: null,
-            GodotWorldFallbackMaterialMode.Neutral);
+            GodotWorldFallbackMaterialMode.Neutral,
+            _actorPresenter);
         _window = new GodotSlidingRenderWindow(
             _session.WorldCache, _renderer, RenderRadiusChunks);
         if (!_window.TryTrackPlayer(
@@ -313,6 +346,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             throw new InvalidOperationException(
                 $"The initial remote render window was rejected: {windowError}/{rendererError}.");
         DrainRenderer();
+        SynchronizeActors(in playable);
         _terrainTriangles = CountTerrainTriangles();
         _smokeStart = _player;
         _lastOwnerState = playable.StateSequence;
@@ -363,6 +397,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                     _presentationBindings[index].SemanticHandle, out _);
         }
         _renderer!.ProcessFrame(GodotWorldFrameBudget.Default);
+        SynchronizeActors(in playable);
         _lastOwnerState = playable.StateSequence;
         UpdateHud(
             $"Remote world active — {_renderer.GetSnapshot().ActiveRenderChunks} chunks — " +
@@ -469,7 +504,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         switch (_smokePhase)
         {
             case 0 when _renderer!.GetSnapshot().ActiveRenderChunks == 9 &&
-                _terrainTriangles > 0 && snapshot.World.AppliedSnapshots != 0:
+                _terrainTriangles > 0 && snapshot.World.AppliedSnapshots != 0 &&
+                _actorPresenter!.GetSnapshot().ActiveActors >= 2 &&
+                snapshot.PublicPresentation.Metadata.CurrentRecords != 0:
+                _actorPresenter.SetRevealHeld(true);
                 _smokeStart = snapshot.Playable.Position;
                 if (!_session!.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
                         GameLocomotionUpdate.CreateDirect(0, -GamePlayerCommand.MaximumAxisMagnitude),
@@ -499,11 +537,34 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             case 4 when _session!.ChatState.GetSnapshot().Applied > _lastChatApplied:
                 _smokePhase = 5;
                 break;
-            case 5 when _renderer!.GetSnapshot().PendingBuilds == 0:
+            case 5 when _renderer!.GetSnapshot().PendingBuilds == 0 &&
+                _actorPresenter!.GetSnapshot() is
+                { VisibleNameplates: >= 2, VisibleOverheadLabels: >= 1 }:
                 _smokePhase = 6;
                 UpdateHud("A0.8 native smoke complete");
                 break;
         }
+    }
+
+    private void ReportSmokeProgress(in RemotePlayableSessionSnapshot snapshot)
+    {
+        if (!_smoke) return;
+        ulong now = Time.GetTicksMsec();
+        if (_lastSmokeDiagnosticMilliseconds != 0 &&
+            now - _lastSmokeDiagnosticMilliseconds < 5_000)
+            return;
+        _lastSmokeDiagnosticMilliseconds = now;
+        GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
+        GD.Print(
+            $"A0.8 remote progress state={_state} phase={_smokePhase} " +
+            $"content={snapshot.Content.State}/{snapshot.Content.ProofsQueued} " +
+            $"world={snapshot.StructuralWorld.State}/{snapshot.World.AppliedSnapshots} " +
+            $"playable={snapshot.Playable.State}/{snapshot.Playable.StateSequence} " +
+            $"semantic={snapshot.SemanticConsumersActive} " +
+            $"metadata={snapshot.PublicPresentation.Metadata.CurrentRecords}/" +
+            $"{snapshot.PublicPresentation.Applied}/{snapshot.PublicPresentation.ProofsQueued} " +
+            $"actors={actors.ActiveActors} names={actors.VisibleNameplates} " +
+            $"overhead={actors.VisibleOverheadLabels}");
     }
 
     private void BuildBootstrapHud()
@@ -567,12 +628,52 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private void UpdateChat()
     {
         ClientChatStateSnapshot snapshot = _session!.ChatState.GetSnapshot();
-        if (snapshot.Applied == _lastChatApplied || _chatFeed is null) return;
-        var rows = new ClientChatOccurrence[64];
-        int count = _session.ChatState.CopyRecent(rows);
-        _chatFeed.Text = string.Join('\n', rows.AsSpan(0, count).ToArray()
+        if (snapshot.Applied == _lastChatApplied || _chatFeed is null)
+        {
+            _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
+            return;
+        }
+        int count = _session.ChatState.CopyRecent(_chatRows);
+        _chatFeed.Text = string.Join('\n', _chatRows.AsSpan(0, count).ToArray()
             .Select(static row => $"{row.DisplayLabel}: {row.Text}"));
+        if (count != 0)
+        {
+            ClientChatOccurrence newest = _chatRows[count - 1];
+            _ = _actorPresenter?.TryPresentOverhead(
+                in newest,
+                _session.Playable.GetSnapshot().ServerGenerationId,
+                checked(Time.GetTicksMsec() + 4_000));
+        }
         _lastChatApplied = snapshot.Applied;
+        _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
+    }
+
+    private void SynchronizeActors(in RemotePlayableClientSnapshot playable)
+    {
+        if (_window is null || _actorState is null || _actorPresenter is null) return;
+        if (!_window.TryCopyBindings(_presentationBindings, out int count, out _))
+            throw new InvalidOperationException("Remote actor bindings exceeded capacity.");
+        for (int index = 0; index < count; index++)
+            _actorPresentedChunks[index] = _presentationBindings[index].SemanticHandle;
+        ClientActorPresentationSyncStatus status = _actorState.TrySynchronize(
+            _session!.WorldCache,
+            _actorPresentedChunks.AsSpan(0, count),
+            _session.PublicPresentationState,
+            playable.ServerGenerationId,
+            _actorChanges,
+            out int changed,
+            out _);
+        if (status is not (ClientActorPresentationSyncStatus.Applied or
+                ClientActorPresentationSyncStatus.NoChanges))
+            throw new InvalidOperationException(
+                $"Remote actor presentation synchronization failed: {status}.");
+        _actorPresenter.SetControlledActor(playable.PublicActor);
+        if (_actorState.TryGet(
+                playable.PublicActor, out ClientActorPresentationRecord controlled))
+            _cameraPivotMeters =
+                controlled.Definition.CameraPivotHeightMillimeters * 0.001f;
+        _actorPresenter.Apply(
+            _actorChanges.AsSpan(0, changed), _player, Time.GetTicksMsec());
     }
 
     private void DrainRenderer()
@@ -673,10 +774,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         if (_camera is null) return;
         float horizontal = MathF.Cos(_cameraPitch) * _cameraDistance;
-        Vector3 pivot = new(0, CameraPivotMeters, 0);
+        Vector3 pivot = new(0, _cameraPivotMeters, 0);
         _camera.Position = new Vector3(
             MathF.Sin(_cameraYaw) * horizontal,
-            MathF.Sin(_cameraPitch) * _cameraDistance + CameraPivotMeters,
+            MathF.Sin(_cameraPitch) * _cameraDistance + _cameraPivotMeters,
             MathF.Cos(_cameraYaw) * horizontal);
         _camera.LookAt(pivot, Vector3.Up);
     }
@@ -699,6 +800,10 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_configured) throw new InvalidOperationException("Remote client is not configured.");
     }
+
+    private static bool IsControlKey(InputEventKey input) =>
+        input.Keycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta ||
+        input.PhysicalKeycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta;
 
     private static Control FullRectControl(string name)
     {

@@ -63,8 +63,15 @@ command is admitted through `GameWorldActions`; owner state, `ChunkPublication`,
 and informational UI continue through their distinct accepted semantic paths.
 
 The current external executable intentionally admits one remote participant on one Hosted owner.
-Shared multi-participant authority, remotely acquired structural World bytes, and generalized native
-actor presentation are not claimed by F0.3b.
+Shared multi-participant authority is not claimed by F0.3b or F0.4.
+
+F0.4 retains the admitted guest's custom public label separately from hot movement state. After the
+guest result is applied, `RemoteGuestPlayableApplication` repeatedly delivers one bounded
+server-generation/full-public-identity metadata occurrence until the client proves that exact
+delivery. It never places the label into `WorldPublicRecord`, and the Network kernel learns only the
+declared Control message and bytes. Other-player metadata fanout will compose with shared
+multi-participant authority when that authority is earned; this checkpoint does not fake it inside
+independent Direct Connect runtimes.
 
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.

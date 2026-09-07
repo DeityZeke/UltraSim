@@ -42,6 +42,10 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     ulong DuplicateClientProfileProofs,
     ulong RejectedClientProfileProofs,
     ulong RejectedPreProfileMessages,
+    bool PublicPresentationApplied,
+    ulong PublicPresentationDeliveriesQueued,
+    ulong DuplicatePublicPresentationProofs,
+    ulong RejectedPublicPresentationProofs,
     RemoteChunkWorldStateServerSnapshot World,
     RemoteChatDeliveryServiceSnapshot Chat);
 
@@ -168,6 +172,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private GameControlSessionEpoch _controlSession;
     private GameGuestIdentity _guestIdentity;
     private WorldPublicEntityId _playerPublicId;
+    private bool _publicPresentationApplied;
+    private long _lastPublicPresentationQueue;
+    private ulong _publicPresentationDeliveriesQueued;
+    private ulong _duplicatePublicPresentationProofs;
+    private ulong _rejectedPublicPresentationProofs;
     private WorldPack? _worldPack;
     private UltraSimGameComposition? _composition;
     private ServerRuntime? _runtime;
@@ -180,6 +189,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private RemoteChatServerSession? _chatSession;
     private OfflineDirectChunkRecipient? _recipient;
     private RemoteChunkWorldStateServer? _worldDelivery;
+    private int _worldScheduleCursor;
     private GamePlayableWorldEntities _entities;
     private GamePlayerCommandResult _lastCommandResult;
     private ulong _lastProcessedCommand;
@@ -258,6 +268,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             ProcessGuestProof(payload);
             return true;
         }
+        if (message.MessageId == RemotePublicPresentationAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessPublicPresentationProof(payload);
+            return true;
+        }
         if (!_guestAdmitted || !_admissionResultApplied || _applicationFaulted)
             return false;
         if (message.MessageId == RemotePlayableCommandMessageCodec.Descriptor.Id)
@@ -300,6 +315,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         if (!_guestAdmitted || !_admissionResultApplied || _applicationFaulted)
             return complete;
 
+        complete &= QueuePublicPresentationMetadata(force: false);
+
         long now = Stopwatch.GetTimestamp();
         int steps = 0;
         while (now >= _nextTickTimestamp && steps < 4)
@@ -332,6 +349,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             _clientProfile is not null, _clientProfileApplied, _clientProfilesQueued,
             _duplicateClientProfileProofs, _rejectedClientProfileProofs,
             _rejectedPreProfileMessages,
+            _publicPresentationApplied, _publicPresentationDeliveriesQueued,
+            _duplicatePublicPresentationProofs, _rejectedPublicPresentationProofs,
             _worldDelivery?.GetSnapshot() ?? default,
             _chatDelivery?.GetSnapshot() ?? default);
     }
@@ -666,8 +685,68 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         }
         _admissionResultApplied = true;
         if (!_guestAdmitted) return;
+        _ = QueuePublicPresentationMetadata(force: true);
         _ = QueueOwnerState();
         DrivePublicWorld();
+    }
+
+    private bool QueuePublicPresentationMetadata(bool force)
+    {
+        if (_publicPresentationApplied || !_guestAdmitted || !_admissionResultApplied ||
+            _runtime is null || !_playerPublicId.IsValid || !_guestIdentity.IsValid)
+            return true;
+        long now = Environment.TickCount64;
+        if (!force && _lastPublicPresentationQueue != 0 &&
+            now - _lastPublicPresentationQueue < AdmissionRetryMilliseconds)
+            return true;
+        var header = new RemotePublicPresentationMetadataHeader
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            ServerGenerationId = _runtime.ActiveGenerationId,
+            DeliveryId = 1,
+            MetadataRevision = 1,
+            PublicEntityIndex = _playerPublicId.Index,
+            PublicEntityGeneration = _playerPublicId.Generation,
+            Operation = RemotePublicPresentationOperation.Present,
+            Flags = RemotePublicPresentationFlags.NameplateEligible,
+        };
+        if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+                _messageScratch, in header, _guestIdentity.DisplayName!, out int written))
+            throw new InvalidOperationException("The retained public presentation metadata became invalid.");
+        if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        _lastPublicPresentationQueue = now;
+        SaturatingIncrement(ref _publicPresentationDeliveriesQueued);
+        return true;
+    }
+
+    private void ProcessPublicPresentationProof(ReadOnlySpan<byte> payload)
+    {
+        if (!_guestAdmitted || _runtime is null ||
+            !RemotePublicPresentationAppliedMessageCodec.TryReadExact(
+                payload, out RemotePublicPresentationAppliedMessage proof) ||
+            !UltraSimGameProtocol.IsValidPublicPresentationApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.ServerGenerationId != _runtime.ActiveGenerationId || proof.DeliveryId != 1)
+        {
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        if (proof.Status != RemotePublicPresentationApplyStatus.Applied)
+        {
+            if (_publicPresentationApplied)
+                SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            else
+                _applicationFaulted = true;
+            return;
+        }
+        if (_publicPresentationApplied)
+        {
+            SaturatingIncrement(ref _duplicatePublicPresentationProofs);
+            return;
+        }
+        _publicPresentationApplied = true;
     }
 
     private bool QueueAdmissionResult(bool force)
@@ -871,13 +950,18 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             throw new InvalidOperationException($"Remote public interest failed: {reconcile}.");
         OfflineDirectChunkSubscriptionView subscriptions = _recipient!.Subscriptions;
         int scheduled = 0;
-        for (int index = 0; index < subscriptions.Length && scheduled < 16; index++)
+        int examined = 0;
+        if (_worldScheduleCursor >= subscriptions.Length) _worldScheduleCursor = 0;
+        while (examined < subscriptions.Length && scheduled < 16)
         {
             // Bulk public-state snapshots must leave bounded reliable headroom for owner state,
             // UI, Chat and other control-plane semantics on this same application session.
             if (_peer.ReliableQueued >=
                 Math.Max(1, _peer.MaximumReliableMessages - ReservedReliableControlMessages))
                 break;
+            int index = _worldScheduleCursor;
+            _worldScheduleCursor = (_worldScheduleCursor + 1) % subscriptions.Length;
+            examined++;
             // Public disclosure does not manufacture structural residency. F0.3b's preinstalled
             // Concept Demo consumer stages the canonical authored WorldPack; unauthored spatial
             // keys have neither structural pages nor a client semantic destination. Later remote

@@ -115,6 +115,13 @@ public partial class LocalCabinClient : Node3D
     private ClientPresentationChange[] _presentationChanges = [];
     private ClientPresentationBinding[] _presentationBindings = [];
     private ClientSemanticHash[] _semanticHashesBeforeRefresh = [];
+    private ClientSemanticChunkHandle[] _actorPresentedChunks = [];
+    private ClientActorPresentationChange[] _actorChanges = [];
+    private readonly ClientActorPresentationRecord[] _actorRows =
+        new ClientActorPresentationRecord[64];
+    private ClientPublicPresentationMetadataState? _publicPresentationMetadata;
+    private ClientActorPresentationState? _actorState;
+    private GodotActorPresenter? _actorPresenter;
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
     private ClientSemanticChunkInfo[] _chatChunkInfo = [];
     private Camera3D? _camera;
@@ -132,6 +139,7 @@ public partial class LocalCabinClient : Node3D
     private LocalQueuedUiClient? _uiBridge;
     private Node3D? _humanPresentation;
     private int _humanMeshInstances;
+    private float _cameraPivotMeters = CameraPivotMeters;
     private bool _addedPresentationRealized;
     private WorldPosition _player;
     private ClientControlWorldPoint _pointerPoint;
@@ -200,7 +208,11 @@ public partial class LocalCabinClient : Node3D
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     }
 
-    public void SetGameplayInputAllowed(bool allowed) => _gameplayInputAllowed = allowed;
+    public void SetGameplayInputAllowed(bool allowed)
+    {
+        _gameplayInputAllowed = allowed;
+        if (!allowed) _actorPresenter?.SetRevealHeld(false);
+    }
 
     public void ApplySettings(ResolvedClientSettings settings)
     {
@@ -240,7 +252,7 @@ public partial class LocalCabinClient : Node3D
             _humanBody,
             _displayName,
             _humanMeshInstances,
-            CameraPivotMeters,
+            _cameraPivotMeters,
             NameplateHeightMeters,
             EffectsHeightMeters,
             _addedPresentationRealized,
@@ -472,7 +484,6 @@ public partial class LocalCabinClient : Node3D
             CreateSceneFurniture();
             StartFreshWorld();
             CreateInventoryConsumer();
-            CreateHumanPresentation();
             RealizeAddedContent();
             _initialized = true;
             SetPhysicsProcess(true);
@@ -553,6 +564,12 @@ public partial class LocalCabinClient : Node3D
     public override void _Input(InputEvent inputEvent)
     {
         if (!_gameplayInputAllowed) return;
+        if (inputEvent is InputEventKey reveal && !reveal.Echo && IsControlKey(reveal))
+        {
+            _actorPresenter?.SetRevealHeld(reveal.Pressed);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (inputEvent is InputEventKey chatKey && chatKey.Pressed && !chatKey.Echo &&
             _settings is not null &&
             GodotWorldInput.Matches(chatKey, _settings, ClientSemanticAction.Chat))
@@ -634,6 +651,10 @@ public partial class LocalCabinClient : Node3D
         _uiBridge = null;
         _uiClient?.Dispose();
         _uiClient = null;
+        _actorPresenter?.Dispose();
+        _actorPresenter = null;
+        _actorState = null;
+        _publicPresentationMetadata = null;
         _renderer?.Dispose();
         _renderer = null;
         _residency = null;
@@ -672,6 +693,17 @@ public partial class LocalCabinClient : Node3D
         };
         _displayName = view.GuestIdentity.DisplayName ??
             throw new InvalidOperationException("The authority published no guest display name.");
+        _publicPresentationMetadata = new ClientPublicPresentationMetadataState(64);
+        _publicPresentationMetadata.ResetServerGeneration(view.GenerationId);
+        ApplyControlledActorMetadata(in view);
+        _actorState = new ClientActorPresentationState(
+            ClientActorDefinitionCatalog.ConceptDemo, 64);
+        _actorPresenter = new GodotActorPresenter(
+            this,
+            ClientActorDefinitionCatalog.ConceptDemo,
+            64,
+            new BundledActorVisualResolver());
+        _actorPresenter.SetControlledActor(view.PublicActor);
         RebuildClientProjection(view);
         DriveLocalUntil(() =>
             CountPresentedCharacters() == 1 &&
@@ -849,8 +881,8 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException(
                 "The controlled presentation did not consume the authoritative guest identity.");
         if (_humanPresentation.FindChild(
-                "ControlledPlayerNameplateCalibration", recursive: true, owned: false) is not
-                Label3D { Text: var nameplate } || nameplate != expectedDisplayName)
+                "Nameplate", recursive: true, owned: false) is not
+            Label3D { Text: var nameplate } || nameplate != expectedDisplayName)
             throw new InvalidOperationException(
                 "The controlled actor nameplate did not use the accepted guest display name.");
         uint expectedPrefab = expectedBody == CabinHumanBody.XBot
@@ -862,15 +894,28 @@ public partial class LocalCabinClient : Node3D
         if (CountPresentedPrefab(expectedPrefab) != 1 || CountPresentedPrefab(otherPrefab) != 0)
             throw new InvalidOperationException(
                 "The authoritative guest body did not select the matching public character prefab.");
+        GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
+        if (actors.ActiveActors < 2 || actors.VisibleNameplates != 1)
+            throw new InvalidOperationException(
+                "The shared actor presenter did not retain the controlled actor and nearby animal.");
+        _actorPresenter!.SetRevealHeld(true);
+        if (_actorPresenter.GetSnapshot().VisibleNameplates < 2)
+            throw new InvalidOperationException(
+                "Local Ctrl reveal did not expose already-known eligible actor labels.");
+        _actorPresenter.SetRevealHeld(false);
+        if (_actorPresenter.GetSnapshot().VisibleNameplates != 1)
+            throw new InvalidOperationException(
+                "Releasing local Ctrl reveal did not restore normal nameplate policy.");
 
         ulong before = _chatState.GetSnapshot().Applied;
         SubmitChat("guest identity canary");
         DriveLocalUntil(() => _chatState.GetSnapshot().Applied == before + 1);
         int count = _chatState.CopyRecent(_chatRows);
         if (count == 0 || _chatRows[count - 1].DisplayLabel != expectedDisplayName ||
-            _chatRows[count - 1].Text != "guest identity canary")
+            _chatRows[count - 1].Text != "guest identity canary" ||
+            _actorPresenter.GetSnapshot().VisibleOverheadLabels != 1)
             throw new InvalidOperationException(
-                "Spatial Chat did not use the accepted guest display name.");
+                "Spatial Chat did not use and anchor the accepted guest display name.");
         return GetPresentationSnapshot();
     }
 
@@ -924,45 +969,6 @@ public partial class LocalCabinClient : Node3D
             : "Inventory request queue busy";
     }
 
-    private void CreateHumanPresentation()
-    {
-        string resource = _humanBody == CabinHumanBody.XBot
-            ? "res://Assets/Avatars/x_bot/x_bot_visual.tscn"
-            : "res://Assets/Avatars/y_bot/y_bot_visual.tscn";
-        PackedScene? scene = ResourceLoader.Load<PackedScene>(resource);
-        if (scene is null)
-            throw new InvalidOperationException($"The bundled human calibration body is missing: {resource}.");
-        Node instantiated = scene.Instantiate();
-        if (instantiated is not Node3D human)
-        {
-            instantiated.Free();
-            throw new InvalidOperationException("The bundled human calibration body is not a Node3D scene.");
-        }
-        _humanPresentation = human;
-        _humanPresentation.Name = $"Controlled{_humanBody}";
-        AddChild(_humanPresentation);
-        _humanMeshInstances = CountMeshInstances(_humanPresentation);
-        if (_humanMeshInstances == 0)
-            throw new InvalidOperationException("The bundled human calibration body contains no mesh presentation.");
-
-        var nameplate = new Label3D
-        {
-            Name = "ControlledPlayerNameplateCalibration",
-            Text = _displayName,
-            Position = new Vector3(0, NameplateHeightMeters, 0),
-            Billboard = BaseMaterial3D.BillboardModeEnum.Enabled,
-            NoDepthTest = true,
-            FontSize = 32,
-        };
-        _humanPresentation.AddChild(nameplate);
-        var effectsAnchor = new Marker3D
-        {
-            Name = "EffectsAnchorCalibration",
-            Position = new Vector3(0, EffectsHeightMeters, 0),
-        };
-        _humanPresentation.AddChild(effectsAnchor);
-    }
-
     private void RealizeAddedContent()
     {
         if (_resolvedContent?.Variant != CabinContentVariant.Add || _assetResolver?.AddedMaterial is null)
@@ -976,14 +982,6 @@ public partial class LocalCabinClient : Node3D
         };
         AddChild(badge);
         _addedPresentationRealized = true;
-    }
-
-    private void UpdateHumanPresentation(WorldYaw orientation)
-    {
-        if (_humanPresentation is null) return;
-        float radians = orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn);
-        _humanPresentation.Position = Vector3.Zero;
-        _humanPresentation.Rotation = new Vector3(0, radians, 0);
     }
 
     private void RebuildClientProjection(in LocalPlayableAuthorityView view)
@@ -1015,19 +1013,83 @@ public partial class LocalCabinClient : Node3D
             this,
             _cache,
             GodotWorldRendererLimits.ForStructuralWindow(renderRadius, 5, 32),
-            _assetResolver);
+            _assetResolver,
+            publicBatchFilter: _actorPresenter);
         _window = new GodotSlidingRenderWindow(_cache, _renderer, renderRadius);
         int maximumPresented = _window.MaximumActiveChunks;
         _presentationChanges = new ClientPresentationChange[checked(maximumPresented * 2)];
         _presentationBindings = new ClientPresentationBinding[maximumPresented];
         _semanticHashesBeforeRefresh = new ClientSemanticHash[maximumPresented];
+        _actorPresentedChunks = new ClientSemanticChunkHandle[maximumPresented];
+        _actorChanges = new ClientActorPresentationChange[128];
         _chatChunkInfo = new ClientSemanticChunkInfo[cacheLimits.MaximumResidentChunks];
         _orbit.Reset();
         _residentGenerationId = view.GenerationId;
         _player = view.PlayerPosition;
-        UpdateHumanPresentation(view.PlayerOrientation);
+        if (_publicPresentationMetadata?.GetSnapshot().ServerGenerationId != view.GenerationId)
+        {
+            _publicPresentationMetadata?.ResetServerGeneration(view.GenerationId);
+            ApplyControlledActorMetadata(in view);
+        }
+        _actorPresenter?.SetControlledActor(view.PublicActor);
         TrackPresentation(reset: true);
         DrainRenderer();
+        SynchronizeActorPresentation(in view);
+    }
+
+    private void ApplyControlledActorMetadata(in LocalPlayableAuthorityView view)
+    {
+        if (_publicPresentationMetadata is null || !view.PublicActor.IsValid ||
+            !view.GuestIdentity.IsValid)
+            throw new InvalidOperationException("The controlled actor metadata source was incomplete.");
+        var metadata = new ClientPublicPresentationMetadata(
+            view.GenerationId,
+            view.PublicActor,
+            1,
+            ClientPublicPresentationFlags.NameplateEligible,
+            view.GuestIdentity.DisplayName!);
+        ClientPublicPresentationApplyStatus applied = _publicPresentationMetadata.TryApply(
+            ClientPublicPresentationOperation.Present, in metadata);
+        if (applied is not (ClientPublicPresentationApplyStatus.Applied or
+                ClientPublicPresentationApplyStatus.Duplicate))
+            throw new InvalidOperationException($"Controlled actor metadata was rejected: {applied}.");
+    }
+
+    private void SynchronizeActorPresentation(in LocalPlayableAuthorityView view)
+    {
+        if (_window is null || _cache is null || _actorState is null ||
+            _publicPresentationMetadata is null || _actorPresenter is null)
+            return;
+        if (!_window.TryCopyBindings(_presentationBindings, out int count, out _))
+            throw new InvalidOperationException("Actor presentation bindings exceeded capacity.");
+        for (int index = 0; index < count; index++)
+            _actorPresentedChunks[index] = _presentationBindings[index].SemanticHandle;
+        ClientActorPresentationSyncStatus status = _actorState.TrySynchronize(
+            _cache,
+            _actorPresentedChunks.AsSpan(0, count),
+            _publicPresentationMetadata,
+            view.GenerationId,
+            _actorChanges,
+            out int changed,
+            out _);
+        if (status is not (ClientActorPresentationSyncStatus.Applied or
+                ClientActorPresentationSyncStatus.NoChanges))
+            throw new InvalidOperationException($"Actor presentation synchronization failed: {status}.");
+        _actorPresenter.SetControlledActor(view.PublicActor);
+        _actorPresenter.Apply(
+            _actorChanges.AsSpan(0, changed), _player, Time.GetTicksMsec());
+        if (!_actorPresenter.TryGetActorRoot(view.PublicActor, out _humanPresentation) ||
+            _humanPresentation is null)
+        {
+            _humanMeshInstances = 0;
+            return;
+        }
+        _humanPresentation.Name = $"Controlled{_humanBody}";
+        if (_actorState.TryGet(view.PublicActor, out ClientActorPresentationRecord controlled))
+            _cameraPivotMeters = controlled.Definition.CameraPivotHeightMillimeters * 0.001f;
+        _humanMeshInstances = CountMeshInstances(_humanPresentation);
+        if (_humanMeshInstances == 0)
+            throw new InvalidOperationException("The controlled actor contains no mesh presentation.");
     }
 
     private static int MaximumRenderRadius(BoundWorldPack world)
@@ -1214,10 +1276,10 @@ public partial class LocalCabinClient : Node3D
         _ = _localSession.PumpWorld(_cache);
         QueueChangedPublicChunks();
         _player = view.PlayerPosition;
-        UpdateHumanPresentation(view.PlayerOrientation);
         ObserveAuthorityOutcomes(view);
         TrackPresentation(reset: false);
         _renderer.ProcessFrame(GodotWorldFrameBudget.Default);
+        SynchronizeActorPresentation(in view);
     }
 
     private void CaptureSemanticHashes()
@@ -1501,10 +1563,10 @@ public partial class LocalCabinClient : Node3D
         if (_camera is null)
             return;
         float horizontal = MathF.Cos(_cameraPitch) * _cameraDistance;
-        Vector3 pivot = new(0, CameraPivotMeters, 0);
+        Vector3 pivot = new(0, _cameraPivotMeters, 0);
         _camera.Position = new Vector3(
             MathF.Sin(_cameraYaw) * horizontal,
-            MathF.Sin(_cameraPitch) * _cameraDistance + CameraPivotMeters,
+            MathF.Sin(_cameraPitch) * _cameraDistance + _cameraPivotMeters,
             MathF.Cos(_cameraYaw) * horizontal);
         _camera.LookAt(pivot, Vector3.Up);
     }
@@ -1542,6 +1604,10 @@ public partial class LocalCabinClient : Node3D
                 break;
         }
     }
+
+    private static bool IsControlKey(InputEventKey input) =>
+        input.Keycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta ||
+        input.PhysicalKeycode is global::Godot.Key.Ctrl or global::Godot.Key.Meta;
 
     private void ApplyResolvedSettings()
     {
@@ -2102,6 +2168,15 @@ public partial class LocalCabinClient : Node3D
 
     private int CountPresentedPrefab(uint prefabId)
     {
+        if (ClientActorDefinitionCatalog.ConceptDemo.TryGet(prefabId, out _) &&
+            _actorState is not null)
+        {
+            int actorCount = _actorState.CopyCurrent(_actorRows);
+            int matched = 0;
+            for (int index = 0; index < actorCount; index++)
+                if (_actorRows[index].PrefabId == prefabId) matched++;
+            return matched;
+        }
         if (_renderer is null) return 0;
         string expectedName = $"Public_{prefabId}";
         int count = 0;
@@ -2152,6 +2227,21 @@ public partial class LocalCabinClient : Node3D
 
     private int CountVisiblyPresentedPrefab(uint prefabId)
     {
+        if (ClientActorDefinitionCatalog.ConceptDemo.TryGet(prefabId, out _) &&
+            _actorState is not null && _actorPresenter is not null)
+        {
+            int actorCount = _actorState.CopyCurrent(_actorRows);
+            int matched = 0;
+            for (int index = 0; index < actorCount; index++)
+            {
+                ref readonly ClientActorPresentationRecord actor = ref _actorRows[index];
+                if (actor.PrefabId == prefabId &&
+                    _actorPresenter.TryGetActorRoot(actor.Id, out Node3D? root) &&
+                    root?.Visible == true && CountMeshInstances(root) != 0)
+                    matched++;
+            }
+            return matched;
+        }
         if (_renderer is null) return 0;
         string expectedName = $"Public_{prefabId}";
         int count = 0;
@@ -2482,7 +2572,10 @@ public partial class LocalCabinClient : Node3D
                     _overheadAnchor = newest.PublicAnchor;
                     _overheadOriginGenerationId = newest.ServerGenerationId;
                     _overheadExpiresAtMilliseconds = checked(Time.GetTicksMsec() + 4_000);
-                    if (_overheadSpeech is not null) _overheadSpeech.Text = newest.Text;
+                    _ = _actorPresenter?.TryPresentOverhead(
+                        in newest,
+                        residentGenerationId,
+                        _overheadExpiresAtMilliseconds);
                 }
                 else if (newest.IsSpatial)
                 {
@@ -2493,26 +2586,8 @@ public partial class LocalCabinClient : Node3D
             _chatAppliedPresentationCount = snapshot.Applied;
         }
 
-        if (_overheadSpeech is null || _camera is null || _cache is null ||
-            !_overheadAnchor.IsValid || Time.GetTicksMsec() >= _overheadExpiresAtMilliseconds ||
-            _overheadOriginGenerationId != ReadActiveGenerationId() ||
-            !TryFindPublicAnchor(_overheadAnchor, out WorldPosition position))
-        {
-            if (_overheadSpeech is not null) _overheadSpeech.Visible = false;
-            return;
-        }
-        Vector3 world = new(
-            (position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
-            (position.YMillimeters - _player.YMillimeters) * 0.001f + 2.4f,
-            (position.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f);
-        if (_camera.IsPositionBehind(world))
-        {
-            _overheadSpeech.Visible = false;
-            return;
-        }
-        Vector2 screen = _camera.UnprojectPosition(world);
-        _overheadSpeech.Position = screen - new Vector2(_overheadSpeech.Size.X * 0.5f, 24);
-        _overheadSpeech.Visible = true;
+        if (_overheadSpeech is not null) _overheadSpeech.Visible = false;
+        _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
     }
 
     private ulong ReadActiveGenerationId()
@@ -2585,6 +2660,31 @@ public partial class LocalCabinClient : Node3D
         Int128 dx = (Int128)point.XMillimeters - target.GlobalXMillimeters;
         Int128 dz = (Int128)point.ZMillimeters - target.GlobalZMillimeters;
         return dx * dx + dz * dz <= (Int128)radius * radius;
+    }
+
+    private sealed class BundledActorVisualResolver : IGodotActorVisualResolver
+    {
+        public Node3D? Instantiate(in ClientActorDefinition definition)
+        {
+            string? resource = definition.VisualKind switch
+            {
+                ClientActorVisualKind.HumanX =>
+                    "res://Assets/Avatars/x_bot/x_bot_visual.tscn",
+                ClientActorVisualKind.HumanY =>
+                    "res://Assets/Avatars/y_bot/y_bot_visual.tscn",
+                _ => null,
+            };
+            if (resource is null) return null;
+            PackedScene? scene = ResourceLoader.Load<PackedScene>(resource);
+            if (scene is null)
+                throw new InvalidOperationException(
+                    $"The bundled actor presentation is missing: {resource}.");
+            Node instantiated = scene.Instantiate();
+            if (instantiated is Node3D visual) return visual;
+            instantiated.Free();
+            throw new InvalidOperationException(
+                $"The bundled actor presentation is not a Node3D scene: {resource}.");
+        }
     }
 
     private sealed class CabinCatalogAssetResolver : IGodotWorldAssetResolver

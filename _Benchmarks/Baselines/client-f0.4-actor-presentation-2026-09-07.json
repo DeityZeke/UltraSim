@@ -1,0 +1,117 @@
+{
+  "Checkpoint": "F0.4 generalized actor presentation",
+  "Workload": "cold-metadata-hot-public-state-shared-local-remote-godot-presentation",
+  "CaptureDate": "2026-09-07",
+  "BaseCommit": "0bea74c522af1ee301bce173fe43469775b34631",
+  "Protocol": {
+    "ManifestVersion": 20,
+    "ManifestFingerprint": "ae5755623e852d03",
+    "MetadataMessageId": 144,
+    "AppliedProofMessageId": 145,
+    "Lane": "Control",
+    "MaximumMessageBytes": 256,
+    "MaximumDisplayLabelUtf8Bytes": 128,
+    "HotWorldPublicRecordChanged": false
+  },
+  "EngineNeutralProjection": {
+    "ActorDefinitionCapacity": 64,
+    "ColdMetadataCapacity": 256,
+    "DefaultActorStateCapacity": 256,
+    "GodotActorCapacity": 64,
+    "DefinitionKinds": [
+      "HumanX",
+      "HumanY",
+      "WoodlandAnimal"
+    ],
+    "ColdMetadataFences": [
+      "application session",
+      "server generation",
+      "full WorldPublicEntityId",
+      "metadata revision"
+    ],
+    "RemovedIdentityGenerationFloorRetained": true,
+    "RequestsDisclosureOrExpandsAoi": false,
+    "WarmedNoChangeIterations": 1000,
+    "WarmedNoChangeAllocationBytes": 0
+  },
+  "PresentationPolicy": {
+    "LocalAndRemoteShareClientCoreState": true,
+    "LocalAndRemoteShareGodotPresenter": true,
+    "ControlledNameplateNormallyVisible": true,
+    "CtrlRevealIsClientLocal": true,
+    "CtrlRevealNetworkOrSubscriptionMessages": 0,
+    "SpatialSpeechUsesExactPublicAnchor": true,
+    "OverheadExpiryIsPresentationLocal": true,
+    "OrdinaryPublicObjectsRemainChunkBatched": true,
+    "ContentlessOnlineUsesPrimitiveActorFallback": true
+  },
+  "NativeJourneys": {
+    "SinglePlayerD05": {
+      "ActiveActors": 2,
+      "CtrlVisibleNameplates": 2,
+      "VisibleOverheadLabels": 1,
+      "BundledControlledHumanPresentation": true
+    },
+    "ExportedOnlineCold": {
+      "ActiveActors": 2,
+      "PrimitiveFallbackActors": 2,
+      "CtrlVisibleNameplates": 2,
+      "VisibleOverheadLabels": 1,
+      "PublicMetadataProofs": 1,
+      "FilesFetched": 2,
+      "PayloadBytesFetched": 732053,
+      "RenderedChunks": 9,
+      "TerrainTriangles": 20120
+    },
+    "ExportedOnlineWarm": {
+      "FilesFetched": 0,
+      "PayloadBytesFetched": 0,
+      "FreshPublicMetadataProofs": 1,
+      "ActorPresentationRebuilt": true
+    }
+  },
+  "ExportedOnlineClosure": {
+    "UltraSimManagedAssemblies": 12,
+    "UltraSimManagedBytes": 2427392,
+    "ExecutableBytes": 73630168,
+    "TotalFileBytes": 156272446,
+    "BundledWorldPacks": 0,
+    "BundledPackageEnvelopes": 0,
+    "LocalAuthorityAbsent": true
+  },
+  "IntegrationHardening": {
+    "Issue": "restarting bounded public scheduling at subscription zero could starve later subscriptions under real reliable-queue pressure",
+    "Resolution": "retained bounded round-robin subscription cursor",
+    "ControlPlaneReliableHeadroomPreserved": true,
+    "ExportedControlledActorChunkConverges": true
+  },
+  "FocusedTests": {
+    "ClientCore": 29,
+    "NetworkApplicationBase": 70,
+    "F03a": 7,
+    "F03b": 4,
+    "A03": 6,
+    "A04": 5,
+    "A05": 1,
+    "A06": 2,
+    "A07": 2,
+    "F04": 2,
+    "F03c": 3,
+    "GameReplication": 132,
+    "LocalClientSession": 11
+  },
+  "PermanentGate": {
+    "CanonicalDebugAndReleaseVerifier": true,
+    "GodotHeadlessAcceptance": true,
+    "ActualOnlineExportInspected": true,
+    "ActualOnlineExportExecutedColdAndWarm": true,
+    "ProductMismatchFailsClosed": true
+  },
+  "DeliberateDeferrals": [
+    "shared multi-participant authority",
+    "other-player authority fanout across independent connections",
+    "runtime model-content migration",
+    "animation and equipment presentation",
+    "server-driven nameplate disclosure policy beyond current eligible metadata"
+  ]
+}

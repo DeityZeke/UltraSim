@@ -203,6 +203,7 @@ public sealed class GodotWorldRenderer : IDisposable
     private readonly ClientWorldSemanticCache _cache;
     private readonly GodotWorldRendererLimits _limits;
     private readonly IGodotWorldAssetResolver? _assets;
+    private readonly IGodotWorldPublicBatchFilter? _publicBatchFilter;
     private readonly RenderChunk?[] _renderChunks;
     private readonly RenderAssociation[] _associations;
     private readonly int[] _freeRenderSlots;
@@ -262,7 +263,8 @@ public sealed class GodotWorldRenderer : IDisposable
     public GodotWorldRenderer(Node3D host, ClientWorldSemanticCache cache,
         GodotWorldRendererLimits limits = default, IGodotWorldAssetResolver? assets = null,
         GodotWorldFallbackMaterialMode fallbackMaterialMode =
-            GodotWorldFallbackMaterialMode.Diagnostic)
+            GodotWorldFallbackMaterialMode.Diagnostic,
+        IGodotWorldPublicBatchFilter? publicBatchFilter = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -275,6 +277,7 @@ public sealed class GodotWorldRenderer : IDisposable
         limits.Validate(cache);
         _limits = limits;
         _assets = assets;
+        _publicBatchFilter = publicBatchFilter;
         if (fallbackMaterialMode is not (GodotWorldFallbackMaterialMode.Diagnostic or
                 GodotWorldFallbackMaterialMode.Neutral))
             throw new ArgumentOutOfRangeException(nameof(fallbackMaterialMode));
@@ -931,7 +934,8 @@ public sealed class GodotWorldRenderer : IDisposable
             FallbackCounts fallbacks = default;
             foreach (WorldPublicRecord record in semantic.PublicRecords)
             {
-                if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0) continue;
+                if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0 ||
+                    _publicBatchFilter?.ShouldBatch(record.PrefabId) == false) continue;
                 if (!groups.TryGetValue(record.PrefabId, out List<Transform3D>? transforms))
                     groups.Add(record.PrefabId, transforms = []);
                 Transform3D transform = ToLocalTransform(
@@ -1222,10 +1226,13 @@ public sealed class GodotWorldRenderer : IDisposable
         for (int index = 0; index < semantic.PublicRecords.Length; index++)
         {
             WorldPublicRecord record = semantic.PublicRecords[index];
-            if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0) continue;
+            if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0 ||
+                _publicBatchFilter?.ShouldBatch(record.PrefabId) == false) continue;
             bool prior = false;
             for (int scan = 0; scan < index; scan++)
                 if ((semantic.PublicRecords[scan].StateFlags & WorldPublicStateFlags.Visible) != 0 &&
+                    _publicBatchFilter?.ShouldBatch(
+                        semantic.PublicRecords[scan].PrefabId) != false &&
                     semantic.PublicRecords[scan].PrefabId == record.PrefabId) prior = true;
             if (!prior) groups++;
         }

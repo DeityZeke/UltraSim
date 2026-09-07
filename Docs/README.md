@@ -65,7 +65,8 @@ acceptance narratives remain available through git history.
   owner state, and owner-private UI/Inventory, with A0.3 authenticated content requirement,
   A0.4 physical byte-source parity, A0.5 resilient granular acquisition, A0.6 content-backed
   remote UI HotOpen, A0.7 atomic initial structural publication, A0.8 native Godot composition,
-  and exact application-proof gating before guest admission.
+  exact application-proof gating before guest admission, and F0.4 cold public-presentation
+  metadata/application proof beside unchanged hot movement records.
 - [Direct Connect Concept Demo server](../Server/DirectConnect/README.md) — external Hosted endpoint
   with durable deployment key/realm identity, authenticated Concept Demo World/UI content, and one
   bounded remote playable application.

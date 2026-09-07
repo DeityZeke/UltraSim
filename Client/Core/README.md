@@ -135,6 +135,19 @@ desired structural set, allowing the old renderer/native window and structural-o
 retire before the distant set is admitted. The permanent sparse-cluster canary is `162/25/9` at
 radius 1 in either cluster and performs exact central → far → central resets without capacity growth.
 
+F0.4 adds the bounded renderer-neutral actor-presentation projection above those already-resident
+chunks. `ClientActorDefinitionCatalog` maps finite public prefab vocabulary to presentation kind,
+scale, camera/nameplate/effect anchors, and default-label policy without owning Godot resources or
+physical body dimensions. `ClientActorPresentationState` joins only visible public records from the
+current presentation window with relatively cold `ClientPublicPresentationMetadataState`; it never
+requests another chunk, expands AOI, or polls authority. Add/update/remove changes are emitted into
+caller-owned spans, and the warmed no-change path allocates zero bytes.
+
+Cold labels are fenced by server generation plus complete generational `WorldPublicEntityId` and
+monotonic metadata revision. A bounded per-index identity floor survives removal, preventing an old
+name from attaching to a reused public slot. Missing per-instance metadata falls back only to the
+definition's presentation label; it never changes Game identity or disclosure.
+
 `ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
 are ordered, append-only occurrences rather than latest state: session/server
 generation and recipient sequence fence application, exact duplicates are

@@ -23,8 +23,9 @@ internal static class F03bRemotePlayableTests
     internal const int A05TestCount = 1;
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
+    internal const int F04TestCount = 2;
     internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
-        A06TestCount + A07TestCount;
+        A06TestCount + A07TestCount + F04TestCount;
 
     internal static void RunAll()
     {
@@ -68,6 +69,95 @@ internal static class F03bRemotePlayableTests
             StreamedWorldPackPublishesBeforeGuestAndMatchesAuthority);
         Run("StreamedWorldPackCapacityFailurePublishesNothing",
             StreamedWorldPackCapacityFailurePublishesNothing);
+        Run("PublicPresentationMetadataProtocolIsCanonicalAndBounded",
+            PublicPresentationMetadataProtocolIsCanonicalAndBounded);
+        Run("RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement",
+            RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement);
+    }
+
+    private static void PublicPresentationMetadataProtocolIsCanonicalAndBounded()
+    {
+        var header = new RemotePublicPresentationMetadataHeader
+        {
+            ApplicationSessionEpoch = 11,
+            ServerGenerationId = 12,
+            DeliveryId = 13,
+            MetadataRevision = 1,
+            PublicEntityIndex = 7,
+            PublicEntityGeneration = 3,
+            Operation = RemotePublicPresentationOperation.Present,
+            Flags = RemotePublicPresentationFlags.NameplateEligible,
+        };
+        var bytes = new byte[UltraSimGameProtocol.MaximumPublicPresentationMessageBytes + 1];
+        True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, "Remote Éowyn", out int written));
+        True(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
+            bytes.AsSpan(0, written), out RemotePublicPresentationMetadataHeader decoded,
+            out string label));
+        Equal(header, decoded);
+        Equal("Remote Éowyn", label);
+        bytes[written] = 0;
+        False(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
+            bytes.AsSpan(0, written + 1), out _, out _));
+        False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, " bad", out _));
+        False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, "bad\uD800", out _));
+
+        header.Operation = RemotePublicPresentationOperation.Remove;
+        header.Flags = RemotePublicPresentationFlags.None;
+        True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, string.Empty, out written));
+        True(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
+            bytes.AsSpan(0, written), out decoded, out label));
+        Equal(string.Empty, label);
+        False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, "must be empty", out _));
+
+        var proof = new RemotePublicPresentationAppliedMessage
+        {
+            ApplicationSessionEpoch = 11,
+            ServerGenerationId = 12,
+            DeliveryId = 13,
+            Status = RemotePublicPresentationApplyStatus.Applied,
+        };
+        True(UltraSimGameProtocol.IsValidPublicPresentationApplied(in proof));
+        proof.Status = 0;
+        False(UltraSimGameProtocol.IsValidPublicPresentationApplied(in proof));
+        Equal(NetworkLane.Control,
+            RemotePublicPresentationMetadataHeaderCodec.Descriptor.Lane);
+        Equal(NetworkLane.Control,
+            RemotePublicPresentationAppliedMessageCodec.Descriptor.Lane);
+    }
+
+    private static void RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement()
+    {
+        using var fixture = RemotePlayableFixture.Create();
+        fixture.Admit("Remote Bob", GameGuestBody.HumanMale);
+        RemotePlayableClientSnapshot admitted = fixture.Playable.GetSnapshot();
+        fixture.DriveUntil(() => fixture.PublicPresentationState.TryGet(
+            admitted.PublicActor, out _));
+
+        True(fixture.PublicPresentationState.TryGet(
+            admitted.PublicActor, out ClientPublicPresentationMetadata metadata));
+        Equal("Remote Bob", metadata.DisplayLabel);
+        Equal(admitted.ServerGenerationId, metadata.ServerGenerationId);
+        Equal(ClientPublicPresentationFlags.NameplateEligible, metadata.Flags);
+        RemotePublicPresentationMetadataClientSnapshot client =
+            fixture.SessionSnapshot.PublicPresentation;
+        True(client.Applied >= 1);
+        True(client.ProofsQueued >= 1);
+
+        fixture.DriveUntil(() => fixture.TryFindPublic(
+            GameWorldPublicPrefabIds.CharacterMale, out _));
+        True(fixture.TryFindPublic(
+            GameWorldPublicPrefabIds.CharacterMale, out WorldPublicRecord moving));
+        Equal(admitted.PublicActor, moving.Id);
+        True(fixture.Chat.TrySubmit("anchored speech", ClientChatSpeechMode.Say));
+        fixture.DriveUntil(() => fixture.ChatState.GetSnapshot().Applied != 0);
+        var rows = new ClientChatOccurrence[1];
+        Equal(1, fixture.ChatState.CopyRecent(rows));
+        Equal(admitted.PublicActor, rows[0].PublicAnchor);
     }
 
     private static void RemotePlayableProtocolIsCanonicalAndTrustMinimal()
@@ -320,7 +410,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)19, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)20, UltraSimGameProtocol.Manifest.Version);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()
@@ -1380,6 +1470,8 @@ internal static class F03bRemotePlayableTests
         internal RemoteChunkWorldStateClient World => _session.World;
         internal ClientChatState ChatState => _session.ChatState;
         internal RemoteChatClient Chat => _session.Chat;
+        internal ClientPublicPresentationMetadataState PublicPresentationState =>
+            _session.PublicPresentationState;
         internal UiClientRuntime UiClient => _session.UiClient;
         internal RemoteContentClient? Content => _session.Content;
         internal ContentCache? ContentStore => _contentCache;

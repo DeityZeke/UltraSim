@@ -90,6 +90,7 @@ public readonly record struct RemotePlayableSessionSnapshot(
     RemotePlayableClientSnapshot Playable,
     RemoteChunkWorldStateClientSnapshot World,
     RemoteChatClientSnapshot Chat,
+    RemotePublicPresentationMetadataClientSnapshot PublicPresentation,
     RemoteUiClientSnapshot Ui,
     RemoteStructuralWorldSnapshot StructuralWorld);
 
@@ -192,9 +193,13 @@ public sealed class RemotePlayableSession : IDisposable
                 ? null
                 : key => _content.TryResolveUiDefinition(
                     key, out CompiledUiDefinition? definition, out _) ? definition : null);
-        _protocol = new RemoteGameProtocolComposition(5);
+        PublicPresentationState = new ClientPublicPresentationMetadataState(256);
+        PublicPresentation = new RemotePublicPresentationMetadataClient(
+            peer, applicationSessionEpoch, PublicPresentationState);
+        _protocol = new RemoteGameProtocolComposition(6);
         if (_content is not null) _protocol.Add(_content);
         _protocol.Add(Playable);
+        _protocol.Add(PublicPresentation);
         if (worldCache is not null)
         {
             ActivateWorld(worldCache);
@@ -236,6 +241,8 @@ public sealed class RemotePlayableSession : IDisposable
     }
     public ClientChatState ChatState { get; }
     public RemoteChatClient Chat { get; }
+    public ClientPublicPresentationMetadataState PublicPresentationState { get; }
+    public RemotePublicPresentationMetadataClient PublicPresentation { get; }
     public UiClientRuntime UiClient { get; }
     public RemoteContentClient? Content => _content;
 
@@ -263,7 +270,8 @@ public sealed class RemotePlayableSession : IDisposable
             try
             {
                 claimed = _content?.TryProcess(in message, payload) == true ||
-                    Playable.TryProcess(in message, payload);
+                    Playable.TryProcess(in message, payload) ||
+                    PublicPresentation.TryProcess(in message, payload);
             }
             finally { _ = _peer.TryConsumeReceived(); }
             processed++;
@@ -296,6 +304,7 @@ public sealed class RemotePlayableSession : IDisposable
             Playable.GetSnapshot(),
             _world?.GetSnapshot() ?? default,
             Chat.GetSnapshot(),
+            PublicPresentation.GetSnapshot(),
             _ui.GetSnapshot(),
             _structuralWorld);
     }

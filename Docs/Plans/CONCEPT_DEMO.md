@@ -229,6 +229,15 @@ published by authority. The D0.5 native gate proves rejected input cannot start 
 Unicode input is canonicalized, the Y body reaches its matching public prefab, and the accepted
 name reaches both nameplate and Chat presentation.
 
+F0.4 generalizes that one-off controlled presentation. Hot movement remains in the existing public
+chunk record, while cold custom labels are retained independently by full generational public
+identity. The same bounded Client Core actor state and Godot actor presenter now realize Local and
+Online actors, presentation anchors, Ctrl reveal, and spatial overhead speech. Ctrl never changes
+disclosure or public subscription. The current native two-actor canary is a controlled human plus
+the resident woodland animal; engine-neutral coverage separately proves simultaneous X/Y records.
+True other-player presentation remains dependent on the later shared multi-participant authority
+checkpoint and is not simulated here.
+
 This identity remains session-scoped. D0.5 adds no Accounting record, durable Character identity,
 name uniqueness, profanity service, account persistence, or remote admission protocol. F0.3 may
 carry the same Game-owned request/accepted-result semantics across the authenticated remote path;
@@ -851,6 +860,9 @@ window resets/enters/exits
 ---
 
 # 13. Nameplates, overhead speech, chat feed, and ping
+
+**F0.4 actor/nameplate/overhead foundation: CLOSED.** Ping/connection indication and the shared
+many-player Far-gate retirement journey remain Round 1 integration work.
 
 Round 1 requires:
 

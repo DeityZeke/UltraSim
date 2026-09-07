@@ -117,7 +117,11 @@ the three fallback classes, model/material independence, native bounds, and sign
 `--d0-5-smoke` crosses the real Single Player button and Admission form. It proves rejected input
 does not start authority, then enters with a trimmed Unicode name and the Y body and checks the
 authoritative guest identity, selected public character prefab, controlled nameplate, and spatial
-Chat sender label.
+Chat sender label. F0.4 routes that controlled human and the nearby woodland animal through the
+same renderer-neutral actor state used by Online, verifies Ctrl reveal over already-known eligible
+actors, and anchors spatial speech to the exact presented public identity. Online has no bundled
+X/Y scenes, so its same presenter deliberately realizes the current actors through the primitive
+substrate rather than reintroducing hidden default content.
 
 F1 Orbit starts in a close three-quarter composition: 45-degree elevation at 14 m rather than the
 older 64-degree/28 m overhead survey view. Version-2 settings that merely captured the exact old

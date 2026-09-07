@@ -804,6 +804,8 @@ public sealed class LocalPlayableSession : IDisposable
                     Entity player = Resolve(world, entities.PlayerId);
                     if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position) ||
                         !game.WorldState.TryReadPublic(world, player, out WorldPublicDescriptor descriptor) ||
+                        !game.WorldState.Publications.TryGetPublicEntityId(
+                            player, out WorldPublicEntityId publicActor) ||
                         !game.WorldActions.TryReadCabinDoor(
                             world, Resolve(world, entities.CabinDoorId), out bool doorOpen) ||
                         !game.Inventory.TryReadItem(
@@ -816,6 +818,7 @@ public sealed class LocalPlayableSession : IDisposable
                         generationId,
                         world.TickCount,
                         guestIdentity,
+                        publicActor,
                         position,
                         descriptor.Orientation,
                         doorOpen,

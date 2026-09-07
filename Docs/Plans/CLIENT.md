@@ -1740,7 +1740,8 @@ reconnect lineage over real localhost UDP.
 This checkpoint does **not** acquire World/content bytes. A contentless Online product cannot claim
 native world realization until A0.2+ supplies and verifies the required structural/content artifact.
 Supplying a semantic cache to `RemotePlayableSession` is not content authorization or application
-proof. F0.4 remains responsible for generalized remote actor/nameplate/overhead presentation.
+proof. F0.4 subsequently generalized actor/nameplate/overhead presentation without changing this
+F0.3b transport boundary.
 
 Implement:
 
@@ -1772,6 +1773,11 @@ global user settings file. Exact reconnect reuses the remembered decision; eithe
 a changed revision requires a new choice. A decision is durable before the client queues the exact
 profile-handled proof, and the server refuses content/admission progress until that proof matches
 the current application-session lineage and profile identity.
+
+The accepted store retains **one durable exact current profile decision per realm**, not an
+unbounded history keyed by every prior profile. Accepting profile B replaces that realm's decision
+for profile A; if the deployment later returns to A, the client asks again. This conservative
+one-per-realm policy is the concrete F0.3c contract.
 
 The Godot Online path consumes the resulting layered settings rather than retaining the old
 hard-coded third-person controller. OrbitCommand, ThirdPersonDirect, and IndependentMoveLook now
@@ -1808,6 +1814,27 @@ general remote actor/selection/nameplate presentation; those remain later consum
 
 ## F0.4 — World presentation parity
 
+**Status: CLOSED.** Hot `WorldPublicRecord` movement remains unchanged. Client Core now combines
+already-resident/disclosed hot public records with a bounded renderer-neutral actor-definition
+catalog and relatively cold `WorldPublicEntityId`-fenced presentation metadata. X/Y humans and the
+current woodland animal resolve through that catalog; per-instance display labels and eligibility
+are not retransmitted in every movement record.
+
+Cold metadata is server-generation, full-public-identity, revision, and application-session
+fenced. Removed identities retain a bounded generation floor so delayed labels cannot attach to a
+reused public slot. Protocol v20 carries the retained metadata occurrence and exact client apply
+result on Control without changing chunk/AOI semantics. Local Play derives the same fact from its
+Game-owned admission view; remote play applies it through `RemotePlayableSession` before the shared
+client actor state reaches Godot.
+
+`GodotActorPresenter` owns one root only for actors that earn independent moving, nameplate,
+effects, and overhead-speech anchors. Ordinary public objects remain chunk-batched. Ctrl changes
+only local visibility over already-presented eligible actors; it has no Network, subscription, or
+AOI path. Spatial Chat uses its existing full public anchor and becomes overhead only while that
+exact actor is presented; the bounded feed remains independent. Local and Contentless Online use
+the same Client Core state and Godot presenter, while bundled X/Y scenes and primitive Online
+fallbacks remain presentation-source choices above that seam.
+
 Implement:
 
 - actor/mobile definition/catalog;
@@ -1821,6 +1848,13 @@ Implement:
 - focus isolation.
 
 **Gate:** multi-actor cached nameplate/overhead behavior with no presentation polling.
+
+The permanent gate includes a Godot-free X/Y add/update/remove and ABA test with zero warmed
+allocation, real UDP cold-metadata/proof and Chat-anchor coverage, the existing Single Player Y-body
+native admission journey, and the exported Online cold/warm journey with controlled human plus
+another resident actor, Ctrl reveal, primitive fallback, and anchored overhead speech. This does
+not claim a shared many-participant authority; the current external deployment still owns one
+participant runtime per accepted connection.
 
 ---
 
@@ -2242,7 +2276,7 @@ A0.8  native Contentless Online world entry                              CLOSED
         |
 F0.3c server client-profile consent/settings                              CLOSED
         |
-F0.4  actor definitions/nameplates/Ctrl/chat presentation parity          NEXT
+F0.4  actor definitions/nameplates/Ctrl/chat presentation parity          CLOSED
         |
 F0.5  server-composed UI + standard compiled definitions + Inventory
         |

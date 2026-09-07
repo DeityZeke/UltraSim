@@ -48,6 +48,7 @@ public readonly record struct LocalPlayableAuthorityView(
     ulong GenerationId,
     ulong SimulationTick,
     GameGuestIdentity GuestIdentity,
+    WorldPublicEntityId PublicActor,
     WorldPosition PlayerPosition,
     WorldYaw PlayerOrientation,
     bool DoorIsOpen,
