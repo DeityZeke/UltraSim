@@ -1632,9 +1632,12 @@ controlled-player semantic projection equals the committed authoritative positio
 a following absolute facing/movement point. Authority completion alone is not presentation
 convergence. This closes the reproduced stale-origin facing race without changing command meaning.
 Later interactive hardening also makes the input sequencer application/control-session-owned rather
-than projection-owned. Rebuilding the semantic/render window for a saved Render Distance change—or
-for a replacement Game generation in the same application session—therefore preserves its monotonic
-command sequence; authority no longer rejects post-Settings movement as stale.
+than projection-owned. A saved Render Distance change preserves both that monotonic command sequence
+and the current-generation semantic application cache while rebuilding only structural residency and
+native presentation. Already-proven dynamic-public rows therefore remain present without requiring
+unrelated movement to create new publication work. A replacement Game generation still creates a
+fresh semantic cache, but retains the application/control-session sequencer; authority no longer
+rejects post-Settings or post-load movement as stale.
 
 The consolidated Godot composition also preserves the C# script generator's class/file identity:
 native-derived `ClientRoot` resides in `ClientRoot.cs`, while generated internal-source resources are

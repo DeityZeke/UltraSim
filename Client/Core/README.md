@@ -128,6 +128,12 @@ keep an otherwise undesired semantic chunk resident, but Render Distance never c
 public interest. D0.1's accepted local canary was authored/resident/rendered `81/25/9` at radius 1
 and `81/49/25` at radius 2.
 
+Live Render Distance changes do not create a new semantic application target. The cache is admitted
+at current-generation construction for the largest radius supported by the bound authored world;
+changing radius replaces only the residency controller and presentation window over that same cache.
+This preserves applied dynamic-public rows and their delivery/proof lineage. A replacement authority
+generation remains the boundary that earns a fresh semantic cache.
+
 D0.2 admits noncontiguous authored geography. Valid presentation centers are derived from actual
 sorted WorldPack keys rather than a global bounding rectangle; fringe planning skips unauthored
 coordinates instead of synthesizing blank chunks. A disjoint transition can first commit an empty

@@ -223,7 +223,7 @@ public partial class LocalCabinClient : Node3D
         if (_initialized && previousRenderDistance != settings.RenderDistanceChunks &&
             _localSession is not null && _localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
         {
-            RebuildClientProjection(view);
+            RebuildClientProjection(view, preserveSemanticCache: true);
             ClientStructuralResidencySnapshot residency = _residency?.GetSnapshot() ?? default;
             GodotWorldRendererSnapshot render = _renderer?.GetSnapshot() ?? default;
             string clamp = _effectiveRenderDistanceChunks == settings.RenderDistanceChunks
@@ -281,9 +281,16 @@ public partial class LocalCabinClient : Node3D
     {
         if (!_initialized || _settings is null || !_useConceptDemoWorld)
             throw new InvalidOperationException("D0.1 requires the initialized Concept Demo consumer.");
+        ClientWorldSemanticCache semanticCache = _cache ??
+            throw new InvalidOperationException("The D0.1 semantic cache was unavailable.");
+        if (CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character) != 1)
+            throw new InvalidOperationException(
+                "The controlled actor was not visible before the D0.1 radius transition.");
         // Normalize through an actual resize even when D0.0 left the requested radius at one.
         ApplySettings(WithRenderDistance(_settings, 2));
+        AssertSemanticContinuity("first radius-2 transition");
         ApplySettings(WithRenderDistance(_settings, 1));
+        AssertSemanticContinuity("radius-1 transition");
         LocalCabinPresentationSnapshot before = GetPresentationSnapshot();
         ClientStructuralResidencySnapshot residencyBefore = _residency!.GetSnapshot();
         int terrainTrianglesBefore = CountRenderedTerrainTriangles();
@@ -298,6 +305,7 @@ public partial class LocalCabinClient : Node3D
                 $"{before.SemanticResidentChunks}/{before.RenderedChunks}.");
 
         ApplySettings(WithRenderDistance(_settings, 2));
+        AssertSemanticContinuity("second radius-2 transition");
 
         LocalCabinPresentationSnapshot after = GetPresentationSnapshot();
         ClientStructuralResidencySnapshot residencyAfter = _residency!.GetSnapshot();
@@ -319,6 +327,20 @@ public partial class LocalCabinClient : Node3D
             inputBefore.LastSequence != inputAfter.LastSequence)
             throw new InvalidOperationException(
                 "A render-distance projection rebuild reset the live control-session sequence.");
+        ApplySettings(WithRenderDistance(_settings, 3));
+        AssertSemanticContinuity("radius-3 transition");
+        LocalCabinPresentationSnapshot maximum = GetPresentationSnapshot();
+        ClientStructuralResidencySnapshot residencyMaximum = _residency!.GetSnapshot();
+        if (!ReferenceEquals(semanticCache, _cache) ||
+            maximum.RenderDistanceChunks != 3 ||
+            residencyMaximum.DesiredResidentChunks != 81 ||
+            maximum.SemanticResidentChunks < residencyMaximum.DesiredResidentChunks ||
+            maximum.RenderedChunks != 49 ||
+            CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character) != 1)
+            throw new InvalidOperationException(
+                "The maximum D0.1 window did not preserve its semantic cache and controlled actor: " +
+                $"{maximum.AuthoredChunks}/{maximum.SemanticResidentChunks}/" +
+                $"{maximum.RenderedChunks}; actors={CountPresentedCharacters()}.");
 
         WorldPosition movementStart = _player;
         if (_sequencer is null || !_sequencer.TryCreateSemanticCommand(
@@ -335,7 +357,15 @@ public partial class LocalCabinClient : Node3D
             current.LastCommandSequence == movement.Sequence &&
             _player.GlobalXMillimeters < movementStart.GlobalXMillimeters);
         SubmitStopAfterSettings();
-        return after;
+        return maximum;
+
+        void AssertSemanticContinuity(string stage)
+        {
+            if (!ReferenceEquals(semanticCache, _cache) ||
+                CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character) != 1)
+                throw new InvalidOperationException(
+                    $"The {stage} replaced semantic application state or retired the controlled actor.");
+        }
 
         void SubmitStopAfterSettings()
         {
@@ -987,28 +1017,46 @@ public partial class LocalCabinClient : Node3D
         _addedPresentationRealized = true;
     }
 
-    private void RebuildClientProjection(in LocalPlayableAuthorityView view)
+    private void RebuildClientProjection(
+        in LocalPlayableAuthorityView view,
+        bool preserveSemanticCache = false)
     {
         if (_localSession is null || _boundWorld is null || !view.IsReady)
             throw new InvalidOperationException("Authority is not ready.");
+        bool reuseSemanticCache = preserveSemanticCache && _cache is not null &&
+            _residentGenerationId == view.GenerationId &&
+            ReferenceEquals(_cache.PreparedWorld, view.PreparedWorld);
+        if (preserveSemanticCache && !reuseSemanticCache)
+            throw new InvalidOperationException(
+                "A presentation-only rebuild cannot replace its semantic application lineage.");
         int requestedRenderRadius = _settings?.RenderDistanceChunks ??
             ClientSettingsResolver.MinimumRenderDistanceChunks;
-        int renderRadius = Math.Min(
-            requestedRenderRadius,
-            MaximumRenderRadius(view.PreparedWorld.BaseWorld));
+        int maximumRenderRadius = MaximumRenderRadius(view.PreparedWorld.BaseWorld);
+        int renderRadius = Math.Min(requestedRenderRadius, maximumRenderRadius);
         _effectiveRenderDistanceChunks = renderRadius;
         _renderer?.Dispose();
-        ClientWorldSemanticCacheLimits cacheLimits =
-            ClientWorldSemanticCacheLimits.ForStructuralViewRadius(
-                checked(renderRadius + ClientStructuralResidency.DefaultStructuralFringeChunks),
+        ClientWorldSemanticCacheLimits cacheLimits;
+        if (reuseSemanticCache)
+        {
+            cacheLimits = _cache!.Limits;
+        }
+        else
+        {
+            // The semantic cache is an application target for the complete authoritative
+            // generation, not a disposable render-window detail. Admit its maximum supported
+            // structural working set once so live radius changes can preserve public rows and
+            // their already-proven delivery lineage.
+            cacheLimits = ClientWorldSemanticCacheLimits.ForStructuralViewRadius(
+                checked(maximumRenderRadius +
+                    ClientStructuralResidency.DefaultStructuralFringeChunks),
                 spareResidentChunks: 16,
                 maximumFrozenStaticsPerChunk: 16,
                 maximumMultiFragmentsPerChunk: 16,
                 maximumPublicRecordsPerChunk: 16,
                 maximumKnownPublicIdentities: 64);
-        _cache = new ClientWorldSemanticCache(
-            view.PreparedWorld,
-            cacheLimits);
+            _cache = new ClientWorldSemanticCache(view.PreparedWorld, cacheLimits);
+            _chatChunkInfo = new ClientSemanticChunkInfo[cacheLimits.MaximumResidentChunks];
+        }
         _residency = new ClientStructuralResidency(_cache, renderRadius);
 
         _assetResolver = new CabinCatalogAssetResolver(_contentOracle!, _resolvedContent!);
@@ -1025,7 +1073,6 @@ public partial class LocalCabinClient : Node3D
         _semanticHashesBeforeRefresh = new ClientSemanticHash[maximumPresented];
         _actorPresentedChunks = new ClientSemanticChunkHandle[maximumPresented];
         _actorChanges = new ClientActorPresentationChange[128];
-        _chatChunkInfo = new ClientSemanticChunkInfo[cacheLimits.MaximumResidentChunks];
         _orbit.Reset();
         _residentGenerationId = view.GenerationId;
         _player = view.PlayerPosition;
@@ -1964,6 +2011,11 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The Concept Demo fall could not form a command.");
         ApplyCommand(walkOff, false, default, false);
         DriveLocalUntil(() => _player == GamePlayableWorld.PlayerStart);
+        // Owner/private position may become visible one local-pump turn before the corresponding
+        // dynamic-public move. Finish client semantic convergence before a following acceptance
+        // mutates presentation policy.
+        DriveLocalUntil(() =>
+            CountVisiblyPresentedPrefab(GameWorldPublicPrefabIds.Character) == 1);
         SetProfile(ControlProfile.OrbitCommand);
 
         void ValidateRenderedShell(SpatialChunkKey key, int expectedFragments)

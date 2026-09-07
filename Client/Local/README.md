@@ -53,6 +53,12 @@ store on every render frame. Structural client residency remains independent
 from dynamic-public interest, so leaving public interest retires only public
 knowledge from a resident Client chunk.
 
+The delivery/proof cursor is paired with one current-generation semantic application cache. A live
+client Render Distance change must retain that cache and rebuild only its residency/presentation
+policy; replacing the cache while retaining these cursors would suppress unchanged public snapshots
+and make actors disappear until later publication work. Authority-generation replacement remains an
+explicit fresh-cache boundary.
+
 The local path does not serialize Game protocol messages, create a loopback
 connection, or reference `Client.Network`, Game Protocol, Remote Replication, or
 `Kernels.Network`. Hosting in a Complete composition adds independent remote

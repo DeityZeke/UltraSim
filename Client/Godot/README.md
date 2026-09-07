@@ -65,6 +65,12 @@ no account or saved character is created. Runtime diagnostics show the configure
 the authored/resident/rendered chunk counts; intentional-void chunks have no mesh, so a larger
 window can change the counts without adding visible geometry at the current location.
 
+Saving a live Render Distance change rebuilds native chunks and the bounded structural-residency
+window, but deliberately retains the current-generation semantic cache. Public actors and objects
+that were already applied therefore remain present without waiting for movement or a chunk crossing
+to manufacture new publication work. The `--d0-1-smoke` gate exercises radii 1, 2, and 3 and requires
+the controlled actor, cache identity, command sequence, and post-resize movement to remain valid.
+
 F0.3a makes the **Multiplayer / Direct Connect** entry real in Online and Complete. Start the
 external identity gateway with:
 

@@ -546,17 +546,24 @@ no authored chunk                      = outside authored world
 
 The F0.1 settings document now persists a bounded client-owned Render Distance of 1–3 chunks. Save
 applies the value once rather than rebuilding on every slider sample. A live change reconstructs
-the bounded semantic/presentation window without replacing the authoritative local Game session.
-The permanent D0.1 Godot canary proves both the default 81/25/9 shape and an expanded 81/49/25
-shape at radius 2 through the real Single Player consumer.
+the bounded structural-residency controller and native presentation window without replacing either
+the authoritative local Game session or the current-generation semantic application cache. Cache
+capacity is admitted once for the largest presentation radius the bound authored world supports;
+the chosen radius still determines actual desired residency and realization.
+
+The permanent D0.1 Godot canary proves the default 81/25/9 shape and an expanded 81/49/25 shape at
+radius 2 through the real Single Player consumer. Post-F0.4 human-play hardening also drives radius
+1 → 2 → 3 over the 162-chunk sparse world and requires the same semantic cache, controlled actor,
+and native actor presentation to survive; radius 3 converges to 81 semantic / 49 rendered chunks.
 
 Post-D0.3 human-play hardening makes that change visually observable as well as structurally true.
 The Central Island's present BaseTerrain footprint now crosses the radius-1 presentation boundary
 while remaining inside the same sparse 9×9 authored cluster; the Far Island and intentional Sky
 cutout are unchanged. The native D0.1 gate requires the expanded window to realize strictly more
 terrain triangles and then submits an accepted movement command after the live resize. A radius
-change remains presentation/residency policy and does not replace the local authority or reset its
-control-session sequence.
+change remains presentation/residency policy and does not replace the local authority, reset its
+control-session sequence, or discard already-applied dynamic-public rows. A replacement Game
+generation still earns a fresh semantic cache and application lineage.
 
 Diagnostics expose configured radius, authored/current/peak semantic residents,
 current/peak rendered chunks, semantic and presentation enters/exits, resets, and renderer queue
