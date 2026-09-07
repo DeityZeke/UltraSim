@@ -80,6 +80,16 @@ mutate shell geometry or topology. Mutable shells, destruction/state overlays,
 illusions/per-observer perception, editor rip/extrude, and gravity remain future
 work.
 
+## Complete-pack stream opening
+
+A0.7 adds `WorldPack.TryOpen(Stream, ...)` without changing WorldPack identity or format. It reads
+the exact remaining stream, validates the fixed header and configured pack bound before one
+proportional World-owned byte allocation, handles partial/non-seekable reads, and rejects truncation
+or trailing bytes. `TryOpenFile` delegates to the same path. Content may supply a verified CAS
+stream, but World still owns canonical container validation, `WorldPackFingerprint`,
+`WorldContentFingerprint`, and `WorldContentBinding`; cache possession alone is not World
+publication authority.
+
 `WorldPosition` is a 16-byte game value: signed 32-bit chunk X/Z, unsigned
 canonical local X/Z in `0..15,999`, and signed 32-bit Y millimeters. It is not an
 ECS component. `WorldPositionComponent` is the separate 16-byte persisted ECS

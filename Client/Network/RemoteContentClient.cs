@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using UltraSim.Client.Content;
 using UltraSim.Game.Application;
 using UltraSim.Game.Protocol;
+using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.UI;
 
@@ -185,6 +186,34 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
                 cacheKey.DefinitionHash),
             out definition,
             out error);
+    }
+
+    /// <summary>
+    /// Opens and binds one exact World-owned artifact from this application session's applied
+    /// realm catalog. Catalog application remains distinct from structural publication.
+    /// </summary>
+    public bool TryResolveWorldPack(
+        LogicalContentId definitionId,
+        WorldPackFingerprint expectedPackFingerprint,
+        WorldContentBinding binding,
+        out BoundWorldPack? world,
+        out ContentWorldPackResolutionResult result,
+        WorldPackLimits limits = default)
+    {
+        EnsureOperational();
+        world = null;
+        result = default;
+        if (_state != RemoteContentClientState.Applied || _catalog is null)
+        {
+            result = new ContentWorldPackResolutionResult(
+                ContentWorldPackResolutionStatus.InvalidRequest,
+                WorldPackOpenError.None,
+                WorldPackBindingError.None);
+            return false;
+        }
+        return ContentWorldPackResolver.TryResolve(
+            _catalog, definitionId, expectedPackFingerprint, binding,
+            out world, out result, limits);
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)

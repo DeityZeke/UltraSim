@@ -3,9 +3,10 @@
 **Status:** frozen ownership/security direction with A0.0 content contracts/resolution, the
 local A0.1 Cabin Default/Replace/Add oracle, A0.2 persistent CAS/install/reopen, A0.3
 authenticated requirement/acquisition/application proof, A0.4 remote semantic/source parity,
-A0.5 cache/delta/corruption/mirror hardening, and A0.6 typed UI schema convergence accepted,
+A0.5 cache/delta/corruption/mirror hardening, A0.6 typed UI schema convergence, and A0.7 complete
+canonical WorldPack streaming accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
-(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.6 are closed; A0.7 complete WorldPack streaming is next.
+(F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.7 are closed; A0.8 native Contentless Online closure is next.
 Runtime mesh/audio
 import, package
 dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
@@ -1525,7 +1526,7 @@ claim of authenticated remote realm establishment.
 
 This first presentation oracle deliberately does not repackage the existing authoritative Cabin
 WorldPack or bundled X/Y meshes. F0.2 consumes the catalogs in the real Single Player shell; A0.7
-later carries a complete World-owned artifact through the streaming substrate.
+separately carries a complete World-owned artifact through the streaming substrate.
 
 Use local/preinstalled sources only and publish immutable engine-neutral catalog generations.
 
@@ -1790,20 +1791,38 @@ action and receives the authoritative Game update. See
 
 ## A0.7 — structural world streaming canary
 
-After presentation streaming is proven, carry one existing complete World-owned artifact through the
-content byte/cache substrate.
+**Status: CLOSED.** One existing complete Concept Demo WorldPack now travels as an ordinary
+`ContentFileKind.WorldPack` leaf through the authenticated A0.3 requirement, A0.4 HTTP source, and
+A0.2 CAS. `ContentWorldPackResolver` will inspect only the exact World definition owned by a
+package selected by the live applied realm catalog. A matching global blob, base/local definition,
+other-realm manifest, wrong typed definition, wrong pack fingerprint, or wrong World content
+binding is insufficient.
 
-First canary:
+World remains the artifact owner. `WorldPack.TryOpen(Stream, ...)` admits the canonical header
+before one proportional World-owned allocation, consumes partial/non-seekable streams exactly,
+rejects truncation and trailing bytes, and performs the existing complete structural validation.
+The resolver then checks the exact `WorldPackFingerprint` and calls `WorldPack.TryBind` against the
+composition-owned `WorldContentBinding`. Content blob SHA-256, WorldPack fingerprint, and World
+content fingerprint/binding remain separate identities.
 
-- Contentless client has no Cabin WorldPack;
-- server authorizes the exact complete Cabin WorldPack fingerprint/content binding;
-- client obtains and caches the complete canonical WorldPack bytes;
-- `WorldPack.TryOpen` and World content binding validate them;
-- client publishes the initial structural semantic/render world;
-- dynamic entity replication unaffected.
+`RemotePlayableSession` keeps the resolved pack and candidate semantic cache private until every
+initial structural chunk stages and publishes. Guest admission cannot be submitted before that
+transaction completes. Capacity or validation failure exposes no partial cache and records an
+explicit rejected structural state; catalog application remains distinct from structural
+publication. Once ready, the ordinary dynamic-public protocol adapter attaches to the same cache,
+without changing content protocol v18 or dynamic entity publication.
 
-**Gate:** complete WorldPack fingerprint/content binding and renderer result match the local oracle,
-independently from dynamic public replication.
+Permanent evidence transports the exact 731,158-byte, 162-chunk Concept Demo artifact over the
+real server-hosted HTTP fixture. Its blob SHA-256, WorldPack/content fingerprints, statics, Multi
+instances/fragments, additional terrain surfaces, resident count, and complete client semantic
+hash match the preinstalled local oracle exactly. A subsequently admitted remote guest receives
+ordinary dynamic-public state. A second canary proves a 161-slot structural limit rejects this
+162-chunk candidate with zero published chunks. See
+[`content-a0.7-worldpack-streaming-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.7-worldpack-streaming-2026-09-06.json).
+
+**Gate:** complete WorldPack fingerprint/content binding and renderer structural source match the
+local oracle independently from dynamic public replication. Native Godot Contentless Online
+realization remains A0.8.
 
 Later World-owned checkpoints—not A0.7—may define a canonical complete overlay artifact and, only if
 earned afterward, an independently downloadable chunk artifact.

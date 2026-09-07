@@ -1,0 +1,76 @@
+{
+  "Checkpoint": "A0.7",
+  "Workload": "complete-canonical-worldpack-streaming-canary",
+  "CaptureDate": "2026-09-06",
+  "Configurations": [
+    "Debug",
+    "Release"
+  ],
+  "Artifact": {
+    "DefinitionId": "server-world:world/concept-demo",
+    "PackageId": "server.world.concept-demo",
+    "FileExtension": ".usworldpack",
+    "Bytes": 731158,
+    "BlobSha256": "02082af5f769385d43f763d38aa354efdc87fddc40399c397a955828a98d0ed5",
+    "PackageManifestHash": "92effc725984ecfb6cd5cc2978077fc18787ba5555b961b28e444fa85e61532f",
+    "ActivationPlanHash": "999560fb241cf6f6058ccc2136dc74f332ec0f3eea2e4a4ea916c4fb5690ece1",
+    "ResolvedCatalogFingerprint": "6f753d817353ca935059c5ea2f2226c6bcb2dee5916190bfc6972a5c0b646d8b",
+    "WorldPackFingerprint": "DD5DC0F6710BBD9C2D0DC90271E3B18BEAA5325AFDE80D902328AABB086EA228",
+    "WorldContentFingerprint": "D2418739B74F10A53B8D14CBE652EE21",
+    "Source": "server-hosted HTTP through the authenticated applied realm catalog"
+  },
+  "StructuralParity": {
+    "Chunks": 162,
+    "FrozenStatics": 124,
+    "MultiInstances": 3,
+    "MultiFragments": 17,
+    "AdditionalTerrainSurfaceFragments": 3,
+    "ClientSemanticHashLow": 14057999015864257037,
+    "ClientSemanticHashHigh": 13260273818489469651,
+    "MatchesPreinstalledLocalOracle": true
+  },
+  "Publication": {
+    "AppliedCatalogRequiredFirst": true,
+    "PrivateCandidateBeforeCommit": true,
+    "PublishedStructuralChunks": 162,
+    "GuestAdmissionBlockedUntilReady": true,
+    "DynamicPublicSnapshotsAppliedAfterAdmission": 2,
+    "ContentProtocolVersionChanged": false
+  },
+  "FailureCanary": {
+    "CandidateChunks": 162,
+    "ResidentChunkLimit": 161,
+    "Error": "CapacityExceeded",
+    "PublishedStructuralChunks": 0,
+    "GuestAdmissionRejected": true
+  },
+  "WorldStreamOpen": {
+    "HeaderValidatedBeforeProportionalAllocation": true,
+    "ProportionalWorldOwnedByteBufferAllocations": 1,
+    "PartialAndNonSeekableReadsSupported": true,
+    "TruncationRejected": true,
+    "TrailingBytesRejected": true,
+    "DefaultMaximumPackBytes": 268435456,
+    "WarmedOversizedHeaderAllocationBytesPer10000Attempts": 0
+  },
+  "IdentitySeparation": [
+    "content blob SHA-256",
+    "WorldPackFingerprint",
+    "WorldContentFingerprint and WorldContentBinding",
+    "client structural semantic publication"
+  ],
+  "FocusedTests": {
+    "WorldTotal": 86,
+    "NewWorldA07": 1,
+    "ClientContentTotal": 25,
+    "NewClientContentA07": 1,
+    "NetworkApplicationA07": 2
+  },
+  "Deferred": [
+    "native Godot Contentless Online world entry (A0.8)",
+    "canonical complete mutable overlay artifact",
+    "independently downloadable World chunk artifacts",
+    "runtime mesh/audio import",
+    "user presentation-leaf overrides"
+  ]
+}

@@ -22,7 +22,9 @@ internal static class F03bRemotePlayableTests
     internal const int A04TestCount = 5;
     internal const int A05TestCount = 1;
     internal const int A06TestCount = 2;
-    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount + A06TestCount;
+    internal const int A07TestCount = 2;
+    internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
+        A06TestCount + A07TestCount;
 
     internal static void RunAll()
     {
@@ -62,6 +64,10 @@ internal static class F03bRemotePlayableTests
             UiDefinitionArtifactMatchesAcrossLocalCacheHttpAndHttps);
         Run("ContentBackedRemoteInventoryUsesHotOpenAndGameActions",
             ContentBackedRemoteInventoryUsesHotOpenAndGameActions);
+        Run("StreamedWorldPackPublishesBeforeGuestAndMatchesAuthority",
+            StreamedWorldPackPublishesBeforeGuestAndMatchesAuthority);
+        Run("StreamedWorldPackCapacityFailurePublishesNothing",
+            StreamedWorldPackCapacityFailurePublishesNothing);
     }
 
     private static void RemotePlayableProtocolIsCanonicalAndTrustMinimal()
@@ -807,6 +813,176 @@ internal static class F03bRemotePlayableTests
             $"action_model_sequence={remote.UiClient.GetView(view).LastSequence}");
     }
 
+    private static void StreamedWorldPackPublishesBeforeGuestAndMatchesAuthority()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        WorldContentFixture world = CreateConceptWorldContent(oracle);
+        byte[] archive = Archive(world.Manifest, world.Payloads);
+        using var host = new StaticContentHttpHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+            [new StaticContentHttpResource("/content/concept-world.uspkg", archive)]);
+        ContentPackageAcquisition acquisition = Acquisition(
+            world.Manifest, ContentSourceKind.ServerHostedStatic,
+            host.GetUri("/content/concept-world.uspkg").ToString());
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
+        var requiredWorld = new RemoteRequiredWorldBinding(
+            world.DefinitionId,
+            world.Pack.Fingerprint,
+            world.Binding,
+            new ClientWorldSemanticCacheLimits(192, 256, 32, 64, 4_096));
+        using var remote = RemotePlayableFixture.CreateWithWorldContent(
+            CabinContentOracle.FixtureRealm,
+            oracle.BaseCatalog,
+            world.Plan,
+            world.Catalog.Fingerprint,
+            [acquisition],
+            source,
+            requiredWorld);
+
+        Equal(RemoteStructuralWorldState.AwaitingAppliedCatalog,
+            remote.SessionSnapshot.StructuralWorld.State);
+        False(remote.TrySubmitGuest("Too Early", GameGuestBody.HumanFemale));
+        remote.DriveUntil(() =>
+            remote.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready);
+        RemotePlayableSessionSnapshot ready = remote.SessionSnapshot;
+        True(ready.RequiredContentApplied);
+        True(ready.StructuralWorld.Resolution.IsResolved);
+        Equal(ClientSemanticChunkError.None, ready.StructuralWorld.PublicationError);
+        Equal(world.Pack.Fingerprint, ready.StructuralWorld.WorldPackFingerprint);
+        Equal(world.Pack.ContentFingerprint, ready.StructuralWorld.WorldContentFingerprint);
+        Equal(world.Pack.ChunkCount, ready.StructuralWorld.PublishedStructuralChunks);
+        Equal(world.Pack.ChunkCount, remote.Cache.GetSnapshot().ResidentChunks);
+        Equal(1, remote.Content!.GetSnapshot().Acquisition.FilesFetched);
+        Equal((long)world.Bytes.Length, remote.Content.GetSnapshot().Acquisition.BytesFetched);
+
+        ClientWorldSemanticCache local = RemotePlayableFixture.CreatePreinstalledWorldCache();
+        ClientWorldSemanticCacheSnapshot streamedSnapshot = remote.Cache.GetSnapshot();
+        ClientWorldSemanticCacheSnapshot localSnapshot = local.GetSnapshot();
+        Equal(localSnapshot.BaseWorldFingerprint, streamedSnapshot.BaseWorldFingerprint);
+        Equal(localSnapshot.WorldSemanticHash, streamedSnapshot.WorldSemanticHash);
+        Equal(localSnapshot.ResidentChunks, streamedSnapshot.ResidentChunks);
+        Equal(local.BaseWorld.FrozenStaticCount, remote.Cache.BaseWorld.FrozenStaticCount);
+        Equal(local.BaseWorld.MultiInstanceCount, remote.Cache.BaseWorld.MultiInstanceCount);
+        Equal(local.BaseWorld.MultiFragmentCount, remote.Cache.BaseWorld.MultiFragmentCount);
+        Equal(local.BaseWorld.AdditionalTerrainSurfaceFragmentCount,
+            remote.Cache.BaseWorld.AdditionalTerrainSurfaceFragmentCount);
+
+        remote.Admit("Streamed World Guest", GameGuestBody.HumanFemale);
+        remote.DriveUntil(() =>
+            remote.TryFindPublic(GameWorldPublicPrefabIds.Character, out _) &&
+            remote.World.GetSnapshot().AppliedSnapshots != 0);
+        Console.WriteLine(
+            $"EVIDENCE A0.7 worldpack_bytes={world.Bytes.Length} " +
+            $"blob_sha={ContentHash.Compute(world.Bytes)} manifest={world.Manifest.ManifestHash} " +
+            $"plan={world.Plan.PlanHash} catalog={world.Catalog.Fingerprint} " +
+            $"pack={world.Pack.Fingerprint} " +
+            $"content={world.Pack.ContentFingerprint} chunks={world.Pack.ChunkCount} " +
+            $"statics={world.Pack.FrozenStaticCount} multis={world.Pack.MultiInstanceCount}/" +
+            $"{world.Pack.MultiFragmentCount} surfaces={world.Pack.AdditionalTerrainSurfaceFragmentCount} " +
+            $"semantic={streamedSnapshot.WorldSemanticHash} dynamic_snapshots=" +
+            $"{remote.World.GetSnapshot().AppliedSnapshots}");
+    }
+
+    private static void StreamedWorldPackCapacityFailurePublishesNothing()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        WorldContentFixture world = CreateConceptWorldContent(oracle);
+        byte[] archive = Archive(world.Manifest, world.Payloads);
+        using var host = new StaticContentHttpHost(
+            new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+            [new StaticContentHttpResource("/content/concept-world.uspkg", archive)]);
+        ContentPackageAcquisition acquisition = Acquisition(
+            world.Manifest, ContentSourceKind.ServerHostedStatic,
+            host.GetUri("/content/concept-world.uspkg").ToString());
+        using var source = new HttpContentPackageSource(
+            FixtureHttpLimits(archive.Length, allowInsecureHttp: true));
+        var requiredWorld = new RemoteRequiredWorldBinding(
+            world.DefinitionId,
+            world.Pack.Fingerprint,
+            world.Binding,
+            new ClientWorldSemanticCacheLimits(
+                world.Pack.ChunkCount - 1, 256, 32, 64, 4_096));
+        using var remote = RemotePlayableFixture.CreateWithWorldContent(
+            CabinContentOracle.FixtureRealm,
+            oracle.BaseCatalog,
+            world.Plan,
+            world.Catalog.Fingerprint,
+            [acquisition],
+            source,
+            requiredWorld);
+        remote.DriveUntil(() =>
+            remote.SessionSnapshot.StructuralWorld.State == RemoteStructuralWorldState.Rejected);
+        RemotePlayableSessionSnapshot rejected = remote.SessionSnapshot;
+        True(rejected.RequiredContentApplied);
+        True(rejected.StructuralWorld.Resolution.IsResolved);
+        Equal(ClientSemanticChunkError.CapacityExceeded,
+            rejected.StructuralWorld.PublicationError);
+        Equal(0, rejected.StructuralWorld.PublishedStructuralChunks);
+        Equal(world.Pack.Fingerprint, rejected.StructuralWorld.WorldPackFingerprint);
+        False(remote.TrySubmitGuest("No Partial World", GameGuestBody.HumanFemale));
+    }
+
+    private static WorldContentFixture CreateConceptWorldContent(CabinContentOracle oracle)
+    {
+        WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+        var bytes = new byte[pack.Length];
+        pack.CopyTo(bytes);
+        True(ContentFilePath.TryCreate(
+            "world/concept-demo.usworldpack", out ContentFilePath path));
+        True(ContentFileDescriptor.TryCreate(
+            path, ContentFileKind.WorldPack, bytes.Length, ContentHash.Compute(bytes),
+            default, out ContentFileDescriptor file));
+        True(LogicalContentId.TryCreate(
+            "server-world:world/concept-demo", out LogicalContentId definitionId));
+        True(ContentDefinitionDescriptor.TryCreateFileDefinition(
+            definitionId, ContentDefinitionKind.WorldPack, ContentDefinitionOperation.Add,
+            path, out ContentDefinitionDescriptor? definition));
+        True(ContentPackageId.TryCreate(
+            "server.world.concept-demo", out ContentPackageId packageId));
+        True(ContentNamespaceId.TryCreate(
+            "server-world", out ContentNamespaceId contentNamespace));
+        True(ContentPackageManifest.TryCreate(
+            1, 1, packageId, contentNamespace,
+            "Concept Demo canonical world", "1.0.0",
+            ContentTrustClass.ServerAuthorizedPassive,
+            [file], [definition!], out ContentPackageManifest? manifest, out _));
+        var payloads = new[] { new ContentFilePayload(path, bytes) };
+        True(ContentPackageValidator.TryValidatePayloads(
+            manifest!, payloads, out VerifiedContentPackage? verified, out _));
+        var requirement = new ContentActivationPackage(
+            packageId, manifest!.ManifestHash, ContentRequirementPolicy.Required);
+        True(ContentActivationPlan.TryCreate(
+            CabinContentOracle.FixtureRealm,
+            new ContentActivationId(0x4130_2E37_2D57_4F52UL, 1),
+            oracle.BaseCatalog.Fingerprint,
+            [requirement], out ContentActivationPlan? plan, out _));
+        True(ContentCatalogResolver.TryResolve(
+            oracle.BaseCatalog, plan!, [verified!], out ResolvedContentCatalog? catalog,
+            out ContentCatalogResolutionError resolutionError));
+        Equal(ContentCatalogResolutionError.None, resolutionError);
+        return new WorldContentFixture(
+            definitionId, pack, bytes, CreateWorldBinding(), manifest, payloads, plan!, catalog!);
+    }
+
+    private static WorldContentBinding CreateWorldBinding() => new(
+        GameContent.WorldFingerprint,
+        [
+            GameTerrainMaterialIds.Water,
+            GameTerrainMaterialIds.Sand,
+            GameTerrainMaterialIds.Grass,
+            GameTerrainMaterialIds.Rock,
+            GameTerrainMaterialIds.Snow,
+        ],
+        [
+            GameWorldStaticDefinitionIds.Tree,
+            GameWorldStaticDefinitionIds.Rock,
+            GameWorldStaticDefinitionIds.CabinWall,
+            GameWorldStaticDefinitionIds.CabinRoof,
+            GameWorldStaticDefinitionIds.Shelf,
+            GameWorldStaticDefinitionIds.Book,
+        ]);
+
     private static UiContentFixture CreateInventoryUiContent(CabinContentOracle oracle)
     {
         CompiledUiDefinition definition = InventoryUi.Definition;
@@ -1060,6 +1236,16 @@ internal static class F03bRemotePlayableTests
         ContentActivationPlan Plan,
         ResolvedContentCatalog Catalog);
 
+    private sealed record WorldContentFixture(
+        LogicalContentId DefinitionId,
+        WorldPack Pack,
+        byte[] Bytes,
+        WorldContentBinding Binding,
+        ContentPackageManifest Manifest,
+        ContentFilePayload[] Payloads,
+        ContentActivationPlan Plan,
+        ResolvedContentCatalog Catalog);
+
     private sealed class CabinReplaceSource : IContentPackageSource
     {
         private readonly CabinContentOracle _oracle;
@@ -1176,7 +1362,6 @@ internal static class F03bRemotePlayableTests
             HostedUdpAdmissionHost host,
             ClientDirectConnectSession direct,
             RemotePlayableSession session,
-            ClientWorldSemanticCache cache,
             ContentCache? contentCache = null,
             string? contentRoot = null,
             bool preserveContentRoot = false)
@@ -1189,7 +1374,6 @@ internal static class F03bRemotePlayableTests
             _contentCache = contentCache;
             _contentRoot = contentRoot;
             _preserveContentRoot = preserveContentRoot;
-            Cache = cache;
         }
 
         internal RemotePlayableClient Playable => _session.Playable;
@@ -1199,7 +1383,7 @@ internal static class F03bRemotePlayableTests
         internal UiClientRuntime UiClient => _session.UiClient;
         internal RemoteContentClient? Content => _session.Content;
         internal ContentCache? ContentStore => _contentCache;
-        internal ClientWorldSemanticCache Cache { get; }
+        internal ClientWorldSemanticCache Cache => _session.WorldCache;
         internal RemotePlayableSessionSnapshot SessionSnapshot => _session.GetSnapshot();
 
         internal static RemotePlayableFixture Create()
@@ -1276,6 +1460,38 @@ internal static class F03bRemotePlayableTests
             }
         }
 
+        internal static RemotePlayableFixture CreateWithWorldContent(
+            UltraSim.Game.Application.ApplicationRealmId realm,
+            ContentBaseCatalog baseCatalog,
+            ContentActivationPlan plan,
+            ContentHash expectedFingerprint,
+            ContentPackageAcquisition[] acquisitions,
+            IContentPackageSource source,
+            RemoteRequiredWorldBinding requiredWorld)
+        {
+            string contentRoot = TemporaryDirectory("ultrasim-a07-cache");
+            if (!ContentCache.TryOpen(
+                    contentRoot, out ContentCache? contentCache, out ContentCacheError error))
+                throw new InvalidOperationException($"The A0.7 cache could not open: {error}.");
+            try
+            {
+                RemoteContentAuthorization authorization = RemoteContentAuthorizationProjection.Create(
+                    plan, expectedFingerprint, acquisitions);
+                var contentBinding = new RemoteRequiredContentBinding(
+                    realm, contentCache!, baseCatalog, source);
+                return CreateCore(
+                    realm, authorization, contentBinding, contentCache, contentRoot,
+                    preserveContentRoot: false,
+                    requiredWorld: requiredWorld);
+            }
+            catch
+            {
+                contentCache!.Dispose();
+                if (Directory.Exists(contentRoot)) Directory.Delete(contentRoot, recursive: true);
+                throw;
+            }
+        }
+
         private static RemotePlayableFixture CreateCore(
             UltraSim.Game.Application.ApplicationRealmId realm,
             RemoteContentAuthorization? contentAuthorization = null,
@@ -1283,7 +1499,8 @@ internal static class F03bRemotePlayableTests
             ContentCache? contentCache = null,
             string? contentRoot = null,
             bool preserveContentRoot = false,
-            IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null)
+            IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
+            RemoteRequiredWorldBinding? requiredWorld = null)
         {
             string trustDirectory = Path.Combine(Path.GetTempPath(),
                 $"ultrasim-f03b-{Environment.ProcessId}-{Guid.NewGuid():N}");
@@ -1317,18 +1534,35 @@ internal static class F03bRemotePlayableTests
                         ClientDirectConnectSnapshot connected = direct.GetSnapshot();
                         NetworkProtocolPeer peer = direct.Peer ??
                             throw new InvalidOperationException("The established client peer was absent.");
-                        ClientWorldSemanticCache cache = CreatePreinstalledWorldCache();
-                        var session = new RemotePlayableSession(
-                            peer,
-                            connected.ApplicationSessionEpoch,
-                            cache,
-                            new NullRenderer(),
-                            new ClientChatLimits(16, 256, 128),
-                            new UiClientLimits(8, 8),
-                            maximumPendingWorldProofs: 256,
-                            requiredContent: requiredContent);
+                        RemotePlayableSession session;
+                        if (requiredWorld is null)
+                        {
+                            ClientWorldSemanticCache cache = CreatePreinstalledWorldCache();
+                            session = new RemotePlayableSession(
+                                peer,
+                                connected.ApplicationSessionEpoch,
+                                cache,
+                                new NullRenderer(),
+                                new ClientChatLimits(16, 256, 128),
+                                new UiClientLimits(8, 8),
+                                maximumPendingWorldProofs: 256,
+                                requiredContent: requiredContent);
+                        }
+                        else
+                        {
+                            session = new RemotePlayableSession(
+                                peer,
+                                connected.ApplicationSessionEpoch,
+                                requiredContent ?? throw new InvalidOperationException(
+                                    "The streamed World requires a content binding."),
+                                requiredWorld,
+                                new NullRenderer(),
+                                new ClientChatLimits(16, 256, 128),
+                                new UiClientLimits(8, 8),
+                                maximumPendingWorldProofs: 256);
+                        }
                         return new RemotePlayableFixture(
-                            trustDirectory, identity, host, direct, session, cache,
+                            trustDirectory, identity, host, direct, session,
                             contentCache, contentRoot, preserveContentRoot);
                     }
                     catch
@@ -1372,7 +1606,7 @@ internal static class F03bRemotePlayableTests
             }
             throw new InvalidOperationException(
                 $"Remote playable did not converge. direct={_direct.GetSnapshot()} " +
-                $"playable={Playable.GetSnapshot()} world={World.GetSnapshot()} " +
+                $"playable={Playable.GetSnapshot()} world={_session.GetSnapshot().World} " +
                 $"chat={Chat.GetSnapshot()} session={_session.GetSnapshot()}");
         }
 
@@ -1469,26 +1703,10 @@ internal static class F03bRemotePlayableTests
             _ = _session.ProcessReceived();
         }
 
-        private static ClientWorldSemanticCache CreatePreinstalledWorldCache()
+        internal static ClientWorldSemanticCache CreatePreinstalledWorldCache()
         {
             WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
-            var binding = new WorldContentBinding(
-                GameContent.WorldFingerprint,
-                [
-                    GameTerrainMaterialIds.Water,
-                    GameTerrainMaterialIds.Sand,
-                    GameTerrainMaterialIds.Grass,
-                    GameTerrainMaterialIds.Rock,
-                    GameTerrainMaterialIds.Snow,
-                ],
-                [
-                    GameWorldStaticDefinitionIds.Tree,
-                    GameWorldStaticDefinitionIds.Rock,
-                    GameWorldStaticDefinitionIds.CabinWall,
-                    GameWorldStaticDefinitionIds.CabinRoof,
-                    GameWorldStaticDefinitionIds.Shelf,
-                    GameWorldStaticDefinitionIds.Book,
-                ]);
+            WorldContentBinding binding = CreateWorldBinding();
             True(pack.TryBind(binding, out BoundWorldPack? bound, out _));
             var cache = new ClientWorldSemanticCache(
                 bound!, new ClientWorldSemanticCacheLimits(192, 256, 32, 64, 4_096));

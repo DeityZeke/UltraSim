@@ -52,8 +52,9 @@ acceptance narratives remain available through git history.
   resolution, immutable catalogs, application-proof vocabulary, the A0.2 persistent
   hash-addressed install/reopen/pinning/eviction substrate, A0.3 source-neutral acquisition, and
   A0.4 canonical local/server-HTTP/external-HTTPS source parity, A0.5 hash-level delta,
-  repair, mirror, Optional-upgrade, bounded-concurrency, and DNS-target hardening, plus A0.6
-  canonical typed UI-definition resolution through the applied realm catalog.
+  repair, mirror, Optional-upgrade, bounded-concurrency, and DNS-target hardening, A0.6 canonical
+  typed UI-definition resolution, and A0.7 complete WorldPack resolution through the applied realm
+  catalog with World-owned open/bind validation.
 - [Built-in Test Worlds](../Client/BuiltInTestWorlds/README.md) — A0.1 local Cabin
   Default/Replace/Add package oracle, frozen catalog fingerprints, and exact ownership deltas.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
@@ -63,7 +64,8 @@ acceptance narratives remain available through git history.
   establishment plus the F0.3b guest/control composition over public chunk state, Chat Events,
   owner state, and owner-private UI/Inventory, with A0.3 authenticated content requirement,
   A0.4 physical byte-source parity, A0.5 resilient granular acquisition, A0.6 content-backed
-  remote UI HotOpen, and exact application-proof gating before guest admission.
+  remote UI HotOpen, A0.7 atomic initial structural publication, and exact application-proof
+  gating before guest admission.
 - [Direct Connect Concept Demo server](../Server/DirectConnect/README.md) — external Hosted endpoint
   with durable deployment key/realm identity and one bounded F0.3b remote playable application.
 - [Godot client application](../Client/Godot/README.md) — the single maintained native adapter,

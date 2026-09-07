@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `content-a0.7-worldpack-streaming-2026-09-06.json` — exact complete Concept Demo
+  WorldPack acquisition through server-hosted HTTP and the applied realm catalog, one-allocation
+  World stream open, typed pack/content binding, private atomic 162-chunk client publication,
+  complete local semantic parity, capacity rejection with zero publication, and unchanged
+  dynamic-public application;
 - `content-a0.6-ui-schema-convergence-2026-09-06.json` — canonical typed `.usui` Inventory
   definition identity across rooted local, warm CAS, server HTTP, and external HTTPS, plus the
   authenticated content-backed HotOpen/action/application-proof canary;

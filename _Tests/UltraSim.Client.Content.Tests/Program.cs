@@ -32,6 +32,7 @@ var tests = new (string Name, Action Body)[]
     ("OptionalAcquisitionFallsBackThenHotUpgradesExplicitly", OptionalAcquisitionFallsBackThenHotUpgradesExplicitly),
     ("ResolvedPrivateDnsTargetIsRejectedAtConnectTime", ResolvedPrivateDnsTargetIsRejectedAtConnectTime),
     ("UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog", UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog),
+    ("WorldPackResolvesThroughAppliedCatalogAndWorldBinding", WorldPackResolvesThroughAppliedCatalogAndWorldBinding),
 };
 
 foreach ((string name, Action body) in tests)
@@ -1032,6 +1033,108 @@ static void UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog()
     }
 }
 
+static void WorldPackResolvesThroughAppliedCatalogAndWorldBinding()
+{
+    byte[] bytes = WorldPackBytes();
+    var worldLimits = new WorldPackLimits(2 * 1024 * 1024, 4, 4);
+    var contentFingerprint = new WorldContentFingerprint(2, 3);
+    True(WorldPack.TryOpen(bytes, worldLimits, contentFingerprint,
+        out WorldPack? expected, out WorldPackOpenError expectedError), expectedError.ToString());
+    ContentFilePath path = FilePath("world/cabin.usworldpack");
+    ContentPackageManifest manifest = Manifest(
+        "server.world.cabin", "server-world", ContentTrustClass.ServerAuthorizedPassive,
+        [File(path, ContentFileKind.WorldPack, bytes)],
+        [FileDefinition("cabin:world/default", ContentDefinitionKind.WorldPack,
+            ContentDefinitionOperation.Replace, path.Value!)]);
+    var package = new PackageFixture(
+        manifest, [new ContentFilePayload(path, bytes)]);
+    ContentBaseCatalog baseCatalog = BaseCatalog();
+    var realm = new ApplicationRealmId(25, 1000);
+    ContentActivationPlan plan = Plan(
+        realm, new ContentActivationId(25, 1), baseCatalog.Fingerprint,
+        [Required(manifest)]);
+    var binding = new WorldContentBinding(contentFingerprint, [1]);
+    string root = NewCacheRoot();
+    try
+    {
+        True(ContentCache.TryOpen(root, out ContentCache? cache, out ContentCacheError openError),
+            openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(
+                realm, manifest, package.Payloads, out _, out ContentCacheError installError),
+                installError.ToString());
+            True(cache.TryPublishCatalog(
+                baseCatalog, plan, false, out ContentCatalogLease? lease,
+                out ContentCacheError publishError), publishError.ToString());
+            using (lease)
+            {
+                True(ContentWorldPackResolver.TryResolve(
+                    lease!, Logical("cabin:world/default"), expected!.Fingerprint, binding,
+                    out BoundWorldPack? actual, out ContentWorldPackResolutionResult result,
+                    worldLimits), result.ToString());
+                True(result.IsResolved);
+                Equal(expected.Fingerprint, actual!.Fingerprint);
+                Equal(expected.ContentFingerprint, actual.Content.Fingerprint);
+                Equal(expected.ChunkCount, actual.ChunkCount);
+                Equal(expected.FrozenStaticCount, actual.FrozenStaticCount);
+                Equal(expected.MultiInstanceCount, actual.MultiInstanceCount);
+
+                byte[] otherBytes = WorldPackBytes(baseHeightMillimeters: 5_000);
+                True(WorldPack.TryOpen(otherBytes, worldLimits, contentFingerprint,
+                    out WorldPack? other, out _));
+                False(ContentWorldPackResolver.TryResolve(
+                    lease!, Logical("cabin:world/default"), other!.Fingerprint, binding,
+                    out _, out ContentWorldPackResolutionResult mismatch, worldLimits));
+                Equal(ContentWorldPackResolutionStatus.PackFingerprintMismatch, mismatch.Status);
+
+                var wrongBinding = new WorldContentBinding(
+                    new WorldContentFingerprint(8, 9), [1]);
+                False(ContentWorldPackResolver.TryResolve(
+                    lease!, Logical("cabin:world/default"), expected.Fingerprint, wrongBinding,
+                    out _, out ContentWorldPackResolutionResult wrongContent, worldLimits));
+                Equal(ContentWorldPackResolutionStatus.InvalidArtifact, wrongContent.Status);
+                Equal(WorldPackOpenError.ContentMismatch, wrongContent.OpenError);
+            }
+            False(ContentWorldPackResolver.TryResolve(
+                lease!, Logical("cabin:world/default"), expected!.Fingerprint, binding,
+                out _, out ContentWorldPackResolutionResult disposed, worldLimits));
+            Equal(ContentWorldPackResolutionStatus.CatalogDisposed, disposed.Status);
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+
+    ContentActivationPlan defaultPlan = Plan(
+        realm, new ContentActivationId(25, 2), baseCatalog.Fingerprint, []);
+    string defaultRoot = NewCacheRoot();
+    try
+    {
+        True(ContentCache.TryOpen(
+            defaultRoot, out ContentCache? cache, out ContentCacheError openError),
+            openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryPublishCatalog(
+                baseCatalog, defaultPlan, false, out ContentCatalogLease? lease,
+                out ContentCacheError publishError), publishError.ToString());
+            using (lease)
+            {
+                False(ContentWorldPackResolver.TryResolve(
+                    lease!, Logical("cabin:world/default"), expected!.Fingerprint, binding,
+                    out _, out ContentWorldPackResolutionResult unselected, worldLimits));
+                Equal(ContentWorldPackResolutionStatus.DefinitionNotSelected, unselected.Status);
+            }
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(defaultRoot)) Directory.Delete(defaultRoot, recursive: true);
+    }
+}
+
 static ContentBaseCatalog BaseCatalog(PackageFixture? fixture = null)
 {
     PackageFixture selected = fixture ?? CreateBasePackage();
@@ -1267,12 +1370,13 @@ static byte[] Webp(byte marker)
     return bytes;
 }
 
-static byte[] WorldPackBytes()
+static byte[] WorldPackBytes(int baseHeightMillimeters = 0)
 {
     var builder = new WorldPackBuilder(new SpatialSpaceId(1), new WorldContentFingerprint(2, 3),
         new WorldPackLimits(2 * 1024 * 1024, 4, 4));
     var materials = Enumerable.Repeat((ushort)1, TerrainChunkFormat.MaterialCellCount).ToArray();
-    True(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase heightBase));
+    True(TerrainHeightPlaneBase.TryCreate(
+        baseHeightMillimeters, out TerrainHeightPlaneBase heightBase));
     var heights = new TerrainHeightOffset[TerrainChunkFormat.HeightVertexCount];
     True(builder.TryAddBaseTerrain(new SpatialChunkKey(new SpatialSpaceId(1), 0, 0), materials,
         heightBase, heights, out WorldPackBuildError addError));

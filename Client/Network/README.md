@@ -62,16 +62,16 @@ same Game authority path as local play. Complete owner state is latest-state, wh
 Chat occurrence, and generic UI adapters preserve their existing independent application-proof
 contracts.
 
-The remote playable composition still receives an already verified/preinstalled
-`ClientWorldSemanticCache`; A0.7 owns structural WorldPack acquisition. A0.3 adds a separate optional
-`RemoteContentClient` before guest admission. It validates the Game-protocol requirement against the
+The remote playable composition accepts either an already verified/preinstalled
+`ClientWorldSemanticCache` or, after A0.7, one exact required WorldPack binding. A0.3 adds a
+separate optional `RemoteContentClient` before guest admission. It validates the Game-protocol requirement against the
 authenticated application realm, drives exact A0.2 reuse or source-neutral acquisition, retains the
 catalog lease, and emits `ContentSetApplied` only after catalog publication. `RemotePlayableSession`
 will not submit guest admission before that local application succeeds, while the authority also
 independently blocks hostile bypass until the exact session proof arrives. Cache presence alone is
 not proof, and reconnect always requires fresh application-session proof.
 
-The contentless Online native world remains a later A0.7/A0.8 consumer even though F0.3b's external
+The contentless Online native world remains an A0.8 consumer even though F0.3b's external
 semantic path and A0.3's headless authenticated content gate are accepted. A0.4 now feeds that same
 gate from canonical local-file, server-hosted HTTP, and external HTTPS package envelopes and proves
 Default/Replace/Add parity with the A0.1 oracle. Source URIs remain authorization hints outside
@@ -85,7 +85,14 @@ advances. A0.6 now lets `RemoteContentClient` resolve an exact typed `.usui` art
 its live applied realm catalog. `RemoteUiClientBridge` uses that definition to decode the existing
 compact `HotOpen`, primes Client Core's bounded cache, and sends the ordinary semantic apply proof
 only after the view opens. Game continues to own model values/actions; cache possession alone does
-not authorize a definition. WorldPack streaming remains A0.7.
+not authorize a definition.
+
+A0.7 resolves a selected complete WorldPack only after the realm catalog applies. World performs
+canonical open/fingerprint/content binding, then `RemotePlayableSession` constructs and publishes
+the complete initial `ClientWorldSemanticCache` privately before exposing it or permitting guest
+submission. Failure publishes no partial structural state. The existing dynamic-public adapter is
+attached afterward and keeps its independent application-proof lineage. No overlay/chunk artifact,
+native Godot world entry, or new protocol message is introduced.
 
 ## Dynamic public chunk state
 

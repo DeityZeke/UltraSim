@@ -2205,7 +2205,9 @@ A0.5  cache/delta/corruption/mirror hardening                            CLOSED
         |
 A0.6  cached/streamed UI schema convergence                              CLOSED
         |
-A0.7  complete canonical WorldPack streaming                              NEXT
+A0.7  complete canonical WorldPack streaming                              CLOSED
+        |
+A0.8  native Contentless Online world entry                                NEXT
         |
 F0.3c server client-profile consent/settings
         |

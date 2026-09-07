@@ -766,6 +766,14 @@ public sealed class WorldPack
     public WorldContentFingerprint ContentFingerprint => _metadata.ContentFingerprint;
     public WorldPackFingerprint Fingerprint => _metadata.PackFingerprint;
 
+    /// <summary>Copies the complete canonical artifact bytes without exposing mutable ownership.</summary>
+    public void CopyTo(Span<byte> destination)
+    {
+        if (destination.Length < _bytes.Length)
+            throw new ArgumentException("Destination is too small.", nameof(destination));
+        _bytes.CopyTo(destination);
+    }
+
     public static bool TryOpen(
         ReadOnlySpan<byte> source,
         WorldPackLimits limits,
@@ -800,23 +808,58 @@ public sealed class WorldPack
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 WorldPackFormat.HeaderBytes, FileOptions.SequentialScan);
+            return TryOpen(stream, limits, expectedContent, out pack, out error);
+        }
+        catch (IOException)
+        {
+            error = WorldPackOpenError.IoFailure;
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            error = WorldPackOpenError.IoFailure;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Opens the exact unread contents of a stream with one World-owned pack allocation. The
+    /// header is admitted before proportional allocation, and trailing bytes fail closed.
+    /// </summary>
+    public static bool TryOpen(
+        Stream source,
+        WorldPackLimits limits,
+        WorldContentFingerprint expectedContent,
+        out WorldPack? pack,
+        out WorldPackOpenError error)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        pack = null;
+        if (!source.CanRead)
+        {
+            error = WorldPackOpenError.IoFailure;
+            return false;
+        }
+        try
+        {
             Span<byte> header = stackalloc byte[WorldPackFormat.HeaderBytes];
-            if (!ReadExactly(stream, header))
+            if (!ReadExactly(source, header))
             {
                 error = WorldPackOpenError.Truncated;
                 return false;
             }
-            if (!WorldPackCodec.TryReadBoundedLength(header, limits, out int length, out error)) return false;
-            if (stream.Length != length)
-            {
-                error = WorldPackOpenError.LengthMismatch;
+            if (!WorldPackCodec.TryReadBoundedLength(header, limits, out int length, out error))
                 return false;
-            }
             var owned = new byte[length];
             header.CopyTo(owned);
-            if (!ReadExactly(stream, owned.AsSpan(WorldPackFormat.HeaderBytes)))
+            if (!ReadExactly(source, owned.AsSpan(WorldPackFormat.HeaderBytes)))
             {
                 error = WorldPackOpenError.Truncated;
+                return false;
+            }
+            if (source.ReadByte() != -1)
+            {
+                error = WorldPackOpenError.LengthMismatch;
                 return false;
             }
             if (!WorldPackCodec.TryValidate(owned, limits, expectedContent,
@@ -825,12 +868,8 @@ public sealed class WorldPack
             pack = new WorldPack(owned, metadata);
             return true;
         }
-        catch (IOException)
-        {
-            error = WorldPackOpenError.IoFailure;
-            return false;
-        }
-        catch (UnauthorizedAccessException)
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             error = WorldPackOpenError.IoFailure;
             return false;

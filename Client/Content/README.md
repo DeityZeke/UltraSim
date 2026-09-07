@@ -157,8 +157,8 @@ entire resolution containing loopback/private/link-local targets unless explicit
 connects to one of those exact admitted addresses. Redirects remain disabled, so a textual public
 hostname cannot bypass policy through DNS rebinding or a redirect. Source URLs still do not enter
 package, plan, or catalog identity. The activation transaction remains synchronous; its
-concurrency is bounded file acquisition, not a background content framework. WorldPack streaming
-and native resource realization remain later work.
+concurrency is bounded file acquisition, not a background content framework. Native resource
+realization remains later work.
 
 ## A0.6 typed UI-definition convergence
 
@@ -181,5 +181,18 @@ semantic application and desynchronizes the view rather than falling back to inv
 Rooted local archives, process-reopened warm cache, server-hosted HTTP, and external HTTPS all
 produce the same canonical Inventory definition and resolved catalog fingerprint.
 
-See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan. Complete
-WorldPack streaming remains A0.7.
+## A0.7 typed WorldPack resolution
+
+`ContentWorldPackResolver` resolves one `ContentDefinitionKind.WorldPack` only through a live
+applied realm catalog lease and the exact selected owner package. It opens the selected CAS blob as
+a stream, then hands ownership back to World for canonical validation, exact pack/content identity,
+and `WorldContentBinding`. A global cache hit or a base-catalog definition not selected by the
+authenticated activation grants no structural authority.
+
+Content blob SHA-256, `WorldPackFingerprint`, and `WorldContentFingerprint` remain distinct. The
+resolver does not publish semantic chunks, create renderer resources, interpret World sections, or
+define downloadable overlays/chunks. Those remain World, Client Core, and later World-artifact
+contracts respectively.
+
+See [`ASSET_STREAMING.md`](../../Docs/Plans/ASSET_STREAMING.md) for the owning plan. Native
+Contentless Online realization remains A0.8.

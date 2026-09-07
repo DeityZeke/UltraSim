@@ -56,6 +56,7 @@ var tests = new (string Name, Action Body)[]
     ("WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams", WorldPackCompilerRejectsInvalidPlanesAndBrokenSeams),
     ("WorldPackOpenRejectsCorruptionAndMalformedStructure", WorldPackOpenRejectsCorruptionAndMalformedStructure),
     ("WorldPackFileReopensWithStableFingerprint", WorldPackFileReopensWithStableFingerprint),
+    ("WorldPackStreamOpenIsExactBoundedAndSingleCopy", WorldPackStreamOpenIsExactBoundedAndSingleCopy),
     ("WorldPackBoundsRejectBeforeProportionalAllocation", WorldPackBoundsRejectBeforeProportionalAllocation),
     ("WorldPackContentBindingPublishesWithGameGeneration", WorldPackContentBindingPublishesWithGameGeneration),
     ("FrozenStaticsAndStaticMultisCompileCanonically", FrozenStaticsAndStaticMultisCompileCanonically),
@@ -1026,6 +1027,62 @@ static void WorldPackFileReopensWithStableFingerprint()
     {
         if (File.Exists(path)) File.Delete(path);
     }
+}
+
+static void WorldPackStreamOpenIsExactBoundedAndSingleCopy()
+{
+    WorldPackArtifact artifact = CreateWorldPackArtifact(reverse: true);
+    var bytes = new byte[artifact.Length];
+    artifact.CopyTo(bytes);
+    var limits = new WorldPackLimits(2 * 1024 * 1024, 64, 8);
+    using (var source = new ChunkedReadStream(bytes, maximumRead: 37))
+    {
+        True(WorldPack.TryOpen(source, limits, WorldPackTestProfile.Content,
+            out WorldPack? streamed, out WorldPackOpenError error));
+        Equal(WorldPackOpenError.None, error);
+        Equal(artifact.Length, streamed!.Length);
+        Equal(artifact.Fingerprint, streamed.Fingerprint);
+        var copied = new byte[streamed.Length];
+        streamed.CopyTo(copied);
+        True(bytes.AsSpan().SequenceEqual(copied));
+    }
+
+    using (var truncated = new ChunkedReadStream(bytes[..^1], maximumRead: 13))
+    {
+        False(WorldPack.TryOpen(truncated, limits, WorldPackTestProfile.Content,
+            out WorldPack? pack, out WorldPackOpenError error));
+        Equal(null, pack);
+        Equal(WorldPackOpenError.Truncated, error);
+    }
+
+    var trailingBytes = new byte[bytes.Length + 1];
+    bytes.CopyTo(trailingBytes, 0);
+    using (var trailing = new ChunkedReadStream(trailingBytes, maximumRead: 19))
+    {
+        False(WorldPack.TryOpen(trailing, limits, WorldPackTestProfile.Content,
+            out WorldPack? pack, out WorldPackOpenError error));
+        Equal(null, pack);
+        Equal(WorldPackOpenError.LengthMismatch, error);
+    }
+
+    var oversizedHeader = new byte[WorldPackFormat.HeaderBytes];
+    BinaryPrimitives.WriteUInt64LittleEndian(oversizedHeader, WorldPackFormat.Magic);
+    BinaryPrimitives.WriteUInt32LittleEndian(
+        oversizedHeader.AsSpan(8), WorldPackFormat.ContainerVersion);
+    BinaryPrimitives.WriteUInt64LittleEndian(oversizedHeader.AsSpan(16), 16 * 1024 * 1024);
+    using var oversized = new ChunkedReadStream(oversizedHeader, maximumRead: 23);
+    False(WorldPack.TryOpen(oversized, limits, WorldPackTestProfile.Content,
+        out _, out WorldPackOpenError warmError));
+    Equal(WorldPackOpenError.CapacityExceeded, warmError);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 10_000; index++)
+    {
+        oversized.Reset();
+        False(WorldPack.TryOpen(oversized, limits, WorldPackTestProfile.Content,
+            out _, out WorldPackOpenError error));
+        Equal(WorldPackOpenError.CapacityExceeded, error);
+    }
+    Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
 }
 
 static void WorldPackBoundsRejectBeforeProportionalAllocation()
@@ -4834,6 +4891,46 @@ sealed class EmptyPersistentResolver : IExternalPersistentEntityResolver
         value = null;
         return false;
     }
+}
+
+sealed class ChunkedReadStream : Stream
+{
+    private readonly byte[] _bytes;
+    private readonly int _maximumRead;
+    private int _position;
+
+    internal ChunkedReadStream(byte[] bytes, int maximumRead)
+    {
+        _bytes = bytes;
+        _maximumRead = maximumRead;
+    }
+
+    internal void Reset() => _position = 0;
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+    public override int Read(byte[] buffer, int offset, int count) =>
+        Read(buffer.AsSpan(offset, count));
+    public override int Read(Span<byte> buffer)
+    {
+        int count = Math.Min(Math.Min(buffer.Length, _maximumRead), _bytes.Length - _position);
+        if (count == 0) return 0;
+        _bytes.AsSpan(_position, count).CopyTo(buffer);
+        _position += count;
+        return count;
+    }
+    public override int ReadByte() =>
+        _position == _bytes.Length ? -1 : _bytes[_position++];
+    public override void Flush() { }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 }
 
 readonly record struct PublicationConsumerFloor(
