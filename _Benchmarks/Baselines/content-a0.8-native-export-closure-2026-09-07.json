@@ -1,0 +1,72 @@
+{
+  "Checkpoint": "A0.8 export closure follow-up",
+  "Workload": "actual-linux-mono-online-export-cold-warm-product-canary",
+  "CaptureDate": "2026-09-07",
+  "BaseCommit": "a55efea3f6d800d5ccca7bf5c58884305330d3e7",
+  "Godot": {
+    "Version": "4.7.1.stable.mono.official.a13da4feb",
+    "Template": "linux_release.x86_64",
+    "TemplateBytes": 73627864,
+    "ExportSolutionRequired": "Client/Godot/UltraSim.Client.Application.Godot.sln"
+  },
+  "ActualOnlineExport": {
+    "Executable": "UltraSimOnline.x86_64",
+    "ExecutableBytes": 73630168,
+    "EmbeddedPackBytesOverTemplate": 2304,
+    "Files": 210,
+    "TotalFileBytes": 156165850,
+    "UltraSimManagedAssemblies": 12,
+    "UltraSimManagedBytes": 2331648,
+    "Assemblies": [
+      "UltraSim.Client.Application.Godot",
+      "UltraSim.Client.Content",
+      "UltraSim.Client.Core",
+      "UltraSim.Client.Network",
+      "UltraSim.ECS",
+      "UltraSim.Game.Accounting",
+      "UltraSim.Game.Contracts",
+      "UltraSim.Game.Protocol",
+      "UltraSim.Game.World",
+      "UltraSim.Network",
+      "UltraSim.Spatial",
+      "UltraSim.UI"
+    ],
+    "BundledWorldPacks": 0,
+    "BundledPackageEnvelopes": 0,
+    "ClientLocalAbsent": true,
+    "BuiltInTestWorldsAbsent": true,
+    "GameCompositionAbsent": true,
+    "GameReplicationImplementationAbsent": true,
+    "ServerRuntimeHostingPersistenceAbsent": true,
+    "OnlinePresetExcludesPresentationAssets": true
+  },
+  "ExportedExecutableColdRun": {
+    "FilesFetched": 2,
+    "PayloadBytesFetched": 732053,
+    "FreshContentSetAppliedProofs": 1,
+    "WorldPackFingerprint": "DD5DC0F6710BBD9C2D0DC90271E3B18BEAA5325AFDE80D902328AABB086EA228",
+    "RenderedChunks": 9,
+    "TerrainTriangles": 20120,
+    "InventoryUiOpened": 1,
+    "ChatOccurrencesApplied": 1,
+    "AuthoritativeMovementObserved": true
+  },
+  "ExportedExecutableWarmRunAfterDeploymentRestart": {
+    "DeploymentKeyStable": true,
+    "ApplicationRealmIdStable": true,
+    "FilesFetched": 0,
+    "PayloadBytesFetched": 0,
+    "FreshContentSetAppliedProofs": 1,
+    "SameWorldPack": true,
+    "RenderedChunks": 9,
+    "InventoryUiOpened": 1,
+    "ChatOccurrencesApplied": 1
+  },
+  "PermanentGate": {
+    "ProducesActualOnlineExport": true,
+    "InspectsExportedDepsAndFiles": true,
+    "RejectsForbiddenAuthorityAssemblies": true,
+    "RejectsBundledWorldPackAndPackageFiles": true,
+    "RunsColdAndWarmAgainstExportedExecutable": true
+  }
+}

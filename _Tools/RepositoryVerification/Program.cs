@@ -182,8 +182,19 @@ foreach (string configuration in configurations)
         ]);
         if (!contentlessOnlineVerified)
         {
-            VerifyContentlessOnlineNative(root, configuration, godot);
-            contentlessOnlineVerified = true;
+            ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+            try
+            {
+                VerifyContentlessOnlineNative(
+                    root, configuration, product.Executable,
+                    ["--headless", "--"]);
+                contentlessOnlineVerified = true;
+            }
+            finally
+            {
+                if (Directory.Exists(product.Scope))
+                    Directory.Delete(product.Scope, recursive: true);
+            }
         }
         RunExpectFailure(root, godot,
         [
@@ -377,7 +388,101 @@ static void BuildClientApplication(string root, string configuration, string edi
             $"the sole script assembly; found: {string.Join(", ", liveScriptAssemblies)}");
 }
 
-static void VerifyContentlessOnlineNative(string root, string configuration, string godot)
+static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string godot)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "a0.8-export");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string executable = Path.Combine(scope, "UltraSimOnline.x86_64");
+    Run(
+        root,
+        Path.Combine(root, "Client", "Godot", "export-client.sh"),
+        ["Online", executable],
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ULTRASIM_GODOT"] = godot,
+        });
+
+    string data = Path.Combine(
+        scope, "data_UltraSim.Client.Application.Godot_linuxbsd_x86_64");
+    string dependenciesPath = Path.Combine(
+        data, "UltraSim.Client.Application.Godot.deps.json");
+    if (!File.Exists(executable) || !File.Exists(dependenciesPath))
+        throw new InvalidOperationException(
+            "The Online Godot export omitted its executable or managed dependency manifest.");
+
+    string[] expectedAssemblies =
+    [
+        "UltraSim.Client.Application.Godot",
+        "UltraSim.Client.Content",
+        "UltraSim.Client.Core",
+        "UltraSim.Client.Network",
+        "UltraSim.ECS",
+        "UltraSim.Game.Accounting",
+        "UltraSim.Game.Contracts",
+        "UltraSim.Game.Protocol",
+        "UltraSim.Game.World",
+        "UltraSim.Network",
+        "UltraSim.Spatial",
+        "UltraSim.UI",
+    ];
+    string[] actualAssemblies = Directory.EnumerateFiles(
+            data, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
+        .Select(static path => Path.GetFileNameWithoutExtension(path))
+        .OrderBy(static value => value, StringComparer.Ordinal)
+        .ToArray();
+    if (!actualAssemblies.SequenceEqual(expectedAssemblies, StringComparer.Ordinal))
+        throw new InvalidOperationException(
+            "The actual Online Godot export has an unexpected UltraSim assembly closure.\n" +
+            $"Expected: {string.Join(", ", expectedAssemblies)}\n" +
+            $"Actual: {string.Join(", ", actualAssemblies)}");
+
+    using JsonDocument document = JsonDocument.Parse(File.ReadAllText(dependenciesPath));
+    var dependencies = document.RootElement.GetProperty("libraries").EnumerateObject()
+        .Select(static property => property.Name.Split('/')[0])
+        .ToHashSet(StringComparer.Ordinal);
+    string[] forbidden =
+    [
+        "UltraSim.Client.BuiltInTestWorlds",
+        "UltraSim.Client.Local",
+        "UltraSim.Game.Composition",
+        "UltraSim.Game.Persistence",
+        "UltraSim.Game.Replication",
+        "UltraSim.Game.Replication.Remote",
+        "UltraSim.Server.Hosting",
+        "UltraSim.Server.Persistence",
+        "UltraSim.Server.Runtime",
+    ];
+    string[] leakedDependencies = forbidden.Where(dependencies.Contains).ToArray();
+    string[] forbiddenPayloads = Directory.EnumerateFiles(scope, "*", SearchOption.AllDirectories)
+        .Where(static path => Path.GetExtension(path) is ".usworldpack" or ".uspkg")
+        .Select(path => Relative(scope, path))
+        .ToArray();
+    if (leakedDependencies.Length != 0 || forbiddenPayloads.Length != 0)
+        throw new InvalidOperationException(
+            "The actual Online Godot export contains forbidden local authority/content: " +
+            string.Join(", ", leakedDependencies.Concat(forbiddenPayloads)));
+
+    long managedBytes = Directory.EnumerateFiles(
+            data, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
+        .Sum(static path => new FileInfo(path).Length);
+    long exportedBytes = Directory.EnumerateFiles(scope, "*", SearchOption.AllDirectories)
+        .Sum(static path => new FileInfo(path).Length);
+    Console.WriteLine(
+        $"PASS A0.8_ContentlessOnlineExport ultrasimAssemblies={actualAssemblies.Length} " +
+        $"managedBytes={managedBytes} executableBytes={new FileInfo(executable).Length} " +
+        $"files={Directory.EnumerateFiles(scope, "*", SearchOption.AllDirectories).Count()} " +
+        $"totalBytes={exportedBytes} bundledWorldPacks=0 bundledPackages=0");
+    return new ContentlessOnlineExport(scope, executable);
+}
+
+static void VerifyContentlessOnlineNative(
+    string root,
+    string configuration,
+    string clientExecutable,
+    IReadOnlyList<string> clientArgumentPrefix)
 {
     string scope = Path.Combine(
         Path.GetTempPath(), "ultrasim-repository-verification",
@@ -396,9 +501,9 @@ static void VerifyContentlessOnlineNative(string root, string configuration, str
     {
         try
         {
-            string cold = RunCaptured(root, godot,
+            string cold = RunCaptured(root, clientExecutable,
+            clientArgumentPrefix.Concat(
             [
-                "--headless", "--path", "Client/Godot", "--",
                 "--a0-8-smoke",
                 $"--a0-8-endpoint={coldReady.Endpoint}",
                 $"--a0-8-fingerprint={coldReady.Fingerprint}",
@@ -407,7 +512,7 @@ static void VerifyContentlessOnlineNative(string root, string configuration, str
                 "--a0-8-allow-private-content",
                 "--a0-8-expect=cold",
                 "--expect-edition=Online",
-            ], 45_000);
+            ]), 45_000);
             RequireNativeA08Result(cold, "cold", coldReady.WorldPackFingerprint,
                 expectedWarm: false);
         }
@@ -428,9 +533,9 @@ static void VerifyContentlessOnlineNative(string root, string configuration, str
                 warmReady.WorldPackFingerprint != coldReady.WorldPackFingerprint)
                 throw new InvalidOperationException(
                     "The restarted Direct Connect deployment did not retain its realm/key/content identity.");
-            string warm = RunCaptured(root, godot,
+            string warm = RunCaptured(root, clientExecutable,
+            clientArgumentPrefix.Concat(
             [
-                "--headless", "--path", "Client/Godot", "--",
                 "--a0-8-smoke",
                 $"--a0-8-endpoint={warmReady.Endpoint}",
                 $"--a0-8-fingerprint={warmReady.Fingerprint}",
@@ -439,7 +544,7 @@ static void VerifyContentlessOnlineNative(string root, string configuration, str
                 "--a0-8-allow-private-content",
                 "--a0-8-expect=warm",
                 "--expect-edition=Online",
-            ], 45_000);
+            ]), 45_000);
             RequireNativeA08Result(warm, "warm", warmReady.WorldPackFingerprint,
                 expectedWarm: true);
         }
@@ -643,6 +748,18 @@ static void VerifyClientExportComposition(string root)
     if (!godotProject.Contains(
             "project/assembly_name=\"UltraSim.Client.Application.Godot\"", StringComparison.Ordinal))
         throw new InvalidOperationException("The shared Godot project does not name the fixed host assembly.");
+
+    string solutionPath = Path.Combine(
+        root, "Client", "Godot", "UltraSim.Client.Application.Godot.sln");
+    if (!File.Exists(solutionPath))
+        throw new InvalidOperationException(
+            "The shared .NET Godot project is missing its adjacent export solution.");
+    string solution = File.ReadAllText(solutionPath);
+    if (!solution.Contains(
+            "\"UltraSim.Client.Application.Godot.csproj\"", StringComparison.Ordinal) ||
+        Regex.Matches(solution, "^Project\\(", RegexOptions.Multiline | RegexOptions.CultureInvariant).Count != 1)
+        throw new InvalidOperationException(
+            "The shared Godot export solution must contain exactly the one application project.");
 
     foreach (string internalSource in new[] { "Adapter", "Local", "Remote", "Shell" })
     {
@@ -1133,13 +1250,20 @@ static string ResolveGodot(string? configured)
         "Godot was not found. Set ULTRASIM_GODOT, pass --godot=<path>, or explicitly use --skip-godot.");
 }
 
-static void Run(string root, string executable, IEnumerable<string> arguments)
+static void Run(
+    string root,
+    string executable,
+    IEnumerable<string> arguments,
+    IReadOnlyDictionary<string, string>? environment = null)
 {
     var start = new ProcessStartInfo(executable)
     {
         WorkingDirectory = root,
         UseShellExecute = false,
     };
+    if (environment is not null)
+        foreach ((string key, string value) in environment)
+            start.Environment[key] = value;
     foreach (string argument in arguments) start.ArgumentList.Add(argument);
     Console.WriteLine($"> {executable} {string.Join(' ', start.ArgumentList.Select(Quote))}");
     using Process process = Process.Start(start) ?? throw new InvalidOperationException($"Unable to start '{executable}'.");
@@ -1214,3 +1338,7 @@ internal sealed record NativeDeploymentReady(
     string WorldPackFingerprint,
     long ArchiveBytes,
     int WorldChunks);
+
+internal sealed record ContentlessOnlineExport(
+    string Scope,
+    string Executable);

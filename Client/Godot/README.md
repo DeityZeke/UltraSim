@@ -38,6 +38,11 @@ edition into an isolated directory and inspects its `.deps.json` and copied asse
 composition is the security/capability boundary. The matching export-preset feature is only a
 startup consistency check.
 
+Godot 4.7's .NET exporter also requires the adjacent
+`UltraSim.Client.Application.Godot.sln`. It contains only this application project; the permanent
+export gate rejects its absence or any extra solution project before producing the actual Online
+Linux product.
+
 Linux exports use:
 
 ```bash
@@ -49,7 +54,9 @@ Client/Godot/export-client.sh Complete
 The Online preset excludes bundled `Assets/**`. A0.8 launches that product from the primitive
 bootstrap substrate and an empty local/default catalog; its playable WorldPack and typed Inventory
 UI definition arrive only through the authenticated content requirement, persistent CAS, and
-World/UI-owned validation paths.
+World/UI-owned validation paths. The actual exported executable passes the same external cold/warm
+journey, and its exported managed closure is inspected for forbidden local authority and bundled
+World/package artifacts.
 
 For normal development, open this directory in Godot and run the Complete build. Choose **Single
 Player**, enter a temporary guest display name, choose the X/Human Female or Y/Human Male body, and

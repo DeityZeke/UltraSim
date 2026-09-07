@@ -1850,11 +1850,15 @@ Composition/authority, Game Replication implementation, Server Runtime/Hosting/P
 `.usworldpack`, or `.uspkg`. Its compatible Concept Demo profile contains stable binding vocabulary
 and the expected WorldPack fingerprint, never the WorldPack bytes.
 
-The permanent verifier runs the external cold/warm native journey and inspects the isolated
-published `.deps.json` plus copied payload. A Linux Godot export was attempted at closure, but this
-machine has no 4.7.1 Mono export templates installed; therefore no export-content claim is made
-beyond the preset exclusion gate and the independently inspected published managed closure. See
-[`content-a0.8-contentless-online-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.8-contentless-online-2026-09-06.json).
+The permanent verifier now produces the actual Linux Mono Online export, inspects its exported
+`.deps.json`, exact UltraSim assembly set, and copied payload, and runs the external cold/warm
+journey against that exported executable. Godot 4.7 requires the one-project
+`UltraSim.Client.Application.Godot.sln` beside the C# project; the verifier permanently guards that
+export prerequisite. The accepted export contains 12 UltraSim assemblies / 2,331,648 managed
+bytes, zero `.usworldpack`/`.uspkg` files, and none of the local-authority closure. See the original
+native closure and its actual-export follow-up:
+[`content-a0.8-contentless-online-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.8-contentless-online-2026-09-06.json) and
+[`content-a0.8-native-export-closure-2026-09-07.json`](../../_Benchmarks/Baselines/content-a0.8-native-export-closure-2026-09-07.json).
 
 Use the Contentless Online composition:
 

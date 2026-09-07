@@ -32,11 +32,18 @@ fi
 output="${2:-$default_output}"
 mkdir -p -- "$(dirname -- "$output")"
 
+export_release_bin="$script_dir/.godot/mono/temp/bin/ExportRelease"
+export_release_obj="$script_dir/.godot/mono/temp/obj/ExportRelease"
+
 # Edition changes alter the root project graph. Remove only its generated ExportRelease state so a
-# previous wider product cannot leave stale managed files for the next export.
-rm -rf -- \
-  "$script_dir/.godot/mono/temp/bin/ExportRelease" \
-  "$script_dir/.godot/mono/temp/obj/ExportRelease"
+# previous wider product cannot leave stale managed files for the next export. The exported product
+# owns copied outputs, so clear the transient RID-specific script assembly afterward as well; Godot's
+# editor scanner must never discover it beside the normal development assembly.
+cleanup_export_state() {
+  rm -rf -- "$export_release_bin" "$export_release_obj"
+}
+cleanup_export_state
+trap cleanup_export_state EXIT
 
 export UltraSimEdition="$edition"
-exec "$godot" --headless --path "$script_dir" --export-release "$preset" "$output"
+"$godot" --headless --path "$script_dir" --export-release "$preset" "$output"

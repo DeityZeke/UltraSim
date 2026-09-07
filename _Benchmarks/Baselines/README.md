@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `content-a0.8-native-export-closure-2026-09-07.json` — follow-up after the matching Godot Mono
+  export templates became available: the actual Online Linux export, exact exported managed and
+  content closure, and the full cold/warm external-deployment journey executed by that exported
+  binary. It also freezes the adjacent one-project solution as a required Godot 4.7 .NET export
+  input and promotes export inspection/execution into the permanent verifier;
 - `content-a0.8-contentless-online-2026-09-06.json` — the physically Online-only native Godot
   product's external cold/warm journey against a separately restarted Direct Connect deployment:
   empty local catalog, authenticated World/UI acquisition, fresh application proof, World-owned
