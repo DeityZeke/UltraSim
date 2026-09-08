@@ -15,6 +15,7 @@ public static class GamePrefabKeys
     public static readonly PrefabKey WorldChest = new("game.container.world-chest");
     public static readonly PrefabKey Bread = new("game.item.bread");
     public static readonly PrefabKey IronSword = new("game.item.iron-sword");
+    public static readonly PrefabKey IronSwordSpawner = new("game.spawner.iron-sword");
     public static readonly PrefabKey Apple = new("game.item.apple");
     public static readonly PrefabKey CabinDoor = new("game.world.cabin-door");
     public static readonly PrefabKey SkyTelepad = new("game.world.sky-telepad");
@@ -50,6 +51,7 @@ public sealed class GameContent : IInventoryContentCatalog
         InventoryContainerDefinition worldChest,
         InventoryItemDefinition bread,
         InventoryItemDefinition ironSword,
+        PrefabHandle ironSwordSpawner,
         InventoryItemDefinition apple,
         PrefabHandle cabinDoor,
         PrefabHandle skyTelepad,
@@ -71,6 +73,7 @@ public sealed class GameContent : IInventoryContentCatalog
         WorldChest = worldChest.Handle;
         Bread = bread;
         IronSword = ironSword;
+        IronSwordSpawner = ironSwordSpawner;
         Apple = apple;
         CabinDoor = cabinDoor;
         SkyTelepad = skyTelepad;
@@ -114,6 +117,7 @@ public sealed class GameContent : IInventoryContentCatalog
     public PrefabHandle WorldChest { get; }
     public InventoryItemDefinition Bread { get; }
     public InventoryItemDefinition IronSword { get; }
+    public PrefabHandle IronSwordSpawner { get; }
     public InventoryItemDefinition Apple { get; }
     public PrefabHandle CabinDoor { get; }
     public PrefabHandle SkyTelepad { get; }
@@ -249,13 +253,50 @@ public sealed class GameContent : IInventoryContentCatalog
             HasOwner: false);
         InventoryItemAuthoring breadSource = InventoryContent.DefineItem(
             content, GamePrefabKeys.Bread, "Bread", maximumQuantity: 20);
-        InventoryItemAuthoring swordSource = InventoryContent.DefineItem(
-            content,
+        // This prefab contains constant structural defaults only. GameItemGenerationState applies
+        // the one-time spawn recipe after ordinary ECS instantiation and persists the result.
+        PrefabBuilder swordPrefab = content.Define(GamePrefabKeys.IronSword);
+        swordPrefab.With(new InventoryItem
+        {
+            Parent = Entity.Null,
+            EquipSlot = InventoryEquipSlot.None,
+            Quantity = 1,
+        });
+        swordPrefab.With(new InventoryEquipCapability { AllowedSlots = InventoryEquipSlots.MainHand });
+        swordPrefab.With(new InventoryGridFootprint { Width = 1, Height = 3 });
+        swordPrefab.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        swordPrefab.With(new WorldPublicComponent(new WorldPublicDescriptor(
+            GameWorldPublicPrefabIds.IronSword, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+        // A valid non-random baseline preserves generic Inventory fixtures. Production Concept
+        // Demo spawning overwrites it once with the deterministic rolled instance result.
+        swordPrefab.With(new GameWeaponInstance
+        {
+            DamageMinimum = 2,
+            DamageMaximum = 6,
+            MaximumDurability = 35,
+            CurrentDurability = 35,
+            Quality = 1,
+            Element = GameWeaponElement.None,
+            SpawnOrdinal = 0,
+        });
+        swordPrefab.With(new GameSpawnedItem { Spawner = Entity.Null });
+        swordPrefab.DisplayName("Iron Sword");
+        var swordSource = new InventoryItemAuthoring(
             GamePrefabKeys.IronSword,
             "Iron Sword",
-            maximumQuantity: 1,
+            1,
             InventoryEquipSlots.MainHand,
             new InventoryItemFootprint(1, 3));
+
+        PrefabBuilder swordSpawner = content.Define(GamePrefabKeys.IronSwordSpawner);
+        swordSpawner.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
+        swordSpawner.With(new GameItemSpawnerState
+        {
+            ActiveItem = Entity.Null,
+            NextSpawnOrdinal = 0,
+            RemainingRespawnTicks = 0,
+        });
+        swordSpawner.DisplayName("Iron Sword Rack");
         // Third item deliberately proves content expansion without changing
         // InventoryGenerationState or InventoryIndex.
         InventoryItemAuthoring appleSource = InventoryContent.DefineItem(
@@ -319,6 +360,7 @@ public sealed class GameContent : IInventoryContentCatalog
             BindContainer(compiled, chestSource),
             bread,
             sword,
+            compiled.GetHandle(GamePrefabKeys.IronSwordSpawner),
             apple,
             compiled.GetHandle(GamePrefabKeys.CabinDoor),
             compiled.GetHandle(GamePrefabKeys.SkyTelepad),

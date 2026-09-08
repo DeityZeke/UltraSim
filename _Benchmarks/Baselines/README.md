@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `inventory-i0.12-persistent-world-item-2026-09-08.json` — deterministic one-time
+  rolled Iron Sword instances, persistent spawner continuation, same-entity world/Inventory/
+  Main-Hand/drop/second-owner transfer, owner-private v7 details/Drop, public lifetime retirement,
+  protocol-v21 Primary result, and bounded native accepted-action feedback. It explicitly defers
+  Combat, ObjectScript authoring syntax, generalized public item-property caching, and full
+  content-backed animation;
 - `client-human-play-ui-picking-hardening-2026-09-07.json` — full-height bounded
   door/sign nomination before terrain fallback, centered/surfaced compiled views, authoritative
   Inventory close with `I` toggle behavior, and a 2.5-second controlled-nameplate grace period;

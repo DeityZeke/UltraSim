@@ -14,11 +14,13 @@ public static class InventoryUi
     public static UiSlotId Title => _contract.Title;
     public static UiSlotId Items => _contract.Items;
     public static UiSlotId Status => _contract.Status;
+    public static UiSlotId Details => _contract.Details;
     public static UiSlotId TransferLabel => _contract.TransferLabel;
     public static UiSlotId TransferDestinations => _contract.TransferDestinations;
     public static UiSlotId SplitLabel => _contract.SplitLabel;
     public static UiSlotId EquipLabel => _contract.EquipLabel;
     public static UiSlotId UnequipLabel => _contract.UnequipLabel;
+    public static UiSlotId DropLabel => _contract.DropLabel;
     public static UiSlotId CloseLabel => _contract.CloseLabel;
     public static UiSlotId GridLabel => _contract.GridLabel;
     public static UiSlotId GridCells => _contract.GridCells;
@@ -27,20 +29,23 @@ public static class InventoryUi
     public static UiActionId Split => _contract.Split;
     public static UiActionId Equip => _contract.Equip;
     public static UiActionId Unequip => _contract.Unequip;
+    public static UiActionId Drop => _contract.Drop;
     public static UiActionId PlaceAt => _contract.PlaceAt;
     public static UiActionId Close => _contract.Close;
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.inventory.gump", version: 6);
+        var source = new UiDefinitionBuilder("game.inventory.gump", version: 7);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference items = source.DeclareSlot("items", UiSlotValueKind.List);
         UiSlotReference status = source.DeclareSlot("status", UiSlotValueKind.Text);
+        UiSlotReference details = source.DeclareSlot("details", UiSlotValueKind.Text);
         UiSlotReference transferLabel = source.DeclareSlot("transfer-label", UiSlotValueKind.Text);
         UiSlotReference transferDestinations = source.DeclareSlot("transfer-destinations", UiSlotValueKind.List);
         UiSlotReference splitLabel = source.DeclareSlot("split-label", UiSlotValueKind.Text);
         UiSlotReference equipLabel = source.DeclareSlot("equip-label", UiSlotValueKind.Text);
         UiSlotReference unequipLabel = source.DeclareSlot("unequip-label", UiSlotValueKind.Text);
+        UiSlotReference dropLabel = source.DeclareSlot("drop-label", UiSlotValueKind.Text);
         UiSlotReference closeLabel = source.DeclareSlot("close-label", UiSlotValueKind.Text);
         UiSlotReference gridLabel = source.DeclareSlot("grid-label", UiSlotValueKind.Text);
         UiSlotReference gridCells = source.DeclareSlot("grid-cells", UiSlotValueKind.List);
@@ -49,6 +54,7 @@ public static class InventoryUi
         UiActionReference split = source.DeclareAction("split");
         UiActionReference equip = source.DeclareAction("equip");
         UiActionReference unequip = source.DeclareAction("unequip");
+        UiActionReference drop = source.DeclareAction("drop");
         UiActionReference placeAt = source.DeclareAction("place-at", acceptsRowContext: true);
         UiActionReference close = source.DeclareAction("close");
         source.AddCanvas(new UiCanvasOptions(800, 600), canvas =>
@@ -64,6 +70,7 @@ public static class InventoryUi
                 {
                     content.AddText("title", title);
                     content.AddList("items", items, select);
+                    content.AddText("details", details);
                     content.AddText("transfer-label", transferLabel);
                     content.AddList("transfer-destinations", transferDestinations, moveTo);
                     content.AddText("grid-label", gridLabel);
@@ -73,6 +80,7 @@ public static class InventoryUi
                         actions.AddButton("split", split, splitLabel);
                         actions.AddButton("equip", equip, equipLabel);
                         actions.AddButton("unequip", unequip, unequipLabel);
+                        actions.AddButton("drop", drop, dropLabel);
                         actions.AddButton("close", close, closeLabel);
                     });
                     content.AddText("status", status);
@@ -89,11 +97,13 @@ public static class InventoryUi
             definition.Prepare(title),
             definition.Prepare(items),
             definition.Prepare(status),
+            definition.Prepare(details),
             definition.Prepare(transferLabel),
             definition.Prepare(transferDestinations),
             definition.Prepare(splitLabel),
             definition.Prepare(equipLabel),
             definition.Prepare(unequipLabel),
+            definition.Prepare(dropLabel),
             definition.Prepare(closeLabel),
             definition.Prepare(gridLabel),
             definition.Prepare(gridCells),
@@ -102,6 +112,7 @@ public static class InventoryUi
             definition.Prepare(split),
             definition.Prepare(equip),
             definition.Prepare(unequip),
+            definition.Prepare(drop),
             definition.Prepare(placeAt),
             definition.Prepare(close));
     }
@@ -111,11 +122,13 @@ public static class InventoryUi
         UiSlotId Title,
         UiSlotId Items,
         UiSlotId Status,
+        UiSlotId Details,
         UiSlotId TransferLabel,
         UiSlotId TransferDestinations,
         UiSlotId SplitLabel,
         UiSlotId EquipLabel,
         UiSlotId UnequipLabel,
+        UiSlotId DropLabel,
         UiSlotId CloseLabel,
         UiSlotId GridLabel,
         UiSlotId GridCells,
@@ -124,6 +137,7 @@ public static class InventoryUi
         UiActionId Split,
         UiActionId Equip,
         UiActionId Unequip,
+        UiActionId Drop,
         UiActionId PlaceAt,
         UiActionId Close);
 }
@@ -303,6 +317,7 @@ public sealed class InventoryUiController : IDisposable
             projection.Container,
             projection.RequiredOwner,
             projection.Destinations,
+            projection.Items,
             projection.GridWidth,
             projection.GridHeight,
             model,
@@ -509,6 +524,26 @@ public sealed class InventoryUiController : IDisposable
                             [UiListPatch.Update(InventoryUi.Items, ToRow(contained))];
                         }
                     }
+                    else if (request.Action == InventoryUi.Drop)
+                    {
+                        if (!owner.IsValid || provider is not IInventoryWorldItemActions worldItems)
+                        {
+                            result = new InventoryMutationResult(
+                                InventoryMutationStatus.UnauthorizedContainer,
+                                item,
+                                Entity.Null,
+                                "Dropping requires an owner-authorized Game inventory view.");
+                            return true;
+                        }
+                        result = worldItems.DropOwnedItem(world, item, owner);
+                        if (result.Accepted)
+                        {
+                            listPatches =
+                            [UiListPatch.Remove(
+                                InventoryUi.Items,
+                                new UiRowId(session.SelectedItem.Entity.Value))];
+                        }
+                    }
                     else if (request.Action == InventoryUi.PlaceAt)
                     {
                         if (!session.TryGetGridCell(request.Row, out int x, out int y) ||
@@ -612,13 +647,19 @@ public sealed class InventoryUiController : IDisposable
             string.Equals(values[2].Text, "Main Hand", StringComparison.Ordinal);
         bool splittable = session.GridWidth == 0 && !equipped && values.Length >= 2 &&
             values[1].Kind == UiValueKind.Number && values[1].Number > 1;
+        string details = session.TryGetDescription(row, out string description)
+            ? description
+            : values.Length != 0 ? values[0].Text ?? "Item selected." : "Item selected.";
         PublishStatus(session, "Item selected.",
             SelectedActionPatches(
                 splittable,
                 canEquip: !equipped,
                 canUnequip: session.GridWidth == 0 && equipped && session.RequiredOwner.IsValid,
                 canMove: !equipped && session.Destinations.Length != 0,
-                canPlace: session.GridWidth != 0 && session.GridHeight != 0));
+                canPlace: session.GridWidth != 0 && session.GridHeight != 0,
+                canDrop: session.RequiredOwner.IsValid &&
+                    session.TryGetDescription(row, out _)),
+            details);
     }
 
     private InventoryProjection CaptureProjection(
@@ -745,13 +786,21 @@ public sealed class InventoryUiController : IDisposable
     private void PublishStatus(
         Session session,
         string status,
-        UiActionStatePatch[] actions)
+        UiActionStatePatch[] actions,
+        string? details = null)
     {
         ulong sequence = checked(session.Sequence + 1);
+        UiScalarSlotPatch[] scalars = details is null
+            ? [new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status))]
+            :
+            [
+                new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status)),
+                new UiScalarSlotPatch(InventoryUi.Details, UiValue.FromText(details)),
+            ];
         var delta = new UiModelDelta(
             InventoryUi.Definition.Handle,
             sequence,
-            [new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status))],
+            scalars,
             actions: actions);
         try
         {
@@ -764,6 +813,8 @@ public sealed class InventoryUiController : IDisposable
         }
         session.Sequence = sequence;
         session.Model.SetText(InventoryUi.Status, status);
+        if (details is not null)
+            session.Model.SetText(InventoryUi.Details, details);
         ApplyActionPatches(session.Model, actions);
     }
 
@@ -806,6 +857,7 @@ public sealed class InventoryUiController : IDisposable
         model.SetText(InventoryUi.Title, title);
         model.ReplaceRows(InventoryUi.Items, ToRows(items));
         model.SetText(InventoryUi.Status, status);
+        model.SetText(InventoryUi.Details, "Select an item to inspect its authoritative properties.");
         model.SetText(InventoryUi.TransferLabel,
             destinations.Count == 0 ? "No transfer destinations" : "Move selected item to:");
         model.ReplaceRows(InventoryUi.TransferDestinations, ToRows(destinations));
@@ -815,6 +867,7 @@ public sealed class InventoryUiController : IDisposable
         model.SetText(InventoryUi.SplitLabel, "Split");
         model.SetText(InventoryUi.EquipLabel, "Equip");
         model.SetText(InventoryUi.UnequipLabel, "Unequip");
+        model.SetText(InventoryUi.DropLabel, "Drop");
         model.SetText(InventoryUi.CloseLabel, "Close");
         ApplyActionPatches(model, DisabledActionPatches());
         return model;
@@ -881,13 +934,15 @@ public sealed class InventoryUiController : IDisposable
         bool canEquip,
         bool canUnequip,
         bool canMove,
-        bool canPlace) =>
+        bool canPlace,
+        bool canDrop) =>
         [
             ActionPatch(InventoryUi.Split, canSplit, "Select a splittable contained stack."),
             ActionPatch(InventoryUi.Equip, canEquip, "Select a contained equippable item."),
             ActionPatch(InventoryUi.Unequip, canUnequip, "Select an equipped item."),
             ActionPatch(InventoryUi.MoveTo, canMove, "Select a contained item and destination."),
             ActionPatch(InventoryUi.PlaceAt, canPlace, "Open a Grid container and select an item."),
+            ActionPatch(InventoryUi.Drop, canDrop, "Open an owner-authorized inventory."),
         ];
 
     private static UiActionStatePatch[] DisabledActionPatches()
@@ -900,6 +955,7 @@ public sealed class InventoryUiController : IDisposable
             new UiActionStatePatch(InventoryUi.Unequip, disabled),
             new UiActionStatePatch(InventoryUi.MoveTo, disabled),
             new UiActionStatePatch(InventoryUi.PlaceAt, disabled),
+            new UiActionStatePatch(InventoryUi.Drop, disabled),
         ];
     }
 
@@ -955,6 +1011,9 @@ public sealed class InventoryUiController : IDisposable
             [
                 new UiScalarSlotPatch(InventoryUi.Title, UiValue.FromText(projection.Title)),
                 new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status)),
+                new UiScalarSlotPatch(
+                    InventoryUi.Details,
+                    UiValue.FromText("Select an item to inspect its authoritative properties.")),
                 new UiScalarSlotPatch(InventoryUi.TransferLabel, UiValue.FromText(transferLabel)),
                 new UiScalarSlotPatch(InventoryUi.GridLabel, UiValue.FromText(gridLabel)),
             ],
@@ -976,7 +1035,11 @@ public sealed class InventoryUiController : IDisposable
         session.SelectedItem = default;
         session.Model.SetText(InventoryUi.Title, projection.Title);
         session.Model.SetText(InventoryUi.Status, status);
+        session.Model.SetText(
+            InventoryUi.Details,
+            "Select an item to inspect its authoritative properties.");
         session.Model.SetText(InventoryUi.TransferLabel, transferLabel);
+        session.ReplaceDescriptions(projection.Items);
         session.GridWidth = projection.GridWidth;
         session.GridHeight = projection.GridHeight;
         session.Model.SetText(InventoryUi.GridLabel, gridLabel);
@@ -1133,6 +1196,7 @@ public sealed class InventoryUiController : IDisposable
             PersistentEntityKey container,
             PersistentEntityKey requiredOwner,
             InventoryDestination[] destinations,
+            InventoryItemView[] items,
             ushort gridWidth,
             ushort gridHeight,
             UiModel model,
@@ -1142,6 +1206,7 @@ public sealed class InventoryUiController : IDisposable
             Container = container;
             RequiredOwner = requiredOwner;
             Destinations = destinations;
+            ReplaceDescriptions(items);
             GridWidth = gridWidth;
             GridHeight = gridHeight;
             Model = model;
@@ -1157,6 +1222,19 @@ public sealed class InventoryUiController : IDisposable
         internal PersistentEntityKey SelectedItem { get; set; }
         internal UiModel Model { get; }
         internal ulong Sequence { get; set; }
+
+        private readonly Dictionary<ulong, string> _descriptions = [];
+
+        internal void ReplaceDescriptions(ReadOnlySpan<InventoryItemView> items)
+        {
+            _descriptions.Clear();
+            foreach (ref readonly InventoryItemView item in items)
+                if (!string.IsNullOrWhiteSpace(item.InstanceDescription))
+                    _descriptions.Add(item.PersistentId.Value, item.InstanceDescription);
+        }
+
+        internal bool TryGetDescription(UiRowId row, out string description) =>
+            _descriptions.TryGetValue(row.Value, out description!);
 
         internal bool TryGetDestination(UiRowId row, out PersistentEntityKey destination)
         {

@@ -13,6 +13,14 @@ not make the oracle part of client storage. T1.0 adds explicit base-surface
 presence/intentional void; T1.1 adds immutable sparse terrain shells and bounded
 multi-surface column reads without turning terrain into ECS entities or voxels.
 
+An entity is current in dynamic-public projection only while its valid
+`WorldPublicComponent` has `WorldPublicStateFlags.Visible`. Clearing `Visible`
+retires that public lifetime without removing authoritative identity or the
+component; setting it again begins a fresh generational public lifetime. This is
+used by I0.12 for the same persistent item moving between public World placement
+and owner-private Inventory/equipment. Position/component presence alone never
+publishes a hidden contained item.
+
 The frozen first profile is:
 
 ```text

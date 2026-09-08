@@ -33,6 +33,7 @@ public readonly record struct RemotePlayableClientSnapshot(
     RemotePlayableActionStatus Admission,
     RemotePlayableActionStatus Locomotion,
     RemotePlayableActionStatus Jump,
+    RemotePlayableActionStatus Primary,
     RemotePlayableActionStatus Interaction,
     bool CommandRetainedLocally,
     ulong CommandsRetained,
@@ -74,6 +75,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
     private RemotePlayableActionStatus _admission;
     private RemotePlayableActionStatus _locomotion;
     private RemotePlayableActionStatus _jump;
+    private RemotePlayableActionStatus _primary;
     private RemotePlayableActionStatus _interaction;
     private ulong _commandsRetained;
     private ulong _commandsQueued;
@@ -180,7 +182,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
             _state, _applicationSessionEpoch, _admissionAttempt, _participant, _guestIdentity,
             _controlSession, _publicActor, _serverGenerationId, _stateSequence, _simulationTick,
             _lastProcessedCommand, _position, _orientation, _admission, _locomotion, _jump,
-            _interaction, _hasPendingCommand, _commandsRetained, _commandsQueued,
+            _primary, _interaction, _hasPendingCommand, _commandsRetained, _commandsQueued,
             _duplicateOwnerStates, _rejectedMessages, _detail);
     }
 
@@ -250,7 +252,8 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
             state.LastProcessedCommandSequence > _lastSubmittedCommand ||
             state.Body != (byte)_guestIdentity.Body ||
             !IsActionStatus(state.Admission) || !IsActionStatus(state.Locomotion) ||
-            !IsActionStatus(state.Jump) || !IsActionStatus(state.Interaction) ||
+            !IsActionStatus(state.Jump) || !IsActionStatus(state.Primary) ||
+            !IsActionStatus(state.Interaction) ||
             !WorldPosition.TryFromGlobalMillimeters(
                 state.GlobalXMillimeters, state.YMillimeters,
                 state.GlobalZMillimeters, out WorldPosition position))
@@ -274,6 +277,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
         _admission = state.Admission;
         _locomotion = state.Locomotion;
         _jump = state.Jump;
+        _primary = state.Primary;
         _interaction = state.Interaction;
     }
 

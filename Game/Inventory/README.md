@@ -13,6 +13,12 @@ Mutations are transactional Game operations. `Move`, `Split`, `Equip`, and
 publishing ECS plus index state. Accepted mutations are projected as granular UI
 row changes; a client command is intent, never authoritative truth.
 
+I0.12 adds the first Game-owned world-item transition without making Inventory own World semantics.
+`InventoryItem.Parent == Entity.Null` is a valid world-item state outside the derived container/
+equipment index. Game coordinates pickup and Drop with public World state, while Inventory performs
+the same entity's topology mutation. The Iron Sword's persisted rolled weapon component survives
+world → container → Main Hand → world and is projected as bounded owner-private detail text.
+
 ## Owner-private UI
 
 `InventoryUiController.OpenOwned` is the private-container route. Trusted Game

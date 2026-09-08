@@ -408,7 +408,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 20,
+        version: 21,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },

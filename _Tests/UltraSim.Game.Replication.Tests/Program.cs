@@ -147,6 +147,7 @@ var tests = new (string Name, Action Body)[]
     ("N13SnapshotImpairmentAndLostProofConverge", N1OfflineDirectChunkTests.SnapshotImpairmentAndLostProofConverge),
     ("N13BulkSnapshotDoesNotBlockOrdinaryWorldState", N1OfflineDirectChunkTests.BulkSnapshotDoesNotBlockOrdinaryWorldState),
     ("M00OneGenerationOwnsIndependentParticipantsAndSurvivesLeave", M00SharedPlayableAuthorityTests.OneGenerationOwnsIndependentParticipantsAndSurvivesLeave),
+    ("I012SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner", M00SharedPlayableAuthorityTests.SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner),
 };
 
 static void ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth()
@@ -1932,6 +1933,7 @@ static void GenerationReplacementRebindsDurableAdmission()
     var candidate = new GameGenerationState(
         accounting,
         staging.Inventory,
+        staging.Items,
         staging.Content,
         staging.WorldState,
         staging.SimulationLookup,
@@ -1977,6 +1979,7 @@ static void GenerationReplacementRebuildsEpoch()
     var candidate = new GameGenerationState(
         new UltraSim.Game.Accounting.AccountingStore(),
         staging.Inventory,
+        staging.Items,
         staging.Content,
         staging.WorldState,
         staging.SimulationLookup,

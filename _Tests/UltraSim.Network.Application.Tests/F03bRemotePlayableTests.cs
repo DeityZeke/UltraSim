@@ -453,7 +453,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)20, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)21, UltraSimGameProtocol.Manifest.Version);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()

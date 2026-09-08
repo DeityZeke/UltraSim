@@ -409,6 +409,8 @@ public sealed class GameWorldState : IDisposable
                     if (!publicComponent.TryGetValue(out WorldPublicDescriptor descriptor))
                         throw new InvalidOperationException(
                             "Authoritative WorldPublicComponent is not canonical.");
+                    if ((descriptor.Flags & WorldPublicStateFlags.Visible) == 0)
+                        return WorldPublicChange.Absent(entity);
                     return WorldPublicChange.Present(entity, position, descriptor);
                 }
             }

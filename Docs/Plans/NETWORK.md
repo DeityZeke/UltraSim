@@ -551,10 +551,11 @@ fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
 As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 11
-and `UltraSimGameProtocol` constructs manifest version 20. Version 20 adds only the bounded
-cold public-presentation metadata/application-proof pair above existing hot chunk state. Future
-schema changes must advance the appropriate generated/manifest identity and remain
-bounded/hostile-input transactional.
+and `UltraSimGameProtocol` constructs manifest version 21. Version 20 added the bounded cold
+public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
+adds the authoritative `Primary` result to the playable owner-state schema for I0.12; it does not
+move item state or action meaning into Network. Future schema changes must advance the appropriate
+generated/manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy
 

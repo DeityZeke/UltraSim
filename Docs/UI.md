@@ -99,10 +99,15 @@ sign text, interaction distance, or view lifecycle.
 
 ## Current client closure
 
-The renderer, exact cache identity, cold/hot semantics, Inventory v6 workflow, local/remote action
+The renderer, exact cache identity, cold/hot semantics, Inventory v7 workflow, local/remote action
 path, A0.6 content-backed `.usui` path, and F0.5 source convergence are accepted. One selected
 standard Inventory artifact, reopened cached bytes, and content-backed exact bytes enter the same
 `UiClientRuntime` and produce the same model, actions, Game handler, and Godot result. The standard
 library remains small composition data; it does not make Client Core
 depend on every Game definition, pull Game UI/Inventory authority assemblies into Online, or
 substitute for required realm-content application proof.
+
+I0.12 advances the passive definition to v7 with one item-details slot and Drop action. Game derives
+rolled weapon text from persistent authoritative instance state and authorizes Drop only in an
+owner-bound view. Godot still renders the generic compiled tree and returns a semantic action; it
+does not choose item stats, ownership, or world placement.

@@ -1840,8 +1840,9 @@ authenticated package through A0.2-A0.5, opens/binds the A0.7 WorldPack, private
 162 structural chunks, admits a remote guest, and realizes a nine-chunk native Godot window using
 the always-available neutral primitive substrate for presentation leaves not supplied by content.
 
-The development Direct Connect deployment serves one canonical package containing the 731,384-byte
-Concept Demo WorldPack and the 1,054-byte standard Inventory v6 `.usui`. The remote native journey proves
+At A0.8 closure, the development Direct Connect deployment served one canonical package containing
+the 731,384-byte Concept Demo WorldPack and the then-current 1,054-byte standard Inventory v6
+`.usui`. The remote native journey proved
 authoritative movement, dynamic-public state, cached typed Inventory UI, Chat occurrence/application
 proof, and clean presentation-before-transport teardown. A cold run fetches two files / 732,438
 payload bytes; after deployment restart with the same persisted key and `ApplicationRealmId`, the

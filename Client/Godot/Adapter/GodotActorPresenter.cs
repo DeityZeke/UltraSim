@@ -20,10 +20,12 @@ public readonly record struct GodotActorPresenterSnapshot(
     int PrimitiveFallbackActors,
     int VisibleNameplates,
     int VisibleOverheadLabels,
+    int VisiblePrimaryCues,
     bool RevealHeld,
     ulong Added,
     ulong Updated,
-    ulong Removed);
+    ulong Removed,
+    ulong PrimaryCuesPresented);
 
 /// <summary>
 /// Native realization of engine-neutral actor state. One actor root is earned by moving/nameplate/
@@ -32,6 +34,7 @@ public readonly record struct GodotActorPresenterSnapshot(
 public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposable
 {
     public const ulong ControlledNameplateGraceMilliseconds = 2_500;
+    public const ulong PrimaryCueDurationMilliseconds = 240;
     private const float MillimetersToMeters = 0.001f;
     private readonly ClientActorDefinitionCatalog _catalog;
     private readonly IGodotActorVisualResolver? _visuals;
@@ -50,6 +53,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private ulong _added;
     private ulong _updated;
     private ulong _removed;
+    private ulong _primaryCuesPresented;
     private bool _disposed;
 
     public GodotActorPresenter(
@@ -161,6 +165,29 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         return true;
     }
 
+    /// <summary>
+    /// Presents one bounded primitive swing cue only after an authoritative Primary result. This
+    /// is minimum feedback, not weapon authority or a substitute for future content animation.
+    /// </summary>
+    public bool TryPresentPrimaryAction(
+        WorldPublicEntityId actor,
+        ulong commandSequence,
+        ulong nowMilliseconds)
+    {
+        EnsureOperational();
+        if (!actor.IsValid || commandSequence == 0 || nowMilliseconds == 0) return false;
+        int index = Find(actor);
+        if (index < 0) return false;
+        ref ActorSlot slot = ref _slots[index];
+        if (commandSequence <= slot.LastPrimaryCommandSequence) return false;
+        slot.LastPrimaryCommandSequence = commandSequence;
+        slot.PrimaryCueStartedAtMilliseconds = nowMilliseconds;
+        slot.PrimaryCue!.Visible = true;
+        ApplyPrimaryCue(ref slot, nowMilliseconds);
+        SaturatingIncrement(ref _primaryCuesPresented);
+        return true;
+    }
+
     public bool TryGetActorRoot(WorldPublicEntityId id, out Node3D? root)
     {
         EnsureOperational();
@@ -174,15 +201,17 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         EnsureOperational();
         int nameplates = 0;
         int overhead = 0;
+        int primaryCues = 0;
         for (int index = 0; index < _slots.Length; index++)
         {
             if (!_slots[index].Used) continue;
             if (_slots[index].Nameplate?.Visible == true) nameplates++;
             if (_slots[index].Overhead?.Visible == true) overhead++;
+            if (_slots[index].PrimaryCue?.Visible == true) primaryCues++;
         }
         return new GodotActorPresenterSnapshot(
-            _active, _primitive, nameplates, overhead, _revealHeld,
-            _added, _updated, _removed);
+            _active, _primitive, nameplates, overhead, primaryCues, _revealHeld,
+            _added, _updated, _removed, _primaryCuesPresented);
     }
 
     public void Dispose()
@@ -243,6 +272,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Modulate = new Color(1f, 1f, 0.86f),
         };
         root.AddChild(overhead);
+        var primaryCue = CreatePrimaryCue();
+        root.AddChild(primaryCue);
         Root.AddChild(root);
         _slots[index] = new ActorSlot
         {
@@ -251,6 +282,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Root = root,
             Nameplate = nameplate,
             Overhead = overhead,
+            PrimaryCue = primaryCue,
             PrimitiveFallback = primitive,
         };
         _active++;
@@ -346,6 +378,24 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             slot.Overhead.Text = string.Empty;
             slot.OverheadExpiresAtMilliseconds = 0;
         }
+        if (nowMilliseconds != 0)
+            ApplyPrimaryCue(ref slot, nowMilliseconds);
+    }
+
+    private static void ApplyPrimaryCue(ref ActorSlot slot, ulong nowMilliseconds)
+    {
+        if (slot.PrimaryCue?.Visible != true || slot.PrimaryCueStartedAtMilliseconds == 0) return;
+        ulong elapsed = nowMilliseconds >= slot.PrimaryCueStartedAtMilliseconds
+            ? nowMilliseconds - slot.PrimaryCueStartedAtMilliseconds
+            : ulong.MaxValue;
+        if (elapsed >= PrimaryCueDurationMilliseconds)
+        {
+            slot.PrimaryCue.Visible = false;
+            slot.PrimaryCueStartedAtMilliseconds = 0;
+            return;
+        }
+        float progress = elapsed / (float)PrimaryCueDurationMilliseconds;
+        slot.PrimaryCue.Rotation = new Vector3(-0.35f, Mathf.Lerp(-1.2f, 1.2f, progress), 0.25f);
     }
 
     private void RefreshNameplates()
@@ -390,6 +440,29 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         };
     }
 
+    private static Node3D CreatePrimaryCue()
+    {
+        var material = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.88f, 0.9f, 0.94f),
+            Metallic = 0.75f,
+            Roughness = 0.25f,
+        };
+        var pivot = new Node3D
+        {
+            Name = "AcceptedPrimaryCue",
+            Position = new Vector3(0, 1.05f, 0),
+            Visible = false,
+        };
+        pivot.AddChild(new MeshInstance3D
+        {
+            Name = "PrimitiveBlade",
+            Mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(0.08f, 0.08f, 1.25f), material),
+            Position = new Vector3(0, 0, -0.9f),
+        });
+        return pivot;
+    }
+
     private static void SaturatingIncrement(ref ulong value)
     {
         if (value != ulong.MaxValue) value++;
@@ -414,7 +487,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         internal Node3D? Root;
         internal Label3D? Nameplate;
         internal Label3D? Overhead;
+        internal Node3D? PrimaryCue;
         internal ulong OverheadExpiresAtMilliseconds;
+        internal ulong PrimaryCueStartedAtMilliseconds;
+        internal ulong LastPrimaryCommandSequence;
         internal bool PrimitiveFallback;
     }
 }

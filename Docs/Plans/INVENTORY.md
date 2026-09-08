@@ -4,7 +4,7 @@
 
 **Status:** living design/architecture note
 
-**Current implementation checkpoint:** I0.11 — dynamic instance capacity
+**Current implementation checkpoint:** I0.12 — persistent world-item instance vertical (closed)
 
 **Remote/private vertical checkpoint:** `0ad93d54` — I0.8 authenticated remote inventory vertical
 
@@ -1338,6 +1338,71 @@ Deferred:
 - grandfathered overflow/capacity debt;
 - weight and nesting capacity.
 
+## I0.12 — persistent world-item instance vertical — CLOSED
+
+This checkpoint is the first concrete world ↔ Inventory item lifecycle. It uses a respawning Iron
+Sword to prove that a prefab is a template while each spawned entity owns durable rolled state.
+
+The frozen lifecycle is:
+
+```text
+persistent spawner identity + spawn ordinal + world seed
+    -> deterministic one-time initial roll
+    -> persist the resulting weapon values
+
+world item
+    -> pickup (same entity and persistent identity)
+    -> contained Inventory
+    -> equip / accepted Primary swing
+    -> unequip or drop
+    -> world item again (same identity and rolled values)
+
+spawner
+    -> observes its active item leave the world
+    -> waits a bounded delay
+    -> creates a new independent item instance
+```
+
+Restore saves the rolled result, not merely an RNG seed. A future change to authoring ranges or the
+roll algorithm must not mutate an existing sword. The spawner ordinal is durable so restoration
+continues the deterministic spawn lineage without reusing an earlier roll occurrence.
+
+`InventoryItem.Parent == Entity.Null` is the canonical world-item relationship for this checkpoint.
+Such an item remains valid Inventory content but is absent from the derived Inventory index. It must
+have no equipment slot or Grid placement. Rebuild validates it and leaves it outside container and
+equipment topology. Pickup/drop mutations move the same ECS entity into/out of that topology; they
+do not destroy and recreate it.
+
+The first property projection is bounded authoritative text derived from the persisted instance
+component and shown by the existing owner-private Inventory UI. World hover identifies the already
+disclosed semantic item as `Iron Sword`, but does not invent or poll for its rolled values. A
+generalized cold public Object Property List request/cache protocol is deliberately deferred; world
+hover must not poll the authority each frame or stuff rolled properties into hot movement/public
+records.
+
+The first swing is an admitted Game action with no damage. The controlled client realizes one
+bounded 240 ms primitive cue only after that exact authoritative Primary result; generalized public
+action occurrence delivery and content-backed X/Y animation remain a separate Concept Demo
+animation closure. Combat, hit testing, durability loss, death, loot rarity/affixes, and
+account-owned character persistence are not implied.
+
+The accepted shared-authority journey proves one exact item lifetime across public world,
+Alice's Inventory, Main Hand equipment, world drop, and Bob's Inventory. Pickup starts the
+spawner's fixed 120-tick delay; its next occurrence is a new persistent entity with the next durable
+ordinal and independently rolled values. Save/load preserves the stored results for existing items
+and reproduces the exact next occurrence without rerolling earlier items. Remote owner state adds
+only the authoritative Primary result; Inventory details and Drop continue through the existing
+owner-private compiled-UI path.
+
+A due spawner is also ordinary bounded workload rather than an authority-fault trigger. If ECS item
+capacity is temporarily exhausted, the spawner remains due with its ordinal unchanged and retries on
+a later tick; releasing one slot permits the exact next occurrence to be created. Malformed spawner
+state remains an invariant failure.
+
+The spawn recipe is currently explicit compiled Game composition data rather than ObjectScript
+authoring. That is deliberate: I0.12 earns the runtime/persistence semantics without prematurely
+freezing the future authoring syntax.
+
 ## Later candidates
 
 - Slot semantics/viewer;
@@ -1350,6 +1415,8 @@ Deferred:
 - multi-viewer sessions;
 - transaction/trade/escrow;
 - lock/no-drop/no-trade/quest/reserved flags as gameplay earns them.
+- bounded cold public item-property disclosure/cache for world hover;
+- authored spawn-recipe/ObjectScript syntax beyond the first compiled Iron Sword recipe;
 
 ---
 

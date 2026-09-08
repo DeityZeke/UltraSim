@@ -19,6 +19,7 @@ public enum LocalPlayableSelection : byte
     InformationalSign = 5,
     FallbackLabSign = 6,
     Unsupported = 7,
+    IronSword = 8,
 }
 
 public readonly record struct LocalPlayableCommand(
@@ -26,10 +27,11 @@ public readonly record struct LocalPlayableCommand(
     LocalPlayableSelection Selection,
     bool FaceRequested,
     ClientControlWorldPoint FacePoint,
-    bool FacingRequiresAcceptedLocomotion)
+    bool FacingRequiresAcceptedLocomotion,
+    WorldPublicEntityId Target = default)
 {
     public bool IsValid => Command.IsValid &&
-        Selection is >= LocalPlayableSelection.None and <= LocalPlayableSelection.Unsupported;
+        Selection is >= LocalPlayableSelection.None and <= LocalPlayableSelection.IronSword;
 }
 
 public enum LocalAdministrativeOperationKind : byte

@@ -848,11 +848,29 @@ static void RequireNativeA08Result(
         !output.Contains("chunks=9", StringComparison.Ordinal) ||
         !output.Contains("proofs=1", StringComparison.Ordinal) ||
         !output.Contains("ui=1", StringComparison.Ordinal) ||
-        !output.Contains("chat=1", StringComparison.Ordinal) ||
+        !ContainsPositiveNamedCount(output, "chat=") ||
         expectedWarm && !output.Contains("filesFetched=0 bytesFetched=0", StringComparison.Ordinal) ||
         !expectedWarm && output.Contains("bytesFetched=0", StringComparison.Ordinal))
         throw new InvalidOperationException(
             $"The A0.8 {mode} native product output was incomplete:\n{Tail(output, 8_000)}");
+}
+
+static bool ContainsPositiveNamedCount(string output, string marker)
+{
+    int search = 0;
+    while (search < output.Length)
+    {
+        int markerIndex = output.IndexOf(marker, search, StringComparison.Ordinal);
+        if (markerIndex < 0) return false;
+        int firstDigit = markerIndex + marker.Length;
+        int end = firstDigit;
+        while (end < output.Length && output[end] is >= '0' and <= '9') end++;
+        if (end > firstDigit && ulong.TryParse(
+                output.AsSpan(firstDigit, end - firstDigit), out ulong count) && count > 0)
+            return true;
+        search = firstDigit;
+    }
+    return false;
 }
 
 static string RunCaptured(

@@ -85,6 +85,12 @@ same-version reinterpretation of wider bytes.
 Restore starts with clean change/lifecycle observation rather than fabricating a
 gameplay-wide creation storm.
 
+I0.12 persists rolled item results and spawner continuation as ordinary ECS truth. Existing weapon
+instances restore their exact values and relationships even if the spawn algorithm later changes;
+the spawner restores its active persistent item reference, next ordinal, and remaining bounded
+delay. A restored continuation therefore cannot reuse an earlier occurrence or reroll an existing
+item.
+
 The game-world staging shell prepares ECS lookups before restore seals the
 candidate world. Exact pack/overlay resolution is installed into that unpublished
 shell afterward and before derived rebuild/publication. Missing pack identity,

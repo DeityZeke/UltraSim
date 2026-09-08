@@ -2691,7 +2691,7 @@ static void AssertSharedTerrainEdgeWithDifferentBases(int elevationOffset)
 static void PositionComponentIsPersistedCanonicalAuthority()
 {
     ComponentSchema schema = GameSchema.CreateSchema();
-    Equal(12, schema.ComponentCount);
+    Equal(15, schema.ComponentCount);
     ComponentId position = GameSchema.GetComponentId<WorldPositionComponent>();
     True(position.IsValid);
     PersistenceCatalog catalog = GameSchema.CreatePersistenceCatalog();
@@ -3023,6 +3023,7 @@ static void GenerationReplacementPublishesFreshDerivedIndex()
         candidate = new GameGenerationState(
             accounting,
             staging.Inventory,
+            staging.Items,
             staging.Content,
             staging.WorldState,
             staging.SimulationLookup,
@@ -3121,6 +3122,26 @@ static void PublicEligibilityAndFinalPostStepTruthAreExplicit()
     True(records[0].Id.IsValid);
     Equal(1, fixture.State.Publications.GetSnapshot().PublicEntityCount);
     WorldPublicEntityId publicId = records[0].Id;
+
+    True(fixture.State.TrySetPublic(fixture.World, entity,
+        new WorldPublicDescriptor(77, new WorldYaw(1_009), WorldPublicStateFlags.None)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    var hidden = new WorldPublicDeltaRecord[1];
+    Equal(ChunkPublicationReadStatus.Delta,
+        fixture.State.Publications.TryCopyDelta(key, batch.Cursor, hidden, out _));
+    Equal(WorldPublicOperation.Remove, hidden[0].Operation);
+    Equal(publicId, hidden[0].Id);
+    Equal(0, fixture.State.Publications.GetSnapshot().PublicEntityCount);
+
+    True(fixture.State.TrySetPublic(fixture.World, entity,
+        new WorldPublicDescriptor(77, new WorldYaw(1_009), WorldPublicStateFlags.Visible)));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(ChunkPublicationReadStatus.Snapshot,
+        fixture.State.Publications.TryCopySnapshot(key, records, out batch));
+    Equal(1, batch.Count);
+    True(records[0].Id.Index == publicId.Index && records[0].Id.Generation > publicId.Generation);
+    publicId = records[0].Id;
+
     True(fixture.World.TryTransition(entity, fixture.RemovePublic));
     fixture.State.CommitAfterEcsStep(fixture.World);
     var removed = new WorldPublicDeltaRecord[1];
@@ -4021,7 +4042,8 @@ static void AssertPublicationTruth(
     for (int index = 0; index < actors.Length; index++)
     {
         ref PublicationChurnActor actor = ref actors[index];
-        if (!actor.Alive || !actor.Public)
+        if (!actor.Alive || !actor.Public ||
+            (actor.Descriptor.Flags & WorldPublicStateFlags.Visible) == 0)
         {
             actor.ObservedPublic = false;
             continue;
@@ -4122,7 +4144,8 @@ static void SynchronizePublicationConsumer(
     for (int index = 0; index < actors.Length; index++)
     {
         ref readonly PublicationChurnActor actor = ref actors[index];
-        if (!actor.Alive || !actor.Public) continue;
+        if (!actor.Alive || !actor.Public ||
+            (actor.Descriptor.Flags & WorldPublicStateFlags.Visible) == 0) continue;
         expected++;
         True(byPrefab.TryGetValue(actor.Descriptor.PrefabId, out WorldPublicRecord record));
         Equal(actor.Position, record.Position);

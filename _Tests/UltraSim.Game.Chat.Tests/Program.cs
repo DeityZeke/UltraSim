@@ -944,6 +944,7 @@ sealed class ChatFixture : IDisposable
             candidate = new GameGenerationState(
                 new AccountingStore(),
                 staging.Inventory,
+                staging.Items,
                 staging.Content,
                 staging.WorldState,
                 staging.SimulationLookup,

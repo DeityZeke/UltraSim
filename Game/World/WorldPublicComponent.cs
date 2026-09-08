@@ -22,7 +22,9 @@ public readonly record struct WorldPublicDescriptor(
 
 /// <summary>
 /// Explicit persisted eligibility and minimal public semantics for one dynamic world entity.
-/// Presence of this component permits publication only when a valid world position is also present.
+/// Presence of this component plus a valid world position permits publication; the Visible flag
+/// makes that permitted projection current. Clearing Visible retires the public lifetime without
+/// destroying the authoritative entity or its other persisted state.
 /// </summary>
 [EcsComponent("game.world.public-projection", PersistenceId = 700604)]
 [StructLayout(LayoutKind.Sequential, Size = 8)]

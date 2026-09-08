@@ -327,13 +327,11 @@ public sealed class SharedPlayableAuthority : IDisposable
             {
                 Entity player = Resolve(world, retiring.Entities.PlayerId);
                 _ = game.WorldActions.EndControlSession(world, player, retiring.ControlSession);
-                Entity bread = Resolve(world, retiring.Entities.BreadId);
                 Entity backpack = Resolve(world, retiring.Entities.BackpackId);
-                if (!game.Inventory.DestroyItem(world, bread).Accepted ||
-                    !game.Inventory.DestroyContainer(world, backpack).Accepted ||
+                if (!game.TryRetireTransientParticipantInventory(world, player, backpack) ||
                     !world.TryDestroy(player))
                     throw new InvalidOperationException(
-                        "The shared participant entities could not retire transactionally.");
+                        "The shared participant entities could not retire cleanly.");
                 return true;
             }, out bool complete) && complete;
         if (!retired || !Admission.TryLeave(playable.Participant, out _))

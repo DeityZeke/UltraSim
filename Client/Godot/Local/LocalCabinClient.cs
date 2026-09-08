@@ -78,6 +78,7 @@ public partial class LocalCabinClient : Node3D
         InformationalSign,
         FallbackLabSign,
         WoodlandAnimal,
+        IronSword,
     }
 
     private const int MaximumChatTextCharacters = 256;
@@ -151,6 +152,8 @@ public partial class LocalCabinClient : Node3D
     private WorldPosition _player;
     private ClientControlWorldPoint _pointerPoint;
     private bool _pointerPointValid;
+    private WorldPublicEntityId _pointerTarget;
+    private uint _pointerTargetPrefab;
     private bool _primaryDown;
     private bool _primaryPressed;
     private bool _primaryReleased;
@@ -1387,6 +1390,7 @@ public partial class LocalCabinClient : Node3D
             SelectionKind.FarGate => LocalPlayableSelection.FarGate,
             SelectionKind.InformationalSign => LocalPlayableSelection.InformationalSign,
             SelectionKind.FallbackLabSign => LocalPlayableSelection.FallbackLabSign,
+            SelectionKind.IronSword => LocalPlayableSelection.IronSword,
             _ => LocalPlayableSelection.Unsupported,
         };
         if (!_localSession.TrySubmit(new LocalPlayableCommand(
@@ -1394,7 +1398,8 @@ public partial class LocalCabinClient : Node3D
                 selection,
                 faceLookPoint,
                 lookPoint,
-                facingRequiresAcceptedLocomotion)))
+                facingRequiresAcceptedLocomotion,
+                _selection == SelectionKind.IronSword ? _pointerTarget : default)))
             _lastOutcome = "Local command queue busy";
     }
 
@@ -1513,6 +1518,7 @@ public partial class LocalCabinClient : Node3D
                         LocalPlayableSelection.FarGate => "Far Gate activated",
                         LocalPlayableSelection.InformationalSign => "Sign opened",
                         LocalPlayableSelection.FallbackLabSign => "Fallback Lab sign opened",
+                        LocalPlayableSelection.IronSword => "Picked up Iron Sword",
                         _ => "Interaction accepted",
                     }
                     : $"{view.LastSelection} interaction: {view.LastCommandResult.Interaction}";
@@ -1522,6 +1528,15 @@ public partial class LocalCabinClient : Node3D
                 _lastOutcome = view.LastCommandResult.Jump == GameWorldActionStatus.Accepted
                     ? "Jumped"
                     : $"Jump: {view.LastCommandResult.Jump}";
+            }
+            else if (view.LastCommandResult.Primary != GameWorldActionStatus.NotRequested)
+            {
+                _lastOutcome = view.LastCommandResult.Primary == GameWorldActionStatus.Accepted
+                    ? "Swung equipped weapon"
+                    : "Primary requires an equipped weapon";
+                if (view.LastCommandResult.Primary == GameWorldActionStatus.Accepted)
+                    _ = _actorPresenter?.TryPresentPrimaryAction(
+                        view.PublicActor, view.LastCommandSequence, Time.GetTicksMsec());
             }
         }
         if (view.LastAdministrativeSequence != 0 &&
@@ -1612,6 +1627,13 @@ public partial class LocalCabinClient : Node3D
 
     private void Select(in ClientControlWorldPoint point)
     {
+        if (_pointerTarget.IsValid && _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword)
+        {
+            _selection = SelectionKind.IronSword;
+            _lastOutcome = $"Selected Iron Sword at ({point.XMillimeters / 1000d:F1}, " +
+                $"{point.ZMillimeters / 1000d:F1}) m";
+            return;
+        }
         bool signPresented = _useConceptDemoWorld && IsKnownPresentedPrefabNear(
             GameWorldPublicPrefabIds.InformationalSign, point, radius: 1_500);
         _selection = signPresented && Nearest(
@@ -1641,13 +1663,18 @@ public partial class LocalCabinClient : Node3D
     {
         if (_hoverTooltip is null)
             return;
-        bool show = _useConceptDemoWorld && _pointerPointValid &&
-            IsKnownPresentedPrefabNear(
-                GameWorldPublicPrefabIds.InformationalSign, _pointerPoint, radius: 1_500);
-        _hoverTooltip.Visible = show;
-        if (!show)
+        string? label = _useConceptDemoWorld && _pointerTarget.IsValid &&
+            _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword
+                ? "Iron Sword"
+                : _useConceptDemoWorld && _pointerPointValid &&
+                    IsKnownPresentedPrefabNear(
+                        GameWorldPublicPrefabIds.InformationalSign, _pointerPoint, radius: 1_500)
+                    ? "Sign"
+                    : null;
+        _hoverTooltip.Visible = label is not null;
+        if (label is null)
             return;
-        _hoverTooltip.Text = "Sign";
+        _hoverTooltip.Text = label;
         _hoverTooltip.Position = GetViewport().GetMousePosition() + new Vector2(14, 18);
     }
 
@@ -1685,12 +1712,21 @@ public partial class LocalCabinClient : Node3D
         Vector2 mouse = GetViewport().GetMousePosition();
         Vector3 origin = _camera.ProjectRayOrigin(mouse);
         Vector3 direction = _camera.ProjectRayNormal(mouse);
-        if (TryPickPresentedPublicObject(origin, direction, out ClientControlWorldPoint objectPoint))
+        if (TryPickPresentedPublicObject(
+                origin,
+                direction,
+                out ClientControlWorldPoint objectPoint,
+                out WorldPublicEntityId target,
+                out uint prefabId))
         {
             _pointerPoint = objectPoint;
             _pointerPointValid = true;
+            _pointerTarget = target;
+            _pointerTargetPrefab = prefabId;
             return;
         }
+        _pointerTarget = default;
+        _pointerTargetPrefab = 0;
         if (Math.Abs(direction.Y) < 0.0001f)
         {
             _pointerPointValid = false;
@@ -1713,15 +1749,21 @@ public partial class LocalCabinClient : Node3D
     private bool TryPickPresentedPublicObject(
         in Vector3 rayOrigin,
         in Vector3 rayDirection,
-        out ClientControlWorldPoint point)
+        out ClientControlWorldPoint point,
+        out WorldPublicEntityId target,
+        out uint prefabId)
     {
         point = default;
+        target = default;
+        prefabId = 0;
         if (_cache is null || _window is null ||
             !_window.TryCopyBindings(_presentationBindings, out int count, out _))
             return false;
 
         float nearest = float.PositiveInfinity;
         WorldPosition selected = default;
+        WorldPublicEntityId selectedTarget = default;
+        uint selectedPrefab = 0;
         for (int index = 0; index < count; index++)
         {
             if (!_cache.TryGetResidentView(
@@ -1741,6 +1783,8 @@ public partial class LocalCabinClient : Node3D
                     continue;
                 nearest = distance;
                 selected = record.Position;
+                selectedTarget = record.Id;
+                selectedPrefab = record.PrefabId;
             }
         }
         if (!float.IsFinite(nearest))
@@ -1748,11 +1792,15 @@ public partial class LocalCabinClient : Node3D
         point = new ClientControlWorldPoint(
             selected.GlobalXMillimeters,
             selected.GlobalZMillimeters);
+        target = selectedTarget;
+        prefabId = selectedPrefab;
         return true;
     }
 
     private bool TrySetPointerWorldPoint(long globalXMillimeters, long globalZMillimeters)
     {
+        _pointerTarget = default;
+        _pointerTargetPrefab = 0;
         _pointerPoint = new ClientControlWorldPoint(globalXMillimeters, globalZMillimeters);
         _pointerPointValid = WorldPosition.TryFromGlobalMillimeters(
                 globalXMillimeters,
@@ -3004,6 +3052,8 @@ public partial class LocalCabinClient : Node3D
             new Vector3(1.5f, 2.8f, 0.35f), new Color(0.68f, 0.22f, 0.86f));
         private readonly Mesh _informationalSign = GroundedBox(
             new Vector3(1.25f, 1.65f, 0.16f), new Color(0.52f, 0.31f, 0.12f));
+        private readonly Mesh _sword = GroundedBox(
+            new Vector3(0.12f, 1.15f, 0.20f), new Color(0.72f, 0.75f, 0.78f));
         private readonly Mesh _mountainWallEight = GroundedBox(
             new Vector3(8f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
         private readonly Mesh _mountainWallTen = GroundedBox(
@@ -3107,6 +3157,7 @@ public partial class LocalCabinClient : Node3D
             GameWorldPublicPrefabIds.SkyTelepad => _telepad,
             GameWorldPublicPrefabIds.FarGate => _farGate,
             GameWorldPublicPrefabIds.InformationalSign => _informationalSign,
+            GameWorldPublicPrefabIds.IronSword => _sword,
             _ => _stone,
         };
 

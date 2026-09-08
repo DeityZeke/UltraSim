@@ -11,7 +11,7 @@ namespace UltraSim.Client.StandardUi;
 public static class ClientStandardUiLibrary
 {
     private const string InventoryResource =
-        "UltraSim.Client.StandardUi.Assets.game.inventory.gump.v6.usui";
+        "UltraSim.Client.StandardUi.Assets.game.inventory.gump.v7.usui";
     private static readonly Lazy<CompiledUiDefinition> Inventory =
         new(() => ReadCanonical(InventoryResource), LazyThreadSafetyMode.ExecutionAndPublication);
 

@@ -64,7 +64,7 @@ contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
 guest admission. It hostile-validates the finite profile vocabulary introduced in protocol v19,
-now retained unchanged in protocol v20, and maps it into
+retained unchanged through protocol v21, and maps it into
 Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not

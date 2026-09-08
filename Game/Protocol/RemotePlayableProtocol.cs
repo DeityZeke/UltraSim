@@ -111,7 +111,7 @@ public partial struct RemotePlayableCommandMessage
 }
 
 /// <summary>Latest complete owner-private controlled-actor result after an authoritative tick.</summary>
-[NetworkMessage(139, "ultrasim.game.playable-owner-state", 1, NetworkLane.OwnerState)]
+[NetworkMessage(139, "ultrasim.game.playable-owner-state", 2, NetworkLane.OwnerState)]
 public partial struct RemotePlayableOwnerStateMessage
 {
     public ulong ApplicationSessionEpoch;
@@ -129,6 +129,7 @@ public partial struct RemotePlayableOwnerStateMessage
     public RemotePlayableActionStatus Admission;
     public RemotePlayableActionStatus Locomotion;
     public RemotePlayableActionStatus Jump;
+    public RemotePlayableActionStatus Primary;
     public RemotePlayableActionStatus Interaction;
     public byte Body;
 }

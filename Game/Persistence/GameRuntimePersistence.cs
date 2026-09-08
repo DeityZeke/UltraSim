@@ -172,6 +172,7 @@ public sealed class GameRuntimePersistence
             candidate = new GameGenerationState(
                 stagedAccounting,
                 built.Inventory,
+                built.Items,
                 built.Content,
                 built.WorldState,
                 built.SimulationLookup,

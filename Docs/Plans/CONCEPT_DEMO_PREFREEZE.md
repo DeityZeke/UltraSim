@@ -1688,26 +1688,27 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 ```text
 1. Keep Client F0.5's compiled-UI source convergence closed.
 2. Keep M0.0 shared multi-participant authority closed.
-3. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
-4. Select one exact feature-complete pre-freeze candidate.
-5. Build the real headless Network bot client.
-6. Add first-class wire/per-message accounting.
-7. Establish high-performance quiet/moving/crowd baselines.
-8. Decouple render FPS from input submission cadence.
-9. Define/advertise/enforce the bounded Server Performance Profile.
-10. Run mismatched-cadence correctness matrix.
-11. Evaluate input/owner/public cadence reductions.
-12. Evaluate unreliable frame aggregation.
-13. Measure dense vs distributed AOI/fanout.
-14. Evaluate selective compression only where payload shape justifies it.
-15. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-16. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-17. Run mixed headless + exported Godot clients.
-18. Run external human Concept Demo validation.
-19. Choose/document the default deployment-performance policy.
-20. Record decisive performance/bandwidth/failure evidence.
-21. Full exact-tree verifier and export closure.
-22. Freeze/tag the Concept Demo baseline.
+3. Keep Inventory I0.12's persistent rolled world-item vertical closed.
+4. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
+5. Select one exact feature-complete pre-freeze candidate.
+6. Build the real headless Network bot client.
+7. Add first-class wire/per-message accounting.
+8. Establish high-performance quiet/moving/crowd baselines.
+9. Decouple render FPS from input submission cadence.
+10. Define/advertise/enforce the bounded Server Performance Profile.
+11. Run mismatched-cadence correctness matrix.
+12. Evaluate input/owner/public cadence reductions.
+13. Evaluate unreliable frame aggregation.
+14. Measure dense vs distributed AOI/fanout.
+15. Evaluate selective compression only where payload shape justifies it.
+16. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+17. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+18. Run mixed headless + exported Godot clients.
+19. Run external human Concept Demo validation.
+20. Choose/document the default deployment-performance policy.
+21. Record decisive performance/bandwidth/failure evidence.
+22. Full exact-tree verifier and export closure.
+23. Freeze/tag the Concept Demo baseline.
 23. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 

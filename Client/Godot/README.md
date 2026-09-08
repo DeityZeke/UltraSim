@@ -113,11 +113,18 @@ direct profiles; and the mouse wheel adjusts supported camera profiles. The Cent
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
 
-Compiled UI Canvases are centered in the viewport. The Inventory v6 definition supplies its own
+Compiled UI Canvases are centered in the viewport. The Inventory v7 definition supplies its own
 surface and authoritative Close action; `I` opens it when no UI is active and closes the existing
 Inventory instead of stacking duplicate transparent views. Window dragging remains deferred. Tall
 stock public objects use bounded full-height pointer volumes before terrain projection, so the
 visible upper portions of doors and signs nominate those disclosed objects normally.
+
+I0.12 adds the first persistent world item to both local and remote consumers. An Iron Sword can be
+selected and picked up with the ordinary Interact path, inspected in Inventory, equipped, used with
+Primary, and dropped through the compiled Inventory view. The semantic world item has a bounded
+primitive presentation/pick volume; exact rolls remain owner-private until a future recipient-safe
+cold public property cache is earned. An accepted Primary result drives a short primitive cue on the
+controlled actor. It is feedback, not Combat authority or the final content-backed animation path.
 
 F0.5 is closed. The application composes the passive `Client.StandardUi` Inventory artifact into
 the same local/remote `UiClientRuntime` path used by reopened cached and content-backed exact

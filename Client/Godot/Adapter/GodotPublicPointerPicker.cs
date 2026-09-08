@@ -50,6 +50,7 @@ public static class GodotPublicPointerPicker
             GameWorldPublicPrefabIds.SkyTelepad => (new Vector3(1f, 0, 1f), 0.25f),
             GameWorldPublicPrefabIds.FarGate => (new Vector3(0.85f, 0, 0.4f), 2.8f),
             GameWorldPublicPrefabIds.InformationalSign => (new Vector3(0.7f, 0, 0.25f), 1.65f),
+            GameWorldPublicPrefabIds.IronSword => (new Vector3(0.25f, 0, 0.25f), 1.2f),
             _ => default,
         };
         return height > 0;

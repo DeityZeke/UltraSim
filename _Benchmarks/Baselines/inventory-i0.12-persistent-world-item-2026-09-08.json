@@ -1,0 +1,88 @@
+{
+  "Checkpoint": "I0.12 persistent rolled world-item instance vertical",
+  "CaptureDate": "2026-09-08",
+  "BaseCommit": "e030af21962f7f3826407c0c50503ee82831b32b",
+  "InstanceAuthority": {
+    "Prefab": "game.item.iron-sword",
+    "Spawner": "game.spawner.iron-sword",
+    "WorldSeed": "0x554C54524153494D",
+    "RespawnDelayTicks": 120,
+    "RespawnDelaySecondsAt20Hz": 6,
+    "StoredResultFields": [
+      "DamageMinimum",
+      "DamageMaximum",
+      "MaximumDurability",
+      "CurrentDurability",
+      "Quality",
+      "Element",
+      "SpawnOrdinal"
+    ],
+    "PersistedSpawnerFields": [
+      "ActiveItem persistent entity reference",
+      "NextSpawnOrdinal",
+      "RemainingRespawnTicks"
+    ],
+    "PersistResultNotSeed": true,
+    "EcsEntityCapacity": 256,
+    "GenerationItemTrackingReservedBytes": 4096,
+    "CapacityExhaustionDefersWithoutAdvancingOrdinal": true,
+    "FreedEntitySlotResumesDueSpawn": true
+  },
+  "DeterministicEvidence": {
+    "SharedAuthorityRoll0": "2-9/50/50/q59/None/o0",
+    "SharedAuthorityRoll1": "4-7/52/52/q67/Fire/o1",
+    "PersistenceRoll0": "4-7/50/50/q100/Cold/o0",
+    "PersistenceRoll1": "3-7/45/45/q61/Fire/o1",
+    "PersistenceNextRoll": "4-6/48/48/q61/Cold/o2",
+    "MultipleDistinctVectors": true,
+    "SaveRestoresExistingResults": true,
+    "SaveRestoresNextOrdinal": true
+  },
+  "IdentityAndOwnership": {
+    "SamePersistentEntityAcrossWorldInventoryEquipmentAndDrop": true,
+    "PickupRetiresPublicPresentationLifetime": true,
+    "EquipCreatesFreshPublicPresentationLifetime": true,
+    "SpawnerNeverRecallsTakenItem": true,
+    "SecondParticipantReceivesSameItemAndDescription": true,
+    "OwnerPrivateInventoryIsolationPreserved": true
+  },
+  "UiAndPresentation": {
+    "InventoryDefinition": "game.inventory.gump/v7/b0b3e87ced073c8a40778127ba583993",
+    "InventoryArtifactBytes": 1158,
+    "InventoryArtifactSha256": "c16bf26a1802ca3cf84542734dc4f97ff58d160a3a9e39b002830df2f3ced189",
+    "AuthoritativeRolledDetails": true,
+    "OwnerAuthorizedDropAction": true,
+    "WorldPointerVolume": true,
+    "WorldHoverSemanticNameOnly": true,
+    "AcceptedPrimaryCueMilliseconds": 240,
+    "GeneralPublicPropertyCacheDeferred": true,
+    "ContentBackedFullAnimationDeferred": true
+  },
+  "Protocol": {
+    "ManifestVersion": 21,
+    "ManifestFingerprint": 1781163582972887298,
+    "OwnerStateSchemaVersion": 2,
+    "PrimaryResultAddedOnlyToOwnerState": true,
+    "RolledFactsAbsentFromHotPublicRecords": true
+  },
+  "PermanentAcceptance": {
+    "GameInventoryTests": 33,
+    "GameWorldTests": 86,
+    "GameReplicationTests": 134,
+    "GamePersistenceTests": 13,
+    "IntegratedAcceptanceGates": 35,
+    "LocalClientSessionTests": 13,
+    "PacketFreeLocalItemJourney": true,
+    "GodotPlayableWorldAcceptance": true,
+    "SharedUdpThreeParticipantJourney": true,
+    "DebugAndReleaseCanonicalVerifier": true
+  },
+  "DeliberateDeferrals": [
+    "ObjectScript spawn-recipe authoring syntax",
+    "cold recipient-interest-coupled public Object Property List cache",
+    "damage and hit testing",
+    "durability consumption",
+    "content-backed X/Y equipment and public swing animation",
+    "durable account-character ownership for disconnected guests"
+  ]
+}

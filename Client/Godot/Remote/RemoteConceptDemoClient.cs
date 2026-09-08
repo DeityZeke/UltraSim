@@ -71,6 +71,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private WorldPosition _player;
     private WorldPosition _smokeStart;
     private ulong _lastOwnerState;
+    private ulong _lastPrimaryCommandSequence;
     private ulong _lastChatApplied;
     private bool _inventoryRequested;
     private bool _primaryDown;
@@ -79,6 +80,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private bool _secondaryPressed;
     private bool _pointerPointValid;
     private ClientControlWorldPoint _pointerPoint;
+    private WorldPublicEntityId _pointerTarget;
+    private WorldPublicEntityId _selectedTarget;
     private float _cameraYaw = -0.7f;
     private float _cameraPitch = 0.34f;
     private float _cameraDistance = 8.5f;
@@ -426,6 +429,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _settings!, allowed && GetWindow().HasFocus() && _chatInput?.HasFocus() != true);
         ClientHorizontalCameraBasis basis = CameraBasis();
         ClientControlProfileDecision decision = EvaluateProfile(in sample, in basis);
+        if (decision.SelectionRequested)
+            _selectedTarget = _pointerTarget;
         RemotePlayableCommandFlags flags = _inventoryRequested
             ? RemotePlayableCommandFlags.OpenInventoryRequested
             : RemotePlayableCommandFlags.None;
@@ -442,6 +447,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         if (_session!.Playable.TrySubmitCommand(
                 decision.Command,
+                target: _selectedTarget,
                 flags: flags,
                 faceXMillimeters: faceX,
                 faceZMillimeters: faceZ))
@@ -720,6 +726,16 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 controlled.Definition.CameraPivotHeightMillimeters * 0.001f;
         _actorPresenter.Apply(
             _actorChanges.AsSpan(0, changed), _player, Time.GetTicksMsec());
+        if (playable.LastProcessedCommandSequence != 0 &&
+            playable.LastProcessedCommandSequence != _lastPrimaryCommandSequence)
+        {
+            _lastPrimaryCommandSequence = playable.LastProcessedCommandSequence;
+            if (playable.Primary == RemotePlayableActionStatus.Accepted)
+                _ = _actorPresenter.TryPresentPrimaryAction(
+                    playable.PublicActor,
+                    playable.LastProcessedCommandSequence,
+                    Time.GetTicksMsec());
+        }
     }
 
     private void DrainRenderer()
@@ -766,6 +782,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         Vector2 mouse = GetViewport().GetMousePosition();
         Vector3 origin = _camera.ProjectRayOrigin(mouse);
         Vector3 direction = _camera.ProjectRayNormal(mouse);
+        if (TryPickPresentedPublicObject(origin, direction, out ClientControlWorldPoint objectPoint,
+                out WorldPublicEntityId target))
+        {
+            _pointerPoint = objectPoint;
+            _pointerPointValid = true;
+            _pointerTarget = target;
+            return;
+        }
+        _pointerTarget = default;
         if (Math.Abs(direction.Y) < 0.0001f)
         {
             _pointerPointValid = false;
@@ -788,6 +813,52 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _session.WorldCache.PreparedWorld.TryFindNearestSupport(
                 candidate, _player.YMillimeters, out WorldTerrainColumnSurface support) ==
                 WorldTerrainColumnQueryStatus.Complete && support.IsValid && support.IsSupport;
+    }
+
+    private bool TryPickPresentedPublicObject(
+        in Vector3 rayOrigin,
+        in Vector3 rayDirection,
+        out ClientControlWorldPoint point,
+        out WorldPublicEntityId target)
+    {
+        point = default;
+        target = default;
+        if (_session is null || _window is null ||
+            !_window.TryCopyBindings(_presentationBindings, out int count, out _))
+            return false;
+        float nearest = float.PositiveInfinity;
+        WorldPosition selected = default;
+        for (int index = 0; index < count; index++)
+        {
+            if (!_session.WorldCache.TryGetResidentView(
+                    _presentationBindings[index].SemanticHandle, out ClientSemanticChunkView view))
+                continue;
+            foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+            {
+                if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0)
+                    continue;
+                Vector3 basePosition = new(
+                    checked(record.Position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
+                    checked(record.Position.YMillimeters - _player.YMillimeters) * 0.001f,
+                    checked(record.Position.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f);
+                if (!GodotPublicPointerPicker.TryIntersect(
+                        record.PrefabId, rayOrigin, rayDirection, basePosition, out float distance) ||
+                    distance >= nearest)
+                    continue;
+                nearest = distance;
+                selected = record.Position;
+                target = record.Id;
+            }
+        }
+        if (!float.IsFinite(nearest))
+        {
+            target = default;
+            return false;
+        }
+        point = new ClientControlWorldPoint(
+            selected.GlobalXMillimeters,
+            selected.GlobalZMillimeters);
+        return true;
     }
 
     private void ApplyCameraProfile()

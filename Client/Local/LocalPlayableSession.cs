@@ -613,7 +613,11 @@ public sealed class LocalPlayableSession : IDisposable
                     (world, generationId, game) =>
                     {
                         Entity actor = Resolve(world, entities.PlayerId);
-                        Entity target = captured.Selection switch
+                        Entity target = Entity.Null;
+                        if (captured.Target.IsValid)
+                            _ = game.WorldState.Publications.TryResolvePublicEntity(
+                                captured.Target, out target);
+                        if (!target.IsValid) target = captured.Selection switch
                         {
                             LocalPlayableSelection.CabinDoor => Resolve(world, entities.CabinDoorId),
                             LocalPlayableSelection.SkyTelepad when entities.SkyTelepadId.IsValid =>
@@ -628,9 +632,40 @@ public sealed class LocalPlayableSession : IDisposable
                                 Resolve(world, entities.FallbackLabSignId),
                             _ => Entity.Null,
                         };
+                        bool swordInteraction = interactionPressed && target.IsValid &&
+                            game.WorldState.TryReadPublic(
+                                world, target, out WorldPublicDescriptor targetDescriptor) &&
+                            targetDescriptor.PrefabId == GameWorldPublicPrefabIds.IronSword;
+                        GamePlayerCommand effective = swordInteraction
+                            ? admitted with
+                            {
+                                HeldActions = admitted.HeldActions & ~GamePlayerActions.Interact,
+                                PressedActions = admitted.PressedActions & ~GamePlayerActions.Interact,
+                            }
+                            : admitted;
                         game.WorldActions.ApplyPlayerCommand(
-                            world, game.WorldState, actor, admitted, target,
+                            world, game.WorldState, actor, effective, target,
                             out GamePlayerCommandResult result);
+                        if (swordInteraction)
+                        {
+                            result = result with
+                            {
+                                Interaction = game.Items.TryPickup(
+                                    world,
+                                    game.WorldState,
+                                    game.Inventory,
+                                    actor,
+                                    target,
+                                    Resolve(world, entities.BackpackId)),
+                            };
+                        }
+                        if ((admitted.PressedActions & GamePlayerActions.Primary) != 0)
+                        {
+                            result = result with
+                            {
+                                Primary = game.Items.TryUsePrimary(world, game.Inventory, actor),
+                            };
+                        }
                         if (result.WasAdmitted && captured.FaceRequested &&
                             (!captured.FacingRequiresAcceptedLocomotion ||
                              result.Locomotion == GameWorldActionStatus.Accepted))
@@ -1067,7 +1102,9 @@ public sealed class LocalPlayableSession : IDisposable
         scene.WelcomeSign,
         scene.WelcomeSignId,
         scene.FallbackLabSign,
-        scene.FallbackLabSignId);
+        scene.FallbackLabSignId,
+        scene.IronSwordSpawner,
+        scene.IronSwordSpawnerId);
 
     private static Entity ResolveNearestFarGate(
         EcsWorld world,

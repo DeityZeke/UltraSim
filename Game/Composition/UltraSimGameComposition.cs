@@ -15,6 +15,7 @@ public sealed class GameStaging
     public GameStaging(
         EcsWorld world,
         InventoryGenerationState inventory,
+        GameItemGenerationState items,
         GameContent content,
         GameWorldState worldState,
         GameWorldActions worldActions,
@@ -23,6 +24,7 @@ public sealed class GameStaging
     {
         World = world ?? throw new ArgumentNullException(nameof(world));
         Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
+        Items = items ?? throw new ArgumentNullException(nameof(items));
         Content = content ?? throw new ArgumentNullException(nameof(content));
         WorldState = worldState ?? throw new ArgumentNullException(nameof(worldState));
         WorldActions = worldActions ?? throw new ArgumentNullException(nameof(worldActions));
@@ -32,6 +34,7 @@ public sealed class GameStaging
 
     public EcsWorld World { get; }
     public InventoryGenerationState Inventory { get; }
+    public GameItemGenerationState Items { get; }
     public GameContent Content { get; }
     public GameWorldState WorldState { get; }
     public GameWorldActions WorldActions { get; }
@@ -92,12 +95,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
     public void Configure(ServerGenerationBuilder generation)
     {
         GameContent content = CompileContent(generation.World);
+        var items = new GameItemGenerationState(generation.World, content);
         (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
             PrepareSimulation(generation.World, _runtimeProfile);
         GameWorldState worldState = CreateWorldState(generation.World, content);
         generation.SetGameState(new GameGenerationState(
             new AccountingStore(),
-            new InventoryGenerationState(generation.World, content, _inventoryLimits),
+            new InventoryGenerationState(generation.World, content, _inventoryLimits, items),
+            items,
             content,
             worldState,
             simulation,
@@ -116,12 +121,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         try
         {
             GameContent content = CompileContent(world);
+            var items = new GameItemGenerationState(world, content);
             (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
                 PrepareSimulation(world, _runtimeProfile);
             var worldState = new GameWorldState(world);
             return new GameStaging(
                 world,
-                new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
+                new InventoryGenerationState(world, content, limits ?? _inventoryLimits, items),
+                items,
                 content,
                 worldState,
                 CreateWorldActions(world, worldState),
@@ -144,12 +151,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IGuestAdmissio
         try
         {
             GameContent content = CompileContent(world);
+            var items = new GameItemGenerationState(world, content);
             (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
                 PrepareSimulation(world, _runtimeProfile);
             GameWorldState worldState = CreateWorldState(world, content);
             return new GameStaging(
                 world,
-                new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
+                new InventoryGenerationState(world, content, limits ?? _inventoryLimits, items),
+                items,
                 content,
                 worldState,
                 CreateWorldActions(world, worldState),

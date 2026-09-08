@@ -35,7 +35,9 @@ supersedes the historical Client F0.6 content-integration gate. F0.5 also closes
 reopened-cache, and content-backed compiled-UI source convergence. M0.0 now closes the first shared
 multi-participant authority: one dedicated server serves three remote guests, and one Complete
 client adds two remote Online guests to its already-running packet-free local world without
-replacing the authoritative generation.
+replacing the authoritative generation. Inventory I0.12 now closes the first persistent rolled
+world-item vertical: a respawning Iron Sword retains one identity and rolled result through world,
+owner-private Inventory, Main Hand, accepted Primary, drop, and another participant's pickup.
 
 The demo has two purposes:
 
@@ -905,6 +907,18 @@ A training dummy may exist as a swing target without taking damage.
 Round 1 swing does not imply hitpoints, damage, Combat authority, death, or PvP. Those belong to
 Round 2.
 
+The first owning implementation checkpoint is Inventory I0.12. It uses a respawning Iron Sword to
+prove one-time deterministic instance rolls, durable rolled values, same-entity world/contained/
+equipped/world transitions, owner-private Inventory projection, public disappearance/reappearance,
+and an admitted no-damage Primary swing. Respawn creates a new item; it never recalls or rerolls an
+item already taken by a participant.
+
+I0.12 deliberately stops before a generalized cold public Object Property List protocol and before
+the complete X/Y animation set. Inventory selection/detail presentation may show the bounded
+authoritative rolled values already disclosed in its owner-private model. World hover/property
+caching and full public swing
+animation are follow-on consumers, not permission to place item stats in every hot public record.
+
 ---
 
 # 12. Render-distance setting
@@ -1556,7 +1570,11 @@ then prioritize the first meaningful remote vertical:
          real other-player F0.4 presentation, Chat, owner isolation
 
 then continue remaining Round 1 consumers as earned:
-    animation/pickup/inventory swing
+    I0.12 persistent rolled world-item / pickup / Inventory / equip / drop  CLOSED
+          + minimum owner-result swing cue
+
+then continue:
+    X/Y content-backed animation + public action realization
     Global/system Chat
     diagnostics/Server Monitor/test markers
 

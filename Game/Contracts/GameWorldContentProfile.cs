@@ -51,6 +51,7 @@ public static class GameWorldPublicPrefabIds
     public const uint FarGate = 6;
     public const uint InformationalSign = 7;
     public const uint CharacterMale = 8;
+    public const uint IronSword = 9;
 }
 
 /// <summary>

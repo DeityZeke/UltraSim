@@ -32,7 +32,9 @@ public readonly record struct GamePlayableWorldEntities(
     Entity WelcomeSign,
     PersistentEntityId WelcomeSignId,
     Entity FallbackLabSign,
-    PersistentEntityId FallbackLabSignId);
+    PersistentEntityId FallbackLabSignId,
+    Entity IronSwordSpawner,
+    PersistentEntityId IronSwordSpawnerId);
 
 /// <summary>
 /// Shared authoritative Concept Demo structure created once per Game generation. These identities
@@ -47,6 +49,7 @@ public readonly record struct GamePlayableWorldScene(
     Entity FarReturnGate,
     Entity WelcomeSign,
     Entity FallbackLabSign,
+    Entity IronSwordSpawner,
     PersistentEntityId CabinDoorId,
     PersistentEntityId CabinChestId,
     PersistentEntityId WoodlandAnimalId,
@@ -54,11 +57,13 @@ public readonly record struct GamePlayableWorldScene(
     PersistentEntityId CentralFarGateId,
     PersistentEntityId FarReturnGateId,
     PersistentEntityId WelcomeSignId,
-    PersistentEntityId FallbackLabSignId)
+    PersistentEntityId FallbackLabSignId,
+    PersistentEntityId IronSwordSpawnerId)
 {
     public bool IsValid => CabinDoorId.IsValid && CabinChestId.IsValid &&
         WoodlandAnimalId.IsValid && SkyTelepadId.IsValid && CentralFarGateId.IsValid &&
-        FarReturnGateId.IsValid && WelcomeSignId.IsValid && FallbackLabSignId.IsValid;
+        FarReturnGateId.IsValid && WelcomeSignId.IsValid && FallbackLabSignId.IsValid &&
+        IronSwordSpawnerId.IsValid;
 }
 
 /// <summary>Participant-owned playable/inventory identities inside one shared Game generation.</summary>
@@ -97,6 +102,7 @@ public readonly record struct GamePlayerCommandResult(
     GameWorldActionStatus Admission,
     GameWorldActionStatus Locomotion,
     GameWorldActionStatus Jump,
+    GameWorldActionStatus Primary,
     GameWorldActionStatus Interaction,
     WorldPosition Position,
     bool DoorIsOpen)
@@ -461,6 +467,7 @@ public sealed class GameWorldActions
             GameWorldActionStatus.Accepted,
             locomotion,
             jump,
+            GameWorldActionStatus.NotRequested,
             interaction,
             current,
             doorIsOpen);
@@ -1470,6 +1477,7 @@ public static class GamePlayableWorld
     public static WorldPosition FarReturnGatePosition => FromGlobal(FarIslandCenterXMillimeters, 20_000);
     public static WorldPosition FarGateDestination => FromGlobal(FarIslandCenterXMillimeters, 16_000);
     public static WorldPosition WelcomeSignPosition => FromGlobal(14_000, 6_000);
+    public static WorldPosition IronSwordSpawnerPosition => FromGlobal(14_000, 7_000);
     public static WorldPosition FallbackLabSignPosition => FromGlobal(7_500, -1_000);
     public static WorldPosition FallbackLabApproachPosition => FromGlobal(7_500, 1_000);
     public static WorldPosition FallbackLabCorrectPosition => FromGlobal(3_000, -4_000);
@@ -1585,11 +1593,15 @@ public static class GamePlayableWorld
             !world.TryInstantiate(game.Content.InformationalSign, out Entity fallbackLabSign) ||
             !game.WorldState.TrySetPosition(world, fallbackLabSign, FallbackLabSignPosition))
             throw new InvalidOperationException("The shared informational signs could not be created.");
+        if (!game.Items.TryCreateIronSwordSpawner(
+                world, game.WorldState, IronSwordSpawnerPosition, out Entity swordSpawner, out _))
+            throw new InvalidOperationException("The shared Iron Sword spawner could not be created.");
 
         game.WorldActions.RegisterPlayableDynamicBlocker(world, game.WorldState, door);
         game.WorldActions.RegisterPlayableDynamicBlocker(world, game.WorldState, chest);
         return new GamePlayableWorldScene(
             door, chest, animal, telepad, centralGate, returnGate, welcomeSign, fallbackLabSign,
+            swordSpawner,
             world.GetOrAssignPersistentId(door),
             world.GetOrAssignPersistentId(chest),
             world.GetOrAssignPersistentId(animal),
@@ -1597,7 +1609,8 @@ public static class GamePlayableWorld
             world.GetOrAssignPersistentId(centralGate),
             world.GetOrAssignPersistentId(returnGate),
             world.GetOrAssignPersistentId(welcomeSign),
-            world.GetOrAssignPersistentId(fallbackLabSign));
+            world.GetOrAssignPersistentId(fallbackLabSign),
+            world.GetOrAssignPersistentId(swordSpawner));
     }
 
     /// <summary>Adds one participant-owned playable and inventory to an existing shared scene.</summary>
@@ -1673,6 +1686,8 @@ public static class GamePlayableWorld
             Entity.Null,
             default,
             Entity.Null,
+            default,
+            Entity.Null,
             default);
     }
 
@@ -1696,6 +1711,9 @@ public static class GamePlayableWorld
             !world.TryInstantiate(game.Content.InformationalSign, out Entity fallbackLabSign) ||
             !game.WorldState.TrySetPosition(world, fallbackLabSign, FallbackLabSignPosition))
             throw new InvalidOperationException("The Concept Demo informational signs could not be created.");
+        if (!game.Items.TryCreateIronSwordSpawner(
+                world, game.WorldState, IronSwordSpawnerPosition, out Entity swordSpawner, out _))
+            throw new InvalidOperationException("The Concept Demo Iron Sword spawner could not be created.");
         return entities with
         {
             SkyTelepad = telepad,
@@ -1708,6 +1726,8 @@ public static class GamePlayableWorld
             WelcomeSignId = world.GetOrAssignPersistentId(welcomeSign),
             FallbackLabSign = fallbackLabSign,
             FallbackLabSignId = world.GetOrAssignPersistentId(fallbackLabSign),
+            IronSwordSpawner = swordSpawner,
+            IronSwordSpawnerId = world.GetOrAssignPersistentId(swordSpawner),
         };
     }
 

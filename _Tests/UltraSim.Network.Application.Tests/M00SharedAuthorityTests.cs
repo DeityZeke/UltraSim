@@ -8,6 +8,7 @@ using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
+using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.UI;
@@ -269,6 +270,113 @@ internal static class M00SharedAuthorityTests
                 Equal(3, CountHumanActors(clients[index].Session.WorldCache));
             }
 
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                TryFindPublic(
+                    client.Session.WorldCache,
+                    GameWorldPublicPrefabIds.IronSword,
+                    out _)));
+            True(TryFindPublic(
+                alice.Session.WorldCache,
+                GameWorldPublicPrefabIds.IronSword,
+                out WorldPublicRecord sharedSword));
+            True(alice.Session.Playable.TrySubmitCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+                sharedSword.Id));
+            ulong pickupSequence = alice.Session.Playable.Input.Snapshot().LastSequence;
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == pickupSequence &&
+                alice.Session.Playable.GetSnapshot().Interaction == RemotePlayableActionStatus.Accepted &&
+                clients.All(client => !ContainsPublic(client.Session.WorldCache, sharedSword.Id)));
+
+            True(alice.Session.Playable.TrySubmitCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+                flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+            ulong inventorySequence = alice.Session.Playable.Input.Snapshot().LastSequence;
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == inventorySequence &&
+                alice.Session.UiClient.OpenViewCount == 1);
+            var aliceInventory = new UiViewInstanceId(1);
+            UiRowId swordRow = FindRow(
+                alice.Session.UiClient.GetRows(aliceInventory, InventoryUi.Items), "Iron Sword");
+            ulong beforeSelection = alice.Session.UiClient.GetView(aliceInventory).LastSequence;
+            alice.Session.UiClient.SubmitAction(aliceInventory, InventoryUi.Select, swordRow);
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.UiClient.GetView(aliceInventory).LastSequence > beforeSelection &&
+                alice.Session.UiClient.GetActionState(aliceInventory, InventoryUi.Equip).Enabled);
+            string aliceSwordDetails =
+                alice.Session.UiClient.GetValue(aliceInventory, InventoryUi.Details).Text ?? string.Empty;
+            True(aliceSwordDetails.Contains("Damage ", StringComparison.Ordinal));
+            True(aliceSwordDetails.Contains("Quality ", StringComparison.Ordinal));
+            True(aliceSwordDetails.Contains("Durability ", StringComparison.Ordinal));
+            alice.Session.UiClient.SubmitAction(aliceInventory, InventoryUi.Equip);
+            DriveUntil(host, authority, clients, () =>
+            {
+                UiListRow row = alice.Session.UiClient.GetRows(aliceInventory, InventoryUi.Items)
+                    .ToArray().Single(candidate => candidate.Id == swordRow);
+                RemotePlayableClientSnapshot owner = alice.Session.Playable.GetSnapshot();
+                return string.Equals(row.Values[2].Text, "Main Hand", StringComparison.Ordinal) &&
+                    TryFindPublicNear(
+                        alice.Session.WorldCache,
+                        GameWorldPublicPrefabIds.IronSword,
+                        owner.Position.GlobalXMillimeters,
+                        owner.Position.GlobalZMillimeters,
+                        250,
+                        out _);
+            });
+            RemotePlayableClientSnapshot equippedOwner = alice.Session.Playable.GetSnapshot();
+            True(TryFindPublicNear(
+                alice.Session.WorldCache,
+                GameWorldPublicPrefabIds.IronSword,
+                equippedOwner.Position.GlobalXMillimeters,
+                equippedOwner.Position.GlobalZMillimeters,
+                250,
+                out WorldPublicRecord equippedSword));
+            True(equippedSword.Id != sharedSword.Id);
+            True(alice.Session.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.Primary, true)));
+            ulong primarySequence = alice.Session.Playable.Input.Snapshot().LastSequence;
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == primarySequence &&
+                alice.Session.Playable.GetSnapshot().Primary == RemotePlayableActionStatus.Accepted);
+            ulong beforeDropSelection = alice.Session.UiClient.GetView(aliceInventory).LastSequence;
+            alice.Session.UiClient.SubmitAction(aliceInventory, InventoryUi.Select, swordRow);
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.UiClient.GetView(aliceInventory).LastSequence > beforeDropSelection &&
+                alice.Session.UiClient.GetActionState(aliceInventory, InventoryUi.Drop).Enabled);
+            alice.Session.UiClient.SubmitAction(aliceInventory, InventoryUi.Drop);
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                ContainsPublic(client.Session.WorldCache, equippedSword.Id)));
+
+            True(bob.Session.Playable.TrySubmitCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.Interact, true),
+                equippedSword.Id));
+            ulong bobPickupSequence = bob.Session.Playable.Input.Snapshot().LastSequence;
+            DriveUntil(host, authority, clients, () =>
+                bob.Session.Playable.GetSnapshot().LastProcessedCommandSequence == bobPickupSequence &&
+                bob.Session.Playable.GetSnapshot().Interaction == RemotePlayableActionStatus.Accepted &&
+                clients.All(client => !ContainsPublic(client.Session.WorldCache, equippedSword.Id)));
+            True(bob.Session.Playable.TrySubmitCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+                flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+            ulong bobInventorySequence = bob.Session.Playable.Input.Snapshot().LastSequence;
+            DriveUntil(host, authority, clients, () =>
+                bob.Session.Playable.GetSnapshot().LastProcessedCommandSequence == bobInventorySequence &&
+                bob.Session.UiClient.OpenViewCount == 1);
+            var bobItemView = new UiViewInstanceId(1);
+            UiRowId bobSwordRow =
+                FindRow(bob.Session.UiClient.GetRows(bobItemView, InventoryUi.Items), "Iron Sword");
+            ulong bobBeforeSelection = bob.Session.UiClient.GetView(bobItemView).LastSequence;
+            bob.Session.UiClient.SubmitAction(bobItemView, InventoryUi.Select, bobSwordRow);
+            DriveUntil(host, authority, clients, () =>
+                bob.Session.UiClient.GetView(bobItemView).LastSequence > bobBeforeSelection);
+            Equal(
+                aliceSwordDetails,
+                bob.Session.UiClient.GetValue(bobItemView, InventoryUi.Details).Text);
+
             RemotePlayableClientSnapshot aliceBefore = alice.Session.Playable.GetSnapshot();
             RemotePlayableClientSnapshot bobBefore = bob.Session.Playable.GetSnapshot();
             True(alice.Session.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
@@ -276,7 +384,8 @@ internal static class M00SharedAuthorityTests
                 GamePlayerActions.None,
                 true)));
             DriveUntil(host, authority, clients, () =>
-                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == 1 &&
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence ==
+                    alice.Session.Playable.Input.Snapshot().LastSequence &&
                 alice.Session.Playable.GetSnapshot().Position.GlobalXMillimeters !=
                     aliceBefore.Position.GlobalXMillimeters);
             Equal(bobBefore.Position.GlobalXMillimeters,
@@ -297,8 +406,9 @@ internal static class M00SharedAuthorityTests
             Equal(generation, authority.GetSnapshot().GenerationId);
             True(alice.Session.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
                 GameLocomotionUpdate.Stop, GamePlayerActions.None, true)));
+            ulong stopSequence = alice.Session.Playable.Input.Snapshot().LastSequence;
             DriveUntil(host, authority, clients, () =>
-                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == 2);
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == stopSequence);
             True(carol.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active);
 
             ClientNode bobAgain = ClientNode.Connect(root, "bob-again", host, identity);
@@ -317,7 +427,8 @@ internal static class M00SharedAuthorityTests
                 $"EVIDENCE M0.0 dedicated_shared generation={evidence.GenerationId} " +
                 $"participants={evidence.ParticipantCount}/{evidence.MaximumParticipants} " +
                 $"joins={evidence.Joins} leaves={evidence.Leaves} ticks={evidence.Ticks} " +
-                "public_actors=3 chat_recipients=3 independent_commands=pass reconnect=pass");
+                "public_actors=3 chat_recipients=3 independent_commands=pass reconnect=pass " +
+                "item_world_inventory_equip_primary_drop_other_owner=pass");
         }
         finally
         {
@@ -446,6 +557,82 @@ internal static class M00SharedAuthorityTests
                     actors++;
         }
         return actors;
+    }
+
+    private static bool TryFindPublic(
+        ClientWorldSemanticCache cache,
+        uint prefabId,
+        out WorldPublicRecord result)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        True(cache.TryCopyResidentInfo(chunks, out int count, out _));
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!cache.TryGetResidentView(chunks[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (WorldPublicRecord record in view.PublicRecords)
+            {
+                if (record.PrefabId != prefabId) continue;
+                result = record;
+                return true;
+            }
+        }
+        result = default;
+        return false;
+    }
+
+    private static bool ContainsPublic(
+        ClientWorldSemanticCache cache,
+        WorldPublicEntityId id)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        True(cache.TryCopyResidentInfo(chunks, out int count, out _));
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!cache.TryGetResidentView(chunks[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (WorldPublicRecord record in view.PublicRecords)
+                if (record.Id == id) return true;
+        }
+        return false;
+    }
+
+    private static bool TryFindPublicNear(
+        ClientWorldSemanticCache cache,
+        uint prefabId,
+        long x,
+        long z,
+        long maximumDistanceMillimeters,
+        out WorldPublicRecord result)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        True(cache.TryCopyResidentInfo(chunks, out int count, out _));
+        Int128 maximumSquared = (Int128)maximumDistanceMillimeters * maximumDistanceMillimeters;
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!cache.TryGetResidentView(chunks[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (WorldPublicRecord record in view.PublicRecords)
+            {
+                if (record.PrefabId != prefabId) continue;
+                Int128 dx = (Int128)record.Position.GlobalXMillimeters - x;
+                Int128 dz = (Int128)record.Position.GlobalZMillimeters - z;
+                if (dx * dx + dz * dz > maximumSquared) continue;
+                result = record;
+                return true;
+            }
+        }
+        result = default;
+        return false;
+    }
+
+    private static UiRowId FindRow(ReadOnlySpan<UiListRow> rows, string name)
+    {
+        foreach (UiListRow row in rows)
+            if (row.Values.Length != 0 &&
+                string.Equals(row.Values[0].Text, name, StringComparison.Ordinal))
+                return row.Id;
+        throw new InvalidOperationException($"The UI row '{name}' was unavailable.");
     }
 
     private static string DescribePublic(ClientWorldSemanticCache cache)

@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
     ("PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache", PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache),
+    ("ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath", ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath),
     ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
     ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
@@ -250,6 +251,112 @@ static void PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache()
         $"fresh_cached={freshClient.CachedDefinitionCount}");
 }
 
+static void ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath()
+{
+    using Fixture fixture = Fixture.CreateConcept();
+    ClientWorldSemanticCache cache = fixture.CreateCacheAround(new SpatialChunkCoord(0, 0));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return TryFindPublic(cache, GameWorldPublicPrefabIds.IronSword, out _);
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+    True(TryFindPublic(
+        cache, GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord worldSword));
+
+    var input = new ClientWorldInputSequencer(fixture.Session.ControlSession);
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Interact,
+            true),
+        out GamePlayerCommand pickup));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        pickup,
+        LocalPlayableSelection.IronSword,
+        false,
+        default,
+        false,
+        worldSword.Id)));
+    DriveUntil(() =>
+    {
+        fixture.Session.PumpWorld(cache);
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastCommandSequence == pickup.Sequence &&
+            view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+            !ContainsPublic(cache, worldSword.Id);
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(
+        client,
+        ClientStandardUiLibrary.Resolve);
+    True(fixture.Session.TryRequestOpenInventory(1));
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 1;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    UiViewInstanceId inventory = renderer.LastInstance;
+    UiRowId swordRow = FindRow(
+        client.GetRows(inventory, InventoryUi.Items),
+        "Iron Sword");
+    client.SubmitAction(inventory, InventoryUi.Select, swordRow);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.GetActionState(inventory, InventoryUi.Equip).Enabled;
+    });
+    string details = client.GetValue(inventory, InventoryUi.Details).Text ?? string.Empty;
+    True(details.Contains("Damage ", StringComparison.Ordinal));
+    True(details.Contains("Quality ", StringComparison.Ordinal));
+    True(details.Contains("Durability ", StringComparison.Ordinal));
+
+    client.SubmitAction(inventory, InventoryUi.Equip);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        fixture.Session.PumpWorld(cache);
+        UiListRow row = client.GetRows(inventory, InventoryUi.Items)
+            .ToArray().Single(candidate => candidate.Id == swordRow);
+        return string.Equals(row.Values[2].Text, "Main Hand", StringComparison.Ordinal) &&
+            TryFindPublic(cache, GameWorldPublicPrefabIds.IronSword, out _);
+    });
+
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Primary,
+            true),
+        out GamePlayerCommand primary));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        primary, LocalPlayableSelection.None, false, default, false)));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastCommandSequence == primary.Sequence &&
+        view.LastCommandResult.Primary == GameWorldActionStatus.Accepted);
+
+    client.SubmitAction(inventory, InventoryUi.Select, swordRow);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.GetActionState(inventory, InventoryUi.Drop).Enabled;
+    });
+    client.SubmitAction(inventory, InventoryUi.Drop);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        fixture.Session.PumpWorld(cache);
+        return !client.GetRows(inventory, InventoryUi.Items)
+                .ToArray().Any(candidate => candidate.Id == swordRow) &&
+            TryFindPublic(cache, GameWorldPublicPrefabIds.IronSword, out _);
+    });
+
+    Console.WriteLine(
+        $"EVIDENCE I0.12 local_packet_free pickup={pickup.Sequence} " +
+        $"primary={primary.Sequence} details='{details}'");
+}
+
 static void ConceptDemoSignUsesAuthoritativeInformationalUi()
 {
     using Fixture fixture = Fixture.CreateConcept();
@@ -456,6 +563,53 @@ static bool ContainsPrefab(ClientWorldSemanticCache cache, uint prefab)
             if (row.PrefabId == prefab) return true;
     }
     return false;
+}
+
+static bool ContainsPublic(ClientWorldSemanticCache cache, WorldPublicEntityId id)
+{
+    var chunks = new ClientSemanticChunkInfo[25];
+    if (!cache.TryCopyResidentInfo(chunks, out int count, out _)) return false;
+    for (int index = 0; index < count; index++)
+    {
+        if (!cache.TryGetResidentView(chunks[index].Handle, out ClientSemanticChunkView view)) continue;
+        foreach (ref readonly WorldPublicRecord row in view.PublicRecords)
+            if (row.Id == id) return true;
+    }
+    return false;
+}
+
+static bool TryFindPublic(
+    ClientWorldSemanticCache cache,
+    uint prefab,
+    out WorldPublicRecord record)
+{
+    var chunks = new ClientSemanticChunkInfo[25];
+    if (cache.TryCopyResidentInfo(chunks, out int count, out _))
+    {
+        for (int index = 0; index < count; index++)
+        {
+            if (!cache.TryGetResidentView(
+                    chunks[index].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (ref readonly WorldPublicRecord candidate in view.PublicRecords)
+            {
+                if (candidate.PrefabId != prefab) continue;
+                record = candidate;
+                return true;
+            }
+        }
+    }
+    record = default;
+    return false;
+}
+
+static UiRowId FindRow(ReadOnlySpan<UiListRow> rows, string name)
+{
+    foreach (ref readonly UiListRow row in rows)
+        if (row.Values.Length != 0 &&
+            string.Equals(row.Values[0].Text, name, StringComparison.Ordinal))
+            return row.Id;
+    throw new InvalidOperationException($"UI row '{name}' was not found.");
 }
 
 static void DriveUntil(Func<bool> condition, int milliseconds = 5_000, Func<string>? failure = null)

@@ -799,7 +799,9 @@ public sealed class RemoteGuestPlayableApplication :
             scene.WelcomeSign,
             scene.WelcomeSignId,
             scene.FallbackLabSign,
-            scene.FallbackLabSignId);
+            scene.FallbackLabSignId,
+            scene.IronSwordSpawner,
+            scene.IronSwordSpawnerId);
         _controlSession = _sharedParticipant.ControlSession;
         _playerPublicId = _sharedParticipant.PublicEntity;
         _ui = new RemoteUiSemanticPort(
@@ -1163,7 +1165,10 @@ public sealed class RemoteGuestPlayableApplication :
         bool chestInteraction = interactionPressed && target.IsValid &&
             game.WorldState.TryReadPublic(world, target, out WorldPublicDescriptor targetDescriptor) &&
             targetDescriptor.PrefabId == GameWorldPublicPrefabIds.WorldChest;
-        GamePlayerCommand admitted = chestInteraction
+        bool swordInteraction = interactionPressed && target.IsValid &&
+            game.WorldState.TryReadPublic(world, target, out targetDescriptor) &&
+            targetDescriptor.PrefabId == GameWorldPublicPrefabIds.IronSword;
+        GamePlayerCommand admitted = chestInteraction || swordInteraction
             ? command with
             {
                 HeldActions = command.HeldActions & ~GamePlayerActions.Interact,
@@ -1185,6 +1190,17 @@ public sealed class RemoteGuestPlayableApplication :
 
         if (chestInteraction)
             result = result with { Interaction = ToggleBreadContainer(world, game) };
+        else if (swordInteraction)
+            result = result with
+            {
+                Interaction = game.Items.TryPickup(
+                    world,
+                    game.WorldState,
+                    game.Inventory,
+                    player,
+                    target,
+                    Resolve(world, _entities.BackpackId)),
+            };
         else if (target.IsValid && result.Interaction == GameWorldActionStatus.Accepted &&
                  game.WorldState.TryReadPublic(
                      world, target, out WorldPublicDescriptor descriptor) &&
@@ -1197,6 +1213,9 @@ public sealed class RemoteGuestPlayableApplication :
                     ? PostCommandSemantic.FallbackLabSign
                     : PostCommandSemantic.WelcomeSign);
         }
+
+        if ((command.PressedActions & GamePlayerActions.Primary) != 0)
+            result = result with { Primary = game.Items.TryUsePrimary(world, game.Inventory, player) };
 
         if (result.WasAdmitted &&
             (remote.Flags & RemotePlayableCommandFlags.OpenInventoryRequested) != 0)
@@ -1358,6 +1377,7 @@ public sealed class RemoteGuestPlayableApplication :
             Admission = Map(_lastCommandResult.Admission),
             Locomotion = Map(_lastCommandResult.Locomotion),
             Jump = Map(_lastCommandResult.Jump),
+            Primary = Map(_lastCommandResult.Primary),
             Interaction = Map(_lastCommandResult.Interaction),
             Body = (byte)_guestIdentity.Body,
         };

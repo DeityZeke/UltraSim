@@ -19,6 +19,13 @@ Apple, Iron Sword, Backpack, and World Chest. Inventory reasons about facts—it
 quantity, stack policy, equipment capability, container, and relationships—not
 hard-coded item-kind switches.
 
+I0.12 keeps the Iron Sword prefab as a constant ECS template and places the first random initial
+values in a concrete Game spawn service. World seed, persistent spawner identity, and durable spawn
+ordinal deterministically produce one roll; the resulting damage, durability, quality, and element
+are stored as persistent component values. Restore preserves those results rather than rerunning the
+algorithm. The same entity crosses World, Inventory, Main Hand, and World state; the spawner never
+recalls a previously taken item.
+
 Container content also selects a stable Inventory rule profile. The server may
 retain those per-container selections or force one uniform profile. Effective
 item-count capacity is validated against content policy and generation limits;

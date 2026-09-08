@@ -91,3 +91,9 @@ F0.5 lets composition supply the exact passive stock Inventory definition when a
 client runtime. The definition is cached before use and the local Game authority emits the ordinary
 `HotOpen`; without that exact stock capability it retains the accepted cold-open path. Dynamic
 model values/actions remain Game-owned, and every new local session owns a fresh bounded UI cache.
+
+I0.12 reuses the same boundary for an exact public-item nomination, owner-private Inventory details,
+Drop, and the admitted Primary result. The local command may carry a disclosed
+`WorldPublicEntityId`; the authority resolves and revalidates its current kind/range before moving
+the same persistent sword entity into the player's backpack. No ECS handle, rolled stat, or drop
+position crosses from Godot into authority.

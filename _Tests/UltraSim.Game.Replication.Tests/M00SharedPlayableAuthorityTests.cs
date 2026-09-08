@@ -2,6 +2,7 @@ using UltraSim.ECS;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
+using UltraSim.Game.Inventory;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -9,6 +10,94 @@ namespace UltraSim.Game.Replication.Tests;
 
 internal static class M00SharedPlayableAuthorityTests
 {
+    internal static void SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner()
+    {
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(2));
+        Check.True(authority.Join(
+            new ParticipantId(201),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Alice"),
+            out SharedPlayableParticipant alice).IsEntered);
+        Check.True(authority.Join(
+            new ParticipantId(202),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanMale, "Bob"),
+            out SharedPlayableParticipant bob).IsEntered);
+        Check.True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, long>(
+            static (_, _, game) => game.Items.ReservedBytes,
+            out long itemReservedBytes));
+
+        SpawnCapture first = ReadActiveSpawn(authority);
+        Check.Equal(0U, first.Weapon.SpawnOrdinal);
+        Check.True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity aliceActor = Resolve(world, alice.Entities.PlayerId);
+                Entity aliceBackpack = Resolve(world, alice.Entities.BackpackId);
+                Check.Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, aliceActor, first.Item, aliceBackpack));
+                Check.True(world.TryGetPersistentId(first.Item, out PersistentEntityId retained));
+                Check.Equal(first.PersistentId, retained);
+                Check.True(game.Items.TryReadWeapon(world, first.Item, out GameWeaponInstance retainedWeapon));
+                Check.Equal(first.Weapon, retainedWeapon);
+                Check.True(game.Inventory.TryReadItem(world, first.Item, out InventoryItem contained));
+                Check.Equal(aliceBackpack, contained.Parent);
+                Check.True(game.WorldState.TryReadPublic(
+                    world, first.Item, out WorldPublicDescriptor hidden));
+                Check.Equal(WorldPublicStateFlags.None, hidden.Flags);
+                Check.True(game.Inventory.Equip(
+                    world,
+                    first.Item,
+                    aliceBackpack,
+                    aliceActor,
+                    InventoryEquipSlot.MainHand).Accepted);
+                Check.Equal(
+                    GameWorldActionStatus.Accepted,
+                    game.Items.TryUsePrimary(world, game.Inventory, aliceActor));
+                return true;
+            }, out bool pickedUp) && pickedUp);
+
+        for (int tick = 0; tick < GameItemGenerationState.RespawnDelayTicks; tick++)
+            authority.Runtime.Tick();
+
+        SpawnCapture second = ReadActiveSpawn(authority);
+        Check.Equal(1U, second.Weapon.SpawnOrdinal);
+        Check.False(first.PersistentId == second.PersistentId);
+        Check.False(first.Weapon.Equals(second.Weapon));
+        Check.True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity aliceActor = Resolve(world, alice.Entities.PlayerId);
+                Entity bobActor = Resolve(world, bob.Entities.PlayerId);
+                Entity bobBackpack = Resolve(world, bob.Entities.BackpackId);
+                Check.True(game.WorldState.TryReadPublic(
+                    world, first.Item, out WorldPublicDescriptor equipped));
+                Check.True((equipped.Flags & WorldPublicStateFlags.Visible) != 0);
+                Check.Equal(
+                    GameWorldActionStatus.Accepted,
+                    game.Items.TryDrop(world, game.WorldState, game.Inventory, aliceActor, first.Item));
+                Check.True(world.TryGetPersistentId(first.Item, out PersistentEntityId dropped));
+                Check.Equal(first.PersistentId, dropped);
+                Check.True(game.Items.TryReadWeapon(world, first.Item, out GameWeaponInstance droppedWeapon));
+                Check.Equal(first.Weapon, droppedWeapon);
+                Check.Equal(GameWorldActionStatus.Accepted, game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, bobActor, first.Item, bobBackpack));
+                Check.True(game.Inventory.TryReadItem(world, first.Item, out InventoryItem transferred));
+                Check.Equal(bobBackpack, transferred.Parent);
+                Check.True(world.TryGetPersistentId(first.Item, out PersistentEntityId transferredId));
+                Check.Equal(first.PersistentId, transferredId);
+                return true;
+            }, out bool transferred) && transferred);
+
+        Console.WriteLine(
+            $"EVIDENCE I0.12 shared_item first={first.PersistentId.Value} " +
+            $"roll0={Describe(first.Weapon)} second={second.PersistentId.Value} " +
+            $"roll1={Describe(second.Weapon)} respawn_ticks={GameItemGenerationState.RespawnDelayTicks} " +
+            $"reserved_bytes={itemReservedBytes} " +
+            "same_entity_world_inventory_equip_drop_other_owner=pass");
+        Check.True(authority.Leave(bob));
+        Check.True(authority.Leave(alice));
+    }
+
     internal static void OneGenerationOwnsIndependentParticipantsAndSurvivesLeave()
     {
         using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
@@ -128,6 +217,28 @@ internal static class M00SharedPlayableAuthorityTests
         return result;
     }
 
+    private static SpawnCapture ReadActiveSpawn(SharedPlayableAuthority authority)
+    {
+        Check.True(authority.Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+            SpawnCapture>((world, _, game) =>
+            {
+                Entity spawner = Resolve(world, authority.Scene.IronSwordSpawnerId);
+                Check.True(game.Items.TryReadSpawner(world, spawner, out GameItemSpawnerState state));
+                Check.True(state.ActiveItem.IsValid);
+                Check.True(game.Items.TryReadWeapon(
+                    world, state.ActiveItem, out GameWeaponInstance weapon));
+                Check.True(world.TryGetPersistentId(
+                    state.ActiveItem, out PersistentEntityId persistentId));
+                return new SpawnCapture(state.ActiveItem, persistentId, weapon);
+            }, out SpawnCapture result));
+        return result;
+    }
+
+    private static string Describe(in GameWeaponInstance weapon) =>
+        $"{weapon.DamageMinimum}-{weapon.DamageMaximum}/" +
+        $"{weapon.CurrentDurability}/{weapon.MaximumDurability}/" +
+        $"q{weapon.Quality}/{weapon.Element}/o{weapon.SpawnOrdinal}";
+
     private static void CheckHorizontalEqual(WorldPosition expected, WorldPosition actual)
     {
         Check.Equal(expected.GlobalXMillimeters, actual.GlobalXMillimeters);
@@ -138,4 +249,9 @@ internal static class M00SharedPlayableAuthorityTests
         world.TryResolvePersistentEntity(id, out Entity entity)
             ? entity
             : throw new InvalidOperationException($"Persistent entity {id} was unavailable.");
+
+    private readonly record struct SpawnCapture(
+        Entity Item,
+        PersistentEntityId PersistentId,
+        GameWeaponInstance Weapon);
 }

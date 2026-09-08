@@ -30,6 +30,57 @@ public struct GameCabinDoorState : IComponent<GameCabinDoorState>
     public int IsOpen;
 }
 
+/// <summary>Finite authoritative presentation/gameplay vocabulary for one rolled weapon.</summary>
+public enum GameWeaponElement : byte
+{
+    None = 0,
+    Fire = 1,
+    Cold = 2,
+    Lightning = 3,
+}
+
+/// <summary>
+/// Persistent one-time result of a Game-owned weapon spawn recipe. Restore reads these values;
+/// it never reruns the recipe or depends on the implementation that originally rolled them.
+/// </summary>
+[EcsComponent("game.item.weapon-instance", PersistenceId = 700608)]
+public struct GameWeaponInstance : IComponent<GameWeaponInstance>
+{
+    public ushort DamageMinimum;
+    public ushort DamageMaximum;
+    public ushort MaximumDurability;
+    public ushort CurrentDurability;
+    public byte Quality;
+    public GameWeaponElement Element;
+    public uint SpawnOrdinal;
+
+    public readonly bool IsCanonical() => DamageMinimum != 0 && DamageMaximum >= DamageMinimum &&
+        MaximumDurability != 0 && CurrentDurability <= MaximumDurability &&
+        Quality is >= 1 and <= 100 &&
+        Element is >= GameWeaponElement.None and <= GameWeaponElement.Lightning;
+}
+
+/// <summary>Persistent origin of a spawned item; identity is not ownership.</summary>
+[EcsComponent("game.item.spawn-origin", PersistenceId = 700609)]
+public struct GameSpawnedItem : IComponent<GameSpawnedItem>
+{
+    [PersistenceEntityReference]
+    public Entity Spawner;
+}
+
+/// <summary>
+/// Persistent respawn lineage. ActiveItem becomes null permanently for one pickup; a later ordinal
+/// creates a new entity instead of recalling or rerolling the prior instance.
+/// </summary>
+[EcsComponent("game.item.spawner", PersistenceId = 700610)]
+public struct GameItemSpawnerState : IComponent<GameItemSpawnerState>
+{
+    [PersistenceEntityReference]
+    public Entity ActiveItem;
+    public uint NextSpawnOrdinal;
+    public int RemainingRespawnTicks;
+}
+
 [EcsSchema(
     typeof(InventoryContainer),
     typeof(GameSimulationState),
@@ -39,6 +90,9 @@ public struct GameCabinDoorState : IComponent<GameCabinDoorState>
     typeof(WorldPositionComponent),
     typeof(WorldPublicComponent),
     typeof(GameCabinDoorState),
+    typeof(GameWeaponInstance),
+    typeof(GameSpawnedItem),
+    typeof(GameItemSpawnerState),
     typeof(InventoryEquipCapability),
     typeof(InventoryStackPolicy),
     typeof(InventoryGridPlacement),

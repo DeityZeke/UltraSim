@@ -44,12 +44,31 @@ public readonly record struct InventoryItemView(
     string DisplayName,
     InventoryEquipSlot EquipSlot,
     int Quantity,
-    InventoryPlacement Placement);
+    InventoryPlacement Placement,
+    string InstanceDescription);
+
+/// <summary>
+/// Optional concrete-Game projection of persistent instance facts. Inventory remains unaware of
+/// weapon/armor/affix schemas and merely carries the already-authorized bounded description.
+/// </summary>
+public interface IInventoryItemDescriptionProvider
+{
+    bool TryDescribe(EcsWorld world, Entity item, out string description);
+}
 
 /// <summary>Generation-owned capability exposing the derived Inventory state paired with its ECS world.</summary>
 public interface IInventoryGenerationStateProvider
 {
     InventoryGenerationState Inventory { get; }
+}
+
+/// <summary>
+/// Optional concrete-Game action for returning an owned item to authoritative world space. The
+/// Inventory UI can nominate an item, but only Game chooses and publishes its world placement.
+/// </summary>
+public interface IInventoryWorldItemActions : IInventoryGenerationStateProvider
+{
+    InventoryMutationResult DropOwnedItem(EcsWorld world, Entity item, Entity owner);
 }
 
 /// <summary>
@@ -67,12 +86,14 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
     private readonly ComponentLookup<InventoryEquipCapability> _equipLookup;
     private readonly ComponentLookup<InventoryGridPlacement> _gridPlacementLookup;
     private readonly ComponentLookup<InventoryGridFootprint> _gridFootprintLookup;
+    private readonly IInventoryItemDescriptionProvider? _descriptions;
     private bool _disposed;
 
     public InventoryGenerationState(
         EcsWorld world,
         IInventoryContentCatalog content,
-        InventoryLimits? limits = null)
+        InventoryLimits? limits = null,
+        IInventoryItemDescriptionProvider? descriptions = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         _content = content ?? throw new ArgumentNullException(nameof(content));
@@ -86,6 +107,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         _equipLookup = world.PrepareLookup<InventoryEquipCapability>();
         _gridPlacementLookup = world.PrepareLookup<InventoryGridPlacement>();
         _gridFootprintLookup = world.PrepareLookup<InventoryGridFootprint>();
+        _descriptions = descriptions;
         Limits = limits ?? InventoryLimits.Default;
         Limits.Validate();
         Index = new InventoryIndex(Limits);
@@ -577,6 +599,75 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return Accept(item, Entity.Null, "Destroy accepted.");
     }
 
+    /// <summary>
+    /// Moves one valid uncontained item into an Unplaced container without replacing its ECS or
+    /// persistent identity. World position/publication are concrete-Game concerns outside this
+    /// transaction.
+    /// </summary>
+    public InventoryMutationResult TakeWorldItem(EcsWorld world, Entity item, Entity destination)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(item) || !world.TryRead(item, _itemLookup, out InventoryItem value))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The world item is stale or missing.");
+        if (value.Parent.IsValid || value.EquipSlot != InventoryEquipSlot.None ||
+            world.Has(item, _gridPlacementLookup))
+            return Reject(InventoryMutationStatus.WrongSource, item, "The item is not an uncontained world item.");
+        if (!Index.TryGetContainerRules(destination, out InventoryEffectiveRules rules))
+            return Reject(InventoryMutationStatus.MissingContainer, item, "The destination container is missing.");
+        if (rules.PlacementMode != InventoryPlacementMode.Unplaced)
+            return Reject(InventoryMutationStatus.PlacementRequired, item,
+                "World pickup currently requires an Unplaced destination.");
+        if (!TryGetDefinition(world, item, out _) || !Index.CanAddContainedItem(destination))
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The destination cannot accept the world item.");
+
+        InventoryItem contained = value;
+        contained.Parent = destination;
+        contained.EquipSlot = InventoryEquipSlot.None;
+        if (!world.TryWrite(item, _itemLookup, contained))
+            throw new InvalidOperationException("A validated world pickup rejected its ECS update.");
+        if (!Index.TryAddItem(item, contained))
+            throw new InvalidOperationException("A validated world pickup was rejected by the index.");
+        return Accept(item, Entity.Null, "World item picked up.");
+    }
+
+    /// <summary>
+    /// Removes one item from an actor-owned container/equipment relationship and makes its
+    /// Inventory parent canonical-null. Concrete Game code chooses and validates the world anchor.
+    /// </summary>
+    public InventoryMutationResult DropToWorld(EcsWorld world, Entity item, Entity owner)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(owner))
+            return Reject(InventoryMutationStatus.MissingEquipOwner, item, "The item owner is missing.");
+        if (!world.IsAlive(item) || !world.TryRead(item, _itemLookup, out InventoryItem value))
+            return Reject(InventoryMutationStatus.MissingItem, item, "The item is stale or missing.");
+        bool authorized = value.EquipSlot != InventoryEquipSlot.None
+            ? value.Parent == owner
+            : Index.ContainsContainer(value.Parent) &&
+              TryGetContainerOwner(world, value.Parent, out Entity containerOwner) &&
+              containerOwner == owner;
+        if (!authorized)
+            return Reject(InventoryMutationStatus.UnauthorizedContainer, item,
+                "The item is not owned by the authorized actor.");
+        if (!Index.CanRemoveItem(item, value) || !TryGetDefinition(world, item, out InventoryItemDefinition definition))
+            return Reject(InventoryMutationStatus.InvariantViolation, item,
+                "The item and Inventory index disagree.");
+        if (world.Has(item, _gridPlacementLookup) &&
+            !TryTransitionPlacement(world, item, definition, add: false))
+            return Reject(InventoryMutationStatus.CapacityExceeded, item,
+                "The world-item ECS transition could not be reserved.");
+
+        InventoryItem worldItem = value;
+        worldItem.Parent = Entity.Null;
+        worldItem.EquipSlot = InventoryEquipSlot.None;
+        if (!world.TryWrite(item, _itemLookup, worldItem))
+            throw new InvalidOperationException("A validated item drop rejected its ECS update.");
+        if (!Index.TryRemoveItem(item, value))
+            throw new InvalidOperationException("A validated item drop was rejected by the index.");
+        return Accept(item, Entity.Null, "Item dropped into the world.");
+    }
+
     public InventoryMutationResult DestroyContainer(EcsWorld world, Entity container)
     {
         EnsureWorld(world);
@@ -628,7 +719,10 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             world.TryRead(item, _gridPlacementLookup, out InventoryGridPlacement grid)
                 ? InventoryPlacement.Grid(
                     grid.X, grid.Y, definition.Footprint.Width, definition.Footprint.Height)
-                : InventoryPlacement.Unplaced);
+                : InventoryPlacement.Unplaced,
+            _descriptions?.TryDescribe(world, item, out string description) == true
+                ? description
+                : string.Empty);
         return true;
     }
 

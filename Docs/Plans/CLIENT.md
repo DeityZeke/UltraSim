@@ -1947,7 +1947,7 @@ other already-known eligible actor. Expiry and reveal do not request disclosure 
 **Status: CLOSED.** Most of the original vertical was earned before its numbered
 checkpoint. `UiClientRuntime` already owns exact bounded definition caching plus cold/hot opens;
 local and remote Game UI use the same model/action semantics; `GodotUiRenderer` realizes the
-engine-neutral compiled tree; Inventory v6 is a real interactive compiled definition; and A0.6
+engine-neutral compiled tree; Inventory v7 is a real interactive compiled definition; and A0.6
 proves exact content-backed `.usui` resolution through an applied realm catalog. Human-play
 hardening additionally supplies centered opaque views and validated close behavior.
 
@@ -1964,8 +1964,8 @@ F0.5 closed the remaining source-convergence gap:
 - retain the already-accepted local/remote semantic result and cold/hot failure behavior.
 
 `Client.StandardUi` is explicit composition data and references only the UI kernel. Its embedded
-1,054-byte canonical Inventory v6 artifact decodes to the exact
-`game.inventory.gump/v6/608912922e71821517d2e025bb5645c6` identity. It is not a reason for generic
+1,158-byte canonical Inventory v7 artifact decodes to the exact
+`game.inventory.gump/v7/b0b3e87ced073c8a40778127ba583993` identity. It is not a reason for generic
 Client Core to depend on every Game UI definition. In particular, the Online product preseeds passive
 definition bytes/data without acquiring the Game UI/Inventory authority assemblies. Main
 Menu/Settings/Exit stay client-owned. Required content authorization/application proof also remains
@@ -2431,6 +2431,8 @@ F0.5  standard/preinstalled + cached/content-backed compiled UI closure   CLOSED
         |
 M0.0  shared multi-participant authority
       dedicated A/B/C + Complete packet-free host A / remote B/C           CLOSED
+        |
+I0.12 persistent rolled world item / Inventory / equip / Primary / drop     CLOSED
         |
 remaining Concept Demo gameplay/presentation consumers
         |

@@ -99,6 +99,13 @@ The accepted shared UDP listener/Hosted owner machinery remains transport infras
 this consumer. Do not reopen Network encoding/profile architecture unless later real workload
 evidence exposes a concrete correctness or measured capacity problem.
 
+I0.12 composes one respawning public Iron Sword through that shared authority. Exact public identity
+nominates pickup; the same persistent entity disappears from every recipient when contained,
+appears only in the owner's private Inventory/UI, follows Main Hand equipment, and becomes public
+again on an authority-positioned Drop. Another participant can then pick up that same item. The
+spawner independently publishes a newly rolled occurrence after its bounded delay. Protocol v21
+adds only the owner-visible Primary result; rolled item facts remain out of hot public records.
+
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.
 After that activation is semantically applied, `RemoteUiSemanticPort` translates a normal Game

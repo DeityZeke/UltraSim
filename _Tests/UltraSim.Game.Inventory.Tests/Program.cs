@@ -7,6 +7,7 @@ using UltraSim.Game.Composition;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.Persistence;
 using UltraSim.Game.UI;
+using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
@@ -39,6 +40,8 @@ var tests = new (string Name, Action Body)[]
     ("InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit", InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit),
     ("InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection", InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection),
     ("InventoryPersistsAndRebuildsAfterGenerationSwap", InventoryPersistsAndRebuildsAfterGenerationSwap),
+    ("I012RolledWeaponAndSpawnerContinuationPersistAsResults", I012RolledWeaponAndSpawnerContinuationPersistAsResults),
+    ("I012SpawnerDefersAtCapacityAndRecovers", I012SpawnerDefersAtCapacityAndRecovers),
     ("GridPlacementPersistsAndRebuildsAfterGenerationSwap", GridPlacementPersistsAndRebuildsAfterGenerationSwap),
     ("EquippedRelationshipPersistsAndReindexes", EquippedRelationshipPersistsAndReindexes),
     ("FailedInventoryRebuildDoesNotPublishCandidate", FailedInventoryRebuildDoesNotPublishCandidate),
@@ -57,7 +60,7 @@ static void ClosedGameSchemaOwnsFinalInventoryIds()
 {
     _ = new UltraSimGameComposition();
     ComponentSchema schema = GameSchema.CreateSchema();
-    Assert.Equal(12, schema.ComponentCount);
+    Assert.Equal(15, schema.ComponentCount);
     ComponentId simulation = GameSchema.GetComponentId<GameSimulationState>();
     ComponentId character = GameSchema.GetComponentId<GameCharacter>();
     ComponentId container = GameSchema.GetComponentId<InventoryContainer>();
@@ -490,6 +493,7 @@ static void GameAggregateRejectsCrossWorldFeatureState()
             _ = new GameGenerationState(
                 accounting,
                 first.Inventory,
+                first.Items,
                 second.Content,
                 first.WorldState,
                 first.SimulationLookup));
@@ -919,6 +923,11 @@ static void OwnedInventoryUiAuthorizesMoveEquipAndUnequip()
         fixture.Backpack, fixture.Character, pouch);
     UiRowId sword = FindRow(client.GetRows(backpack.View, InventoryUi.Items), "Iron Sword");
     client.SubmitAction(backpack.View, InventoryUi.Select, sword);
+    string? details = client.GetValue(backpack.View, InventoryUi.Details).Text;
+    Assert.True(details?.Contains("Damage ", StringComparison.Ordinal) == true);
+    Assert.True(details?.Contains("Quality ", StringComparison.Ordinal) == true);
+    Assert.True(details?.Contains("Durability ", StringComparison.Ordinal) == true);
+    Assert.True(client.GetActionState(backpack.View, InventoryUi.Drop).Enabled);
     client.SubmitAction(backpack.View, InventoryUi.Equip);
     Assert.SequenceEqual(new[] { UiListDeltaKind.Update }, port.LastListKinds);
     UiListRow equipped = client.GetRows(backpack.View, InventoryUi.Items)
@@ -1108,6 +1117,7 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
         candidate = new GameGenerationState(
             new AccountingStore(),
             staging.Inventory,
+            staging.Items,
             staging.Content,
             staging.WorldState,
             staging.SimulationLookup,
@@ -1227,6 +1237,184 @@ static void InventoryPersistsAndRebuildsAfterGenerationSwap()
         Assert.Equal(fixture.CharacterId, alice.PersistentEntityKey.Entity);
         return true;
     });
+}
+
+static void I012RolledWeaponAndSpawnerContinuationPersistAsResults()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-i012-" + Guid.NewGuid().ToString("N"));
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(
+                256,
+                new PersistenceIdentityOptions(new PersistentWorldId(0x70_1212))),
+            WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    try
+    {
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+            GamePlayableWorldEntities>(
+                static (world, _, game) =>
+                {
+                    Assert.True(world.TryInstantiate(game.Content.Character, out Entity player));
+                    return GamePlayableWorld.PopulateConceptDemo(world, game, player);
+                },
+                out GamePlayableWorldEntities entities));
+        runtime.Tick();
+        WeaponSpawn first = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.Equal(0U, first.Weapon.SpawnOrdinal);
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolvePersistent(world, entities.PlayerId);
+                Entity backpack = ResolvePersistent(world, entities.BackpackId);
+                return game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, first.Entity, backpack) ==
+                    GameWorldActionStatus.Accepted;
+            }, out bool firstPicked) && firstPicked);
+        for (int tick = 0; tick < GameItemGenerationState.RespawnDelayTicks; tick++) runtime.Tick();
+        WeaponSpawn second = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.Equal(1U, second.Weapon.SpawnOrdinal);
+
+        var persistence = new GameRuntimePersistence(
+            runtime.Game,
+            composition,
+            RestoreOptions(),
+            new SaveSetCoordinator(root));
+        Assert.True(persistence.TrySave(new SaveSetContext(1, 1), static capture => capture()).Succeeded);
+
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolvePersistent(world, entities.PlayerId);
+                Entity backpack = ResolvePersistent(world, entities.BackpackId);
+                return game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, second.Entity, backpack) ==
+                    GameWorldActionStatus.Accepted;
+            }, out bool secondPicked) && secondPicked);
+        for (int tick = 0; tick < GameItemGenerationState.RespawnDelayTicks; tick++) runtime.Tick();
+        WeaponSpawn provisionalThird = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.Equal(2U, provisionalThird.Weapon.SpawnOrdinal);
+
+        Assert.True(persistence.TryLoad().Succeeded);
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity restoredFirst = ResolvePersistent(world, first.PersistentId);
+                Entity restoredSecond = ResolvePersistent(world, second.PersistentId);
+                Entity spawner = ResolvePersistent(world, entities.IronSwordSpawnerId);
+                Assert.False(world.TryResolvePersistentEntity(
+                    provisionalThird.PersistentId, out Entity discardedEntity));
+                Assert.True(game.Items.TryReadWeapon(world, restoredFirst, out GameWeaponInstance firstWeapon));
+                Assert.True(game.Items.TryReadWeapon(world, restoredSecond, out GameWeaponInstance secondWeapon));
+                Assert.Equal(first.Weapon, firstWeapon);
+                Assert.Equal(second.Weapon, secondWeapon);
+                Assert.True(game.Items.TryReadSpawner(world, spawner, out GameItemSpawnerState state));
+                Assert.Equal(restoredSecond, state.ActiveItem);
+                Assert.Equal(2U, state.NextSpawnOrdinal);
+                Assert.Equal(0, state.RemainingRespawnTicks);
+                Assert.True(game.Inventory.TryReadItem(world, restoredFirst, out InventoryItem contained));
+                Assert.Equal(ResolvePersistent(world, entities.BackpackId), contained.Parent);
+                Entity actor = ResolvePersistent(world, entities.PlayerId);
+                Entity backpack = ResolvePersistent(world, entities.BackpackId);
+                return game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, restoredSecond, backpack) ==
+                    GameWorldActionStatus.Accepted;
+            }, out bool restored) && restored);
+        for (int tick = 0; tick < GameItemGenerationState.RespawnDelayTicks; tick++) runtime.Tick();
+        WeaponSpawn reproducedThird = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.Equal(provisionalThird.PersistentId, reproducedThird.PersistentId);
+        Assert.Equal(provisionalThird.Weapon, reproducedThird.Weapon);
+        Console.WriteLine(
+            $"EVIDENCE I0.12 persistence roll0={DescribeWeapon(first.Weapon)} " +
+            $"roll1={DescribeWeapon(second.Weapon)} roll2={DescribeWeapon(reproducedThird.Weapon)} " +
+            "save_restores_results_and_next_ordinal=pass");
+    }
+    finally
+    {
+        runtime.Stop();
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
+static void I012SpawnerDefersAtCapacityAndRecovers()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            UltraSimGameComposition.CreateWorldOptions(
+                256,
+                new PersistenceIdentityOptions(new PersistentWorldId(0x70_1213))),
+            WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    try
+    {
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+            GamePlayableWorldEntities>(
+                static (world, _, game) =>
+                {
+                    Assert.True(world.TryInstantiate(game.Content.Character, out Entity player));
+                    return GamePlayableWorld.PopulateConceptDemo(world, game, player);
+                },
+                out GamePlayableWorldEntities entities));
+        runtime.Tick();
+        WeaponSpawn first = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity actor = ResolvePersistent(world, entities.PlayerId);
+                Entity backpack = ResolvePersistent(world, entities.BackpackId);
+                return game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, actor, first.Entity, backpack) ==
+                    GameWorldActionStatus.Accepted;
+            }, out bool picked) && picked);
+
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, Entity>(
+            static (world, _, game) =>
+            {
+                Entity reclaimable = Entity.Null;
+                while (world.TryInstantiate(game.Content.Bread.Handle, out Entity filler))
+                    reclaimable = filler;
+                Assert.True(reclaimable.IsValid);
+                return reclaimable;
+            }, out Entity reclaimable));
+
+        for (int tick = 0; tick <= GameItemGenerationState.RespawnDelayTicks; tick++)
+            runtime.Tick();
+        Assert.Equal(ServerRuntimeState.Running, runtime.State);
+        Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                Entity spawner = ResolvePersistent(world, entities.IronSwordSpawnerId);
+                Assert.True(game.Items.TryReadSpawner(world, spawner, out GameItemSpawnerState state));
+                Assert.False(state.ActiveItem.IsValid);
+                Assert.Equal(1U, state.NextSpawnOrdinal);
+                Assert.Equal(0, state.RemainingRespawnTicks);
+                return world.TryDestroy(reclaimable);
+            }, out bool reclaimed) && reclaimed);
+
+        runtime.Tick();
+        WeaponSpawn second = ReadActiveWeapon(runtime, entities.IronSwordSpawnerId);
+        Assert.Equal(1U, second.Weapon.SpawnOrdinal);
+        Assert.Equal(ServerRuntimeState.Running, runtime.State);
+        Console.WriteLine(
+            "EVIDENCE I0.12 spawner_capacity full=deferred freed_slot=respawned " +
+            $"ordinal={second.Weapon.SpawnOrdinal}");
+    }
+    finally
+    {
+        runtime.Stop();
+    }
 }
 
 static void GridPlacementPersistsAndRebuildsAfterGenerationSwap()
@@ -1470,6 +1658,34 @@ static InventoryItem ReadItem(EcsWorld world, InventoryGenerationState state, En
     return item;
 }
 
+static WeaponSpawn ReadActiveWeapon(ServerRuntime runtime, PersistentEntityId spawnerId)
+{
+    Assert.True(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WeaponSpawn>(
+        (world, _, game) =>
+        {
+            Entity spawner = ResolvePersistent(world, spawnerId);
+            Assert.True(game.Items.TryReadSpawner(world, spawner, out GameItemSpawnerState state));
+            Assert.True(state.ActiveItem.IsValid);
+            Assert.True(game.Items.TryReadWeapon(
+                world, state.ActiveItem, out GameWeaponInstance weapon));
+            Assert.True(world.TryGetPersistentId(
+                state.ActiveItem, out PersistentEntityId persistentId));
+            return new WeaponSpawn(state.ActiveItem, persistentId, weapon);
+        }, out WeaponSpawn result));
+    return result;
+}
+
+static Entity ResolvePersistent(EcsWorld world, PersistentEntityId id)
+{
+    Assert.True(world.TryResolvePersistentEntity(id, out Entity entity));
+    return entity;
+}
+
+static string DescribeWeapon(in GameWeaponInstance weapon) =>
+    $"{weapon.DamageMinimum}-{weapon.DamageMaximum}/" +
+    $"{weapon.CurrentDurability}/{weapon.MaximumDurability}/" +
+    $"q{weapon.Quality}/{weapon.Element}/o{weapon.SpawnOrdinal}";
+
 static UiRowId FindRow(ReadOnlySpan<UiListRow> rows, string displayName)
 {
     foreach (UiListRow row in rows)
@@ -1555,6 +1771,11 @@ static void CollectGarbage()
 }
 
 readonly record struct Measurement(double Mean, double P95, long Checksum, long Allocation);
+
+readonly record struct WeaponSpawn(
+    Entity Entity,
+    PersistentEntityId PersistentId,
+    GameWeaponInstance Weapon);
 
 readonly record struct FixtureEntities(
     Entity Character,

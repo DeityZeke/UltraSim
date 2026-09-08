@@ -48,6 +48,13 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 Vector3.Zero,
                 out float signDistance) && signDistance > 0,
             "The upper portion of an informational sign was not pointer-pickable.");
+        Expect(GodotPublicPointerPicker.TryIntersect(
+                GameWorldPublicPrefabIds.IronSword,
+                new Vector3(0, 0.8f, 5f),
+                direction,
+                Vector3.Zero,
+                out float swordDistance) && swordDistance > 0,
+            "The primitive Iron Sword was not pointer-pickable.");
         Expect(!GodotPublicPointerPicker.TryIntersect(
                 GameWorldPublicPrefabIds.CabinDoor,
                 new Vector3(2f, 1.9f, 5f),
@@ -141,6 +148,20 @@ public partial class T010PlayableWorldAcceptance : Node3D
         presenter.SetRevealHeld(false);
         Expect(presenter.GetSnapshot().VisibleNameplates == 0,
             "Releasing Ctrl reveal restored an expired controlled nameplate.");
+        const ulong swingStarted = 3_000;
+        Expect(presenter.TryPresentPrimaryAction(controlledId, 7, swingStarted),
+            "An accepted Primary action did not start its minimum native swing cue.");
+        Expect(!presenter.TryPresentPrimaryAction(controlledId, 7, swingStarted),
+            "A duplicate Primary sequence replayed its native swing cue.");
+        Expect(presenter.GetSnapshot() is
+            { VisiblePrimaryCues: 1, PrimaryCuesPresented: 1 },
+            "The active Primary cue was not observable in bounded native state.");
+        presenter.UpdateOriginAndLifetimes(
+            nextOwnerPose,
+            swingStarted + GodotActorPresenter.PrimaryCueDurationMilliseconds);
+        Expect(presenter.GetSnapshot() is
+            { VisiblePrimaryCues: 0, PrimaryCuesPresented: 1 },
+            "The transient Primary cue did not retire at its fixed presentation lifetime.");
     }
 
     private void RunJoinedInputAuthorityAcceptance()

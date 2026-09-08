@@ -300,7 +300,15 @@ public sealed class InventoryIndex : IDisposable
             foreach ((Entity entity, InventoryItem item, InventoryPlacement placement,
                 InventoryItemDefinition definition) in items)
             {
-                if (!item.Parent.IsValid || !world.IsAlive(item.Parent))
+                if (!item.Parent.IsValid)
+                {
+                    if (item.EquipSlot != InventoryEquipSlot.None ||
+                        placement.Mode != InventoryPlacementMode.Unplaced)
+                        throw new InvalidOperationException(
+                            "A world item retains equipment or Grid placement state.");
+                    continue;
+                }
+                if (!world.IsAlive(item.Parent))
                     throw new InvalidOperationException("An inventory item references a stale parent.");
                 if (item.EquipSlot == InventoryEquipSlot.None)
                 {

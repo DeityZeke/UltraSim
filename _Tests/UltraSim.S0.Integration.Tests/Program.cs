@@ -1069,6 +1069,7 @@ static TestMetrics SimplePhysicsGenerationReplacement()
         candidate = new GameGenerationState(
             new AccountingStore(),
             staging.Inventory,
+            staging.Items,
             staging.Content,
             staging.WorldState,
             staging.SimulationLookup,
@@ -1548,6 +1549,7 @@ static TestMetrics SimplePhysicsTerrainShellSupport()
         candidate = new GameGenerationState(
             new AccountingStore(),
             staging.Inventory,
+            staging.Items,
             staging.Content,
             staging.WorldState,
             staging.SimulationLookup,
@@ -3282,6 +3284,7 @@ static TestMetrics ContradictoryRestoredDoorFailsClosed()
     var candidate = new GameGenerationState(
         new AccountingStore(),
         staging.Inventory,
+        staging.Items,
         staging.Content,
         staging.WorldState,
         staging.SimulationLookup,
@@ -3341,6 +3344,7 @@ static TestMetrics DynamicCollisionProjectionCapacityFailsClosed()
     var candidate = new GameGenerationState(
         new AccountingStore(),
         staging.Inventory,
+        staging.Items,
         staging.Content,
         staging.WorldState,
         staging.SimulationLookup,
@@ -4805,6 +4809,7 @@ sealed class PlayableOfflineDirectLink
         if (!world.TryResolvePersistentEntity(_playerId, out Entity player))
             return new GamePlayerCommandResult(
                 GameWorldActionStatus.MissingActor,
+                GameWorldActionStatus.NotRequested,
                 GameWorldActionStatus.NotRequested,
                 GameWorldActionStatus.NotRequested,
                 GameWorldActionStatus.NotRequested,
