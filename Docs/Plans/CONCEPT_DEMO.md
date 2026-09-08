@@ -1571,6 +1571,10 @@ then prioritize the first meaningful remote vertical:
          Complete packet-free host A + remote Online B/C
          real other-player F0.4 presentation, Chat, owner isolation
 
+    Network capability packaging                                      CLOSED
+         Online ClientOnly / dedicated ServerOnly / Complete Full
+         same UltraSim.Network identity and unchanged wire protocol
+
 then continue remaining Round 1 consumers as earned:
     I0.12 persistent rolled world-item / pickup / Inventory / equip / drop  CLOSED
           + minimum owner-result swing cue

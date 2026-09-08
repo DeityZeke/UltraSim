@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Kernels/Network.Testing/UltraSim.Network.Testing.csproj" />
     <ProjectReference Include="../../_Benchmarks/UltraSim.Network.ComparisonCore/UltraSim.Network.ComparisonCore.csproj" />
   </ItemGroup>
 </Project>

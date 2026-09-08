@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Kernels/Network.Testing/UltraSim.Network.Testing.csproj" />
   </ItemGroup>
 </Project>

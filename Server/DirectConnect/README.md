@@ -30,8 +30,13 @@ the local-client authority bridge.
 Run the development endpoint with:
 
 ```bash
-dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj
+dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
+    -p:UltraSimNetworkFlavor=ServerOnly
 ```
+
+The canonical Network development default is Full. Dedicated product builds select
+`ServerOnly` explicitly so their physical output omits the unused Hosted client
+role; switching this product to Full later requires no consumer-code change.
 
 The default protocol bind is `127.0.0.1:7777` and the content host defaults to
 `127.0.0.1:7778`. `--bind=<IPv4>:<port>`, `--content-bind=<IPv4>:<port>`,

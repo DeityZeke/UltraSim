@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'UltraSim.Network'">
+    <!-- Full is the canonical developer and package build. Product compositions
+         explicitly select a capability-stripped variant when they need one. -->
+    <UltraSimNetworkFlavor Condition="'$(UltraSimNetworkFlavor)' == ''">Full</UltraSimNetworkFlavor>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)artifacts/network/$(UltraSimNetworkFlavor)/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)artifacts/network/$(UltraSimNetworkFlavor)/obj/</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+</Project>

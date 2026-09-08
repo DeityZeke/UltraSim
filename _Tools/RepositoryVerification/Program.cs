@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -6,6 +7,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 
 string root = FindRepositoryRoot();
 VerificationOptions options = VerificationOptions.Parse(args);
@@ -54,6 +57,7 @@ string[] testProjects =
 foreach (string configuration in configurations)
 {
     Console.WriteLine($"VERIFY configuration={configuration}");
+    VerifyNetworkCapabilityArtifacts(root, configuration);
     foreach (string project in testProjects)
     {
         var command = new List<string> { "run", "--project", project, "-c", configuration };
@@ -64,8 +68,10 @@ foreach (string configuration in configurations)
     Run(root, "dotnet",
     [
         "run", "--project", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
-        "-c", configuration, "--", "--ephemeral-smoke",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ServerOnly",
+        "--", "--ephemeral-smoke",
     ]);
+    VerifyDedicatedNetworkAssembly(root, configuration);
 
     VerifyClientCompositionArtifacts(root, configuration);
 
@@ -227,6 +233,214 @@ Run(root, "git", ["diff", "--check"]);
 Console.WriteLine("PASS repository verification");
 return 0;
 
+static void VerifyNetworkCapabilityArtifacts(string root, string configuration)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), configuration, "network-capabilities");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string networkSource = Path.Combine(root, "Kernels", "Network");
+    string[] conditionalSources = Directory.EnumerateFiles(
+            networkSource, "*.cs", SearchOption.AllDirectories)
+        .Where(static path => File.ReadLines(path).Any(static line =>
+            Regex.IsMatch(line, "^\\s*#(if|elif|else|endif)\\b",
+                RegexOptions.CultureInvariant)))
+        .Select(path => Relative(root, path))
+        .ToArray();
+    if (conditionalSources.Length != 0)
+        throw new InvalidOperationException(
+            "Network capability selection must use physical source inclusion, not #if branches: " +
+            string.Join(", ", conditionalSources));
+    string[] roleProtocolDeclarations = Directory.EnumerateFiles(
+            Path.Combine(networkSource, "Hosted"), "*.cs", SearchOption.AllDirectories)
+        .Where(static path => File.ReadAllText(path).Contains(
+            "[NetworkProtocol", StringComparison.Ordinal) ||
+            File.ReadAllText(path).Contains("[NetworkMessage", StringComparison.Ordinal))
+        .Select(path => Relative(root, path))
+        .ToArray();
+    if (roleProtocolDeclarations.Length != 0)
+        throw new InvalidOperationException(
+            "Shared protocol declarations must remain in Network/Core: " +
+            string.Join(", ", roleProtocolDeclarations));
+
+    NetworkFlavorProbeEvidence full = RunProbe("Full", explicitSelection: false);
+    NetworkFlavorProbeEvidence client = RunProbe("ClientOnly", explicitSelection: true);
+    NetworkFlavorProbeEvidence server = RunProbe("ServerOnly", explicitSelection: true);
+
+    foreach (NetworkFlavorProbeEvidence evidence in new[] { full, client, server })
+    {
+        if (!string.Equals(evidence.AssemblyName, "UltraSim.Network", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"{evidence.Flavor} changed the canonical UltraSim.Network assembly identity.");
+        if (evidence.AllTypes.Any(IsNetworkTestingType))
+            throw new InvalidOperationException(
+                $"{evidence.Flavor} contains non-production Network testing machinery.");
+    }
+
+    if (full.ProtocolVersion != client.ProtocolVersion ||
+        full.ProtocolVersion != server.ProtocolVersion ||
+        full.ProtocolFingerprint != client.ProtocolFingerprint ||
+        full.ProtocolFingerprint != server.ProtocolFingerprint ||
+        !string.Equals(full.CanonicalPacketHex, client.CanonicalPacketHex, StringComparison.Ordinal) ||
+        !string.Equals(full.CanonicalPacketHex, server.CanonicalPacketHex, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "Network capability selection changed shared protocol identity or canonical wire bytes.");
+
+    var expectedFullApi = client.PublicApi
+        .Concat(server.PublicApi)
+        .ToHashSet(StringComparer.Ordinal);
+    if (!expectedFullApi.SetEquals(full.PublicApi))
+        throw new InvalidOperationException(
+            "The canonical Full Network public API is not the exact union of ClientOnly and ServerOnly.");
+
+    RequireType(client.AllTypes, "UltraSim.Network.HostedUdpProtocolClient", "ClientOnly");
+    RequireType(client.AllTypes, "UltraSim.Network.HostedUdpDeploymentDiscoveryClient", "ClientOnly");
+    RejectType(client.AllTypes, "UltraSim.Network.HostedUdpAdmissionHost", "ClientOnly");
+    RejectType(client.AllTypes, "UltraSim.Network.NetworkServerIdentity", "ClientOnly");
+    RejectType(client.AllTypes, "UltraSim.Network.HostedUdpConnectionOwnerRuntime", "ClientOnly");
+    RejectType(client.AllTypes, "UltraSim.Network.SharedUdpServerListener", "ClientOnly");
+
+    RequireType(server.AllTypes, "UltraSim.Network.HostedUdpAdmissionHost", "ServerOnly");
+    RequireType(server.AllTypes, "UltraSim.Network.NetworkServerIdentity", "ServerOnly");
+    RequireType(server.AllTypes, "UltraSim.Network.HostedUdpConnectionOwnerRuntime", "ServerOnly");
+    RejectType(server.AllTypes, "UltraSim.Network.HostedUdpProtocolClient", "ServerOnly");
+    RejectType(server.AllTypes, "UltraSim.Network.HostedUdpDeploymentDiscoveryClient", "ServerOnly");
+
+    RequireType(full.AllTypes, "UltraSim.Network.HostedUdpProtocolClient", "Full");
+    RequireType(full.AllTypes, "UltraSim.Network.HostedUdpAdmissionHost", "Full");
+    RequireType(full.AllTypes, "UltraSim.Network.NetworkServerIdentity", "Full");
+    if (client.AssemblyBytes >= full.AssemblyBytes || server.AssemblyBytes >= full.AssemblyBytes)
+        throw new InvalidOperationException(
+            "A capability-stripped Network assembly is not physically smaller than Full.");
+
+    string packages = Path.Combine(scope, "packages");
+    Run(root, "dotnet",
+    [
+        "pack", "Kernels/Network/UltraSim.Network.csproj",
+        "-c", configuration,
+        "--output", packages,
+    ]);
+    string package = Directory.EnumerateFiles(packages, "UltraSim.Network.*.nupkg")
+        .Single(static path => !path.EndsWith(".symbols.nupkg", StringComparison.Ordinal));
+    using (ZipArchive archive = ZipFile.OpenRead(package))
+    {
+        if (!archive.Entries.Any(static entry =>
+                string.Equals(entry.FullName, "lib/net8.0/UltraSim.Network.dll",
+                    StringComparison.Ordinal)) ||
+            archive.Entries.Any(static entry =>
+                entry.FullName.Contains("UltraSim.Network.Testing", StringComparison.Ordinal)))
+            throw new InvalidOperationException(
+                "The canonical UltraSim.Network package is not the Full production assembly alone.");
+    }
+    RunExpectFailure(root, "dotnet",
+    [
+        "pack", "Kernels/Network/UltraSim.Network.csproj",
+        "-c", configuration,
+        "--output", Path.Combine(scope, "invalid-client-package"),
+        "-p:UltraSimNetworkFlavor=ClientOnly",
+    ], "Network_StrippedBuildCannotPublishCanonicalPackage");
+    RunExpectFailure(root, "dotnet",
+    [
+        "build", "Kernels/Network/UltraSim.Network.csproj",
+        "-c", configuration,
+        "-p:UltraSimNetworkFlavor=Unknown",
+    ], "Network_UnknownCapabilitySetFailsClosed");
+
+    Console.WriteLine(
+        $"PASS NetworkCapabilityBuilds assembly=UltraSim.Network protocol=" +
+        $"{full.ProtocolVersion}/{full.ProtocolFingerprint:x16} " +
+        $"bytes=ClientOnly:{client.AssemblyBytes},ServerOnly:{server.AssemblyBytes},Full:{full.AssemblyBytes} " +
+        $"publicApi=ClientOnly:{client.PublicApi.Length},ServerOnly:{server.PublicApi.Length},Full:{full.PublicApi.Length}");
+    Directory.Delete(scope, recursive: true);
+    return;
+
+    NetworkFlavorProbeEvidence RunProbe(string flavor, bool explicitSelection)
+    {
+        string evidencePath = Path.Combine(scope, $"{flavor}.json");
+        var arguments = new List<string>
+        {
+            "run", "--project",
+            "_Tools/NetworkFlavorProbe/UltraSim.NetworkFlavorProbe.csproj",
+            "-c", configuration,
+        };
+        if (explicitSelection)
+            arguments.Add($"-p:UltraSimNetworkFlavor={flavor}");
+        arguments.Add("--");
+        arguments.Add(evidencePath);
+        Run(root, "dotnet", arguments);
+        NetworkFlavorProbeEvidence? evidence =
+            JsonSerializer.Deserialize<NetworkFlavorProbeEvidence>(
+                File.ReadAllText(evidencePath));
+        if (evidence is null || !string.Equals(evidence.Flavor, flavor, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"Network flavor probe expected {flavor} but observed {evidence?.Flavor ?? "none"}.");
+        return evidence;
+    }
+}
+
+static void VerifyDedicatedNetworkAssembly(string root, string configuration)
+{
+    string path = Path.Combine(
+        root, "Server", "DirectConnect", "bin", configuration, "net8.0",
+        "UltraSim.Network.dll");
+    HashSet<string> types = ReadDefinedTypeNames(path);
+    RequireType(types, "UltraSim.Network.HostedUdpAdmissionHost", "Dedicated");
+    RequireType(types, "UltraSim.Network.NetworkServerIdentity", "Dedicated");
+    RejectType(types, "UltraSim.Network.HostedUdpProtocolClient", "Dedicated");
+    RejectType(types, "UltraSim.Network.HostedUdpDeploymentDiscoveryClient", "Dedicated");
+    Console.WriteLine("PASS Dedicated_ServerOnlyNetworkAssembly");
+}
+
+static bool IsNetworkTestingType(string name)
+{
+    string[] testingTypes =
+    [
+        "UltraSim.Network.ProtocolLoopback",
+        "UltraSim.Network.DeterministicDatagramLink",
+        "UltraSim.Network.DeterministicDatagramEndpoint",
+        "UltraSim.Network.DeterministicNetworkImpairment",
+        "UltraSim.Network.SharedUdpProtocolHost",
+        "UltraSim.Network.UdpProtocolSession",
+    ];
+    return testingTypes.Any(type =>
+        string.Equals(name, type, StringComparison.Ordinal) ||
+        name.StartsWith(type + "+", StringComparison.Ordinal));
+}
+
+static HashSet<string> ReadDefinedTypeNames(string assemblyPath)
+{
+    if (!File.Exists(assemblyPath))
+        throw new FileNotFoundException("Expected Network assembly was not published.", assemblyPath);
+    using FileStream stream = File.OpenRead(assemblyPath);
+    using var executable = new PEReader(stream);
+    MetadataReader metadata = executable.GetMetadataReader();
+    var types = new HashSet<string>(StringComparer.Ordinal);
+    foreach (TypeDefinitionHandle handle in metadata.TypeDefinitions)
+    {
+        TypeDefinition definition = metadata.GetTypeDefinition(handle);
+        string name = metadata.GetString(definition.Name);
+        if (name == "<Module>") continue;
+        string @namespace = metadata.GetString(definition.Namespace);
+        types.Add(string.IsNullOrEmpty(@namespace) ? name : @namespace + "." + name);
+    }
+    return types;
+}
+
+static void RequireType(IEnumerable<string> types, string required, string product)
+{
+    if (!types.Contains(required, StringComparer.Ordinal))
+        throw new InvalidOperationException(
+            $"{product} Network assembly is missing required type '{required}'.");
+}
+
+static void RejectType(IEnumerable<string> types, string forbidden, string product)
+{
+    if (types.Contains(forbidden, StringComparer.Ordinal))
+        throw new InvalidOperationException(
+            $"{product} Network assembly contains forbidden type '{forbidden}'.");
+}
+
 static void VerifyClientCompositionArtifacts(string root, string configuration)
 {
     ClientCompositionGate[] gates =
@@ -263,6 +477,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
 
     foreach (ClientCompositionGate gate in gates)
     {
+        string networkFlavor = gate.Name == "Online" ? "ClientOnly" : "Full";
         string output = Path.Combine(
             Path.GetTempPath(), "ultrasim-repository-verification", Environment.ProcessId.ToString(),
             configuration, gate.Name);
@@ -274,6 +489,7 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
             "Client/Godot/UltraSim.Client.Application.Godot.csproj",
             "-c", configuration,
             $"-p:UltraSimEdition={gate.Name}",
+            $"-p:UltraSimNetworkFlavor={networkFlavor}",
             "--output", output,
         ]);
 
@@ -322,6 +538,23 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 throw new InvalidOperationException(
                     $"{gate.Name} composition resolved or copied forbidden assembly '{forbidden}'.");
         }
+        string networkAssembly = Path.Combine(output, "UltraSim.Network.dll");
+        if (string.Equals(gate.Name, "Online", StringComparison.Ordinal))
+        {
+            HashSet<string> types = ReadDefinedTypeNames(networkAssembly);
+            RequireType(types, "UltraSim.Network.HostedUdpProtocolClient", gate.Name);
+            RejectType(types, "UltraSim.Network.HostedUdpAdmissionHost", gate.Name);
+            RejectType(types, "UltraSim.Network.NetworkServerIdentity", gate.Name);
+            RejectType(types, "UltraSim.Network.HostedUdpConnectionOwnerRuntime", gate.Name);
+            RejectType(types, "UltraSim.Network.SharedUdpServerListener", gate.Name);
+        }
+        else if (string.Equals(gate.Name, "Complete", StringComparison.Ordinal))
+        {
+            HashSet<string> types = ReadDefinedTypeNames(networkAssembly);
+            RequireType(types, "UltraSim.Network.HostedUdpProtocolClient", gate.Name);
+            RequireType(types, "UltraSim.Network.HostedUdpAdmissionHost", gate.Name);
+            RequireType(types, "UltraSim.Network.NetworkServerIdentity", gate.Name);
+        }
 
         long managedBytes = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
             .Sum(static path => new FileInfo(path).Length);
@@ -356,12 +589,14 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
 
 static void BuildClientApplication(string root, string configuration, string edition)
 {
+    string networkFlavor = edition == "Online" ? "ClientOnly" : "Full";
     Run(root, "dotnet",
     [
         "build",
         "Client/Godot/UltraSim.Client.Application.Godot.csproj",
         "-c", configuration,
         $"-p:UltraSimEdition={edition}",
+        $"-p:UltraSimNetworkFlavor={networkFlavor}",
     ]);
 
     // The editor host always loads the project's Debug assembly. Release is still compiled and
@@ -375,6 +610,7 @@ static void BuildClientApplication(string root, string configuration, string edi
             "Client/Godot/UltraSim.Client.Application.Godot.csproj",
             "-c", "Debug",
             $"-p:UltraSimEdition={edition}",
+            $"-p:UltraSimNetworkFlavor={networkFlavor}",
         ]);
     }
 
@@ -472,6 +708,13 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
         throw new InvalidOperationException(
             "The actual Online Godot export contains forbidden local authority/content: " +
             string.Join(", ", leakedDependencies.Concat(forbiddenPayloads)));
+    HashSet<string> networkTypes = ReadDefinedTypeNames(
+        Path.Combine(data, "UltraSim.Network.dll"));
+    RequireType(networkTypes, "UltraSim.Network.HostedUdpProtocolClient", "exported Online");
+    RejectType(networkTypes, "UltraSim.Network.HostedUdpAdmissionHost", "exported Online");
+    RejectType(networkTypes, "UltraSim.Network.NetworkServerIdentity", "exported Online");
+    RejectType(
+        networkTypes, "UltraSim.Network.HostedUdpConnectionOwnerRuntime", "exported Online");
 
     long managedBytes = Directory.EnumerateFiles(
             data, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
@@ -1068,6 +1311,8 @@ static void VerifyArchitecture(string root)
         ["Kernels/Network.Generators/UltraSim.Network.Generators.csproj"] = [],
         ["Kernels/Network/UltraSim.Network.csproj"] =
             ["Kernels/Network.Generators/UltraSim.Network.Generators.csproj"],
+        ["Kernels/Network.Testing/UltraSim.Network.Testing.csproj"] =
+            ["Kernels/Network/UltraSim.Network.csproj"],
         ["Kernels/Spatial/UltraSim.Spatial.csproj"] = [],
         ["Kernels/UI/UltraSim.UI.csproj"] = [],
         ["Server/Persistence/UltraSim.Server.Persistence.csproj"] =
@@ -1608,3 +1853,13 @@ internal sealed record NativeDeploymentReady(
 internal sealed record ContentlessOnlineExport(
     string Scope,
     string Executable);
+
+internal sealed record NetworkFlavorProbeEvidence(
+    string AssemblyName,
+    string Flavor,
+    long AssemblyBytes,
+    ushort ProtocolVersion,
+    ulong ProtocolFingerprint,
+    string CanonicalPacketHex,
+    string[] AllTypes,
+    string[] PublicApi);

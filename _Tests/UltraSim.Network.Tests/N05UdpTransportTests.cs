@@ -193,7 +193,7 @@ internal static class N05UdpTransportTests
         {
             int calls = 0;
             ulong Bucket() => calls++ == 0 ? 10UL : expired ? 12UL : 11UL;
-            bool established = ProtocolLoopbackHandshake.TryEstablishUdp(
+            bool established = ProtocolLoopbackHandshakeHarness.TryEstablishUdp(
                 client, server, s_udp.MaximumDatagramBytes, Bucket,
                 server.RemotePathBinding, CoreNetworkProtocol.Manifest,
                 CoreNetworkProtocol.Manifest, identity, identity.PublicKey,

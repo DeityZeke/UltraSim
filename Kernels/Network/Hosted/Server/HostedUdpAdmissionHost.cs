@@ -727,7 +727,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             int length;
             try
             {
-                length = HostedUdpDeploymentDiscoveryCodec.WriteAnnouncement(
+                length = HostedUdpDeploymentDiscoveryServer.WriteAnnouncement(
                     announcement, _manifest, discoveryNonce, _serverIdentity);
             }
             catch (CryptographicException)

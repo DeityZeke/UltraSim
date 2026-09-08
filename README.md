@@ -88,8 +88,10 @@ headroom and fewer ticks per second.
   structural/lifecycle/content/persistence mechanisms.
 - `Kernels/Network*` — dependency-clean identity/lane contracts, fixed connection
   and packet ownership, generated codecs/manifests, security, reliability,
-  deterministic impairment, connected/shared UDP, externally admitted Hosted
-  lifecycle, and bounded connection-owner handoff.
+  connected/shared UDP, externally admitted Hosted lifecycle, and bounded
+  connection-owner handoff in canonical Full `UltraSim.Network.dll`; optional
+  same-identity ClientOnly/ServerOnly deployment builds; and separately packaged
+  deterministic impairment/testing machinery.
 - `Kernels/Spatial` — dependency-neutral integer spatial identity, geometry, and
   canonical math; no runtime world storage or kernel coupling.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, semantic port,

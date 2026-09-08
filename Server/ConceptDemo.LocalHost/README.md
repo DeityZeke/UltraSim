@@ -11,7 +11,9 @@ Network. Stopping hosting retires remote sessions and endpoints while the local 
 
 This assembly is present only in the Complete product. Single Player has no Network family, Online
 has no local authority family, and the dedicated server uses `Server/ConceptDemo` without this
-adapter.
+adapter. Complete explicitly builds the canonical Full `UltraSim.Network` capability set because
+the process contains both a remote client and a Hosted server; Online and dedicated product builds
+currently select ClientOnly and ServerOnly respectively.
 
 The current client-facing default binds loopback development endpoints. Public bind/NAT/relay UX,
 host migration, and production population claims remain future deployment work.

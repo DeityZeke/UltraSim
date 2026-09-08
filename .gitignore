@@ -10,6 +10,7 @@ _tmp_perf_probe/
 *.db-wal
 **/bin/
 **/obj/
+/artifacts/
 .codex-temp/
 _Benchmarks/results/
 _TMP/

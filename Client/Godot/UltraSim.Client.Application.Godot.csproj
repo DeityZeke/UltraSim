@@ -11,6 +11,8 @@
     <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1572;CS1573;CS1574;CS1580;CS1581;CS1584;CS1587;CS1711;CS1734;CS1735</WarningsAsErrors>
     <!-- The editor/development default intentionally exposes both capability families. -->
     <UltraSimEdition Condition="'$(UltraSimEdition)' == ''">Complete</UltraSimEdition>
+    <UltraSimNetworkFlavor Condition="'$(UltraSimNetworkFlavor)' == '' And '$(UltraSimEdition)' == 'Online'">ClientOnly</UltraSimNetworkFlavor>
+    <UltraSimNetworkFlavor Condition="'$(UltraSimNetworkFlavor)' == '' And '$(UltraSimEdition)' != 'Online'">Full</UltraSimNetworkFlavor>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(UltraSimEdition)' == 'SinglePlayer'">
@@ -49,6 +51,10 @@
   <Target Name="ValidateUltraSimEdition" BeforeTargets="PrepareForBuild">
     <Error Condition="'$(UltraSimEdition)' != 'SinglePlayer' And '$(UltraSimEdition)' != 'Online' And '$(UltraSimEdition)' != 'Complete'"
            Text="UltraSimEdition must be SinglePlayer, Online, or Complete; received '$(UltraSimEdition)'." />
+    <Error Condition="'$(UltraSimEdition)' == 'Online' And '$(UltraSimNetworkFlavor)' != 'ClientOnly'"
+           Text="The Online product must build UltraSim.Network with ClientOnly capabilities." />
+    <Error Condition="'$(UltraSimEdition)' == 'Complete' And '$(UltraSimNetworkFlavor)' != 'Full'"
+           Text="The Complete product must build the canonical Full UltraSim.Network assembly." />
   </Target>
 
   <!-- Remove artifacts left by the pre-consolidation multi-Godot-project graph. Godot scans its

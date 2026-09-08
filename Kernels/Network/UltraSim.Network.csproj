@@ -9,11 +9,39 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1572;CS1573;CS1574;CS1580;CS1581;CS1584;CS1587;CS1711;CS1734;CS1735</WarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>UltraSim.Network</AssemblyName>
+    <PackageId>UltraSim.Network</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Description>UltraSim's reusable full network kernel. ClientOnly and ServerOnly are optional capability-stripped builds of this same assembly.</Description>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Core/**/*.cs" />
+    <Compile Include="Hosted/Client/**/*.cs"
+             Condition="'$(UltraSimNetworkFlavor)' == 'Full' Or '$(UltraSimNetworkFlavor)' == 'ClientOnly'" />
+    <Compile Include="Hosted/Server/**/*.cs"
+             Condition="'$(UltraSimNetworkFlavor)' == 'Full' Or '$(UltraSimNetworkFlavor)' == 'ServerOnly'" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../Network.Generators/UltraSim.Network.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="UltraSim.Network.Flavor" Value="$(UltraSimNetworkFlavor)" />
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <Target Name="ValidateUltraSimNetworkFlavor" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(UltraSimNetworkFlavor)' != 'Full' And '$(UltraSimNetworkFlavor)' != 'ClientOnly' And '$(UltraSimNetworkFlavor)' != 'ServerOnly'"
+           Text="UltraSimNetworkFlavor must be Full, ClientOnly, or ServerOnly; received '$(UltraSimNetworkFlavor)'." />
+  </Target>
+
+  <Target Name="RequireFullForCanonicalPackage" BeforeTargets="GenerateNuspec">
+    <Error Condition="'$(UltraSimNetworkFlavor)' != 'Full'"
+           Text="The canonical UltraSim.Network package is always Full. Build ClientOnly/ServerOnly as specialist deployment artifacts rather than publishing them under the canonical package identity." />
+  </Target>
 </Project>

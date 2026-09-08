@@ -87,6 +87,24 @@ Contentless Online Client
 
 The distinction is real at project/package/assembly level. A Single Player build does not merely hide Multiplayer while still shipping Network. An Online build does not merely hide Single Player while still shipping local Game/server code.
 
+Network itself now has one canonical Full assembly plus optional physical
+capability stripping. Product composition currently selects:
+
+```text
+Single Player    no UltraSim.Network
+Online           UltraSim.Network ClientOnly
+Complete         UltraSim.Network Full
+Dedicated server UltraSim.Network ServerOnly
+```
+
+Every Network-capable consumer still references the same
+`UltraSim.Network.dll` identity. Full is the default developer build, canonical
+package, and exact API superset; ClientOnly/ServerOnly are specialist deployment
+outputs, not different protocols or permanent client/server architectures.
+Product export selects its intended set explicitly and verifies the physical DLL.
+Stripping is not a security mechanism, and products may switch to Full later
+without source changes.
+
 The shell exposes only features supplied by its composition.
 
 ---
@@ -2436,6 +2454,9 @@ M0.0  shared multi-participant authority
         |
 I0.12 persistent rolled world item / Inventory / equip / Primary / drop     CLOSED
       + bounded property tooltip / equipped-item pointer hardening
+        |
+Network physical capability packaging
+      canonical Full + optional ClientOnly/ServerOnly same-identity outputs  CLOSED
         |
 remaining Concept Demo gameplay/presentation consumers
         |

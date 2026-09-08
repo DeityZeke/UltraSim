@@ -8,14 +8,17 @@ case "$edition" in
   SinglePlayer)
     preset="UltraSim Single Player Linux"
     default_output="$script_dir/.output/clients/single-player/UltraSimSinglePlayer.x86_64"
+    network_flavor="Full"
     ;;
   Online)
     preset="UltraSim Online Linux"
     default_output="$script_dir/.output/clients/online/UltraSimOnline.x86_64"
+    network_flavor="ClientOnly"
     ;;
   Complete)
     preset="UltraSim Complete Linux"
     default_output="$script_dir/.output/clients/complete/UltraSimComplete.x86_64"
+    network_flavor="Full"
     ;;
   *)
     echo "usage: $0 SinglePlayer|Online|Complete [output-path]" >&2
@@ -46,4 +49,5 @@ cleanup_export_state
 trap cleanup_export_state EXIT
 
 export UltraSimEdition="$edition"
+export UltraSimNetworkFlavor="$network_flavor"
 "$godot" --headless --path "$script_dir" --export-release "$preset" "$output"

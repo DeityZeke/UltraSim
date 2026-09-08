@@ -1,6 +1,7 @@
 # Network V3: current architecture and accepted replication policy
 
-Status: **accepted / consumption-ready** as of 2026-08-25.
+Status: **accepted / consumption-ready**, including physical Network capability
+packaging, as of 2026-09-08.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -102,6 +103,62 @@ Client Core / Godot presentation
 `Kernels/Network` must not reference ECS, `Game/World`, AOI types, inventory,
 accounts, UI meaning, persistence, Godot, or game authority. Game adapters flatten
 all concrete semantics to the same minimal delivery boundary.
+
+### Canonical Full assembly and optional capability stripping
+
+`UltraSim.Network` is one source tree, one public assembly identity, and one
+canonical package. Its default build and normal `UltraSim.Network` package are
+always **Full**:
+
+```text
+Full
+    Core
+    Hosted Client
+    Hosted Server
+```
+
+The optional build property `UltraSimNetworkFlavor` admits exactly:
+
+```text
+Full         Core + Hosted Client + Hosted Server
+ClientOnly   Core + Hosted Client
+ServerOnly   Core + Hosted Server
+```
+
+`Full` is the canonical API and exact public-API union of the two stripped
+capability sets. All outputs remain named `UltraSim.Network.dll`; the flavor is
+recorded as assembly metadata and participates in isolated output/intermediate
+paths. Shared public APIs may not mention flavor-specific types. All protocol
+declarations, codecs, identities, lane contracts, cryptographic domains, limits,
+and manifest inputs live in Core and compile identically in every capability set.
+
+Permanent gates compare protocol version/fingerprint and canonical packet bytes,
+compare public type/member signatures, and inspect published/exported assemblies
+for physically forbidden role types. The production matrix is currently:
+
+```text
+Single Player    no Network assembly
+Online           ClientOnly
+Dedicated        ServerOnly
+Complete         Full
+```
+
+This matrix is packaging policy, not a semantic dependency. Online and Dedicated
+may deliberately ship Full later without changing consumer code. Capability
+stripping reduces binary size, accidental callable surface, and currently
+distributed implementation; Network security never depends on server code being
+absent from a client. The canonical NuGet/package remains Full. Specialist
+ClientOnly/ServerOnly artifacts must not be combined in one process or published
+under the canonical package as competing same-identity binaries.
+
+Deterministic impairment, loopback handshakes, self-trusted two-ended UDP hosts,
+and related test topologies are separately compiled into
+`UltraSim.Network.Testing`. They remain reusable evidence machinery but are
+absent from Full, ClientOnly, ServerOnly, and all production exports.
+
+The accepted Release size, public-API, protocol, package, and actual product-export
+evidence is recorded in
+[`network-capability-packaging-2026-09-08.md`](../../_Benchmarks/Baselines/network-capability-packaging-2026-09-08.md).
 
 Do not introduce a universal `IAoiThing<T...>`, generic cursor hierarchy, or a
 single replication interface merely to hide real differences between profile

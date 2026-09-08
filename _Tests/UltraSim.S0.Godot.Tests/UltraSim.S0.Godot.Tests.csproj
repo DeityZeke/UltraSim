@@ -21,6 +21,7 @@
     <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Kernels/Network.Testing/UltraSim.Network.Testing.csproj" />
     <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
     <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
     <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />

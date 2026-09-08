@@ -8,6 +8,37 @@ authenticated promotion, explicit IPv4 path ownership/rebinding, exclusive
 connection-owner packet handoff, and the accepted dedicated-server/independent-
 client process topology.
 
+The canonical library product is one full `UltraSim.Network.dll`. An ordinary
+`dotnet build` or `dotnet pack` builds **Full**: shared protocol machinery plus
+both Hosted client and Hosted server roles. Optional `ClientOnly` and
+`ServerOnly` builds remove an unused Hosted role without changing assembly
+identity, shared API, wire bytes, protocol version, or manifest fingerprint:
+
+```text
+same source tree
+
+Core/             always
+Hosted/Client/    Full + ClientOnly
+Hosted/Server/    Full + ServerOnly
+
+default package:
+    UltraSim.Network -> Full UltraSim.Network.dll
+```
+
+```bash
+dotnet build Kernels/Network
+dotnet build Kernels/Network -p:UltraSimNetworkFlavor=ClientOnly
+dotnet build Kernels/Network -p:UltraSimNetworkFlavor=ServerOnly
+```
+
+These are physical capability sets, not behavior tiers or separate architectures.
+`Full` is the canonical development/release API and exact binary superset.
+Capability stripping is deployment minimization and is **not a security
+assumption**. A future product may replace either stripped assembly with the
+compatible Full assembly without changing consumer source or assembly references.
+Flavor-specific output and intermediate roots prevent one same-named assembly from
+contaminating another build.
+
 The current UltraSim Game selects `ChunkPublication` for dynamic-public
 replication, but that is a **Game/Replication decision**, not a Network-kernel
 concept. The kernel is equally unaware of the retained entity replication
@@ -60,7 +91,10 @@ HOT / REMOTELY INFLUENCEABLE MEMORY IS BOUNDED.
 
 `Kernels/Network` has no runtime project dependency. Its compile-time analyzer
 reference generates protocol codecs/manifests. The repository architecture gate
-freezes this dependency direction.
+freezes this dependency direction. Deterministic impairment, two-ended loopback,
+and self-trusted transport fixtures live in the separate
+`Kernels/Network.Testing` assembly; no production Network capability set ships
+that assembly.
 
 ## Identity domains
 
@@ -242,7 +276,8 @@ integration.
 
 ## Deterministic evidence
 
-`DeterministicDatagramLink` and `DeterministicNetworkImpairment` provide reproducible
+`UltraSim.Network.Testing` supplies `DeterministicDatagramLink` and
+`DeterministicNetworkImpairment` for reproducible
 loss, duplication, corruption, delay/reorder, and capacity evidence without adding
 protocol semantics.
 
