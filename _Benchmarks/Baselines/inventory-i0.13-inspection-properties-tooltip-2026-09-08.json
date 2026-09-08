@@ -1,0 +1,87 @@
+{
+  "Checkpoint": "I0.13 typed Inspection Properties and content-sized tooltip",
+  "CaptureDate": "2026-09-08",
+  "BaseCommit": "b82da8f650522be13fe67fb0b50a618f619614a3",
+  "SemanticContract": {
+    "AuthorityDeterminesDisclosureAndValues": true,
+    "PresentationDeterminesLabelsFormattingAndOrder": true,
+    "MaximumPropertiesPerSet": 16,
+    "MaximumTokenUtf8Bytes": 32,
+    "ValueKinds": [
+      "Integer",
+      "IntegerRange",
+      "Token",
+      "Fraction",
+      "MassGrams"
+    ],
+    "CanonicalFactOrder": "InspectionPropertyId ascending",
+    "ContributorOrderAffectsEqualityOrWire": false,
+    "DuplicatePropertyIdsRejected": true,
+    "UnknownPropertyDefinitionsRenderable": false
+  },
+  "PresentationPolicy": {
+    "TitleIsSeparateFromPropertyRows": true,
+    "DefaultCategoryOrder": [
+      "Stats",
+      "Attributes",
+      "Durability",
+      "Weight"
+    ],
+    "CategoryOrderConfigurable": true,
+    "PropertyOrderWithinCategoryConfigurable": true,
+    "OmittedKnownProfileEntryUsesCatalogDefault": true,
+    "IronSwordRows": [
+      "Damage <minimum>–<maximum>",
+      "<Element>",
+      "Quality <value>",
+      "Durability <current> / <maximum>"
+    ],
+    "WeightDefinitionPresent": true,
+    "IronSwordWeightFactDeferredUntilAuthoritativeMassExists": true,
+    "WorldHoverAndInventoryUseSameFormatter": true
+  },
+  "GodotTooltip": {
+    "SharedSignAndItemSurface": true,
+    "PreallocatedPropertyRows": 16,
+    "PermanentSwordSizedMinimumRemoved": true,
+    "NaturalWidthUsesWidestRenderedVisibleLine": true,
+    "NaturalHeightUsesVisibleAndWrappedLines": true,
+    "MaximumContentWidthPixels": 480,
+    "ViewportMarginPixels": 8,
+    "HorizontalPaddingPixels": 24,
+    "PointerMoveWithoutContentChangeRebuildsLayout": false,
+    "NativeTitleOnlySignSmallerThanFourRowSword": true
+  },
+  "TransportAndResidency": {
+    "GameProtocolManifestVersion": 23,
+    "GameProtocolManifestFingerprint": 10823083315268688696,
+    "ColdPublicPresentationMessageVersion": 3,
+    "MaximumEncodedMetadataBytes": 768,
+    "HotChunkRecordWireShapeChanged": false,
+    "PropertiesAbsentFromHotMovementRecords": true,
+    "RecipientInterestCoupled": true,
+    "ExactApplicationProofRequired": true,
+    "PacketFreeLocalUsesSameClientCorePropertySet": true,
+    "MalformedExcessiveDuplicateOutOfOrderOrTrailingDataRejected": true
+  },
+  "PermanentAcceptance": {
+    "CanonicalSetAndCustomOrdering": true,
+    "InventoryTypedProjectionAndSelection": true,
+    "ClientCoreMetadataValidation": true,
+    "PacketFreeLocalProjection": true,
+    "RemoteTypedRoundTripAndCanonicalBytes": true,
+    "SharedAuthorityReplication": true,
+    "GodotNativeContentSizedTooltip": true,
+    "GodotPointerMoveLayoutReuse": true,
+    "DebugAndReleaseCanonicalVerifier": true
+  },
+  "DeliberateDeferrals": [
+    "generalized or on-demand inspection acquisition",
+    "content-backed or localized property-definition catalogs",
+    "authoritative item weight",
+    "per-prefab GameObjectScript behavior registration",
+    "TryPickUp/TryDrop and post-commit behavior hooks",
+    "per-entity managed script objects",
+    "Combat and hit testing"
+  ]
+}

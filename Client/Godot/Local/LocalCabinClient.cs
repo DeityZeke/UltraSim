@@ -795,6 +795,9 @@ public partial class LocalCabinClient : Node3D
         UpdateWorldHover();
         if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Sign")
             throw new InvalidOperationException("Known sign presentation did not produce its local hover label.");
+        _hoverTooltip.Show("Sign", null, Vector2.Zero, new Vector2(1_920, 1_080));
+        Vector2 signTooltipSize = _hoverTooltip.PanelSize;
+        ulong signLayoutGeneration = _hoverTooltip.LayoutGeneration;
         Select(_pointerPoint);
         if (_selection != SelectionKind.InformationalSign)
             throw new InvalidOperationException("The known sign presentation was not selected as a sign.");
@@ -849,12 +852,39 @@ public partial class LocalCabinClient : Node3D
             sword.Position.GlobalZMillimeters);
         _pointerPointValid = true;
         UpdateWorldHover();
+        if (_publicPresentationMetadata?.TryGet(
+                sword.Id, out ClientPublicPresentationMetadata swordMetadata) != true)
+            throw new InvalidOperationException(
+                "The world Iron Sword had no retained typed inspection properties.");
+        _hoverTooltip.Show(
+            swordMetadata.DisplayLabel,
+            swordMetadata.InspectionProperties,
+            Vector2.Zero,
+            new Vector2(1_920, 1_080));
         if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Iron Sword" ||
             !_hoverTooltip.Details.Contains("Damage ", StringComparison.Ordinal) ||
             !_hoverTooltip.Details.Contains("Quality ", StringComparison.Ordinal) ||
-            !_hoverTooltip.Details.Contains("Durability ", StringComparison.Ordinal))
+            !_hoverTooltip.Details.Contains("Durability ", StringComparison.Ordinal) ||
+            _hoverTooltip.VisibleRowCount != 4 ||
+            _hoverTooltip.PanelSize.X <= signTooltipSize.X ||
+            _hoverTooltip.PanelSize.Y <= signTooltipSize.Y ||
+            _hoverTooltip.LayoutGeneration <= signLayoutGeneration)
             throw new InvalidOperationException(
-                "The world Iron Sword did not realize its authoritative expanded property tooltip.");
+                "The world Iron Sword did not realize its authoritative content-sized property " +
+                $"tooltip: visible={_hoverTooltip.Visible}, title='{_hoverTooltip.Title}', " +
+                $"rows={_hoverTooltip.VisibleRowCount}, size={_hoverTooltip.PanelSize}, " +
+                $"signSize={signTooltipSize}, generations=" +
+                $"{signLayoutGeneration}->{_hoverTooltip.LayoutGeneration}, " +
+                $"details='{_hoverTooltip.Details}'.");
+        ulong swordLayoutGeneration = _hoverTooltip.LayoutGeneration;
+        _hoverTooltip.Show(
+            swordMetadata.DisplayLabel,
+            swordMetadata.InspectionProperties,
+            new Vector2(300, 200),
+            new Vector2(1_920, 1_080));
+        if (_hoverTooltip.LayoutGeneration != swordLayoutGeneration)
+            throw new InvalidOperationException(
+                "Moving an unchanged hover rebuilt its native tooltip layout.");
         return GetPresentationSnapshot();
     }
 
@@ -1677,7 +1707,7 @@ public partial class LocalCabinClient : Node3D
         if (_hoverTooltip is null)
             return;
         string? title = null;
-        string? details = null;
+        UltraSim.Game.Inspection.InspectionPropertySet? properties = null;
         if (_useConceptDemoWorld && _pointerTarget.IsValid &&
             _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword &&
             _publicPresentationMetadata?.TryGet(
@@ -1685,7 +1715,7 @@ public partial class LocalCabinClient : Node3D
             (item.Flags & ClientPublicPresentationFlags.ItemProperties) != 0)
         {
             title = item.DisplayLabel;
-            details = item.DetailText;
+            properties = item.InspectionProperties;
         }
         else if (_useConceptDemoWorld && _pointerPointValid &&
             IsKnownPresentedPrefabNear(
@@ -1698,7 +1728,7 @@ public partial class LocalCabinClient : Node3D
         }
         _hoverTooltip.Show(
             title,
-            details,
+            properties,
             GetViewport().GetMousePosition(),
             GetViewport().GetVisibleRect().Size);
     }

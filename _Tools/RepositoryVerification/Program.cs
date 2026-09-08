@@ -1409,7 +1409,10 @@ static void VerifyArchitecture(string root)
         ["Game/Contracts/UltraSim.Game.Contracts.csproj"] =
             ["Game/Accounting/UltraSim.Game.Accounting.csproj", "Kernels/ECS/UltraSim.ECS.csproj"],
         ["Game/Inventory/UltraSim.Game.Inventory.csproj"] =
-            ["Kernels/ECS/UltraSim.ECS.csproj"],
+        [
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Kernels/ECS/UltraSim.ECS.csproj",
+        ],
         ["Game/Admission/UltraSim.Game.Admission.csproj"] =
         [
             "Game/Accounting/UltraSim.Game.Accounting.csproj",

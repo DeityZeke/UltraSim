@@ -4,8 +4,8 @@
 
 **Status:** living design/architecture note
 
-**Current implementation checkpoint:** I0.12 — persistent world-item instance vertical plus
-human-play world-property/picking hardening (closed)
+**Current implementation checkpoint:** I0.13 — bounded typed Inspection Properties plus
+content-sized world-hover/Inventory presentation convergence (closed)
 
 **Remote/private vertical checkpoint:** `0ad93d54` — I0.8 authenticated remote inventory vertical
 
@@ -1374,14 +1374,10 @@ have no equipment slot or Grid placement. Rebuild validates it and leaves it out
 equipment topology. Pickup/drop mutations move the same ECS entity into/out of that topology; they
 do not destroy and recreate it.
 
-The first property projection is bounded authoritative text derived from the persisted instance
-component. The owner-private Inventory UI and a Diablo-like world-hover panel now show the same
-rolled damage, element, quality, and durability. World hover does not poll the authority each frame
-or stuff those properties into hot movement/public records. Instead, one bounded relatively cold
-presentation fact joins the already-disclosed complete generational `WorldPublicEntityId`; remote
-delivery is recipient-interest-coupled and exactly application-proved, while packet-free local play
-feeds the same Client Core state directly. Broader on-demand/generalized Object Property Lists remain
-deferred.
+I0.12 first projected the persisted weapon values as one bounded authoritative display string. That
+temporary transport proved recipient-safe cold metadata and the shared Inventory/world-hover
+consumer, but deliberately did not freeze the final property grammar. I0.13 supersedes the string
+with typed Inspection Properties as described below.
 
 `WorldPublicStateFlags.GroundItem` independently marks a visible item as a selectable world pickup.
 An equipped sword remains visible so it can follow its authoritative owner, but clears
@@ -1413,6 +1409,57 @@ The spawn recipe is currently explicit compiled Game composition data rather tha
 authoring. That is deliberate: I0.12 earns the runtime/persistence semantics without prematurely
 freezing the future authoring syntax.
 
+## I0.13 — Inspection Properties v1 and content-sized tooltip — CLOSED
+
+I0.13 replaces the temporary delimiter-formatted sword description with one bounded canonical
+property set. Game determines which recipient-visible semantic facts exist and their typed values;
+presentation policy supplies labels, formatting, category order, and row order. The instance does
+not transmit its preferred UI order.
+
+```text
+authoritative item state
+    -> recipient-visible InspectionPropertySet
+    -> packet-free Local or bounded cold Network metadata
+    -> retained Client Core inspection state
+    -> InspectionPropertyCatalog + InspectionPresentationProfile
+    -> world hover / Inventory
+```
+
+The v1 value grammar is finite: integer, integer range, canonical token, current/maximum fraction,
+and mass in grams. A set contains at most 16 unique stable property IDs and canonicalizes by ID, so
+contributor insertion order cannot alter equality or wire bytes. Numeric property/category identity
+has no display-order meaning. A presentation profile can reorder entire categories and individual
+properties independently; omitted known entries use deterministic catalog defaults. A property
+without a known definition is not rendered merely because an authority supplied an unknown number.
+
+The first stock policy renders the title followed by `Stats`, `Attributes`, `Durability`, and
+`Weight`; within those categories it currently knows Damage, Element, Quality, Durability, and
+Weight. Iron Sword contributes Damage, Element, Quality, and Durability from its persisted rolled
+component. Weight has a typed definition but is intentionally absent until authoritative item mass
+is earned. Inventory selection and world hover call the same engine-neutral formatter and therefore
+produce the same rows without parsing text.
+
+The cold public metadata message now carries the canonical typed set, remains coupled to current
+recipient interest and exact application proof, and remains separate from hot public movement.
+Malformed, excessive, duplicate, out-of-order, kind/value-invalid, or trailing wire data rejects
+transactionally. Packet-free Local feeds the same Client Core representation without pretending to
+use Network.
+
+Godot's shared sign/item hover surface now uses a `PanelContainer`/`VBoxContainer` with one title
+and preallocated bounded rows. Its natural width follows the widest rendered visible line; its
+height follows the actual visible/wrapped lines. Width is clamped to the viewport and long content
+wraps. A sign therefore shrinks to a title-only panel while a sword grows to its actual four rows.
+Moving the pointer only repositions an unchanged layout; the native content tree is rebuilt only
+when content or layout width changes.
+
+This checkpoint establishes the future Game-side behavior seam without implementing a general
+callback framework. A future `GameObjectScript`/`ItemScript` authoring layer may contribute facts and
+register shared immutable behavior by explicit prefab/behavior identity. It must not retain one
+managed script object per ECS entity, infer behavior from archetype shape, teach the ECS kernel
+about pickup/drop, or turn pointer hover into a per-frame authority callback. Transactional
+`TryPickUp`/`TryDrop` validation and post-commit hooks remain deferred until concrete gameplay earns
+them.
+
 ## Later candidates
 
 - Slot semantics/viewer;
@@ -1425,7 +1472,7 @@ freezing the future authoring syntax.
 - multi-viewer sessions;
 - transaction/trade/escrow;
 - lock/no-drop/no-trade/quest/reserved flags as gameplay earns them.
-- generalized/on-demand Object Property Lists beyond the first bounded weapon-property fact;
+- generalized/on-demand inspection acquisition beyond the currently disclosed bounded property set;
 - authored spawn-recipe/ObjectScript syntax beyond the first compiled Iron Sword recipe;
 
 ---

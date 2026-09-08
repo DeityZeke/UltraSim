@@ -109,7 +109,11 @@ library remains small composition data; it does not make Client Core
 depend on every Game definition, pull Game UI/Inventory authority assemblies into Online, or
 substitute for required realm-content application proof.
 
-I0.12 advances the passive definition to v7 with one item-details slot and Drop action. Game derives
-rolled weapon text from persistent authoritative instance state and authorizes Drop only in an
-owner-bound view. Godot still renders the generic compiled tree and returns a semantic action; it
-does not choose item stats, ownership, or world placement.
+I0.12 advances the passive definition to v7 with one item-details slot and Drop action. I0.13
+replaces the temporary preformatted weapon string with a typed bounded Inspection Property set.
+Game determines disclosed facts from persistent authoritative instance state and authorizes Drop
+only in an owner-bound view; an engine-neutral presentation profile determines labels, formatting,
+and category/property ordering. The current Inventory model slot receives the result of that shared
+formatter, while world hover consumes the same facts/profile. Godot still renders the generic
+compiled tree and returns a semantic action; it does not choose item stats, ownership, or world
+placement.

@@ -7,6 +7,7 @@ using UltraSim.Client.Network;
 using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
@@ -133,41 +134,80 @@ internal static class F03bRemotePlayableTests
         };
         var bytes = new byte[UltraSimGameProtocol.MaximumPublicPresentationMessageBytes + 1];
         True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, "Remote Éowyn", string.Empty, out int written));
+            bytes, in header, "Remote Éowyn", null, out int written));
         True(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
             bytes.AsSpan(0, written), out RemotePublicPresentationMetadataHeader decoded,
-            out string label, out string details));
+            out string label, out InspectionPropertySet? decodedProperties));
         Equal(header, decoded);
         Equal("Remote Éowyn", label);
-        Equal(string.Empty, details);
+        True(decodedProperties is null);
         bytes[written] = 0;
         False(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
             bytes.AsSpan(0, written + 1), out _, out _, out _));
         False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, " bad", string.Empty, out _));
+            bytes, in header, " bad", null, out _));
         False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, "bad\uD800", string.Empty, out _));
+            bytes, in header, "bad\uD800", null, out _));
 
         header.Flags = RemotePublicPresentationFlags.ItemProperties;
+        InspectionPropertySet properties = GameItemGenerationState.BuildInspectionProperties(
+            new GameWeaponInstance
+            {
+                DamageMinimum = 3,
+                DamageMaximum = 8,
+                CurrentDurability = 45,
+                MaximumDurability = 45,
+                Quality = 61,
+                Element = GameWeaponElement.Fire,
+                SpawnOrdinal = 1,
+            });
         True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, "Iron Sword",
-            "Damage 3-8 · Fire · Quality 61 · Durability 45/45", out written));
+            bytes, in header, "Iron Sword", properties, out written));
         True(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
-            bytes.AsSpan(0, written), out decoded, out label, out details));
+            bytes.AsSpan(0, written), out decoded, out label, out decodedProperties));
         Equal("Iron Sword", label);
-        True(details.Contains("Damage 3-8", StringComparison.Ordinal));
+        True(properties.Equals(decodedProperties));
+        True(InspectionPresentationDefaults.TryFormat(
+            label, decodedProperties, out InspectionPresentation? presentation));
+        True(presentation!.DetailText.Contains("Damage 3–8", StringComparison.Ordinal));
+        InspectionPropertyFact[] reorderedFacts = properties.Facts.ToArray();
+        Array.Reverse(reorderedFacts);
+        True(InspectionPropertySet.TryCreate(reorderedFacts, out InspectionPropertySet? reordered));
+        var reorderedBytes = new byte[bytes.Length];
+        True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            reorderedBytes, in header, "Iron Sword", reordered, out int reorderedWritten));
+        Equal(written, reorderedWritten);
+        True(bytes.AsSpan(0, written).SequenceEqual(reorderedBytes.AsSpan(0, reorderedWritten)));
         False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, "Iron Sword", string.Empty, out _));
+            bytes, in header, "Iron Sword", null, out _));
+        int firstKindOffset = RemotePublicPresentationMetadataHeaderCodec.EncodedSize +
+            sizeof(byte) + System.Text.Encoding.UTF8.GetByteCount("Iron Sword") +
+            sizeof(byte) + sizeof(ushort);
+        byte originalKind = bytes[firstKindOffset];
+        bytes[firstKindOffset] = byte.MaxValue;
+        False(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
+            bytes.AsSpan(0, written), out _, out _, out _));
+        bytes[firstKindOffset] = originalKind;
+        int secondIdOffset = firstKindOffset + sizeof(byte) + sizeof(long) * 2;
+        byte secondIdHigh = bytes[secondIdOffset];
+        byte secondIdLow = bytes[secondIdOffset + 1];
+        bytes[secondIdOffset] = 0;
+        bytes[secondIdOffset + 1] = 1;
+        False(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
+            bytes.AsSpan(0, written), out _, out _, out _));
+        bytes[secondIdOffset] = secondIdHigh;
+        bytes[secondIdOffset + 1] = secondIdLow;
 
         header.Operation = RemotePublicPresentationOperation.Remove;
         header.Flags = RemotePublicPresentationFlags.None;
         True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, string.Empty, string.Empty, out written));
+            bytes, in header, string.Empty, null, out written));
         True(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
-            bytes.AsSpan(0, written), out decoded, out label, out details));
+            bytes.AsSpan(0, written), out decoded, out label, out decodedProperties));
         Equal(string.Empty, label);
+        True(decodedProperties is null);
         False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-            bytes, in header, "must be empty", string.Empty, out _));
+            bytes, in header, "must be empty", null, out _));
 
         var proof = new RemotePublicPresentationAppliedMessage
         {
@@ -226,9 +266,13 @@ internal static class F03bRemotePlayableTests
             publicSword.Id, out ClientPublicPresentationMetadata item));
         Equal(ClientPublicPresentationFlags.ItemProperties, item.Flags);
         Equal("Iron Sword", item.DisplayLabel);
-        True(item.DetailText.Contains("Damage ", StringComparison.Ordinal));
-        True(item.DetailText.Contains("Quality ", StringComparison.Ordinal));
-        True(item.DetailText.Contains("Durability ", StringComparison.Ordinal));
+        True(InspectionPresentationDefaults.TryFormat(
+            item.DisplayLabel,
+            item.InspectionProperties,
+            out InspectionPresentation? itemPresentation));
+        True(itemPresentation!.DetailText.Contains("Damage ", StringComparison.Ordinal));
+        True(itemPresentation.DetailText.Contains("Quality ", StringComparison.Ordinal));
+        True(itemPresentation.DetailText.Contains("Durability ", StringComparison.Ordinal));
     }
 
     private static void RemotePlayableProtocolIsCanonicalAndTrustMinimal()
@@ -481,7 +525,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)22, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)23, UltraSimGameProtocol.Manifest.Version);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()

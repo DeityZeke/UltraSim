@@ -17,7 +17,9 @@ I0.12 adds the first Game-owned world-item transition without making Inventory o
 `InventoryItem.Parent == Entity.Null` is a valid world-item state outside the derived container/
 equipment index. Game coordinates pickup and Drop with public World state, while Inventory performs
 the same entity's topology mutation. The Iron Sword's persisted rolled weapon component survives
-world → container → Main Hand → world and is projected as bounded owner-private detail text.
+world → container → Main Hand → world. I0.13 projects its disclosed values as a bounded canonical
+`InspectionPropertySet`; Inventory retains typed facts and uses the same engine-neutral presentation
+catalog/profile as world hover. Inventory does not parse or own a delimiter-formatted weapon string.
 
 ## Owner-private UI
 

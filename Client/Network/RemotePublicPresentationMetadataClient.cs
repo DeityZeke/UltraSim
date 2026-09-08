@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using UltraSim.Client.Core;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Network;
@@ -70,7 +71,7 @@ public sealed class RemotePublicPresentationMetadataClient :
         }
         if (!UltraSimGameProtocol.TryReadPublicPresentationMetadata(
                 payload, out RemotePublicPresentationMetadataHeader header,
-                out string displayLabel, out string detailText) ||
+                out string displayLabel, out InspectionPropertySet? properties) ||
             header.ApplicationSessionEpoch != _applicationSessionEpoch)
         {
             SaturatingIncrement(ref _rejected);
@@ -94,7 +95,7 @@ public sealed class RemotePublicPresentationMetadataClient :
                 header.MetadataRevision,
                 (ClientPublicPresentationFlags)header.Flags,
                 displayLabel,
-                detailText);
+                properties);
             result = _state.TryApply(
                 (ClientPublicPresentationOperation)header.Operation, in metadata);
         }

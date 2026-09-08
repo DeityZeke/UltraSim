@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.World;
 
@@ -30,13 +31,13 @@ public readonly record struct GamePublicWeaponPresentation(
     WorldPublicStateFlags StateFlags,
     GameWeaponInstance Weapon,
     string DisplayName,
-    string DetailText)
+    InspectionPropertySet InspectionProperties)
 {
     public bool IsValid => Id.IsValid &&
         (StateFlags & (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)) ==
             (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem) &&
         Weapon.IsCanonical() &&
-        !string.IsNullOrWhiteSpace(DisplayName) && !string.IsNullOrWhiteSpace(DetailText);
+        !string.IsNullOrWhiteSpace(DisplayName) && InspectionProperties is not null;
 }
 
 /// <summary>
@@ -44,7 +45,7 @@ public readonly record struct GamePublicWeaponPresentation(
 /// performs deterministic one-time rolls, owns respawn lineage, and coordinates public/private
 /// representation without making Inventory aware of weapon schemas.
 /// </summary>
-public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
+public sealed class GameItemGenerationState : IInventoryItemInspectionProvider
 {
     private enum SpawnResult : byte
     {
@@ -66,7 +67,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
     private readonly Entity[] _items;
     private readonly Entity[] _spawners;
     private readonly GameWeaponInstance[] _describedWeapons;
-    private readonly string?[] _descriptions;
+    private readonly InspectionPropertySet?[] _inspectionProperties;
     private int _itemCount;
     private int _spawnerCount;
 
@@ -85,7 +86,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
         _items = new Entity[world.Options.EntityCapacity.MaximumEntities];
         _spawners = new Entity[world.Options.EntityCapacity.MaximumEntities];
         _describedWeapons = new GameWeaponInstance[_items.Length];
-        _descriptions = new string?[_items.Length];
+        _inspectionProperties = new InspectionPropertySet?[_items.Length];
     }
 
     public int ItemCount => _itemCount;
@@ -94,15 +95,15 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
     {
         get
         {
-            long textBytes = 0;
-            for (int index = 0; index < _descriptions.Length; index++)
-                if (_descriptions[index] is { } value)
-                    textBytes = checked(textBytes + (long)value.Length * sizeof(char));
+            long propertyBytes = 0;
+            for (int index = 0; index < _inspectionProperties.Length; index++)
+                if (_inspectionProperties[index] is { } value)
+                    propertyBytes = checked(propertyBytes + 24L + value.Count * 40L);
             return checked(
                 (long)(_items.Length + _spawners.Length) * sizeof(ulong) +
                 (long)_describedWeapons.Length * 16 +
-                (long)_descriptions.Length * IntPtr.Size +
-                textBytes);
+                (long)_inspectionProperties.Length * IntPtr.Size +
+                propertyBytes);
         }
     }
 
@@ -112,7 +113,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
         _itemCount = 0;
         _spawnerCount = 0;
         Array.Clear(_describedWeapons);
-        Array.Clear(_descriptions);
+        Array.Clear(_inspectionProperties);
         int maximum = world.Options.EntityCapacity.MaximumEntities;
         for (uint index = 0; index < unchecked((uint)maximum); index++)
         {
@@ -273,36 +274,61 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
             (!state.ActiveItem.IsValid || world.IsAlive(state.ActiveItem));
     }
 
-    public bool TryDescribe(EcsWorld world, Entity item, out string description)
+    public bool TryGetInspectionProperties(
+        EcsWorld world,
+        Entity item,
+        out InspectionPropertySet? properties)
     {
         if (TryReadWeapon(world, item, out GameWeaponInstance weapon))
         {
             int slot = FindItem(item);
             if (slot >= 0)
             {
-                if (_descriptions[slot] is null ||
+                if (_inspectionProperties[slot] is null ||
                     !WeaponsEqual(in _describedWeapons[slot], in weapon))
                 {
                     _describedWeapons[slot] = weapon;
-                    _descriptions[slot] = Describe(in weapon);
+                    _inspectionProperties[slot] = BuildInspectionProperties(in weapon);
                 }
-                description = _descriptions[slot]!;
+                properties = _inspectionProperties[slot]!;
                 return true;
             }
-            description = Describe(in weapon);
+            properties = BuildInspectionProperties(in weapon);
             return true;
         }
-        description = string.Empty;
+        properties = null;
         return false;
     }
 
-    public static string Describe(in GameWeaponInstance weapon)
+    public static InspectionPropertySet BuildInspectionProperties(in GameWeaponInstance weapon)
     {
         if (!weapon.IsCanonical())
             throw new ArgumentException("Weapon properties must be canonical.", nameof(weapon));
-        return $"Damage {weapon.DamageMinimum}-{weapon.DamageMaximum} · " +
-            $"{weapon.Element} · Quality {weapon.Quality} · " +
-            $"Durability {weapon.CurrentDurability}/{weapon.MaximumDurability}";
+        if (!InspectionPropertyValue.TryToken(
+                weapon.Element switch
+                {
+                    GameWeaponElement.None => "none",
+                    GameWeaponElement.Fire => "fire",
+                    GameWeaponElement.Cold => "cold",
+                    GameWeaponElement.Lightning => "lightning",
+                    _ => null,
+                }, out InspectionPropertyValue element) ||
+            !InspectionPropertySet.TryCreate(
+                [
+                    // Contributor order is deliberately unrelated to presentation order.
+                    new(InspectionPropertyIds.Durability,
+                        InspectionPropertyValue.Fraction(
+                            weapon.CurrentDurability, weapon.MaximumDurability)),
+                    new(InspectionPropertyIds.Quality,
+                        InspectionPropertyValue.Integer(weapon.Quality)),
+                    new(InspectionPropertyIds.Damage,
+                        InspectionPropertyValue.IntegerRange(
+                            weapon.DamageMinimum, weapon.DamageMaximum)),
+                    new(InspectionPropertyIds.Element, element),
+                ],
+                out InspectionPropertySet? properties))
+            throw new InvalidOperationException("A canonical weapon produced invalid inspection properties.");
+        return properties!;
     }
 
     public int CopyPublicWeaponPresentations(
@@ -326,11 +352,11 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
                 !TryReadWeapon(world, item, out GameWeaponInstance weapon))
                 continue;
             if (count == destination.Length) return -1;
-            if (_descriptions[slot] is null ||
+            if (_inspectionProperties[slot] is null ||
                 !WeaponsEqual(in _describedWeapons[slot], in weapon))
             {
                 _describedWeapons[slot] = weapon;
-                _descriptions[slot] = Describe(in weapon);
+                _inspectionProperties[slot] = BuildInspectionProperties(in weapon);
             }
             destination[count++] = new GamePublicWeaponPresentation(
                 id,
@@ -338,7 +364,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
                 descriptor.Flags,
                 weapon,
                 "Iron Sword",
-                _descriptions[slot]!);
+                _inspectionProperties[slot]!);
         }
         return count;
     }
@@ -527,7 +553,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
         int slot = _itemCount++;
         _items[slot] = entity;
         _describedWeapons[slot] = weapon;
-        _descriptions[slot] = Describe(in weapon);
+        _inspectionProperties[slot] = BuildInspectionProperties(in weapon);
     }
 
     private int FindItem(Entity item)

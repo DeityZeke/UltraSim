@@ -1049,7 +1049,7 @@ public sealed class LocalPlayableSession : IDisposable
                     1,
                     ClientPublicPresentationFlags.ItemProperties,
                     source.DisplayName,
-                    source.DetailText);
+                    source.InspectionProperties);
         }
         lock (_viewGate)
         {

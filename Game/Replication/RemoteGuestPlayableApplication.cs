@@ -6,6 +6,7 @@ using UltraSim.Game.Admission;
 using UltraSim.Game.Application;
 using UltraSim.Game.Chat;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.Input;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.Protocol;
@@ -883,7 +884,7 @@ public sealed class RemoteGuestPlayableApplication :
             Flags = RemotePublicPresentationFlags.NameplateEligible,
         };
         if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-                _messageScratch, in header, _guestIdentity.DisplayName!, string.Empty,
+                _messageScratch, in header, _guestIdentity.DisplayName!, null,
                 out int written))
             throw new InvalidOperationException("The retained public presentation metadata became invalid.");
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
@@ -983,9 +984,11 @@ public sealed class RemoteGuestPlayableApplication :
                 : RemotePublicPresentationFlags.None,
         };
         string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
-        string detail = row.DesiredPresent ? row.DetailText! : string.Empty;
+        InspectionPropertySet? properties = row.DesiredPresent
+            ? row.InspectionProperties
+            : null;
         if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-                _messageScratch, in header, label, detail, out int written))
+                _messageScratch, in header, label, properties, out int written))
             throw new InvalidOperationException(
                 "The retained public-item presentation metadata became invalid.");
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
@@ -1027,7 +1030,9 @@ public sealed class RemoteGuestPlayableApplication :
             ? row.DesiredFlags
             : RemotePublicPresentationFlags.None;
         row.AppliedDisplayLabel = row.DesiredPresent ? row.DisplayLabel : null;
-        row.AppliedDetailText = row.DesiredPresent ? row.DetailText : null;
+        row.AppliedInspectionProperties = row.DesiredPresent
+            ? row.InspectionProperties
+            : null;
         row.DeliveryId = 0;
         row.LastQueuedMilliseconds = 0;
         _publicItemPresentationDeliverySlot = -1;
@@ -1085,7 +1090,7 @@ public sealed class RemoteGuestPlayableApplication :
                 continue;
             }
             row.Weapon = desired.Weapon;
-            row.DetailText = desired.DetailText;
+            row.InspectionProperties = desired.InspectionProperties;
             row.Revision = checked(row.Revision + 1);
             row.DesiredPresent = true;
         }
@@ -1116,7 +1121,7 @@ public sealed class RemoteGuestPlayableApplication :
             {
                 PublicEntity = desired.Id,
                 DisplayLabel = desired.DisplayName,
-                DetailText = desired.DetailText,
+                InspectionProperties = desired.InspectionProperties,
                 DesiredFlags = RemotePublicPresentationFlags.ItemProperties,
                 Weapon = desired.Weapon,
                 Revision = 1,
@@ -1195,9 +1200,8 @@ public sealed class RemoteGuestPlayableApplication :
                 : RemotePublicPresentationFlags.None,
         };
         string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
-        string detail = row.DesiredPresent ? row.DetailText ?? string.Empty : string.Empty;
         if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-                _messageScratch, in header, label, detail, out int written))
+                _messageScratch, in header, label, null, out int written))
             throw new InvalidOperationException(
                 "The retained shared public-presentation metadata became invalid.");
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
@@ -1240,7 +1244,7 @@ public sealed class RemoteGuestPlayableApplication :
         row.AppliedFlags = row.DesiredPresent
             ? row.DesiredFlags
             : RemotePublicPresentationFlags.None;
-        row.AppliedDetailText = row.DesiredPresent ? row.DetailText : null;
+        row.AppliedInspectionProperties = null;
         row.DeliveryId = 0;
         row.LastQueuedMilliseconds = 0;
         _sharedPresentationDeliverySlot = -1;
@@ -1762,8 +1766,8 @@ public sealed class RemoteGuestPlayableApplication :
         internal WorldPublicEntityId AppliedPublicEntity;
         internal string? DisplayLabel;
         internal string? AppliedDisplayLabel;
-        internal string? DetailText;
-        internal string? AppliedDetailText;
+        internal InspectionPropertySet? InspectionProperties;
+        internal InspectionPropertySet? AppliedInspectionProperties;
         internal RemotePublicPresentationFlags DesiredFlags;
         internal RemotePublicPresentationFlags AppliedFlags;
         internal GameWeaponInstance Weapon;
@@ -1778,7 +1782,7 @@ public sealed class RemoteGuestPlayableApplication :
              DesiredPresent && (AppliedPublicEntity != PublicEntity ||
                 AppliedFlags != DesiredFlags ||
                 !string.Equals(AppliedDisplayLabel, DisplayLabel, StringComparison.Ordinal) ||
-                !string.Equals(AppliedDetailText, DetailText, StringComparison.Ordinal)));
+                !Equals(AppliedInspectionProperties, InspectionProperties)));
     }
 
     private readonly record struct InventoryOpenEntities(Entity Container, Entity Owner);

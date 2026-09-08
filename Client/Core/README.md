@@ -161,10 +161,12 @@ caller-owned spans, and the warmed no-change path allocates zero bytes.
 
 Cold presentation facts are fenced by server generation plus complete generational
 `WorldPublicEntityId` and monotonic metadata revision. A bounded per-index identity floor survives
-removal, preventing an old name or item detail from attaching to a reused public slot. F0.4 uses
-this state for actor labels; I0.12 human-play hardening adds a separately flagged, bounded weapon
-detail for world hover. Missing per-instance metadata changes only presentation fallback; it never
-changes Game identity, disclosure, or interaction authority.
+removal, preventing an old name or item property set from attaching to a reused public slot. F0.4
+uses this state for actor labels; I0.13 retains a separately flagged, immutable set of at most 16
+canonical typed Inspection Property facts for world hover. Contributor and wire order canonicalize
+by stable property ID, while a presentation profile independently controls category/row order.
+Missing per-instance metadata changes only presentation fallback; it never changes Game identity,
+disclosure, or interaction authority.
 
 `ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
 are ordered, append-only occurrences rather than latest state: session/server

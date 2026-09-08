@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.Inventory;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
@@ -647,9 +648,13 @@ public sealed class InventoryUiController : IDisposable
             string.Equals(values[2].Text, "Main Hand", StringComparison.Ordinal);
         bool splittable = session.GridWidth == 0 && !equipped && values.Length >= 2 &&
             values[1].Kind == UiValueKind.Number && values[1].Number > 1;
-        string details = session.TryGetDescription(row, out string description)
-            ? description
-            : values.Length != 0 ? values[0].Text ?? "Item selected." : "Item selected.";
+        string displayName = values.Length != 0 ? values[0].Text ?? "Item selected." : "Item selected.";
+        string details = session.TryGetInspectionProperties(
+                row, out InspectionPropertySet? properties) &&
+            InspectionPresentationDefaults.TryFormat(
+                displayName, properties, out InspectionPresentation? presentation)
+                ? presentation!.DetailText
+                : displayName;
         PublishStatus(session, "Item selected.",
             SelectedActionPatches(
                 splittable,
@@ -658,7 +663,7 @@ public sealed class InventoryUiController : IDisposable
                 canMove: !equipped && session.Destinations.Length != 0,
                 canPlace: session.GridWidth != 0 && session.GridHeight != 0,
                 canDrop: session.RequiredOwner.IsValid &&
-                    session.TryGetDescription(row, out _)),
+                    session.TryGetInspectionProperties(row, out _)),
             details);
     }
 
@@ -1039,7 +1044,7 @@ public sealed class InventoryUiController : IDisposable
             InventoryUi.Details,
             "Select an item to inspect its authoritative properties.");
         session.Model.SetText(InventoryUi.TransferLabel, transferLabel);
-        session.ReplaceDescriptions(projection.Items);
+        session.ReplaceInspectionProperties(projection.Items);
         session.GridWidth = projection.GridWidth;
         session.GridHeight = projection.GridHeight;
         session.Model.SetText(InventoryUi.GridLabel, gridLabel);
@@ -1206,7 +1211,7 @@ public sealed class InventoryUiController : IDisposable
             Container = container;
             RequiredOwner = requiredOwner;
             Destinations = destinations;
-            ReplaceDescriptions(items);
+            ReplaceInspectionProperties(items);
             GridWidth = gridWidth;
             GridHeight = gridHeight;
             Model = model;
@@ -1223,18 +1228,20 @@ public sealed class InventoryUiController : IDisposable
         internal UiModel Model { get; }
         internal ulong Sequence { get; set; }
 
-        private readonly Dictionary<ulong, string> _descriptions = [];
+        private readonly Dictionary<ulong, InspectionPropertySet> _inspectionProperties = [];
 
-        internal void ReplaceDescriptions(ReadOnlySpan<InventoryItemView> items)
+        internal void ReplaceInspectionProperties(ReadOnlySpan<InventoryItemView> items)
         {
-            _descriptions.Clear();
+            _inspectionProperties.Clear();
             foreach (ref readonly InventoryItemView item in items)
-                if (!string.IsNullOrWhiteSpace(item.InstanceDescription))
-                    _descriptions.Add(item.PersistentId.Value, item.InstanceDescription);
+                if (item.InspectionProperties is { } properties)
+                    _inspectionProperties.Add(item.PersistentId.Value, properties);
         }
 
-        internal bool TryGetDescription(UiRowId row, out string description) =>
-            _descriptions.TryGetValue(row.Value, out description!);
+        internal bool TryGetInspectionProperties(
+            UiRowId row,
+            out InspectionPropertySet? properties) =>
+            _inspectionProperties.TryGetValue(row.Value, out properties);
 
         internal bool TryGetDestination(UiRowId row, out PersistentEntityKey destination)
         {

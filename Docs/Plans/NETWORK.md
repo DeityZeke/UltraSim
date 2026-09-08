@@ -625,14 +625,17 @@ fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
 As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 11
-and `UltraSimGameProtocol` constructs manifest version 22. Version 20 added the bounded cold
+and `UltraSimGameProtocol` constructs manifest version 23. Version 20 added the bounded cold
 public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
 adds the authoritative `Primary` result to the playable owner-state schema for I0.12. Version 22
 widens the existing cold presentation occurrence with an independently bounded optional item-detail
 string and admits the `GroundItem` state bit in the unchanged hot chunk-record shape. Item details
-remain absent from hot records, and Network still owns neither item state nor action meaning. Future
-schema changes must advance the appropriate generated/manifest identity and remain bounded/
-hostile-input transactional.
+remain absent from hot records. Version 23 supersedes that temporary formatted detail string with a
+canonical set of at most 16 stable typed Inspection Property facts. The decoder requires ascending
+unique property identity, a finite value grammar, bounded tokens, exact kind/value validity, and no
+trailing bytes before Client Core publication. Network still owns neither item state, presentation
+order/labels, nor action meaning. Future schema changes must advance the appropriate generated/
+manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy
 

@@ -1,4 +1,5 @@
 using System.Text;
+using UltraSim.Game.Inspection;
 using UltraSim.Network;
 
 namespace UltraSim.Game.Protocol;
@@ -25,10 +26,10 @@ public enum RemotePublicPresentationApplyStatus : byte
 }
 
 /// <summary>
-/// One retained cold public-presentation metadata occurrence. Bounded display/detail text follows
-/// only for a Present operation; moving public state remains in the independent chunk protocol.
+/// One retained cold public-presentation metadata occurrence. A bounded display label and canonical
+/// typed inspection facts follow only for a Present operation; hot movement stays independent.
 /// </summary>
-[NetworkMessage(144, "ultrasim.game.public-presentation-metadata", 2, NetworkLane.Control)]
+[NetworkMessage(144, "ultrasim.game.public-presentation-metadata", 3, NetworkLane.Control)]
 public partial struct RemotePublicPresentationMetadataHeader
 {
     public ulong ApplicationSessionEpoch;
@@ -54,7 +55,6 @@ public partial struct RemotePublicPresentationAppliedMessage
 public static partial class UltraSimGameProtocol
 {
     public const int MaximumPublicPresentationDisplayLabelUtf8Bytes = 128;
-    public const int MaximumPublicPresentationDetailUtf8Bytes = 512;
     public const int MaximumPublicPresentationMessageBytes = 768;
     public const RemotePublicPresentationFlags AdmittedPublicPresentationFlags =
         RemotePublicPresentationFlags.NameplateEligible |
@@ -65,12 +65,11 @@ public static partial class UltraSimGameProtocol
         Span<byte> destination,
         in RemotePublicPresentationMetadataHeader header,
         string displayLabel,
-        string detailText,
+        InspectionPropertySet? properties,
         out int written)
     {
         written = 0;
-        if (!IsValidPublicPresentationHeader(in header) || displayLabel is null ||
-            detailText is null)
+        if (!IsValidPublicPresentationHeader(in header) || displayLabel is null)
             return false;
         var writer = new NetworkPacketWriter(destination);
         if (!RemotePublicPresentationMetadataHeaderCodec.TryWrite(ref writer, in header))
@@ -82,17 +81,13 @@ public static partial class UltraSimGameProtocol
                     !writer.TryWriteBoundedUtf8(
                         displayLabel, MaximumPublicPresentationDisplayLabelUtf8Bytes) ||
                     ((header.Flags & RemotePublicPresentationFlags.ItemProperties) != 0
-                        ? !IsCanonicalPublicPresentationText(
-                                detailText, MaximumPublicPresentationDetailUtf8Bytes) ||
-                          !writer.TryWriteBoundedUtf8(
-                                detailText, MaximumPublicPresentationDetailUtf8Bytes)
-                        : detailText.Length != 0 ||
-                          !writer.TryWriteBoundedUtf8(
-                                string.Empty, MaximumPublicPresentationDetailUtf8Bytes)))
+                        ? properties is null
+                        : properties is not null) ||
+                    !TryWriteInspectionProperties(ref writer, properties))
                     return false;
                 break;
             case RemotePublicPresentationOperation.Remove:
-                if (displayLabel.Length != 0 || detailText.Length != 0) return false;
+                if (displayLabel.Length != 0 || properties is not null) return false;
                 break;
             default:
                 return false;
@@ -105,11 +100,11 @@ public static partial class UltraSimGameProtocol
         ReadOnlySpan<byte> source,
         out RemotePublicPresentationMetadataHeader header,
         out string displayLabel,
-        out string detailText)
+        out InspectionPropertySet? properties)
     {
         header = default;
         displayLabel = string.Empty;
-        detailText = string.Empty;
+        properties = null;
         if (source.Length > MaximumPublicPresentationMessageBytes) return false;
         var reader = new NetworkPacketReader(source);
         if (!RemotePublicPresentationMetadataHeaderCodec.TryRead(
@@ -121,17 +116,13 @@ public static partial class UltraSimGameProtocol
             if (!reader.TryReadBoundedUtf8Bytes(
                     MaximumPublicPresentationDisplayLabelUtf8Bytes,
                     out ReadOnlySpan<byte> label) || label.IsEmpty ||
-                !reader.TryReadBoundedUtf8Bytes(
-                    MaximumPublicPresentationDetailUtf8Bytes,
-                    out ReadOnlySpan<byte> details) || !reader.IsComplete)
+                !TryReadInspectionProperties(ref reader, out properties) || !reader.IsComplete)
                 return false;
             displayLabel = Encoding.UTF8.GetString(label);
-            detailText = Encoding.UTF8.GetString(details);
             if (!IsCanonicalPublicPresentationLabel(displayLabel) ||
                 ((candidate.Flags & RemotePublicPresentationFlags.ItemProperties) != 0
-                    ? !IsCanonicalPublicPresentationText(
-                        detailText, MaximumPublicPresentationDetailUtf8Bytes)
-                    : detailText.Length != 0))
+                    ? properties is null
+                    : properties is not null))
                 return false;
         }
         else if (!reader.IsComplete)
@@ -163,6 +154,102 @@ public static partial class UltraSimGameProtocol
     private static bool IsCanonicalPublicPresentationLabel(string value)
         => IsCanonicalPublicPresentationText(
             value, MaximumPublicPresentationDisplayLabelUtf8Bytes);
+
+    private static bool TryWriteInspectionProperties(
+        ref NetworkPacketWriter writer,
+        InspectionPropertySet? properties)
+    {
+        int count = properties?.Count ?? 0;
+        if (count > InspectionPropertySet.MaximumProperties ||
+            !writer.TryWriteByte(checked((byte)count)))
+            return false;
+        if (properties is null) return true;
+        foreach (ref readonly InspectionPropertyFact fact in properties.Facts)
+        {
+            if (!writer.TryWriteUInt16(fact.Id.Value) ||
+                !writer.TryWriteByte((byte)fact.Value.Kind))
+                return false;
+            switch (fact.Value.Kind)
+            {
+                case InspectionPropertyValueKind.Integer:
+                case InspectionPropertyValueKind.MassGrams:
+                    if (!writer.TryWriteInt64(fact.Value.First)) return false;
+                    break;
+                case InspectionPropertyValueKind.IntegerRange:
+                case InspectionPropertyValueKind.Fraction:
+                    if (!writer.TryWriteInt64(fact.Value.First) ||
+                        !writer.TryWriteInt64(fact.Value.Second))
+                        return false;
+                    break;
+                case InspectionPropertyValueKind.Token:
+                    if (!writer.TryWriteBoundedUtf8(
+                            fact.Value.Token!, InspectionPropertyValue.MaximumTokenUtf8Bytes))
+                        return false;
+                    break;
+                default:
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool TryReadInspectionProperties(
+        ref NetworkPacketReader reader,
+        out InspectionPropertySet? properties)
+    {
+        properties = null;
+        if (!reader.TryReadByte(out byte count) || count > InspectionPropertySet.MaximumProperties)
+            return false;
+        if (count == 0) return true;
+        var facts = new InspectionPropertyFact[count];
+        ushort previous = 0;
+        for (int index = 0; index < facts.Length; index++)
+        {
+            if (!reader.TryReadUInt16(out ushort id) || id <= previous ||
+                !reader.TryReadByte(out byte kindByte))
+                return false;
+            previous = id;
+            var kind = (InspectionPropertyValueKind)kindByte;
+            InspectionPropertyValue value;
+            switch (kind)
+            {
+                case InspectionPropertyValueKind.Integer:
+                    if (!reader.TryReadInt64(out long integer)) return false;
+                    value = InspectionPropertyValue.Integer(integer);
+                    break;
+                case InspectionPropertyValueKind.IntegerRange:
+                    if (!reader.TryReadInt64(out long minimum) ||
+                        !reader.TryReadInt64(out long maximum))
+                        return false;
+                    value = InspectionPropertyValue.IntegerRange(minimum, maximum);
+                    break;
+                case InspectionPropertyValueKind.Token:
+                    if (!reader.TryReadBoundedUtf8Bytes(
+                            InspectionPropertyValue.MaximumTokenUtf8Bytes,
+                            out ReadOnlySpan<byte> tokenBytes) ||
+                        !InspectionPropertyValue.TryToken(
+                            Encoding.UTF8.GetString(tokenBytes), out value))
+                        return false;
+                    break;
+                case InspectionPropertyValueKind.Fraction:
+                    if (!reader.TryReadInt64(out long current) ||
+                        !reader.TryReadInt64(out long fractionMaximum))
+                        return false;
+                    value = InspectionPropertyValue.Fraction(current, fractionMaximum);
+                    break;
+                case InspectionPropertyValueKind.MassGrams:
+                    if (!reader.TryReadInt64(out long grams)) return false;
+                    value = InspectionPropertyValue.MassGrams(grams);
+                    break;
+                default:
+                    return false;
+            }
+            var fact = new InspectionPropertyFact(new InspectionPropertyId(id), value);
+            if (!fact.IsCanonical) return false;
+            facts[index] = fact;
+        }
+        return InspectionPropertySet.TryCreate(facts, out properties);
+    }
 
     private static bool IsCanonicalPublicPresentationText(string value, int maximumUtf8Bytes)
     {

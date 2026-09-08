@@ -77,7 +77,7 @@ contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
 guest admission. It hostile-validates the finite profile vocabulary introduced in protocol v19,
-retained unchanged through protocol v22, and maps it into
+retained unchanged through protocol v23, and maps it into
 Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not
@@ -186,9 +186,10 @@ This acceptance does not move rendering or visibility policy into Client/Network
 F0.4 adds `RemotePublicPresentationMetadataClient` beside the hot chunk consumer. It applies
 bounded, relatively cold custom label/eligibility or item-property facts to Client Core only after
 validating the application session, server generation, full public identity, and metadata revision,
-then retains an exact Control-lane application proof. I0.12 hardening couples item facts to current
-recipient chunk interest; they remain absent from hot movement rows. The adapter owns no nameplate
-visibility, tooltip layout, Ctrl behavior, Godot node, or AOI request. `RemotePlayableSession` also
+then retains an exact Control-lane application proof. I0.13 replaces the former item-detail string
+with a canonical typed property set and keeps it coupled to current recipient chunk interest; the
+facts remain absent from hot movement rows. The adapter owns no label/format/order policy,
+nameplate visibility, tooltip layout, Ctrl behavior, Godot node, or AOI request. `RemotePlayableSession` also
 accepts this message during the narrow post-admission activation transition so a queued metadata
 occurrence cannot be consumed before the complete semantic composition becomes active.
 

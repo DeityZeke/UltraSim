@@ -56,6 +56,12 @@ regresses the canonical remote-removal decoder rule. The I0.8 Inventory vertical
 also proves a different owner-private UI path through the same lower Network
 machinery without entering public AOI.
 
+The first persistent Iron Sword now retains one rolled identity through World, Inventory, equipment,
+drop, and another participant. Its recipient-visible inspection uses at most 16 canonical typed
+facts rather than weapon-formatted transport text. One configurable presentation policy supplies
+category/row ordering and formatting to both Inventory and the content-sized Godot world tooltip;
+the properties remain cold metadata rather than hot movement state.
+
 ## Design
 
 > Build the smallest predictable machine that can move a very large simulation

@@ -113,7 +113,9 @@ again on an authority-positioned Drop. Another participant can then pick up that
 spawner independently publishes a newly rolled occurrence after its bounded delay. Protocol v21
 adds only the owner-visible Primary result. Protocol v22 adds a bounded, recipient-interest-coupled
 cold weapon-property fact and the hot `GroundItem` eligibility bit; rolled item details remain out
-of hot public records.
+of hot public records. I0.13/protocol v23 replaces that temporary formatted detail string with at
+most 16 canonical typed Inspection Property facts. Their stable IDs/value grammar are transported;
+labels, categories, row order, punctuation, and native layout are not Network authority.
 
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.

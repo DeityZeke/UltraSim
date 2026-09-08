@@ -31,6 +31,11 @@ Useful current anchors can be located by their embedded workload or filename:
   stripping, isolated build roots, exact API-union/protocol identity evidence,
   separate non-production `UltraSim.Network.Testing`, Release size census, and
   actual Online/Dedicated/Complete/Single Player product inspection;
+- `inventory-i0.13-inspection-properties-tooltip-2026-09-08.json` — at most 16
+  canonical typed recipient-visible Inspection Property facts, contributor/wire order independence,
+  independently configurable category/property presentation order, shared Inventory/world-hover
+  formatting, protocol-v23 cold metadata, and the native title-only-sign versus four-row-sword
+  content-sized tooltip/layout-reuse canary;
 - `inventory-i0.12-world-property-picking-hardening-2026-09-08.json` — bounded
   recipient-interest-coupled cold Iron Sword properties, packet-free/remote Client Core parity,
   a native expanded stat tooltip, and an explicit `GroundItem` eligibility bit that prevents

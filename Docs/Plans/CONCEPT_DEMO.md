@@ -39,7 +39,9 @@ replacing the authoritative generation. Inventory I0.12 now closes the first per
 world-item vertical: a respawning Iron Sword retains one identity and rolled result through world,
 owner-private Inventory, Main Hand, accepted Primary, drop, and another participant's pickup.
 Human-play hardening adds the same bounded rolled facts to the world-hover panel through cold
-public metadata and separates a selectable ground item from visible equipped presentation.
+public metadata and separates a selectable ground item from visible equipped presentation. I0.13
+supersedes that temporary formatted text with canonical typed Inspection Properties, a configurable
+presentation order shared by Inventory and world hover, and content-sized native tooltip layout.
 
 The demo has two purposes:
 
@@ -921,11 +923,18 @@ equipped/world transitions, owner-private Inventory projection, public disappear
 and an admitted no-damage Primary swing. Respawn creates a new item; it never recalls or rerolls an
 item already taken by a participant.
 
-I0.12 still stops before a generalized/on-demand Object Property List protocol and before the
-complete X/Y animation set. Its post-acceptance human-play hardening carries the first bounded
-weapon detail through relatively cold, generational public-presentation metadata, so local and
-remote world hover can display the authoritative rolled values without placing item stats in every
-hot public record. Full public swing animation remains a follow-on consumer.
+I0.12 still stops before generalized/on-demand inspection and before the complete X/Y animation
+set. Its post-acceptance human-play hardening first carried one bounded formatted weapon detail
+through relatively cold, generational public-presentation metadata. I0.13 replaces that temporary
+string with typed, canonical, bounded facts while retaining the same recipient-interest/application-
+proof fence and keeping item stats out of every hot public record.
+
+Inventory selection and world hover now format the same property set with one engine-neutral
+catalog/profile. The stock order is Name, then Stats, Attributes, Durability, and Weight, while
+category and per-property order are independently configurable presentation policy rather than
+authoritative item state. The shared native tooltip shrinks to a title-only sign and grows to the
+actual sword rows, clamps/wraps at the viewport, and does not rebuild while merely following the
+pointer. Full public swing animation remains a follow-on consumer.
 
 ---
 
@@ -1585,6 +1594,10 @@ then continue remaining Round 1 consumers as earned:
     I0.12 persistent rolled world-item / pickup / Inventory / equip / drop  CLOSED
           + minimum owner-result swing cue
           + bounded world-property tooltip / equipped-item picking hardening
+
+    I0.13 typed Inspection Properties + content-sized tooltip          CLOSED
+         canonical typed facts; configurable category/row policy
+         one formatter for world hover and Inventory
 
 then continue:
     X/Y content-backed animation + public action realization

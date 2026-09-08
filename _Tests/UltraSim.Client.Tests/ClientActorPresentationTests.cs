@@ -1,5 +1,6 @@
 using UltraSim.Client.Core;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -122,20 +123,71 @@ internal static class ClientActorPresentationTests
         var itemMetadata = new ClientPublicPresentationMetadataState(1);
         itemMetadata.ResetServerGeneration(82);
         WorldPublicEntityId sword = new(41, 7);
+        InspectionPropertySet inspection = SwordProperties();
         var properties = new ClientPublicPresentationMetadata(
             82,
             sword,
             1,
             ClientPublicPresentationFlags.ItemProperties,
             "Iron Sword",
-            "Damage 3-8 · Fire · Quality 61 · Durability 45/45");
+            inspection);
         Equal(ClientPublicPresentationApplyStatus.Applied, itemMetadata.TryApply(
             ClientPublicPresentationOperation.Present, in properties));
         True(itemMetadata.TryGet(sword, out ClientPublicPresentationMetadata retained));
-        Equal(properties.DetailText, retained.DetailText);
-        var invalid = properties with { Revision = 2, DetailText = string.Empty };
+        True(inspection.Equals(retained.InspectionProperties));
+        var invalid = properties with { Revision = 2, InspectionProperties = null };
         Equal(ClientPublicPresentationApplyStatus.Rejected, itemMetadata.TryApply(
             ClientPublicPresentationOperation.Present, in invalid));
+
+        True(InspectionPresentationDefaults.TryFormat(
+            "Iron Sword", inspection, out InspectionPresentation? standard));
+        Equal("Damage 3–8\nFire\nQuality 61\nDurability 45 / 45", standard!.DetailText);
+        var reordered = new InspectionPresentationProfile(
+            [
+                new(InspectionCategoryIds.Durability, 10),
+                new(InspectionCategoryIds.Attributes, 20),
+                new(InspectionCategoryIds.Stats, 30),
+            ],
+            [
+                new(InspectionPropertyIds.Quality, 10),
+                new(InspectionPropertyIds.Element, 20),
+            ]);
+        True(InspectionPresentationFormatter.TryFormat(
+            "Iron Sword", inspection, InspectionPresentationDefaults.Catalog,
+            reordered, out InspectionPresentation? custom));
+        Equal("Durability 45 / 45\nQuality 61\nFire\nDamage 3–8", custom!.DetailText);
+
+        True(InspectionPropertySet.TryCreate(
+            [new(new InspectionPropertyId(600), InspectionPropertyValue.Integer(1))],
+            out InspectionPropertySet? unknown));
+        False(InspectionPresentationDefaults.TryFormat("Unknown", unknown, out _));
+        False(InspectionPropertySet.TryCreate(
+            [
+                new(InspectionPropertyIds.Damage, InspectionPropertyValue.IntegerRange(3, 8)),
+                new(InspectionPropertyIds.Damage, InspectionPropertyValue.IntegerRange(4, 9)),
+            ],
+            out _));
+        var excessive = new InspectionPropertyFact[InspectionPropertySet.MaximumProperties + 1];
+        for (ushort index = 0; index < excessive.Length; index++)
+            excessive[index] = new InspectionPropertyFact(
+                new InspectionPropertyId(checked((ushort)(100 + index))),
+                InspectionPropertyValue.Integer(index));
+        False(InspectionPropertySet.TryCreate(excessive, out _));
+    }
+
+    private static InspectionPropertySet SwordProperties()
+    {
+        True(InspectionPropertyValue.TryToken("fire", out InspectionPropertyValue element));
+        True(InspectionPropertySet.TryCreate(
+            [
+                new(InspectionPropertyIds.Quality, InspectionPropertyValue.Integer(61)),
+                new(InspectionPropertyIds.Damage, InspectionPropertyValue.IntegerRange(3, 8)),
+                new(InspectionPropertyIds.Durability, InspectionPropertyValue.Fraction(45, 45)),
+                new(InspectionPropertyIds.Element, element),
+            ],
+            out InspectionPropertySet? properties));
+        Equal(InspectionPropertyIds.Damage, properties![0].Id);
+        return properties;
     }
 
     private static void Apply(

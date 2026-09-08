@@ -924,9 +924,12 @@ static void OwnedInventoryUiAuthorizesMoveEquipAndUnequip()
     UiRowId sword = FindRow(client.GetRows(backpack.View, InventoryUi.Items), "Iron Sword");
     client.SubmitAction(backpack.View, InventoryUi.Select, sword);
     string? details = client.GetValue(backpack.View, InventoryUi.Details).Text;
-    Assert.True(details?.Contains("Damage ", StringComparison.Ordinal) == true);
-    Assert.True(details?.Contains("Quality ", StringComparison.Ordinal) == true);
-    Assert.True(details?.Contains("Durability ", StringComparison.Ordinal) == true);
+    string[] propertyRows = details?.Split('\n') ?? [];
+    Assert.Equal(4, propertyRows.Length);
+    Assert.True(propertyRows[0].StartsWith("Damage ", StringComparison.Ordinal));
+    Assert.True(propertyRows[1] is "None" or "Fire" or "Cold" or "Lightning");
+    Assert.True(propertyRows[2].StartsWith("Quality ", StringComparison.Ordinal));
+    Assert.True(propertyRows[3].StartsWith("Durability ", StringComparison.Ordinal));
     Assert.True(client.GetActionState(backpack.View, InventoryUi.Drop).Enabled);
     client.SubmitAction(backpack.View, InventoryUi.Equip);
     Assert.SequenceEqual(new[] { UiListDeltaKind.Update }, port.LastListKinds);

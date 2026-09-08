@@ -24,7 +24,8 @@ acceptance narratives remain available through git history.
 - [Inventory](../Game/Inventory/README.md) — authoritative mutation, owner-private
   UI authorization, the I0.8 remote Godot vertical, the I0.9 container-policy
   foundation, I0.10 authoritative Grid placement, and I0.11 dynamic instance
-  capacity, plus I0.12 persistent rolled world-item pickup/equip/drop.
+  capacity, I0.12 persistent rolled world-item pickup/equip/drop, and I0.13 bounded typed
+  Inspection Properties shared by Inventory and world hover.
 - [Inventory plan/status](Plans/INVENTORY.md) — current accepted Inventory
   contracts plus explicitly deferred placement, capacity, nesting, and viewer work.
 - [Chat](../Game/Chat/README.md) — packet-free authoritative spatial speech,

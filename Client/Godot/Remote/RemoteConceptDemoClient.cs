@@ -831,7 +831,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         }
         _hoverTooltip.Show(
             item.DisplayLabel,
-            item.DetailText,
+            item.InspectionProperties,
             GetViewport().GetMousePosition(),
             GetViewport().GetVisibleRect().Size);
     }

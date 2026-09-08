@@ -1,5 +1,6 @@
 using System.Text;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.World;
 
 namespace UltraSim.Client.Core;
@@ -148,10 +149,9 @@ public readonly record struct ClientPublicPresentationMetadata(
     ulong Revision,
     ClientPublicPresentationFlags Flags,
     string DisplayLabel,
-    string DetailText = "")
+    InspectionPropertySet? InspectionProperties = null)
 {
     public const int MaximumDisplayLabelUtf8Bytes = 128;
-    public const int MaximumDetailTextUtf8Bytes = 512;
     public const ClientPublicPresentationFlags AdmittedFlags =
         ClientPublicPresentationFlags.NameplateEligible |
         ClientPublicPresentationFlags.ItemProperties;
@@ -162,8 +162,8 @@ public readonly record struct ClientPublicPresentationMetadata(
         (Flags & ~AdmittedFlags) == 0 &&
         ClientActorDefinition.IsCanonicalLabel(DisplayLabel, MaximumDisplayLabelUtf8Bytes) &&
         ((Flags & ClientPublicPresentationFlags.ItemProperties) != 0
-            ? ClientActorDefinition.IsCanonicalLabel(DetailText, MaximumDetailTextUtf8Bytes)
-            : string.IsNullOrEmpty(DetailText));
+            ? InspectionProperties is not null
+            : InspectionProperties is null);
 }
 
 public enum ClientPublicPresentationApplyStatus : byte
@@ -234,7 +234,7 @@ public sealed class ClientPublicPresentationMetadataState
                 (!metadata.Id.IsValid || metadata.Revision == 0 ||
                  metadata.ServerGenerationId == 0 || metadata.Flags != 0 ||
                  !string.IsNullOrEmpty(metadata.DisplayLabel) ||
-                 !string.IsNullOrEmpty(metadata.DetailText)))
+                 metadata.InspectionProperties is not null))
             return Reject();
 
         int slot = Find(metadata.Id.Index);
@@ -261,8 +261,7 @@ public sealed class ClientPublicPresentationMetadataState
                      entry.Flags == metadata.Flags &&
                      string.Equals(entry.DisplayLabel, metadata.DisplayLabel,
                          StringComparison.Ordinal) &&
-                     string.Equals(entry.DetailText, metadata.DetailText,
-                         StringComparison.Ordinal));
+                     Equals(entry.InspectionProperties, metadata.InspectionProperties));
                 if (!duplicate) return Reject();
                 SaturatingIncrement(ref _duplicates);
                 return ClientPublicPresentationApplyStatus.Duplicate;
@@ -279,9 +278,9 @@ public sealed class ClientPublicPresentationMetadataState
         entry.DisplayLabel = operation == ClientPublicPresentationOperation.Present
             ? metadata.DisplayLabel
             : string.Empty;
-        entry.DetailText = operation == ClientPublicPresentationOperation.Present
-            ? metadata.DetailText
-            : string.Empty;
+        entry.InspectionProperties = operation == ClientPublicPresentationOperation.Present
+            ? metadata.InspectionProperties
+            : null;
         if (operation == ClientPublicPresentationOperation.Present)
         {
             if (!wasPresent) _current++;
@@ -311,7 +310,7 @@ public sealed class ClientPublicPresentationMetadataState
                     entry.Revision,
                     entry.Flags,
                     entry.DisplayLabel!,
-                    entry.DetailText!);
+                    entry.InspectionProperties);
                 return true;
             }
         }
@@ -368,7 +367,7 @@ public sealed class ClientPublicPresentationMetadataState
         internal ClientPublicPresentationOperation Operation;
         internal ClientPublicPresentationFlags Flags;
         internal string? DisplayLabel;
-        internal string? DetailText;
+        internal InspectionPropertySet? InspectionProperties;
     }
 }
 

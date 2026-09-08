@@ -26,6 +26,13 @@ are stored as persistent component values. Restore preserves those results rathe
 algorithm. The same entity crosses World, Inventory, Main Hand, and World state; the spawner never
 recalls a previously taken item.
 
+I0.13 derives a recipient-visible bounded typed Inspection Property set from those persisted values.
+Stable property identity and value are Game disclosure; labels, formatting, category order, and row
+order are presentation policy. The stock formatter is shared by Inventory selection and world hover,
+so neither parses a weapon-specific display string. Future ObjectScript ergonomics may contribute
+facts through a shared prefab/behavior registry, but no managed script object is retained per entity
+and behavior is never inferred from archetype shape.
+
 Container content also selects a stable Inventory rule profile. The server may
 retain those per-container selections or force one uniform profile. Effective
 item-count capacity is validated against content policy and generation limits;

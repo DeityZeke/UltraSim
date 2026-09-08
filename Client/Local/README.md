@@ -96,4 +96,6 @@ I0.12 reuses the same boundary for an exact public-item nomination, owner-privat
 Drop, and the admitted Primary result. The local command may carry a disclosed
 `WorldPublicEntityId`; the authority resolves and revalidates its current kind/range before moving
 the same persistent sword entity into the player's backpack. No ECS handle, rolled stat, or drop
-position crosses from Godot into authority.
+position crosses from Godot into authority. I0.13 replaces the local formatted detail string with
+the same immutable typed Inspection Property set consumed remotely. Local still remains packet-free:
+it publishes those facts directly into Client Core under the same identity/revision semantics.

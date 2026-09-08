@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using UltraSim.Game.Inspection;
 
 namespace UltraSim.Game.Inventory;
 
@@ -45,15 +46,18 @@ public readonly record struct InventoryItemView(
     InventoryEquipSlot EquipSlot,
     int Quantity,
     InventoryPlacement Placement,
-    string InstanceDescription);
+    InspectionPropertySet? InspectionProperties);
 
 /// <summary>
 /// Optional concrete-Game projection of persistent instance facts. Inventory remains unaware of
-/// weapon/armor/affix schemas and merely carries the already-authorized bounded description.
+/// weapon/armor/affix schemas and merely carries the already-authorized bounded typed property set.
 /// </summary>
-public interface IInventoryItemDescriptionProvider
+public interface IInventoryItemInspectionProvider
 {
-    bool TryDescribe(EcsWorld world, Entity item, out string description);
+    bool TryGetInspectionProperties(
+        EcsWorld world,
+        Entity item,
+        out InspectionPropertySet? properties);
 }
 
 /// <summary>Generation-owned capability exposing the derived Inventory state paired with its ECS world.</summary>
@@ -86,14 +90,14 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
     private readonly ComponentLookup<InventoryEquipCapability> _equipLookup;
     private readonly ComponentLookup<InventoryGridPlacement> _gridPlacementLookup;
     private readonly ComponentLookup<InventoryGridFootprint> _gridFootprintLookup;
-    private readonly IInventoryItemDescriptionProvider? _descriptions;
+    private readonly IInventoryItemInspectionProvider? _inspection;
     private bool _disposed;
 
     public InventoryGenerationState(
         EcsWorld world,
         IInventoryContentCatalog content,
         InventoryLimits? limits = null,
-        IInventoryItemDescriptionProvider? descriptions = null)
+        IInventoryItemInspectionProvider? inspection = null)
     {
         ArgumentNullException.ThrowIfNull(world);
         _content = content ?? throw new ArgumentNullException(nameof(content));
@@ -107,7 +111,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         _equipLookup = world.PrepareLookup<InventoryEquipCapability>();
         _gridPlacementLookup = world.PrepareLookup<InventoryGridPlacement>();
         _gridFootprintLookup = world.PrepareLookup<InventoryGridFootprint>();
-        _descriptions = descriptions;
+        _inspection = inspection;
         Limits = limits ?? InventoryLimits.Default;
         Limits.Validate();
         Index = new InventoryIndex(Limits);
@@ -720,9 +724,9 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
                 ? InventoryPlacement.Grid(
                     grid.X, grid.Y, definition.Footprint.Width, definition.Footprint.Height)
                 : InventoryPlacement.Unplaced,
-            _descriptions?.TryDescribe(world, item, out string description) == true
-                ? description
-                : string.Empty);
+            _inspection?.TryGetInspectionProperties(world, item, out InspectionPropertySet? properties) == true
+                ? properties
+                : null);
         return true;
     }
 

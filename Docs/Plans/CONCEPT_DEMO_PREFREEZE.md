@@ -1696,20 +1696,21 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 1. Keep Client F0.5's compiled-UI source convergence closed.
 2. Keep M0.0 shared multi-participant authority closed.
 3. Keep Inventory I0.12's persistent rolled world-item vertical closed.
-4. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
-5. Select one exact feature-complete pre-freeze candidate.
-6. Build the real headless Network bot client.
-7. Add first-class wire/per-message accounting.
-8. Establish high-performance quiet/moving/crowd baselines.
-9. Decouple render FPS from input submission cadence.
-10. Define/advertise/enforce the bounded Server Performance Profile.
-11. Run mismatched-cadence correctness matrix.
-12. Evaluate input/owner/public cadence reductions.
-13. Evaluate unreliable frame aggregation.
-14. Measure dense vs distributed AOI/fanout.
-15. Evaluate selective compression only where payload shape justifies it.
-16. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-17. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+4. Keep I0.13 typed Inspection Properties and content-sized shared tooltip closure closed.
+5. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
+6. Select one exact feature-complete pre-freeze candidate.
+7. Build the real headless Network bot client.
+8. Add first-class wire/per-message accounting.
+9. Establish high-performance quiet/moving/crowd baselines.
+10. Decouple render FPS from input submission cadence.
+11. Define/advertise/enforce the bounded Server Performance Profile.
+12. Run mismatched-cadence correctness matrix.
+13. Evaluate input/owner/public cadence reductions.
+14. Evaluate unreliable frame aggregation.
+15. Measure dense vs distributed AOI/fanout.
+16. Evaluate selective compression only where payload shape justifies it.
+17. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+18. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
 18. Run mixed headless + exported Godot clients.
 19. Run external human Concept Demo validation.
 20. Choose/document the default deployment-performance policy.

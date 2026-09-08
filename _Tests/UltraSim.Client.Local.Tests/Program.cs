@@ -3,6 +3,7 @@ using UltraSim.Client.Local;
 using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+using UltraSim.Game.Inspection;
 using UltraSim.Game.Input;
 using UltraSim.Game.UI;
 using UltraSim.Game.World;
@@ -272,8 +273,12 @@ static void ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath()
         return count > 0 && publicMetadata.AsSpan(0, count).ToArray().Any(candidate =>
             candidate.Id == worldSword.Id &&
             (candidate.Flags & ClientPublicPresentationFlags.ItemProperties) != 0 &&
-            candidate.DetailText.Contains("Damage ", StringComparison.Ordinal) &&
-            candidate.DetailText.Contains("Durability ", StringComparison.Ordinal));
+            InspectionPresentationDefaults.TryFormat(
+                candidate.DisplayLabel,
+                candidate.InspectionProperties,
+                out InspectionPresentation? presentation) &&
+            presentation!.DetailText.Contains("Damage ", StringComparison.Ordinal) &&
+            presentation.DetailText.Contains("Durability ", StringComparison.Ordinal));
     });
 
     var input = new ClientWorldInputSequencer(fixture.Session.ControlSession);
