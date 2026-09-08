@@ -1,7 +1,7 @@
 # Game replication
 
 Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accepted.
-N0.3 secure reliable ProtocolLoopback is accepted below this layer; N0.4 remote
+N0.3 secure reliable ProtocolLoopback evidence is accepted below this layer; N0.4 remote
 application binding is accepted beside it. N0.5 carries the same binding over
 real connected localhost UDP. N0.6 adds bounded authoritative input, revisioned
 clock anchors, and one complete owner-state stream. N0.7 maintained recipient
@@ -47,6 +47,13 @@ state and semantic delivery. It depends on the concrete game composition and Run
 but not Game Protocol or `Kernels/Network`. `Game/Replication.Remote` is the separate
 Network-dependent assembly containing codecs/protocol-peer adapters. The Network kernel
 remains independent of ECS, Game, Server, UI, and Client.
+
+The canonical/default Network library is the Full `UltraSim.Network.dll` source/API
+superset. Current dedicated products select its same-identity ServerOnly build,
+Online selects ClientOnly, and Complete selects Full. These selections do not alter
+any Game replication profile or wire contract. ProtocolLoopback and other two-ended
+test topology now live in `UltraSim.Network.Testing`, which production replication
+assemblies and products do not reference.
 
 ## F0.3b remote playable application
 

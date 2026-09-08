@@ -31,6 +31,11 @@ dotnet build Kernels/Network -p:UltraSimNetworkFlavor=ClientOnly
 dotnet build Kernels/Network -p:UltraSimNetworkFlavor=ServerOnly
 ```
 
+`dotnet pack Kernels/Network` likewise produces the canonical Full package.
+Packing ClientOnly or ServerOnly under `PackageId=UltraSim.Network` fails closed;
+specialist stripped files are deployment artifacts, not competing canonical
+packages.
+
 These are physical capability sets, not behavior tiers or separate architectures.
 `Full` is the canonical development/release API and exact binary superset.
 Capability stripping is deployment minimization and is **not a security
@@ -38,6 +43,18 @@ assumption**. A future product may replace either stripped assembly with the
 compatible Full assembly without changing consumer source or assembly references.
 Flavor-specific output and intermediate roots prevent one same-named assembly from
 contaminating another build.
+
+Assembly identity answers **which library this is**, not which physical capability
+set a particular file contains. Every output is named `UltraSim.Network.dll`; build
+and product tooling reads the `UltraSim.Network.Flavor` assembly metadata and
+inspects required/forbidden role types. Product code should depend on the role API
+it was compiled to use, not branch on assembly identity or assume that a same-named
+file is physically stripped. Replacing ClientOnly or ServerOnly with Full is valid;
+combining or substituting the two mutually incomplete stripped files is not.
+
+The accepted API, protocol, product-inspection, and Release-size evidence is
+recorded in
+[`network-capability-packaging-2026-09-08.md`](../../_Benchmarks/Baselines/network-capability-packaging-2026-09-08.md).
 
 The current UltraSim Game selects `ChunkPublication` for dynamic-public
 replication, but that is a **Game/Replication decision**, not a Network-kernel
@@ -69,7 +86,7 @@ Kernels/Network
     packet ownership
     security / replay
     pacing / fragmentation
-    deterministic or UDP transport
+    datagram endpoint contract / UDP transport
             |
             v
 application/client adapter
@@ -238,10 +255,18 @@ this same Network mechanism. Network does not interpret its per-entry proof mean
 
 ## Connected UDP and shared listener
 
-`UdpProtocolSession` carries the accepted secure peer over real connected,
-nonblocking UDP. Socket/protocol state share one owner in that topology.
+`HostedUdpProtocolClient` composes one client-owned secure peer over a connected,
+nonblocking `UdpDatagramEndpoint`. Socket/protocol state share one owner in that
+production client topology. The server-side `SharedUdpServerListener` instead owns
+one shared socket, deployment/path routing, admission, and bounded per-session
+delivery to connection owners.
 
-The shared listener owns deployment/path routing and bounded per-session admission.
+`UdpProtocolSession` is the accepted two-ended connected-UDP evidence fixture. It
+now lives in `UltraSim.Network.Testing` and is not part of Full, ClientOnly,
+ServerOnly, or any production product. Its semantic evidence remains valid; its
+two peers and self-contained server identity are test topology rather than a
+production connection composition.
+
 Linux deployments may use accepted `sendmmsg` / `recvmmsg` batch paths beneath the
 same endpoint contract; unsupported platforms retain scalar fallbacks. Batching
 never waits to fill a batch and never changes per-datagram security/admission

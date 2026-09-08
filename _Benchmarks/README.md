@@ -59,6 +59,13 @@ when those systems exist.
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
 
+Network benchmarks/tests consume deterministic impairment, ProtocolLoopback,
+two-ended connected UDP, and self-trusted topology from the separate
+`UltraSim.Network.Testing` assembly. That assembly is evidence infrastructure and
+is never part of Full, ClientOnly, ServerOnly, or a production export. Ordinary
+benchmark development uses the canonical Full Network build unless a scenario is
+explicitly verifying a stripped product.
+
 Network N0.1 adds game-projection/OfflineDirect evidence, N0.2 adds fixed-runtime
 kernel micro evidence, N0.3 adds a standalone secure ProtocolLoopback baseline,
 N0.4 adds application-level semantic parity and interaction evidence, N0.5

@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `network-capability-packaging-2026-09-08.md` — canonical/default Full
+  `UltraSim.Network.dll`, optional same-identity ClientOnly/ServerOnly physical
+  stripping, isolated build roots, exact API-union/protocol identity evidence,
+  separate non-production `UltraSim.Network.Testing`, Release size census, and
+  actual Online/Dedicated/Complete/Single Player product inspection;
 - `inventory-i0.12-world-property-picking-hardening-2026-09-08.json` — bounded
   recipient-interest-coupled cold Iron Sword properties, packet-free/remote Client Core parity,
   a native expanded stat tooltip, and an explicit `GroundItem` eligibility bit that prevents

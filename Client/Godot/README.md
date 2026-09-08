@@ -22,14 +22,14 @@ the same scene, settings, input surface, import database, and presentation asset
 ```text
 SinglePlayer
     Client Core + Client.Local + built-in local content + Godot wrapper
-    no Client.Network / Game.Protocol / Network kernel
+    no Client.Network / Game.Protocol / UltraSim.Network
 
 Online
-    Client Core + Client.Network + Godot wrapper
+    Client Core + Client.Network + UltraSim.Network ClientOnly + Godot wrapper
     no Client.Local / local Game composition / Server Runtime
 
 Complete
-    union of both capability families
+    union of both capability families + canonical Full UltraSim.Network
 ```
 
 Opening or building the project without an explicit property defaults to `Complete` for development.
@@ -37,6 +37,12 @@ Canonical product builds must set `UltraSimEdition` exactly; the repository veri
 edition into an isolated directory and inspects its `.deps.json` and copied assemblies. Build-time
 composition is the security/capability boundary. The matching export-preset feature is only a
 startup consistency check.
+
+All Network variants retain the same `UltraSim.Network.dll` identity. The export script therefore
+selects the intended `UltraSimNetworkFlavor` explicitly, and the verifier inspects the actual DLL:
+Online must contain Hosted Client and exclude Hosted Server, Complete must contain both, and Single
+Player must contain no Network assembly. Assembly identity alone is never treated as proof of the
+physical capability set.
 
 Godot 4.7's .NET exporter also requires the adjacent
 `UltraSim.Client.Application.Godot.sln`. It contains only this application project; the permanent
@@ -75,7 +81,8 @@ F0.3a makes the **Multiplayer / Direct Connect** entry real in Online and Comple
 external identity gateway with:
 
 ```bash
-dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj
+dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
+    -p:UltraSimNetworkFlavor=ServerOnly
 ```
 
 Then connect to `127.0.0.1:7777`. On first use, compare the client candidate fingerprint with the

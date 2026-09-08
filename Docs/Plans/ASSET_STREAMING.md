@@ -1864,6 +1864,15 @@ native closure and its actual-export follow-up:
 [`content-a0.8-contentless-online-2026-09-06.json`](../../_Benchmarks/Baselines/content-a0.8-contentless-online-2026-09-06.json) and
 [`content-a0.8-native-export-closure-2026-09-07.json`](../../_Benchmarks/Baselines/content-a0.8-native-export-closure-2026-09-07.json).
 
+The later Network capability-packaging closure does not change A0.8 content semantics. The current
+Online product now carries the ClientOnly physical build of the canonical same-identity
+`UltraSim.Network.dll`, so Hosted Server admission/listener/owner implementation is absent alongside
+the already-absent Game/local authority. The canonical Full Network package remains compatible and
+may replace that stripped deployment artifact later. Current packaging measurements and export
+inspection are recorded separately in
+[`network-capability-packaging-2026-09-08.md`](../../_Benchmarks/Baselines/network-capability-packaging-2026-09-08.md);
+the A0.8 numbers above remain historical closure evidence.
+
 Use the Contentless Online composition:
 
 - no bundled playable WorldPack;

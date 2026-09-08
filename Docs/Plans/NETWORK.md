@@ -51,10 +51,16 @@ SECURITY / TRANSPORT DO NOT DEFINE AOI.
 TICK IS AUTHORITY-STEP IDENTITY.
 DELTA IS ELAPSED SIMULATION TIME.
 FREQUENCY / CADENCE ARE HOST AND DELIVERY POLICY.
+
+THE CANONICAL ULTRASIM.NETWORK PRODUCT IS FULL.
+ASSEMBLY IDENTITY != PHYSICAL CAPABILITY SET.
+CAPABILITY STRIPPING MAY REMOVE A ROLE; IT MAY NOT CHANGE SHARED PROTOCOL BEHAVIOR.
+TEST TOPOLOGY IS NOT PRODUCTION NETWORK CAPABILITY.
 ```
 
-These rules apply equally to OfflineDirect evidence, deterministic ProtocolLoopback,
-connected UDP, the shared listener, Hosted H0, and future transports.
+These rules apply equally to OfflineDirect evidence, deterministic ProtocolLoopback
+through `UltraSim.Network.Testing`, connected UDP, the shared listener, Hosted H0,
+and future transports.
 
 ## Ownership and dependency boundary
 
@@ -89,7 +95,7 @@ Kernels/Network
     security / replay
     pacing
     fragmentation where the lane permits it
-    UDP / deterministic transport
+    datagram endpoint contract / UDP transport
             |
             v
 Client/Network
@@ -99,6 +105,10 @@ Client/Network
             v
 Client Core / Godot presentation
 ```
+
+Deterministic endpoints and two-ended topology may satisfy that same datagram
+contract from `UltraSim.Network.Testing`; they are verification inputs, not
+production Network capabilities.
 
 `Kernels/Network` must not reference ECS, `Game/World`, AOI types, inventory,
 accounts, UI meaning, persistence, Godot, or game authority. Game adapters flatten
@@ -131,6 +141,13 @@ recorded as assembly metadata and participates in isolated output/intermediate
 paths. Shared public APIs may not mention flavor-specific types. All protocol
 declarations, codecs, identities, lane contracts, cryptographic domains, limits,
 and manifest inputs live in Core and compile identically in every capability set.
+
+No product may infer physical capability presence from assembly identity alone.
+The embedded `UltraSim.Network.Flavor` metadata and actual role-type inspection are
+packaging evidence; compile-time product composition remains the capability owner.
+A manually substituted Full DLL remains protocol/API compatible but means an
+Online or Dedicated artifact no longer satisfies its current physical-stripping
+policy.
 
 Permanent gates compare protocol version/fingerprint and canonical packet bytes,
 compare public type/member signatures, and inspect published/exported assemblies
@@ -592,7 +609,7 @@ The accepted lower mechanisms include:
 - independent authenticated replay and reliable-delivery acknowledgement state;
 - lane-scoped reliable ordering;
 - bounded fragmentation/reassembly;
-- deterministic impairment evidence;
+- deterministic impairment evidence supplied by `UltraSim.Network.Testing`;
 - connected UDP and one shared listener with Linux native batch paths where enabled;
 - Hosted H0 authenticated external admission, IPv4 rebinding, and connection-owner
   packet handoff.

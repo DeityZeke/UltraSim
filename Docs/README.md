@@ -125,8 +125,13 @@ acceptance narratives remain available through git history.
 
 - [Network kernel foundation](../Kernels/Network/README.md) — dependency-clean
   bounded connection/packet ownership, generated protocol, lane contracts,
-  security/replay, reliability, deterministic impairment, connected/shared UDP,
-  Hosted admission/path mechanisms, and connection-owner handoff.
+  security/replay, reliability, connected/shared UDP, Hosted admission/path
+  mechanisms, and connection-owner handoff. Its canonical/default package is Full;
+  optional same-identity ClientOnly/ServerOnly builds physically strip one Hosted
+  role without changing Core protocol behavior.
+- [Network testing support](../Kernels/Network.Testing/README.md) — separately
+  compiled deterministic impairment, controlled handshake, loopback, and two-ended
+  transport fixtures that are absent from every production Network build.
 - [Network V3 current architecture/status](Plans/NETWORK.md) — authoritative current
   Network/replication policy. It records the permanent ownership/identity/proof/lane
   rules, cadence independence, the five-profile dispositions, P0.4 conservative
@@ -135,7 +140,8 @@ acceptance narratives remain available through git history.
 - [Hosted Network H0](Plans/HOSTED_NETWORK.md) — accepted H0.0-H0.5 external UDP
   lifecycle: deployment pinning, stateless bounded cookies/rates, authenticated
   promotion, explicit IPv4 path ownership/rebinding, exclusive connection-owner
-  packet handoff, dedicated-process composition, and explicit deployment non-claims.
+  packet handoff, dedicated-process composition, physical Hosted role ownership,
+  and explicit deployment non-claims.
 
 ## Current Network/replication status
 

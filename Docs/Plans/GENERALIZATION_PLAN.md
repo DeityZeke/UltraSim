@@ -1058,7 +1058,17 @@ other proven reusable Engines
 UltraSim adapters/profiles
 ```
 
-The exact names are not frozen.
+`UltraSim Network` already establishes the intended packaging direction. Its
+normal public package should be the canonical Full `UltraSim.Network.dll`, with
+shared Core plus complete Hosted Client and Hosted Server capability. Optional
+same-identity ClientOnly/ServerOnly artifacts may remain available for consumers
+that want physical role minimization, but they are not separate architectures,
+functionality tiers, or a secrecy/security model. Most users should install the
+Full package; no future ecosystem extraction should force existing light-build
+consumers to change namespaces or assembly references merely to adopt Full.
+
+The exact names of the other eventual extracted packages are not frozen. The
+existing `UltraSim.Network` assembly/package identity is already canonical.
 
 A user should be able to choose:
 

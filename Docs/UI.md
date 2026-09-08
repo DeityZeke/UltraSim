@@ -59,11 +59,13 @@ authority.
 semantic definition/model/action operations without manufacturing packets or
 sharing server authority.
 
-The N0.4 remote path encodes the same bounded semantics through the accepted
-secure `ProtocolLoopback`. `Game/Protocol` owns game message identity and the
-server-side semantic port; `Client/Network` owns translation into
-`UiClientRuntime`. Server view IDs are allocated before delivery and no
-authoritative callback waits for a network round trip.
+The N0.4 remote evidence path encodes the same bounded semantics through the accepted
+secure `ProtocolLoopback` fixture, now physically owned by
+`UltraSim.Network.Testing`. Production remote clients use the same protocol through
+Hosted UDP without shipping that two-ended test topology. `Game/Protocol` owns
+game message identity and the server-side semantic port; `Client/Network` owns
+translation into `UiClientRuntime`. Server view IDs are allocated before delivery
+and no authoritative callback waits for a network round trip.
 
 Transport acknowledgement proves only that the remote protocol admitted a
 message. A separate application apply result proves that the client UI state

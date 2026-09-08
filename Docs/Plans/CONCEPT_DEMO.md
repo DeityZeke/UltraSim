@@ -134,7 +134,9 @@ NO Single Player capability
 ```
 
 It connects to the externally hosted Concept Demo server and contains only the client capabilities
-allowed by the current Online composition/content plan.
+allowed by the current Online composition/content plan. Its Network dependency is currently the
+ClientOnly physical build of the canonical `UltraSim.Network.dll`: complete shared protocol and
+Hosted Client behavior, with Hosted Server implementation absent.
 
 ## Complete client
 
@@ -149,6 +151,10 @@ Exit
 
 The Complete build includes local-authority capability because of executable composition, **not**
 because the holder is a server administrator.
+
+Complete uses canonical Full `UltraSim.Network.dll` because the same process may connect remotely
+and add a Hosted listener to its existing packet-free local authority. This physical capability
+union still grants no remote Game permission by itself.
 
 > **CLIENT EDITION != SERVER PERMISSION.**
 

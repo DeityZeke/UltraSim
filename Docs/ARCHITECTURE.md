@@ -114,9 +114,13 @@ derived/application indexes when their ownership and scale are explicit.
 ## Current project groups
 
 - `Kernels/ECS*`: ECS runtime and source generators.
-- `Kernels/Network`: dependency-clean Network V3 identities, lane contracts,
-  protocol/security/reliability/transport mechanisms, and deterministic evidence
-  controls.
+- `Kernels/Network`: one dependency-clean canonical Full Network V3 source/product,
+  physically organized as shared Core plus Hosted Client and Hosted Server roles.
+  Optional same-identity ClientOnly/ServerOnly builds remove an unused Hosted role
+  without changing shared protocol behavior.
+- `Kernels/Network.Testing`: deterministic impairment, loopback, controlled
+  handshake, and two-ended transport evidence helpers; never a production product
+  dependency.
 - `Kernels/UI`: neutral view/model/action protocol.
 - `Kernels/Spatial`: dependency-neutral integer spatial values, explicit
   geometry/bounds, floor normalization, and checked wide-distance math. It owns

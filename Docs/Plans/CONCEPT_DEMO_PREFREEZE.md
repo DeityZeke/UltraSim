@@ -159,7 +159,7 @@ Bot Harness
     +-- Client.Network
     +-- Client.Content where the scenario requires real content/application proof
     +-- public Game protocol/contracts needed by an ordinary client
-    +-- Network kernel/client transport
+    +-- canonical Network Core + Hosted Client transport
 ```
 
 It must **not** depend on:
@@ -176,6 +176,11 @@ private server test hooks used as gameplay shortcuts
 ```
 
 The bot should be a cheap non-rendering client, not a server-side simulated player.
+
+The bot product should normally select the ClientOnly physical build of the same
+`UltraSim.Network.dll` used by Online. It must not require Hosted Server or
+`UltraSim.Network.Testing`; Full remains a compatible development substitute, not
+permission for the bot composition to call server-role APIs.
 
 The important path is:
 
@@ -1261,7 +1266,9 @@ It is to know how the **selected current-game profile** behaves under the real C
 
 # 20. Loss, jitter, reorder, and failure behavior
 
-Use the existing deterministic impairment machinery where it can exercise the same production protocol semantics.
+Use the existing `UltraSim.Network.Testing` deterministic impairment machinery where it can
+exercise the same production protocol semantics. It drives the canonical Network Core but must not
+become a dependency of the shipped bot or Online product.
 
 Test combinations of:
 

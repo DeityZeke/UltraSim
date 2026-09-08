@@ -1,7 +1,7 @@
 # Hosted Network H0: accepted external UDP lifecycle
 
-Status: **H0.0-H0.5 accepted / localhost deployment gate closed** as of
-2026-08-25.
+Status: **H0.0-H0.5 accepted / localhost deployment gate closed**, with Hosted
+role packaging reconciled, as of 2026-09-08.
 
 Hosted H0 is the Network-generic lifecycle between an unknown external UDP path and
 an authenticated UltraSim protocol session. It is not a replication profile, does
@@ -14,6 +14,34 @@ experiments, owner-private UI/Inventory traffic, retained Events, and future Gam
 protocols all flatten into the same authenticated Network/session machinery.
 
 General Network/replication policy is recorded in [Network V3](NETWORK.md).
+
+## Physical role packaging
+
+Hosted H0 remains one protocol/lifecycle architecture inside the canonical
+`UltraSim.Network` source tree. Its physical source ownership is now explicit:
+
+```text
+Kernels/Network/Core
+    shared protocol, crypto, lanes, identities, codecs, UDP endpoint mechanics
+
+Kernels/Network/Hosted/Client
+    deployment discovery and connected-client orchestration
+
+Kernels/Network/Hosted/Server
+    admission, deployment identity/signing, shared listener,
+    connection-owner handoff/runtime
+```
+
+The default/canonical `UltraSim.Network.dll` is Full and contains all three. The
+optional ClientOnly build excludes Hosted Server; ServerOnly excludes Hosted
+Client. They retain the same assembly identity and exact shared wire behavior.
+This is deployment minimization—not a second Hosted architecture and not a
+security assumption.
+
+Two-ended connected UDP, deterministic impairment, controlled handshake, and
+self-trusted topology helpers live in `UltraSim.Network.Testing`. Historical H0/N0
+evidence using those fixtures remains valid, but no production Network capability
+set ships them.
 
 ## Frozen boundary
 

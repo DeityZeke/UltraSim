@@ -9,6 +9,19 @@ The current lower architecture is documented in
 [Network V3](../../Docs/Plans/NETWORK.md). Game-owned replication semantics live in
 [Game replication](../../Game/Replication/README.md).
 
+## Physical Network dependency
+
+`Client/Network` references the single `UltraSim.Network` assembly identity and
+uses only shared Core plus Hosted Client APIs. The canonical library/default
+package is Full, so this client remains source- and binary-compatible with Full.
+UltraSim's current Online product explicitly selects ClientOnly to omit Hosted
+Server implementation; Complete selects Full because it can both connect and host.
+
+The client never infers capability from the assembly name—Full, ClientOnly, and
+ServerOnly are all named `UltraSim.Network.dll`. Repository build tooling verifies
+the embedded flavor metadata, while product/export gates inspect the physical role
+types. This layer must not acquire a dependency on `UltraSim.Network.Testing`.
+
 ## Permanent boundary
 
 ```text

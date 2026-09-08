@@ -9,15 +9,22 @@ remote-authority foundation.
 
 The original Network N0 path is frozen and retained as the explicit
 `MaintainedEntityRelation` Game replication profile. It includes secure
-ProtocolLoopback and UDP, authenticated application binding, controlled
-input/owner state, observer WorldState, retained Events, atomic baseline recovery,
-generation replacement, shared-listener/native socket batching, long-lived
-WorldState identity-ledger compaction, and accepted dense/sparse evidence. Its
+ProtocolLoopback evidence and production UDP, authenticated application binding,
+controlled input/owner state, observer WorldState, retained Events, atomic baseline
+recovery, generation replacement, shared-listener/native socket batching,
+long-lived WorldState identity-ledger compaction, and accepted dense/sparse evidence. Its
 final exact-AOI experiment removed substantial relation/record/wire work but
 worsened server-role p95 because continuously maintaining precise moving
 recipient/entity topology cost more. That result closed open-ended N0 tuning and
 helped motivate the chunk-native world/replication investigation rather than
 another packet/codec optimization cycle.
+
+The Network mechanism is now one canonical/default Full `UltraSim.Network.dll`
+with shared Core plus Hosted Client and Hosted Server source. Optional
+same-identity ClientOnly/ServerOnly builds physically strip one Hosted role for a
+product without changing shared protocol behavior. Deterministic/two-ended
+Network evidence helpers are separately compiled as `UltraSim.Network.Testing`
+and are absent from production products.
 
 Terrain / World T0 is accepted/frozen. It provides the chunk-native world
 substrate originally intended for terrain, statics, streaming, and AOI:
@@ -97,7 +104,7 @@ headroom and fewer ticks per second.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, semantic port,
   and bounded transport-independent semantic wire codec.
 - `Server/*` — authority lifecycle, hosts, durable save-set coordination, and the external
-  Direct Connect identity/session plus one-participant Concept Demo application.
+  Direct Connect identity/session plus bounded shared multi-participant Concept Demo authority.
 - `Client/*` — retained client projection, bounded Network-free local application
   bridge, remote network bridge, and Godot presentation.
 - `Game/*` — concrete game schema/content/state, authoritative workflows,
