@@ -388,15 +388,25 @@ public sealed class UltraSimSimplePhysics
                         return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
                     if (fit == TerrainResolutionStatus.Grounded)
                     {
-                        return IsSweepClear(
-                            Bounds(request.Current, request.Body),
-                            Bounds(landing, request.Body),
-                            dynamicBlockingBounds,
-                            dynamicProjectionComplete)
-                            ? new SimpleAirborneMotionResult(
-                                SimpleAirborneMotionStatus.Landed, landing, support)
-                            : new SimpleAirborneMotionResult(
-                                SimpleAirborneMotionStatus.Blocked, default);
+                        if (IsSweepClear(
+                                Bounds(request.Current, request.Body),
+                                Bounds(landing, request.Body),
+                                dynamicBlockingBounds,
+                                dynamicProjectionComplete))
+                        {
+                            return new SimpleAirborneMotionResult(
+                                SimpleAirborneMotionStatus.Landed, landing, support);
+                        }
+                        if (TryResolveVerticalAirborneComponent(
+                                request,
+                                dynamicBlockingBounds,
+                                dynamicProjectionComplete,
+                                out SimpleAirborneMotionResult verticalContact))
+                        {
+                            return verticalContact;
+                        }
+                        return new SimpleAirborneMotionResult(
+                            SimpleAirborneMotionStatus.Blocked, default);
                     }
                 }
             }
@@ -430,17 +440,27 @@ public sealed class UltraSimSimplePhysics
                     if (!WorldPosition.TryFromGlobalMillimeters(x, contactY, z, out WorldPosition stopped))
                         return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.OutsidePreparedWorld, default);
-                    return IsSweepClear(
-                        Bounds(request.Current, request.Body),
-                        Bounds(stopped, request.Body),
-                        dynamicBlockingBounds,
-                        dynamicProjectionComplete)
-                        ? new SimpleAirborneMotionResult(
+                    if (IsSweepClear(
+                            Bounds(request.Current, request.Body),
+                            Bounds(stopped, request.Body),
+                            dynamicBlockingBounds,
+                            dynamicProjectionComplete))
+                    {
+                        return new SimpleAirborneMotionResult(
                             SimpleAirborneMotionStatus.CeilingBlocked,
                             stopped,
-                            SimplePhysicalSupport.FromTerrain(contact))
-                        : new SimpleAirborneMotionResult(
-                            SimpleAirborneMotionStatus.Blocked, default);
+                            SimplePhysicalSupport.FromTerrain(contact));
+                    }
+                    if (TryResolveVerticalAirborneComponent(
+                            request,
+                            dynamicBlockingBounds,
+                            dynamicProjectionComplete,
+                            out SimpleAirborneMotionResult verticalContact))
+                    {
+                        return verticalContact;
+                    }
+                    return new SimpleAirborneMotionResult(
+                        SimpleAirborneMotionStatus.Blocked, default);
                 }
             }
             previousY = y;
@@ -454,6 +474,18 @@ public sealed class UltraSimSimplePhysics
                 dynamicBlockingBounds,
                 dynamicProjectionComplete))
             return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Airborne, target);
+
+        // A combined horizontal/vertical sweep may hit a wall even though gravity or upward
+        // momentum remains clear at the body's current X/Z. Preserve that vertical component
+        // instead of accumulating velocity behind an all-or-nothing contact and later snapping a
+        // large distance when input is released. Re-entering with zero horizontal delta exercises
+        // the same bounded landing/ceiling/static-support path and cannot recurse again here.
+        if (TryResolveVerticalAirborneComponent(
+                request,
+                dynamicBlockingBounds,
+                dynamicProjectionComplete,
+                out SimpleAirborneMotionResult verticalOnly))
+            return verticalOnly;
 
         // The central support footprint is intentionally narrower than the collision body. When
         // that footprint leaves a supporting top, the body's wider AABB can still touch its edge.
@@ -471,6 +503,34 @@ public sealed class UltraSimSimplePhysics
                 SimpleAirborneMotionStatus.Airborne, edgeMotion);
 
         return new SimpleAirborneMotionResult(SimpleAirborneMotionStatus.Blocked, default);
+    }
+
+    private bool TryResolveVerticalAirborneComponent(
+        in SimpleAirborneMotionRequest request,
+        ReadOnlySpan<WorldStaticBounds> dynamicBlockingBounds,
+        bool dynamicProjectionComplete,
+        out SimpleAirborneMotionResult resolved)
+    {
+        resolved = default;
+        if ((request.TargetXMillimeters == request.Current.GlobalXMillimeters &&
+             request.TargetZMillimeters == request.Current.GlobalZMillimeters) ||
+            request.TargetYMillimeters == request.Current.YMillimeters)
+            return false;
+
+        SimpleAirborneMotionResult verticalOnly = ResolveAirborneMotion(
+            request with
+            {
+                TargetXMillimeters = request.Current.GlobalXMillimeters,
+                TargetZMillimeters = request.Current.GlobalZMillimeters,
+            },
+            dynamicBlockingBounds,
+            dynamicProjectionComplete);
+        if (!verticalOnly.WasResolved ||
+            (verticalOnly.Position.YMillimeters == request.Current.YMillimeters &&
+             verticalOnly.Status != SimpleAirborneMotionStatus.CeilingBlocked))
+            return false;
+        resolved = verticalOnly;
+        return true;
     }
 
     private bool TryResolveDescendingEdgeMotion(

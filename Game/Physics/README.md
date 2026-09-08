@@ -96,10 +96,13 @@ and stops ascending bodies at the first Bottom face reached by any footprint poi
 must be completely resident for all five footprint columns or resolution fails closed. Airborne
 requests do not snap to a nearby support merely because one exists.
 
-Grounded motion and ordinary blocked airborne motion remain all-or-nothing. One later human-play
-hardening admits bounded horizontal/shortest-edge progress for a descending airborne body whose
+Grounded motion remains all-or-nothing. One later human-play hardening admits bounded
+horizontal/shortest-edge progress for a descending airborne body whose
 smaller support footprint has left a static top while its wider collision body still touches that
-top edge; this prevents a permanent unsupported vertical wedge. Fixed spatial samples are bounded
+top edge; this prevents a permanent unsupported vertical wedge. Combined airborne wall contact may
+also retry the exact admitted vertical component at the current X/Z, including from an early
+landing/ceiling branch, so a rejected horizontal component cannot suspend gravity or create a later
+snap. Fixed spatial samples are bounded
 Simple Physics traversal contracts, not a general triangle time-of-impact solver or rigid-body
 character controller. Ordinary collidable
 FrozenStatics/Multis support on top unless authored with the rare `NoTopSupport` override;
@@ -139,4 +142,11 @@ Permanent integrated regressions land and move on the authored Concept Demo rock
 Cabin shelf; walk off the wall into unsupported motion; reject a top smaller than the support core;
 prove `NoTopSupport` stays blocking without grounding; and prove that leaving a rock's legal support
 cannot become `Airborne` at one unchanged position forever merely because the wider body still
-touches its old top edge. The warmed ordinary static-support/edge path continues to allocate 0 B.
+touches its old top edge. A further regression holds a captured jump into a tree face and proves
+that the body continues vertically, does not penetrate, and lands without accumulated-gravity snap
+or recovery. The warmed ordinary static-support/edge/wall-contact paths continue to allocate 0 B.
+
+Game composition captures Direct-profile horizontal axes and exact movement remainders at takeoff
+or walk-off. Live Direct input while airborne changes post-landing intent only; it cannot steer or
+cancel the current flight. Destination locomotion retains its already-latched route semantics.
+Physics still receives only concrete requested displacement and does not interpret input profiles.

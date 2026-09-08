@@ -1869,16 +1869,21 @@ public partial class LocalCabinClient : Node3D
         Span<WorldTerrainColumnSurface> column = stackalloc WorldTerrainColumnSurface[8];
         if (_boundWorld.TryCopyTerrainColumnSurfaces(
                 GamePlayableWorld.CaveLedgePoint, column, out int caveCount, out _) !=
-                WorldTerrainColumnQueryStatus.Complete || caveCount != 4 ||
+                WorldTerrainColumnQueryStatus.Complete || caveCount != 5 ||
             !column[..caveCount].Contains(new WorldTerrainColumnSurface(
                 GamePlayableWorld.MountainSurface,
                 WorldTerrainSurfaceFace.Bottom,
-                5_000,
+                8_000,
                 GameTerrainMaterialIds.Rock)) ||
             !column[..caveCount].Contains(new WorldTerrainColumnSurface(
                 GamePlayableWorld.CaveLedgeSurface,
                 WorldTerrainSurfaceFace.Top,
-                3_000,
+                4_000,
+                GameTerrainMaterialIds.Rock)) ||
+            !column[..caveCount].Contains(new WorldTerrainColumnSurface(
+                GamePlayableWorld.CaveLedgeSurface,
+                WorldTerrainSurfaceFace.Bottom,
+                3_500,
                 GameTerrainMaterialIds.Rock)))
             throw new InvalidOperationException("The MountainShell/preserved-base cave column is incomplete.");
         if (_boundWorld.TryCopyTerrainColumnSurfaces(
@@ -1912,7 +1917,7 @@ public partial class LocalCabinClient : Node3D
             _player.YMillimeters < 5_000);
         SubmitStop();
 
-        // Third-person profile: cross the intentional gap by authoritative jump/air control.
+        // Third-person profile: cross the intentional gap on the authoritative takeoff trajectory.
         RelocateControlledActor(GamePlayableWorld.SkyJumpStart);
         SetProfile(ControlProfile.ThirdPersonDirect);
         if (!_sequencer.TryCreateSemanticCommand(
@@ -2812,9 +2817,9 @@ public partial class LocalCabinClient : Node3D
         private readonly Mesh _informationalSign = GroundedBox(
             new Vector3(1.25f, 1.65f, 0.16f), new Color(0.52f, 0.31f, 0.12f));
         private readonly Mesh _mountainWallEight = GroundedBox(
-            new Vector3(8f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
+            new Vector3(8f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
         private readonly Mesh _mountainWallTen = GroundedBox(
-            new Vector3(10f, 4.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
+            new Vector3(10f, 7.2f, 0.4f), new Color(0.29f, 0.30f, 0.27f));
         private readonly Mesh _fallbackLabPedestal = GroundedBox(
             new Vector3(2f, 0.4f, 2f), new Color(0.23f, 0.24f, 0.26f));
         private readonly Mesh _fallbackLabModel = GodotMeshGeometry.CreateGroundedPointerWedge(

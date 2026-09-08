@@ -49,6 +49,8 @@ Run("SimplePhysicsSeparatesBodyAndStaticTopSupportPolicy",
     SimplePhysicsStaticTopPolicy, results);
 Run("AuthoritativeJumpFallLandingAndRecovery",
     AuthoritativeJumpFallLandingAndRecovery, results);
+Run("AuthoritativeAirborneWallContactKeepsGravityProgress",
+    AuthoritativeAirborneWallContactKeepsGravityProgress, results);
 Run("VerticalMomentumIsGenerationLocalAcrossRestore",
     VerticalMomentumIsGenerationLocalAcrossRestore, results);
 Run("VerticalStateFencesReusedEntitySlots",
@@ -623,6 +625,25 @@ static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
     Expect(first.AdditionalTerrainSurfaceFragmentCount == 3,
         "The Concept Demo pack does not contain exactly Mountain, cave-ledge, and Sky fragments.");
 
+    for (int chunkZ = GamePlayableWorld.FlatTestMinimumChunkZ;
+         chunkZ <= GamePlayableWorld.FlatTestMaximumChunkZ;
+         chunkZ++)
+    for (int chunkX = GamePlayableWorld.FlatTestMinimumChunkX;
+         chunkX <= GamePlayableWorld.FlatTestMaximumChunkX;
+         chunkX++)
+    {
+        var key = new SpatialChunkKey(GameWorldState.DefaultSpace, chunkX, chunkZ);
+        Expect(first.TryGetBaseTerrain(key, out WorldTerrainChunkView flat) &&
+            flat.PresentSurfaceCount == TerrainChunkFormat.MaterialCellCount,
+            $"The 3x3 flat movement-test area contains a topology hole in {key}.");
+        for (int vertex = 0; vertex < flat.HeightVertexCount; vertex++)
+        {
+            Expect(flat.GetAbsoluteHeightMillimeters(vertex) ==
+                GamePlayableWorld.FlatTestHeightMillimeters,
+                $"The 3x3 movement-test area is not flat in {key} at vertex {vertex}.");
+        }
+    }
+
     var binding = new WorldContentBinding(
         GameContent.WorldFingerprint,
         [
@@ -655,17 +676,22 @@ static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
     Span<WorldTerrainColumnSurface> surfaces = stackalloc WorldTerrainColumnSurface[8];
     Expect(world.TryCopyTerrainColumnSurfaces(
             GamePlayableWorld.CaveLedgePoint, surfaces, out int caveCount, out _) ==
-            WorldTerrainColumnQueryStatus.Complete && caveCount == 4,
-        "The mountain/cave column did not expose four actual structural faces.");
+            WorldTerrainColumnQueryStatus.Complete && caveCount == 5,
+        "The mountain/cave column did not expose five actual structural faces.");
     Expect(surfaces[0].SurfaceId == GamePlayableWorld.MountainSurface &&
         surfaces[0].Face == WorldTerrainSurfaceFace.Top &&
-        surfaces[0].HeightMillimeters == 7_000 &&
+        surfaces[0].HeightMillimeters == 10_000 &&
         surfaces[1].SurfaceId == GamePlayableWorld.MountainSurface &&
         surfaces[1].Face == WorldTerrainSurfaceFace.Bottom &&
-        surfaces[1].HeightMillimeters == 5_000 &&
+        surfaces[1].HeightMillimeters == 8_000 &&
         surfaces[2].SurfaceId == GamePlayableWorld.CaveLedgeSurface &&
         surfaces[2].Face == WorldTerrainSurfaceFace.Top &&
-        surfaces[2].HeightMillimeters == 3_000 && surfaces[3].IsBase,
+        surfaces[2].HeightMillimeters == 4_000 &&
+        surfaces[3].SurfaceId == GamePlayableWorld.CaveLedgeSurface &&
+        surfaces[3].Face == WorldTerrainSurfaceFace.Bottom &&
+        surfaces[3].HeightMillimeters == 3_500 &&
+        surfaces[4].IsBase &&
+        surfaces[4].HeightMillimeters == GamePlayableWorld.FlatTestHeightMillimeters,
         "The cave surfaces were ordered by something other than physical elevation.");
     Expect(world.TryCopyTerrainColumnSurfaces(
             GamePlayableWorld.SkyTelepadDestination, surfaces, out int skyCount, out _) ==
@@ -679,7 +705,7 @@ static TestMetrics ConceptDemoWorldCombinesFloatingBaseCaveAndSkyShells()
     return new TestMetrics(
         first.Fingerprint.ToString(),
         0, 0, 0, 0, 0, first.Length, 0, 0, 0, 0, 0,
-        "D0.0 deterministically composes intentional BaseTerrain void, preserved cave base, Mountain/ledge surfaces, and a detached Sky Island without changing the historical Cabin pack.",
+        "D0.0 deterministically composes intentional BaseTerrain void, a complete 3x3 flat movement-test area, preserved cave base, thick Mountain/ledge shells, and a detached Sky Island without changing the historical Cabin pack.",
         WorldPackBytes: first.Length);
 }
 
@@ -1792,6 +1818,25 @@ static TestMetrics SimplePhysicsStaticSupport()
                 Expect(shelfLanding.IsGrounded,
                     "A static top wider than the support core but narrower than the body did not support landing.");
 
+                WorldPosition treeFace = Position(
+                    3_951, GamePlayableWorld.FlatTestHeightMillimeters + 61, 3_000);
+                SimpleAirborneMotionResult treeContact =
+                    game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            treeFace,
+                            3_851,
+                            GamePlayableWorld.FlatTestHeightMillimeters - 651,
+                            3_000,
+                            body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                Expect(treeContact.Status == SimpleAirborneMotionStatus.Landed &&
+                    treeContact.Position.GlobalXMillimeters == treeFace.GlobalXMillimeters &&
+                    treeContact.Position.YMillimeters ==
+                        GamePlayableWorld.FlatTestHeightMillimeters,
+                    $"A combined wall/landing contact did not preserve its clear vertical " +
+                    $"component: {treeContact}.");
+
                 for (int index = 0; index < 16; index++)
                 {
                     _ = game.SimplePhysics.ResolveMotion(
@@ -1801,6 +1846,15 @@ static TestMetrics SimplePhysicsStaticSupport()
                     _ = game.SimplePhysics.ResolveAirborneMotion(
                         new SimpleAirborneMotionRequest(
                             lastRockSupport, 5_417, rockTopY - 1, 13_000, body),
+                        ReadOnlySpan<WorldStaticBounds>.Empty,
+                        true);
+                    _ = game.SimplePhysics.ResolveAirborneMotion(
+                        new SimpleAirborneMotionRequest(
+                            treeFace,
+                            3_851,
+                            GamePlayableWorld.FlatTestHeightMillimeters - 651,
+                            3_000,
+                            body),
                         ReadOnlySpan<WorldStaticBounds>.Empty,
                         true);
                 }
@@ -1824,6 +1878,20 @@ static TestMetrics SimplePhysicsStaticSupport()
                             lastRockSupport.GlobalXMillimeters)
                         throw new InvalidOperationException(
                             "The warmed static-edge escape result changed.");
+                    SimpleAirborneMotionResult wall =
+                        game.SimplePhysics.ResolveAirborneMotion(
+                            new SimpleAirborneMotionRequest(
+                                treeFace,
+                                3_851,
+                                GamePlayableWorld.FlatTestHeightMillimeters - 651,
+                                3_000,
+                                body),
+                            ReadOnlySpan<WorldStaticBounds>.Empty,
+                            true);
+                    if (!wall.IsGrounded ||
+                        wall.Position.GlobalXMillimeters != treeFace.GlobalXMillimeters)
+                        throw new InvalidOperationException(
+                            "The warmed airborne-wall decomposition result changed.");
                 }
                 return GC.GetAllocatedBytesForCurrentThread() - before;
 
@@ -1842,7 +1910,8 @@ static TestMetrics SimplePhysicsStaticSupport()
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, allocated,
         "Ordinary collidable rock, thin-wall, and shelf tops support airborne landing and " +
         "grounded traversal through the independent feet footprint; unsupported rock-edge " +
-        "contact escapes without a permanent airborne wedge and allocates 0 B warmed.");
+        "contact escapes, combined wall/landing contact preserves vertical progress, and the " +
+        "paths allocate 0 B warmed.");
 }
 
 static TestMetrics SimplePhysicsStaticTopPolicy()
@@ -1906,7 +1975,12 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
     WorldPack pack = CreatePhysicsTerrainShellWorldPack();
     var composition = new UltraSimGameComposition(
         new InventoryLimits(32, 128, 32),
-        baseWorldPack: pack);
+        baseWorldPack: pack,
+        verticalMotionOptions: new GameVerticalMotionOptions(
+            JumpSpeedMillimetersPerSecond: 11_000,
+            GravityMillimetersPerSecondSquared: -18_000,
+            RecoveryMinimumYMillimeters: -8_000,
+            RecoveryPosition: GamePlayableWorld.PlayerStart));
     using var host = new InternalHost(
         composition,
         RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_1085))));
@@ -1924,7 +1998,7 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
     WorldPosition verticalStart = Position(
         GamePlayableWorld.PlayerStart.GlobalXMillimeters,
         0,
-        GamePlayableWorld.PlayerStart.GlobalZMillimeters);
+        6_000);
     Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
             (world, generationId, game) => game.WorldActions.RelocateActor(
                 world, game.WorldState, ResolveInWorld(world, entities.PlayerId),
@@ -1933,14 +2007,14 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         "The vertical-motion actor could not enter the shell fixture's BaseTerrain.");
 
     Expect(input.TryCreateCommand(new ClientWorldInputSample(
-            1, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump),
+            -1, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump),
         "The jump edge could not be formed.");
     GamePlayerCommandResult admitted = link.ApplyCommand(jump);
     Expect(admitted.Jump == GameWorldActionStatus.Accepted,
         $"The grounded jump was not admitted: {admitted.Jump}.");
     host.Tick();
     WorldPosition afterFirst = link.ReadPosition();
-    Expect(afterFirst.GlobalXMillimeters > verticalStart.GlobalXMillimeters &&
+    Expect(afterFirst.GlobalXMillimeters < verticalStart.GlobalXMillimeters &&
         afterFirst.YMillimeters > verticalStart.YMillimeters &&
         ReadVertical(runtime.Game, entities.PlayerId).IsAirborne,
         "One authoritative jump step did not compose horizontal and upward motion.");
@@ -1956,10 +2030,29 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         "A fresh hostile Jump edge created an airborne double-jump.");
 
     Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            1, 0, GamePlayerActions.None, true), out GamePlayerCommand reverse),
+        "The jump fixture could not request a mid-air direction reversal.");
+    // The hostile sequence consumed sequence 2, so use an explicitly fresh reversal.
+    reverse = reverse with { Sequence = hostileDoubleJump.Sequence + 1 };
+    GamePlayerCommandResult reverseResult = link.ApplyCommand(reverse);
+    Expect(reverseResult.WasAdmitted &&
+        reverseResult.Locomotion == GameWorldActionStatus.Accepted,
+        $"The mid-air correction probe was not admitted: {reverseResult}.");
+    WorldPosition afterCorrectionAttempt = afterFirst;
+    for (int tick = 0; tick < 8 && afterCorrectionAttempt == afterFirst; tick++)
+    {
+        host.Tick(TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 60));
+        afterCorrectionAttempt = link.ReadPosition();
+    }
+    Expect(afterCorrectionAttempt.GlobalXMillimeters < afterFirst.GlobalXMillimeters,
+        "Live Direct input altered the authoritative horizontal trajectory after takeoff: " +
+        $"first={afterFirst}, correction={afterCorrectionAttempt}, " +
+        $"vertical={ReadVertical(runtime.Game, entities.PlayerId)}.");
+
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
             0, 0, GamePlayerActions.None, true), out GamePlayerCommand stop),
-        "The jump fixture could not release horizontal input.");
-    // The hostile sequence consumed sequence 2, so use an explicitly fresh stop.
-    stop = stop with { Sequence = hostileDoubleJump.Sequence + 1 };
+        "The jump fixture could not release post-landing horizontal input.");
+    stop = stop with { Sequence = reverse.Sequence + 1 };
     _ = link.ApplyCommand(stop);
     int landingBudget = 180;
     while (ReadVertical(runtime.Game, entities.PlayerId).IsAirborne && landingBudget-- > 0)
@@ -1968,16 +2061,17 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
     WorldPosition landing = link.ReadPosition();
     Expect(landingBudget >= 0 && landed.IsGrounded && landing.YMillimeters == 0 &&
         landed.CumulativeJumpsAccepted == 1 && landed.CumulativeLandings == 1,
-        "The authoritative jump did not fall and land exactly on BaseTerrain.");
+        "The authoritative jump did not fall and land exactly on BaseTerrain: " +
+        $"budget={landingBudget}, state={landed}, position={landing}.");
 
-    WorldPosition gapStart = Position(11_500, 0, 12_500);
+    WorldPosition gapStart = Position(9_500, 0, 15_000);
     Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
             (world, generationId, game) => game.WorldActions.RelocateActor(
                 world, game.WorldState, ResolveInWorld(world, entities.PlayerId),
                 gapStart, out WorldPosition _), out GameWorldActionStatus relocation) &&
         relocation == GameWorldActionStatus.Accepted,
         "The recovery fixture could not relocate beside intentional void.");
-    var fallSession = new ClientWorldInputSequencer(input.ControlSession, hostileDoubleJump.Sequence + 2);
+    var fallSession = new ClientWorldInputSequencer(input.ControlSession, hostileDoubleJump.Sequence + 3);
     Expect(fallSession.TryCreateCommand(new ClientWorldInputSample(
             1, 0, GamePlayerActions.None, true), out GamePlayerCommand walkOff),
         "The walk-off command could not be formed.");
@@ -1992,7 +2086,7 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         "The falling actor could not release horizontal input.");
     _ = link.ApplyCommand(stopFall);
     long recoveriesBefore = ReadVertical(runtime.Game, entities.PlayerId).CumulativeRecoveries;
-    int recoveryBudget = 240;
+    int recoveryBudget = 300;
     while (ReadVertical(runtime.Game, entities.PlayerId).CumulativeRecoveries == recoveriesBefore &&
            recoveryBudget-- > 0)
         host.Tick();
@@ -2003,7 +2097,9 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         recovered.GlobalXMillimeters == GamePlayableWorld.PlayerStart.GlobalXMillimeters &&
         recovered.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters &&
         recovered.YMillimeters == 0,
-        "Game-owned fall recovery did not use the occupancy-aware safe relocation point.");
+        "Game-owned fall recovery did not use the occupancy-aware safe relocation point: " +
+        $"budget={recoveryBudget}, before={recoveriesBefore}, state={recovery}, " +
+        $"position={recovered}.");
 
     WorldPosition cadence20 = RunJumpCadence(20, 0x80_1086);
     WorldPosition cadence60 = RunJumpCadence(60, 0x80_1087);
@@ -2012,9 +2108,9 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
         "Jump/fall/landing final truth diverged across 20/60/120 Hz.");
 
     return new TestMetrics(
-        HashText($"{afterFirst}|{landing}|{recovered}|{cadence20}"),
+        HashText($"{afterFirst}|{afterCorrectionAttempt}|{landing}|{recovered}|{cadence20}"),
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        "Game admits one grounded Jump edge, integrates horizontal air control plus exact fixed-point gravity, lands on terrain, rejects double-jump, recovers below the configured fall envelope, and converges at 20/60/120 Hz.");
+        "Game admits one grounded Jump edge, captures takeoff direction without live air steering, integrates exact fixed-point gravity, lands on terrain, rejects double-jump, recovers below the configured fall envelope, and converges at 20/60/120 Hz.");
 
     static GameVerticalMotionSnapshot ReadVertical(ServerGameFacet gameFacet, PersistentEntityId id)
     {
@@ -2088,6 +2184,127 @@ static TestMetrics AuthoritativeJumpFallLandingAndRecovery()
     {
         if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
             throw new InvalidOperationException("A vertical Game fixture point was invalid.");
+        return value;
+    }
+}
+
+static TestMetrics AuthoritativeAirborneWallContactKeepsGravityProgress()
+{
+    WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_108C))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(108_012));
+    Expect(entered.IsEntered, "The airborne-wall actor did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.PopulateConceptDemo(
+                world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The airborne-wall fixture could not populate.");
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    // The authored tree centered at (3000,3000) ends at X=3651. With the 300 mm body
+    // half-extent, X=3951 is exact non-overlapping contact with its east face.
+    WorldPosition contact = Position(
+        3_951,
+        GamePlayableWorld.FlatTestHeightMillimeters,
+        3_000);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, generationId, game) => game.WorldActions.RelocateActor(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                contact,
+                out WorldPosition _),
+            out GameWorldActionStatus relocated) &&
+        relocated == GameWorldActionStatus.Accepted,
+        "The airborne-wall actor could not reach exact tree-face contact.");
+
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            -1, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump) &&
+        link.ApplyCommand(jump).Jump == GameWorldActionStatus.Accepted,
+        "The tree-contact jump was not admitted.");
+
+    bool observedAirborne = false;
+    int stationaryTicks = 0;
+    int maximumStationaryTicks = 0;
+    int maximumDownwardStep = 0;
+    WorldPosition previous = contact;
+    int budget = 180;
+    while (budget-- > 0)
+    {
+        host.Tick(TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 60));
+        WorldPosition current = link.ReadPosition();
+        GameVerticalMotionSnapshot vertical = ReadVertical();
+        observedAirborne |= vertical.IsAirborne;
+        if (current == previous)
+            stationaryTicks++;
+        else
+            stationaryTicks = 0;
+        maximumStationaryTicks = Math.Max(maximumStationaryTicks, stationaryTicks);
+        if (current.YMillimeters < previous.YMillimeters)
+            maximumDownwardStep = Math.Max(
+                maximumDownwardStep,
+                previous.YMillimeters - current.YMillimeters);
+        Expect(current.GlobalXMillimeters >= contact.GlobalXMillimeters,
+            "Airborne wall contact penetrated the authored tree.");
+        previous = current;
+        if (observedAirborne && vertical.IsGrounded)
+            break;
+    }
+
+    GameVerticalMotionSnapshot landed = ReadVertical();
+    WorldPosition final = link.ReadPosition();
+    Expect(budget >= 0 && observedAirborne && landed.IsGrounded &&
+        landed.CumulativeLandings == 1 && landed.CumulativeRecoveries == 0 &&
+        final.YMillimeters == GamePlayableWorld.FlatTestHeightMillimeters &&
+        maximumStationaryTicks <= 2 && maximumDownwardStep <= 500,
+        "A jump held into a tree suspended, snapped, recovered, or failed to land normally: " +
+        $"budget={budget}, observedAirborne={observedAirborne}, state={landed}, " +
+        $"position={final}, stationary={maximumStationaryTicks}, " +
+        $"downwardStep={maximumDownwardStep}.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, long>(
+            (world, generationId, game) => game.WorldActions.ReservedBytes,
+            out long worldActionReservedBytes),
+        "The airborne-wall fixture could not read its bounded Game action reservation.");
+
+    return new TestMetrics(
+        HashText($"{contact}|{final}|{maximumStationaryTicks}|{maximumDownwardStep}"),
+        0, 0, 0, 0, 0, pack.Length, 0, 0, 0, 0, 0,
+        "A captured jump trajectory held into exact tree-face contact preserves bounded vertical " +
+        "progress every tick and lands without penetration, accumulated-gravity snap, or recovery.",
+        WorldPackBytes: pack.Length,
+        WorldActionReservedBytes: worldActionReservedBytes);
+
+    GameVerticalMotionSnapshot ReadVertical()
+    {
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameVerticalMotionSnapshot>(
+                (world, _, game) =>
+                {
+                    Expect(game.WorldActions.TryReadVerticalMotion(
+                            world,
+                            ResolveInWorld(world, entities.PlayerId),
+                            out GameVerticalMotionSnapshot state),
+                        "The airborne-wall vertical state was unavailable.");
+                    return state;
+                },
+                out GameVerticalMotionSnapshot snapshot),
+            "The airborne-wall vertical-state read did not run.");
+        return snapshot;
+    }
+
+    static WorldPosition Position(long x, int y, long z)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+            throw new InvalidOperationException("An airborne-wall fixture point was invalid.");
         return value;
     }
 }
@@ -3998,6 +4215,13 @@ static WorldPack CreatePhysicsTerrainShellWorldPack()
             basePresence, new TerrainCellCoord(checked((byte)x), checked((byte)z)), false);
     for (int z = 22; z <= 25; z++)
     for (int x = 28; x <= 31; x++)
+        TerrainSurfacePresence.SetPresent(
+            basePresence, new TerrainCellCoord(checked((byte)x), checked((byte)z)), false);
+    // A distinct six-meter fall-recovery runway keeps the one-meter grounded-path
+    // sampling canary above intact while giving captured takeoff momentum enough
+    // unsupported space to cross the recovery envelope.
+    for (int z = 28; z <= 31; z++)
+    for (int x = 20; x <= 31; x++)
         TerrainSurfacePresence.SetPresent(
             basePresence, new TerrainCellCoord(checked((byte)x), checked((byte)z)), false);
     Expect(TerrainHeightPlaneBase.TryCreate(0, out TerrainHeightPlaneBase baseHeight),

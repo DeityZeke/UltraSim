@@ -428,7 +428,7 @@ fall/recovery policy
 Exact Physics checkpoint/API is owned by `PHYSICS.md` and must be reviewed before implementation.
 
 P0.1d closes the foundation: Space produces a focus-fenced Jump edge, Game admits only grounded
-jumps, integrates vertical velocity/gravity with horizontal air control, lands against actual
+jumps, integrates vertical velocity/gravity with a Game-owned horizontal trajectory, lands against actual
 Base/Top surfaces, stops at Bottom ceilings, and uses occupancy-aware Game recovery below the
 admitted fall envelope. D0.0 now consumes that foundation through the actual island/cave traversal
 fixture described below.
@@ -459,12 +459,13 @@ movement mechanism:
 ```text
 finite Central BaseTerrain sheet
     + intentional-void outer edge and east cutout
+    + exact 3x3-chunk / 48x48 m flat movement-diagnostic region at 1 m
 
 MountainShell
-    + top support at 7 m
-    + Bottom clearance face at 5 m
+    + top support at 10 m
+    + Bottom clearance face at 8 m
     + preserved BaseTerrain cave floor
-    + sparse 3 m interior ledge
+    + closed 500 mm-thick interior ledge at 4.0/3.5 m
     + frozen structural perimeter with a real south opening
 
 detached SkyIslandShell
@@ -489,7 +490,8 @@ Permanent D0.0 acceptance proves through the real Single Player client that:
 - the central edge and Sky gap are actual intentional void;
 - sparse mountain, cave-ledge, and Sky fragments enter bounded Client Core residency and Godot
   realization without ECS terrain entities;
-- ThirdPersonDirect performs an authoritative jump with air control and lands on the Sky shell;
+- ThirdPersonDirect performs an authoritative jump with its captured takeoff trajectory and lands
+  on the Sky shell;
 - OrbitCommand pointer destinations resolve against the detached Sky shell rather than requiring
   BaseTerrain, while ThirdPersonDirect/Independent mouse selection can nominate interaction targets;
 - OrbitCommand still filters Jump and reaches the same shell through the authoritative telepad;
@@ -510,6 +512,23 @@ the wider body remained in exact top-edge contact, making every downward all-or-
 The accepted narrow hardening preserves support eligibility and full body collision, realizes clear
 outward X/Z motion first, and otherwise performs one bounded deterministic shortest-edge release so
 gravity can resume. This is not a general capsule/slide controller.
+
+A later play pass found combined airborne wall contact could reject gravity together with the
+horizontal request: holding into a tree suspended the actor, while release exposed accumulated
+downward velocity as a snap. Direct-profile takeoff now captures the horizontal axes/remainders for
+the flight; live input changes only desired post-landing movement. Simple Physics independently
+preserves a valid vertical-only component when the combined request is wall-blocked, including at
+landing/ceiling contact. Permanent tests require a jump held into an authored tree to keep making
+bounded vertical progress and land without penetration, recovery, or snap. This remains a bounded
+component decomposition, not general contact sliding or capsule collision.
+
+The exact flat movement-diagnostic region spans chunks X -2..0 and Z -1..1 (global X -32..16 m,
+Z -16..32 m). Every BaseTerrain vertex in those nine chunks is exactly 1 m high. It gives human and
+automated tests a large control surface for separating terrain-height transitions from camera/
+presentation cadence; the noisy terrain outside remains deliberate. The cave's intermediate ledge
+is no longer a zero-thickness Top face: its Bottom and closure faces form a 500 mm structural shell.
+The outer MountainShell is raised from 7/5 m to 10/8 m, with the frozen perimeter extended to meet
+the higher underside.
 
 This remains bounded Simple Physics; moving platforms, general sliding/contact response,
 dynamic-projected support, actor support, and special narrow traversal are not implied.

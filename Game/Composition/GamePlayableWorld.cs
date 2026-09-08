@@ -155,6 +155,10 @@ public sealed class GameWorldActions
     private readonly long[] _destinationProgress;
     private readonly long[] _movementRemainderX;
     private readonly long[] _movementRemainderZ;
+    private readonly short[] _airborneDirectX;
+    private readonly short[] _airborneDirectZ;
+    private readonly long[] _airborneMovementRemainderX;
+    private readonly long[] _airborneMovementRemainderZ;
     private readonly uint[] _verticalGenerations;
     private readonly GameVerticalMotionKind[] _verticalKinds;
     private readonly long[] _verticalVelocityNumerators;
@@ -206,6 +210,10 @@ public sealed class GameWorldActions
         _destinationProgress = new long[_lastSequences.Length];
         _movementRemainderX = new long[_lastSequences.Length];
         _movementRemainderZ = new long[_lastSequences.Length];
+        _airborneDirectX = new short[_lastSequences.Length];
+        _airborneDirectZ = new short[_lastSequences.Length];
+        _airborneMovementRemainderX = new long[_lastSequences.Length];
+        _airborneMovementRemainderZ = new long[_lastSequences.Length];
         _verticalGenerations = new uint[_lastSequences.Length];
         _verticalKinds = new GameVerticalMotionKind[_lastSequences.Length];
         _verticalVelocityNumerators = new long[_lastSequences.Length];
@@ -217,8 +225,8 @@ public sealed class GameWorldActions
 
     /// <summary>Known fixed backing reserved for control, locomotion, and vertical state.</summary>
     public long ReservedBytes => checked((long)_lastSequences.Length *
-        ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 2) +
-         (sizeof(long) * 9) + (sizeof(uint) * 3) + (sizeof(byte) * 2) +
+        ((sizeof(ulong) * 2) + sizeof(uint) + (sizeof(short) * 4) +
+         (sizeof(long) * 11) + (sizeof(uint) * 3) + (sizeof(byte) * 2) +
          Unsafe.SizeOf<Int128>() + Unsafe.SizeOf<Entity>() + sizeof(int)) +
         _physics.ReservedBytes + _collisionProjection.ReservedBytes);
 
@@ -615,13 +623,25 @@ public sealed class GameWorldActions
         long nextZ = current.GlobalZMillimeters;
         long? progress = null;
         bool reached = false;
-        switch (_locomotionKinds[index])
+        // Direct-profile horizontal momentum is captured once at takeoff/walk-off. Live input may
+        // still update the retained locomotion that will resume after landing, but it cannot steer
+        // the current flight or cancel its already-committed horizontal velocity.
+        if (_airborneDirectX[index] != 0 || _airborneDirectZ[index] != 0)
+        {
+            nextX = checked(nextX + IntegrateAxis(
+                _airborneDirectX[index],
+                stepQuanta,
+                ref _airborneMovementRemainderX[index]));
+            nextZ = checked(nextZ + IntegrateAxis(
+                _airborneDirectZ[index],
+                stepQuanta,
+                ref _airborneMovementRemainderZ[index]));
+        }
+        else switch (_locomotionKinds[index])
         {
             case RetainedLocomotionKind.Direct:
-                nextX = checked(nextX +
-                    IntegrateAxis(_directX[index], stepQuanta, ref _movementRemainderX[index]));
-                nextZ = checked(nextZ +
-                    IntegrateAxis(_directZ[index], stepQuanta, ref _movementRemainderZ[index]));
+                // A Direct command first received after takeoff is post-landing intent, not
+                // mid-air acceleration.
                 break;
             case RetainedLocomotionKind.Destination:
                 int distance = IntegrateDistance(stepQuanta, ref _movementRemainderX[index]);
@@ -1159,7 +1179,14 @@ public sealed class GameWorldActions
     private void BeginAirborne(Entity actor, int index, int initialVelocityMillimetersPerSecond)
     {
         if (_verticalKinds[index] != GameVerticalMotionKind.Airborne)
+        {
             _activeAirborneCount++;
+            bool direct = _locomotionKinds[index] == RetainedLocomotionKind.Direct;
+            _airborneDirectX[index] = direct ? _directX[index] : (short)0;
+            _airborneDirectZ[index] = direct ? _directZ[index] : (short)0;
+            _airborneMovementRemainderX[index] = direct ? _movementRemainderX[index] : 0;
+            _airborneMovementRemainderZ[index] = direct ? _movementRemainderZ[index] : 0;
+        }
         _verticalGenerations[index] = actor.Generation;
         _verticalKinds[index] = GameVerticalMotionKind.Airborne;
         _verticalVelocityNumerators[index] = checked(
@@ -1177,6 +1204,7 @@ public sealed class GameWorldActions
         _verticalKinds[index] = GameVerticalMotionKind.Grounded;
         _verticalVelocityNumerators[index] = 0;
         _verticalDisplacementRemainders[index] = 0;
+        ClearAirborneHorizontal(index);
         if (_locomotionKinds[index] == RetainedLocomotionKind.None)
             RemoveActive(index);
     }
@@ -1192,6 +1220,7 @@ public sealed class GameWorldActions
         _verticalGenerations[index] = 0;
         _verticalVelocityNumerators[index] = 0;
         _verticalDisplacementRemainders[index] = 0;
+        ClearAirborneHorizontal(index);
         _directX[index] = 0;
         _directZ[index] = 0;
         _destinationX[index] = 0;
@@ -1203,6 +1232,14 @@ public sealed class GameWorldActions
         _movementRemainderX[index] = 0;
         _movementRemainderZ[index] = 0;
         RemoveActive(index);
+    }
+
+    private void ClearAirborneHorizontal(int index)
+    {
+        _airborneDirectX[index] = 0;
+        _airborneDirectZ[index] = 0;
+        _airborneMovementRemainderX[index] = 0;
+        _airborneMovementRemainderZ[index] = 0;
     }
 
     private void RemoveActive(int index)
@@ -1366,6 +1403,11 @@ public static class GamePlayableWorld
     public const int FarIslandMaximumChunkX = FarIslandCenterChunkX + 4;
     public const int ConceptClusterChunkCount = 81;
     public const int ConceptChunkCount = ConceptClusterChunkCount * 2;
+    public const int FlatTestMinimumChunkX = -2;
+    public const int FlatTestMaximumChunkX = 0;
+    public const int FlatTestMinimumChunkZ = -1;
+    public const int FlatTestMaximumChunkZ = 1;
+    public const int FlatTestHeightMillimeters = 1_000;
 
     public static WorldSurfaceId MountainSurface => new(0xD0_001);
     public static WorldSurfaceId CaveLedgeSurface => new(0xD0_002);
@@ -1381,7 +1423,7 @@ public static class GamePlayableWorld
     public static WorldPosition SkyJumpStart => AtHeight(22_000, 1_000, 9_000);
     public static WorldPosition CaveEntranceApproach => FromGlobal(-6_000, 2_500);
     public static WorldPosition CaveFloorPoint => FromGlobal(-6_000, 7_000);
-    public static WorldPosition CaveLedgePoint => AtHeight(-6_000, 3_000, 11_000);
+    public static WorldPosition CaveLedgePoint => AtHeight(-6_000, 4_000, 11_000);
     public static long FarIslandCenterXMillimeters =>
         checked((long)FarIslandCenterChunkX * GameWorldSpatialProfile.WorldChunkEdgeUnits + 8_000);
     public static WorldPosition CentralFarGatePosition => FromGlobal(0, 20_000);
@@ -1646,6 +1688,15 @@ public static class GamePlayableWorld
 
     private static int AuthoredHeight(int globalVertexX, int globalVertexZ)
     {
+        int minimumFlatVertexX = FlatTestMinimumChunkX * TerrainChunkFormat.MaterialCellEdge;
+        int maximumFlatVertexX = (FlatTestMaximumChunkX + 1) *
+            TerrainChunkFormat.MaterialCellEdge;
+        int minimumFlatVertexZ = FlatTestMinimumChunkZ * TerrainChunkFormat.MaterialCellEdge;
+        int maximumFlatVertexZ = (FlatTestMaximumChunkZ + 1) *
+            TerrainChunkFormat.MaterialCellEdge;
+        if (globalVertexX >= minimumFlatVertexX && globalVertexX <= maximumFlatVertexX &&
+            globalVertexZ >= minimumFlatVertexZ && globalVertexZ <= maximumFlatVertexZ)
+            return FlatTestHeightMillimeters;
         if (globalVertexX is >= 24 and <= 44 && globalVertexZ is >= 16 and <= 32)
             return 1_000;
         int noise = Math.Abs(unchecked(globalVertexX * 73 + globalVertexZ * 151 +
@@ -1692,8 +1743,8 @@ public static class GamePlayableWorld
             new SpatialChunkKey(GameWorldState.DefaultSpace, -1, 0),
             MountainSurface,
             new TerrainSurfacePatchBounds(12, 8, 16, 20),
-            topMillimeters: 7_000,
-            bottomMillimeters: 5_000,
+            topMillimeters: 10_000,
+            bottomMillimeters: 8_000,
             topMaterial: GameTerrainMaterialIds.Rock,
             bottomMaterial: GameTerrainMaterialIds.Rock,
             sideMaterial: GameTerrainMaterialIds.Rock);
@@ -1702,11 +1753,11 @@ public static class GamePlayableWorld
             new SpatialChunkKey(GameWorldState.DefaultSpace, -1, 0),
             CaveLedgeSurface,
             new TerrainSurfacePatchBounds(16, 20, 8, 6),
-            topMillimeters: 3_000,
-            bottomMillimeters: null,
+            topMillimeters: 4_000,
+            bottomMillimeters: 3_500,
             topMaterial: GameTerrainMaterialIds.Rock,
-            bottomMaterial: 0,
-            sideMaterial: 0);
+            bottomMaterial: GameTerrainMaterialIds.Rock,
+            sideMaterial: GameTerrainMaterialIds.Rock);
         AddFlatShell(
             builder,
             new SpatialChunkKey(GameWorldState.DefaultSpace, 1, 0),
@@ -1782,15 +1833,15 @@ public static class GamePlayableWorld
         WorldMultiPieceSource[] pieces =
         [
             CabinPiece(1, GameWorldStaticDefinitionIds.Rock,
-                -10_000, 9_000, 200, 5_000, 4_200,
+                -10_000, 9_000, 200, 5_000, 7_200,
                 WorldYaw.QuarterTurn, GameWorldStaticVariants.MountainWallTenMeters,
                 WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
             CabinPiece(2, GameWorldStaticDefinitionIds.Rock,
-                -2_000, 9_000, 200, 5_000, 4_200,
+                -2_000, 9_000, 200, 5_000, 7_200,
                 WorldYaw.QuarterTurn, GameWorldStaticVariants.MountainWallTenMeters,
                 WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
             CabinPiece(3, GameWorldStaticDefinitionIds.Rock,
-                -6_000, 14_000, 4_000, 200, 4_200,
+                -6_000, 14_000, 4_000, 200, 7_200,
                 WorldYaw.Zero, GameWorldStaticVariants.MountainWallEightMeters,
                 WorldStaticFlags.Renderable | WorldStaticFlags.Collidable),
         ];

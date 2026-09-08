@@ -6,12 +6,14 @@ added first-class occupancy-aware relocation, and P0.1b added bounded exact swep
 blocker collision. Terrain T1.1 supplies multiple immutable structural surface
 candidates per X/Z column; P0.1c now selects actual support, checks footprint and
 clearance, and enforces bounded grounded steps. P0.1d adds Game-owned grounded/airborne
-state, jump admission, deterministic gravity, horizontal air control, terrain-shell
+state, jump admission, deterministic gravity, a captured Direct takeoff trajectory, terrain-shell
 landing/ceiling contact, restore reconstruction, and Game-owned fall recovery. D0 human-play
 hardening subsequently admits complete collidable frozen-static/Multi bounds tops as support and
 separates the playable body's collision/clearance footprint from its central support/feet footprint.
 A later human-play hardening adds one bounded static-top edge release so an unsupported airborne
-body cannot remain vertically wedged against the support it just left. General contact sliding,
+body cannot remain vertically wedged against the support it just left. A further contact hardening
+preserves the clear vertical component when a combined airborne request hits a wall, so gravity
+cannot accumulate behind a rejected horizontal component. General contact sliding,
 rounded/capsule narrowphase, triangle time-of-impact, moving support, and actor collision remain
 unstarted.
 
@@ -462,8 +464,11 @@ there is no coyote time, buffering, double jump, wall jump, stamina, or client-a
 velocity. ThirdPersonDirect and IndependentMoveLook expose the action; OrbitCommand intentionally
 retains its no-jump grammar and may use future authoritative relocation/telepad content instead.
 
-Airborne Direct/Destination intent supplies X/Z while Game vertical state supplies Y. The combined
-request does not run through grounded support snapping. Descending motion lands on the first
+Direct-profile airborne momentum is captured from the retained movement axes and exact movement
+remainders when the actor leaves support or begins a Jump. Later Direct input updates only desired
+post-landing locomotion; it cannot steer or cancel that flight. A retained Destination continues
+along its already-latched straight route while Game vertical state supplies Y. The combined request
+does not run through grounded support snapping. Descending motion lands on the first
 geometry-ordered Base/Top support crossed with a valid five-point footprint and clearance;
 ascending motion stops at the first Bottom face crossed by any footprint point, zeros upward
 velocity, and remains airborne for gravity on the next step. Intentional T1.0 void supplies no
@@ -477,8 +482,9 @@ and airborne state exactly once per simulation step; idle grounded actors incur 
 The Simple airborne path remains bounded at <=250 mm sample spacing, 512 samples, five footprint
 columns, 129 stack-resident column faces, 16 static candidate chunks, 64 static hits, and the
 existing complete 16-entry Game dynamic projection. One thousand warmed terrain-shell airborne
-resolutions allocate 0 B. The added generation-owned arrays raise the accepted integrated fixture's
-`GameWorldActions` reservation from 14,336 B to 16,704 B.
+resolutions allocate 0 B. The original P0.1d generation-owned arrays raised the accepted integrated
+fixture's `GameWorldActions` reservation from 14,336 B to 16,704 B. Capturing Direct takeoff axes
+and their independent fixed-point remainders later raises the current reservation to 17,984 B.
 
 P0.1d deliberately does not make FrozenStatics, Multis, or dynamic bounds into support surfaces.
 They remain exact swept blockers, so a blocked airborne request realizes no partial displacement.
@@ -581,6 +587,37 @@ It records all thirty-four integrated gates passing, the unchanged playable-worl
 `B764...F220` hash and 16,704 B `GameWorldActions` reservation, and 0 B warmed static-support/edge
 allocation. Chat focus is independently exercised by the real `--d0-5-smoke` Godot journey rather
 than being represented as a Physics metric in this artifact.
+
+## D0 playability hardening — airborne wall contact and takeoff trajectory
+
+Human play found that holding Direct movement into a tree during a jump could reject the combined
+horizontal/vertical sweep every tick. Game continued integrating gravity while authoritative
+position remained unchanged; releasing movement could then expose a large accumulated downward
+step and, in the worst case, cross terrain before the next accepted position.
+
+Simple Physics now performs one bounded component decomposition when a combined airborne request is
+blocked by a static/projected-dynamic wall: it retries the same admitted Y target at the current
+X/Z through the normal structural, landing, ceiling, and blocker rules. The decomposition is also
+available inside landing/ceiling contact branches, before they can return an early combined-sweep
+failure. A valid vertical result is committed; horizontal penetration remains rejected. This is not
+a general slide/contact-normal solver and does not weaken exact swept blocking.
+
+Game simultaneously removes floaty Direct air correction. Direct axes and exact integration
+remainders are captured on the grounded-to-airborne transition. Releasing, reversing, or pressing a
+new Direct direction during flight changes only retained post-landing intent. Destination movement
+retains its existing latched-route semantics; OrbitCommand still has no Jump action.
+
+Permanent regressions hold a captured jump directly into an authored tree face and require bounded
+vertical progress, exact nonpenetration, ordinary landing, no recovery, no long stationary run, and
+no large downward snap. A separate command regression reverses live Direct input after takeoff and
+requires the original trajectory to continue. The warmed combined wall/landing decomposition remains
+0 B allocated, and the current 64-entity integrated `GameWorldActions` reservation is 17,984 B.
+
+The Release evidence is
+[`physics-airborne-contact-terrain-fixture-hardening-2026-09-07.json`](../../_Benchmarks/Baselines/physics-airborne-contact-terrain-fixture-hardening-2026-09-07.json).
+It records all thirty-five integrated gates passing, the 731,384-byte current Concept Demo pack
+with fingerprint `323141A8...29CF795`, and the independently warmed 0 B static-edge/wall-contact
+path. Timing remains an observation rather than a throughput claim.
 
 ## RunUO archaeology
 
@@ -1751,7 +1788,7 @@ selection. It does not broaden into actor collision, navigation, rigid bodies, o
 an alternate-provider campaign.
 
 **Gate:** terrain Top/Bottom contacts, jump admission, hostile double-jump rejection,
-horizontal air control, void fall/recovery, generation-local restore, ECS slot-reuse
+captured Direct takeoff trajectory, void fall/recovery, generation-local restore, ECS slot-reuse
 fencing, 20/60/120 Hz final convergence, and zero warmed airborne allocation pass.
 
 ### P0.2 — Godot provider canary

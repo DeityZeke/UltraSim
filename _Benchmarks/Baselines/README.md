@@ -256,6 +256,15 @@ Useful current anchors can be located by their embedded workload or filename:
   relocation, generation replacement, 20/60/120 Hz-equivalent agreement, and 0 B
   warmed allocation. It is not gravity, jump/fall/landing, sliding, arbitrary
   triangle time-of-impact, static/dynamic support, or provider evidence;
+- `physics-p0.1d-vertical-motion-*` and later `physics-static-edge-*` /
+  `physics-airborne-contact-terrain-fixture-*` hardenings — Game-owned vertical
+  state, jump/gravity/landing/recovery, static-top support, independent feet/body
+  footprints, bounded edge release, and the current captured Direct takeoff
+  trajectory. The latest artifact adds a nine-chunk exactly flat terrain canary,
+  thick cave geometry, and a warmed 0 B vertical-component decomposition that
+  prevents a wall-blocked horizontal request from suspending gravity or producing
+  a later snap. It does not claim general sliding, capsule contact, moving support,
+  actor collision, or alternate-provider completion;
 - `terrain-t0-acceptance-matrix-closure-*` and
   `terrain-t0.10-acceptance-closure-*` — cumulative T0.0-T0.10 profile mapping
   plus the current final Release integrated/native rerun. They freeze the

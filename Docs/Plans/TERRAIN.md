@@ -9,8 +9,10 @@ base-surface presence/intentional void. T1.1 adds immutable sparse terrain shell
 at free absolute elevations, complete vertical-column reads, stable logical shell
 identity across chunk fragments, and bounded client/native realization.
 Concept Demo D0.0 now consumes T1.0/T1.1 through the permanent Single Player path as a finite
-floating base sheet, MountainShell/preserved-base cave, sparse interior ledge, and detached Sky
-Island. No new Terrain representation or mutable topology was added by that consumer.
+floating base sheet, MountainShell/preserved-base cave, closed sparse interior ledge, and detached
+Sky Island. Later playability hardening makes the diagnostic BaseTerrain region exactly flat across
+nine complete chunks, gives the cave ledge explicit Top/Bottom/closure thickness, and raises the
+MountainShell without adding a new Terrain representation or mutable topology.
 Revised from the accepted Network N0 baseline, later spatial-seam decisions, and
 V1/transitional spatial-publication archaeology. Network N0 remains the frozen
 remote-authority reference; accepted T0 now supplies the world/spatial/publication

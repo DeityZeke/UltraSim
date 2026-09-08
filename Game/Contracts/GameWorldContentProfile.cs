@@ -81,7 +81,7 @@ public static class GameWorldContentProfile
     public const ulong ContentFingerprintHigh = 0xD241_8739_B74F_10A5UL;
     public const string ConceptDemoDefinitionId = "server-world:world/concept-demo";
     public const string ConceptDemoPackFingerprint =
-        "DD5DC0F6710BBD9C2D0DC90271E3B18BEAA5325AFDE80D902328AABB086EA228";
+        "323141A827CD25ECC5BC144CE860FECF717F472E1C0ED57626BCC89EC29CF795";
 
     public static ReadOnlySpan<ushort> TerrainMaterialIds => TerrainMaterials;
     public static ReadOnlySpan<uint> StaticDefinitionIds => StaticDefinitions;
