@@ -7,10 +7,10 @@ A0.5 cache/delta/corruption/mirror hardening, A0.6 typed UI schema convergence, 
 canonical WorldPack streaming, and A0.8 native Contentless Online product closure accepted,
 companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell foundation
 (F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.8 are closed.
-Runtime mesh/audio
-import, package
-dependencies, executable extensions, mutable overlay artifacts, and independently streamed chunk
-artifacts remain deferred.
+Client F0.6's historical content-source/Contentless Online gate is therefore also closed and
+superseded by this accepted A0 campaign; no duplicate F0.6 implementation remains.
+Runtime mesh/audio import, package dependencies, executable extensions, mutable overlay artifacts,
+and independently streamed chunk artifacts remain deferred.
 
 **Purpose:** restore the useful V2 content-pack, resolver, cache, server-patch, and asset-streaming ideas without reviving old ownership mistakes. The first proof uses the same Cabin in the Woods world locally and remotely so a preinstalled Single Player composition can act as a deterministic oracle for Online content.
 
@@ -1870,6 +1870,12 @@ Direct Connect to the external Concept Demo deployment and acquire required cont
 source-independent pipeline.
 
 **Gate:** external world becomes playable and matches the equivalent Complete/Single Player oracle where semantics are intended to match.
+
+This A0.8 closure also satisfies and supersedes Client F0.6. Its original requirements—optional
+local Test World content, realm/hash-owned passive cache, source-independent delivery, diagnosable
+fallback, and a playable exported Online product without bundled world/local authority—are all
+stronger permanent A0 gates now. Do not create a second client content-source campaign under the
+F0.6 label.
 
 ---
 

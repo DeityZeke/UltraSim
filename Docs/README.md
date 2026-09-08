@@ -33,13 +33,15 @@ acceptance narratives remain available through git history.
   semantics plus deliberately deferred routed-channel, moderation, history, and
   richer extensibility work.
 - [UltraSim Simple Physics](../Game/Physics/README.md) — the concrete generation-owned
-  P0.0-P0.1b resolver, first-class occupancy, and bounded swept blocker test.
-- [Physics plan/status](Plans/PHYSICS.md) — accepted P0.0 ownership extraction and
-  P0.1a relocation occupancy plus P0.1b swept movement, with support/step and
-  providers unstarted.
+  P0.0-P0.1d resolver: first-class occupancy, bounded swept blocking, multi-surface
+  support/clearance, and airborne contact beneath Game-owned vertical motion.
+- [Physics plan/status](Plans/PHYSICS.md) — accepted P0.0-P0.1d ownership, occupancy,
+  sweep, support/step/clearance, jump/gravity/landing, and subsequent Concept Demo
+  playability hardening; general contact sliding and alternate providers remain future.
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   five concrete dynamic-public profiles, selected `ChunkPublication` semantics,
-  P0.4 conservative selection, and the real public-actor consumer vertical.
+  P0.4 conservative selection, the real public-actor consumer vertical, and the
+  next shared multi-participant authority boundary above accepted Network/Hosted infrastructure.
 - [Spatial contracts](../Kernels/Spatial/README.md) — dependency-neutral integer
   spatial identity, geometry, bounds, and canonical math.
 - [Game world](../Game/World/README.md) — fixed world-position profile and accepted
@@ -77,7 +79,9 @@ acceptance narratives remain available through git history.
   roadmap: Single Player/Online/Complete/Contentless compositions, local-vs-remote
   semantic parity, Network-free local authority/session extraction, Direct Connect
   identity onboarding, human-scale presentation calibration, nameplates/chat,
-  layered settings, server-recommended profiles, and server-composed UI.
+  layered settings, server-recommended profiles, and server-composed UI. F0.5's
+  remaining standard-definition convergence is next; F0.6 is closed by A0.2-A0.8,
+  followed by shared multi-participant authority and explicit lifecycle/final matrices.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
@@ -174,12 +178,15 @@ consumer/deployment need earns them.
 - [Chat C0](Plans/CHAT.md) records accepted C0.0-C0.1a spatial/remote occurrence
   semantics and the stopped routed-channel/social/moderation work until a real
   consumer earns it.
-- [Physics P0](Plans/PHYSICS.md) records the P0.0 Simple Physics extraction,
-  P0.1a occupancy-aware relocation, P0.1b swept blocking, and stopped P0.1c+
-  behavior/provider work.
+- [Physics P0](Plans/PHYSICS.md) records the accepted P0.0-P0.1d Simple Physics
+  extraction, occupancy-aware relocation, swept blocking, support/clearance/steps,
+  jump/gravity/fall/landing, and bounded human-play hardening, with richer contact
+  response and alternate-provider work still stopped.
 - [Client F0](Plans/CLIENT.md) records the frozen real-client shell/composition,
   authority-thread/local-session extraction, Direct Connect trust, settings/control-
-  profile, world-presentation, server-composed UI, and parity roadmap.
+  profile, and world-presentation work through F0.4, the A0-derived F0.6 closure,
+  F0.5's remaining standard-UI convergence, and the later shared-authority/lifecycle/parity
+  roadmap.
 - [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred

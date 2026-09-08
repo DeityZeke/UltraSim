@@ -119,6 +119,11 @@ Inventory instead of stacking duplicate transparent views. Window dragging remai
 stock public objects use bounded full-height pointer volumes before terrain projection, so the
 visible upper portions of doors and signs nominate those disclosed objects normally.
 
+This native renderer and the existing local/remote Inventory paths already provide most of Client
+F0.5. The remaining checkpoint is the explicit standard-definition preseed and proof that it
+converges with cached/content-backed exact definitions through this same renderer; it is not a
+second Godot UI implementation.
+
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a
 magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby

@@ -73,6 +73,21 @@ declared Control message and bytes. Other-player metadata fanout will compose wi
 multi-participant authority when that authority is earned; this checkpoint does not fake it inside
 independent Direct Connect runtimes.
 
+## Next shared multi-participant authority boundary
+
+After the small Client F0.5 compiled-UI convergence closure, shared authority is the next major
+cross-cutting Concept Demo checkpoint. Its owning plan/checkpoint name must be reviewed before
+implementation. It must compose one authoritative Game/World generation with several independently
+authenticated application, participant, and control lineages; it must not construct one isolated
+Game runtime per player and call that multiplayer.
+
+The first acceptance should make the already-earned seams interact: per-recipient
+`ChunkPublication` interest/debt/proof, F0.4 cold actor metadata and nameplates, spatial Chat fanout,
+owner-private UI/state, independent command sequences, and non-poisoning capacity rejection. The
+accepted shared UDP listener/Hosted owner machinery remains transport infrastructure beneath this
+consumer. Do not reopen Network encoding/profile architecture unless this real shared-authority
+work exposes a concrete correctness or measured capacity problem.
+
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.
 After that activation is semantically applied, `RemoteUiSemanticPort` translates a normal Game

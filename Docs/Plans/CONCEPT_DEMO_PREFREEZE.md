@@ -1,4 +1,4 @@
-/st# UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
+# UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
 **Status:** future pre-freeze campaign. Begin only after the Concept Demo's required feature journey is complete and accepted. Complete this campaign before declaring the Concept Demo frozen and before beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1679,28 +1679,29 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 # 30. Recommended execution order
 
 ```text
-1. Finish the complete Concept Demo feature journey.
+1. Close Client F0.5's small compiled-UI source-convergence gap.
 2. Close shared multi-participant authority.
-3. Select one exact feature-complete pre-freeze candidate.
-4. Build the real headless Network bot client.
-5. Add first-class wire/per-message accounting.
-6. Establish high-performance quiet/moving/crowd baselines.
-7. Decouple render FPS from input submission cadence.
-8. Define/advertise/enforce the bounded Server Performance Profile.
-9. Run mismatched-cadence correctness matrix.
-10. Evaluate input/owner/public cadence reductions.
-11. Evaluate unreliable frame aggregation.
-12. Measure dense vs distributed AOI/fanout.
-13. Evaluate selective compression only where payload shape justifies it.
-14. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-15. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-16. Run mixed headless + exported Godot clients.
-17. Run external human Concept Demo validation.
-18. Choose/document the default deployment-performance policy.
-19. Record decisive performance/bandwidth/failure evidence.
-20. Full exact-tree verifier and export closure.
-21. Freeze/tag the Concept Demo baseline.
-22. Begin the separate extraction/genericization/ecosystem roadmap.
+3. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
+4. Select one exact feature-complete pre-freeze candidate.
+5. Build the real headless Network bot client.
+6. Add first-class wire/per-message accounting.
+7. Establish high-performance quiet/moving/crowd baselines.
+8. Decouple render FPS from input submission cadence.
+9. Define/advertise/enforce the bounded Server Performance Profile.
+10. Run mismatched-cadence correctness matrix.
+11. Evaluate input/owner/public cadence reductions.
+12. Evaluate unreliable frame aggregation.
+13. Measure dense vs distributed AOI/fanout.
+14. Evaluate selective compression only where payload shape justifies it.
+15. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+16. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+17. Run mixed headless + exported Godot clients.
+18. Run external human Concept Demo validation.
+19. Choose/document the default deployment-performance policy.
+20. Record decisive performance/bandwidth/failure evidence.
+21. Full exact-tree verifier and export closure.
+22. Freeze/tag the Concept Demo baseline.
+23. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

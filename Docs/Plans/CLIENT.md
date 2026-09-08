@@ -1,13 +1,12 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
-**Status:** frozen architectural direction with executable composition, the permanent Network-free
-local path, persistent shell/settings/focus, content A0.0/A0.1, the physical Concept Demo world,
-F0.3a Online Direct Connect trust/session lifecycle, and the F0.3b remote guest/controlled-actor
-semantic vertical accepted. A0.2 persistent content installation/cache, A0.3 remote content
-authorization/acquisition/application proof, A0.4 local/server-HTTP/external-HTTPS source parity,
-and A0.5 cache/delta/corruption/mirror hardening, A0.6 typed UI schema convergence, A0.7 complete
-WorldPack streaming, and A0.8 native Contentless Online entry are accepted; generalized actor
-presentation and shared multi-participant authority remain separately gated.
+**Status:** frozen architectural direction with F0.0a-F0.4 accepted, including executable
+composition, the permanent Network-free local path, persistent shell/settings/focus, Direct
+Connect trust, remote controlled play, declarative client-profile consent, and generalized actor
+presentation. A0.0-A0.8 are also accepted, including the actual exported Contentless Online
+product. F0.5 is next as a deliberately small standard/preinstalled-versus-content-backed compiled
+UI closure campaign. F0.6 is already closed/superseded by A0.2-A0.8. Shared multi-participant
+authority remains the major unproven cross-cutting boundary after F0.5; F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -1883,19 +1882,35 @@ other already-known eligible actor. Expiry and reveal do not request disclosure 
 
 ## F0.5 — Server-composed UI + standard compiled library
 
-Implement:
+**Status: NEXT — CLOSURE CAMPAIGN.** Most of the original vertical was earned before its numbered
+checkpoint. `UiClientRuntime` already owns exact bounded definition caching plus cold/hot opens;
+local and remote Game UI use the same model/action semantics; `GodotUiRenderer` realizes the
+engine-neutral compiled tree; Inventory v6 is a real interactive compiled definition; and A0.6
+proves exact content-backed `.usui` resolution through an applied realm catalog. Human-play
+hardening additionally supplies centered opaque views and validated close behavior.
 
-- Godot rendering of engine-neutral compiled UI;
-- exact definition identity;
-- preinstalled standard definition cache;
-- cold/hot paths;
-- session lifetime fencing;
-- real Inventory/container panel;
-- local/remote same semantics.
+Close only the remaining source-convergence gap:
 
-Main Menu/Settings/Exit stay client-owned.
+- define one small explicitly selected stock/preinstalled compiled-UI library at the client
+  composition boundary;
+- preseed the exact Inventory definition into the normal `UiClientRuntime` cache;
+- prove preinstalled standard, reopened cached exact, and streamed/content-backed exact definitions
+  converge on the same `UiDefinitionIdentity`, `UiModel`, `UiActionRequest`, Game handler, and Godot
+  renderer result;
+- prove a fresh session owns a fresh bounded runtime cache and no view/definition lifetime leaks
+  through teardown;
+- retain the already-accepted local/remote semantic result and cold/hot failure behavior.
 
-**Gate:** Inventory works locally/remotely through normal server-composed UI; cached/preinstalled/custom definitions behave correctly.
+The standard library is explicit composition data, not a reason for generic Client Core to depend
+on every Game UI definition. In particular, the Online product must preseed selected passive
+definition bytes/data without acquiring the Game UI/Inventory authority assemblies. Main
+Menu/Settings/Exit stay client-owned. Required content authorization/application proof also remains
+independent: possessing the same preinstalled definition cannot claim that a required realm catalog
+was applied.
+
+**Gate:** the same Inventory definition and authoritative actions work through preinstalled
+standard, cached exact, and content-backed exact sources in local/remote composition; identity,
+application proof, session teardown, and Online's no-local-authority dependency gate remain exact.
 
 Human-play hardening centers the fixed logical Canvas within the current viewport. Informational
 and Inventory definitions provide an opaque surface and a compiled, validated Close action;
@@ -1911,9 +1926,13 @@ validates exact target identity, range, and interaction legality.
 
 ## F0.6 — Content-source separation + Contentless Online integration
 
-Asset streaming implementation is governed by `ASSET_STREAMING.md`; do not hide its full campaign in one client commit.
+**Status: CLOSED / SUPERSEDED BY A0.2-A0.8.** Do not schedule a second F0.6 implementation.
+The companion Asset Streaming campaign established persistent CAS/install state, authenticated
+requirement and application proof, source parity, repair/delta/mirrors, typed UI and WorldPack
+consumers, and finally an inspected exported Online product with no bundled playable WorldPack or
+local authority closure. A0.8 exceeds the original F0.6 gate.
 
-Client integration must prove:
+The accepted closure proves:
 
 - Test World/content optional, not Client Core;
 - Online may ship without Cabin;
@@ -1926,11 +1945,17 @@ Client integration must prove:
 
 Executable extension host remains deferred/separate.
 
-**Gate:** Contentless Online connects to compatible server and renders acquired world without bundled playable world/local authority implementation.
+**Gate: PASSED by A0.8.** Contentless Online connects to a compatible server and renders the
+acquired world without a bundled playable world or local authority implementation.
 
 ---
 
 ## F0.7 — Settings/debug/lifecycle hardening
+
+**Status: OPEN; partially earned hardening is already accepted.** Settings focus, Chat focus,
+Render Distance projection replacement, export cleanup, client-profile persistence, content-cache
+restart, controlled-actor lifetime, and repeated local session entry have each closed concrete
+bugs. They do not replace an explicit mixed-session lifecycle closure.
 
 Implement:
 
@@ -1942,7 +1967,10 @@ Implement:
 - bounded debug surfaces;
 - lifecycle hardening across local->menu, remote->menu, repeated runs, generation/world replacement.
 
-**Gate:** no stale world, panels, nameplates, overhead chat, render chunks, control profile, or input focus crosses session boundaries.
+**Gate:** a deliberate same-process sequence such as local -> menu -> local -> menu -> remote ->
+disconnect -> another remote realm -> menu -> local leaves no stale world, panels, actors,
+nameplates, overhead Chat, render chunks, control profile, trust candidate, content application
+session, or input focus across boundaries.
 
 ---
 
@@ -2250,7 +2278,7 @@ Current V3:
 - `Game/UI/InventoryUi.cs`
 - `Game/World` public/semantic records
 - Chat C0.1a client/overhead semantics
-- Physics P0.0-P0.1b boundary
+- Physics P0.0-P0.1d boundary plus accepted Concept Demo playability hardening
 - Terrain T0 semantic cache/render window
 - [`ASSET_STREAMING.md`](ASSET_STREAMING.md)
 
@@ -2272,14 +2300,14 @@ Recover concepts where they fit current ownership; do not port old coupling beca
 # 37. Roadmap summary
 
 ```text
-Physics foundation                    CLOSED through P0.1b
+Physics foundation                    CLOSED through P0.1d + demo playability hardening
         |
         v
-F0.0a executable composition roots / shipped-dependency proof
+F0.0a executable composition roots / shipped-dependency proof            CLOSED
         |
-F0.0c one maintained Godot project / three physical products       CLOSED
+F0.0b permanent OfflineDirect local-session extraction                  CLOSED
         |
-F0.0b permanent OfflineDirect local-session extraction     CLOSED
+F0.0c one maintained Godot project / three physical products            CLOSED
         |
 F0.1  persistent shell + readable layered settings/control foundation CLOSED
         |
@@ -2307,17 +2335,26 @@ A0.7  complete canonical WorldPack streaming                              CLOSED
         |
 A0.8  native Contentless Online world entry                              CLOSED
         |
+F0.6  content-source integration + Contentless Online                     CLOSED
+      superseded/satisfied by A0.2-A0.8
+        |
 F0.3c server client-profile consent/settings                              CLOSED
         |
 F0.4  actor definitions/nameplates/Ctrl/chat presentation parity          CLOSED
         |
-F0.5  server-composed UI + standard compiled definitions + Inventory
+F0.5  standard/preinstalled + cached/content-backed compiled UI closure   NEXT
         |
-F0.6  content-source integration + Contentless Online (A0 companion campaign)
+shared multi-participant authority
+      one Game/World authority + multiple independent application sessions
+      owning checkpoint to be reviewed/named after F0.5                    NEXT AFTER F0.5
         |
-F0.7  settings/debug/lifecycle hardening
+remaining Concept Demo gameplay/presentation consumers
         |
-F0.8  final local/remote/complete/contentless + different-feel matrix
+F0.7  explicit settings/debug/mixed-session lifecycle closure             OPEN
+        |
+F0.8  final local/remote/complete/contentless + different-feel matrix      OPEN
+        |
+pre-freeze campaign: bots/bandwidth/tuning/ObjectScript/human testing
         |
         v
 repository generalization / extraction readiness

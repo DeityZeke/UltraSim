@@ -645,5 +645,12 @@ validated a very different owner-private UI/Inventory path over the same lower
 Network machinery. Future gameplay should continue to consume these seams before
 reopening Network architecture.
 
+The next major multiplayer consumer after Client F0.5 is one shared Game/World authority serving
+several independent authenticated application/participant/control sessions. That is Game/server
+composition work over the accepted shared listener, Hosted handoff, per-recipient replication,
+Chat, and UI paths—not an implicit N1.5 or another Network-profile campaign. Reopen lower Network
+design only if the concrete shared-authority acceptance exposes a correctness, boundedness, or
+measured capacity failure.
+
 The current exclusions and deployment gates for externally admitted UDP remain in
 [HOSTED_NETWORK.md](HOSTED_NETWORK.md).

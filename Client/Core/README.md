@@ -9,6 +9,12 @@ A0.6 permits an exact already-validated passive UI definition to enter the bound
 supersession rules and does not publish model values or action handlers. A subsequent semantic
 `HotOpen` still carries the Game-owned model and must match that exact cached definition.
 
+Client F0.5's remaining closure uses this existing mechanism. One explicitly selected stock
+Inventory definition may preseed the same cache at composition time, while a reopened content blob
+or newly acquired `.usui` may seed it after exact validation/authorization. All sources converge on
+one `UiDefinitionCacheKey`; no source changes model/action authority, and session disposal still
+retires the complete runtime cache and its views.
+
 F0.1 also places the application-shell state and local settings model here. The owner-thread-bound
 `ClientShellCoordinator` owns Main Menu/loading/session/options/settings/error transitions, while
 `ClientInputFocusPolicy` produces one finite World/HUD-text/modal/debug focus decision for engine

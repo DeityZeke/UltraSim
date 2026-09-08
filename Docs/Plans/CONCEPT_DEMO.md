@@ -17,8 +17,10 @@ permanent Single Player client as a floating Central Island, MountainShell cave,
 Island, and Game-owned telepad. D0.1 adds live bounded structural/render residency, D0.2 adds the
 sparse Far Island and reciprocal authoritative gates, D0.3 adds the authoritative informational
 sign, D0.4 closes the local Fallback Lab canaries, and D0.5 closes the local guest/demo
-admission presentation described below. F0.3a/F0.3b close Direct Connect trust and the first remote
-controlled-actor semantic vertical. A0.2 supplies the persistent verified content cache, and A0.3
+admission presentation described below. F0.3a-F0.3c close Direct Connect trust, the first remote
+controlled-actor semantic vertical, and declarative client-profile consent; F0.4 closes the shared
+local/remote actor, nameplate, Ctrl-reveal, and overhead-Chat presentation path. A0.2 supplies the
+persistent verified content cache, and A0.3
 now closes authenticated requirements, source-neutral acquisition, exact catalog application
 proof, cold-cache Cabin Replace parity, and warm-cache fresh-session proof. A0.4 now closes remote
 Default/Replace/Add parity across rooted local files, server-hosted HTTP, and external HTTPS. A0.5
@@ -28,7 +30,9 @@ definition convergence without moving models/actions out of Game. A0.7 closes co
 WorldPack acquisition, typed World open/bind, and atomic initial client structural publication
 with exact local semantic parity. A0.8 now closes the native Contentless Online journey through a
 separately running deployment, persistent CAS, primitive presentation fallback, guest admission,
-movement, dynamic-public state, typed Inventory UI, and Chat.
+movement, dynamic-public state, typed Inventory UI, and Chat. That A0 campaign also closes and
+supersedes the historical Client F0.6 content-integration gate. The small F0.5 standard compiled-UI
+source-convergence closure is next, followed by shared multi-participant authority.
 
 The demo has two purposes:
 
@@ -1496,6 +1500,8 @@ then earn/integrate Concept Demo Round 1 consumers:
 then prioritize the first meaningful remote vertical:
     F0.3a Direct Connect + deployment trust                         CLOSED
     F0.3b remote controlled actor + guest admission                 CLOSED
+    F0.3c declarative client-profile consent                        CLOSED
+    F0.4 generalized actor/nameplate/overhead presentation          CLOSED
 
     A0.2 persistent verified content installation/cache             CLOSED
     A0.3 authenticated requirement/source acquisition               CLOSED
@@ -1505,13 +1511,27 @@ then prioritize the first meaningful remote vertical:
     A0.7 complete canonical WorldPack streaming                      CLOSED
     A0.8 native Contentless Online world entry                       CLOSED
 
-then continue Round 1 consumers as earned:
+    F0.6 Contentless Online client integration                       CLOSED
+         superseded/satisfied by A0.2-A0.8
+
+next close the small remaining Client UI source-convergence gap:
+    F0.5 standard/preinstalled + cached/content-backed compiled UI   NEXT
+
+then earn the major shared-world boundary:
+    one shared Game/World authority
+    multiple independent authenticated application/participant/control sessions
+    real other-player F0.4 presentation and per-recipient AOI/Chat
+    owning checkpoint reviewed/named before implementation
+
+then continue remaining Round 1 consumers as earned:
     animation/pickup/inventory swing
     Global/system Chat
     diagnostics/Server Monitor/test markers
 
-then shared multi-participant authority, actor presentation, and the external Concept Demo
-multiplayer/stress run
+then close:
+    F0.7 explicit mixed-session settings/debug/lifecycle torture pass
+    F0.8 final composition/parity matrix
+    external Concept Demo multiplayer/stress and pre-freeze campaign
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

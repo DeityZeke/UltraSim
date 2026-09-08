@@ -391,6 +391,11 @@ New Hosted work must be earned by a concrete deployment requirement such as:
 - multi-host ownership/migration;
 - demonstrated listener/owner capacity or security pressure.
 
+The planned shared multi-participant Concept Demo authority after Client F0.5 is initially a
+consumer of the already-accepted shared listener/owner handoff. Multiple Game participants sharing
+one authority do not by themselves authorize a new Hosted checkpoint; only concrete transport,
+ownership, capacity, or security evidence may reopen this layer.
+
 Until then:
 
 - keep H0.0-H0.5 semantics frozen;

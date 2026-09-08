@@ -96,3 +96,14 @@ presentation exposes only that the object is a sign. After ordinary Game interac
 trusted target and range, Game supplies immutable title/body content and one compiled Close action.
 The native Godot view is therefore a renderer of server-authored information, not the authority for
 sign text, interaction distance, or view lifecycle.
+
+## Current client closure
+
+The renderer, exact cache identity, cold/hot semantics, Inventory v6 workflow, local/remote action
+path, and A0.6 content-backed `.usui` path are accepted. Client F0.5 is therefore a small
+source-convergence checkpoint, not a new UI system: explicitly preseed one selected standard
+Inventory definition into the same `UiClientRuntime` cache and prove that preinstalled, reopened
+cached, and content-backed exact definitions produce the same model, actions, Game handler, and
+Godot result. The standard library remains small composition data; it does not make Client Core
+depend on every Game definition, pull Game UI/Inventory authority assemblies into Online, or
+substitute for required realm-content application proof.
