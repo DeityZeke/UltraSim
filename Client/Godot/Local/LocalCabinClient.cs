@@ -725,7 +725,7 @@ public partial class LocalCabinClient : Node3D
             64,
             new BundledActorVisualResolver());
         _actorPresenter.SetControlledActorPose(
-            view.PublicActor, view.PlayerPosition, view.PlayerOrientation);
+            view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         RebuildClientProjection(view);
         DriveLocalUntil(() =>
             CountPresentedCharacters() == 1 &&
@@ -795,7 +795,9 @@ public partial class LocalCabinClient : Node3D
         Label? body = root?.FindChild("Element_body", recursive: true, owned: false) as Label;
         Button? close = root?.FindChild("Element_close", recursive: true, owned: false) as Button;
         if (title?.Text != GameInformationalSigns.ConceptDemoWelcome.Title ||
-            body?.Text != GameInformationalSigns.ConceptDemoWelcome.Body || close is null)
+            body?.Text != GameInformationalSigns.ConceptDemoWelcome.Body || close is null ||
+            root is null || !Mathf.IsEqualApprox(root.AnchorLeft, 0.5f) ||
+            !Mathf.IsEqualApprox(root.AnchorTop, 0.5f))
             throw new InvalidOperationException("Godot did not realize the authoritative sign title/body/actions.");
 
         close!.EmitSignal(BaseButton.SignalName.Pressed);
@@ -917,7 +919,7 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException(
                 "The authoritative guest body did not select the matching public character prefab.");
         GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
-        if (actors.ActiveActors < 2 || actors.VisibleNameplates != 1)
+        if (actors.ActiveActors < 2 || actors.VisibleNameplates > 1)
             throw new InvalidOperationException(
                 "The shared actor presenter did not retain the controlled actor and nearby animal.");
         _actorPresenter!.SetRevealHeld(true);
@@ -925,9 +927,9 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException(
                 "Local Ctrl reveal did not expose already-known eligible actor labels.");
         _actorPresenter.SetRevealHeld(false);
-        if (_actorPresenter.GetSnapshot().VisibleNameplates != 1)
+        if (_actorPresenter.GetSnapshot().VisibleNameplates > 1)
             throw new InvalidOperationException(
-                "Releasing local Ctrl reveal did not restore normal nameplate policy.");
+                "Releasing local Ctrl reveal did not restore the join-grace/hidden nameplate policy.");
 
         ulong before = _chatState.GetSnapshot().Applied;
         SubmitChat("guest identity canary");
@@ -996,11 +998,41 @@ public partial class LocalCabinClient : Node3D
 
     private void OpenInventory()
     {
-        if (_localSession is null) return;
+        if (_localSession is null || _uiClient is null) return;
+        if (_uiClient.OpenViewCount != 0)
+        {
+            _lastOutcome = TryRequestCloseOpenInventory()
+                ? "Inventory close requested"
+                : "Close the current window before opening Inventory";
+            return;
+        }
         ulong request = _nextAdministrativeRequest++;
         _lastOutcome = _localSession.TryRequestOpenInventory(request)
             ? "Inventory requested"
             : "Inventory request queue busy";
+    }
+
+    private bool TryRequestCloseOpenInventory()
+    {
+        Control? view = FindOpenInventoryView();
+        Button? close = view?.FindChild(
+            "Element_close", recursive: true, owned: false) as Button;
+        if (close is null || close.Disabled)
+            return false;
+        close.EmitSignal(BaseButton.SignalName.Pressed);
+        return true;
+    }
+
+    private Control? FindOpenInventoryView()
+    {
+        if (_inventoryHost is null) return null;
+        foreach (Node child in _inventoryHost.GetChildren())
+        {
+            if (child is Control candidate &&
+                candidate.FindChild("Element_items", recursive: true, owned: false) is not null)
+                return candidate;
+        }
+        return null;
     }
 
     private void RealizeAddedContent()
@@ -1083,7 +1115,7 @@ public partial class LocalCabinClient : Node3D
             ApplyControlledActorMetadata(in view);
         }
         _actorPresenter?.SetControlledActorPose(
-            view.PublicActor, view.PlayerPosition, view.PlayerOrientation);
+            view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         TrackPresentation(reset: true);
         DrainRenderer();
         SynchronizeActorPresentation(in view);
@@ -1128,7 +1160,7 @@ public partial class LocalCabinClient : Node3D
                 ClientActorPresentationSyncStatus.NoChanges))
             throw new InvalidOperationException($"Actor presentation synchronization failed: {status}.");
         _actorPresenter.SetControlledActorPose(
-            view.PublicActor, view.PlayerPosition, view.PlayerOrientation);
+            view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         _actorPresenter.Apply(
             _actorChanges.AsSpan(0, changed), _player, Time.GetTicksMsec());
         if (!_actorPresenter.TryGetActorRoot(view.PublicActor, out _humanPresentation) ||
@@ -1557,11 +1589,17 @@ public partial class LocalCabinClient : Node3D
 
     private void UpdatePointerWorldPoint()
     {
-        if (_camera is null)
+        if (_camera is null || _cache is null || _window is null)
             return;
         Vector2 mouse = GetViewport().GetMousePosition();
         Vector3 origin = _camera.ProjectRayOrigin(mouse);
         Vector3 direction = _camera.ProjectRayNormal(mouse);
+        if (TryPickPresentedPublicObject(origin, direction, out ClientControlWorldPoint objectPoint))
+        {
+            _pointerPoint = objectPoint;
+            _pointerPointValid = true;
+            return;
+        }
         if (Math.Abs(direction.Y) < 0.0001f)
         {
             _pointerPointValid = false;
@@ -1579,6 +1617,47 @@ public partial class LocalCabinClient : Node3D
         long globalZ = checked(_player.GlobalZMillimeters +
             (long)Math.Round(hit.Z * 1000d, MidpointRounding.AwayFromZero));
         _ = TrySetPointerWorldPoint(globalX, globalZ);
+    }
+
+    private bool TryPickPresentedPublicObject(
+        in Vector3 rayOrigin,
+        in Vector3 rayDirection,
+        out ClientControlWorldPoint point)
+    {
+        point = default;
+        if (_cache is null || _window is null ||
+            !_window.TryCopyBindings(_presentationBindings, out int count, out _))
+            return false;
+
+        float nearest = float.PositiveInfinity;
+        WorldPosition selected = default;
+        for (int index = 0; index < count; index++)
+        {
+            if (!_cache.TryGetResidentView(
+                    _presentationBindings[index].SemanticHandle, out ClientSemanticChunkView view))
+                continue;
+            foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+            {
+                if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0)
+                    continue;
+                Vector3 basePosition = new(
+                    checked(record.Position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
+                    checked(record.Position.YMillimeters - _player.YMillimeters) * 0.001f,
+                    checked(record.Position.GlobalZMillimeters - _player.GlobalZMillimeters) * 0.001f);
+                if (!GodotPublicPointerPicker.TryIntersect(
+                        record.PrefabId, rayOrigin, rayDirection, basePosition, out float distance) ||
+                    distance >= nearest)
+                    continue;
+                nearest = distance;
+                selected = record.Position;
+            }
+        }
+        if (!float.IsFinite(nearest))
+            return false;
+        point = new ClientControlWorldPoint(
+            selected.GlobalXMillimeters,
+            selected.GlobalZMillimeters);
+        return true;
     }
 
     private bool TrySetPointerWorldPoint(long globalXMillimeters, long globalZMillimeters)
@@ -2077,7 +2156,8 @@ public partial class LocalCabinClient : Node3D
 
     private void ProbePlayableInventory()
     {
-        if (_localSession is null || _uiClient is null || _uiBridge is null)
+        if (_localSession is null || _uiClient is null || _uiBridge is null ||
+            _inventoryHost is null)
             throw new InvalidOperationException("Playable Inventory presentation was not composed.");
         ulong before = _localSession.GetSnapshot().UiOperationsApplied;
         OpenInventory();
@@ -2086,6 +2166,20 @@ public partial class LocalCabinClient : Node3D
             _ = _uiBridge.Pump();
             return _uiClient.OpenViewCount == 1 &&
                 _localSession.GetSnapshot().UiOperationsApplied > before;
+        });
+        Control? inventory = FindOpenInventoryView();
+        if (inventory is null ||
+            inventory.FindChild("Element_background", recursive: true, owned: false) is not Panel ||
+            inventory.FindChild("Element_close", recursive: true, owned: false) is not Button ||
+            !Mathf.IsEqualApprox(inventory.AnchorLeft, 0.5f) ||
+            !Mathf.IsEqualApprox(inventory.AnchorTop, 0.5f))
+            throw new InvalidOperationException(
+                "Playable Inventory was not centered, backed by a surface, and closable.");
+        OpenInventory();
+        DriveLocalUntil(() =>
+        {
+            _ = _uiBridge.Pump();
+            return _uiClient.OpenViewCount == 0;
         });
     }
 

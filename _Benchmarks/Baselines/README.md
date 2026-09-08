@@ -26,6 +26,9 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-human-play-ui-picking-hardening-2026-09-07.json` — full-height bounded
+  door/sign nomination before terrain fallback, centered/surfaced compiled views, authoritative
+  Inventory close with `I` toggle behavior, and a 2.5-second controlled-nameplate grace period;
 - `client-f0.4-controlled-pose-hardening-2026-09-07.json` — the controlled avatar and
   player-relative render origin consume one fresh owner-private pose while ordinary actors remain
   public-record-driven; its native adversarial case holds the controlled public row stale across

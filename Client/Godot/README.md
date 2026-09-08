@@ -113,6 +113,12 @@ direct profiles; and the mouse wheel adjusts supported camera profiles. The Cent
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
 
+Compiled UI Canvases are centered in the viewport. The Inventory v6 definition supplies its own
+surface and authoritative Close action; `I` opens it when no UI is active and closes the existing
+Inventory instead of stacking duplicate transparent views. Window dragging remains deferred. Tall
+stock public objects use bounded full-height pointer volumes before terrain projection, so the
+visible upper portions of doors and signs nominate those disclosed objects normally.
+
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a
 magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby
@@ -131,6 +137,9 @@ same renderer-neutral actor state used by Online, verifies Ctrl reveal over alre
 actors, and anchors spatial speech to the exact presented public identity. Online has no bundled
 X/Y scenes, so its same presenter deliberately realizes the current actors through the primitive
 substrate rather than reintroducing hidden default content.
+
+The controlled nameplate is visible for 2.5 seconds after its control lifetime begins, then hides
+until Ctrl reveal. Ctrl remains purely local presentation over already-known eligible actors.
 
 The controlled actor is a special presentation consumer of the fresh owner-private pose already
 used to position the player-relative world. Its independently delivered public row remains useful

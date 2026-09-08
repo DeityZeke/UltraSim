@@ -1875,6 +1875,10 @@ valid public record trails by a tick. Other actors continue to use disclosed pub
 the fresh origin with the older controlled public pose creates a visible backward/forward sawtooth
 and is a permanent native regression case for both Local and Online composition.
 
+The controlled display label has a short 2.5-second local join grace period rather than permanent
+visibility. After that grace expires it follows the same client-local Ctrl reveal policy as every
+other already-known eligible actor. Expiry and reveal do not request disclosure or change AOI.
+
 ---
 
 ## F0.5 — Server-composed UI + standard compiled library
@@ -1892,6 +1896,16 @@ Implement:
 Main Menu/Settings/Exit stay client-owned.
 
 **Gate:** Inventory works locally/remotely through normal server-composed UI; cached/preinstalled/custom definitions behave correctly.
+
+Human-play hardening centers the fixed logical Canvas within the current viewport. Informational
+and Inventory definitions provide an opaque surface and a compiled, validated Close action;
+Inventory `I` toggles its existing view instead of stacking another transparent view. Window
+dragging/placement persistence remains later UI-shell polish, not a new semantic requirement.
+
+Pointer nomination now tests bounded full-height stock presentation volumes before falling back to
+terrain projection. Clicking the upper portion of a door or sign therefore nominates that already
+disclosed object rather than the ground behind it. This remains client presentation: Game still
+validates exact target identity, range, and interaction legality.
 
 ---
 

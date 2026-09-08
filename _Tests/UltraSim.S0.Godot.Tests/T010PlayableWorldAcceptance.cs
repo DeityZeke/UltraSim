@@ -19,6 +19,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunJoinedInputAuthorityAcceptance();
             RunRemotePublicActorAcceptance();
             RunControlledActorOwnerPoseAcceptance();
+            RunTallPublicObjectPickingAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
@@ -27,6 +28,33 @@ public partial class T010PlayableWorldAcceptance : Node3D
             GD.PushError($"T0.10 GODOT PLAYABLE WORLD ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private static void RunTallPublicObjectPickingAcceptance()
+    {
+        Vector3 origin = new(0, 1.9f, 5f);
+        Vector3 direction = Vector3.Forward;
+        Expect(GodotPublicPointerPicker.TryIntersect(
+                GameWorldPublicPrefabIds.CabinDoor,
+                origin,
+                direction,
+                Vector3.Zero,
+                out float doorDistance) && doorDistance > 0,
+            "The upper portion of a Cabin door was not pointer-pickable.");
+        Expect(GodotPublicPointerPicker.TryIntersect(
+                GameWorldPublicPrefabIds.InformationalSign,
+                new Vector3(0, 1.45f, 5f),
+                direction,
+                Vector3.Zero,
+                out float signDistance) && signDistance > 0,
+            "The upper portion of an informational sign was not pointer-pickable.");
+        Expect(!GodotPublicPointerPicker.TryIntersect(
+                GameWorldPublicPrefabIds.CabinDoor,
+                new Vector3(2f, 1.9f, 5f),
+                direction,
+                Vector3.Zero,
+                out _),
+            "The Cabin door pick volume extended far outside its visual width.");
     }
 
     private void RunControlledActorOwnerPoseAcceptance()
@@ -76,7 +104,8 @@ public partial class T010PlayableWorldAcceptance : Node3D
         ];
 
         using var presenter = new GodotActorPresenter(this, catalog, 2);
-        presenter.SetControlledActorPose(controlledId, ownerPose, WorldYaw.HalfTurn);
+        presenter.SetControlledActorPose(
+            controlledId, ownerPose, WorldYaw.HalfTurn, nowMilliseconds: 1);
         presenter.Apply(additions, ownerPose, nowMilliseconds: 1);
         if (!presenter.TryGetActorRoot(controlledId, out Node3D? controlled) || controlled is null)
             throw new InvalidOperationException("The controlled actor root was not realized.");
@@ -93,13 +122,25 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 2_200, 1_500, 2_300, out WorldPosition nextOwnerPose),
             "The next controlled owner pose was invalid.");
         presenter.SetControlledActorPose(
-            controlledId, nextOwnerPose, WorldYaw.ThreeQuarterTurn);
+            controlledId, nextOwnerPose, WorldYaw.ThreeQuarterTurn, nowMilliseconds: 2);
         presenter.UpdateOriginAndLifetimes(nextOwnerPose, nowMilliseconds: 2);
         Expect(controlled.Position.IsEqualApprox(Vector3.Zero) &&
             Mathf.IsEqualApprox(controlled.Rotation.Y, MathF.PI * 1.5f),
             "Owner movement did not keep the controlled actor pinned to the player-relative origin.");
         Expect(other.Position.IsEqualApprox(new Vector3(1.8f, -0.5f, 2.7f)),
             "An ordinary public actor stopped following the player-relative render origin.");
+
+        presenter.UpdateOriginAndLifetimes(
+            nextOwnerPose,
+            nowMilliseconds: 1 + GodotActorPresenter.ControlledNameplateGraceMilliseconds);
+        Expect(presenter.GetSnapshot().VisibleNameplates == 0,
+            "The controlled nameplate remained permanently visible after its join grace period.");
+        presenter.SetRevealHeld(true);
+        Expect(presenter.GetSnapshot().VisibleNameplates == 2,
+            "Ctrl reveal did not restore all already-known eligible nameplates.");
+        presenter.SetRevealHeld(false);
+        Expect(presenter.GetSnapshot().VisibleNameplates == 0,
+            "Releasing Ctrl reveal restored an expired controlled nameplate.");
     }
 
     private void RunJoinedInputAuthorityAcceptance()

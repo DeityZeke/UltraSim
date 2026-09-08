@@ -32,7 +32,11 @@ public sealed class GodotUiRenderer : IUiRenderer
         Action<UiActionRequest> submitAction)
     {
         var handle = new GodotUiRenderHandle(instance, definition, model, submitAction, _assets);
-        _host?.AddChild(handle.Root);
+        if (_host is not null)
+        {
+            _host.AddChild(handle.Root);
+            handle.CenterInHost();
+        }
         return handle;
     }
 
@@ -151,6 +155,18 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             Root.GetParent()?.RemoveChild(Root);
             Root.QueueFree();
         }
+    }
+
+    internal void CenterInHost()
+    {
+        Root.AnchorLeft = 0.5f;
+        Root.AnchorTop = 0.5f;
+        Root.AnchorRight = 0.5f;
+        Root.AnchorBottom = 0.5f;
+        Root.OffsetLeft = -Root.Size.X * 0.5f;
+        Root.OffsetTop = -Root.Size.Y * 0.5f;
+        Root.OffsetRight = Root.Size.X * 0.5f;
+        Root.OffsetBottom = Root.Size.Y * 0.5f;
     }
 
     private UiCompiledLayoutNode FindRootLayout()

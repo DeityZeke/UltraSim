@@ -702,6 +702,11 @@ compiled, validated UI action rather than a Godot-only dismissal, and the result
 also requires client semantic application. D0.3 does not add a sign-specific Network path, hidden
 description query, generalized lore system, or Fallback Lab behavior.
 
+Human-play hardening centers the view instead of placing its logical Canvas at the viewport's upper
+left. Door/sign nomination tests their bounded full-height presentation volume before the terrain
+fallback, so their visible upper regions remain clickable. This changes only which disclosed target
+the client nominates; authoritative interaction validation is unchanged.
+
 ## Hover
 
 Mouse/pointer hover may highlight a sign or display a short local tooltip such as `Sign` using already

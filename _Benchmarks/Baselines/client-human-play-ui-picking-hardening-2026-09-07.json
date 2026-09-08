@@ -1,0 +1,42 @@
+{
+  "Checkpoint": "Client human-play UI/picking hardening",
+  "CaptureDate": "2026-09-07",
+  "BaseCommit": "cfcafe3f859f0ba7c90391eac1f1f441029791f1",
+  "PublicObjectPicking": {
+    "PreviousBehavior": "pointer ray projected to a ground plane before X/Z proximity selection",
+    "Failure": "upper door and sign pixels projected behind the object and selected terrain",
+    "Resolution": "bounded full-height stock public-object volumes are tested before terrain projection",
+    "AuthorityChanged": false,
+    "GameStillValidatesTargetAndRange": true
+  },
+  "CompiledUi": {
+    "InventoryDefinitionVersion": 6,
+    "InventoryArtifactBytes": 1054,
+    "CanvasCenteredInViewport": true,
+    "InventorySurface": true,
+    "InventoryAuthoritativeCloseAction": true,
+    "InventoryKeyTogglesExistingView": true,
+    "RepeatedInventoryKeyStackingBlockedByClientPolicy": true,
+    "WindowDraggingDeferred": true
+  },
+  "Nameplates": {
+    "ControlledJoinGraceMilliseconds": 2500,
+    "VisibleAfterGraceOnlyWhileRevealHeld": true,
+    "CtrlChangesDisclosureOrAoi": false
+  },
+  "PermanentCanaries": {
+    "UpperDoorAndSignPickVolumes": true,
+    "InventoryCloseReachesGameController": true,
+    "NativeInventoryCenteredSurfacedAndClosable": true,
+    "NativeSignCenteredAndClosable": true,
+    "ControlledNameplateExpiresAndCtrlRestores": true
+  },
+  "Verification": {
+    "FocusedGameInventory": true,
+    "FocusedGodotPlayableWorld": true,
+    "SinglePlayerF0_2": true,
+    "SinglePlayerD0_3": true,
+    "SinglePlayerD0_5": true,
+    "CanonicalDebugAndReleaseVerifier": true
+  }
+}

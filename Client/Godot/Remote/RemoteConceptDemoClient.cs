@@ -265,7 +265,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (inputEvent is InputEventKey key && key.Pressed && !key.Echo &&
             GodotWorldInput.Matches(key, _settings, ClientSemanticAction.OpenInventory))
         {
-            _inventoryRequested = true;
+            if (!TryRequestCloseOpenInventory() && _session!.UiClient.OpenViewCount == 0)
+                _inventoryRequested = true;
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -341,7 +342,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _actorPresenter = new GodotActorPresenter(
             this, ClientActorDefinitionCatalog.ConceptDemo, 64);
         _actorPresenter.SetControlledActorPose(
-            playable.PublicActor, playable.Position, playable.Orientation);
+            playable.PublicActor, playable.Position, playable.Orientation, Time.GetTicksMsec());
         _renderer = new GodotWorldRenderer(
             this,
             _session.WorldCache,
@@ -709,7 +710,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             throw new InvalidOperationException(
                 $"Remote actor presentation synchronization failed: {status}.");
         _actorPresenter.SetControlledActorPose(
-            playable.PublicActor, playable.Position, playable.Orientation);
+            playable.PublicActor, playable.Position, playable.Orientation, Time.GetTicksMsec());
         if (_actorState.TryGet(
                 playable.PublicActor, out ClientActorPresentationRecord controlled))
             _cameraPivotMeters =
@@ -835,6 +836,24 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private void UpdateHud(string text)
     {
         if (_status is not null) _status.Text = text;
+    }
+
+    private bool TryRequestCloseOpenInventory()
+    {
+        if (_uiHost is null) return false;
+        foreach (Node child in _uiHost.GetChildren())
+        {
+            if (child is not Control candidate ||
+                candidate.FindChild("Element_items", recursive: true, owned: false) is null)
+                continue;
+            Button? close = candidate.FindChild(
+                "Element_close", recursive: true, owned: false) as Button;
+            if (close is null || close.Disabled)
+                return false;
+            close.EmitSignal(BaseButton.SignalName.Pressed);
+            return true;
+        }
+        return false;
     }
 
     private void EnsureOperational()

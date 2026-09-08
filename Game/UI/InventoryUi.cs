@@ -19,6 +19,7 @@ public static class InventoryUi
     public static UiSlotId SplitLabel => _contract.SplitLabel;
     public static UiSlotId EquipLabel => _contract.EquipLabel;
     public static UiSlotId UnequipLabel => _contract.UnequipLabel;
+    public static UiSlotId CloseLabel => _contract.CloseLabel;
     public static UiSlotId GridLabel => _contract.GridLabel;
     public static UiSlotId GridCells => _contract.GridCells;
     public static UiActionId Select => _contract.Select;
@@ -27,10 +28,11 @@ public static class InventoryUi
     public static UiActionId Equip => _contract.Equip;
     public static UiActionId Unequip => _contract.Unequip;
     public static UiActionId PlaceAt => _contract.PlaceAt;
+    public static UiActionId Close => _contract.Close;
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.inventory.gump", version: 5);
+        var source = new UiDefinitionBuilder("game.inventory.gump", version: 6);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference items = source.DeclareSlot("items", UiSlotValueKind.List);
         UiSlotReference status = source.DeclareSlot("status", UiSlotValueKind.Text);
@@ -39,6 +41,7 @@ public static class InventoryUi
         UiSlotReference splitLabel = source.DeclareSlot("split-label", UiSlotValueKind.Text);
         UiSlotReference equipLabel = source.DeclareSlot("equip-label", UiSlotValueKind.Text);
         UiSlotReference unequipLabel = source.DeclareSlot("unequip-label", UiSlotValueKind.Text);
+        UiSlotReference closeLabel = source.DeclareSlot("close-label", UiSlotValueKind.Text);
         UiSlotReference gridLabel = source.DeclareSlot("grid-label", UiSlotValueKind.Text);
         UiSlotReference gridCells = source.DeclareSlot("grid-cells", UiSlotValueKind.List);
         UiActionReference select = source.DeclareAction("select", acceptsRowContext: true);
@@ -47,25 +50,39 @@ public static class InventoryUi
         UiActionReference equip = source.DeclareAction("equip");
         UiActionReference unequip = source.DeclareAction("unequip");
         UiActionReference placeAt = source.DeclareAction("place-at", acceptsRowContext: true);
-        source.AddCanvas(canvas => canvas.AddVertical(
-            "content",
-            content =>
-            {
-                content.AddText("title", title);
-                content.AddList("items", items, select);
-                content.AddText("transfer-label", transferLabel);
-                content.AddList("transfer-destinations", transferDestinations, moveTo);
-                content.AddText("grid-label", gridLabel);
-                content.AddList("grid-cells", gridCells, placeAt);
-                content.AddHorizontal("actions", actions =>
+        UiActionReference close = source.DeclareAction("close");
+        source.AddCanvas(new UiCanvasOptions(800, 600), canvas =>
+        {
+            var surface = new UiCanvasPlacement(16, 16, 768, 568);
+            canvas.AddPanel(
+                "background",
+                "inventory.surface",
+                UiChildLayout.Canvas(surface));
+            canvas.AddVertical(
+                "content",
+                content =>
                 {
-                    actions.AddButton("split", split, splitLabel);
-                    actions.AddButton("equip", equip, equipLabel);
-                    actions.AddButton("unequip", unequip, unequipLabel);
-                });
-                content.AddText("status", status);
-            },
-            UiChildLayout.Canvas(new UiCanvasPlacement(16, 16, 768, 568))));
+                    content.AddText("title", title);
+                    content.AddList("items", items, select);
+                    content.AddText("transfer-label", transferLabel);
+                    content.AddList("transfer-destinations", transferDestinations, moveTo);
+                    content.AddText("grid-label", gridLabel);
+                    content.AddList("grid-cells", gridCells, placeAt);
+                    content.AddHorizontal("actions", actions =>
+                    {
+                        actions.AddButton("split", split, splitLabel);
+                        actions.AddButton("equip", equip, equipLabel);
+                        actions.AddButton("unequip", unequip, unequipLabel);
+                        actions.AddButton("close", close, closeLabel);
+                    });
+                    content.AddText("status", status);
+                },
+                UiChildLayout.Canvas(new UiCanvasPlacement(32, 32, 736, 536)),
+                new UiFlowOptions(
+                    spacing: 8,
+                    padding: new UiPadding(8, 8, 8, 8),
+                    alignment: UiAlignment.Stretch));
+        });
         CompiledUiDefinition definition = UiDefinitionCompiler.Compile(source);
         return new Contract(
             definition,
@@ -77,6 +94,7 @@ public static class InventoryUi
             definition.Prepare(splitLabel),
             definition.Prepare(equipLabel),
             definition.Prepare(unequipLabel),
+            definition.Prepare(closeLabel),
             definition.Prepare(gridLabel),
             definition.Prepare(gridCells),
             definition.Prepare(select),
@@ -84,7 +102,8 @@ public static class InventoryUi
             definition.Prepare(split),
             definition.Prepare(equip),
             definition.Prepare(unequip),
-            definition.Prepare(placeAt));
+            definition.Prepare(placeAt),
+            definition.Prepare(close));
     }
 
     private sealed record Contract(
@@ -97,6 +116,7 @@ public static class InventoryUi
         UiSlotId SplitLabel,
         UiSlotId EquipLabel,
         UiSlotId UnequipLabel,
+        UiSlotId CloseLabel,
         UiSlotId GridLabel,
         UiSlotId GridCells,
         UiActionId Select,
@@ -104,7 +124,8 @@ public static class InventoryUi
         UiActionId Split,
         UiActionId Equip,
         UiActionId Unequip,
-        UiActionId PlaceAt);
+        UiActionId PlaceAt,
+        UiActionId Close);
 }
 
 /// <summary>Stable definition-cache identity used by the Inventory server workflow.</summary>
@@ -299,6 +320,11 @@ public sealed class InventoryUiController : IDisposable
         // retained application model and must reject before authority begins.
         if (!session.Model.TryValidateAction(request))
             return;
+        if (request.Action == InventoryUi.Close)
+        {
+            _ = Close(request.Instance);
+            return;
+        }
         if (request.Action == InventoryUi.Select)
         {
             HandleSelection(session, request.Row);
@@ -789,6 +815,7 @@ public sealed class InventoryUiController : IDisposable
         model.SetText(InventoryUi.SplitLabel, "Split");
         model.SetText(InventoryUi.EquipLabel, "Equip");
         model.SetText(InventoryUi.UnequipLabel, "Unequip");
+        model.SetText(InventoryUi.CloseLabel, "Close");
         ApplyActionPatches(model, DisabledActionPatches());
         return model;
     }

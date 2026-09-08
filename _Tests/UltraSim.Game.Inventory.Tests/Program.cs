@@ -859,6 +859,9 @@ static void InventoryUiPublishesGranularRowDeltas()
     Assert.SequenceEqual(new[] { UiListDeltaKind.Remove }, port.LastListKinds);
     Assert.False(port.LastListKinds.Contains(UiListDeltaKind.Replace));
     Assert.Equal(2, client.GetRows(opened.View, InventoryUi.Items).Length);
+    client.SubmitAction(opened.View, InventoryUi.Close);
+    Assert.Equal(0, client.OpenViewCount);
+    Assert.Equal(0, controller.OpenViewCount);
 }
 
 static void OwnedInventoryUiAuthorizesMoveEquipAndUnequip()

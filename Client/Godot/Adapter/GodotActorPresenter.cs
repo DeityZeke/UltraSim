@@ -31,6 +31,7 @@ public readonly record struct GodotActorPresenterSnapshot(
 /// </summary>
 public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposable
 {
+    public const ulong ControlledNameplateGraceMilliseconds = 2_500;
     private const float MillimetersToMeters = 0.001f;
     private readonly ClientActorDefinitionCatalog _catalog;
     private readonly IGodotActorVisualResolver? _visuals;
@@ -41,6 +42,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private WorldPosition _controlledPosition;
     private WorldYaw _controlledOrientation;
     private bool _controlledPoseAvailable;
+    private ulong _controlledNameplateExpiresAtMilliseconds;
+    private ulong _currentTimeMilliseconds;
     private WorldPosition _origin;
     private int _active;
     private int _primitive;
@@ -77,14 +80,22 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     public void SetControlledActorPose(
         WorldPublicEntityId id,
         in WorldPosition position,
-        WorldYaw orientation)
+        WorldYaw orientation,
+        ulong nowMilliseconds)
     {
         EnsureOperational();
         if (!id.IsValid) throw new ArgumentOutOfRangeException(nameof(id));
+        bool newControlLifetime = !_controlledPoseAvailable || id != _controlledActor;
         _controlledActor = id;
         _controlledPosition = position;
         _controlledOrientation = orientation;
         _controlledPoseAvailable = true;
+        _currentTimeMilliseconds = nowMilliseconds;
+        if (newControlLifetime)
+            _controlledNameplateExpiresAtMilliseconds = nowMilliseconds <=
+                ulong.MaxValue - ControlledNameplateGraceMilliseconds
+                    ? nowMilliseconds + ControlledNameplateGraceMilliseconds
+                    : ulong.MaxValue;
         RefreshNameplates();
     }
 
@@ -103,6 +114,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         EnsureOperational();
         _origin = origin;
+        _currentTimeMilliseconds = nowMilliseconds;
         foreach (ref readonly ClientActorPresentationChange change in changes)
         {
             switch (change.Kind)
@@ -129,6 +141,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         EnsureOperational();
         _origin = origin;
+        _currentTimeMilliseconds = nowMilliseconds;
         UpdateTransformsAndLifetimes(nowMilliseconds);
     }
 
@@ -322,8 +335,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                 MillimetersToMeters);
         slot.Root.Rotation = new Vector3(
             0, orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn), 0);
+        bool controlledNameGrace = controlled &&
+            _currentTimeMilliseconds < _controlledNameplateExpiresAtMilliseconds;
         slot.Nameplate!.Visible = actor.NameplateEligible &&
-            (actor.Id == _controlledActor || _revealHeld);
+            (_revealHeld || controlledNameGrace);
         if (nowMilliseconds != 0 && slot.OverheadExpiresAtMilliseconds != 0 &&
             nowMilliseconds >= slot.OverheadExpiresAtMilliseconds)
         {
