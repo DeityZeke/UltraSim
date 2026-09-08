@@ -38,6 +38,9 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private readonly int _ownerThreadId = System.Environment.CurrentManagedThreadId;
     private bool _revealHeld;
     private WorldPublicEntityId _controlledActor;
+    private WorldPosition _controlledPosition;
+    private WorldYaw _controlledOrientation;
+    private bool _controlledPoseAvailable;
     private WorldPosition _origin;
     private int _active;
     private int _primitive;
@@ -65,10 +68,23 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
 
     public bool ShouldBatch(uint prefabId) => !_catalog.TryGet(prefabId, out _);
 
-    public void SetControlledActor(WorldPublicEntityId id)
+    /// <summary>
+    /// Supplies the fresh owner-private pose for the locally controlled actor. Its independently
+    /// delivered public record may legitimately trail that pose; using the public record for the
+    /// controlled root would draw the actor behind the player-relative world origin and then snap
+    /// it forward whenever public delivery catches up.
+    /// </summary>
+    public void SetControlledActorPose(
+        WorldPublicEntityId id,
+        in WorldPosition position,
+        WorldYaw orientation)
     {
         EnsureOperational();
+        if (!id.IsValid) throw new ArgumentOutOfRangeException(nameof(id));
         _controlledActor = id;
+        _controlledPosition = position;
+        _controlledOrientation = orientation;
+        _controlledPoseAvailable = true;
         RefreshNameplates();
     }
 
@@ -295,14 +311,17 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     {
         ref ActorSlot slot = ref _slots[index];
         ClientActorPresentationRecord actor = slot.Record;
+        bool controlled = _controlledPoseAvailable && actor.Id == _controlledActor;
+        WorldPosition position = controlled ? _controlledPosition : actor.Position;
+        WorldYaw orientation = controlled ? _controlledOrientation : actor.Orientation;
         slot.Root!.Position = new Vector3(
-            checked(actor.Position.GlobalXMillimeters - _origin.GlobalXMillimeters) *
+            checked(position.GlobalXMillimeters - _origin.GlobalXMillimeters) *
                 MillimetersToMeters,
-            checked(actor.Position.YMillimeters - _origin.YMillimeters) * MillimetersToMeters,
-            checked(actor.Position.GlobalZMillimeters - _origin.GlobalZMillimeters) *
+            checked(position.YMillimeters - _origin.YMillimeters) * MillimetersToMeters,
+            checked(position.GlobalZMillimeters - _origin.GlobalZMillimeters) *
                 MillimetersToMeters);
         slot.Root.Rotation = new Vector3(
-            0, actor.Orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn), 0);
+            0, orientation.Units * (MathF.Tau / WorldYaw.UnitsPerTurn), 0);
         slot.Nameplate!.Visible = actor.NameplateEligible &&
             (actor.Id == _controlledActor || _revealHeld);
         if (nowMilliseconds != 0 && slot.OverheadExpiresAtMilliseconds != 0 &&

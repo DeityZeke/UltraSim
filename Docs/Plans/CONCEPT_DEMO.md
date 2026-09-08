@@ -238,6 +238,14 @@ the resident woodland animal; engine-neutral coverage separately proves simultan
 True other-player presentation remains dependent on the later shared multi-participant authority
 checkpoint and is not simulated here.
 
+The controlled human's render pose is sourced from the latest owner-private state used as the
+player-relative world origin, not from its independently delivered public movement row. Public
+delivery may legitimately trail owner state; subtracting that older pose from the newer origin made
+the avatar alternate behind/at the origin across otherwise healthy authoritative ticks, including
+in mid-air. Local and Online now pin the controlled root to the fresh owner pose while other actors
+remain driven by public state. A native canary deliberately supplies a stale controlled public row
+and verifies that only the controlled root uses the owner-pose override.
+
 This identity remains session-scoped. D0.5 adds no Accounting record, durable Character identity,
 name uniqueness, profanity service, account persistence, or remote admission protocol. F0.3 may
 carry the same Game-owned request/accepted-result semantics across the authenticated remote path;

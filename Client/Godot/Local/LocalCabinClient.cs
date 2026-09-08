@@ -724,7 +724,8 @@ public partial class LocalCabinClient : Node3D
             ClientActorDefinitionCatalog.ConceptDemo,
             64,
             new BundledActorVisualResolver());
-        _actorPresenter.SetControlledActor(view.PublicActor);
+        _actorPresenter.SetControlledActorPose(
+            view.PublicActor, view.PlayerPosition, view.PlayerOrientation);
         RebuildClientProjection(view);
         DriveLocalUntil(() =>
             CountPresentedCharacters() == 1 &&
@@ -1081,7 +1082,8 @@ public partial class LocalCabinClient : Node3D
             _publicPresentationMetadata?.ResetServerGeneration(view.GenerationId);
             ApplyControlledActorMetadata(in view);
         }
-        _actorPresenter?.SetControlledActor(view.PublicActor);
+        _actorPresenter?.SetControlledActorPose(
+            view.PublicActor, view.PlayerPosition, view.PlayerOrientation);
         TrackPresentation(reset: true);
         DrainRenderer();
         SynchronizeActorPresentation(in view);
@@ -1125,7 +1127,8 @@ public partial class LocalCabinClient : Node3D
         if (status is not (ClientActorPresentationSyncStatus.Applied or
                 ClientActorPresentationSyncStatus.NoChanges))
             throw new InvalidOperationException($"Actor presentation synchronization failed: {status}.");
-        _actorPresenter.SetControlledActor(view.PublicActor);
+        _actorPresenter.SetControlledActorPose(
+            view.PublicActor, view.PlayerPosition, view.PlayerOrientation);
         _actorPresenter.Apply(
             _actorChanges.AsSpan(0, changed), _player, Time.GetTicksMsec());
         if (!_actorPresenter.TryGetActorRoot(view.PublicActor, out _humanPresentation) ||

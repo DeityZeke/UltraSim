@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `client-f0.4-controlled-pose-hardening-2026-09-07.json` — the controlled avatar and
+  player-relative render origin consume one fresh owner-private pose while ordinary actors remain
+  public-record-driven; its native adversarial case holds the controlled public row stale across
+  owner movement and prevents the backward/forward cadence sawtooth in both Local and Online;
 - `client-f0.4-actor-presentation-2026-09-07.json` — bounded renderer-neutral actor
   definitions and cold per-instance metadata beside unchanged hot public movement, ABA-safe exact
   identity/application proof, shared Local/Online Godot realization, client-local Ctrl reveal,

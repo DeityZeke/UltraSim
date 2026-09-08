@@ -132,6 +132,13 @@ actors, and anchors spatial speech to the exact presented public identity. Onlin
 X/Y scenes, so its same presenter deliberately realizes the current actors through the primitive
 substrate rather than reintroducing hidden default content.
 
+The controlled actor is a special presentation consumer of the fresh owner-private pose already
+used to position the player-relative world. Its independently delivered public row remains useful
+to other observers but may trail that owner pose. The shared Local/Online presenter therefore pins
+the controlled root to the owner pose and uses public rows for every other actor; combining a fresh
+world origin with a stale controlled public row would otherwise make the avatar sawtooth backward
+and forward as the two valid streams converge.
+
 F1 Orbit starts in a close three-quarter composition: 45-degree elevation at 14 m rather than the
 older 64-degree/28 m overhead survey view. Version-2 settings that merely captured the exact old
 28 m Orbit default migrate to the new composition; distinct user-selected distances remain intact.

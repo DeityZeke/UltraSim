@@ -18,6 +18,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunAcceptance();
             RunJoinedInputAuthorityAcceptance();
             RunRemotePublicActorAcceptance();
+            RunControlledActorOwnerPoseAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
@@ -26,6 +27,79 @@ public partial class T010PlayableWorldAcceptance : Node3D
             GD.PushError($"T0.10 GODOT PLAYABLE WORLD ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private void RunControlledActorOwnerPoseAcceptance()
+    {
+        WorldPublicEntityId controlledId = new(701, 3);
+        WorldPublicEntityId otherId = new(702, 4);
+        ClientActorDefinitionCatalog catalog = ClientActorDefinitionCatalog.ConceptDemo;
+        if (!catalog.TryGet(
+                GameWorldPublicPrefabIds.Character, out ClientActorDefinition controlledDefinition) ||
+            !catalog.TryGet(
+                GameWorldPublicPrefabIds.CharacterMale, out ClientActorDefinition otherDefinition))
+            throw new InvalidOperationException(
+                "The controlled-pose fixture could not resolve its actor definitions.");
+        if (!WorldPosition.TryFromGlobalMillimeters(
+                1_000, 1_000, 1_000, out WorldPosition staleControlled) ||
+            !WorldPosition.TryFromGlobalMillimeters(
+                2_000, 1_300, 2_000, out WorldPosition ownerPose) ||
+            !WorldPosition.TryFromGlobalMillimeters(
+                4_000, 1_000, 5_000, out WorldPosition otherPosition))
+            throw new InvalidOperationException(
+                "The controlled-pose fixture positions were invalid.");
+
+        ClientActorPresentationChange[] additions =
+        [
+            new(
+                ClientActorPresentationChangeKind.Added,
+                controlledId,
+                new ClientActorPresentationRecord(
+                    controlledId,
+                    GameWorldPublicPrefabIds.Character,
+                    staleControlled,
+                    WorldYaw.Zero,
+                    controlledDefinition,
+                    "Controlled",
+                    true)),
+            new(
+                ClientActorPresentationChangeKind.Added,
+                otherId,
+                new ClientActorPresentationRecord(
+                    otherId,
+                    GameWorldPublicPrefabIds.CharacterMale,
+                    otherPosition,
+                    WorldYaw.QuarterTurn,
+                    otherDefinition,
+                    "Other",
+                    true)),
+        ];
+
+        using var presenter = new GodotActorPresenter(this, catalog, 2);
+        presenter.SetControlledActorPose(controlledId, ownerPose, WorldYaw.HalfTurn);
+        presenter.Apply(additions, ownerPose, nowMilliseconds: 1);
+        if (!presenter.TryGetActorRoot(controlledId, out Node3D? controlled) || controlled is null)
+            throw new InvalidOperationException("The controlled actor root was not realized.");
+        Expect(controlled.Position.IsEqualApprox(Vector3.Zero) &&
+            Mathf.IsEqualApprox(controlled.Rotation.Y, MathF.PI),
+            "A stale public record displaced or rotated the controlled actor away from its fresh owner pose.");
+        if (!presenter.TryGetActorRoot(otherId, out Node3D? other) || other is null)
+            throw new InvalidOperationException("The other actor root was not realized.");
+        Expect(other.Position.IsEqualApprox(new Vector3(2f, -0.3f, 3f)) &&
+            Mathf.IsEqualApprox(other.Rotation.Y, MathF.PI * 0.5f),
+            "The owner-pose override contaminated ordinary public actor presentation.");
+
+        Expect(WorldPosition.TryFromGlobalMillimeters(
+                2_200, 1_500, 2_300, out WorldPosition nextOwnerPose),
+            "The next controlled owner pose was invalid.");
+        presenter.SetControlledActorPose(
+            controlledId, nextOwnerPose, WorldYaw.ThreeQuarterTurn);
+        presenter.UpdateOriginAndLifetimes(nextOwnerPose, nowMilliseconds: 2);
+        Expect(controlled.Position.IsEqualApprox(Vector3.Zero) &&
+            Mathf.IsEqualApprox(controlled.Rotation.Y, MathF.PI * 1.5f),
+            "Owner movement did not keep the controlled actor pinned to the player-relative origin.");
+        Expect(other.Position.IsEqualApprox(new Vector3(1.8f, -0.5f, 2.7f)),
+            "An ordinary public actor stopped following the player-relative render origin.");
     }
 
     private void RunJoinedInputAuthorityAcceptance()

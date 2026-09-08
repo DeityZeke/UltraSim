@@ -1,0 +1,47 @@
+{
+  "Checkpoint": "F0.4 controlled-actor presentation hardening",
+  "Workload": "owner-private-controlled-pose-vs-public-record-cadence",
+  "CaptureDate": "2026-09-07",
+  "BaseCommit": "eea1729cca88d66eb19c95cda9e4191619c268e7",
+  "ObservedFailure": {
+    "AffectedProfiles": [
+      "OrbitCommand",
+      "ThirdPersonDirect",
+      "IndependentMoveLook"
+    ],
+    "AffectedVerticalStates": [
+      "Grounded",
+      "Airborne"
+    ],
+    "Symptom": "controlled avatar alternated backward and forward relative to its camera/world origin",
+    "AuthorityOrPhysicsFailure": false
+  },
+  "RootCause": {
+    "WorldOriginSource": "latest owner-private playable pose",
+    "ControlledActorSourceBeforeHardening": "independently delivered public movement record",
+    "PublicRecordMayTrailOwnerPose": true,
+    "FailureMechanism": "stale controlled public pose minus fresh player origin produced a transient negative offset followed by a snap to zero"
+  },
+  "Resolution": {
+    "ControlledActorPositionSource": "latest owner-private playable pose",
+    "ControlledActorOrientationSource": "latest owner-private playable pose",
+    "OtherActorPositionSource": "disclosed hot public record",
+    "LocalAndOnlineSharePresenter": true,
+    "GameAuthorityChanged": false,
+    "PhysicsChanged": false,
+    "NetworkProtocolChanged": false
+  },
+  "PermanentNativeCanary": {
+    "ControlledPublicPoseDeliberatelyStale": true,
+    "OwnerPoseMovesWithoutPublicUpdate": true,
+    "ControlledRootRemainsAtPlayerRelativeOrigin": true,
+    "ControlledOrientationUsesOwnerPose": true,
+    "OtherActorStillUsesPublicPose": true
+  },
+  "Verification": {
+    "FocusedGodotPlayableWorldAcceptance": true,
+    "SinglePlayerNativeJourneys": true,
+    "ContentlessOnlineColdWarmExportJourney": true,
+    "CanonicalDebugAndReleaseVerifier": true
+  }
+}

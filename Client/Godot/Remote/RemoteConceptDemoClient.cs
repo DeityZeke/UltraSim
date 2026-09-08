@@ -340,7 +340,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             ClientActorDefinitionCatalog.ConceptDemo, 64);
         _actorPresenter = new GodotActorPresenter(
             this, ClientActorDefinitionCatalog.ConceptDemo, 64);
-        _actorPresenter.SetControlledActor(playable.PublicActor);
+        _actorPresenter.SetControlledActorPose(
+            playable.PublicActor, playable.Position, playable.Orientation);
         _renderer = new GodotWorldRenderer(
             this,
             _session.WorldCache,
@@ -707,7 +708,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 ClientActorPresentationSyncStatus.NoChanges))
             throw new InvalidOperationException(
                 $"Remote actor presentation synchronization failed: {status}.");
-        _actorPresenter.SetControlledActor(playable.PublicActor);
+        _actorPresenter.SetControlledActorPose(
+            playable.PublicActor, playable.Position, playable.Orientation);
         if (_actorState.TryGet(
                 playable.PublicActor, out ClientActorPresentationRecord controlled))
             _cameraPivotMeters =

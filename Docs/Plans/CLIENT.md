@@ -1868,6 +1868,13 @@ gameplay gate. The Single Player native admission journey now types/submits thro
 event, proves Escape remains local to Chat, proves click-away preserves the draft, and verifies that
 gameplay input resumes after focus is released.
 
+Controlled-actor presentation also distinguishes the fresh owner-private pose from the separately
+delivered hot public record. The world render origin and controlled root consume the same latest
+owner pose; the controlled root is therefore stable at that player-relative origin even when its
+valid public record trails by a tick. Other actors continue to use disclosed public records. Mixing
+the fresh origin with the older controlled public pose creates a visible backward/forward sawtooth
+and is a permanent native regression case for both Local and Online composition.
+
 ---
 
 ## F0.5 — Server-composed UI + standard compiled library
