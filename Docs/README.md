@@ -40,8 +40,8 @@ acceptance narratives remain available through git history.
   playability hardening; general contact sliding and alternate providers remain future.
 - [Game replication](../Game/Replication/README.md) — canonical projection,
   five concrete dynamic-public profiles, selected `ChunkPublication` semantics,
-  P0.4 conservative selection, the real public-actor consumer vertical, and the
-  next shared multi-participant authority boundary above accepted Network/Hosted infrastructure.
+  P0.4 conservative selection, the real public-actor consumer vertical, and M0.0's
+  shared multi-participant authority above accepted Network/Hosted infrastructure.
 - [Spatial contracts](../Kernels/Spatial/README.md) — dependency-neutral integer
   spatial identity, geometry, bounds, and canonical math.
 - [Game world](../Game/World/README.md) — fixed world-position profile and accepted
@@ -72,8 +72,12 @@ acceptance narratives remain available through git history.
   exact application-proof gating before guest admission, and F0.4 cold public-presentation
   metadata/application proof beside unchanged hot movement records.
 - [Direct Connect Concept Demo server](../Server/DirectConnect/README.md) — external Hosted endpoint
-  with durable deployment key/realm identity, authenticated Concept Demo World/UI content, and one
-  bounded remote playable application.
+  with durable deployment key/realm identity, authenticated Concept Demo World/UI content, and up
+  to eight independent remote applications in one shared Game/World authority.
+- [Concept Demo deployment composition](../Server/ConceptDemo/README.md) — presentation/content
+  deployment data shared by dedicated and embedded hosting without a `Client.Local` dependency.
+- [Complete local-host adapter](../Server/ConceptDemo.LocalHost/README.md) — Complete-only M0.0
+  adapter which adds remote Network recipients to an existing packet-free local authority.
 - [Godot client application](../Client/Godot/README.md) — the single maintained native adapter,
   persistent shell, and local/remote presentation project, with physically distinct Single Player,
   Online, and Complete published dependency products.
@@ -81,9 +85,9 @@ acceptance narratives remain available through git history.
   roadmap: Single Player/Online/Complete/Contentless compositions, local-vs-remote
   semantic parity, Network-free local authority/session extraction, Direct Connect
   identity onboarding, human-scale presentation calibration, nameplates/chat,
-  layered settings, server-recommended profiles, and server-composed UI. F0.5's
-  remaining standard-definition convergence is next; F0.6 is closed by A0.2-A0.8,
-  followed by shared multi-participant authority and explicit lifecycle/final matrices.
+  layered settings, server-recommended profiles, and server-composed UI. F0.5 and M0.0
+  are closed; F0.6 is closed by A0.2-A0.8, followed by remaining Concept Demo consumers
+  and explicit lifecycle/final matrices.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
@@ -187,7 +191,7 @@ consumer/deployment need earns them.
 - [Client F0](Plans/CLIENT.md) records the frozen real-client shell/composition,
   authority-thread/local-session extraction, Direct Connect trust, settings/control-
   profile, world-presentation, and standard-UI convergence work through F0.5, the A0-derived
-  F0.6 closure, and the next shared-authority/lifecycle/parity roadmap.
+  F0.6 closure, M0.0 shared authority, and the remaining lifecycle/parity roadmap.
 - [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred

@@ -51,6 +51,16 @@ public readonly record struct RemoteChatDeliveryServiceSnapshot(
     long KnownArrayReservedBytes);
 
 /// <summary>
+/// Packet-free recipient admitted into the same Game Chat occurrence handoff as remote sessions.
+/// Acceptance transfers the occurrence into independently bounded local application debt.
+/// </summary>
+public interface IRemoteChatLocalRecipient
+{
+    bool CanPublish { get; }
+    bool TryPublishSpatial(in GameSpeechFact fact);
+}
+
+/// <summary>
 /// Game-owned bounded handoff from C0.0 occurrences to independent per-session
 /// application debt. It owns no socket or transport acknowledgement semantics.
 /// </summary>
@@ -60,6 +70,7 @@ public sealed class RemoteChatDeliveryService : IDisposable
     private readonly GameChatService _chat;
     private readonly RemoteChatServerLimits _limits;
     private readonly RemoteChatServerSession?[] _sessions;
+    private readonly RemoteChatLocalRegistration?[] _localRecipients;
     private readonly DeliveryRow[] _deliveries;
     private readonly ParticipantId[] _recipientScratch;
     private readonly HandoffRecipient[] _handoffRecipients;
@@ -107,6 +118,7 @@ public sealed class RemoteChatDeliveryService : IDisposable
         limits.Validate(chat.Limits);
         _limits = limits;
         _sessions = new RemoteChatServerSession[limits.MaximumSessions];
+        _localRecipients = new RemoteChatLocalRegistration[limits.MaximumSessions];
         _deliveries = new DeliveryRow[limits.MaximumPendingDeliveries];
         _recipientScratch = new ParticipantId[chat.Limits.MaximumRecipientsPerSpeech];
         _handoffRecipients = new HandoffRecipient[chat.Limits.MaximumRecipientsPerSpeech];
@@ -150,6 +162,31 @@ public sealed class RemoteChatDeliveryService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Adds one packet-free local application recipient to this shared occurrence handoff. The
+    /// local sink remains responsible for its own client-application proof and retry lifecycle.
+    /// </summary>
+    public RemoteChatLocalRegistration RegisterLocal(
+        ParticipantId participant,
+        IRemoteChatLocalRecipient recipient)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(recipient);
+        if (!participant.IsValid || !_chat.TryGetEnteredParticipant(participant, out _))
+            throw new ArgumentException("Local Chat registration requires an entered participant.");
+        if (FindSession(participant) >= 0 || FindLocalRecipient(participant) >= 0)
+            throw new InvalidOperationException("The participant already owns a Chat delivery session.");
+        int slot = FindFreeLocalRecipient();
+        if (slot < 0 || _sessionCount == _limits.MaximumSessions)
+            throw new InvalidOperationException("The bounded Chat session table is full.");
+        var registration = new RemoteChatLocalRegistration(this, participant, recipient);
+        _localRecipients[slot] = registration;
+        _sessionCount++;
+        RebindPendingRecipient(registration);
+        _handoffDirty = true;
+        return registration;
+    }
+
     private RemoteChatServerSession RegisterCore(
         NetworkProtocolPeer peer,
         ParticipantId participant,
@@ -165,7 +202,9 @@ public sealed class RemoteChatDeliveryService : IDisposable
         if (FindSession(participant) >= 0)
             throw new InvalidOperationException("The participant already owns a Chat delivery session.");
         int slot = FindFreeSession();
-        if (slot < 0) throw new InvalidOperationException("The bounded Chat session table is full.");
+        if (slot < 0 || FindLocalRecipient(participant) >= 0 ||
+            _sessionCount == _limits.MaximumSessions)
+            throw new InvalidOperationException("The bounded Chat session table is full.");
         var session = new RemoteChatServerSession(
             this, peer, participant, applicationSessionEpoch,
             monotonicMilliseconds ?? (() => Environment.TickCount64),
@@ -301,11 +340,27 @@ public sealed class RemoteChatDeliveryService : IDisposable
         }
     }
 
+    internal void Unregister(RemoteChatLocalRegistration registration)
+    {
+        EnsureOwnerThread();
+        RecordTerminalRecipient(registration.Participant);
+        MarkPendingRecipientTerminal(registration);
+        for (int index = 0; index < _localRecipients.Length; index++)
+        {
+            if (!ReferenceEquals(_localRecipients[index], registration)) continue;
+            _localRecipients[index] = null;
+            _sessionCount--;
+            _handoffDirty = true;
+            return;
+        }
+    }
+
     public RemoteChatDeliveryServiceSnapshot GetSnapshot()
     {
         EnsureOperational();
         long bytes = checked(
             (long)_sessions.Length * IntPtr.Size +
+            (long)_localRecipients.Length * IntPtr.Size +
             (long)_deliveries.Length * Unsafe.SizeOf<DeliveryRow>() +
             (long)_recipientScratch.Length * Unsafe.SizeOf<ParticipantId>() +
             (long)_handoffRecipients.Length * Unsafe.SizeOf<HandoffRecipient>() +
@@ -325,7 +380,10 @@ public sealed class RemoteChatDeliveryService : IDisposable
         _disposed = true;
         for (int index = 0; index < _sessions.Length; index++)
             _sessions[index]?.DetachFromService();
+        for (int index = 0; index < _localRecipients.Length; index++)
+            _localRecipients[index]?.DetachFromService();
         Array.Clear(_sessions);
+        Array.Clear(_localRecipients);
         Array.Clear(_deliveries);
         _sessionCount = 0;
         _deliveryCount = 0;
@@ -352,22 +410,26 @@ public sealed class RemoteChatDeliveryService : IDisposable
             _handoffDirty = false;
             if (!EnsureHandoffCandidate()) return true;
 
-            int liveRecipients = 0;
+            int remoteRecipients = 0;
             for (int index = 0; index < _handoffRecipientCount; index++)
             {
                 ref HandoffRecipient recipient = ref _handoffRecipients[index];
                 if (recipient.Terminal) continue;
-                if (recipient.Session is null)
-                    recipient.Session = TryFindSession(recipient.Participant);
-                if (recipient.Session is null || recipient.Session.IsNonviable ||
-                    recipient.Session.PendingDeliveryCount >=
-                        _limits.MaximumPendingDeliveriesPerSession ||
-                    recipient.Session.NextRecipientSequence == 0)
+                BindRecipient(ref recipient);
+                if (recipient.Session is not null)
+                {
+                    if (recipient.Session.IsNonviable ||
+                        recipient.Session.PendingDeliveryCount >=
+                            _limits.MaximumPendingDeliveriesPerSession ||
+                        recipient.Session.NextRecipientSequence == 0)
+                        return HandOffBlocked();
+                    remoteRecipients++;
+                }
+                else if (recipient.Local is null || !recipient.Local.CanPublish)
                     return HandOffBlocked();
-                liveRecipients++;
             }
-            if (_freeDeliveryCount < liveRecipients || _nextDeliveryId == 0 ||
-                _nextDeliveryId > ulong.MaxValue - (ulong)liveRecipients)
+            if (_freeDeliveryCount < remoteRecipients || _nextDeliveryId == 0 ||
+                _nextDeliveryId > ulong.MaxValue - (ulong)remoteRecipients)
                 return HandOffBlocked();
 
             if (!_chat.TryConsumeNextSpeech(
@@ -379,6 +441,13 @@ public sealed class RemoteChatDeliveryService : IDisposable
             {
                 ref HandoffRecipient recipient = ref _handoffRecipients[index];
                 if (recipient.Terminal) continue;
+                if (recipient.Local is not null)
+                {
+                    if (!recipient.Local.TryPublishSpatial(in consumed))
+                        throw new InvalidOperationException(
+                            "A preflighted local Chat recipient lost bounded delivery capacity.");
+                    continue;
+                }
                 RemoteChatServerSession session = recipient.Session ??
                     throw new InvalidOperationException("A preflighted Chat recipient lost its session.");
                 AddDelivery(session, new DeliveryRow(
@@ -420,6 +489,7 @@ public sealed class RemoteChatDeliveryService : IDisposable
             _handoffRecipients[index] = new HandoffRecipient(
                 participant,
                 terminal ? null : TryFindSession(participant),
+                terminal ? null : TryFindLocalRecipient(participant),
                 terminal);
             if (terminal) SaturatingIncrement(ref _terminalAbandonments);
         }
@@ -484,10 +554,39 @@ public sealed class RemoteChatDeliveryService : IDisposable
         return -1;
     }
 
+    private int FindLocalRecipient(ParticipantId participant)
+    {
+        for (int index = 0; index < _localRecipients.Length; index++)
+            if (_localRecipients[index]?.Participant == participant) return index;
+        return -1;
+    }
+
+    private int FindFreeLocalRecipient()
+    {
+        for (int index = 0; index < _localRecipients.Length; index++)
+            if (_localRecipients[index] is null) return index;
+        return -1;
+    }
+
     private RemoteChatServerSession? TryFindSession(ParticipantId participant)
     {
         int session = FindSession(participant);
         return session < 0 ? null : _sessions[session];
+    }
+
+    private RemoteChatLocalRegistration? TryFindLocalRecipient(ParticipantId participant)
+    {
+        int registration = FindLocalRecipient(participant);
+        return registration < 0 ? null : _localRecipients[registration];
+    }
+
+    private void BindRecipient(ref HandoffRecipient recipient)
+    {
+        if (recipient.Session is null && recipient.Local is null)
+        {
+            recipient.Session = TryFindSession(recipient.Participant);
+            recipient.Local = TryFindLocalRecipient(recipient.Participant);
+        }
     }
 
     private void RebindPendingRecipient(RemoteChatServerSession session)
@@ -502,6 +601,18 @@ public sealed class RemoteChatDeliveryService : IDisposable
         }
     }
 
+    private void RebindPendingRecipient(RemoteChatLocalRegistration registration)
+    {
+        if (!_handoffCandidateValid) return;
+        for (int index = 0; index < _handoffRecipientCount; index++)
+        {
+            ref HandoffRecipient recipient = ref _handoffRecipients[index];
+            if (recipient.Participant == registration.Participant && !recipient.Terminal &&
+                recipient.Session is null && recipient.Local is null)
+                recipient.Local = registration;
+        }
+    }
+
     private void MarkPendingRecipientTerminal(RemoteChatServerSession session)
     {
         if (!_handoffCandidateValid) return;
@@ -510,6 +621,19 @@ public sealed class RemoteChatDeliveryService : IDisposable
             ref HandoffRecipient recipient = ref _handoffRecipients[index];
             if (!ReferenceEquals(recipient.Session, session) || recipient.Terminal) continue;
             recipient.Session = null;
+            recipient.Terminal = true;
+            SaturatingIncrement(ref _terminalAbandonments);
+        }
+    }
+
+    private void MarkPendingRecipientTerminal(RemoteChatLocalRegistration registration)
+    {
+        if (!_handoffCandidateValid) return;
+        for (int index = 0; index < _handoffRecipientCount; index++)
+        {
+            ref HandoffRecipient recipient = ref _handoffRecipients[index];
+            if (!ReferenceEquals(recipient.Local, registration) || recipient.Terminal) continue;
+            recipient.Local = null;
             recipient.Terminal = true;
             SaturatingIncrement(ref _terminalAbandonments);
         }
@@ -588,10 +712,12 @@ public sealed class RemoteChatDeliveryService : IDisposable
         internal HandoffRecipient(
             ParticipantId participant,
             RemoteChatServerSession? session,
+            RemoteChatLocalRegistration? local,
             bool terminal) =>
-            (Participant, Session, Terminal) = (participant, session, terminal);
+            (Participant, Session, Local, Terminal) = (participant, session, local, terminal);
         internal ParticipantId Participant;
         internal RemoteChatServerSession? Session;
+        internal RemoteChatLocalRegistration? Local;
         internal bool Terminal;
     }
 
@@ -642,6 +768,49 @@ public sealed class RemoteChatDeliveryService : IDisposable
         internal long LastQueuedMilliseconds;
         internal bool AwaitingApplication;
         internal int Next;
+    }
+}
+
+/// <summary>Owner-thread lifetime for one packet-free recipient in shared Chat fanout.</summary>
+public sealed class RemoteChatLocalRegistration : IDisposable
+{
+    private readonly RemoteChatDeliveryService _service;
+    private readonly IRemoteChatLocalRecipient _recipient;
+    private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private bool _attached = true;
+    private bool _disposed;
+
+    internal RemoteChatLocalRegistration(
+        RemoteChatDeliveryService service,
+        ParticipantId participant,
+        IRemoteChatLocalRecipient recipient)
+    {
+        _service = service;
+        Participant = participant;
+        _recipient = recipient;
+    }
+
+    internal ParticipantId Participant { get; }
+    internal bool CanPublish => _attached && _recipient.CanPublish;
+    internal bool TryPublishSpatial(in GameSpeechFact fact) =>
+        _attached && _recipient.TryPublishSpatial(in fact);
+
+    public void Dispose()
+    {
+        EnsureOwner();
+        if (_disposed) return;
+        _disposed = true;
+        if (_attached) _service.Unregister(this);
+        _attached = false;
+    }
+
+    internal void DetachFromService() => _attached = false;
+
+    private void EnsureOwner()
+    {
+        if (Environment.CurrentManagedThreadId != _ownerThreadId)
+            throw new InvalidOperationException(
+                "The packet-free Chat registration belongs to another owner thread.");
     }
 }
 

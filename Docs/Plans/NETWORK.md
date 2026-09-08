@@ -645,12 +645,16 @@ validated a very different owner-private UI/Inventory path over the same lower
 Network machinery. Future gameplay should continue to consume these seams before
 reopening Network architecture.
 
-The next major multiplayer consumer after Client F0.5 is one shared Game/World authority serving
-several independent authenticated application/participant/control sessions. That is Game/server
-composition work over the accepted shared listener, Hosted handoff, per-recipient replication,
-Chat, and UI paths—not an implicit N1.5 or another Network-profile campaign. Reopen lower Network
-design only if the concrete shared-authority acceptance exposes a correctness, boundedness, or
-measured capacity failure.
+M0.0 now closes the first major multiplayer consumer after Client F0.5: one shared Game/World
+authority serves three independent authenticated application/participant/control sessions in both
+dedicated and Complete-hosted shapes. It composes the accepted listener, Hosted handoff,
+per-recipient replication, Chat, UI, and session-detach paths without a new wire profile. A paced
+snapshot may no longer be replaced while its transaction/proof is outstanding; this prevents
+normal multi-recipient scheduling from repeatedly cancelling a healthy transfer.
+
+M0.0 remains Game/server composition evidence, not an implicit N1.5 or another Network-profile
+campaign. Reopen lower Network design only if later crowd/distributed/churn acceptance exposes a
+correctness, boundedness, or measured capacity failure.
 
 The current exclusions and deployment gates for externally admitted UDP remain in
 [HOSTED_NETWORK.md](HOSTED_NETWORK.md).

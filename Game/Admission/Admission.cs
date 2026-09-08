@@ -453,6 +453,31 @@ public sealed class AdmissionService : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// Retires one admission-session binding without deciding ECS destruction policy. The owning
+    /// Game/server composition must end control and retire participant-owned entities separately.
+    /// </summary>
+    public bool TryLeave(ParticipantId participant, out AdmissionResult result)
+    {
+        EnsureOperational();
+        if (!participant.IsValid || !_sessions.Remove(participant, out Session? session))
+        {
+            result = default;
+            return false;
+        }
+        result = session.Snapshot();
+        if (session.CharacterSelectView.IsValid)
+        {
+            UiViewInstanceId view = session.CharacterSelectView;
+            _characterSelectViews.Remove(view);
+            session.CharacterSelectView = UiViewInstanceId.Invalid;
+            session.CharacterSelectModel = null;
+            if (!TryReleaseView(view, out Exception? failure))
+                NotifyPresentationFault(failure!);
+        }
+        return true;
+    }
+
     public void Dispose()
     {
         EnsureOwnerThread();

@@ -1334,6 +1334,10 @@ internal static class N1OfflineDirectChunkTests
         False(recipient.Subscriptions[occupied].HasKnowledge);
         Equal(1UL, server.GetSnapshot().SnapshotsQueued);
         Equal(2, server.GetSnapshot().SnapshotSegmentsQueued);
+        Equal(RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy,
+            server.TrySchedule(occupied, 2));
+        Equal(0UL, server.GetSnapshot().SnapshotCancels);
+        Equal(0UL, server.GetSnapshot().InvalidatedDeliveries);
         Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
         True(recipient.Subscriptions[occupied].HasKnowledge);
         True(cache.TryGetResidentHandle(Key(0, 0), out ClientSemanticChunkHandle handle));

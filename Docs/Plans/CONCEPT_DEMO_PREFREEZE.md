@@ -95,7 +95,7 @@ The freeze is a trustworthy reference point from which later extraction and arch
 
 ---
 
-# 4. Precondition: one real shared multiplayer authority
+# 4. Precondition: one real shared multiplayer authority — M0.0 CLOSED
 
 The synthetic-client campaign is most valuable only after multiple external participants actually share one authoritative Game/World.
 
@@ -126,6 +126,13 @@ one authoritative deployment
 ```
 
 Every participant must use ordinary externally observable client contracts. No bot receives privileged ECS/Game access merely because it is a test client.
+
+M0.0 satisfies this architectural precondition with three human-shaped participants in one
+generation, including a dedicated all-remote composition and a Complete composition whose host
+remains packet-free while two exported Online clients join remotely. It proves functional
+cardinality, independent control, public actor fanout, spatial Chat, owner-private UI, and
+leave/reconnect lifetime. It is not the PF1 bot harness, a high-population result, or the complete
+distributed AOI/stress matrix described below.
 
 ---
 
@@ -1679,8 +1686,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 # 30. Recommended execution order
 
 ```text
-1. Close Client F0.5's small compiled-UI source-convergence gap.
-2. Close shared multi-participant authority.
+1. Keep Client F0.5's compiled-UI source convergence closed.
+2. Keep M0.0 shared multi-participant authority closed.
 3. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
 4. Select one exact feature-complete pre-freeze candidate.
 5. Build the real headless Network bot client.

@@ -315,6 +315,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _disposed = true;
         _actorPresenter?.Dispose();
         _renderer?.Dispose();
+        _ = _session?.TryRequestDetach();
         _session?.Dispose();
         _source?.Dispose();
         _cache?.Dispose();

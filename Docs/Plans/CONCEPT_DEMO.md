@@ -32,8 +32,10 @@ with exact local semantic parity. A0.8 now closes the native Contentless Online 
 separately running deployment, persistent CAS, primitive presentation fallback, guest admission,
 movement, dynamic-public state, typed Inventory UI, and Chat. That A0 campaign also closes and
 supersedes the historical Client F0.6 content-integration gate. F0.5 also closes stock/preinstalled,
-reopened-cache, and content-backed compiled-UI source convergence. Shared multi-participant
-authority is next.
+reopened-cache, and content-backed compiled-UI source convergence. M0.0 now closes the first shared
+multi-participant authority: one dedicated server serves three remote guests, and one Complete
+client adds two remote Online guests to its already-running packet-free local world without
+replacing the authoritative generation.
 
 The demo has two purposes:
 
@@ -240,8 +242,11 @@ identity. The same bounded Client Core actor state and Godot actor presenter now
 Online actors, presentation anchors, Ctrl reveal, and spatial overhead speech. Ctrl never changes
 disclosure or public subscription. The current native two-actor canary is a controlled human plus
 the resident woodland animal; engine-neutral coverage separately proves simultaneous X/Y records.
-True other-player presentation remains dependent on the later shared multi-participant authority
-checkpoint and is not simulated here.
+M0.0 now supplies true other-player presentation rather than only the earlier animal/fixture
+canary. The permanent engine-neutral gate gives Alice, Bob, and Carol distinct guest, participant,
+control, public-entity, and owner-private lineages inside one Game generation. The Complete native
+gate uses Host Alice through `Client.Local` plus two actual exported Online clients through Network;
+all three human actors enter the existing F0.4 presentation path.
 
 The controlled human's render pose is sourced from the latest owner-private state used as the
 player-relative world origin, not from its independently delivered public movement row. Public
@@ -252,9 +257,37 @@ remain driven by public state. A native canary deliberately supplies a stale con
 and verifies that only the controlled root uses the owner-pose override.
 
 This identity remains session-scoped. D0.5 adds no Accounting record, durable Character identity,
-name uniqueness, profanity service, account persistence, or remote admission protocol. F0.3 may
-carry the same Game-owned request/accepted-result semantics across the authenticated remote path;
-it must not trust the Online client to publish its own accepted identity.
+name uniqueness, profanity service, account persistence, or remote admission protocol. F0.3b now
+carries the same Game-owned request/accepted-result semantics across the authenticated remote path;
+it does not trust the Online client to publish its own accepted identity.
+
+## 4.1 M0.0 shared authority — CLOSED
+
+M0.0 separates world ownership from any one participant:
+
+```text
+internal/dedicated server process
+    one Game generation / one Concept Demo world
+        -> participant A
+        -> participant B
+        -> participant C
+```
+
+For a Complete-hosted game, participant A remains connected through the packet-free local semantic
+adapter. Enabling hosting adds a UDP listener and remote application sessions on the internal server
+owner thread; it does not rebuild the World, ECS, Physics, Game clock, or local client session.
+Stopping hosting retires those remote sessions while the host's local world continues. There is no
+host migration if the process itself exits.
+
+The accepted journey proves three simultaneously known human actors, independent movement,
+three-recipient spatial Chat across local/remote adapters, public names, owner-private Inventory UI,
+one remote leave/reconnect, and stable authoritative generation. The dedicated path proves the same
+shared authority with all three participants remote. The native path launches the actual Complete
+Godot composition and two inspected exported Online products against its dynamically enabled host.
+
+M0.0 deliberately does not claim routed Global Chat, public-WAN deployment, NAT traversal, broad
+population capacity, host migration, or the distributed Central/Far/Sky/Cave player matrix. Those
+remain explicit later consumers and pre-freeze evidence.
 
 Desired Online flow:
 
@@ -1517,11 +1550,10 @@ then prioritize the first meaningful remote vertical:
 
     F0.5 standard/preinstalled + cached/content-backed compiled UI   CLOSED
 
-next earn the major shared-world boundary:
-    one shared Game/World authority
-    multiple independent authenticated application/participant/control sessions
-    real other-player F0.4 presentation and per-recipient AOI/Chat
-    owning checkpoint reviewed/named before implementation
+    M0.0 shared multi-participant authority                           CLOSED
+         one dedicated A/B/C authority
+         Complete packet-free host A + remote Online B/C
+         real other-player F0.4 presentation, Chat, owner isolation
 
 then continue remaining Round 1 consumers as earned:
     animation/pickup/inventory swing
@@ -1606,6 +1638,10 @@ Round 1 is ready to hand to external concept-demo testers when:
 14. server diagnostics record bounded broad operational evidence and marker timelines;
 15. the permanent functional multiplayer gate is proven at a modest controlled population before larger stress runs;
 16. external larger-population tests are labeled and retained as stress/failure-characterization evidence rather than production capacity promises.
+
+M0.0 satisfies the first functional shared-authority canary behind item 15 with three simultaneous
+participants in both dedicated and Complete-hosted shapes. It does not satisfy the later
+feature-complete distributed/crowd/stress population matrix by itself.
 
 The final remote proof also routes informational signs, container/player Inventory surfaces, and
 appropriate Server Monitor panels through the typed UI-definition/cache/application-proof path.

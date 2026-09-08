@@ -146,6 +146,7 @@ var tests = new (string Name, Action Body)[]
     ("N13SnapshotTimeoutAndHistoryAdvanceRemainBounded", N1OfflineDirectChunkTests.SnapshotTimeoutAndHistoryAdvanceRemainBounded),
     ("N13SnapshotImpairmentAndLostProofConverge", N1OfflineDirectChunkTests.SnapshotImpairmentAndLostProofConverge),
     ("N13BulkSnapshotDoesNotBlockOrdinaryWorldState", N1OfflineDirectChunkTests.BulkSnapshotDoesNotBlockOrdinaryWorldState),
+    ("M00OneGenerationOwnsIndependentParticipantsAndSurvivesLeave", M00SharedPlayableAuthorityTests.OneGenerationOwnsIndependentParticipantsAndSurvivesLeave),
 };
 
 static void ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth()

@@ -162,6 +162,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private readonly NetworkConnectionTable? _connections;
     private readonly HostedUdpProtocolSession?[] _sessions;
     private readonly HostedUdpConnectionOwnerRuntime? _ownerRuntime;
+    private readonly IHostedUdpSessionApplicationFactory? _callerApplicationFactory;
     private readonly byte[] _serverPublicKey;
     private readonly byte[] _cookieKey;
     private readonly ulong[] _rateKeys;
@@ -238,6 +239,27 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         NetworkProtocolManifest? manifest = null)
         : this(bindEndPoint, serverIdentity, protocolLimits: null, udpLimits,
             sharedLimits, admissionLimits, StopwatchNetworkMonotonicClock.Instance, manifest)
+    {
+    }
+
+    /// <summary>
+    /// Creates a caller-owned hosted application composition. Listener, secure peers, and
+    /// applications are all progressed by <see cref="Pump"/> on the constructing thread. This is
+    /// the deployment seam for an embedded internal server whose existing Game owner thread must
+    /// remain the sole authority owner when remote recipients are enabled.
+    /// </summary>
+    public HostedUdpAdmissionHost(
+        IPEndPoint bindEndPoint,
+        NetworkServerIdentity serverIdentity,
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        SharedUdpProtocolLimits sharedLimits,
+        HostedUdpAdmissionLimits admissionLimits,
+        IHostedUdpSessionApplicationFactory applicationFactory,
+        NetworkProtocolManifest? manifest = null)
+        : this(bindEndPoint, serverIdentity, protocolLimits, udpLimits,
+            sharedLimits, admissionLimits, StopwatchNetworkMonotonicClock.Instance,
+            manifest, applicationFactory: applicationFactory)
     {
     }
 
@@ -337,6 +359,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         _clock = clock;
         _lastMilliseconds = clock.Milliseconds;
         _serverIdentity = serverIdentity;
+        _callerApplicationFactory = ownerLimits is null ? applicationFactory : null;
         _serverPublicKey = serverIdentity.PublicKey.ToArray();
         _cookieKey = RandomNumberGenerator.GetBytes(32);
         int rateCapacity = admissionLimits.RateTableCapacity;
@@ -398,9 +421,9 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             udpLimits, sharedLimits, bindEndPoint, this);
         try
         {
-            if (ownerLimits.HasValue || applicationFactory is not null)
+            if (ownerLimits.HasValue)
             {
-                if (!_promotionEnabled || !ownerLimits.HasValue || applicationFactory is null ||
+                if (!_promotionEnabled || applicationFactory is null ||
                     ownerLimits.Value.MaximumConnections < sharedLimits.MaximumSessions)
                     throw new ArgumentException(
                         "Hosted owner sharding requires promotion, a factory, and enough connection slots.",
@@ -413,6 +436,10 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                     _admissionLimits,
                     applicationFactory);
             }
+            else if (applicationFactory is not null && !_promotionEnabled)
+                throw new ArgumentException(
+                    "Caller-owned hosted applications require protocol promotion.",
+                    nameof(applicationFactory));
         }
         catch
         {
@@ -541,6 +568,25 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 _ = current.Server.ProcessInbound(now);
                 if (current.Server.ReceivedPacketCount != received)
                     current.LastActivityMilliseconds = now;
+                if (current.Application is IHostedUdpSessionApplication application)
+                {
+                    while (current.Server.TryPeekReceived(
+                        out NetworkDeliveredMessage message,
+                        out ReadOnlySpan<byte> payload))
+                    {
+                        _ = application.TryProcess(in message, payload);
+                        if (!current.Server.TryConsumeReceived())
+                            throw new InvalidOperationException(
+                                "The caller-owned hosted application could not consume a message.");
+                    }
+                    _ = application.TryProgress();
+                    if (application is IHostedUdpSessionApplicationLifetime
+                            { RetirementRequested: true })
+                    {
+                        RetireCore(current);
+                        continue;
+                    }
+                }
                 if (current.RawState == UdpProtocolSessionState.Established &&
                     now - current.LastKeepAliveMilliseconds >=
                         (ulong)_udpLimits.KeepAliveIntervalMilliseconds &&
@@ -956,7 +1002,11 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
             _ownerRuntime!.RetireTransport(owned, _listener, _sessions);
         CloseTransport(session);
-        if (session.OwnedTransport is null) session.Server.Dispose();
+        if (session.OwnedTransport is null)
+        {
+            session.Application?.Dispose();
+            session.Server.Dispose();
+        }
         CloseAndReleaseConnection(session.Connection);
         _sessions[session.Connection.Slot] = null;
         _sessionCount--;
@@ -1274,6 +1324,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         }
 
         NetworkProtocolPeer? server = null;
+        IHostedUdpSessionApplication? application = null;
         HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? ownedTransport = null;
         byte[]? clientFinish = null;
         byte[]? serverFinish = null;
@@ -1301,6 +1352,10 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                     "The hosted promotion could not create its connection-owner transport.");
             else
                 server = ownedTransport.Peer;
+            if (_callerApplicationFactory is not null)
+                application = _callerApplicationFactory.Create(connection, server) ??
+                    throw new InvalidOperationException(
+                        "The caller-owned hosted application factory returned no application.");
             clientFinish = datagram.ToArray();
             serverFinish = new byte[1 + 4 + 4 + 4 + ProtocolLoopbackHandshake.ProofBytes];
             int finishLength = ProtocolLoopbackHandshake.WriteServerFinish(
@@ -1322,7 +1377,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 checked((uint)slot), _candidateGenerations[slot]);
             var session = new HostedUdpProtocolSession(
                 this, endpoint, server, connection, candidateId,
-                clientFinish, serverFinish, pathKey, now, ownedTransport);
+                clientFinish, serverFinish, pathKey, now, ownedTransport, application);
             _sessions[connection.Slot] = session;
             _sessionCount++;
             _establishedPromotions = SaturatingIncrement(_establishedPromotions);
@@ -1331,6 +1386,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             clientFinish = null;
             serverFinish = null;
             pathKey = null;
+            application = null;
             published = true;
             ReleaseCandidate(slot, releaseConnection: false);
             if (endpoint.TrySendHandshake(session.ServerFinish) == DatagramSendStatus.Accepted)
@@ -1352,6 +1408,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                     _ownerRuntime!.CancelTransport(ownedTransport);
                 else
                     server?.Dispose();
+                application?.Dispose();
                 endpoint.Dispose();
                 if (clientFinish is not null)
                     CryptographicOperations.ZeroMemory(clientFinish);
@@ -1803,7 +1860,8 @@ public sealed class HostedUdpProtocolSession : IDisposable
         byte[] serverFinish,
         byte[] pathKey,
         ulong now,
-        HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? ownedTransport = null)
+        HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? ownedTransport = null,
+        IHostedUdpSessionApplication? application = null)
     {
         Owner = owner;
         Endpoint = endpoint;
@@ -1814,6 +1872,7 @@ public sealed class HostedUdpProtocolSession : IDisposable
         ServerFinish = serverFinish;
         PathKey = pathKey;
         OwnedTransport = ownedTransport;
+        Application = application;
         PathGeneration = new(1);
         ListenerPathGeneration = new(1);
         LastIssuedPathGeneration = 1;
@@ -1854,6 +1913,7 @@ public sealed class HostedUdpProtocolSession : IDisposable
     internal int LastPathCommitLength { get; set; }
     internal bool PathCommitAwaitingListener { get; set; }
     internal HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport? OwnedTransport { get; }
+    internal IHostedUdpSessionApplication? Application { get; }
     internal bool HasPendingPathRebind => PendingPathGeneration.IsValid;
     internal long ReservedBytes => checked(
         ClientFinish.Length + ServerFinish.Length + PathKey.Length +

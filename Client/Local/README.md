@@ -64,6 +64,14 @@ connection, or reference `Client.Network`, Game Protocol, Remote Replication, or
 `Kernels.Network`. Hosting in a Complete composition adds independent remote
 sessions around the same authority; the host player stays on this local path.
 
+M0.0 adds that hosting without putting Network into this assembly. `LocalPlayableSession` accepts
+an optional server-extension factory, constructs it on the private authority owner thread, and
+offers bounded administrative enable/disable requests plus immutable status and public-presentation
+snapshots. The Complete-only `Server.ConceptDemo.LocalHost` implementation uses that seam to borrow
+the existing runtime, scene, Admission, Chat, local participant/control session, and WorldPack.
+Stopping the extension leaves all of those local owners alive. Single Player has no implementation
+of the extension interface, so its physical Network-free closure is unchanged.
+
 `LocalPlayableSession` remains a concrete playable-world authority composition rather than a
 universal local-server API. `CreateCabin` preserves the historical F0.2 fixture;
 `CreateConceptDemo` composes D0.0's finite Central Island, mountain/cave, Sky Island, and public

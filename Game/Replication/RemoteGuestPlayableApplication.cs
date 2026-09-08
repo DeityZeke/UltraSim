@@ -152,7 +152,9 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
 /// Physics, public disclosure, Chat, Inventory and informational UI; Network only carries their
 /// existing bounded semantic messages.
 /// </summary>
-public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplication
+public sealed class RemoteGuestPlayableApplication :
+    IHostedUdpSessionApplication,
+    IHostedUdpSessionApplicationLifetime
 {
     private const int MaximumPublicationRecords = 64;
     private const int MaximumSubscriptions = 1_024;
@@ -168,6 +170,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
     private readonly ParticipantId _participant;
     private readonly ulong _applicationSessionEpoch;
+    private readonly SharedPlayableAuthority? _sharedAuthority;
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
     private readonly OfflineDirectChunkSubscriptionChange[] _subscriptionChanges =
         new OfflineDirectChunkSubscriptionChange[MaximumTopologyChanges];
@@ -192,6 +195,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private long _lastAdmissionResultQueue;
     private bool _guestAdmitted;
     private bool _applicationFaulted;
+    private bool _retirementRequested;
     private GameControlSessionEpoch _controlSession;
     private GameGuestIdentity _guestIdentity;
     private WorldPublicEntityId _playerPublicId;
@@ -200,6 +204,10 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private ulong _publicPresentationDeliveriesQueued;
     private ulong _duplicatePublicPresentationProofs;
     private ulong _rejectedPublicPresentationProofs;
+    private readonly SharedPublicPresentationRow[]? _sharedPresentation;
+    private readonly SharedPlayableParticipant[]? _sharedParticipantScratch;
+    private ulong _nextSharedPresentationDeliveryId = 1;
+    private int _sharedPresentationDeliverySlot = -1;
     private WorldPack? _worldPack;
     private UltraSimGameComposition? _composition;
     private ServerRuntime? _runtime;
@@ -218,6 +226,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private ulong _lastProcessedCommand;
     private ulong _authorityTicks;
     private ulong _ownerStateSequence;
+    private ulong _lastOwnerStateSimulationTick = ulong.MaxValue;
+    private ulong _lastOwnerStateCommandSequence = ulong.MaxValue;
+    private ulong _lastOwnerStateGeneration;
+    private WorldPosition _lastOwnerStatePosition;
+    private WorldYaw _lastOwnerStateOrientation;
     private ulong _commandsApplied;
     private ulong _duplicateCommands;
     private ulong _rejectedCommands;
@@ -226,6 +239,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private long _nextTickTimestamp;
     private long _tickInterval;
     private bool _disposed;
+    private SharedPlayableParticipant _sharedParticipant;
 
     public RemoteGuestPlayableApplication(
         NetworkProtocolPeer peer,
@@ -235,7 +249,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         RemoteContentAuthorization? contentAuthorization = null,
         IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
         RemoteClientProfileAdvertisement? clientProfile = null,
-        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null)
+        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
+        SharedPlayableAuthority? sharedAuthority = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -250,6 +265,13 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             throw new ArgumentException("The required content authorization is invalid.",
                 nameof(contentAuthorization));
         _contentAuthorization = contentAuthorization;
+        _sharedAuthority = sharedAuthority;
+        if (sharedAuthority is not null)
+        {
+            int participantCapacity = sharedAuthority.GetSnapshot().MaximumParticipants;
+            _sharedPresentation = new SharedPublicPresentationRow[participantCapacity];
+            _sharedParticipantScratch = new SharedPlayableParticipant[participantCapacity];
+        }
         _clientProfile = clientProfile;
         _contentBackedUiDefinitions = (contentBackedUiDefinitions ?? [])
             .Take(257).ToArray();
@@ -277,6 +299,14 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();
+        if (message.MessageId == RemoteSessionDetachMessageCodec.Descriptor.Id)
+        {
+            if (RemoteSessionDetachMessageCodec.TryReadExact(
+                    payload, out RemoteSessionDetachMessage detach) &&
+                detach.ApplicationSessionEpoch == _applicationSessionEpoch)
+                _retirementRequested = true;
+            return true;
+        }
         if (message.MessageId == RemoteClientProfileAppliedMessageCodec.Descriptor.Id)
         {
             ProcessClientProfileProof(payload);
@@ -331,6 +361,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     public bool TryProgress()
     {
         EnsureOperational();
+        if (_retirementRequested) return true;
         bool complete = QueueIdentity();
         if (!_identityQueued) return complete;
         if (_applicationFaulted) return complete;
@@ -351,24 +382,41 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
 
         complete &= QueuePublicPresentationMetadata(force: false);
 
-        long now = Stopwatch.GetTimestamp();
-        int steps = 0;
-        while (now >= _nextTickTimestamp && steps < 4)
+        if (_sharedAuthority is null)
         {
-            _runtime!.Tick();
-            _authorityTicks++;
-            _nextTickTimestamp = checked(_nextTickTimestamp + _tickInterval);
-            steps++;
-            DrivePublicWorld();
-            _ = QueueOwnerState();
+            long now = Stopwatch.GetTimestamp();
+            int steps = 0;
+            while (now >= _nextTickTimestamp && steps < 4)
+            {
+                _runtime!.Tick();
+                _authorityTicks++;
+                _nextTickTimestamp = checked(_nextTickTimestamp + _tickInterval);
+                steps++;
+                _ = _worldDelivery!.ExpireSnapshotTransfer(_authorityTicks);
+                DrivePublicWorld();
+                _ = QueueOwnerState();
+            }
+            if (steps == 4 && now >= _nextTickTimestamp)
+                _nextTickTimestamp = checked(now + _tickInterval);
         }
-        if (steps == 4 && now >= _nextTickTimestamp)
-            _nextTickTimestamp = checked(now + _tickInterval);
+        else
+        {
+            ulong sharedTick = _runtime!.SimulationTick;
+            if (sharedTick != _authorityTicks)
+            {
+                _authorityTicks = sharedTick;
+                _ = _worldDelivery!.ExpireSnapshotTransfer(_authorityTicks);
+                DrivePublicWorld();
+                _ = QueueOwnerState();
+            }
+        }
         _ = _chatDelivery!.TryHandoffPendingSpeech();
         complete &= _chatSession!.TryProgress();
         complete &= _worldDelivery!.TryProgress();
         return complete;
     }
+
+    bool IHostedUdpSessionApplicationLifetime.RetirementRequested => _retirementRequested;
 
     public RemoteGuestPlayableServerSnapshot GetSnapshot()
     {
@@ -395,7 +443,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         if (_disposed) return;
         _disposed = true;
         _chatSession?.Dispose();
-        _chatDelivery?.Dispose();
+        if (_sharedAuthority is null) _chatDelivery?.Dispose();
         // Connection retirement is terminal for this presentation lineage. Best-effort Close
         // messages are useful while transport accepts them, but backpressure or a vanished peer
         // must not turn terminal application cleanup into an owner-worker failure.
@@ -403,14 +451,23 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
         try { _inventoryUi?.Dispose(); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
-        _chat?.Dispose();
-        _admission?.Dispose();
         _ui?.Dispose();
-        if (_runtime is not null)
+        if (_sharedAuthority is not null && _sharedParticipant.IsValid)
         {
-            if (_runtime.State == ServerRuntimeState.Running) _runtime.Stop();
-            _runtime.Dispose();
+            _ = _sharedAuthority.Leave(_sharedParticipant);
+            _sharedParticipant = default;
         }
+        else
+        {
+            _chat?.Dispose();
+            _admission?.Dispose();
+            if (_runtime is not null)
+            {
+                if (_runtime.State == ServerRuntimeState.Running) _runtime.Stop();
+                _runtime.Dispose();
+            }
+        }
+        _sharedAuthority?.UnregisterRemoteApplication(this);
         _chatSession = null;
         _chatDelivery = null;
         _signUi = null;
@@ -631,6 +688,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
 
     private AdmissionResult InitializeGuest(in GameGuestAdmissionRequest request)
     {
+        if (_sharedAuthority is not null)
+            return InitializeSharedGuest(in request);
         _worldPack = GamePlayableWorld.CreateConceptDemoWorldPack();
         _composition = new UltraSimGameComposition(
             new InventoryLimits(32, 128, 32),
@@ -688,7 +747,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             OfflineDirectChunkCadence.EvidenceProfile);
         _worldDelivery = new RemoteChunkWorldStateServer(
             _peer, _recipient, publications, _applicationSessionEpoch,
-            new RemoteChunkWorldStateTransportLimits(128));
+            new RemoteChunkWorldStateTransportLimits(128, 64));
         if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPublicEntityId>(
                 (world, _, game) =>
                 {
@@ -701,6 +760,67 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
 
         _tickInterval = Math.Max(1, Stopwatch.Frequency / _runtime.SimulationFrequencyHz);
         _nextTickTimestamp = checked(Stopwatch.GetTimestamp() + _tickInterval);
+        return entered;
+    }
+
+    private AdmissionResult InitializeSharedGuest(in GameGuestAdmissionRequest request)
+    {
+        _worldPack = _sharedAuthority!.WorldPack;
+        _composition = _sharedAuthority.Composition;
+        _runtime = _sharedAuthority.Runtime;
+        _admission = _sharedAuthority.Admission;
+        _chat = _sharedAuthority.Chat;
+        _chatDelivery = _sharedAuthority.ChatDelivery;
+        AdmissionResult entered = _sharedAuthority.Join(
+            _participant, in request, out _sharedParticipant);
+        if (!entered.IsEntered) return entered;
+
+        GamePlayableWorldScene scene = _sharedAuthority.Scene;
+        GamePlayableParticipantEntities participant = _sharedParticipant.Entities;
+        _entities = new GamePlayableWorldEntities(
+            participant.Player,
+            participant.Backpack,
+            scene.CabinDoor,
+            scene.CabinChest,
+            scene.WoodlandAnimal,
+            participant.Bread,
+            participant.PlayerId,
+            participant.BackpackId,
+            scene.CabinDoorId,
+            scene.CabinChestId,
+            scene.WoodlandAnimalId,
+            participant.BreadId,
+            scene.SkyTelepad,
+            scene.SkyTelepadId,
+            scene.CentralFarGate,
+            scene.CentralFarGateId,
+            scene.FarReturnGate,
+            scene.FarReturnGateId,
+            scene.WelcomeSign,
+            scene.WelcomeSignId,
+            scene.FallbackLabSign,
+            scene.FallbackLabSignId);
+        _controlSession = _sharedParticipant.ControlSession;
+        _playerPublicId = _sharedParticipant.PublicEntity;
+        _ui = new RemoteUiSemanticPort(
+            _peer,
+            _applicationSessionEpoch,
+            contentBackedDefinitions: _contentBackedUiDefinitions,
+            standardDefinitions: _standardUiDefinitions);
+        _inventoryUi = new InventoryUiController(_runtime.Game, _ui);
+        _signUi = new InformationalSignUiController(_ui);
+        _chatSession = _chatDelivery.Register(
+            _peer, _participant, _applicationSessionEpoch);
+        ChunkPublicationStore publications = CapturePublications();
+        _recipient = new OfflineDirectChunkRecipient(
+            new OfflineDirectChunkRecipientLimits(
+                MaximumSubscriptions, MaximumPublicationRecords, MaximumPublicationRecords),
+            GameChunkInterestProfile.Default,
+            OfflineDirectChunkCadence.EvidenceProfile);
+        _worldDelivery = new RemoteChunkWorldStateServer(
+            _peer, _recipient, publications, _applicationSessionEpoch,
+            new RemoteChunkWorldStateTransportLimits(128, 64));
+        _authorityTicks = _runtime.SimulationTick;
         return entered;
     }
 
@@ -727,6 +847,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
 
     private bool QueuePublicPresentationMetadata(bool force)
     {
+        if (_sharedAuthority is not null)
+            return QueueSharedPublicPresentationMetadata(force);
         if (_publicPresentationApplied || !_guestAdmitted || !_admissionResultApplied ||
             _runtime is null || !_playerPublicId.IsValid || !_guestIdentity.IsValid)
             return true;
@@ -758,6 +880,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
 
     private void ProcessPublicPresentationProof(ReadOnlySpan<byte> payload)
     {
+        if (_sharedAuthority is not null)
+        {
+            ProcessSharedPublicPresentationProof(payload);
+            return;
+        }
         if (!_guestAdmitted || _runtime is null ||
             !RemotePublicPresentationAppliedMessageCodec.TryReadExact(
                 payload, out RemotePublicPresentationAppliedMessage proof) ||
@@ -782,6 +909,179 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             return;
         }
         _publicPresentationApplied = true;
+    }
+
+    private bool QueueSharedPublicPresentationMetadata(bool force)
+    {
+        if (!_guestAdmitted || !_admissionResultApplied || _runtime is null ||
+            _sharedPresentation is null || _sharedParticipantScratch is null)
+            return true;
+
+        ReconcileSharedPresentation();
+        int slot = _sharedPresentationDeliverySlot;
+        if (slot < 0)
+        {
+            for (int index = 0; index < _sharedPresentation.Length; index++)
+            {
+                if (!_sharedPresentation[index].NeedsDelivery) continue;
+                slot = index;
+                ref SharedPublicPresentationRow selected = ref _sharedPresentation[index];
+                if (_nextSharedPresentationDeliveryId == 0)
+                    throw new InvalidOperationException(
+                        "The shared public-presentation delivery identity space is exhausted.");
+                selected.DeliveryId = _nextSharedPresentationDeliveryId++;
+                _sharedPresentationDeliverySlot = index;
+                break;
+            }
+        }
+        if (slot < 0)
+        {
+            _publicPresentationApplied = IsOwnPresentationApplied();
+            return true;
+        }
+
+        ref SharedPublicPresentationRow row = ref _sharedPresentation[slot];
+        long now = Environment.TickCount64;
+        if (!force && row.LastQueuedMilliseconds != 0 &&
+            now - row.LastQueuedMilliseconds < AdmissionRetryMilliseconds)
+            return true;
+        var header = new RemotePublicPresentationMetadataHeader
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            ServerGenerationId = _runtime.ActiveGenerationId,
+            DeliveryId = row.DeliveryId,
+            MetadataRevision = row.Revision,
+            PublicEntityIndex = row.PublicEntity.Index,
+            PublicEntityGeneration = row.PublicEntity.Generation,
+            Operation = row.DesiredPresent
+                ? RemotePublicPresentationOperation.Present
+                : RemotePublicPresentationOperation.Remove,
+            Flags = row.DesiredPresent
+                ? RemotePublicPresentationFlags.NameplateEligible
+                : RemotePublicPresentationFlags.None,
+        };
+        string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
+        if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+                _messageScratch, in header, label, out int written))
+            throw new InvalidOperationException(
+                "The retained shared public-presentation metadata became invalid.");
+        if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        row.LastQueuedMilliseconds = now;
+        SaturatingIncrement(ref _publicPresentationDeliveriesQueued);
+        return true;
+    }
+
+    private void ProcessSharedPublicPresentationProof(ReadOnlySpan<byte> payload)
+    {
+        if (!_guestAdmitted || _runtime is null || _sharedPresentation is null ||
+            _sharedPresentationDeliverySlot < 0 ||
+            !RemotePublicPresentationAppliedMessageCodec.TryReadExact(
+                payload, out RemotePublicPresentationAppliedMessage proof) ||
+            !UltraSimGameProtocol.IsValidPublicPresentationApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.ServerGenerationId != _runtime.ActiveGenerationId)
+        {
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        ref SharedPublicPresentationRow row =
+            ref _sharedPresentation[_sharedPresentationDeliverySlot];
+        if (proof.DeliveryId != row.DeliveryId)
+        {
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        if (proof.Status != RemotePublicPresentationApplyStatus.Applied)
+        {
+            _applicationFaulted = true;
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        row.AppliedPresent = row.DesiredPresent;
+        row.AppliedPublicEntity = row.PublicEntity;
+        row.AppliedDisplayLabel = row.DesiredPresent ? row.DisplayLabel : null;
+        row.DeliveryId = 0;
+        row.LastQueuedMilliseconds = 0;
+        _sharedPresentationDeliverySlot = -1;
+        _publicPresentationApplied = IsOwnPresentationApplied();
+    }
+
+    private void ReconcileSharedPresentation()
+    {
+        SharedPublicPresentationRow[] rows = _sharedPresentation!;
+        int count = _sharedAuthority!.CopyParticipants(_sharedParticipantScratch!);
+        if (count < 0)
+            throw new InvalidOperationException("The shared participant census exceeded its bound.");
+        for (int slot = 0; slot < rows.Length; slot++)
+        {
+            ref SharedPublicPresentationRow row = ref rows[slot];
+            // A queued occurrence is immutable until its exact application proof arrives. A slot
+            // may be reused while that proof is in flight; changing the retained operation here
+            // would let an old delivery identity describe a newer participant (key ABA).
+            if (row.DeliveryId != 0) continue;
+
+            SharedPlayableParticipant desired = default;
+            for (int index = 0; index < count; index++)
+            {
+                if (_sharedParticipantScratch![index].Slot != slot) continue;
+                desired = _sharedParticipantScratch[index];
+                break;
+            }
+            if (!desired.IsValid)
+            {
+                if (!row.PublicEntity.IsValid) continue;
+                if (!row.AppliedPresent)
+                {
+                    row = default;
+                    continue;
+                }
+                if (row.DesiredPresent)
+                {
+                    row.DesiredPresent = false;
+                    row.Revision = checked(row.Revision + 1);
+                }
+                continue;
+            }
+
+            bool identityChanged = row.PublicEntity != desired.PublicEntity ||
+                !string.Equals(row.DisplayLabel, desired.GuestIdentity.DisplayName,
+                    StringComparison.Ordinal);
+            if (!identityChanged)
+            {
+                row.DesiredPresent = true;
+                continue;
+            }
+            if (row.AppliedPresent)
+            {
+                // Retire the exact older generational identity before publishing a newer occupant
+                // of the bounded operational slot.
+                if (row.DesiredPresent)
+                {
+                    row.DesiredPresent = false;
+                    row.Revision = checked(row.Revision + 1);
+                }
+                continue;
+            }
+            row = new SharedPublicPresentationRow
+            {
+                PublicEntity = desired.PublicEntity,
+                DisplayLabel = desired.GuestIdentity.DisplayName,
+                Revision = 1,
+                DesiredPresent = true,
+            };
+        }
+    }
+
+    private bool IsOwnPresentationApplied()
+    {
+        if (_sharedPresentation is null || !_sharedParticipant.IsValid) return false;
+        ref readonly SharedPublicPresentationRow row =
+            ref _sharedPresentation[_sharedParticipant.Slot];
+        return row.AppliedPresent && row.AppliedPublicEntity == _playerPublicId &&
+            string.Equals(row.AppliedDisplayLabel, _guestIdentity.DisplayName,
+                StringComparison.Ordinal);
     }
 
     private bool QueueAdmissionResult(bool force)
@@ -1034,6 +1334,12 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
                     return new OwnerCapture(generation, world.TickCount, position, descriptor, publicId);
                 }, out OwnerCapture capture))
             return false;
+        if (_ownerStateSequence != 0 &&
+            capture.Generation == _lastOwnerStateGeneration &&
+            capture.Position == _lastOwnerStatePosition &&
+            capture.Descriptor.Orientation == _lastOwnerStateOrientation &&
+            _lastProcessedCommand == _lastOwnerStateCommandSequence)
+            return true;
         ulong sequence = _ownerStateSequence + 1;
         var state = new RemotePlayableOwnerStateMessage
         {
@@ -1063,6 +1369,11 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
                 _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
             return false;
         _ownerStateSequence = sequence;
+        _lastOwnerStateSimulationTick = capture.SimulationTick;
+        _lastOwnerStateCommandSequence = _lastProcessedCommand;
+        _lastOwnerStateGeneration = capture.Generation;
+        _lastOwnerStatePosition = capture.Position;
+        _lastOwnerStateOrientation = capture.Descriptor.Orientation;
         SaturatingIncrement(ref _ownerStatesQueued);
         return true;
     }
@@ -1117,18 +1428,32 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private void DisposeGameplayAfterFailedAdmission()
     {
         try { _chatSession?.Dispose(); } catch { }
-        try { _chatDelivery?.Dispose(); } catch { }
+        if (_sharedAuthority is null)
+            try { _chatDelivery?.Dispose(); } catch { }
         try { _signUi?.Dispose(); } catch { }
         try { _inventoryUi?.Dispose(); } catch { }
-        try { _chat?.Dispose(); } catch { }
-        try { _admission?.Dispose(); } catch { }
         try { _ui?.Dispose(); } catch { }
-        try
+        if (_sharedAuthority is not null)
         {
-            if (_runtime?.State == ServerRuntimeState.Running) _runtime.Stop();
-            _runtime?.Dispose();
+            try
+            {
+                if (_sharedParticipant.IsValid)
+                    _ = _sharedAuthority.Leave(_sharedParticipant);
+            }
+            catch { }
+            _sharedParticipant = default;
         }
-        catch { }
+        else
+        {
+            try { _chat?.Dispose(); } catch { }
+            try { _admission?.Dispose(); } catch { }
+            try
+            {
+                if (_runtime?.State == ServerRuntimeState.Running) _runtime.Stop();
+                _runtime?.Dispose();
+            }
+            catch { }
+        }
         _chatSession = null;
         _chatDelivery = null;
         _signUi = null;
@@ -1172,6 +1497,24 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private readonly record struct CommandOutcome(
         GamePlayerCommandResult Result,
         PostCommandSemantic Semantic);
+
+    private struct SharedPublicPresentationRow
+    {
+        internal WorldPublicEntityId PublicEntity;
+        internal WorldPublicEntityId AppliedPublicEntity;
+        internal string? DisplayLabel;
+        internal string? AppliedDisplayLabel;
+        internal ulong Revision;
+        internal ulong DeliveryId;
+        internal long LastQueuedMilliseconds;
+        internal bool DesiredPresent;
+        internal bool AppliedPresent;
+
+        internal readonly bool NeedsDelivery => PublicEntity.IsValid && DeliveryId == 0 &&
+            (DesiredPresent != AppliedPresent ||
+             DesiredPresent && (AppliedPublicEntity != PublicEntity ||
+                !string.Equals(AppliedDisplayLabel, DisplayLabel, StringComparison.Ordinal)));
+    }
 
     private readonly record struct InventoryOpenEntities(Entity Container, Entity Owner);
 

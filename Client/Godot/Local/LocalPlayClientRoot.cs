@@ -1,8 +1,14 @@
 using Godot;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Core;
+using UltraSim.Client.Local;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
+#if ULTRASIM_COMPLETE
+using System.Text;
+using System.Text.Json;
+using UltraSim.Server.ConceptDemo;
+#endif
 
 namespace UltraSim.Client.Godot;
 
@@ -29,12 +35,24 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         bool fallbackLabSmoke = arguments.Contains("--d0-4-smoke", StringComparer.Ordinal);
         bool guestAdmissionSmoke = arguments.Contains("--d0-5-smoke", StringComparer.Ordinal);
         bool f02Smoke = arguments.Contains("--f0-2-smoke", StringComparer.Ordinal);
+#if ULTRASIM_COMPLETE
+        bool sharedHostSmoke = arguments.Contains("--m0-0-host-smoke", StringComparer.Ordinal);
+#else
+        const bool sharedHostSmoke = false;
+#endif
         if (arguments.Contains("--composition-smoke", StringComparer.Ordinal) ||
             !conceptDemoSmoke && !residencySmoke && !farIslandSmoke && !signSmoke &&
-            !fallbackLabSmoke && !guestAdmissionSmoke && !f02Smoke)
+            !fallbackLabSmoke && !guestAdmissionSmoke && !f02Smoke && !sharedHostSmoke)
             return;
         try
         {
+#if ULTRASIM_COMPLETE
+            if (sharedHostSmoke)
+            {
+                RunSharedHostSmoke();
+                return;
+            }
+#endif
             if (guestAdmissionSmoke)
             {
                 RunGuestAdmissionSmoke();
@@ -162,6 +180,148 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         }
     }
 
+#if ULTRASIM_COMPLETE
+    private async void RunSharedHostSmoke()
+    {
+        try
+        {
+            int gameplayPort = ReadRequiredPort("--m0-0-gameplay-port=");
+            int contentPort = ReadRequiredPort("--m0-0-content-port=");
+            string readyPath = ReadRequiredArgument("--m0-0-ready=");
+            var options = new ConceptDemoHostedServerOptions(
+                new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, gameplayPort),
+                new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, contentPort),
+                MaximumParticipants: 8);
+            StartLocalCabin(
+                CabinContentVariant.Default,
+                CabinHumanBody.XBot,
+                useConceptDemoWorld: true,
+                guestDisplayName: "Host Alice",
+                serverExtensionFactory: new ConceptDemoHostedServerExtensionFactory(options));
+            ulong generation = _cabin!.GetHostingSnapshot().ServerGenerationId;
+            if (generation == 0 || !_cabin.TrySetHostingEnabled(enabled: true))
+                throw new InvalidOperationException(
+                    "The Complete host could not queue its hosting transition.");
+
+            LocalPlayableServerExtensionSnapshot hosted = default;
+            ulong hostingDeadline = checked(Time.GetTicksMsec() + 30_000UL);
+            while (Time.GetTicksMsec() < hostingDeadline)
+            {
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                hosted = _cabin.GetHostingSnapshot();
+                if (hosted.HostingEnabled) break;
+                if (hosted.Detail?.Contains("could not", StringComparison.OrdinalIgnoreCase) == true)
+                    throw new InvalidOperationException(hosted.Detail);
+            }
+            if (!hosted.HostingEnabled || hosted.ServerGenerationId != generation ||
+                string.IsNullOrWhiteSpace(hosted.Endpoint) ||
+                string.IsNullOrWhiteSpace(hosted.DeploymentFingerprint))
+                throw new InvalidOperationException(
+                    $"The Complete host did not preserve and publish its internal server: {hosted}.");
+            WriteSharedHostReady(readyPath, hosted);
+            GD.Print(
+                $"M0.0 COMPLETE HOST READY generation={generation} endpoint={hosted.Endpoint} " +
+                $"fingerprint={hosted.DeploymentFingerprint} host_path=packet-free");
+
+            int participantHighWater = 0;
+            bool observedTwoRemotes = false;
+            ulong participantsDeadline = checked(Time.GetTicksMsec() + 120_000UL);
+            while (Time.GetTicksMsec() < participantsDeadline)
+            {
+                await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                LocalPlayableServerExtensionSnapshot current = _cabin.GetHostingSnapshot();
+                if (!current.HostingEnabled || current.ServerGenerationId != generation)
+                    throw new InvalidOperationException(
+                        $"The hosted adapter replaced or lost the internal server: {current}.");
+                if (current.RemoteParticipants > participantHighWater)
+                {
+                    participantHighWater = current.RemoteParticipants;
+                    GD.Print(
+                        $"M0.0 COMPLETE HOST REMOTES generation={generation} " +
+                        $"remoteParticipants={participantHighWater}");
+                }
+                observedTwoRemotes |= current.RemoteParticipants >= 2;
+                if (!observedTwoRemotes || current.RemoteParticipants != 0) continue;
+
+                if (!_cabin.TrySetHostingEnabled(enabled: false))
+                    throw new InvalidOperationException(
+                        "The Complete host could not queue its stop-hosting transition.");
+                ulong stopDeadline = checked(Time.GetTicksMsec() + 30_000UL);
+                while (Time.GetTicksMsec() < stopDeadline)
+                {
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                    current = _cabin.GetHostingSnapshot();
+                    if (!current.HostingEnabled) break;
+                }
+                if (current.HostingEnabled || current.ServerGenerationId != generation)
+                    throw new InvalidOperationException(
+                        "Stopping remote hosting did not preserve the internal server generation.");
+                GD.Print(
+                    $"M0.0 COMPLETE HOST PASS generation={generation} " +
+                    "localPath=packet-free remotePaths=2 highWaterParticipants=3 " +
+                    "remoteDetach=clean localWorldSurvived=true");
+                RetireCurrentSession();
+                ReturnToMainMenu("M0.0 embedded shared-authority smoke passed.");
+                GetTree().Quit(0);
+                return;
+            }
+            throw new TimeoutException(
+                "The Complete host did not observe two simultaneous remote participants and their clean detach.");
+        }
+        catch (Exception exception)
+        {
+            GD.PushError($"M0.0 Complete hosted smoke failed: {exception}");
+            RetireCurrentSession();
+            FailSession(exception.Message);
+            GetTree().Quit(1);
+        }
+    }
+
+    private static void WriteSharedHostReady(
+        string path,
+        in LocalPlayableServerExtensionSnapshot hosted)
+    {
+        string full = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(full);
+        if (string.IsNullOrEmpty(directory))
+            throw new InvalidOperationException("The M0.0 ready-file path has no parent directory.");
+        Directory.CreateDirectory(directory);
+        string temporary = full + $".{System.Environment.ProcessId}.tmp";
+        try
+        {
+            File.WriteAllText(
+                temporary,
+                JsonSerializer.Serialize(new
+                {
+                    hosted.Endpoint,
+                    Fingerprint = hosted.DeploymentFingerprint,
+                    Generation = hosted.ServerGenerationId,
+                }) + System.Environment.NewLine,
+                new UTF8Encoding(false, true));
+            File.Move(temporary, full, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    private static int ReadRequiredPort(string prefix)
+    {
+        string value = ReadRequiredArgument(prefix);
+        if (!int.TryParse(value, out int port) || port is <= 0 or > 65_535)
+            throw new InvalidOperationException($"M0.0 requires a valid port for '{prefix}'.");
+        return port;
+    }
+
+    private static string ReadRequiredArgument(string prefix) =>
+        OS.GetCmdlineUserArgs().FirstOrDefault(
+            argument => argument.StartsWith(prefix, StringComparison.Ordinal))?[prefix.Length..]
+        is { Length: > 0 } value
+            ? value
+            : throw new InvalidOperationException($"M0.0 requires '{prefix}<value>'.");
+#endif
+
     public override void _Process(double delta)
     {
         if (_cabin is null) return;
@@ -252,11 +412,35 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     protected override void OnEffectiveSettingsChanged(ResolvedClientSettings settings) =>
         _cabin?.ApplySettings(settings);
 
+    protected override void BuildAdditionalInSessionOptions(VBoxContainer column)
+    {
+#if ULTRASIM_COMPLETE
+        if (_cabin is null) return;
+        LocalPlayableServerExtensionSnapshot hosting = _cabin.GetHostingSnapshot();
+        if (!hosting.Available) return;
+        string label = hosting.HostingEnabled ? "Stop Hosting" : "Enable Hosting";
+        Button hostingButton = MenuButton(label);
+        hostingButton.Name = hosting.HostingEnabled ? "StopHosting" : "EnableHosting";
+        ConnectDeferred(hostingButton, () =>
+        {
+            _cabin?.TrySetHostingEnabled(!hosting.HostingEnabled);
+            ResumeCurrentSession();
+        });
+        column.AddChild(hostingButton);
+        string detail = hosting.HostingEnabled
+            ? $"Listening at {hosting.Endpoint}\nDeployment fingerprint: {hosting.DeploymentFingerprint}\n" +
+              $"Remote participants: {hosting.RemoteParticipants}"
+            : hosting.Detail ?? "The internal server is local-only.";
+        column.AddChild(CenteredLabel(detail));
+#endif
+    }
+
     private void StartLocalCabin(
         CabinContentVariant variant,
         CabinHumanBody human,
         bool useConceptDemoWorld,
-        string? guestDisplayName = null)
+        string? guestDisplayName = null,
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
     {
         if (_cabin is not null)
             throw new InvalidOperationException("A local Cabin session is already active.");
@@ -273,6 +457,12 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
         ContentCatalogRoot.AddChild(_catalogMarker);
 
         var cabin = new LocalCabinClient { Name = "LocalCabinSession" };
+#if ULTRASIM_COMPLETE
+        ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory ??
+            (useConceptDemoWorld ? new ConceptDemoHostedServerExtensionFactory() : null);
+#else
+        ILocalPlayableServerExtensionFactory? extensionFactory = serverExtensionFactory;
+#endif
         cabin.Configure(
             oracle,
             resolved,
@@ -284,7 +474,8 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             human,
             EffectiveSettings,
             useConceptDemoWorld,
-            guestDisplayName);
+            guestDisplayName,
+            extensionFactory);
         _cabin = cabin;
         WorldRoot.AddChild(cabin);
         LocalCabinPresentationSnapshot snapshot = cabin.GetPresentationSnapshot();

@@ -24,6 +24,11 @@ internal static class Program
 {
     public static void Main(string[] args)
     {
+        if (args.Contains("--m0-0-only", StringComparer.Ordinal))
+        {
+            M00SharedAuthorityTests.RunAll();
+            return;
+        }
         var tests = new (string Name, Action Body)[]
         {
             ("GameProtocolReservationEstimateMatchesConstructedPeers", GameProtocolReservationEstimateMatchesConstructedPeers),
@@ -106,6 +111,7 @@ internal static class Program
         F03aDirectConnectTests.RunAll();
         F03bRemotePlayableTests.RunAll();
         F03cClientProfileTests.RunAll();
+        M00SharedAuthorityTests.RunAll();
         Console.WriteLine(
             $"All {tests.Length} Network N0.4 through N0.10 application tests plus " +
             $"{F03aDirectConnectTests.TestCount} Client F0.3a Direct Connect and " +
@@ -117,7 +123,8 @@ internal static class Program
             $"{F03bRemotePlayableTests.A07TestCount} A0.7 content/World plus " +
             $"{F03bRemotePlayableTests.F04TestCount} F0.4 actor-presentation plus " +
             $"{F03bRemotePlayableTests.F05TestCount} F0.5 compiled-UI convergence plus " +
-            $"{F03cClientProfileTests.TestCount} F0.3c client-profile tests passed.");
+            $"{F03cClientProfileTests.TestCount} F0.3c client-profile and " +
+            $"{M00SharedAuthorityTests.TestCount} M0.0 shared-authority tests passed.");
         if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
             RunN09Benchmark(args);
         else if (args.Contains("--benchmark-n08", StringComparer.Ordinal))

@@ -1,0 +1,601 @@
+using System.Diagnostics;
+using UltraSim.ECS;
+using UltraSim.Game.Admission;
+using UltraSim.Game.Application;
+using UltraSim.Game.Chat;
+using UltraSim.Game.Composition;
+using UltraSim.Game.Input;
+using UltraSim.Game.Inventory;
+using UltraSim.Game.Protocol;
+using UltraSim.Game.World;
+using UltraSim.Network;
+using UltraSim.Server.Runtime;
+using UltraSim.Spatial;
+using UltraSim.UI;
+
+namespace UltraSim.Game.Replication;
+
+/// <summary>Bounded ownership profile for one shared Concept Demo authority.</summary>
+public readonly record struct SharedPlayableAuthorityLimits(int MaximumParticipants = 8)
+{
+    public static SharedPlayableAuthorityLimits Default => new(8);
+
+    public void Validate()
+    {
+        if (MaximumParticipants is <= 0 or > 64)
+            throw new ArgumentOutOfRangeException(nameof(MaximumParticipants));
+    }
+}
+
+/// <summary>One admitted participant binding inside the shared authoritative generation.</summary>
+public readonly record struct SharedPlayableParticipant(
+    ParticipantId Participant,
+    GameGuestIdentity GuestIdentity,
+    GameControlSessionEpoch ControlSession,
+    GamePlayableParticipantEntities Entities,
+    WorldPublicEntityId PublicEntity,
+    int Slot)
+{
+    public bool IsValid => Participant.IsValid && GuestIdentity.IsValid && ControlSession.IsValid &&
+        Entities.IsValid && PublicEntity.IsValid && Slot >= 0;
+}
+
+/// <summary>Read-only evidence for one shared Game/World authority.</summary>
+public readonly record struct SharedPlayableAuthoritySnapshot(
+    ulong GenerationId,
+    ulong SimulationTick,
+    int ParticipantCount,
+    int MaximumParticipants,
+    ulong Joins,
+    ulong Leaves,
+    ulong Ticks,
+    bool OwnsRuntime);
+
+/// <summary>
+/// One owner-thread Game generation and Concept Demo world serving several independent participant
+/// and control lineages. Network and local adapters borrow this authority; neither owns its world.
+/// </summary>
+public sealed class SharedPlayableAuthority : IDisposable
+{
+    private readonly SharedPlayableAuthorityLimits _limits;
+    private readonly SharedPlayableParticipant[] _participants;
+    private readonly bool[] _occupied;
+    private readonly bool[] _externallyOwned;
+    private readonly RemoteGuestPlayableApplication?[] _remoteApplications;
+    private readonly bool _ownsRuntime;
+    private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private readonly long _tickInterval;
+    private long _nextTickTimestamp;
+    private int _participantCount;
+    private ulong _joins;
+    private ulong _leaves;
+    private ulong _ticks;
+    private bool _disposed;
+
+    private SharedPlayableAuthority(
+        WorldPack worldPack,
+        UltraSimGameComposition composition,
+        ServerRuntime runtime,
+        AdmissionService admission,
+        GameChatService chat,
+        RemoteChatDeliveryService chatDelivery,
+        GamePlayableWorldScene scene,
+        bool ownsRuntime,
+        SharedPlayableAuthorityLimits limits)
+    {
+        WorldPack = worldPack;
+        Composition = composition;
+        Runtime = runtime;
+        Admission = admission;
+        Chat = chat;
+        ChatDelivery = chatDelivery;
+        Scene = scene;
+        _ownsRuntime = ownsRuntime;
+        _limits = limits;
+        _participants = new SharedPlayableParticipant[limits.MaximumParticipants];
+        _occupied = new bool[limits.MaximumParticipants];
+        _externallyOwned = new bool[limits.MaximumParticipants];
+        _remoteApplications = new RemoteGuestPlayableApplication[limits.MaximumParticipants];
+        _tickInterval = Math.Max(1, Stopwatch.Frequency / runtime.SimulationFrequencyHz);
+        _nextTickTimestamp = checked(Stopwatch.GetTimestamp() + _tickInterval);
+    }
+
+    /// <summary>Creates and owns a fresh shared Concept Demo server on the calling thread.</summary>
+    public static SharedPlayableAuthority CreateConceptDemo(
+        SharedPlayableAuthorityLimits limits = default)
+    {
+        if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
+        limits.Validate();
+        WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+        var composition = new UltraSimGameComposition(
+            new InventoryLimits(32, 128, 32),
+            runtimeProfile: GameRuntimeProfile.Networked,
+            baseWorldPack: pack);
+        var runtime = new ServerRuntime(
+            composition,
+            new ServerRuntimeOptions(
+                UltraSimGameComposition.CreateWorldOptions(
+                    256,
+                    new PersistenceIdentityOptions(new PersistentWorldId(0x4D_0000UL)),
+                    GameRuntimeProfile.Networked),
+                WorldClockOptions.Default));
+        AdmissionService? admission = null;
+        GameChatService? chat = null;
+        RemoteChatDeliveryService? delivery = null;
+        try
+        {
+            runtime.Initialize();
+            runtime.Start();
+            admission = new AdmissionService(runtime.Game, composition);
+            if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                    GamePlayableWorldScene>(
+                    static (world, _, game) =>
+                        GamePlayableWorld.PopulateSharedConceptDemoScene(world, game),
+                    out GamePlayableWorldScene scene) || !scene.IsValid)
+                throw new InvalidOperationException("The shared Concept Demo scene could not populate.");
+            runtime.Tick();
+            var chatLimits = GameChatLimits.Default with
+            {
+                MaximumParticipants = limits.MaximumParticipants,
+                MaximumRecipientsPerSpeech = limits.MaximumParticipants,
+            };
+            chat = new GameChatService(runtime.Game, admission, chatLimits);
+            delivery = new RemoteChatDeliveryService(
+                runtime.Game,
+                chat,
+                new RemoteChatServerLimits(
+                    limits.MaximumParticipants,
+                    checked(limits.MaximumParticipants * 64),
+                    64,
+                    8,
+                    2_000,
+                    1_000));
+            return new SharedPlayableAuthority(
+                pack, composition, runtime, admission, chat, delivery, scene,
+                ownsRuntime: true, limits);
+        }
+        catch
+        {
+            delivery?.Dispose();
+            chat?.Dispose();
+            admission?.Dispose();
+            if (runtime.State == ServerRuntimeState.Running) runtime.Stop();
+            runtime.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Attaches remote participant adapters to an already-running internal server and its existing
+    /// local participant. The borrowed runtime remains owned and ticked by its original local
+    /// authority thread; enabling Network recipients neither restarts nor replaces that world.
+    /// </summary>
+    public static SharedPlayableAuthority AttachExisting(
+        WorldPack worldPack,
+        UltraSimGameComposition composition,
+        ServerRuntime runtime,
+        AdmissionService admission,
+        GameChatService chat,
+        RemoteChatDeliveryService chatDelivery,
+        GamePlayableWorldScene scene,
+        SharedPlayableParticipant localParticipant,
+        SharedPlayableAuthorityLimits limits = default)
+    {
+        ArgumentNullException.ThrowIfNull(worldPack);
+        ArgumentNullException.ThrowIfNull(composition);
+        ArgumentNullException.ThrowIfNull(runtime);
+        ArgumentNullException.ThrowIfNull(admission);
+        ArgumentNullException.ThrowIfNull(chat);
+        ArgumentNullException.ThrowIfNull(chatDelivery);
+        if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
+        limits.Validate();
+        if (runtime.State != ServerRuntimeState.Running || !scene.IsValid ||
+            !localParticipant.IsValid || localParticipant.Slot >= limits.MaximumParticipants)
+            throw new ArgumentException(
+                "The borrowed shared-authority composition is not currently playable.");
+        var authority = new SharedPlayableAuthority(
+            worldPack, composition, runtime, admission, chat, chatDelivery, scene,
+            ownsRuntime: false, limits);
+        int slot = localParticipant.Slot;
+        authority._participants[slot] = localParticipant;
+        authority._occupied[slot] = true;
+        authority._externallyOwned[slot] = true;
+        authority._participantCount = 1;
+        authority._joins = 1;
+        return authority;
+    }
+
+    public WorldPack WorldPack { get; }
+    public GamePlayableWorldScene Scene { get; }
+    internal UltraSimGameComposition Composition { get; }
+    internal ServerRuntime Runtime { get; }
+    internal AdmissionService Admission { get; }
+    internal GameChatService Chat { get; }
+    internal RemoteChatDeliveryService ChatDelivery { get; }
+
+    /// <summary>Advances an owned server clock without coupling it to any one connection.</summary>
+    public int TickDue()
+    {
+        EnsureOperational();
+        if (!_ownsRuntime)
+            throw new InvalidOperationException("A borrowed authority is ticked by its internal server owner.");
+        long now = Stopwatch.GetTimestamp();
+        int steps = 0;
+        while (now >= _nextTickTimestamp && steps < 4)
+        {
+            Runtime.Tick();
+            _ticks++;
+            _nextTickTimestamp = checked(_nextTickTimestamp + _tickInterval);
+            steps++;
+        }
+        if (steps == 4 && now >= _nextTickTimestamp)
+            _nextTickTimestamp = checked(now + _tickInterval);
+        _ = ChatDelivery.TryHandoffPendingSpeech();
+        return steps;
+    }
+
+    internal AdmissionResult Join(
+        ParticipantId participant,
+        in GameGuestAdmissionRequest request,
+        out SharedPlayableParticipant playable)
+    {
+        EnsureOperational();
+        playable = default;
+        int slot = FindFreeSlot();
+        if (slot < 0)
+            return new AdmissionResult(
+                participant, AdmissionStage.Rejected, Entity.Null, default, default,
+                Runtime.ActiveGenerationId, default, AdmissionRejection.EntityCreationFailed,
+                "The shared authority participant capacity is full.");
+        AdmissionResult entered = Admission.JoinGuest(participant, request);
+        if (!entered.IsEntered || !entered.GuestIdentity.IsValid)
+            return entered;
+        try
+        {
+            WorldPosition start = SpawnForSlot(slot);
+            GameControlSessionEpoch control = GameControlSessionEpoch.Create();
+            if (!Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                    JoinCapture>(
+                    (world, _, game) =>
+                    {
+                        GamePlayableParticipantEntities entities =
+                            GamePlayableWorld.PopulateSharedParticipant(
+                                world, game, entered.Entity, start);
+                        GameWorldActionStatus status = game.WorldActions.BeginControlSession(
+                            world, entered.Entity, control);
+                        if (status != GameWorldActionStatus.Accepted)
+                            throw new InvalidOperationException(
+                                $"The shared control session could not bind: {status}.");
+                        if (!game.WorldState.Publications.TryGetPublicEntityId(
+                                entered.Entity, out WorldPublicEntityId publicId))
+                        {
+                            // Publication identity is assigned when lifecycle maintenance runs.
+                            publicId = default;
+                        }
+                        return new JoinCapture(entities, publicId);
+                    }, out JoinCapture capture))
+                throw new InvalidOperationException("The shared participant had no active generation.");
+            Runtime.Tick();
+            _ticks++;
+            if (!capture.PublicEntity.IsValid)
+            {
+                if (!Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                        WorldPublicEntityId>(
+                        (world, _, game) =>
+                        {
+                            Entity actor = Resolve(world, capture.Entities.PlayerId);
+                            if (!game.WorldState.Publications.TryGetPublicEntityId(
+                                    actor, out WorldPublicEntityId id))
+                                throw new InvalidOperationException(
+                                    "The shared participant has no public identity.");
+                            return id;
+                        }, out WorldPublicEntityId published))
+                    throw new InvalidOperationException(
+                        "The shared participant public identity was unavailable.");
+                capture = capture with { PublicEntity = published };
+            }
+            playable = new SharedPlayableParticipant(
+                participant, entered.GuestIdentity, control,
+                capture.Entities, capture.PublicEntity, slot);
+            _participants[slot] = playable;
+            _occupied[slot] = true;
+            _participantCount++;
+            _joins++;
+            if (!Chat.RefreshEnteredParticipants())
+                throw new InvalidOperationException("Chat could not admit the shared participant census.");
+            return entered;
+        }
+        catch
+        {
+            _ = Admission.TryLeave(participant, out _);
+            throw;
+        }
+    }
+
+    internal bool Leave(in SharedPlayableParticipant playable)
+    {
+        EnsureOperational();
+        if (!playable.IsValid || playable.Slot >= _participants.Length ||
+            !_occupied[playable.Slot] || _participants[playable.Slot] != playable)
+            return false;
+        if (_externallyOwned[playable.Slot])
+            throw new InvalidOperationException(
+                "A borrowed local participant is retired by its internal server owner.");
+        SharedPlayableParticipant retiring = playable;
+        bool retired = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, generationId, game) =>
+            {
+                Entity player = Resolve(world, retiring.Entities.PlayerId);
+                _ = game.WorldActions.EndControlSession(world, player, retiring.ControlSession);
+                Entity bread = Resolve(world, retiring.Entities.BreadId);
+                Entity backpack = Resolve(world, retiring.Entities.BackpackId);
+                if (!game.Inventory.DestroyItem(world, bread).Accepted ||
+                    !game.Inventory.DestroyContainer(world, backpack).Accepted ||
+                    !world.TryDestroy(player))
+                    throw new InvalidOperationException(
+                        "The shared participant entities could not retire transactionally.");
+                return true;
+            }, out bool complete) && complete;
+        if (!retired || !Admission.TryLeave(playable.Participant, out _))
+            throw new InvalidOperationException("The shared participant admission could not retire.");
+        _participants[playable.Slot] = default;
+        _occupied[playable.Slot] = false;
+        _participantCount--;
+        _leaves++;
+        Runtime.Tick();
+        _ticks++;
+        if (!Chat.RefreshEnteredParticipants())
+            throw new InvalidOperationException("Chat could not retire the shared participant census.");
+        return true;
+    }
+
+    public int CopyParticipants(Span<SharedPlayableParticipant> destination)
+    {
+        EnsureOperational();
+        if (destination.Length < _participantCount) return -1;
+        int count = 0;
+        for (int slot = 0; slot < _participants.Length; slot++)
+            if (_occupied[slot]) destination[count++] = _participants[slot];
+        return count;
+    }
+
+    /// <summary>Copies bounded cold diagnostics for the currently attached remote adapters.</summary>
+    public int CopyRemoteSessionSnapshots(Span<RemoteGuestPlayableServerSnapshot> destination)
+    {
+        EnsureOperational();
+        int required = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is not null) required++;
+        if (destination.Length < required) return -1;
+        int count = 0;
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is RemoteGuestPlayableApplication application)
+                destination[count++] = application.GetSnapshot();
+        return count;
+    }
+
+    internal void RegisterRemoteApplication(RemoteGuestPlayableApplication application)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(application);
+        for (int index = 0; index < _remoteApplications.Length; index++)
+        {
+            if (_remoteApplications[index] is not null) continue;
+            _remoteApplications[index] = application;
+            return;
+        }
+        throw new InvalidOperationException("The bounded shared remote-adapter table is full.");
+    }
+
+    internal void UnregisterRemoteApplication(RemoteGuestPlayableApplication application)
+    {
+        EnsureOperational();
+        for (int index = 0; index < _remoteApplications.Length; index++)
+        {
+            if (!ReferenceEquals(_remoteApplications[index], application)) continue;
+            _remoteApplications[index] = null;
+            return;
+        }
+    }
+
+    public SharedPlayableAuthoritySnapshot GetSnapshot()
+    {
+        EnsureOperational();
+        return new SharedPlayableAuthoritySnapshot(
+            Runtime.ActiveGenerationId,
+            Runtime.SimulationTick,
+            _participantCount,
+            _limits.MaximumParticipants,
+            _joins,
+            _leaves,
+            _ticks,
+            _ownsRuntime);
+    }
+
+    public void Dispose()
+    {
+        EnsureOwnerThread();
+        if (_disposed) return;
+        if (_remoteApplications.Any(static application => application is not null) ||
+            HasOwnedParticipants())
+            throw new InvalidOperationException(
+                "Shared authority must retire every remote participant before disposal.");
+        _disposed = true;
+        ChatDelivery.Dispose();
+        if (!_ownsRuntime)
+        {
+            Array.Clear(_participants);
+            Array.Clear(_occupied);
+            Array.Clear(_externallyOwned);
+            _participantCount = 0;
+            return;
+        }
+        Chat.Dispose();
+        Admission.Dispose();
+        if (Runtime.State == ServerRuntimeState.Running) Runtime.Stop();
+        Runtime.Dispose();
+        Array.Clear(_participants);
+        Array.Clear(_occupied);
+        Array.Clear(_externallyOwned);
+        Array.Clear(_remoteApplications);
+    }
+
+    private bool HasOwnedParticipants()
+    {
+        for (int index = 0; index < _participants.Length; index++)
+            if (_occupied[index] && !_externallyOwned[index]) return true;
+        return false;
+    }
+
+    private int FindFreeSlot()
+    {
+        for (int slot = 0; slot < _occupied.Length; slot++)
+            if (!_occupied[slot]) return slot;
+        return -1;
+    }
+
+    private static WorldPosition SpawnForSlot(int slot)
+    {
+        int column = slot & 1;
+        int row = slot >> 1;
+        if (!WorldPosition.TryFromGlobalMillimeters(
+                checked(GamePlayableWorld.PlayerStart.GlobalXMillimeters + column * 1_500L),
+                GamePlayableWorld.PlayerStart.YMillimeters,
+                checked(GamePlayableWorld.PlayerStart.GlobalZMillimeters + row * 1_500L),
+                out WorldPosition position))
+            throw new InvalidOperationException("The bounded shared spawn is unrepresentable.");
+        return position;
+    }
+
+    private static Entity Resolve(EcsWorld world, PersistentEntityId id) =>
+        world.TryResolvePersistentEntity(id, out Entity entity)
+            ? entity
+            : throw new InvalidOperationException($"Persistent entity {id} was unavailable.");
+
+    private void EnsureOperational()
+    {
+        EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    private void EnsureOwnerThread()
+    {
+        if (Environment.CurrentManagedThreadId != _ownerThreadId)
+            throw new InvalidOperationException("The shared Game authority belongs to another thread.");
+    }
+
+    private readonly record struct JoinCapture(
+        GamePlayableParticipantEntities Entities,
+        WorldPublicEntityId PublicEntity);
+}
+
+/// <summary>
+/// Hosted application factory whose connections become independent sessions in one borrowed
+/// shared authority. The factory never owns or replaces that authority.
+/// </summary>
+public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSessionApplicationFactory
+{
+    private const int MaximumHotOpenUiDefinitions = 256;
+    private readonly SharedPlayableAuthority _authority;
+    private readonly ApplicationRealmId _realm;
+    private readonly RemoteContentAuthorization? _contentAuthorization;
+    private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
+    private readonly UiDefinitionIdentity[] _standardUiDefinitions;
+    private readonly RemoteClientProfileAdvertisement? _clientProfile;
+    private long _nextParticipant;
+
+    public SharedRemoteGuestPlayableApplicationFactory(
+        SharedPlayableAuthority authority,
+        ApplicationRealmId realm,
+        RemoteContentAuthorization? contentAuthorization = null,
+        IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
+        RemoteClientProfileAdvertisement? clientProfile = null,
+        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
+        ulong firstParticipantId = 1)
+    {
+        _authority = authority ?? throw new ArgumentNullException(nameof(authority));
+        if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
+        if (firstParticipantId == 0 || firstParticipantId > long.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(firstParticipantId));
+        if (contentAuthorization is not null &&
+            (!contentAuthorization.IsAuthorityValid ||
+             contentAuthorization.RealmHigh != realm.High ||
+             contentAuthorization.RealmLow != realm.Low))
+            throw new ArgumentException(
+                "The required content authorization must belong to the shared realm.",
+                nameof(contentAuthorization));
+        _realm = realm;
+        _contentAuthorization = contentAuthorization;
+        _contentBackedUiDefinitions = CopyDefinitions(
+            contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
+        _standardUiDefinitions = CopyDefinitions(
+            standardUiDefinitions, nameof(standardUiDefinitions));
+        if (_contentBackedUiDefinitions.Length != 0 && contentAuthorization is null)
+            throw new ArgumentException(
+                "Content-backed UI requires exact authenticated content authorization.",
+                nameof(contentBackedUiDefinitions));
+        if (_contentBackedUiDefinitions.Length + _standardUiDefinitions.Length >
+                MaximumHotOpenUiDefinitions ||
+            _contentBackedUiDefinitions.Intersect(_standardUiDefinitions).Any())
+            throw new ArgumentException(
+                "The shared hot-open definition sets exceed capacity or overlap.",
+                nameof(standardUiDefinitions));
+        _clientProfile = clientProfile;
+        _nextParticipant = checked((long)firstParticipantId - 1);
+    }
+
+    public IHostedUdpSessionApplication Create(ConnectionId connection, NetworkProtocolPeer peer)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        long value = Interlocked.Increment(ref _nextParticipant);
+        if (value <= 0)
+            throw new InvalidOperationException("The shared participant identity space is exhausted.");
+        var application = new RemoteGuestPlayableApplication(
+            peer,
+            _realm,
+            new ParticipantId(checked((ulong)value)),
+            CreateEpoch(),
+            _contentAuthorization,
+            _contentBackedUiDefinitions,
+            _clientProfile,
+            _standardUiDefinitions,
+            _authority);
+        try
+        {
+            _authority.RegisterRemoteApplication(application);
+            return application;
+        }
+        catch
+        {
+            application.Dispose();
+            throw;
+        }
+    }
+
+    private static UiDefinitionIdentity[] CopyDefinitions(
+        IEnumerable<UiDefinitionIdentity>? source,
+        string parameterName)
+    {
+        UiDefinitionIdentity[] values = (source ?? [])
+            .Take(MaximumHotOpenUiDefinitions + 1).ToArray();
+        if (values.Length > MaximumHotOpenUiDefinitions ||
+            values.Any(static value => !value.IsValid) ||
+            values.Distinct().Count() != values.Length)
+            throw new ArgumentException(
+                "The shared UI definition set is invalid, duplicated, or over capacity.",
+                parameterName);
+        return values;
+    }
+
+    private static ulong CreateEpoch()
+    {
+        Span<byte> random = stackalloc byte[sizeof(ulong)];
+        ulong epoch;
+        do
+        {
+            System.Security.Cryptography.RandomNumberGenerator.Fill(random);
+            epoch = System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(random);
+        } while (epoch == 0);
+        return epoch;
+    }
+}

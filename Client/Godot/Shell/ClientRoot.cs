@@ -312,7 +312,7 @@ public abstract partial class ClientRoot : Control
         _debugLayer.AddChild(_debugStatus);
     }
 
-    private void RenderCurrentSurface()
+    protected void RenderCurrentSurface()
     {
         if (_menuHost is null) return;
         ClearChildren(_menuHost);
@@ -520,6 +520,7 @@ public abstract partial class ClientRoot : Control
             RenderCurrentSurface();
         });
         column.AddChild(settings);
+        BuildAdditionalInSessionOptions(column);
         Button disconnect = MenuButton("Disconnect / Main Menu");
         ConnectDeferred(disconnect, () =>
         {
@@ -529,6 +530,17 @@ public abstract partial class ClientRoot : Control
         });
         column.AddChild(disconnect);
         FocusFirstButton(column);
+    }
+
+    /// <summary>Capability-owned options inserted without transferring shell lifecycle ownership.</summary>
+    protected virtual void BuildAdditionalInSessionOptions(VBoxContainer column)
+    {
+    }
+
+    protected void ResumeCurrentSession()
+    {
+        _shell.ResumeSession();
+        RenderCurrentSurface();
     }
 
     private void BuildMessageSurface(

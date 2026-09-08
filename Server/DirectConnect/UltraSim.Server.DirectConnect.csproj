@@ -12,13 +12,10 @@
     <WarningsAsErrors>$(WarningsAsErrors);CS1570;CS1572;CS1573;CS1574;CS1580;CS1581;CS1584;CS1587;CS1711;CS1734;CS1735</WarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../Client/Content/UltraSim.Client.Content.csproj" />
-    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
-    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
+    <ProjectReference Include="../ConceptDemo/UltraSim.Server.ConceptDemo.csproj" />
     <ProjectReference Include="../../Game/Protocol/UltraSim.Game.Protocol.csproj" />
     <ProjectReference Include="../../Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj" />
     <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
-    <ProjectReference Include="../../Server/Hosting/UltraSim.Server.Hosting.csproj" />
   </ItemGroup>
 </Project>

@@ -112,6 +112,14 @@ with this A0.6 resolver on the same `UiDefinitionCacheKey` and existing `HotOpen
 requires content application, a matching preinstalled definition may avoid redundant realization
 work but cannot replace the authenticated catalog or `ContentSetApplied` proof.
 
+M0.0 changes server cardinality, not this client protocol. Several `RemotePlayableSession`
+instances may now attach to one shared authority and receive independent owner state/UI plus
+per-recipient public state, cold presentation metadata, and Chat. A client sends the bounded
+`RemoteSessionDetach` occurrence on clean exit; authority treats it as a request to retire only that
+application/participant lineage. If admission and the first semantic messages share one receive
+batch, the session activates its semantic consumers before continuing that batch so no initial
+public/UI/Chat occurrence is stranded behind admission state.
+
 ## Dynamic public chunk state
 
 `RemoteChunkWorldStateClient` is the production client adapter for the selected

@@ -8,6 +8,7 @@ using UltraSim.Game.Replication;
 using UltraSim.Network;
 using UltraSim.Game.UI;
 using UltraSim.UI;
+using UltraSim.Server.ConceptDemo;
 
 DirectConnectOptions options;
 try
@@ -23,10 +24,13 @@ catch (Exception exception) when (exception is ArgumentException or FormatExcept
 if (options.EphemeralSmoke)
 {
     using NetworkServerIdentity smokeIdentity = NetworkServerIdentity.CreateEphemeral();
+    using SharedPlayableAuthority smokeAuthority =
+        SharedPlayableAuthority.CreateConceptDemo();
     using HostedUdpAdmissionHost smokeHost = CreateHost(
         new IPEndPoint(IPAddress.Loopback, 0), smokeIdentity,
-        new ApplicationRealmId(0xF03A, 0x534D4F4B45));
+        new ApplicationRealmId(0xF03A, 0x534D4F4B45), smokeAuthority);
     smokeHost.Pump();
+    _ = smokeAuthority.TickDue();
     Console.WriteLine(
         $"F0.3b DIRECT CONNECT PLAYABLE SERVER SMOKE PASS endpoint={smokeHost.LocalEndPoint} " +
         $"protocol={UltraSimGameProtocol.Manifest.Version}/" +
@@ -37,12 +41,13 @@ if (options.EphemeralSmoke)
 Directory.CreateDirectory(options.IdentityDirectory);
 using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
+using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo();
 using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
     realm, options.ContentEndPoint);
 RemoteClientProfileAdvertisement clientProfile =
     ConceptDemoClientProfiles.Create(options.ClientProfile);
 using HostedUdpAdmissionHost host = CreateHost(
-    options.BindEndPoint, identity, realm, content.Authorization,
+    options.BindEndPoint, identity, realm, authority, content.Authorization,
     [UiDefinitionIdentity.From(InventoryUi.Definition)], clientProfile);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
@@ -56,7 +61,7 @@ Console.WriteLine(
 Console.WriteLine(
     $"Client profile: {options.ClientProfile} revision={clientProfile.Revision} " +
     $"hash={ProfileHash(clientProfile.Hash)}");
-Console.WriteLine("This A0.8 endpoint admits one authenticated remote guest into the Concept Demo.");
+Console.WriteLine("This M0.0 endpoint admits up to eight independent guests into one shared Concept Demo authority.");
 Console.WriteLine("Press Ctrl+C to stop.");
 WriteReady(options.ReadyFile, new DirectConnectReady(
     host.LocalEndPoint.ToString(), realm.ToString(), fingerprint,
@@ -76,6 +81,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 while (!stopping.IsCancellationRequested)
 {
     host.Pump();
+    _ = authority.TickDue();
     Thread.Sleep(1);
 }
 return 0;
@@ -84,6 +90,7 @@ static HostedUdpAdmissionHost CreateHost(
     IPEndPoint endpoint,
     NetworkServerIdentity identity,
     ApplicationRealmId realm,
+    SharedPlayableAuthority authority,
     RemoteContentAuthorization? contentAuthorization = null,
     IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
     RemoteClientProfileAdvertisement? clientProfile = null)
@@ -91,15 +98,10 @@ static HostedUdpAdmissionHost CreateHost(
     UdpProtocolLimits udp = UdpProtocolLimits.Default;
     SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default with
     {
-        // F0.3b proves one external remote participant against one owner-thread Game runtime.
-        // A shared multi-participant authority is a separate, explicit later checkpoint.
-        MaximumSessions = 1,
+        MaximumSessions = 8,
     };
-    HostedUdpOwnerShardingLimits owners = HostedUdpOwnerShardingLimits.Default with
-    {
-        MaximumOwners = 1,
-        MaximumConnections = 1,
-    };
+    var applications = new SharedRemoteGuestPlayableApplicationFactory(
+        authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile);
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,
@@ -107,9 +109,7 @@ static HostedUdpAdmissionHost CreateHost(
         udp,
         shared,
         HostedUdpAdmissionLimits.Default,
-        owners,
-        new RemoteGuestPlayableApplicationFactory(
-            realm, contentAuthorization, contentBackedUiDefinitions, clientProfile),
+        applications,
         UltraSimGameProtocol.Manifest);
 }
 

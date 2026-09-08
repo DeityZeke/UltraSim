@@ -214,11 +214,24 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 RemoteChunkWorldStateScheduleStatus.TransportNotAccepting,
             _ => default,
         };
+        // A snapshot is one bounded transaction for this application consumer. Do not replace it
+        // while its exact proof is still in flight: a paced transport can otherwise cancel a valid
+        // snapshot every simulation tick before the proof returns. Ordinary WorldState deltas and
+        // absences remain independent and may progress beside the active Bulk transaction.
+        if (encoded == OfflineDirectChunkWireEncodeStatus.Snapshot && HasOutstandingSnapshot())
+            return RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy;
         if (encoded == OfflineDirectChunkWireEncodeStatus.Snapshot)
             return StartSnapshotTransfer(in result, cadenceStep);
         if (encoded is not (OfflineDirectChunkWireEncodeStatus.Delta or
             OfflineDirectChunkWireEncodeStatus.Absence))
             return mapped;
+        // An absence contains no newer semantic state that can supersede an earlier unproved
+        // absence for the same subscription lifetime. Retaining duplicates only consumes the
+        // bounded independent-state lane and can delay the one snapshot which establishes an
+        // occupied chunk. Deltas remain coalescible while their revisions advance.
+        if (encoded == OfflineDirectChunkWireEncodeStatus.Absence &&
+            HasOutstandingAbsence(result.Ticket.Key))
+            return RemoteChunkWorldStateScheduleStatus.NotDue;
         if (result.Written > _peer.MaximumUnfragmentedMessageBytes)
         {
             SaturatingIncrement(ref _oversizeDeltas);
@@ -272,6 +285,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         EnsureOwner();
         if (_nextDeliveryId == 0)
             return RemoteChunkWorldStateScheduleStatus.DeliverySequenceExhausted;
+        if (HasOutstandingSnapshot())
+            return RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy;
         OfflineDirectChunkWireEncodeStatus encoded = _encoder.TryEncodeSnapshot(
             _recipient, _source, subscriptionIndex, _nextDeliveryId,
             _messageScratch, out OfflineDirectChunkWireEncodeResult result);
@@ -571,6 +586,24 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private bool HasOutstandingCapacity() =>
         _outstandingCount < _outstanding.Length - (_snapshotTicket.IsValid ? 1 : 0);
+
+    private bool HasOutstandingSnapshot()
+    {
+        if (_snapshotTicket.IsValid) return true;
+        for (int index = 0; index < _outstandingCount; index++)
+            if (_outstanding[index].Ticket.Status == OfflineDirectChunkReadStatus.Snapshot)
+                return true;
+        return false;
+    }
+
+    private bool HasOutstandingAbsence(SpatialChunkKey key)
+    {
+        for (int index = 0; index < _outstandingCount; index++)
+            if (_outstanding[index].Ticket.Key == key &&
+                _outstanding[index].Ticket.Status == OfflineDirectChunkReadStatus.ChunkAbsent)
+                return true;
+        return false;
+    }
 
     private void ClearActiveSnapshot()
     {

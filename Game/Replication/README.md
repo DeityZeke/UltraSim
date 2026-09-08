@@ -62,31 +62,42 @@ recipient set. Public identity is resolved back to current Game authority before
 command is admitted through `GameWorldActions`; owner state, `ChunkPublication`, Chat, Inventory,
 and informational UI continue through their distinct accepted semantic paths.
 
-The current external executable intentionally admits one remote participant on one Hosted owner.
-Shared multi-participant authority is not claimed by F0.3b or F0.4.
+F0.3b itself intentionally proved one remote participant without claiming multiplayer cardinality.
+M0.0 now composes multiple `RemoteGuestPlayableApplication` instances against one
+`SharedPlayableAuthority`; it does not change the accepted F0.3b command or semantic protocols.
 
 F0.4 retains the admitted guest's custom public label separately from hot movement state. After the
 guest result is applied, `RemoteGuestPlayableApplication` repeatedly delivers one bounded
 server-generation/full-public-identity metadata occurrence until the client proves that exact
 delivery. It never places the label into `WorldPublicRecord`, and the Network kernel learns only the
-declared Control message and bytes. Other-player metadata fanout will compose with shared
-multi-participant authority when that authority is earned; this checkpoint does not fake it inside
-independent Direct Connect runtimes.
+declared Control message and bytes. M0.0 now fans that cold metadata out beside per-recipient hot
+public state for real co-resident participants, retaining full public-identity generations across
+bounded participant-slot reuse.
 
-## Next shared multi-participant authority boundary
+## M0.0 shared multi-participant authority — CLOSED
 
-With the small Client F0.5 compiled-UI convergence closure accepted, shared authority is the next major
-cross-cutting Concept Demo checkpoint. Its owning plan/checkpoint name must be reviewed before
-implementation. It must compose one authoritative Game/World generation with several independently
-authenticated application, participant, and control lineages; it must not construct one isolated
-Game runtime per player and call that multiplayer.
+`SharedPlayableAuthority` owns one Game/World generation, one immutable Concept Demo scene, and a
+bounded table of independent participant/control/application lineages. Joining adds only that
+participant's player, backpack, and starter item; leaving ends its control session, retires those
+entities and Admission binding, and advances public identity generation without replacing the
+authority.
 
-The first acceptance should make the already-earned seams interact: per-recipient
-`ChunkPublication` interest/debt/proof, F0.4 cold actor metadata and nameplates, spatial Chat fanout,
-owner-private UI/state, independent command sequences, and non-poisoning capacity rejection. The
-accepted shared UDP listener/Hosted owner machinery remains transport infrastructure beneath this
-consumer. Do not reopen Network encoding/profile architecture unless this real shared-authority
-work exposes a concrete correctness or measured capacity problem.
+The accepted A/B/C gate composes per-recipient `ChunkPublication` interest/debt/proof, F0.4 cold
+actor metadata/nameplates, spatial Chat fanout, owner-private UI/state, independent command
+sequences, disconnect/reconnect, and ABA-safe public identity. The dedicated executable owns and
+ticks a fresh shared authority. The Complete-only local-host adapter instead borrows the existing
+internal server and registers its packet-free local Chat recipient beside remote Network sessions.
+Stopping that adapter removes remotes without retiring the borrowed world.
+
+Paced snapshot recovery now refuses to begin a replacement transaction while any prior snapshot
+transaction/proof is outstanding. This fixes a real multi-recipient scheduling race without
+changing snapshot identity or wire format.
+
+The current functional gate covers three simultaneous participants and co-resident public
+disclosure. It is not a broad capacity, public-WAN, distributed-region AOI, or host-migration claim.
+The accepted shared UDP listener/Hosted owner machinery remains transport infrastructure beneath
+this consumer. Do not reopen Network encoding/profile architecture unless later real workload
+evidence exposes a concrete correctness or measured capacity problem.
 
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.

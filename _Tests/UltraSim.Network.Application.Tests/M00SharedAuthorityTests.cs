@@ -1,0 +1,846 @@
+using System.Net;
+using UltraSim.Client.Core;
+using UltraSim.Client.Local;
+using UltraSim.Client.Network;
+using UltraSim.Game.Admission;
+using UltraSim.Game.Application;
+using UltraSim.Game.Composition;
+using UltraSim.Game.Input;
+using UltraSim.Game.Protocol;
+using UltraSim.Game.Replication;
+using UltraSim.Game.World;
+using UltraSim.Network;
+using UltraSim.UI;
+
+internal static class M00SharedAuthorityTests
+{
+    internal const int TestCount = 2;
+
+    internal static void RunAll()
+    {
+        OneDedicatedAuthorityServesThreeIndependentRemoteSessions();
+        Console.WriteLine("PASS M00OneDedicatedAuthorityServesThreeIndependentRemoteSessions");
+        ExistingLocalAuthorityAddsAndRetiresRemoteRecipients();
+        Console.WriteLine("PASS M00ExistingLocalAuthorityAddsAndRetiresRemoteRecipients");
+    }
+
+    private static void ExistingLocalAuthorityAddsAndRetiresRemoteRecipients()
+    {
+        string root = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-m00-hosted-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var factory = new EmbeddedTestExtensionFactory();
+        using LocalPlayableSession local = LocalPlayableSession.CreateConceptDemo(
+            Path.Combine(root, "local"),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Host Alice"),
+            serverExtensionFactory: factory);
+        local.WaitUntilReady(TimeSpan.FromSeconds(10));
+        ClientWorldSemanticCache localWorld = CreateWorldCache(local.BoundWorld);
+        var localChat = new ClientChatState(local.ApplicationSessionEpoch);
+        ClientNode? bob = null;
+        ClientNode? carol = null;
+        ClientNode? bobAgain = null;
+        try
+        {
+            True(local.TryGetLatestView(out LocalPlayableAuthorityView before));
+            ulong generation = before.GenerationId;
+            True(before.ServerExtension.Available);
+            True(!before.ServerExtension.HostingEnabled);
+
+            var localInput = new ClientWorldInputSequencer(local.ControlSession);
+            True(localInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(12_000, 0),
+                GamePlayerActions.None,
+                true), out GamePlayerCommand localMove));
+            True(local.TrySubmit(new LocalPlayableCommand(
+                localMove, LocalPlayableSelection.None, false, default, false)));
+            DriveLocalUntil(local, localWorld, localChat, () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == localMove.Sequence &&
+                current.PlayerPosition != before.PlayerPosition);
+            True(localInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop,
+                GamePlayerActions.None,
+                true), out GamePlayerCommand preHostStop));
+            True(local.TrySubmit(new LocalPlayableCommand(
+                preHostStop, LocalPlayableSelection.None, false, default, false)));
+            DriveLocalUntil(local, localWorld, localChat, () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == preHostStop.Sequence);
+
+            True(local.TryRequestHosting(1, enabled: true));
+            DriveLocalUntil(local, localWorld, localChat, () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastAdministrativeSequence == 1 &&
+                current.LastAdministrativeSucceeded &&
+                current.ServerExtension.HostingEnabled);
+            True(local.TryGetLatestView(out LocalPlayableAuthorityView hosted));
+            Equal(generation, hosted.GenerationId);
+            string endpoint = hosted.ServerExtension.Endpoint ??
+                throw new InvalidOperationException("The hosted endpoint was not published.");
+            string fingerprint = hosted.ServerExtension.DeploymentFingerprint ??
+                throw new InvalidOperationException("The hosted deployment fingerprint was not published.");
+
+            bob = ClientNode.Connect(root, "hosted-bob", endpoint, fingerprint);
+            True(bob.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanMale, "Remote Bob")));
+            DriveHostedUntil(local, localWorld, localChat, [bob], () =>
+                bob.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                CountHumanActors(localWorld) == 2 &&
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.ServerExtension.RemoteParticipants == 1);
+            Equal(generation, bob.Session.Playable.GetSnapshot().ServerGenerationId);
+            var metadata = new ClientPublicPresentationMetadata[8];
+            Equal(2, local.CopyPublicPresentationMetadata(metadata));
+            True(metadata.Take(2).Any(static row => row.DisplayLabel == "Host Alice"));
+            True(metadata.Take(2).Any(static row => row.DisplayLabel == "Remote Bob"));
+
+            carol = ClientNode.Connect(root, "hosted-carol", endpoint, fingerprint);
+            True(carol.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanFemale, "Remote Carol")));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                carol.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                CountHumanActors(localWorld) == 3 &&
+                CountHumanActors(bob.Session.WorldCache) == 3 &&
+                CountHumanActors(carol.Session.WorldCache) == 3 &&
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.ServerExtension.RemoteParticipants == 2);
+            Equal(generation, carol.Session.Playable.GetSnapshot().ServerGenerationId);
+            Equal(3, local.CopyPublicPresentationMetadata(metadata));
+            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Host Alice"));
+            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Remote Bob"));
+            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Remote Carol"));
+
+            RemotePlayableClientSnapshot bobBefore = bob.Session.Playable.GetSnapshot();
+            RemotePlayableClientSnapshot carolBefore = carol.Session.Playable.GetSnapshot();
+            True(localInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(-12_000, 0),
+                GamePlayerActions.None,
+                true), out GamePlayerCommand hostedMove));
+            True(local.TrySubmit(new LocalPlayableCommand(
+                hostedMove, LocalPlayableSelection.None, false, default, false)));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == hostedMove.Sequence);
+            Equal(bobBefore.Position, bob.Session.Playable.GetSnapshot().Position);
+            Equal(carolBefore.Position, carol.Session.Playable.GetSnapshot().Position);
+            True(localInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop,
+                GamePlayerActions.None,
+                true), out GamePlayerCommand hostedStop));
+            True(local.TrySubmit(new LocalPlayableCommand(
+                hostedStop, LocalPlayableSelection.None, false, default, false)));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == hostedStop.Sequence);
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                CountHumanActors(bob.Session.WorldCache) == 3 &&
+                CountHumanActors(carol.Session.WorldCache) == 3);
+
+            True(local.TrySubmitChat(1, ClientChatSpeechMode.Say, "local packet-free hello"));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                ContainsChat(bob.Session.ChatState, "local packet-free hello") &&
+                ContainsChat(carol.Session.ChatState, "local packet-free hello"));
+            True(bob.Session.Chat.TrySubmit("remote network hello"));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                ContainsChat(localChat, "remote network hello") &&
+                ContainsChat(carol.Session.ChatState, "remote network hello"));
+
+            True(bob.Session.Playable.TrySubmitCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+                flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+            ulong bobInventory = bob.Session.Playable.Input.Snapshot().LastSequence;
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                bob.Session.Playable.GetSnapshot().LastProcessedCommandSequence == bobInventory &&
+                bob.Session.UiClient.OpenViewCount == 1);
+            Equal(0, carol.Session.UiClient.OpenViewCount);
+            Equal(0UL, local.GetSnapshot().UiOperationsApplied);
+
+            bob.Dispose();
+            bob = null;
+            DriveHostedUntil(local, localWorld, localChat, [carol], () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.ServerExtension.RemoteParticipants == 1 &&
+                CountHumanActors(localWorld) == 2 &&
+                CountHumanActors(carol.Session.WorldCache) == 2);
+            True(local.TryGetLatestView(out LocalPlayableAuthorityView afterLeave));
+            Equal(generation, afterLeave.GenerationId);
+            True(carol.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active);
+
+            bobAgain = ClientNode.Connect(root, "hosted-bob-again", endpoint, fingerprint);
+            True(bobAgain.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanMale, "Remote Bob Again")));
+            DriveHostedUntil(local, localWorld, localChat, [carol, bobAgain], () =>
+                bobAgain.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                CountHumanActors(localWorld) == 3 &&
+                CountHumanActors(carol.Session.WorldCache) == 3 &&
+                CountHumanActors(bobAgain.Session.WorldCache) == 3 &&
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.ServerExtension.RemoteParticipants == 2);
+            Equal(generation, bobAgain.Session.Playable.GetSnapshot().ServerGenerationId);
+
+            True(local.TryRequestHosting(2, enabled: false));
+            DriveLocalUntil(local, localWorld, localChat, () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastAdministrativeSequence == 2 &&
+                current.LastAdministrativeSucceeded &&
+                !current.ServerExtension.HostingEnabled &&
+                current.ServerExtension.RemoteParticipants == 0);
+            True(local.TryGetLatestView(out LocalPlayableAuthorityView stopped));
+            Equal(generation, stopped.GenerationId);
+            Console.WriteLine(
+                $"EVIDENCE M0.0 embedded_hosted generation={generation} " +
+                "host_path=packet-free remote_path=udp participants=3 " +
+                "chat=three_recipient metadata=3 owner_ui=isolated reconnect=pass " +
+                "stop_host_world_survives=pass");
+        }
+        finally
+        {
+            bobAgain?.Dispose();
+            carol?.Dispose();
+            bob?.Dispose();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void OneDedicatedAuthorityServesThreeIndependentRemoteSessions()
+    {
+        const int maximumParticipants = 3;
+        var realm = new ApplicationRealmId(0x4D00, 1);
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+            new SharedPlayableAuthorityLimits(maximumParticipants));
+        var shared = SharedUdpProtocolLimits.Default with
+        {
+            MaximumSessions = maximumParticipants,
+        };
+        using var host = new HostedUdpAdmissionHost(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            identity,
+            NetworkProtocolLimits.Default,
+            UdpProtocolLimits.Default,
+            shared,
+            HostedUdpAdmissionLimits.Default with
+            {
+                MaximumChallengesPerAddressPerBucket = 64,
+                MaximumValidationsPerAddressPerBucket = 64,
+            },
+            new SharedRemoteGuestPlayableApplicationFactory(authority, realm),
+            UltraSimGameProtocol.Manifest);
+        string root = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-m00-{Environment.ProcessId}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        var clients = new List<ClientNode>();
+        try
+        {
+            ClientNode alice = ClientNode.Connect(root, "alice", host, identity);
+            clients.Add(alice);
+            True(alice.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanFemale, "Alice")));
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                CountHumanActors(alice.Session.WorldCache) == 1);
+
+            ClientNode bob = ClientNode.Connect(root, "bob", host, identity);
+            clients.Add(bob);
+            True(bob.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanMale, "Bob")));
+            DriveUntil(host, authority, clients, () =>
+                bob.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                clients.All(static client => CountHumanActors(client.Session.WorldCache) == 2));
+
+            ClientNode carol = ClientNode.Connect(root, "carol", host, identity);
+            clients.Add(carol);
+            True(carol.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanFemale, "Carol")));
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                client.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active));
+            ulong generation = authority.GetSnapshot().GenerationId;
+            Equal(3, authority.GetSnapshot().ParticipantCount);
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords == 3));
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                CountHumanActors(client.Session.WorldCache) == 3));
+            for (int index = 0; index < clients.Count; index++)
+            {
+                Equal(generation,
+                    clients[index].Session.Playable.GetSnapshot().ServerGenerationId);
+                Equal(3, CountHumanActors(clients[index].Session.WorldCache));
+            }
+
+            RemotePlayableClientSnapshot aliceBefore = alice.Session.Playable.GetSnapshot();
+            RemotePlayableClientSnapshot bobBefore = bob.Session.Playable.GetSnapshot();
+            True(alice.Session.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(12_000, 0),
+                GamePlayerActions.None,
+                true)));
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == 1 &&
+                alice.Session.Playable.GetSnapshot().Position.GlobalXMillimeters !=
+                    aliceBefore.Position.GlobalXMillimeters);
+            Equal(bobBefore.Position.GlobalXMillimeters,
+                bob.Session.Playable.GetSnapshot().Position.GlobalXMillimeters);
+            Equal(bobBefore.Position.GlobalZMillimeters,
+                bob.Session.Playable.GetSnapshot().Position.GlobalZMillimeters);
+
+            True(alice.Session.Chat.TrySubmit("shared authority hello"));
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                client.Session.ChatState.GetSnapshot().RetainedOccurrences >= 1));
+            for (int index = 0; index < clients.Count; index++)
+                True(ContainsChat(clients[index].Session.ChatState, "shared authority hello"));
+
+            bob.Dispose();
+            clients.RemoveAt(1);
+            DriveUntil(host, authority, clients,
+                () => authority.GetSnapshot().ParticipantCount == 2);
+            Equal(generation, authority.GetSnapshot().GenerationId);
+            True(alice.Session.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.None, true)));
+            DriveUntil(host, authority, clients, () =>
+                alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == 2);
+            True(carol.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active);
+
+            ClientNode bobAgain = ClientNode.Connect(root, "bob-again", host, identity);
+            clients.Add(bobAgain);
+            True(bobAgain.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
+                GameGuestBody.HumanMale, "Bob Again")));
+            DriveUntil(host, authority, clients, () =>
+                bobAgain.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
+                authority.GetSnapshot().ParticipantCount == 3);
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords == 3));
+            Equal(generation, authority.GetSnapshot().GenerationId);
+
+            SharedPlayableAuthoritySnapshot evidence = authority.GetSnapshot();
+            Console.WriteLine(
+                $"EVIDENCE M0.0 dedicated_shared generation={evidence.GenerationId} " +
+                $"participants={evidence.ParticipantCount}/{evidence.MaximumParticipants} " +
+                $"joins={evidence.Joins} leaves={evidence.Leaves} ticks={evidence.Ticks} " +
+                "public_actors=3 chat_recipients=3 independent_commands=pass reconnect=pass");
+        }
+        finally
+        {
+            for (int index = clients.Count - 1; index >= 0; index--) clients[index].Dispose();
+            for (int step = 0; step < 20_000 && authority.GetSnapshot().ParticipantCount != 0;
+                 step++)
+            {
+                host.Pump();
+                _ = authority.TickDue();
+                Thread.Yield();
+            }
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+        Equal(0, authority.GetSnapshot().ParticipantCount);
+    }
+
+    private static void DriveUntil(
+        HostedUdpAdmissionHost host,
+        SharedPlayableAuthority authority,
+        IReadOnlyList<ClientNode> clients,
+        Func<bool> condition,
+        int maximumSteps = 12_000)
+    {
+        for (int step = 0; step < maximumSteps; step++)
+        {
+            for (int index = 0; index < clients.Count; index++) clients[index].Direct.Pump();
+            host.Pump();
+            _ = authority.TickDue();
+            for (int index = 0; index < clients.Count; index++)
+            {
+                clients[index].Direct.Pump();
+                _ = clients[index].Session.ProcessReceived();
+            }
+            if (condition()) return;
+            if ((step & 15) == 0) Thread.Sleep(1);
+            else Thread.Yield();
+        }
+        throw new InvalidOperationException(
+            $"The shared remote authority did not converge: {authority.GetSnapshot()}; " +
+            $"server={DescribeServer(authority)}; transport={DescribeTransport(host, clients)}; " +
+            string.Join(" | ", clients.Select(static client =>
+                $"playable={client.Session.Playable.GetSnapshot()} " +
+                $"session={client.Session.GetSnapshot()} " +
+                $"peer={client.Direct.Peer?.GetSnapshot()} " +
+                $"actors={CountHumanActors(client.Session.WorldCache)} " +
+                $"public={DescribePublic(client.Session.WorldCache)}")));
+    }
+
+    private static void DriveLocalUntil(
+        LocalPlayableSession local,
+        ClientWorldSemanticCache localWorld,
+        ClientChatState localChat,
+        Func<bool> condition,
+        int maximumSteps = 60_000) =>
+        DriveHostedUntil(local, localWorld, localChat, [], condition, maximumSteps);
+
+    private static void DriveHostedUntil(
+        LocalPlayableSession local,
+        ClientWorldSemanticCache localWorld,
+        ClientChatState localChat,
+        IReadOnlyList<ClientNode> clients,
+        Func<bool> condition,
+        int maximumSteps = 60_000)
+    {
+        for (int step = 0; step < maximumSteps; step++)
+        {
+            for (int index = 0; index < clients.Count; index++) clients[index].Direct.Pump();
+            _ = local.PumpWorld(localWorld);
+            _ = local.PumpChat(localChat);
+            for (int index = 0; index < clients.Count; index++)
+            {
+                clients[index].Direct.Pump();
+                _ = clients[index].Session.ProcessReceived();
+            }
+            if (condition()) return;
+            if ((step & 15) == 0) Thread.Sleep(1);
+            else Thread.Yield();
+        }
+        throw new InvalidOperationException(
+            $"The embedded hosted authority did not converge: local={local.GetSnapshot()} " +
+            $"localActors={CountHumanActors(localWorld)} " +
+            $"localPublic={DescribePublic(localWorld)} " +
+            $"localView={(local.TryGetLatestView(out LocalPlayableAuthorityView latest) ? latest : default)}; " +
+            string.Join(" | ", clients.Select(static client =>
+                $"playable={client.Session.Playable.GetSnapshot()} " +
+                $"session={client.Session.GetSnapshot()} peer={client.Direct.Peer?.GetSnapshot()} " +
+                $"actors={CountHumanActors(client.Session.WorldCache)} " +
+                $"public={DescribePublic(client.Session.WorldCache)}")));
+    }
+
+    private static string DescribeTransport(
+        HostedUdpAdmissionHost host,
+        IReadOnlyList<ClientNode> clients)
+    {
+        return string.Join(" | ", clients.Select(client =>
+        {
+            ConnectionId connection = client.Direct.GetSnapshot().Connection;
+            return host.TryGetSession(connection, out HostedUdpProtocolSession? session)
+                ? session!.Server.GetSnapshot().ToString()
+                : "missing";
+        }));
+    }
+
+    private static string DescribeServer(SharedPlayableAuthority authority)
+    {
+        var snapshots = new RemoteGuestPlayableServerSnapshot[8];
+        int count = authority.CopyRemoteSessionSnapshots(snapshots);
+        return count < 0 ? "overflow" : string.Join(" | ", snapshots.Take(count).Select(
+            static snapshot => $"participant={snapshot.Participant} " +
+                $"guest={snapshot.GuestAdmitted}/{snapshot.AdmissionApplied} " +
+                $"world={snapshot.World}"));
+    }
+
+    private static int CountHumanActors(ClientWorldSemanticCache cache)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        True(cache.TryCopyResidentInfo(chunks, out int count, out _));
+        int actors = 0;
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!cache.TryGetResidentView(chunks[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (WorldPublicRecord record in view.PublicRecords)
+                if (record.PrefabId is GameWorldPublicPrefabIds.Character or
+                    GameWorldPublicPrefabIds.CharacterMale)
+                    actors++;
+        }
+        return actors;
+    }
+
+    private static string DescribePublic(ClientWorldSemanticCache cache)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        if (!cache.TryCopyResidentInfo(chunks, out int count, out _)) return "invalid";
+        var prefabs = new List<uint>();
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!cache.TryGetResidentView(chunks[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (WorldPublicRecord record in view.PublicRecords) prefabs.Add(record.PrefabId);
+        }
+        return $"{prefabs.Count}:[{string.Join(',', prefabs.Take(24))}]";
+    }
+
+    private static bool ContainsChat(ClientChatState state, string text)
+    {
+        var occurrences = new ClientChatOccurrence[16];
+        int count = state.CopyRecent(occurrences);
+        for (int index = 0; index < count; index++)
+            if (string.Equals(occurrences[index].Text, text, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
+    private static ClientWorldSemanticCache CreateWorldCache()
+    {
+        WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
+        var binding = new WorldContentBinding(
+            GameContent.WorldFingerprint,
+            [
+                GameTerrainMaterialIds.Water,
+                GameTerrainMaterialIds.Sand,
+                GameTerrainMaterialIds.Grass,
+                GameTerrainMaterialIds.Rock,
+                GameTerrainMaterialIds.Snow,
+            ],
+            [
+                GameWorldStaticDefinitionIds.Tree,
+                GameWorldStaticDefinitionIds.Rock,
+                GameWorldStaticDefinitionIds.CabinWall,
+                GameWorldStaticDefinitionIds.CabinRoof,
+                GameWorldStaticDefinitionIds.Shelf,
+                GameWorldStaticDefinitionIds.Book,
+            ]);
+        True(pack.TryBind(binding, out BoundWorldPack? bound, out _));
+        return CreateWorldCache(bound!);
+    }
+
+    private static ClientWorldSemanticCache CreateWorldCache(BoundWorldPack bound)
+    {
+        WorldPack pack = bound.Pack;
+        var cache = new ClientWorldSemanticCache(
+            bound, new ClientWorldSemanticCacheLimits(192, 256, 32, 64, 4_096));
+        for (int index = 0; index < pack.ChunkCount; index++)
+        {
+            True(pack.TryGetChunkKey(index, out var key));
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            True(cache.TryStageFromBaseWorld(handle, [], default, out _));
+            True(cache.TryPublish(handle, out _));
+        }
+        return cache;
+    }
+
+    private static void True(bool condition)
+    {
+        if (!condition) throw new InvalidOperationException("Expected true.");
+    }
+
+    private static void Equal<T>(T expected, T actual)
+    {
+        if (!EqualityComparer<T>.Default.Equals(expected, actual))
+            throw new InvalidOperationException($"Expected {expected}, got {actual}.");
+    }
+
+    private sealed class ClientNode : IDisposable
+    {
+        private readonly string _trustRoot;
+        private readonly HostedUdpAdmissionHost? _host;
+        private bool _disposed;
+
+        private ClientNode(
+            string trustRoot,
+            HostedUdpAdmissionHost? host,
+            ClientDirectConnectSession direct,
+            RemotePlayableSession session)
+        {
+            _trustRoot = trustRoot;
+            _host = host;
+            Direct = direct;
+            Session = session;
+        }
+
+        internal ClientDirectConnectSession Direct { get; }
+        internal RemotePlayableSession Session { get; }
+
+        internal static ClientNode Connect(
+            string root,
+            string name,
+            HostedUdpAdmissionHost host,
+            NetworkServerIdentity identity)
+        {
+            string trustRoot = Path.Combine(root, name);
+            Directory.CreateDirectory(trustRoot);
+            var direct = new ClientDirectConnectSession(
+                new ClientServerTrustRegistry(),
+                new ClientServerTrustFileStore(Path.Combine(trustRoot, "servers.json")),
+                NetworkProtocolLimits.Default,
+                UdpProtocolLimits.Default);
+            try
+            {
+                ClientDeploymentKeyFingerprint fingerprint =
+                    ClientDeploymentKeyFingerprint.Compute(identity.PublicKey);
+                True(direct.TryStart(host.LocalEndPoint.ToString(), fingerprint.ToString()));
+                for (int step = 0; step < 10_000; step++)
+                {
+                    direct.Pump();
+                    host.Pump();
+                    if (direct.State == ClientDirectConnectState.Established) break;
+                    if (direct.State == ClientDirectConnectState.Failed)
+                        throw new InvalidOperationException(
+                            $"Shared Direct Connect failed: {direct.GetSnapshot()}.");
+                    Thread.Sleep(1);
+                }
+                Equal(ClientDirectConnectState.Established, direct.State);
+                ClientDirectConnectSnapshot connected = direct.GetSnapshot();
+                var session = new RemotePlayableSession(
+                    direct.Peer ?? throw new InvalidOperationException("Client peer missing."),
+                    connected.ApplicationSessionEpoch,
+                    CreateWorldCache(),
+                    new NullRenderer(),
+                    new ClientChatLimits(16, 256, 128),
+                    new UiClientLimits(8, 8),
+                    maximumPendingWorldProofs: 256);
+                return new ClientNode(trustRoot, host, direct, session);
+            }
+            catch
+            {
+                direct.Dispose();
+                throw;
+            }
+        }
+
+        internal static ClientNode Connect(
+            string root,
+            string name,
+            string endpoint,
+            string fingerprint)
+        {
+            string trustRoot = Path.Combine(root, name);
+            Directory.CreateDirectory(trustRoot);
+            var direct = new ClientDirectConnectSession(
+                new ClientServerTrustRegistry(),
+                new ClientServerTrustFileStore(Path.Combine(trustRoot, "servers.json")),
+                NetworkProtocolLimits.Default,
+                UdpProtocolLimits.Default);
+            try
+            {
+                True(direct.TryStart(endpoint, fingerprint));
+                for (int step = 0; step < 10_000; step++)
+                {
+                    direct.Pump();
+                    if (direct.State == ClientDirectConnectState.Established) break;
+                    if (direct.State == ClientDirectConnectState.Failed)
+                        throw new InvalidOperationException(
+                            $"Embedded-host Direct Connect failed: {direct.GetSnapshot()}.");
+                    Thread.Sleep(1);
+                }
+                Equal(ClientDirectConnectState.Established, direct.State);
+                ClientDirectConnectSnapshot connected = direct.GetSnapshot();
+                var session = new RemotePlayableSession(
+                    direct.Peer ?? throw new InvalidOperationException("Client peer missing."),
+                    connected.ApplicationSessionEpoch,
+                    CreateWorldCache(),
+                    new NullRenderer(),
+                    new ClientChatLimits(16, 256, 128),
+                    new UiClientLimits(8, 8),
+                    maximumPendingWorldProofs: 256);
+                return new ClientNode(trustRoot, null, direct, session);
+            }
+            catch
+            {
+                direct.Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _ = Session.TryRequestDetach();
+            Session.Dispose();
+            if (Direct.State == ClientDirectConnectState.Established)
+            {
+                Direct.BeginDisconnect();
+                for (int step = 0; step < 20_000 &&
+                     Direct.State != ClientDirectConnectState.Closed; step++)
+                {
+                    Direct.Pump();
+                    _host?.Pump();
+                    Thread.Yield();
+                }
+            }
+            Direct.Dispose();
+            if (Directory.Exists(_trustRoot)) Directory.Delete(_trustRoot, recursive: true);
+        }
+    }
+
+    private sealed class EmbeddedTestExtensionFactory : ILocalPlayableServerExtensionFactory
+    {
+        public ILocalPlayableServerExtension Create(LocalPlayableServerContext context) =>
+            new EmbeddedTestExtension(context);
+    }
+
+    private sealed class EmbeddedTestExtension : ILocalPlayableServerExtension
+    {
+        private const int MaximumParticipants = 3;
+        private readonly SharedPlayableAuthority _authority;
+        private readonly RemoteChatDeliveryService _chatDelivery;
+        private readonly RemoteChatLocalRegistration _localChat;
+        private readonly SharedPlayableParticipant[] _participants =
+            new SharedPlayableParticipant[MaximumParticipants];
+        private readonly NetworkServerIdentity _identity = NetworkServerIdentity.CreateEphemeral();
+        private readonly ApplicationRealmId _realm = new(0x4D00, 2);
+        private HostedUdpAdmissionHost? _host;
+        private bool _disposed;
+
+        internal EmbeddedTestExtension(LocalPlayableServerContext context)
+        {
+            var delivery = new RemoteChatDeliveryService(
+                context.Runtime.Game,
+                context.Chat,
+                new RemoteChatServerLimits(
+                    MaximumParticipants,
+                    MaximumParticipants * 64,
+                    64,
+                    8,
+                    2_000,
+                    1_000));
+            try
+            {
+                _authority = SharedPlayableAuthority.AttachExisting(
+                    context.WorldPack,
+                    context.Composition,
+                    context.Runtime,
+                    context.Admission,
+                    context.Chat,
+                    delivery,
+                    context.Scene,
+                    new SharedPlayableParticipant(
+                        context.LocalParticipant,
+                        context.LocalGuestIdentity,
+                        context.LocalControlSession,
+                        context.LocalEntities,
+                        context.LocalPublicEntity,
+                        0),
+                    new SharedPlayableAuthorityLimits(MaximumParticipants));
+                _chatDelivery = delivery;
+                _localChat = delivery.RegisterLocal(
+                    context.LocalParticipant,
+                    new PacketFreeChatRecipient(context.LocalChat));
+            }
+            catch
+            {
+                delivery.Dispose();
+                _identity.Dispose();
+                throw;
+            }
+        }
+
+        public bool OwnsSharedChatHandoff => true;
+
+        public void Pump()
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            _host?.Pump();
+            _ = _chatDelivery.TryHandoffPendingSpeech();
+        }
+
+        public bool TrySetHostingEnabled(bool enabled, out string? detail)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (enabled == (_host is not null))
+            {
+                detail = enabled ? "Already hosting." : "Already stopped.";
+                return true;
+            }
+            if (!enabled)
+            {
+                _host!.Dispose();
+                _host = null;
+                detail = "Stopped without replacing the borrowed Game world.";
+                return true;
+            }
+            _host = new HostedUdpAdmissionHost(
+                new IPEndPoint(IPAddress.Loopback, 0),
+                _identity,
+                NetworkProtocolLimits.Default,
+                UdpProtocolLimits.Default,
+                SharedUdpProtocolLimits.Default with
+                {
+                    MaximumSessions = MaximumParticipants - 1,
+                },
+                HostedUdpAdmissionLimits.Default with
+                {
+                    MaximumChallengesPerAddressPerBucket = 64,
+                    MaximumValidationsPerAddressPerBucket = 64,
+                },
+                new SharedRemoteGuestPlayableApplicationFactory(
+                    _authority, _realm, firstParticipantId: 1),
+                UltraSimGameProtocol.Manifest);
+            detail = "Hosting the borrowed local authority.";
+            return true;
+        }
+
+        public LocalPlayableServerExtensionSnapshot GetSnapshot()
+        {
+            SharedPlayableAuthoritySnapshot authority = _authority.GetSnapshot();
+            Span<RemoteGuestPlayableServerSnapshot> remote = stackalloc RemoteGuestPlayableServerSnapshot[2];
+            int remoteCount = _authority.CopyRemoteSessionSnapshots(remote);
+            string detail = _host is null
+                ? "Test host stopped."
+                : remoteCount > 0
+                    ? $"Test host active; remoteWorld={remote[0].World}."
+                    : "Test host active; no remote application.";
+            return new LocalPlayableServerExtensionSnapshot(
+                true,
+                _host is not null,
+                _host?.LocalEndPoint.ToString(),
+                _realm.ToString(),
+                ClientDeploymentKeyFingerprint.Compute(_identity.PublicKey).ToString(),
+                Math.Max(0, authority.ParticipantCount - 1),
+                authority.GenerationId,
+                detail);
+        }
+
+        public int CopyPublicPresentationMetadata(
+            Span<ClientPublicPresentationMetadata> destination)
+        {
+            int count = _authority.CopyParticipants(_participants);
+            if (count < 0 || destination.Length < count) return -1;
+            ulong generation = _authority.GetSnapshot().GenerationId;
+            for (int index = 0; index < count; index++)
+            {
+                SharedPlayableParticipant participant = _participants[index];
+                destination[index] = new ClientPublicPresentationMetadata(
+                    generation,
+                    participant.PublicEntity,
+                    1,
+                    ClientPublicPresentationFlags.NameplateEligible,
+                    participant.GuestIdentity.DisplayName!);
+            }
+            return count;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _host?.Dispose();
+            _host = null;
+            _localChat.Dispose();
+            _authority.Dispose();
+            _identity.Dispose();
+            _disposed = true;
+        }
+
+        private sealed class PacketFreeChatRecipient : IRemoteChatLocalRecipient
+        {
+            private readonly ILocalPlayableChatSink _sink;
+            internal PacketFreeChatRecipient(ILocalPlayableChatSink sink) => _sink = sink;
+            public bool CanPublish => _sink.CanPublish;
+            public bool TryPublishSpatial(in UltraSim.Game.Chat.GameSpeechFact fact) =>
+                _sink.TryPublishSpatial(in fact);
+        }
+    }
+
+    private sealed class NullRenderer : IUiRenderer
+    {
+        public IUiRenderHandle Create(
+            UiViewInstanceId instance,
+            CompiledUiDefinition definition,
+            UiModelView model,
+            Action<UiActionRequest> submitAction) => new Handle();
+
+        public void Apply(
+            IUiRenderHandle handle,
+            CompiledUiDefinition definition,
+            UiModelView previous,
+            UiModelView current,
+            UiModelDelta delta,
+            Action<UiActionRequest> submitAction) { }
+
+        public void Close(IUiRenderHandle handle) { }
+
+        private sealed class Handle : IUiRenderHandle;
+    }
+}

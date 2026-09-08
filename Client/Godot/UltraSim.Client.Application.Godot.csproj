@@ -38,6 +38,8 @@
                       Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../Network/UltraSim.Client.Network.csproj"
                       Condition="'$(UltraSimEdition)' == 'Online' Or '$(UltraSimEdition)' == 'Complete'" />
+    <ProjectReference Include="../../Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj"
+                      Condition="'$(UltraSimEdition)' == 'Complete'" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(UltraSimEdition)' == 'Online'">

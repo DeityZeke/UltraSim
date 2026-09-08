@@ -5,8 +5,8 @@ composition, the permanent Network-free local path, persistent shell/settings/fo
 Connect trust, remote controlled play, declarative client-profile consent, and generalized actor
 presentation and standard/content-backed compiled-UI convergence. A0.0-A0.8 are also accepted,
 including the actual exported Contentless Online product. F0.6 is already closed/superseded by
-A0.2-A0.8. Shared multi-participant authority is now the major unproven cross-cutting boundary;
-F0.7 and F0.8 remain open.
+A0.2-A0.8. M0.0 now closes the first shared multi-participant authority in both dedicated and
+Complete-hosted deployment shapes. F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -545,6 +545,67 @@ The host player remains on the local application adapter before and after hostin
 world is not destroyed/recreated as a separate multiplayer authority, and the host does not begin
 paying packetization, encryption, retransmission, or loopback latency. A Single Player-only build
 cannot expose the listener because the Network capability is physically absent.
+
+## M0.0 shared multi-participant authority — CLOSED
+
+M0.0 makes the hosting contract executable rather than aspirational. One bounded
+`SharedPlayableAuthority` owns one Game generation, one prepared World, one ECS, one Physics
+composition, one shared scene, and several independent participant/control/application lineages.
+It has two consumers:
+
+```text
+dedicated Direct Connect
+    one shared authority
+        -> remote A through Network
+        -> remote B through Network
+        -> remote C through Network
+
+Complete client
+    existing packet-free local authority + host A
+        -> enable hosted adapter on that same owner thread
+        -> remote B through Network
+        -> remote C through Network
+```
+
+The host process contains the server which owns the world. The local player entity does not own
+the world. Stopping the hosted adapter retires remote application sessions and its listener/content
+host while the existing internal server generation and local participant remain alive. Exiting the
+host process still ends that embedded server; host migration is not part of this checkpoint.
+
+Each admitted guest receives distinct participant, control-session, player, backpack, and starter
+item identity. The immutable Concept Demo scene is populated once. Public replication is sourced
+from the shared Game world per recipient; owner-private state and UI handlers remain attached only
+to their owning application. Spatial Chat fans out across local packet-free and remote Network
+recipients without sending the host player's own input or semantic delivery through loopback
+packets. A validated application detach retires only that participant; a new participant may reuse
+the bounded slot only with fresh generational public identity and delivery lineage.
+
+Deployment content/profile composition is split deliberately:
+
+```text
+Server.ConceptDemo
+    shared deployment content and client-profile definitions
+    no Client.Local dependency
+
+Server.ConceptDemo.LocalHost
+    Complete-only adapter which borrows Client.Local authority
+    adds Hosted Network/content endpoints
+```
+
+Therefore the dedicated server does not acquire the local-client authority adapter, Single Player
+and Online remain physically free of the Complete-only hosted adapter, and the Complete edition
+alone can add Network recipients to a running local world.
+
+The permanent engine-neutral gate covers three simultaneous participants, independent movement,
+three-recipient spatial Chat, private Inventory UI, leave/reconnect, ABA-safe public identity, and
+unchanged Game generation. The native product gate launches Complete with a packet-free host,
+enables hosting, joins two separately running inspected exported Online clients, requires both to
+realize all three humans through the normal F0.4 path, then observes clean remote detach and stops
+hosting without retiring the local world.
+
+This is a functional three-participant topology/correctness gate, not a production population,
+WAN, NAT, public-bind UX, or capacity claim. Per-recipient distant-region AOI and larger
+crowd/distributed/churn evidence remain consumers of the pre-freeze campaign.
 
 Forbidden:
 
@@ -1730,11 +1791,12 @@ body choice, and bounded display name. Game derives participant, canonical name,
 session, position, public identity, range, recipients, and authority.
 
 `RemoteGuestPlayableApplication` is the external Concept Demo composition on the existing Hosted
-connection-owner thread. The current Direct Connect product admits one external participant; it does
-not manufacture one isolated runtime per member of a claimed multiplayer world. Commands are exact
-next-sequence, application/control-lineage fenced, resolve optional interaction nominations through
-Game's public-entity table, and execute through the same `GameWorldActions`/Physics path as Local
-Play. UI capture occurs after the authoritative callback, avoiding nested Game-generation access.
+application-owner thread. F0.3b originally admitted one external participant without claiming
+shared multiplayer; M0.0 now composes several instances against one `SharedPlayableAuthority`
+instead of constructing one isolated runtime per player. Commands are exact next-sequence,
+application/control-lineage fenced, resolve optional interaction nominations through Game's
+public-entity table, and execute through the same `GameWorldActions`/Physics path as Local Play. UI
+capture occurs after the authoritative callback, avoiding nested Game-generation access.
 
 `RemotePlayableSession` composes the client owner-state, `RemoteChunkWorldStateClient`,
 `RemoteChatClient`, and `RemoteUiClientBridge` into the existing bounded Client Core destinations.
@@ -2088,6 +2150,19 @@ Mechanically verify forbidden dependencies absent.
 - local and remote recipients use the same Game-owned disclosure/AOI policy;
 - same Client Core semantic shape consumed by Godot.
 
+## Shared authority
+
+- one dedicated Game generation admits at least three independent remote participants;
+- one Complete local world enables hosting without replacing its generation;
+- the Complete host remains on the packet-free local semantic path;
+- two exported Online clients join that existing world through Network;
+- every client realizes all three human actors through the shared F0.4 path;
+- spatial Chat reaches local and remote recipients while owner-private UI stays isolated;
+- one remote leave/reconnect does not retire or reset the remaining participants;
+- stopping the hosted adapter disconnects remotes but leaves the internal server/local player alive;
+- Single Player and Online remain physically free of the Complete-only local-host adapter;
+- dedicated server composition remains physically free of `Client.Local`.
+
 ## Direct-connect trust
 
 - first unpinned endpoint requires explicit TOFU or supplied fingerprint/invite;
@@ -2354,9 +2429,8 @@ F0.4  actor definitions/nameplates/Ctrl/chat presentation parity          CLOSED
         |
 F0.5  standard/preinstalled + cached/content-backed compiled UI closure   CLOSED
         |
-shared multi-participant authority
-      one Game/World authority + multiple independent application sessions
-      owning checkpoint to be reviewed/named before implementation         NEXT
+M0.0  shared multi-participant authority
+      dedicated A/B/C + Complete packet-free host A / remote B/C           CLOSED
         |
 remaining Concept Demo gameplay/presentation consumers
         |

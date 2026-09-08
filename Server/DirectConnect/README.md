@@ -1,17 +1,15 @@
 # Direct Connect identity gateway
 
 This executable hosts the accepted F0.3a deployment-trust/session transport and the
-F0.3b external Concept Demo application. After authenticated trust, one connection may
-submit a bounded guest identity, receive a server-issued control session, and use the
-real Game/Physics, public-world, Chat, Inventory, and informational-UI semantic paths.
+F0.3b external Concept Demo application. M0.0 now composes every authenticated connection as an
+independent guest/application/control lineage inside one bounded shared Game/World authority.
+Each guest uses the real Game/Physics, per-recipient public-world, Chat, owner-private Inventory,
+and informational-UI semantic paths. A disconnect retires only that participant; the remaining
+authority and guests continue, and reconnect creates fresh participant/control/public identity.
 
-F0.3b deliberately admits one external participant. The Game runtime stays on the
-existing Hosted connection-owner thread; shared multi-participant world ownership is a
-later checkpoint rather than one runtime being silently constructed per player.
-Client F0.5 now closes compiled-UI source convergence, so that shared-authority composition is the
-next major cross-cutting checkpoint. It will replace this one-participant
-development limitation without changing endpoint, Network connection, application session,
-participant, and control-session identity into one shared concept.
+The default development profile admits at most eight simultaneous participants. That is a bounded
+functional profile, not a production-capacity claim. Endpoint, Network connection, application
+session, participant, control session, and generational public entity remain separate identities.
 
 A0.3 adds an optional immutable content authorization to the same application factory. When
 configured, it publishes the bounded requirement after authenticated realm/session identity and
@@ -23,6 +21,11 @@ outside Game/Network progression and knows no realm, manifest, or package semant
 composes the development executable with one canonical Concept Demo deployment package containing
 the complete WorldPack and standard Inventory UI definition. The authority publishes the exact
 authenticated requirement while the separate HTTP host only serves its immutable `.uspkg` bytes.
+
+Shared deployment content and profile definitions live in `Server/ConceptDemo`, which has no
+`Client.Local` dependency. The Complete-only adapter in `Server/ConceptDemo.LocalHost` reuses those
+definitions while borrowing an existing internal server; this dedicated executable never carries
+the local-client authority bridge.
 
 Run the development endpoint with:
 

@@ -35,6 +35,7 @@ public sealed class LocalPlayableSession : IDisposable
     private readonly BoundWorldPack _boundWorld;
     private readonly bool _conceptDemo;
     private readonly GameGuestAdmissionRequest _guestAdmission;
+    private readonly ILocalPlayableServerExtensionFactory? _serverExtensionFactory;
     private readonly string _saveRoot;
     private readonly LocalPlayableSessionLimits _limits;
     private readonly BoundedSpscQueue<LocalPlayableCommand> _commands;
@@ -49,6 +50,9 @@ public sealed class LocalPlayableSession : IDisposable
     private readonly GameControlSessionEpoch _controlSession;
     private readonly ulong _applicationSessionEpoch;
     private LocalPlayableAuthorityView _latestView;
+    private readonly ClientPublicPresentationMetadata[] _latestPublicPresentation =
+        new ClientPublicPresentationMetadata[64];
+    private int _latestPublicPresentationCount;
     private Exception? _fault;
     private volatile bool _stopRequested;
     private volatile bool _disposed;
@@ -86,10 +90,12 @@ public sealed class LocalPlayableSession : IDisposable
     public static LocalPlayableSession CreateConceptDemo(
         string saveRoot,
         in GameGuestAdmissionRequest guestAdmission,
-        LocalPlayableSessionLimits limits = default)
+        LocalPlayableSessionLimits limits = default,
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
     {
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
-        return Create(pack, saveRoot, guestAdmission, limits, conceptDemo: true);
+        return Create(
+            pack, saveRoot, guestAdmission, limits, conceptDemo: true, serverExtensionFactory);
     }
 
     private static LocalPlayableSession Create(
@@ -97,7 +103,8 @@ public sealed class LocalPlayableSession : IDisposable
         string saveRoot,
         in GameGuestAdmissionRequest guestAdmission,
         LocalPlayableSessionLimits limits,
-        bool conceptDemo)
+        bool conceptDemo,
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
     {
         var binding = new WorldContentBinding(
             GameContent.WorldFingerprint,
@@ -119,7 +126,7 @@ public sealed class LocalPlayableSession : IDisposable
         if (!pack.TryBind(binding, out BoundWorldPack? bound, out WorldPackBindingError error))
             throw new InvalidOperationException($"The playable WorldPack did not bind: {error}.");
         return new LocalPlayableSession(
-            pack, bound!, saveRoot, guestAdmission, limits, conceptDemo);
+            pack, bound!, saveRoot, guestAdmission, limits, conceptDemo, serverExtensionFactory);
     }
 
     public LocalPlayableSession(
@@ -128,12 +135,14 @@ public sealed class LocalPlayableSession : IDisposable
         string saveRoot,
         GameGuestAdmissionRequest guestAdmission,
         LocalPlayableSessionLimits limits = default,
-        bool conceptDemo = false)
+        bool conceptDemo = false,
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
     {
         _worldPack = worldPack ?? throw new ArgumentNullException(nameof(worldPack));
         _boundWorld = boundWorld ?? throw new ArgumentNullException(nameof(boundWorld));
         _conceptDemo = conceptDemo;
         _guestAdmission = guestAdmission;
+        _serverExtensionFactory = serverExtensionFactory;
         ArgumentException.ThrowIfNullOrWhiteSpace(saveRoot);
         if (worldPack.Fingerprint != boundWorld.Fingerprint)
             throw new ArgumentException("The bound world does not belong to the supplied WorldPack.", nameof(boundWorld));
@@ -221,6 +230,14 @@ public sealed class LocalPlayableSession : IDisposable
         TryRequestAdministrative(new LocalAdministrativeRequest(
             sequence, LocalAdministrativeOperationKind.OpenInventory, default));
 
+    public bool TryRequestHosting(ulong sequence, bool enabled) =>
+        TryRequestAdministrative(new LocalAdministrativeRequest(
+            sequence,
+            enabled
+                ? LocalAdministrativeOperationKind.EnableHosting
+                : LocalAdministrativeOperationKind.DisableHosting,
+            default));
+
     public int PumpWorld(ClientWorldSemanticCache cache, int maximumDeliveries = 64)
     {
         EnsureOperational();
@@ -230,6 +247,18 @@ public sealed class LocalPlayableSession : IDisposable
         while (count < maximumDeliveries && _worldChannel.TryApplyNext(cache, out _)) count++;
         if (count != 0) _wake.Set();
         return count;
+    }
+
+    public int CopyPublicPresentationMetadata(
+        Span<ClientPublicPresentationMetadata> destination)
+    {
+        EnsureOperational();
+        lock (_viewGate)
+        {
+            if (destination.Length < _latestPublicPresentationCount) return -1;
+            _latestPublicPresentation.AsSpan(0, _latestPublicPresentationCount).CopyTo(destination);
+            return _latestPublicPresentationCount;
+        }
     }
 
     public int PumpChat(ClientChatState chat, int maximumDeliveries = 32)
@@ -348,10 +377,15 @@ public sealed class LocalPlayableSession : IDisposable
         LocalQueuedUiSemanticPort? ui = null;
         InventoryUiController? inventoryUi = null;
         InformationalSignUiController? signUi = null;
+        ILocalPlayableServerExtension? serverExtension = null;
         try
         {
+            GameRuntimeProfile runtimeProfile = _serverExtensionFactory is null
+                ? GameRuntimeProfile.Local
+                : GameRuntimeProfile.Networked;
             var composition = new UltraSimGameComposition(
                 new InventoryLimits(32, 128, 32),
+                runtimeProfile: runtimeProfile,
                 baseWorldPack: _worldPack);
             runtime = new ServerRuntime(
                 composition,
@@ -359,7 +393,8 @@ public sealed class LocalPlayableSession : IDisposable
                     UltraSimGameComposition.CreateWorldOptions(
                         128,
                         new PersistenceIdentityOptions(new PersistentWorldId(
-                            _conceptDemo ? 0x80_D000UL : 0x80_4010UL))),
+                            _conceptDemo ? 0x80_D000UL : 0x80_4010UL)),
+                        runtimeProfile),
                     WorldClockOptions.Default));
             runtime.Initialize();
             runtime.Start();
@@ -373,12 +408,24 @@ public sealed class LocalPlayableSession : IDisposable
                 throw new InvalidOperationException(
                     "Authoritative Admission did not retain the accepted guest identity.");
             bool conceptDemo = _conceptDemo;
-            if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
-                    (world, _, game) => conceptDemo
-                        ? GamePlayableWorld.PopulateConceptDemo(world, game, entered.Entity)
-                        : GamePlayableWorld.Populate(world, game, entered.Entity),
-                    out GamePlayableWorldEntities entities))
+            if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, LocalPopulation>(
+                    (world, _, game) =>
+                    {
+                        if (!conceptDemo)
+                            return new LocalPopulation(
+                                default, default,
+                                GamePlayableWorld.Populate(world, game, entered.Entity));
+                        GamePlayableWorldScene scene =
+                            GamePlayableWorld.PopulateSharedConceptDemoScene(world, game);
+                        GamePlayableParticipantEntities participant =
+                            GamePlayableWorld.PopulateSharedParticipant(
+                                world, game, entered.Entity, GamePlayableWorld.PlayerStart);
+                        return new LocalPopulation(
+                            scene, participant, ComposePlayableEntities(scene, participant));
+                    },
+                    out LocalPopulation population))
                 throw new InvalidOperationException("The local playable world could not populate.");
+            GamePlayableWorldEntities entities = population.Entities;
             runtime.Tick();
 
             GameChatLimits chatLimits = GameChatLimits.Default with
@@ -397,11 +444,43 @@ public sealed class LocalPlayableSession : IDisposable
                 new SaveSetCoordinator(_saveRoot));
             OfflineDirectChunkRecipient recipient = CreateRecipient();
             BindControl(runtime, entities);
+            if (_serverExtensionFactory is not null)
+            {
+                WorldPublicEntityId localPublic = default;
+                if (!conceptDemo || !population.Scene.IsValid || !population.Participant.IsValid ||
+                    !runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                        WorldPublicEntityId>(
+                        (world, _, game) =>
+                        {
+                            Entity player = Resolve(world, population.Participant.PlayerId);
+                            return game.WorldState.Publications.TryGetPublicEntityId(
+                                player, out WorldPublicEntityId publicId)
+                                    ? publicId
+                                    : default;
+                        }, out localPublic) || !localPublic.IsValid)
+                    throw new InvalidOperationException(
+                        "The hosted local participant could not bind its shared public identity.");
+                serverExtension = _serverExtensionFactory.Create(new LocalPlayableServerContext(
+                    Path.Combine(_saveRoot, "hosting"),
+                    _worldPack,
+                    composition,
+                    runtime,
+                    admission,
+                    chat,
+                    population.Scene,
+                    entered.Participant,
+                    entered.GuestIdentity,
+                    _controlSession,
+                    population.Participant,
+                    localPublic,
+                    _chatChannel));
+            }
 
             var worldPump = new WorldPumpState();
             var recipients = new ParticipantId[chatLimits.MaximumRecipientsPerSpeech];
             var snapshotScratch = new WorldPublicRecord[MaximumPublicationRecords];
             var deltaScratch = new WorldPublicDeltaRecord[MaximumPublicationRecords];
+            var publicPresentationScratch = new ClientPublicPresentationMetadata[64];
             ulong observedGeneration = runtime.ActiveGenerationId;
             ulong lastChatSubmission = 0;
             ulong lastAdministrative = 0;
@@ -416,7 +495,10 @@ public sealed class LocalPlayableSession : IDisposable
 
             CaptureView(runtime, entities, entered.GuestIdentity,
                 lastCommandSequence, lastSelection, lastCommand, lastChest,
-                lastAdmin, lastAdminSucceeded, lastAdminMessage);
+                lastAdmin, lastAdminSucceeded, lastAdminMessage,
+                serverExtension?.GetSnapshot() ?? default,
+                serverExtension,
+                publicPresentationScratch);
             _running = true;
             _ready.Set();
 
@@ -437,6 +519,7 @@ public sealed class LocalPlayableSession : IDisposable
                 if (now - nextTick > interval * 4) nextTick = now + interval;
 
                 ui.Pump();
+                serverExtension?.Pump();
                 ProcessWorldProofs(ref recipient);
                 ProcessChatProofs();
                 ProcessCommands(
@@ -448,7 +531,7 @@ public sealed class LocalPlayableSession : IDisposable
                     ref lastCommand,
                     ref lastChest);
                 ProcessAdministrative(
-                    runtime, persistence, inventoryUi, entities,
+                    runtime, persistence, inventoryUi, entities, serverExtension,
                     ref lastAdministrative, ref lastAdminSucceeded, ref lastAdminMessage,
                     ref lastAdmin, ref saveSequence);
                 ProcessChatSubmissions(runtime, chat, entered.Participant, ref lastChatSubmission);
@@ -464,14 +547,24 @@ public sealed class LocalPlayableSession : IDisposable
                     BindControl(runtime, entities);
                 }
 
-                DriveChat(chat, entered.Participant, recipients);
+                if (serverExtension?.OwnsSharedChatHandoff != true)
+                    DriveChat(chat, entered.Participant, recipients);
+                serverExtension?.Pump();
                 DriveWorld(
                     runtime, entities, recipient, worldPump, snapshotScratch, deltaScratch);
                 CaptureView(runtime, entities, entered.GuestIdentity,
                     lastCommandSequence, lastSelection, lastCommand, lastChest,
-                    lastAdmin, lastAdminSucceeded, lastAdminMessage);
+                    lastAdmin, lastAdminSucceeded, lastAdminMessage,
+                    serverExtension?.GetSnapshot() ?? default,
+                    serverExtension,
+                    publicPresentationScratch);
             }
 
+            // Remote applications borrow this running authority. Retire the optional hosted
+            // adapter before stopping the internal server so terminal per-participant cleanup can
+            // end control and destroy its Game-owned entities on the still-valid generation.
+            serverExtension?.Dispose();
+            serverExtension = null;
             runtime.Stop();
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -482,6 +575,7 @@ public sealed class LocalPlayableSession : IDisposable
         finally
         {
             _running = false;
+            serverExtension?.Dispose();
             signUi?.Dispose();
             inventoryUi?.Dispose();
             ui?.Dispose();
@@ -579,6 +673,7 @@ public sealed class LocalPlayableSession : IDisposable
         GameRuntimePersistence persistence,
         InventoryUiController inventoryUi,
         GamePlayableWorldEntities entities,
+        ILocalPlayableServerExtension? serverExtension,
         ref ulong lastAcceptedSequence,
         ref bool lastSucceeded,
         ref string? lastMessage,
@@ -641,6 +736,17 @@ public sealed class LocalPlayableSession : IDisposable
                         : default;
                     lastSucceeded = ran && opened.Succeeded;
                     lastMessage = opened.Message;
+                    break;
+                }
+                case LocalAdministrativeOperationKind.EnableHosting:
+                case LocalAdministrativeOperationKind.DisableHosting:
+                {
+                    bool enable = request.Kind == LocalAdministrativeOperationKind.EnableHosting;
+                    lastSucceeded = serverExtension?.TrySetHostingEnabled(
+                        enable, out lastMessage) == true;
+                    lastMessage ??= serverExtension is null
+                        ? "This client composition has no internal-server hosting adapter."
+                        : enable ? "Hosting could not start." : "Hosting could not stop.";
                     break;
                 }
             }
@@ -837,7 +943,10 @@ public sealed class LocalPlayableSession : IDisposable
         GameWorldActionStatus lastChest,
         LocalAdministrativeRequest lastAdministrative,
         bool lastAdministrativeSucceeded,
-        string? lastAdministrativeMessage)
+        string? lastAdministrativeMessage,
+        LocalPlayableServerExtensionSnapshot serverExtension,
+        ILocalPlayableServerExtension? extension,
+        ClientPublicPresentationMetadata[] publicPresentationScratch)
     {
         if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, LocalPlayableAuthorityView>(
                 (world, generationId, game) =>
@@ -872,10 +981,28 @@ public sealed class LocalPlayableSession : IDisposable
                         lastAdministrative.Kind,
                         lastAdministrativeSucceeded,
                         lastAdministrativeMessage,
+                        serverExtension,
                         prepared);
                 }, out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The local owner/private view could not be captured.");
-        lock (_viewGate) _latestView = view;
+        int publicPresentationCount = extension?.CopyPublicPresentationMetadata(
+            publicPresentationScratch) ?? 0;
+        if (publicPresentationCount < 0 ||
+            publicPresentationCount > _latestPublicPresentation.Length)
+            throw new InvalidOperationException(
+                "The local shared public-presentation snapshot exceeded capacity.");
+        lock (_viewGate)
+        {
+            _latestView = view;
+            publicPresentationScratch.AsSpan(0, publicPresentationCount)
+                .CopyTo(_latestPublicPresentation);
+            if (publicPresentationCount < _latestPublicPresentationCount)
+                Array.Clear(
+                    _latestPublicPresentation,
+                    publicPresentationCount,
+                    _latestPublicPresentationCount - publicPresentationCount);
+            _latestPublicPresentationCount = publicPresentationCount;
+        }
     }
 
     private void BindControl(ServerRuntime runtime, GamePlayableWorldEntities entities)
@@ -915,6 +1042,32 @@ public sealed class LocalPlayableSession : IDisposable
         world.TryResolvePersistentEntity(id, out Entity entity)
             ? entity
             : throw new InvalidOperationException($"Persistent entity {id} was unavailable.");
+
+    private static GamePlayableWorldEntities ComposePlayableEntities(
+        in GamePlayableWorldScene scene,
+        in GamePlayableParticipantEntities participant) => new(
+        participant.Player,
+        participant.Backpack,
+        scene.CabinDoor,
+        scene.CabinChest,
+        scene.WoodlandAnimal,
+        participant.Bread,
+        participant.PlayerId,
+        participant.BackpackId,
+        scene.CabinDoorId,
+        scene.CabinChestId,
+        scene.WoodlandAnimalId,
+        participant.BreadId,
+        scene.SkyTelepad,
+        scene.SkyTelepadId,
+        scene.CentralFarGate,
+        scene.CentralFarGateId,
+        scene.FarReturnGate,
+        scene.FarReturnGateId,
+        scene.WelcomeSign,
+        scene.WelcomeSignId,
+        scene.FallbackLabSign,
+        scene.FallbackLabSignId);
 
     private static Entity ResolveNearestFarGate(
         EcsWorld world,
@@ -968,6 +1121,11 @@ public sealed class LocalPlayableSession : IDisposable
     private readonly record struct CommandOutcome(
         GamePlayerCommandResult Result,
         GameWorldActionStatus Chest);
+
+    private readonly record struct LocalPopulation(
+        GamePlayableWorldScene Scene,
+        GamePlayableParticipantEntities Participant,
+        GamePlayableWorldEntities Entities);
 
     private readonly record struct InventoryOpenEntities(Entity Backpack, Entity Player, Entity Chest);
 

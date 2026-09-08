@@ -18,6 +18,15 @@ public interface IHostedUdpSessionApplication : IDisposable
 }
 
 /// <summary>
+/// Optional caller-owned application lifetime signal. A validated application detach may request
+/// retirement of its own hosted transport without waiting for the unrelated idle timeout.
+/// </summary>
+public interface IHostedUdpSessionApplicationLifetime
+{
+    bool RetirementRequested { get; }
+}
+
+/// <summary>
 /// Cold factory invoked on the selected connection-owner thread after the secure
 /// peer exists and before terminal handshake success is published.
 /// </summary>

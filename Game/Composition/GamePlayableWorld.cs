@@ -34,6 +34,45 @@ public readonly record struct GamePlayableWorldEntities(
     Entity FallbackLabSign,
     PersistentEntityId FallbackLabSignId);
 
+/// <summary>
+/// Shared authoritative Concept Demo structure created once per Game generation. These identities
+/// belong to the world, not to any participant/application session.
+/// </summary>
+public readonly record struct GamePlayableWorldScene(
+    Entity CabinDoor,
+    Entity CabinChest,
+    Entity WoodlandAnimal,
+    Entity SkyTelepad,
+    Entity CentralFarGate,
+    Entity FarReturnGate,
+    Entity WelcomeSign,
+    Entity FallbackLabSign,
+    PersistentEntityId CabinDoorId,
+    PersistentEntityId CabinChestId,
+    PersistentEntityId WoodlandAnimalId,
+    PersistentEntityId SkyTelepadId,
+    PersistentEntityId CentralFarGateId,
+    PersistentEntityId FarReturnGateId,
+    PersistentEntityId WelcomeSignId,
+    PersistentEntityId FallbackLabSignId)
+{
+    public bool IsValid => CabinDoorId.IsValid && CabinChestId.IsValid &&
+        WoodlandAnimalId.IsValid && SkyTelepadId.IsValid && CentralFarGateId.IsValid &&
+        FarReturnGateId.IsValid && WelcomeSignId.IsValid && FallbackLabSignId.IsValid;
+}
+
+/// <summary>Participant-owned playable/inventory identities inside one shared Game generation.</summary>
+public readonly record struct GamePlayableParticipantEntities(
+    Entity Player,
+    Entity Backpack,
+    Entity Bread,
+    PersistentEntityId PlayerId,
+    PersistentEntityId BackpackId,
+    PersistentEntityId BreadId)
+{
+    public bool IsValid => PlayerId.IsValid && BackpackId.IsValid && BreadId.IsValid;
+}
+
 /// <summary>Concrete authoritative action outcomes for the first playable vertical.</summary>
 public enum GameWorldActionStatus : byte
 {
@@ -1514,6 +1553,75 @@ public static class GamePlayableWorld
                 AddWoodsStatics(builder, chunkX, chunkZ, conceptDemo, authoredOrdinal++);
             }
         }
+    }
+
+    /// <summary>Creates the shared Concept Demo objects exactly once for a multi-participant world.</summary>
+    public static GamePlayableWorldScene PopulateSharedConceptDemoScene(
+        EcsWorld world,
+        IGameGenerationStateProvider game)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentNullException.ThrowIfNull(game);
+        if (!world.TryInstantiate(game.Content.CabinDoor, out Entity door) ||
+            !game.WorldState.TrySetPosition(world, door, DoorPosition))
+            throw new InvalidOperationException("The shared cabin door could not be created.");
+        int chestCapacity = Math.Min(64, game.Inventory.Limits.MaximumItemsPerContainer);
+        if (!game.Inventory.TryCreateContainer(world, game.Content.WorldChest, chestCapacity, out Entity chest) ||
+            !game.WorldState.TrySetPosition(world, chest, ChestPosition))
+            throw new InvalidOperationException("The shared cabin chest could not be created.");
+        if (!world.TryInstantiate(game.Content.WoodlandAnimal, out Entity animal) ||
+            !game.WorldState.TrySetPosition(world, animal, AnimalPosition))
+            throw new InvalidOperationException("The shared woodland actor could not be created.");
+        if (!world.TryInstantiate(game.Content.SkyTelepad, out Entity telepad) ||
+            !game.WorldState.TrySetPosition(world, telepad, SkyTelepadPosition))
+            throw new InvalidOperationException("The shared Sky Island telepad could not be created.");
+        if (!world.TryInstantiate(game.Content.FarGate, out Entity centralGate) ||
+            !game.WorldState.TrySetPosition(world, centralGate, CentralFarGatePosition) ||
+            !world.TryInstantiate(game.Content.FarGate, out Entity returnGate) ||
+            !game.WorldState.TrySetPosition(world, returnGate, FarReturnGatePosition))
+            throw new InvalidOperationException("The shared Far Gate pair could not be created.");
+        if (!world.TryInstantiate(game.Content.InformationalSign, out Entity welcomeSign) ||
+            !game.WorldState.TrySetPosition(world, welcomeSign, WelcomeSignPosition) ||
+            !world.TryInstantiate(game.Content.InformationalSign, out Entity fallbackLabSign) ||
+            !game.WorldState.TrySetPosition(world, fallbackLabSign, FallbackLabSignPosition))
+            throw new InvalidOperationException("The shared informational signs could not be created.");
+
+        game.WorldActions.RegisterPlayableDynamicBlocker(world, game.WorldState, door);
+        game.WorldActions.RegisterPlayableDynamicBlocker(world, game.WorldState, chest);
+        return new GamePlayableWorldScene(
+            door, chest, animal, telepad, centralGate, returnGate, welcomeSign, fallbackLabSign,
+            world.GetOrAssignPersistentId(door),
+            world.GetOrAssignPersistentId(chest),
+            world.GetOrAssignPersistentId(animal),
+            world.GetOrAssignPersistentId(telepad),
+            world.GetOrAssignPersistentId(centralGate),
+            world.GetOrAssignPersistentId(returnGate),
+            world.GetOrAssignPersistentId(welcomeSign),
+            world.GetOrAssignPersistentId(fallbackLabSign));
+    }
+
+    /// <summary>Adds one participant-owned playable and inventory to an existing shared scene.</summary>
+    public static GamePlayableParticipantEntities PopulateSharedParticipant(
+        EcsWorld world,
+        IGameGenerationStateProvider game,
+        Entity player,
+        in WorldPosition start)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        ArgumentNullException.ThrowIfNull(game);
+        if (!world.IsAlive(player) || !game.WorldState.TrySetPosition(world, player, start))
+            throw new InvalidOperationException("The shared playable could not enter the world.");
+        if (!game.Inventory.TryCreateOwnedContainer(
+                world, game.Content.Backpack, player, 8, out Entity backpack) ||
+            !game.Inventory.TryCreateItem(world, backpack, game.Content.Bread, 3, out Entity bread))
+            throw new InvalidOperationException("The shared playable inventory could not be created.");
+        return new GamePlayableParticipantEntities(
+            player,
+            backpack,
+            bread,
+            world.GetOrAssignPersistentId(player),
+            world.GetOrAssignPersistentId(backpack),
+            world.GetOrAssignPersistentId(bread));
     }
 
     public static GamePlayableWorldEntities Populate(

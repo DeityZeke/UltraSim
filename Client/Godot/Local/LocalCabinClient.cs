@@ -104,6 +104,7 @@ public partial class LocalCabinClient : Node3D
     private ResolvedClientSettings? _settings;
     private CabinCatalogAssetResolver? _assetResolver;
     private LocalPlayableSession? _localSession;
+    private ILocalPlayableServerExtensionFactory? _serverExtensionFactory;
     private BoundWorldPack? _boundWorld;
     private ClientWorldSemanticCache? _cache;
     private ClientStructuralResidency? _residency;
@@ -120,6 +121,11 @@ public partial class LocalCabinClient : Node3D
     private ClientActorPresentationChange[] _actorChanges = [];
     private readonly ClientActorPresentationRecord[] _actorRows =
         new ClientActorPresentationRecord[64];
+    private readonly ClientPublicPresentationMetadata[] _sharedMetadata =
+        new ClientPublicPresentationMetadata[64];
+    private readonly ClientPublicPresentationMetadata[] _previousSharedMetadata =
+        new ClientPublicPresentationMetadata[64];
+    private int _previousSharedMetadataCount;
     private ClientPublicPresentationMetadataState? _publicPresentationMetadata;
     private ClientActorPresentationState? _actorState;
     private GodotActorPresenter? _actorPresenter;
@@ -183,7 +189,8 @@ public partial class LocalCabinClient : Node3D
         CabinHumanBody humanBody = CabinHumanBody.XBot,
         ResolvedClientSettings? settings = null,
         bool useConceptDemoWorld = false,
-        string? guestDisplayName = null)
+        string? guestDisplayName = null,
+        ILocalPlayableServerExtensionFactory? serverExtensionFactory = null)
     {
         ArgumentNullException.ThrowIfNull(contentOracle);
         ArgumentNullException.ThrowIfNull(resolvedContent);
@@ -206,6 +213,7 @@ public partial class LocalCabinClient : Node3D
                 ? "Human Female"
                 : "Human Male"));
         _useConceptDemoWorld = useConceptDemoWorld;
+        _serverExtensionFactory = serverExtensionFactory;
         _settings = settings ?? ClientSettingsResolver.Resolve(ClientSettingsDocument.Empty);
     }
 
@@ -234,6 +242,26 @@ public partial class LocalCabinClient : Node3D
                 $"({residency.SemanticResidentChunks} resident / {render.ActiveRenderChunks} rendered)";
             UpdateHud();
         }
+    }
+
+    public LocalPlayableServerExtensionSnapshot GetHostingSnapshot()
+    {
+        if (_localSession is null ||
+            !_localSession.TryGetLatestView(out LocalPlayableAuthorityView view))
+            return default;
+        return view.ServerExtension;
+    }
+
+    public bool TrySetHostingEnabled(bool enabled)
+    {
+        if (_localSession is null) return false;
+        ulong request = _nextAdministrativeRequest++;
+        bool queued = _localSession.TryRequestHosting(request, enabled);
+        _lastOutcome = queued
+            ? enabled ? "Starting remote hosting…" : "Stopping remote hosting…"
+            : "Hosting request queue busy";
+        UpdateHud();
+        return queued;
     }
 
     public LocalCabinPresentationSnapshot GetPresentationSnapshot()
@@ -694,7 +722,8 @@ public partial class LocalCabinClient : Node3D
         if (_saveRoot is null || _resolvedContent is null || _contentOracle is null)
             throw new InvalidOperationException("Cabin composition was not configured.");
         _localSession = _useConceptDemoWorld
-            ? LocalPlayableSession.CreateConceptDemo(_saveRoot, _guestAdmission)
+            ? LocalPlayableSession.CreateConceptDemo(
+                _saveRoot, _guestAdmission, serverExtensionFactory: _serverExtensionFactory)
             : LocalPlayableSession.CreateCabin(_saveRoot, _guestAdmission);
         _localSession.WaitUntilReady(TimeSpan.FromSeconds(10));
         // Command sequencing belongs to the application/control-session lineage. Presentation
@@ -717,7 +746,10 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The authority published no guest display name.");
         _publicPresentationMetadata = new ClientPublicPresentationMetadataState(64);
         _publicPresentationMetadata.ResetServerGeneration(view.GenerationId);
-        ApplyControlledActorMetadata(in view);
+        if (view.ServerExtension.Available)
+            SynchronizeSharedPublicPresentationMetadata();
+        else
+            ApplyControlledActorMetadata(in view);
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
         _actorPresenter = new GodotActorPresenter(
@@ -1115,7 +1147,11 @@ public partial class LocalCabinClient : Node3D
         if (_publicPresentationMetadata?.GetSnapshot().ServerGenerationId != view.GenerationId)
         {
             _publicPresentationMetadata?.ResetServerGeneration(view.GenerationId);
-            ApplyControlledActorMetadata(in view);
+            _previousSharedMetadataCount = 0;
+            if (view.ServerExtension.Available)
+                SynchronizeSharedPublicPresentationMetadata();
+            else
+                ApplyControlledActorMetadata(in view);
         }
         _actorPresenter?.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
@@ -1140,6 +1176,56 @@ public partial class LocalCabinClient : Node3D
         if (applied is not (ClientPublicPresentationApplyStatus.Applied or
                 ClientPublicPresentationApplyStatus.Duplicate))
             throw new InvalidOperationException($"Controlled actor metadata was rejected: {applied}.");
+    }
+
+    private void SynchronizeSharedPublicPresentationMetadata()
+    {
+        if (_localSession is null || _publicPresentationMetadata is null) return;
+        int count = _localSession.CopyPublicPresentationMetadata(_sharedMetadata);
+        if (count < 0)
+            throw new InvalidOperationException(
+                "The shared participant metadata exceeded the local presentation capacity.");
+        for (int previous = 0; previous < _previousSharedMetadataCount; previous++)
+        {
+            ClientPublicPresentationMetadata old = _previousSharedMetadata[previous];
+            bool retained = false;
+            for (int current = 0; current < count; current++)
+            {
+                if (_sharedMetadata[current].Id != old.Id) continue;
+                retained = true;
+                break;
+            }
+            if (retained) continue;
+            var removed = new ClientPublicPresentationMetadata(
+                old.ServerGenerationId,
+                old.Id,
+                checked(old.Revision + 1),
+                ClientPublicPresentationFlags.None,
+                string.Empty);
+            ClientPublicPresentationApplyStatus status = _publicPresentationMetadata.TryApply(
+                ClientPublicPresentationOperation.Remove, in removed);
+            if (status is not (ClientPublicPresentationApplyStatus.Applied or
+                    ClientPublicPresentationApplyStatus.Duplicate))
+                throw new InvalidOperationException(
+                    $"Retired participant metadata was rejected: {status}.");
+        }
+        for (int current = 0; current < count; current++)
+        {
+            ClientPublicPresentationMetadata metadata = _sharedMetadata[current];
+            ClientPublicPresentationApplyStatus status = _publicPresentationMetadata.TryApply(
+                ClientPublicPresentationOperation.Present, in metadata);
+            if (status is not (ClientPublicPresentationApplyStatus.Applied or
+                    ClientPublicPresentationApplyStatus.Duplicate))
+                throw new InvalidOperationException(
+                    $"Shared participant metadata was rejected: {status}.");
+        }
+        _sharedMetadata.AsSpan(0, count).CopyTo(_previousSharedMetadata);
+        if (count < _previousSharedMetadataCount)
+            Array.Clear(
+                _previousSharedMetadata,
+                count,
+                _previousSharedMetadataCount - count);
+        _previousSharedMetadataCount = count;
     }
 
     private void SynchronizeActorPresentation(in LocalPlayableAuthorityView view)
@@ -1365,6 +1451,8 @@ public partial class LocalCabinClient : Node3D
         QueueChangedPublicChunks();
         _player = view.PlayerPosition;
         ObserveAuthorityOutcomes(view);
+        if (view.ServerExtension.Available)
+            SynchronizeSharedPublicPresentationMetadata();
         TrackPresentation(reset: false);
         _renderer.ProcessFrame(GodotWorldFrameBudget.Default);
         SynchronizeActorPresentation(in view);

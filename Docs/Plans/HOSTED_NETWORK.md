@@ -391,10 +391,17 @@ New Hosted work must be earned by a concrete deployment requirement such as:
 - multi-host ownership/migration;
 - demonstrated listener/owner capacity or security pressure.
 
-The planned shared multi-participant Concept Demo authority after Client F0.5 is initially a
-consumer of the already-accepted shared listener/owner handoff. Multiple Game participants sharing
-one authority do not by themselves authorize a new Hosted checkpoint; only concrete transport,
-ownership, capacity, or security evidence may reopen this layer.
+M0.0 now consumes the already-accepted shared listener/owner handoff with three participants in two
+deployment shapes. The dedicated endpoint gives all participants ordinary Network sessions. The
+Complete-hosted endpoint uses the caller-owned host mode so the local internal-server owner thread
+continues to own its Game generation while the new listener progresses remote applications on that
+same thread. Enabling or stopping the listener does not replace the Game world, and the host player
+never moves onto a loopback Network session.
+
+This result closes shared-application consumption; it does not reopen H0.0-H0.5 or establish a new
+transport-capacity claim. Multiple Game participants sharing one authority do not by themselves
+authorize another Hosted checkpoint; only concrete transport, ownership, capacity, or security
+evidence may reopen this layer.
 
 Until then:
 

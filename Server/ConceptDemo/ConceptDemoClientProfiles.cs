@@ -1,8 +1,10 @@
 using UltraSim.Game.Protocol;
 
-internal static class ConceptDemoClientProfiles
+namespace UltraSim.Server.ConceptDemo;
+
+public static class ConceptDemoClientProfiles
 {
-    internal static RemoteClientProfileAdvertisement Create(string name)
+    public static RemoteClientProfileAdvertisement Create(string name)
     {
         bool orbit = string.Equals(name, "orbit", StringComparison.OrdinalIgnoreCase);
         bool direct = string.Equals(name, "third-person", StringComparison.OrdinalIgnoreCase);

@@ -124,6 +124,15 @@ the same local/remote `UiClientRuntime` path used by reopened cached and content
 definitions. Online gains that passive artifact without gaining Game UI/Inventory authority, and
 there is no second Godot UI implementation.
 
+M0.0 is closed. In the Complete edition, the in-session menu can enable or stop remote hosting on
+the already-running Concept Demo authority. The host remains on `Client.Local`; only remote guests
+use Network. The current development control binds loopback endpoints and displays the exact
+endpoint/fingerprint after activation. The permanent native gate launches Complete as Host Alice,
+joins two separately running inspected exported Online clients, requires all three humans to use
+the normal actor presenter, then observes both remote detaches and stops hosting without replacing
+the local Game generation. Single Player and Online do not compile the Complete-only local-host
+adapter.
+
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a
 magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby

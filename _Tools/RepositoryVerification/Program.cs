@@ -188,6 +188,9 @@ foreach (string configuration in configurations)
                 VerifyContentlessOnlineNative(
                     root, configuration, product.Executable,
                     ["--headless", "--"]);
+                BuildClientApplication(root, configuration, "Complete");
+                VerifyEmbeddedCompleteHostedNative(
+                    root, product.Executable, godot);
                 contentlessOnlineVerified = true;
             }
             finally
@@ -236,7 +239,8 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Game.Composition", "UltraSim.Game.Replication",
                 "UltraSim.Server.Runtime"],
             ["UltraSim.Client.Network", "UltraSim.Network", "UltraSim.Game.Protocol",
-                "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting"]),
+                "UltraSim.Game.Replication.Remote", "UltraSim.Server.Hosting",
+                "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"]),
         new(
             "Online",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.Content", "UltraSim.Client.Network",
@@ -245,13 +249,15 @@ static void VerifyClientCompositionArtifacts(string root, string configuration)
                 "UltraSim.Game.Composition", "UltraSim.Game.Inventory", "UltraSim.Game.Persistence",
                 "UltraSim.Game.Replication",
                 "UltraSim.Game.Replication.Remote", "UltraSim.Game.UI", "UltraSim.Server.Hosting",
-                "UltraSim.Server.Persistence", "UltraSim.Server.Runtime"]),
+                "UltraSim.Server.Persistence", "UltraSim.Server.Runtime",
+                "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"]),
         new(
             "Complete",
             ["UltraSim.Client.Application.Godot", "UltraSim.Client.BuiltInTestWorlds",
                 "UltraSim.Client.Local", "UltraSim.Client.StandardUi",
                 "UltraSim.Client.Network", "UltraSim.Game.Composition", "UltraSim.Game.Protocol",
-                "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime"],
+                "UltraSim.Game.Replication", "UltraSim.Network", "UltraSim.Server.Runtime",
+                "UltraSim.Server.ConceptDemo", "UltraSim.Server.ConceptDemo.LocalHost"],
             []),
     ];
 
@@ -608,6 +614,150 @@ static void VerifyContentlessOnlineNative(
     Directory.Delete(scope, recursive: true);
 }
 
+static void VerifyEmbeddedCompleteHostedNative(
+    string root,
+    string onlineExecutable,
+    string godot)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "m0.0-complete-host");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string readyFile = Path.Combine(scope, "host-ready.json");
+    int gameplayPort = ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp);
+    int contentPort = ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp);
+    var start = new ProcessStartInfo(godot)
+    {
+        WorkingDirectory = root,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+    };
+    foreach (string argument in new[]
+    {
+        "--headless", "--path", "Client/Godot", "--",
+        "--m0-0-host-smoke", "--expect-edition=Complete",
+        $"--m0-0-gameplay-port={gameplayPort}",
+        $"--m0-0-content-port={contentPort}",
+        $"--m0-0-ready={readyFile}",
+    }) start.ArgumentList.Add(argument);
+    Console.WriteLine($"> {godot} {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    using Process host = Process.Start(start) ??
+        throw new InvalidOperationException("Unable to start the Complete embedded host.");
+    Task<string> hostStandardOutput = host.StandardOutput.ReadToEndAsync();
+    Task<string> hostStandardError = host.StandardError.ReadToEndAsync();
+    try
+    {
+        long readyDeadline = Environment.TickCount64 + 30_000;
+        while (!File.Exists(readyFile) && Environment.TickCount64 < readyDeadline)
+        {
+            if (host.HasExited)
+                throw new InvalidOperationException(
+                    $"The Complete host exited before readiness with code {host.ExitCode}:\n" +
+                    hostStandardOutput.GetAwaiter().GetResult() +
+                    hostStandardError.GetAwaiter().GetResult());
+            Thread.Sleep(10);
+        }
+        if (!File.Exists(readyFile))
+            throw new TimeoutException("The Complete host did not publish readiness in 30 seconds.");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(readyFile));
+        string endpoint = RequiredString(document.RootElement, "Endpoint");
+        string fingerprint = RequiredString(document.RootElement, "Fingerprint");
+        ulong generation = document.RootElement.GetProperty("Generation").GetUInt64();
+        string release = Path.Combine(scope, "clients-release");
+        string bobReady = Path.Combine(scope, "bob", "ready");
+        string carolReady = Path.Combine(scope, "carol", "ready");
+
+        Task<string> bob = Task.Run(() => RunCaptured(
+            root, onlineExecutable,
+            NativeSharedClientArguments(
+                scope, "bob", endpoint, fingerprint, bobReady, release), 120_000));
+        Task<string> carol = Task.Run(() => RunCaptured(
+            root, onlineExecutable,
+            NativeSharedClientArguments(
+                scope, "carol", endpoint, fingerprint, carolReady, release), 120_000));
+        long clientReadyDeadline = Environment.TickCount64 + 90_000;
+        while ((!File.Exists(bobReady) || !File.Exists(carolReady)) &&
+               Environment.TickCount64 < clientReadyDeadline)
+        {
+            if (host.HasExited)
+                throw new InvalidOperationException(
+                    "The Complete host exited before both remote clients reached the barrier.");
+            if (bob.IsFaulted || carol.IsFaulted)
+                throw new InvalidOperationException(
+                    "An exported Online client failed before the shared-ready barrier.",
+                    bob.Exception ?? carol.Exception);
+            Thread.Sleep(10);
+        }
+        if (!File.Exists(bobReady) || !File.Exists(carolReady))
+            throw new TimeoutException(
+                "Both exported Online clients did not concurrently reach shared presentation.");
+        File.WriteAllText(release, "release" + Environment.NewLine);
+        string bobOutput = bob.GetAwaiter().GetResult();
+        string carolOutput = carol.GetAwaiter().GetResult();
+        RequireNativeA08Result(
+            bobOutput, "cold", worldPackFingerprint: string.Empty,
+            expectedWarm: false, expectedRememberedProfile: false,
+            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow",
+            requireWorldFingerprint: false);
+        RequireNativeA08Result(
+            carolOutput, "cold", worldPackFingerprint: string.Empty,
+            expectedWarm: false, expectedRememberedProfile: false,
+            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow",
+            requireWorldFingerprint: false);
+        // Three humans plus the existing woodland animal must be concurrently presented.
+        if (!bobOutput.Contains("actors=4", StringComparison.Ordinal) ||
+            !carolOutput.Contains("actors=4", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "The two Online clients did not simultaneously realize all three shared actors.");
+
+        if (!host.WaitForExit(30_000))
+            throw new TimeoutException(
+                "The Complete host did not observe both clean remote detachments.");
+        string hostOutput = hostStandardOutput.GetAwaiter().GetResult() +
+            hostStandardError.GetAwaiter().GetResult();
+        Console.Write(hostOutput);
+        if (host.ExitCode != 0 ||
+            !hostOutput.Contains("M0.0 COMPLETE HOST PASS", StringComparison.Ordinal) ||
+            !hostOutput.Contains("remoteParticipants=2", StringComparison.Ordinal) ||
+            !hostOutput.Contains($"generation={generation}", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The Complete hosted native evidence was incomplete:\n{Tail(hostOutput, 8_000)}");
+        Console.WriteLine(
+            $"PASS M0.0_CompleteHostedNative generation={generation} " +
+            "localPath=packet-free remoteClients=2 humansPerClient=3 actorsPerClient=4 detach=clean");
+    }
+    finally
+    {
+        StopOwnedProcess(host);
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
+static string[] NativeSharedClientArguments(
+    string scope,
+    string name,
+    string endpoint,
+    string fingerprint,
+    string ready,
+    string release) =>
+[
+    "--headless", "--", "--a0-8-smoke",
+    $"--a0-8-endpoint={endpoint}",
+    $"--a0-8-fingerprint={fingerprint}",
+    $"--a0-8-cache={Path.Combine(scope, name, "content-cache")}",
+    $"--a0-8-trust={Path.Combine(scope, name, "trusted-servers.json")}",
+    $"--f0-3c-profile-decisions={Path.Combine(scope, name, "server-profiles.json")}",
+    "--a0-8-allow-private-content",
+    "--a0-8-expect=cold",
+    // Existing woodland animal + local host + two remote humans.
+    "--m0-0-expect-actors=4",
+    $"--m0-0-client-ready={ready}",
+    $"--m0-0-client-release={release}",
+    "--expect-edition=Online",
+];
+
 static Process StartNativeDeployment(
     string root,
     string configuration,
@@ -685,14 +835,16 @@ static void RequireNativeA08Result(
     string worldPackFingerprint,
     bool expectedWarm,
     bool expectedRememberedProfile,
-    string expectedProfile)
+    string expectedProfile,
+    bool requireWorldFingerprint = true)
 {
     string pass = $"A0.8 CONTENTLESS ONLINE PASS mode={mode}";
     if (!output.Contains(pass, StringComparison.Ordinal) ||
         !output.Contains("F0.3c CLIENT PROFILE APPLIED", StringComparison.Ordinal) ||
         !output.Contains(expectedRememberedProfile ? "remembered=True" : "remembered=False", StringComparison.Ordinal) ||
         !output.Contains(expectedProfile, StringComparison.Ordinal) ||
-        !output.Contains($"world={worldPackFingerprint}", StringComparison.Ordinal) ||
+        requireWorldFingerprint &&
+            !output.Contains($"world={worldPackFingerprint}", StringComparison.Ordinal) ||
         !output.Contains("chunks=9", StringComparison.Ordinal) ||
         !output.Contains("proofs=1", StringComparison.Ordinal) ||
         !output.Contains("ui=1", StringComparison.Ordinal) ||
@@ -726,7 +878,10 @@ static string RunCaptured(
     {
         process.Kill(entireProcessTree: true);
         process.WaitForExit();
-        throw new TimeoutException($"'{executable}' exceeded {timeoutMilliseconds} ms.");
+        string timedOut = standardOutput.GetAwaiter().GetResult() +
+            standardError.GetAwaiter().GetResult();
+        throw new TimeoutException(
+            $"'{executable}' exceeded {timeoutMilliseconds} ms:\n{Tail(timedOut, 8_000)}");
     }
     string output = standardOutput.GetAwaiter().GetResult() + standardError.GetAwaiter().GetResult();
     Console.Write(output);
@@ -794,6 +949,11 @@ static void VerifyClientExportComposition(string root)
         reference.Attribute("Include")?.Value.EndsWith(
             "Network/UltraSim.Client.Network.csproj", StringComparison.Ordinal) == true);
     string onlineCondition = online.Attribute("Condition")?.Value ?? "";
+    XElement localHost = references.Single(reference =>
+        reference.Attribute("Include")?.Value.EndsWith(
+            "ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj",
+            StringComparison.Ordinal) == true);
+    string localHostCondition = localHost.Attribute("Condition")?.Value ?? "";
     if (localReferences.Length != 4 || localReferences.Any(reference =>
         !(reference.Attribute("Condition")?.Value ?? "").Contains("SinglePlayer", StringComparison.Ordinal) ||
         !(reference.Attribute("Condition")?.Value ?? "").Contains("Complete", StringComparison.Ordinal) ||
@@ -803,6 +963,11 @@ static void VerifyClientExportComposition(string root)
         !onlineCondition.Contains("Complete", StringComparison.Ordinal) ||
         onlineCondition.Contains("SinglePlayer", StringComparison.Ordinal))
         throw new InvalidOperationException("The remote client reference is not edition-fenced.");
+    if (!localHostCondition.Contains("Complete", StringComparison.Ordinal) ||
+        localHostCondition.Contains("SinglePlayer", StringComparison.Ordinal) ||
+        localHostCondition.Contains("Online", StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            "The embedded hosted-server adapter must exist only in the Complete composition.");
 
     string godotProject = File.ReadAllText(Path.Combine(root, "Client", "Godot", "project.godot"));
     if (!godotProject.Contains(
@@ -895,6 +1060,14 @@ static void VerifyArchitecture(string root)
             ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
         ["Server/DirectConnect/UltraSim.Server.DirectConnect.csproj"] =
         [
+            "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
+            "Game/UI/UltraSim.Game.UI.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+            "Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj",
+        ],
+        ["Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj"] =
+        [
             "Client/Content/UltraSim.Client.Content.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
@@ -903,6 +1076,13 @@ static void VerifyArchitecture(string root)
             "Game/UI/UltraSim.Game.UI.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
             "Server/Hosting/UltraSim.Server.Hosting.csproj",
+        ],
+        ["Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj"] =
+        [
+            "Client/Local/UltraSim.Client.Local.csproj",
+            "Game/Replication.Remote/UltraSim.Game.Replication.Remote.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+            "Server/ConceptDemo/UltraSim.Server.ConceptDemo.csproj",
         ],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
         [
@@ -959,6 +1139,7 @@ static void VerifyArchitecture(string root)
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
+            "Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj",
         ],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],

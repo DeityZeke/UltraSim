@@ -8,7 +8,9 @@ using UltraSim.Game.World;
 using UltraSim.Server.Hosting;
 using UltraSim.UI;
 
-internal sealed class ConceptDemoContentDeployment : IDisposable
+namespace UltraSim.Server.ConceptDemo;
+
+public sealed class ConceptDemoContentDeployment : IDisposable
 {
     private const string ArchiveRoute = "/content/concept-demo.uspkg";
     private readonly StaticContentHttpHost _host;
@@ -23,10 +25,10 @@ internal sealed class ConceptDemoContentDeployment : IDisposable
         Snapshot = snapshot;
     }
 
-    internal RemoteContentAuthorization Authorization { get; }
-    internal ContentDeploymentSnapshot Snapshot { get; }
+    public RemoteContentAuthorization Authorization { get; }
+    public ContentDeploymentSnapshot Snapshot { get; }
 
-    internal static ConceptDemoContentDeployment Create(
+    public static ConceptDemoContentDeployment Create(
         ApplicationRealmId realm,
         IPEndPoint endpoint)
     {
@@ -158,7 +160,7 @@ internal sealed class ConceptDemoContentDeployment : IDisposable
         new(hash.Part0, hash.Part1, hash.Part2, hash.Part3);
 }
 
-internal readonly record struct ContentDeploymentSnapshot(
+public readonly record struct ContentDeploymentSnapshot(
     Uri ArchiveUri,
     int ArchiveBytes,
     int WorldPackBytes,

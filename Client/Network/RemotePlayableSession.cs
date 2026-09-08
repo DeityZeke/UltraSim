@@ -281,19 +281,23 @@ public sealed class RemotePlayableSession : IDisposable
             processed++;
             SaturatingIncrement(ref _messagesBeforeAdmission);
             if (!claimed) SaturatingIncrement(ref _rejectedBeforeAdmission);
+
+            // Admission and the first retained world deliveries can legitimately share one
+            // reliable receive batch. Activate immediately after applying the admission result;
+            // otherwise the pre-admission loop would consume those already-authorized semantic
+            // messages as unclaimed before the normal protocol composition can see them.
+            if (Playable.GetSnapshot().State == RemotePlayableClientState.Active)
+            {
+                ActivateSemanticConsumers();
+                processed += _ui.ProcessReceived();
+                break;
+            }
         }
         _ = _content?.TryProgress();
         _ = TryPublishRequiredWorld();
         _ = Playable.TryProgress();
         if (Playable.GetSnapshot().State == RemotePlayableClientState.Active)
-        {
-            RemotePlayableClientSnapshot admitted = Playable.GetSnapshot();
-            if (!_ui.TryActivateAdmittedSession(
-                    admitted.Participant, admitted.ApplicationSessionEpoch))
-                throw new InvalidOperationException(
-                    "The admitted remote UI semantic consumer could not activate.");
-            _semanticConsumersActive = true;
-        }
+            ActivateSemanticConsumers();
         return processed;
     }
 
@@ -313,6 +317,23 @@ public sealed class RemotePlayableSession : IDisposable
             _structuralWorld);
     }
 
+    /// <summary>
+    /// Retains one authenticated application detach before the transport begins draining. This
+    /// retires only this participant/control lineage; it never owns the shared Game world.
+    /// </summary>
+    public bool TryRequestDetach()
+    {
+        EnsureOperational();
+        var detach = new RemoteSessionDetachMessage
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+        };
+        Span<byte> payload = stackalloc byte[RemoteSessionDetachMessageCodec.EncodedSize];
+        return RemoteSessionDetachMessageCodec.TryWriteExact(payload, in detach) &&
+            _peer.TryQueue(RemoteSessionDetachMessageCodec.Descriptor.Id, payload) ==
+                NetworkQueueStatus.Accepted;
+    }
+
     public void Dispose()
     {
         EnsureOwner();
@@ -320,6 +341,17 @@ public sealed class RemotePlayableSession : IDisposable
         _disposed = true;
         _ui.Dispose();
         _content?.Dispose();
+    }
+
+    private void ActivateSemanticConsumers()
+    {
+        if (_semanticConsumersActive) return;
+        RemotePlayableClientSnapshot admitted = Playable.GetSnapshot();
+        if (!_ui.TryActivateAdmittedSession(
+                admitted.Participant, admitted.ApplicationSessionEpoch))
+            throw new InvalidOperationException(
+                "The admitted remote UI semantic consumer could not activate.");
+        _semanticConsumersActive = true;
     }
 
     private bool TryPublishRequiredWorld()

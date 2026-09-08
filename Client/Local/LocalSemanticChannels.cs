@@ -361,7 +361,7 @@ internal sealed class LocalChatDeliveryRow
     internal bool Queued;
 }
 
-internal sealed class LocalChatSemanticChannel
+internal sealed class LocalChatSemanticChannel : ILocalPlayableChatSink
 {
     private readonly object _gate = new();
     private readonly ulong _applicationSessionEpoch;
@@ -418,6 +418,10 @@ internal sealed class LocalChatSemanticChannel
             fact.Text);
         return TryPublish(occurrence);
     }
+
+    bool ILocalPlayableChatSink.CanPublish => CanPublish;
+    bool ILocalPlayableChatSink.TryPublishSpatial(in GameSpeechFact fact) =>
+        TryPublishSpatial(in fact);
 
     internal bool TryPublishPrivate(
         ulong generationId,

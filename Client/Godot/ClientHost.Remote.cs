@@ -28,6 +28,7 @@ public partial class ClientHost
     private bool _allowInsecurePrivateContent;
     private bool _remoteSmokeStarted;
     private bool _remoteSmokeDisconnectStarted;
+    private bool _remoteSmokeBarrierReadyPublished;
     private bool _remoteProcessObserved;
     private string _remoteGuestName = string.Empty;
     private GameGuestBody _remoteGuestBody = GameGuestBody.HumanFemale;
@@ -88,8 +89,11 @@ public partial class ClientHost
                 if (playable.State == RemoteConceptDemoClientState.Active &&
                     ShellSnapshot().Screen != ClientShellScreen.InSession)
                     CommitSession("Remote Concept Demo active.");
-                if (playable.SmokeComplete && !_remoteSmokeDisconnectStarted)
+                if (playable.SmokeComplete &&
+                    playable.Actors.ActiveActors >= RemoteSmokeExpectedActors() &&
+                    !_remoteSmokeDisconnectStarted)
                 {
+                    if (!SharedRemoteSmokeBarrierReleased()) return;
                     ValidateRemoteSmoke(playable);
                     _remoteSmokeDisconnectStarted = true;
                     GD.Print(
@@ -688,6 +692,38 @@ public partial class ClientHost
 
     private static bool IsRemoteSmoke() => OS.GetCmdlineUserArgs().Contains(
         "--a0-8-smoke", StringComparer.Ordinal);
+
+    private static int RemoteSmokeExpectedActors()
+    {
+        string? value = ReadArgument("--m0-0-expect-actors=");
+        return value is null
+            ? 2
+            : int.TryParse(value, out int expected) && expected is >= 2 and <= 64
+                ? expected
+                : throw new InvalidOperationException(
+                    "--m0-0-expect-actors must be between 2 and 64.");
+    }
+
+    private bool SharedRemoteSmokeBarrierReleased()
+    {
+        string? ready = ReadArgument("--m0-0-client-ready=");
+        if (ready is null) return true;
+        string release = ReadArgument("--m0-0-client-release=") ??
+            throw new InvalidOperationException(
+                "The M0.0 client-ready barrier requires a release path.");
+        if (!_remoteSmokeBarrierReadyPublished)
+        {
+            string full = Path.GetFullPath(ready);
+            string? directory = Path.GetDirectoryName(full);
+            if (string.IsNullOrEmpty(directory))
+                throw new InvalidOperationException(
+                    "The M0.0 client-ready marker has no parent directory.");
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(full, "ready" + global::System.Environment.NewLine);
+            _remoteSmokeBarrierReadyPublished = true;
+        }
+        return File.Exists(release);
+    }
 
     private static string? ReadArgument(string prefix) => OS.GetCmdlineUserArgs()
         .FirstOrDefault(argument => argument.StartsWith(prefix, StringComparison.Ordinal))?
