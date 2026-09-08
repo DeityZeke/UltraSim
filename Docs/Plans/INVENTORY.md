@@ -1450,7 +1450,12 @@ and preallocated bounded rows. Its natural width follows the widest rendered vis
 height follows the actual visible/wrapped lines. Width is clamped to the viewport and long content
 wraps. A sign therefore shrinks to a title-only panel while a sword grows to its actual four rows.
 Moving the pointer only repositions an unchanged layout; the native content tree is rebuilt only
-when content or layout width changes.
+when content or layout width changes. Post-closure human play exposed a Godot 4.7 layout-lifetime
+edge: an auto-wrapped row with only a minimum width could report a transient taller minimum after a
+deferred native pass, enlarging the top-level panel without shrinking it later. Every wrapped label
+now has an explicit maximum width, rows that fit do not enable wrapping, and cached Show re-fits the
+top-level panel to its current bound minimum. The native smoke crosses real process frames and then
+reopens the same cached sword hover to prove that no stale blank height survives.
 
 This checkpoint establishes the future Game-side behavior seam without implementing a general
 callback framework. A future `GameObjectScript`/`ItemScript` authoring layer may contribute facts and

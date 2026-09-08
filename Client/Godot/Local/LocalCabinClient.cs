@@ -885,7 +885,53 @@ public partial class LocalCabinClient : Node3D
         if (_hoverTooltip.LayoutGeneration != swordLayoutGeneration)
             throw new InvalidOperationException(
                 "Moving an unchanged hover rebuilt its native tooltip layout.");
+        // Freeze the gameplay pump so the native smoke can cross actual Godot layout frames
+        // without the headless pointer replacing this deterministic sword hover.
+        SetPhysicsProcess(false);
         return GetPresentationSnapshot();
+    }
+
+    /// <summary>
+    /// Completes the D0.3/I0.13 tooltip canary after Godot has processed native container layout.
+    /// A cached unchanged hover must shrink back to its exact current content bounds rather than
+    /// retaining a transient wrapped height from an earlier frame.
+    /// </summary>
+    public void ValidateD03TooltipAfterNativeLayout()
+    {
+        if (_hoverTooltip is null || !_hoverTooltip.Visible ||
+            _hoverTooltip.Title != "Iron Sword" || _hoverTooltip.VisibleRowCount != 4)
+            throw new InvalidOperationException(
+                "The native tooltip-layout canary lost its retained Iron Sword presentation.");
+        Vector2 required = _hoverTooltip.BoundMinimumSize;
+        Vector2 settled = _hoverTooltip.PanelSize;
+        if (!Mathf.IsEqualApprox(settled.X, required.X) ||
+            !Mathf.IsEqualApprox(settled.Y, required.Y))
+            throw new InvalidOperationException(
+                "Native tooltip layout retained stale surplus space after reflow: " +
+                $"settled={settled}, required={required}.");
+
+        ulong generation = _hoverTooltip.LayoutGeneration;
+        if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword) ||
+            _publicPresentationMetadata?.TryGet(
+                sword.Id, out ClientPublicPresentationMetadata metadata) != true)
+            throw new InvalidOperationException(
+                "The native tooltip-layout canary lost its retained inspection metadata.");
+        _hoverTooltip.Hide();
+        _hoverTooltip.Show(
+            metadata.DisplayLabel,
+            metadata.InspectionProperties,
+            Vector2.Zero,
+            new Vector2(1_920, 1_080));
+        Vector2 restored = _hoverTooltip.PanelSize;
+        Vector2 restoredRequired = _hoverTooltip.BoundMinimumSize;
+        if (_hoverTooltip.LayoutGeneration != generation ||
+            _hoverTooltip.VisibleRowCount != 4 ||
+            !Mathf.IsEqualApprox(restored.X, restoredRequired.X) ||
+            !Mathf.IsEqualApprox(restored.Y, restoredRequired.Y))
+            throw new InvalidOperationException(
+                "A cached Iron Sword hover did not restore exact content-sized native layout: " +
+                $"size={restored}, required={restoredRequired}, generations=" +
+                $"{generation}->{_hoverTooltip.LayoutGeneration}.");
     }
 
     /// <summary>

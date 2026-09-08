@@ -154,6 +154,15 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
             LocalCabinPresentationSnapshot evidence = fallbackLab
                 ? _cabin!.RunD04Acceptance()
                 : _cabin!.RunD03Acceptance();
+            if (!fallbackLab)
+            {
+                // Let Godot's deferred Container/Label layout settle before accepting the cached
+                // hover lifecycle. This catches late auto-wrap growth that synchronous semantic
+                // assertions cannot observe.
+                for (int frame = 0; frame < 3; frame++)
+                    await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+                _cabin!.ValidateD03TooltipAfterNativeLayout();
+            }
             if (evidence.AuthoredChunks != GamePlayableWorld.ConceptChunkCount ||
                 evidence.SemanticResidentChunks >= evidence.AuthoredChunks ||
                 evidence.RenderedChunks >= evidence.SemanticResidentChunks)

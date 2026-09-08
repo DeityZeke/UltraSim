@@ -133,9 +133,12 @@ primitive presentation/pick volume; recipient-visible rolled facts arrive throug
 public metadata cache rather than hot movement rows. I0.13 formats that typed set through the same
 engine-neutral catalog/profile used by Inventory. The shared sign/item tooltip has no sword-sized
 minimum: it sizes to its visible title/rows, wraps at a bounded viewport-relative width, clamps to
-the viewport, and only reflows when content or available layout width changes. An accepted Primary
-result drives a short primitive cue on the controlled actor. It is feedback, not Combat authority
-or the final content-backed animation path.
+the viewport, and only rebuilds its content tree when content or available layout width changes.
+Godot auto-wrap labels carry an explicit maximum width; rows that already fit remain unwrapped, and
+each cached Show reasserts the top-level panel's current bound minimum. This prevents a deferred
+native wrap pass from leaving intermittent blank height after repeated sword hovers. An accepted
+Primary result drives a short primitive cue on the controlled actor. It is feedback, not Combat
+authority or the final content-backed animation path.
 
 F0.5 is closed. The application composes the passive `Client.StandardUi` Inventory artifact into
 the same local/remote `UiClientRuntime` path used by reopened cached and content-backed exact

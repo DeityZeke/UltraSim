@@ -49,8 +49,12 @@
     "MaximumContentWidthPixels": 480,
     "ViewportMarginPixels": 8,
     "HorizontalPaddingPixels": 24,
+    "AutoWrappedLabelsHaveExplicitMaximumWidth": true,
+    "RowsThatFitDisableAutoWrap": true,
+    "CachedShowRefitsTopLevelPanel": true,
     "PointerMoveWithoutContentChangeRebuildsLayout": false,
-    "NativeTitleOnlySignSmallerThanFourRowSword": true
+    "NativeTitleOnlySignSmallerThanFourRowSword": true,
+    "NativeDelayedLayoutRetainsExactContentHeight": true
   },
   "TransportAndResidency": {
     "GameProtocolManifestVersion": 23,
@@ -72,6 +76,7 @@
     "RemoteTypedRoundTripAndCanonicalBytes": true,
     "SharedAuthorityReplication": true,
     "GodotNativeContentSizedTooltip": true,
+    "GodotNativeDelayedAndCachedTooltipRelayout": true,
     "GodotPointerMoveLayoutReuse": true,
     "DebugAndReleaseCanonicalVerifier": true
   },

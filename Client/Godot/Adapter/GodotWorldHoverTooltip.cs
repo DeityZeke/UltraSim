@@ -13,6 +13,7 @@ internal sealed class GodotWorldHoverTooltip
     private const float ViewportMargin = 8f;
     private const float MaximumContentWidth = 480f;
     private readonly PanelContainer _panel;
+    private readonly VBoxContainer _stack;
     private readonly Label _title;
     private readonly Label[] _rows = new Label[InspectionPropertySet.MaximumProperties];
     private string? _contentTitle;
@@ -46,18 +47,18 @@ internal sealed class GodotWorldHoverTooltip
             ContentMarginBottom = 9,
         };
         _panel.AddThemeStyleboxOverride("panel", background);
-        var stack = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
-        _panel.AddChild(stack);
+        _stack = new VBoxContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _panel.AddChild(_stack);
         _title = CreateLabel("Title");
         _title.ThemeTypeVariation = "HeaderSmall";
         _title.Modulate = new Color(1f, 0.82f, 0.36f);
-        stack.AddChild(_title);
+        _stack.AddChild(_title);
         for (int index = 0; index < _rows.Length; index++)
         {
             Label row = CreateLabel($"Property_{index}");
             row.Visible = false;
             _rows[index] = row;
-            stack.AddChild(row);
+            _stack.AddChild(row);
         }
         parent.AddChild(_panel);
     }
@@ -66,6 +67,7 @@ internal sealed class GodotWorldHoverTooltip
     internal string Title => _title.Text;
     internal string Details => _details;
     internal Vector2 PanelSize => _panel.Size;
+    internal Vector2 BoundMinimumSize => _panel.GetBoundMinimumSize();
     internal int VisibleRowCount => _visibleRows;
     internal ulong LayoutGeneration => _layoutGeneration;
 
@@ -89,6 +91,10 @@ internal sealed class GodotWorldHoverTooltip
             }
         }
         _panel.Visible = true;
+        // A top-level Control is not owned by a sizing Container. Reassert its current bound
+        // minimum even when content came from the cache so a prior native wrap/reflow can never
+        // leave stale surplus height behind.
+        FitPanelToContent(queueSort: false);
         Place(cursor, viewportSize);
     }
 
@@ -116,23 +122,30 @@ internal sealed class GodotWorldHoverTooltip
             _rows[index].Text = visible ? rows[index] : string.Empty;
             _rows[index].Visible = visible;
             _rows[index].CustomMinimumSize = Vector2.Zero;
+            _rows[index].CustomMaximumSize = new Vector2(-1, -1);
+            _rows[index].AutowrapMode = TextServer.AutowrapMode.Off;
         }
         _visibleRows = rows.Count;
 
         float maximumPanelWidth = Math.Max(48f, viewportWidth - ViewportMargin * 2f);
         float maximumContentWidth = Math.Max(
             24f, Math.Min(MaximumContentWidth, maximumPanelWidth - HorizontalPadding));
-        float naturalContentWidth = MeasureWidth(_title, title);
+        float titleWidth = MeasureWidth(_title, title);
+        float naturalContentWidth = titleWidth;
+        Span<float> rowWidths = stackalloc float[InspectionPropertySet.MaximumProperties];
         for (int index = 0; index < rows.Count; index++)
-            naturalContentWidth = Math.Max(
-                naturalContentWidth, MeasureWidth(_rows[index], rows[index]));
+        {
+            rowWidths[index] = MeasureWidth(_rows[index], rows[index]);
+            naturalContentWidth = Math.Max(naturalContentWidth, rowWidths[index]);
+        }
         float contentWidth = Math.Clamp(naturalContentWidth, 1f, maximumContentWidth);
-        _title.CustomMinimumSize = new Vector2(contentWidth, 0);
+        ConstrainLabel(_title, contentWidth, titleWidth);
         for (int index = 0; index < rows.Count; index++)
-            _rows[index].CustomMinimumSize = new Vector2(contentWidth, 0);
-        _panel.CustomMinimumSize = new Vector2(
-            Math.Min(maximumPanelWidth, contentWidth + HorizontalPadding), 0);
-        _panel.Size = _panel.GetCombinedMinimumSize();
+            ConstrainLabel(_rows[index], contentWidth, rowWidths[index]);
+        float panelWidth = Math.Min(maximumPanelWidth, contentWidth + HorizontalPadding);
+        _panel.CustomMinimumSize = new Vector2(panelWidth, 0);
+        _panel.CustomMaximumSize = new Vector2(panelWidth, -1);
+        FitPanelToContent(queueSort: true);
 
         _contentTitle = title;
         _contentProperties = properties;
@@ -144,7 +157,7 @@ internal sealed class GodotWorldHoverTooltip
     private void Place(in Vector2 cursor, in Vector2 viewportSize)
     {
         Vector2 required = _panel.Size;
-        if (required.X <= 0 || required.Y <= 0) required = _panel.GetCombinedMinimumSize();
+        if (required.X <= 0 || required.Y <= 0) required = _panel.GetBoundMinimumSize();
         _panel.Position = new Vector2(
             Math.Clamp(
                 cursor.X + 14f,
@@ -160,8 +173,30 @@ internal sealed class GodotWorldHoverTooltip
     {
         Name = name,
         MouseFilter = Control.MouseFilterEnum.Ignore,
-        AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        AutowrapMode = TextServer.AutowrapMode.Off,
     };
+
+    private void FitPanelToContent(bool queueSort)
+    {
+        if (queueSort) _stack.QueueSort();
+        Vector2 required = _panel.GetBoundMinimumSize();
+        if (!Mathf.IsEqualApprox(_panel.Size.X, required.X) ||
+            !Mathf.IsEqualApprox(_panel.Size.Y, required.Y))
+            _panel.SetSize(required);
+    }
+
+    private static void ConstrainLabel(Label label, float width, float naturalWidth)
+    {
+        // Godot 4.7 requires a maximum width for auto-wrapped Labels. A minimum width alone can
+        // make the Label report a transient multi-line height based on an older native width,
+        // causing its top-level panel to grow after our synchronous fit and never shrink again.
+        label.AutowrapMode = naturalWidth > width
+            ? TextServer.AutowrapMode.WordSmart
+            : TextServer.AutowrapMode.Off;
+        label.CustomMinimumSize = new Vector2(width, 0);
+        label.CustomMaximumSize = new Vector2(width, -1);
+        label.ResetSize();
+    }
 
     private static float MeasureWidth(Label label, string text)
     {
