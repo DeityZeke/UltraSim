@@ -68,6 +68,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private Label? _status;
     private RichTextLabel? _chatFeed;
     private LineEdit? _chatInput;
+    private GodotWorldHoverTooltip? _hoverTooltip;
     private WorldPosition _player;
     private WorldPosition _smokeStart;
     private ulong _lastOwnerState;
@@ -223,6 +224,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             if (!_smoke)
             {
                 UpdatePointerWorldPoint();
+                UpdateWorldHover();
                 SubmitPhysicalInput(gameplayInputAllowed);
             }
             else
@@ -334,6 +336,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _ownedHud.QueueFree();
         }
         _ownedHud = null;
+        _hoverTooltip = null;
     }
 
     private void BuildWorldPresentation(in RemotePlayableClientSnapshot playable)
@@ -639,6 +642,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         };
         _chatInput.TextSubmitted += SubmitChat;
         _ownedHud.AddChild(_chatInput);
+        _hoverTooltip = new GodotWorldHoverTooltip(_ownedHud);
         UpdateHud("Authenticated session established; acquiring required content…");
     }
 
@@ -815,6 +819,23 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 WorldTerrainColumnQueryStatus.Complete && support.IsValid && support.IsSupport;
     }
 
+    private void UpdateWorldHover()
+    {
+        if (_hoverTooltip is null || _session is null || !_pointerTarget.IsValid ||
+            !_session.PublicPresentationState.TryGet(
+                _pointerTarget, out ClientPublicPresentationMetadata item) ||
+            (item.Flags & ClientPublicPresentationFlags.ItemProperties) == 0)
+        {
+            _hoverTooltip?.Hide();
+            return;
+        }
+        _hoverTooltip.Show(
+            item.DisplayLabel,
+            item.DetailText,
+            GetViewport().GetMousePosition(),
+            GetViewport().GetVisibleRect().Size);
+    }
+
     private bool TryPickPresentedPublicObject(
         in Vector3 rayOrigin,
         in Vector3 rayDirection,
@@ -835,7 +856,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 continue;
             foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
             {
-                if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0)
+                if (!GodotPublicPointerPicker.IsPointerTarget(
+                        record.PrefabId, record.StateFlags))
                     continue;
                 Vector3 basePosition = new(
                     checked(record.Position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,

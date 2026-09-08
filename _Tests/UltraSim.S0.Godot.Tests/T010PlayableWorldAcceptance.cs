@@ -55,6 +55,14 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 Vector3.Zero,
                 out float swordDistance) && swordDistance > 0,
             "The primitive Iron Sword was not pointer-pickable.");
+        Expect(GodotPublicPointerPicker.IsPointerTarget(
+                GameWorldPublicPrefabIds.IronSword,
+                WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem),
+            "A grounded public Iron Sword was not pointer-eligible.");
+        Expect(!GodotPublicPointerPicker.IsPointerTarget(
+                GameWorldPublicPrefabIds.IronSword,
+                WorldPublicStateFlags.Visible),
+            "Equipped Iron Sword presentation remained independently pointer-eligible.");
         Expect(!GodotPublicPointerPicker.TryIntersect(
                 GameWorldPublicPrefabIds.CabinDoor,
                 new Vector3(2f, 1.9f, 5f),

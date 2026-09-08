@@ -104,7 +104,9 @@ nominates pickup; the same persistent entity disappears from every recipient whe
 appears only in the owner's private Inventory/UI, follows Main Hand equipment, and becomes public
 again on an authority-positioned Drop. Another participant can then pick up that same item. The
 spawner independently publishes a newly rolled occurrence after its bounded delay. Protocol v21
-adds only the owner-visible Primary result; rolled item facts remain out of hot public records.
+adds only the owner-visible Primary result. Protocol v22 adds a bounded, recipient-interest-coupled
+cold weapon-property fact and the hot `GroundItem` eligibility bit; rolled item details remain out
+of hot public records.
 
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.

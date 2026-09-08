@@ -6,7 +6,9 @@ Connect trust, remote controlled play, declarative client-profile consent, and g
 presentation and standard/content-backed compiled-UI convergence. A0.0-A0.8 are also accepted,
 including the actual exported Contentless Online product. F0.6 is already closed/superseded by
 A0.2-A0.8. M0.0 now closes the first shared multi-participant authority in both dedicated and
-Complete-hosted deployment shapes. F0.7 and F0.8 remain open.
+Complete-hosted deployment shapes. I0.12 human-play hardening also adds bounded cold world-item
+property tooltips and prevents visible equipped gear from remaining a pointer-nominated world
+pickup. F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2433,6 +2435,7 @@ M0.0  shared multi-participant authority
       dedicated A/B/C + Complete packet-free host A / remote B/C           CLOSED
         |
 I0.12 persistent rolled world item / Inventory / equip / Primary / drop     CLOSED
+      + bounded property tooltip / equipped-item pointer hardening
         |
 remaining Concept Demo gameplay/presentation consumers
         |

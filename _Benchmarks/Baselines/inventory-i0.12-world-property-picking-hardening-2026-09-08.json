@@ -1,0 +1,69 @@
+{
+  "Checkpoint": "I0.12 human-play world-property and equipped-item picking hardening",
+  "CaptureDate": "2026-09-08",
+  "BaseCommit": "3c5311f380cbc20e9847233a40aebf5a13f44c60",
+  "AuthorityAndDisclosure": {
+    "PropertySource": "persisted GameWeaponInstance",
+    "DisplayFields": [
+      "DamageMinimum-DamageMaximum",
+      "Element",
+      "Quality",
+      "CurrentDurability/MaximumDurability"
+    ],
+    "HotPublicRecordContainsRolledDetails": false,
+    "ColdMetadataFencedByFullWorldPublicEntityId": true,
+    "RemoteMetadataCoupledToRecipientChunkInterest": true,
+    "RemoteMetadataRequiresExactApplicationProof": true,
+    "PacketFreeLocalUsesSameClientCoreState": true,
+    "MaximumPublicWeaponRowsPerRemoteApplication": 64,
+    "MaximumDisplayLabelUtf8Bytes": 128,
+    "MaximumDetailUtf8Bytes": 512,
+    "MaximumEncodedMetadataBytes": 768
+  },
+  "WorldItemEligibility": {
+    "VisibleFlag": 1,
+    "GroundItemFlag": 2,
+    "GroundItemRequiresVisible": true,
+    "GroundItemPointerEligible": true,
+    "EquippedVisiblePointerEligible": false,
+    "ContainedVisible": false,
+    "GameStillValidatesIdentityRangeAndMutation": true
+  },
+  "GodotPresentation": {
+    "ExpandedCursorFollowingPanel": true,
+    "Title": "Iron Sword",
+    "DetailsRenderedAsSeparateRows": true,
+    "ViewportClamped": true,
+    "TooltipOwnsAuthority": false,
+    "NativeAcceptanceChecksDamageQualityAndDurability": true
+  },
+  "Capacity": {
+    "LocalColdMetadataRecords": 128,
+    "RemoteClientColdMetadataRecords": 256,
+    "MaximumHostedParticipants": 64,
+    "MaximumLocalPublicItemRows": 64
+  },
+  "Protocol": {
+    "ManifestVersion": 22,
+    "ManifestFingerprint": 6198709952767303467,
+    "ColdPublicPresentationMessageVersion": 2,
+    "ChunkRecordWireShapeChanged": false,
+    "ItemPropertyTextAbsentFromHotChunkRecords": true
+  },
+  "PermanentAcceptance": {
+    "ClientCoreMetadataValidation": true,
+    "PacketFreeLocalPropertyProjection": true,
+    "RemotePropertyProjectionAndProof": true,
+    "SharedAuthorityGroundEquipDropEligibility": true,
+    "NativeGroundVersusEquippedPointerCanary": true,
+    "NativeExpandedTooltipCanary": true,
+    "DebugAndReleaseCanonicalVerifier": true
+  },
+  "DeliberateDeferrals": [
+    "generalized on-demand Object Property List requests",
+    "localization-ready typed property rows",
+    "durability mutation and cold metadata revision updates",
+    "content-backed tooltip styling",
+    "Combat and hit testing"
+  ]
+}

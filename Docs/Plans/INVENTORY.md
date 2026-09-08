@@ -4,7 +4,8 @@
 
 **Status:** living design/architecture note
 
-**Current implementation checkpoint:** I0.12 — persistent world-item instance vertical (closed)
+**Current implementation checkpoint:** I0.12 — persistent world-item instance vertical plus
+human-play world-property/picking hardening (closed)
 
 **Remote/private vertical checkpoint:** `0ad93d54` — I0.8 authenticated remote inventory vertical
 
@@ -1374,11 +1375,20 @@ equipment topology. Pickup/drop mutations move the same ECS entity into/out of t
 do not destroy and recreate it.
 
 The first property projection is bounded authoritative text derived from the persisted instance
-component and shown by the existing owner-private Inventory UI. World hover identifies the already
-disclosed semantic item as `Iron Sword`, but does not invent or poll for its rolled values. A
-generalized cold public Object Property List request/cache protocol is deliberately deferred; world
-hover must not poll the authority each frame or stuff rolled properties into hot movement/public
-records.
+component. The owner-private Inventory UI and a Diablo-like world-hover panel now show the same
+rolled damage, element, quality, and durability. World hover does not poll the authority each frame
+or stuff those properties into hot movement/public records. Instead, one bounded relatively cold
+presentation fact joins the already-disclosed complete generational `WorldPublicEntityId`; remote
+delivery is recipient-interest-coupled and exactly application-proved, while packet-free local play
+feeds the same Client Core state directly. Broader on-demand/generalized Object Property Lists remain
+deferred.
+
+`WorldPublicStateFlags.GroundItem` independently marks a visible item as a selectable world pickup.
+An equipped sword remains visible so it can follow its authoritative owner, but clears
+`GroundItem`; therefore it is not pointer-nominated as a second world object and cannot produce a
+spurious `MissingTarget` interaction. Contained items remain non-public. This flag changes public
+selection eligibility only; exact Game identity, range, and Inventory mutation are still validated
+by authority.
 
 The first swing is an admitted Game action with no damage. The controlled client realizes one
 bounded 240 ms primitive cue only after that exact authoritative Primary result; generalized public
@@ -1415,7 +1425,7 @@ freezing the future authoring syntax.
 - multi-viewer sessions;
 - transaction/trade/escrow;
 - lock/no-drop/no-trade/quest/reserved flags as gameplay earns them.
-- bounded cold public item-property disclosure/cache for world hover;
+- generalized/on-demand Object Property Lists beyond the first bounded weapon-property fact;
 - authored spawn-recipe/ObjectScript syntax beyond the first compiled Iron Sword recipe;
 
 ---

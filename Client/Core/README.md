@@ -159,10 +159,12 @@ current presentation window with relatively cold `ClientPublicPresentationMetada
 requests another chunk, expands AOI, or polls authority. Add/update/remove changes are emitted into
 caller-owned spans, and the warmed no-change path allocates zero bytes.
 
-Cold labels are fenced by server generation plus complete generational `WorldPublicEntityId` and
-monotonic metadata revision. A bounded per-index identity floor survives removal, preventing an old
-name from attaching to a reused public slot. Missing per-instance metadata falls back only to the
-definition's presentation label; it never changes Game identity or disclosure.
+Cold presentation facts are fenced by server generation plus complete generational
+`WorldPublicEntityId` and monotonic metadata revision. A bounded per-index identity floor survives
+removal, preventing an old name or item detail from attaching to a reused public slot. F0.4 uses
+this state for actor labels; I0.12 human-play hardening adds a separately flagged, bounded weapon
+detail for world hover. Missing per-instance metadata changes only presentation fallback; it never
+changes Game identity, disclosure, or interaction authority.
 
 `ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
 are ordered, append-only occurrences rather than latest state: session/server

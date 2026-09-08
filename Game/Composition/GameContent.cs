@@ -266,7 +266,9 @@ public sealed class GameContent : IInventoryContentCatalog
         swordPrefab.With(new InventoryGridFootprint { Width = 1, Height = 3 });
         swordPrefab.With(new WorldPositionComponent(new WorldPosition(0, 0, 0, 0, 0)));
         swordPrefab.With(new WorldPublicComponent(new WorldPublicDescriptor(
-            GameWorldPublicPrefabIds.IronSword, WorldYaw.Zero, WorldPublicStateFlags.Visible)));
+            GameWorldPublicPrefabIds.IronSword,
+            WorldYaw.Zero,
+            WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)));
         // A valid non-random baseline preserves generic Inventory fixtures. Production Concept
         // Demo spawning overwrites it once with the deterministic rolled instance result.
         swordPrefab.With(new GameWeaponInstance

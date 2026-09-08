@@ -8,6 +8,12 @@ public enum WorldPublicStateFlags : ushort
 {
     None = 0,
     Visible = 1 << 0,
+    /// <summary>
+    /// The public entity is an independently selectable item lying in the world. Equipped item
+    /// presentation remains Visible but clears this flag so it follows its owner without
+    /// masquerading as a second interactable ground object.
+    /// </summary>
+    GroundItem = 1 << 1,
 }
 
 /// <summary>Game-owned public projection semantics read from committed ECS authority.</summary>
@@ -16,8 +22,13 @@ public readonly record struct WorldPublicDescriptor(
     WorldYaw Orientation,
     WorldPublicStateFlags Flags)
 {
+    public const WorldPublicStateFlags AdmittedFlags =
+        WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem;
+
     public bool IsValid => PrefabId != 0 &&
-        (Flags & ~WorldPublicStateFlags.Visible) == 0;
+        (Flags & ~AdmittedFlags) == 0 &&
+        ((Flags & WorldPublicStateFlags.GroundItem) == 0 ||
+         (Flags & WorldPublicStateFlags.Visible) != 0);
 }
 
 /// <summary>

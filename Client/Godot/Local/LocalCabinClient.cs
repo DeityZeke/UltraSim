@@ -123,9 +123,9 @@ public partial class LocalCabinClient : Node3D
     private readonly ClientActorPresentationRecord[] _actorRows =
         new ClientActorPresentationRecord[64];
     private readonly ClientPublicPresentationMetadata[] _sharedMetadata =
-        new ClientPublicPresentationMetadata[64];
+        new ClientPublicPresentationMetadata[128];
     private readonly ClientPublicPresentationMetadata[] _previousSharedMetadata =
-        new ClientPublicPresentationMetadata[64];
+        new ClientPublicPresentationMetadata[128];
     private int _previousSharedMetadataCount;
     private ClientPublicPresentationMetadataState? _publicPresentationMetadata;
     private ClientActorPresentationState? _actorState;
@@ -139,7 +139,7 @@ public partial class LocalCabinClient : Node3D
     private LineEdit? _chatInput;
     private OptionButton? _chatMode;
     private Label? _overheadSpeech;
-    private Label? _hoverTooltip;
+    private GodotWorldHoverTooltip? _hoverTooltip;
     private Control? _ownedHudRoot;
     private Control? _ownedWorldUiRoot;
     private Control? _inventoryHost;
@@ -747,12 +747,11 @@ public partial class LocalCabinClient : Node3D
         };
         _displayName = view.GuestIdentity.DisplayName ??
             throw new InvalidOperationException("The authority published no guest display name.");
-        _publicPresentationMetadata = new ClientPublicPresentationMetadataState(64);
+        _publicPresentationMetadata = new ClientPublicPresentationMetadataState(128);
         _publicPresentationMetadata.ResetServerGeneration(view.GenerationId);
-        if (view.ServerExtension.Available)
-            SynchronizeSharedPublicPresentationMetadata();
-        else
+        if (!view.ServerExtension.Available)
             ApplyControlledActorMetadata(in view);
+        SynchronizeColdPublicPresentationMetadata();
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
         _actorPresenter = new GodotActorPresenter(
@@ -794,7 +793,7 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException("The authored welcome sign was not resident and selectable.");
 
         UpdateWorldHover();
-        if (!_hoverTooltip.Visible || _hoverTooltip.Text != "Sign")
+        if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Sign")
             throw new InvalidOperationException("Known sign presentation did not produce its local hover label.");
         Select(_pointerPoint);
         if (_selection != SelectionKind.InformationalSign)
@@ -840,6 +839,22 @@ public partial class LocalCabinClient : Node3D
         DriveLocalUntil(() => _uiClient.OpenViewCount == 0);
         if (_inventoryHost.GetChildCount() != 0)
             throw new InvalidOperationException("Closing the informational sign left stale Godot UI presentation.");
+
+        if (!TryFindPublicRecord(GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord sword))
+            throw new InvalidOperationException("The world Iron Sword was not resident for hover acceptance.");
+        _pointerTarget = sword.Id;
+        _pointerTargetPrefab = sword.PrefabId;
+        _pointerPoint = new ClientControlWorldPoint(
+            sword.Position.GlobalXMillimeters,
+            sword.Position.GlobalZMillimeters);
+        _pointerPointValid = true;
+        UpdateWorldHover();
+        if (!_hoverTooltip.Visible || _hoverTooltip.Title != "Iron Sword" ||
+            !_hoverTooltip.Details.Contains("Damage ", StringComparison.Ordinal) ||
+            !_hoverTooltip.Details.Contains("Quality ", StringComparison.Ordinal) ||
+            !_hoverTooltip.Details.Contains("Durability ", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "The world Iron Sword did not realize its authoritative expanded property tooltip.");
         return GetPresentationSnapshot();
     }
 
@@ -1151,10 +1166,9 @@ public partial class LocalCabinClient : Node3D
         {
             _publicPresentationMetadata?.ResetServerGeneration(view.GenerationId);
             _previousSharedMetadataCount = 0;
-            if (view.ServerExtension.Available)
-                SynchronizeSharedPublicPresentationMetadata();
-            else
+            if (!view.ServerExtension.Available)
                 ApplyControlledActorMetadata(in view);
+            SynchronizeColdPublicPresentationMetadata();
         }
         _actorPresenter?.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
@@ -1181,13 +1195,13 @@ public partial class LocalCabinClient : Node3D
             throw new InvalidOperationException($"Controlled actor metadata was rejected: {applied}.");
     }
 
-    private void SynchronizeSharedPublicPresentationMetadata()
+    private void SynchronizeColdPublicPresentationMetadata()
     {
         if (_localSession is null || _publicPresentationMetadata is null) return;
         int count = _localSession.CopyPublicPresentationMetadata(_sharedMetadata);
         if (count < 0)
             throw new InvalidOperationException(
-                "The shared participant metadata exceeded the local presentation capacity.");
+                "The cold public metadata exceeded the local presentation capacity.");
         for (int previous = 0; previous < _previousSharedMetadataCount; previous++)
         {
             ClientPublicPresentationMetadata old = _previousSharedMetadata[previous];
@@ -1210,7 +1224,7 @@ public partial class LocalCabinClient : Node3D
             if (status is not (ClientPublicPresentationApplyStatus.Applied or
                     ClientPublicPresentationApplyStatus.Duplicate))
                 throw new InvalidOperationException(
-                    $"Retired participant metadata was rejected: {status}.");
+                    $"Retired cold public metadata was rejected: {status}.");
         }
         for (int current = 0; current < count; current++)
         {
@@ -1220,7 +1234,7 @@ public partial class LocalCabinClient : Node3D
             if (status is not (ClientPublicPresentationApplyStatus.Applied or
                     ClientPublicPresentationApplyStatus.Duplicate))
                 throw new InvalidOperationException(
-                    $"Shared participant metadata was rejected: {status}.");
+                    $"Cold public metadata was rejected: {status}.");
         }
         _sharedMetadata.AsSpan(0, count).CopyTo(_previousSharedMetadata);
         if (count < _previousSharedMetadataCount)
@@ -1456,8 +1470,7 @@ public partial class LocalCabinClient : Node3D
         QueueChangedPublicChunks();
         _player = view.PlayerPosition;
         ObserveAuthorityOutcomes(view);
-        if (view.ServerExtension.Available)
-            SynchronizeSharedPublicPresentationMetadata();
+        SynchronizeColdPublicPresentationMetadata();
         TrackPresentation(reset: false);
         _renderer.ProcessFrame(GodotWorldFrameBudget.Default);
         SynchronizeActorPresentation(in view);
@@ -1663,19 +1676,31 @@ public partial class LocalCabinClient : Node3D
     {
         if (_hoverTooltip is null)
             return;
-        string? label = _useConceptDemoWorld && _pointerTarget.IsValid &&
-            _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword
-                ? "Iron Sword"
-                : _useConceptDemoWorld && _pointerPointValid &&
-                    IsKnownPresentedPrefabNear(
-                        GameWorldPublicPrefabIds.InformationalSign, _pointerPoint, radius: 1_500)
-                    ? "Sign"
-                    : null;
-        _hoverTooltip.Visible = label is not null;
-        if (label is null)
+        string? title = null;
+        string? details = null;
+        if (_useConceptDemoWorld && _pointerTarget.IsValid &&
+            _pointerTargetPrefab == GameWorldPublicPrefabIds.IronSword &&
+            _publicPresentationMetadata?.TryGet(
+                _pointerTarget, out ClientPublicPresentationMetadata item) == true &&
+            (item.Flags & ClientPublicPresentationFlags.ItemProperties) != 0)
+        {
+            title = item.DisplayLabel;
+            details = item.DetailText;
+        }
+        else if (_useConceptDemoWorld && _pointerPointValid &&
+            IsKnownPresentedPrefabNear(
+                GameWorldPublicPrefabIds.InformationalSign, _pointerPoint, radius: 1_500))
+            title = "Sign";
+        if (title is null)
+        {
+            _hoverTooltip.Hide();
             return;
-        _hoverTooltip.Text = label;
-        _hoverTooltip.Position = GetViewport().GetMousePosition() + new Vector2(14, 18);
+        }
+        _hoverTooltip.Show(
+            title,
+            details,
+            GetViewport().GetMousePosition(),
+            GetViewport().GetVisibleRect().Size);
     }
 
     private bool IsKnownPresentedPrefabNear(
@@ -1771,7 +1796,8 @@ public partial class LocalCabinClient : Node3D
                 continue;
             foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
             {
-                if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0)
+                if (!GodotPublicPointerPicker.IsPointerTarget(
+                        record.PrefabId, record.StateFlags))
                     continue;
                 Vector3 basePosition = new(
                     checked(record.Position.GlobalXMillimeters - _player.GlobalXMillimeters) * 0.001f,
@@ -2795,15 +2821,7 @@ public partial class LocalCabinClient : Node3D
         };
         _ownedWorldUiRoot.AddChild(_overheadSpeech);
 
-        _hoverTooltip = new Label
-        {
-            Name = "WorldHoverTooltip",
-            Text = "Sign",
-            Visible = false,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-            ThemeTypeVariation = "HeaderSmall",
-        };
-        _ownedWorldUiRoot.AddChild(_hoverTooltip);
+        _hoverTooltip = new GodotWorldHoverTooltip(_ownedWorldUiRoot);
 
         _inventoryHost = FullRectControl("CabinInventory");
         _ownedHudRoot.AddChild(_inventoryHost);
@@ -2949,6 +2967,28 @@ public partial class LocalCabinClient : Node3D
             }
         }
         position = default;
+        return false;
+    }
+
+    private bool TryFindPublicRecord(uint prefabId, out WorldPublicRecord found)
+    {
+        if (_cache is not null && _cache.TryCopyResidentInfo(
+                _chatChunkInfo, out int count, out _))
+        {
+            for (int chunk = 0; chunk < count; chunk++)
+            {
+                if (!_cache.TryGetResidentView(
+                        _chatChunkInfo[chunk].Handle, out ClientSemanticChunkView view))
+                    continue;
+                foreach (ref readonly WorldPublicRecord record in view.PublicRecords)
+                {
+                    if (record.PrefabId != prefabId) continue;
+                    found = record;
+                    return true;
+                }
+            }
+        }
+        found = default;
         return false;
     }
 

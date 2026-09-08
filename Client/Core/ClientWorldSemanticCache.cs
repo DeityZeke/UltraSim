@@ -957,7 +957,9 @@ public sealed class ClientWorldSemanticCache
         record.EntityPublicVersion != 0 &&
         record.PrefabId != 0 &&
         record.Position.Chunk == key.Coord &&
-        (record.StateFlags & ~WorldPublicStateFlags.Visible) == 0 &&
+        (record.StateFlags & ~WorldPublicDescriptor.AdmittedFlags) == 0 &&
+        ((record.StateFlags & WorldPublicStateFlags.GroundItem) == 0 ||
+         (record.StateFlags & WorldPublicStateFlags.Visible) != 0) &&
         record.LastChangedRevision.IsValid &&
         maximumRevision.IsValid &&
         record.LastChangedRevision.Value <= maximumRevision.Value;

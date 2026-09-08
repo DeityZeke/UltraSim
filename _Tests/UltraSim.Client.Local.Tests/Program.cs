@@ -262,6 +262,19 @@ static void ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath()
     }, failure: () => fixture.Session.GetSnapshot().ToString());
     True(TryFindPublic(
         cache, GameWorldPublicPrefabIds.IronSword, out WorldPublicRecord worldSword));
+    Equal(
+        WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem,
+        worldSword.StateFlags);
+    var publicMetadata = new ClientPublicPresentationMetadata[64];
+    DriveUntil(() =>
+    {
+        int count = fixture.Session.CopyPublicPresentationMetadata(publicMetadata);
+        return count > 0 && publicMetadata.AsSpan(0, count).ToArray().Any(candidate =>
+            candidate.Id == worldSword.Id &&
+            (candidate.Flags & ClientPublicPresentationFlags.ItemProperties) != 0 &&
+            candidate.DetailText.Contains("Damage ", StringComparison.Ordinal) &&
+            candidate.DetailText.Contains("Durability ", StringComparison.Ordinal));
+    });
 
     var input = new ClientWorldInputSequencer(fixture.Session.ControlSession);
     True(input.TryCreateSemanticCommand(

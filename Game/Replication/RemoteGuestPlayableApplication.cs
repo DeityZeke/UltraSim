@@ -208,6 +208,12 @@ public sealed class RemoteGuestPlayableApplication :
     private readonly SharedPlayableParticipant[]? _sharedParticipantScratch;
     private ulong _nextSharedPresentationDeliveryId = 1;
     private int _sharedPresentationDeliverySlot = -1;
+    private readonly SharedPublicPresentationRow[] _publicItemPresentations =
+        new SharedPublicPresentationRow[64];
+    private readonly GamePublicWeaponPresentation[] _publicItemScratch =
+        new GamePublicWeaponPresentation[64];
+    private ulong _nextPublicItemPresentationDeliveryId = 1UL << 63;
+    private int _publicItemPresentationDeliverySlot = -1;
     private WorldPack? _worldPack;
     private UltraSimGameComposition? _composition;
     private ServerRuntime? _runtime;
@@ -849,8 +855,15 @@ public sealed class RemoteGuestPlayableApplication :
 
     private bool QueuePublicPresentationMetadata(bool force)
     {
-        if (_sharedAuthority is not null)
-            return QueueSharedPublicPresentationMetadata(force);
+        bool complete = _sharedAuthority is not null
+            ? QueueSharedPublicPresentationMetadata(force)
+            : QueueOwnPublicPresentationMetadata(force);
+        complete &= QueuePublicItemPresentationMetadata(force);
+        return complete;
+    }
+
+    private bool QueueOwnPublicPresentationMetadata(bool force)
+    {
         if (_publicPresentationApplied || !_guestAdmitted || !_admissionResultApplied ||
             _runtime is null || !_playerPublicId.IsValid || !_guestIdentity.IsValid)
             return true;
@@ -870,7 +883,8 @@ public sealed class RemoteGuestPlayableApplication :
             Flags = RemotePublicPresentationFlags.NameplateEligible,
         };
         if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-                _messageScratch, in header, _guestIdentity.DisplayName!, out int written))
+                _messageScratch, in header, _guestIdentity.DisplayName!, string.Empty,
+                out int written))
             throw new InvalidOperationException("The retained public presentation metadata became invalid.");
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
                 _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
@@ -882,6 +896,15 @@ public sealed class RemoteGuestPlayableApplication :
 
     private void ProcessPublicPresentationProof(ReadOnlySpan<byte> payload)
     {
+        if (RemotePublicPresentationAppliedMessageCodec.TryReadExact(
+                payload, out RemotePublicPresentationAppliedMessage itemProof) &&
+            _publicItemPresentationDeliverySlot >= 0 &&
+            itemProof.DeliveryId ==
+                _publicItemPresentations[_publicItemPresentationDeliverySlot].DeliveryId)
+        {
+            ProcessPublicItemPresentationProof(in itemProof);
+            return;
+        }
         if (_sharedAuthority is not null)
         {
             ProcessSharedPublicPresentationProof(payload);
@@ -912,6 +935,215 @@ public sealed class RemoteGuestPlayableApplication :
         }
         _publicPresentationApplied = true;
     }
+
+    private bool QueuePublicItemPresentationMetadata(bool force)
+    {
+        if (!_guestAdmitted || !_admissionResultApplied || _runtime is null ||
+            _recipient is null)
+            return true;
+        ReconcilePublicItemPresentation();
+        int slot = _publicItemPresentationDeliverySlot;
+        if (slot < 0)
+        {
+            for (int index = 0; index < _publicItemPresentations.Length; index++)
+            {
+                if (!_publicItemPresentations[index].NeedsDelivery) continue;
+                slot = index;
+                ref SharedPublicPresentationRow selected =
+                    ref _publicItemPresentations[index];
+                if (_nextPublicItemPresentationDeliveryId == 0)
+                    throw new InvalidOperationException(
+                        "The public-item presentation delivery identity space is exhausted.");
+                selected.DeliveryId = _nextPublicItemPresentationDeliveryId++;
+                _publicItemPresentationDeliverySlot = index;
+                break;
+            }
+        }
+        if (slot < 0) return true;
+        ref SharedPublicPresentationRow row = ref _publicItemPresentations[slot];
+        if (row.DeliveryId == 0)
+            throw new InvalidOperationException("The selected public-item delivery has no identity.");
+        long now = Environment.TickCount64;
+        if (!force && row.LastQueuedMilliseconds != 0 &&
+            now - row.LastQueuedMilliseconds < AdmissionRetryMilliseconds)
+            return true;
+        var header = new RemotePublicPresentationMetadataHeader
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            ServerGenerationId = _runtime.ActiveGenerationId,
+            DeliveryId = row.DeliveryId,
+            MetadataRevision = row.Revision,
+            PublicEntityIndex = row.PublicEntity.Index,
+            PublicEntityGeneration = row.PublicEntity.Generation,
+            Operation = row.DesiredPresent
+                ? RemotePublicPresentationOperation.Present
+                : RemotePublicPresentationOperation.Remove,
+            Flags = row.DesiredPresent
+                ? row.DesiredFlags
+                : RemotePublicPresentationFlags.None,
+        };
+        string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
+        string detail = row.DesiredPresent ? row.DetailText! : string.Empty;
+        if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+                _messageScratch, in header, label, detail, out int written))
+            throw new InvalidOperationException(
+                "The retained public-item presentation metadata became invalid.");
+        if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+            return false;
+        row.LastQueuedMilliseconds = now;
+        SaturatingIncrement(ref _publicPresentationDeliveriesQueued);
+        return true;
+    }
+
+    private void ProcessPublicItemPresentationProof(
+        in RemotePublicPresentationAppliedMessage proof)
+    {
+        if (_publicItemPresentationDeliverySlot < 0 || _runtime is null)
+        {
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        ref SharedPublicPresentationRow row =
+            ref _publicItemPresentations[_publicItemPresentationDeliverySlot];
+        if (
+            !UltraSimGameProtocol.IsValidPublicPresentationApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.ServerGenerationId != _runtime.ActiveGenerationId ||
+            proof.DeliveryId != row.DeliveryId)
+        {
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        if (proof.Status != RemotePublicPresentationApplyStatus.Applied)
+        {
+            _applicationFaulted = true;
+            SaturatingIncrement(ref _rejectedPublicPresentationProofs);
+            return;
+        }
+        row.AppliedPresent = row.DesiredPresent;
+        row.AppliedPublicEntity = row.PublicEntity;
+        row.AppliedFlags = row.DesiredPresent
+            ? row.DesiredFlags
+            : RemotePublicPresentationFlags.None;
+        row.AppliedDisplayLabel = row.DesiredPresent ? row.DisplayLabel : null;
+        row.AppliedDetailText = row.DesiredPresent ? row.DetailText : null;
+        row.DeliveryId = 0;
+        row.LastQueuedMilliseconds = 0;
+        _publicItemPresentationDeliverySlot = -1;
+    }
+
+    private void ReconcilePublicItemPresentation()
+    {
+        if (_runtime is null) return;
+        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, int>(
+                (world, _, game) => game.Items.CopyPublicWeaponPresentations(
+                    world, game.WorldState, _publicItemScratch),
+                out int desiredCount) || desiredCount < 0)
+            throw new InvalidOperationException(
+                "The public-item presentation source exceeded its bounded destination.");
+
+        for (int slot = 0; slot < _publicItemPresentations.Length; slot++)
+        {
+            ref SharedPublicPresentationRow row = ref _publicItemPresentations[slot];
+            if (row.DeliveryId != 0 || !row.PublicEntity.IsValid) continue;
+            GamePublicWeaponPresentation desired = default;
+            for (int item = 0; item < desiredCount; item++)
+            {
+                if (_publicItemScratch[item].Id != row.PublicEntity ||
+                    !IsSubscribed(_publicItemScratch[item].Position))
+                    continue;
+                desired = _publicItemScratch[item];
+                break;
+            }
+            if (!desired.IsValid)
+            {
+                if (!row.AppliedPresent)
+                {
+                    row = default;
+                    continue;
+                }
+                if (row.DesiredPresent)
+                {
+                    row.DesiredPresent = false;
+                    row.Revision = checked(row.Revision + 1);
+                }
+                continue;
+            }
+            if (WeaponsEqual(row.Weapon, desired.Weapon))
+            {
+                row.DesiredPresent = true;
+                continue;
+            }
+            if (row.AppliedPresent)
+            {
+                if (row.DesiredPresent)
+                {
+                    row.DesiredPresent = false;
+                    row.Revision = checked(row.Revision + 1);
+                }
+                continue;
+            }
+            row.Weapon = desired.Weapon;
+            row.DetailText = desired.DetailText;
+            row.Revision = checked(row.Revision + 1);
+            row.DesiredPresent = true;
+        }
+
+        for (int item = 0; item < desiredCount; item++)
+        {
+            GamePublicWeaponPresentation desired = _publicItemScratch[item];
+            if (!desired.IsValid || !IsSubscribed(desired.Position)) continue;
+            bool exists = false;
+            for (int slot = 0; slot < _publicItemPresentations.Length; slot++)
+            {
+                if (_publicItemPresentations[slot].PublicEntity != desired.Id) continue;
+                exists = true;
+                break;
+            }
+            if (exists) continue;
+            int free = -1;
+            for (int slot = 0; slot < _publicItemPresentations.Length; slot++)
+            {
+                if (_publicItemPresentations[slot].PublicEntity.IsValid) continue;
+                free = slot;
+                break;
+            }
+            if (free < 0)
+                throw new InvalidOperationException(
+                    "The bounded public-item presentation table is full.");
+            _publicItemPresentations[free] = new SharedPublicPresentationRow
+            {
+                PublicEntity = desired.Id,
+                DisplayLabel = desired.DisplayName,
+                DetailText = desired.DetailText,
+                DesiredFlags = RemotePublicPresentationFlags.ItemProperties,
+                Weapon = desired.Weapon,
+                Revision = 1,
+                DesiredPresent = true,
+            };
+        }
+    }
+
+    private bool IsSubscribed(in WorldPosition position)
+    {
+        SpatialChunkKey key = new(GameWorldState.DefaultSpace, position.Chunk);
+        OfflineDirectChunkSubscriptionView subscriptions = _recipient!.Subscriptions;
+        for (int index = 0; index < subscriptions.Length; index++)
+            if (subscriptions[index].Interest.Key == key) return true;
+        return false;
+    }
+
+    private static bool WeaponsEqual(
+        in GameWeaponInstance left,
+        in GameWeaponInstance right) =>
+        left.DamageMinimum == right.DamageMinimum &&
+        left.DamageMaximum == right.DamageMaximum &&
+        left.MaximumDurability == right.MaximumDurability &&
+        left.CurrentDurability == right.CurrentDurability &&
+        left.Quality == right.Quality &&
+        left.Element == right.Element &&
+        left.SpawnOrdinal == right.SpawnOrdinal;
 
     private bool QueueSharedPublicPresentationMetadata(bool force)
     {
@@ -959,12 +1191,13 @@ public sealed class RemoteGuestPlayableApplication :
                 ? RemotePublicPresentationOperation.Present
                 : RemotePublicPresentationOperation.Remove,
             Flags = row.DesiredPresent
-                ? RemotePublicPresentationFlags.NameplateEligible
+                ? row.DesiredFlags
                 : RemotePublicPresentationFlags.None,
         };
         string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
+        string detail = row.DesiredPresent ? row.DetailText ?? string.Empty : string.Empty;
         if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
-                _messageScratch, in header, label, out int written))
+                _messageScratch, in header, label, detail, out int written))
             throw new InvalidOperationException(
                 "The retained shared public-presentation metadata became invalid.");
         if (_peer.TryQueue(RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id,
@@ -1004,6 +1237,10 @@ public sealed class RemoteGuestPlayableApplication :
         row.AppliedPresent = row.DesiredPresent;
         row.AppliedPublicEntity = row.PublicEntity;
         row.AppliedDisplayLabel = row.DesiredPresent ? row.DisplayLabel : null;
+        row.AppliedFlags = row.DesiredPresent
+            ? row.DesiredFlags
+            : RemotePublicPresentationFlags.None;
+        row.AppliedDetailText = row.DesiredPresent ? row.DetailText : null;
         row.DeliveryId = 0;
         row.LastQueuedMilliseconds = 0;
         _sharedPresentationDeliverySlot = -1;
@@ -1070,6 +1307,7 @@ public sealed class RemoteGuestPlayableApplication :
             {
                 PublicEntity = desired.PublicEntity,
                 DisplayLabel = desired.GuestIdentity.DisplayName,
+                DesiredFlags = RemotePublicPresentationFlags.NameplateEligible,
                 Revision = 1,
                 DesiredPresent = true,
             };
@@ -1524,6 +1762,11 @@ public sealed class RemoteGuestPlayableApplication :
         internal WorldPublicEntityId AppliedPublicEntity;
         internal string? DisplayLabel;
         internal string? AppliedDisplayLabel;
+        internal string? DetailText;
+        internal string? AppliedDetailText;
+        internal RemotePublicPresentationFlags DesiredFlags;
+        internal RemotePublicPresentationFlags AppliedFlags;
+        internal GameWeaponInstance Weapon;
         internal ulong Revision;
         internal ulong DeliveryId;
         internal long LastQueuedMilliseconds;
@@ -1533,7 +1776,9 @@ public sealed class RemoteGuestPlayableApplication :
         internal readonly bool NeedsDelivery => PublicEntity.IsValid && DeliveryId == 0 &&
             (DesiredPresent != AppliedPresent ||
              DesiredPresent && (AppliedPublicEntity != PublicEntity ||
-                !string.Equals(AppliedDisplayLabel, DisplayLabel, StringComparison.Ordinal)));
+                AppliedFlags != DesiredFlags ||
+                !string.Equals(AppliedDisplayLabel, DisplayLabel, StringComparison.Ordinal) ||
+                !string.Equals(AppliedDetailText, DetailText, StringComparison.Ordinal)));
     }
 
     private readonly record struct InventoryOpenEntities(Entity Container, Entity Owner);

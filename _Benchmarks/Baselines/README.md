@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `inventory-i0.12-world-property-picking-hardening-2026-09-08.json` — bounded
+  recipient-interest-coupled cold Iron Sword properties, packet-free/remote Client Core parity,
+  a native expanded stat tooltip, and an explicit `GroundItem` eligibility bit that prevents
+  visible equipped gear from remaining independently pointer-selectable;
 - `inventory-i0.12-persistent-world-item-2026-09-08.json` — deterministic one-time
   rolled Iron Sword instances, persistent spawner continuation, same-entity world/Inventory/
   Main-Hand/drop/second-owner transfer, owner-private v7 details/Drop, public lifetime retirement,

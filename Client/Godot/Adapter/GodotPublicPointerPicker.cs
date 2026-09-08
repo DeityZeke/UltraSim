@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Game.Composition;
+using UltraSim.Game.World;
 
 namespace UltraSim.Client.Godot;
 
@@ -10,6 +11,16 @@ namespace UltraSim.Client.Godot;
 public static class GodotPublicPointerPicker
 {
     public const float MaximumPickDistanceMeters = 100f;
+
+    /// <summary>
+    /// Presentation may realize equipped gear as a public visual, but only an independently
+    /// grounded item is a world-item pointer target. Other admitted object kinds retain their
+    /// existing visible-target behavior.
+    /// </summary>
+    public static bool IsPointerTarget(uint prefabId, WorldPublicStateFlags stateFlags) =>
+        (stateFlags & WorldPublicStateFlags.Visible) != 0 &&
+        (prefabId != GameWorldPublicPrefabIds.IronSword ||
+         (stateFlags & WorldPublicStateFlags.GroundItem) != 0);
 
     public static bool TryIntersect(
         uint prefabId,

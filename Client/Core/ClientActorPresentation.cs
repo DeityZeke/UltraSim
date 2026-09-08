@@ -129,6 +129,7 @@ public enum ClientPublicPresentationFlags : byte
 {
     None = 0,
     NameplateEligible = 1 << 0,
+    ItemProperties = 1 << 1,
 }
 
 public enum ClientPublicPresentationOperation : byte
@@ -146,14 +147,23 @@ public readonly record struct ClientPublicPresentationMetadata(
     WorldPublicEntityId Id,
     ulong Revision,
     ClientPublicPresentationFlags Flags,
-    string DisplayLabel)
+    string DisplayLabel,
+    string DetailText = "")
 {
     public const int MaximumDisplayLabelUtf8Bytes = 128;
+    public const int MaximumDetailTextUtf8Bytes = 512;
+    public const ClientPublicPresentationFlags AdmittedFlags =
+        ClientPublicPresentationFlags.NameplateEligible |
+        ClientPublicPresentationFlags.ItemProperties;
 
     public bool IsValid =>
         ServerGenerationId != 0 && Id.IsValid && Revision != 0 &&
-        (Flags & ~ClientPublicPresentationFlags.NameplateEligible) == 0 &&
-        ClientActorDefinition.IsCanonicalLabel(DisplayLabel, MaximumDisplayLabelUtf8Bytes);
+        Flags != ClientPublicPresentationFlags.None &&
+        (Flags & ~AdmittedFlags) == 0 &&
+        ClientActorDefinition.IsCanonicalLabel(DisplayLabel, MaximumDisplayLabelUtf8Bytes) &&
+        ((Flags & ClientPublicPresentationFlags.ItemProperties) != 0
+            ? ClientActorDefinition.IsCanonicalLabel(DetailText, MaximumDetailTextUtf8Bytes)
+            : string.IsNullOrEmpty(DetailText));
 }
 
 public enum ClientPublicPresentationApplyStatus : byte
@@ -223,7 +233,8 @@ public sealed class ClientPublicPresentationMetadataState
             operation == ClientPublicPresentationOperation.Remove &&
                 (!metadata.Id.IsValid || metadata.Revision == 0 ||
                  metadata.ServerGenerationId == 0 || metadata.Flags != 0 ||
-                 !string.IsNullOrEmpty(metadata.DisplayLabel)))
+                 !string.IsNullOrEmpty(metadata.DisplayLabel) ||
+                 !string.IsNullOrEmpty(metadata.DetailText)))
             return Reject();
 
         int slot = Find(metadata.Id.Index);
@@ -249,6 +260,8 @@ public sealed class ClientPublicPresentationMetadataState
                     (operation == ClientPublicPresentationOperation.Remove ||
                      entry.Flags == metadata.Flags &&
                      string.Equals(entry.DisplayLabel, metadata.DisplayLabel,
+                         StringComparison.Ordinal) &&
+                     string.Equals(entry.DetailText, metadata.DetailText,
                          StringComparison.Ordinal));
                 if (!duplicate) return Reject();
                 SaturatingIncrement(ref _duplicates);
@@ -265,6 +278,9 @@ public sealed class ClientPublicPresentationMetadataState
             : ClientPublicPresentationFlags.None;
         entry.DisplayLabel = operation == ClientPublicPresentationOperation.Present
             ? metadata.DisplayLabel
+            : string.Empty;
+        entry.DetailText = operation == ClientPublicPresentationOperation.Present
+            ? metadata.DetailText
             : string.Empty;
         if (operation == ClientPublicPresentationOperation.Present)
         {
@@ -294,7 +310,8 @@ public sealed class ClientPublicPresentationMetadataState
                     id,
                     entry.Revision,
                     entry.Flags,
-                    entry.DisplayLabel!);
+                    entry.DisplayLabel!,
+                    entry.DetailText!);
                 return true;
             }
         }
@@ -308,7 +325,7 @@ public sealed class ClientPublicPresentationMetadataState
         return new ClientPublicPresentationMetadataSnapshot(
             _serverGenerationId, _current, _known, _entries.Length,
             _applied, _removed, _duplicates, _rejected, _generationResets,
-            checked((long)_entries.Length * 48));
+            checked((long)_entries.Length * 56));
     }
 
     private int Find(uint index)
@@ -351,6 +368,7 @@ public sealed class ClientPublicPresentationMetadataState
         internal ClientPublicPresentationOperation Operation;
         internal ClientPublicPresentationFlags Flags;
         internal string? DisplayLabel;
+        internal string? DetailText;
     }
 }
 

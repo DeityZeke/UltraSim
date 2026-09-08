@@ -19,8 +19,9 @@ public readonly record struct RemotePublicPresentationMetadataClientSnapshot(
     long ReservedBytes);
 
 /// <summary>
-/// Remote adapter for relatively cold public actor metadata. It applies only exact bounded facts
-/// to Client Core and retains semantic proof independently from hot chunk movement delivery.
+/// Remote adapter for relatively cold public presentation metadata. It applies only exact bounded
+/// actor labels or item-property facts to Client Core and retains semantic proof independently
+/// from hot chunk movement delivery.
 /// </summary>
 public sealed class RemotePublicPresentationMetadataClient :
     IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor
@@ -69,7 +70,7 @@ public sealed class RemotePublicPresentationMetadataClient :
         }
         if (!UltraSimGameProtocol.TryReadPublicPresentationMetadata(
                 payload, out RemotePublicPresentationMetadataHeader header,
-                out string displayLabel) ||
+                out string displayLabel, out string detailText) ||
             header.ApplicationSessionEpoch != _applicationSessionEpoch)
         {
             SaturatingIncrement(ref _rejected);
@@ -92,7 +93,8 @@ public sealed class RemotePublicPresentationMetadataClient :
                     header.PublicEntityIndex, header.PublicEntityGeneration),
                 header.MetadataRevision,
                 (ClientPublicPresentationFlags)header.Flags,
-                displayLabel);
+                displayLabel,
+                detailText);
             result = _state.TryApply(
                 (ClientPublicPresentationOperation)header.Operation, in metadata);
         }

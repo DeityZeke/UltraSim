@@ -92,9 +92,12 @@ internal static class M00SharedAuthorityTests
                 current.ServerExtension.RemoteParticipants == 1);
             Equal(generation, bob.Session.Playable.GetSnapshot().ServerGenerationId);
             var metadata = new ClientPublicPresentationMetadata[8];
-            Equal(2, local.CopyPublicPresentationMetadata(metadata));
-            True(metadata.Take(2).Any(static row => row.DisplayLabel == "Host Alice"));
-            True(metadata.Take(2).Any(static row => row.DisplayLabel == "Remote Bob"));
+            Equal(3, local.CopyPublicPresentationMetadata(metadata));
+            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Host Alice"));
+            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Remote Bob"));
+            True(metadata.Take(3).Any(static row =>
+                row.DisplayLabel == "Iron Sword" &&
+                (row.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
 
             carol = ClientNode.Connect(root, "hosted-carol", endpoint, fingerprint);
             True(carol.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
@@ -107,10 +110,13 @@ internal static class M00SharedAuthorityTests
                 local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
                 current.ServerExtension.RemoteParticipants == 2);
             Equal(generation, carol.Session.Playable.GetSnapshot().ServerGenerationId);
-            Equal(3, local.CopyPublicPresentationMetadata(metadata));
-            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Host Alice"));
-            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Remote Bob"));
-            True(metadata.Take(3).Any(static row => row.DisplayLabel == "Remote Carol"));
+            Equal(4, local.CopyPublicPresentationMetadata(metadata));
+            True(metadata.Take(4).Any(static row => row.DisplayLabel == "Host Alice"));
+            True(metadata.Take(4).Any(static row => row.DisplayLabel == "Remote Bob"));
+            True(metadata.Take(4).Any(static row => row.DisplayLabel == "Remote Carol"));
+            True(metadata.Take(4).Any(static row =>
+                row.DisplayLabel == "Iron Sword" &&
+                (row.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
 
             RemotePlayableClientSnapshot bobBefore = bob.Session.Playable.GetSnapshot();
             RemotePlayableClientSnapshot carolBefore = carol.Session.Playable.GetSnapshot();
@@ -193,7 +199,7 @@ internal static class M00SharedAuthorityTests
             Console.WriteLine(
                 $"EVIDENCE M0.0 embedded_hosted generation={generation} " +
                 "host_path=packet-free remote_path=udp participants=3 " +
-                "chat=three_recipient metadata=3 owner_ui=isolated reconnect=pass " +
+                "chat=three_recipient metadata=4 owner_ui=isolated reconnect=pass " +
                 "stop_host_world_survives=pass");
         }
         finally
@@ -260,7 +266,7 @@ internal static class M00SharedAuthorityTests
             ulong generation = authority.GetSnapshot().GenerationId;
             Equal(3, authority.GetSnapshot().ParticipantCount);
             DriveUntil(host, authority, clients, () => clients.All(static client =>
-                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords == 3));
+                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords >= 3));
             DriveUntil(host, authority, clients, () => clients.All(static client =>
                 CountHumanActors(client.Session.WorldCache) == 3));
             for (int index = 0; index < clients.Count; index++)
@@ -419,7 +425,7 @@ internal static class M00SharedAuthorityTests
                 bobAgain.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active &&
                 authority.GetSnapshot().ParticipantCount == 3);
             DriveUntil(host, authority, clients, () => clients.All(static client =>
-                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords == 3));
+                client.Session.PublicPresentationState.GetSnapshot().CurrentRecords >= 3));
             Equal(generation, authority.GetSnapshot().GenerationId);
 
             SharedPlayableAuthoritySnapshot evidence = authority.GetSnapshot();

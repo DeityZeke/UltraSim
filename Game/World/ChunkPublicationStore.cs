@@ -1806,7 +1806,9 @@ public static class ChunkPublicationSemanticCodec
             ref readonly WorldPublicRecord record = ref records[index];
             if (!record.Id.IsValid || record.EntityPublicVersion == 0 || record.PrefabId == 0 ||
                 record.Position.Chunk != batch.Key.Coord ||
-                (record.StateFlags & ~WorldPublicStateFlags.Visible) != 0 ||
+                (record.StateFlags & ~WorldPublicDescriptor.AdmittedFlags) != 0 ||
+                ((record.StateFlags & WorldPublicStateFlags.GroundItem) != 0 &&
+                 (record.StateFlags & WorldPublicStateFlags.Visible) == 0) ||
                 !record.LastChangedRevision.IsValid ||
                 record.LastChangedRevision.Value > batch.Cursor.Revision.Value ||
                 index != 0 && records[index - 1].Id.CompareTo(record.Id) >= 0)

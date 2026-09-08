@@ -38,6 +38,8 @@ client adds two remote Online guests to its already-running packet-free local wo
 replacing the authoritative generation. Inventory I0.12 now closes the first persistent rolled
 world-item vertical: a respawning Iron Sword retains one identity and rolled result through world,
 owner-private Inventory, Main Hand, accepted Primary, drop, and another participant's pickup.
+Human-play hardening adds the same bounded rolled facts to the world-hover panel through cold
+public metadata and separates a selectable ground item from visible equipped presentation.
 
 The demo has two purposes:
 
@@ -913,11 +915,11 @@ equipped/world transitions, owner-private Inventory projection, public disappear
 and an admitted no-damage Primary swing. Respawn creates a new item; it never recalls or rerolls an
 item already taken by a participant.
 
-I0.12 deliberately stops before a generalized cold public Object Property List protocol and before
-the complete X/Y animation set. Inventory selection/detail presentation may show the bounded
-authoritative rolled values already disclosed in its owner-private model. World hover/property
-caching and full public swing
-animation are follow-on consumers, not permission to place item stats in every hot public record.
+I0.12 still stops before a generalized/on-demand Object Property List protocol and before the
+complete X/Y animation set. Its post-acceptance human-play hardening carries the first bounded
+weapon detail through relatively cold, generational public-presentation metadata, so local and
+remote world hover can display the authoritative rolled values without placing item stats in every
+hot public record. Full public swing animation remains a follow-on consumer.
 
 ---
 
@@ -1572,6 +1574,7 @@ then prioritize the first meaningful remote vertical:
 then continue remaining Round 1 consumers as earned:
     I0.12 persistent rolled world-item / pickup / Inventory / equip / drop  CLOSED
           + minimum owner-result swing cue
+          + bounded world-property tooltip / equipped-item picking hardening
 
 then continue:
     X/Y content-backed animation + public action realization

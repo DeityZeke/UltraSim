@@ -276,6 +276,10 @@ public readonly record struct RemoteChunkDeltaRecord(
 
 public static partial class UltraSimGameProtocol
 {
+    private const ushort PublicVisibleStateFlag = 1 << 0;
+    private const ushort PublicGroundItemStateFlag = 1 << 1;
+    private const ushort AdmittedPublicStateFlags =
+        PublicVisibleStateFlag | PublicGroundItemStateFlag;
     public const int MaximumChunkPublicationRecords = 64;
     public const int MaximumChunkSnapshotSegments = 64;
     public const int MaximumDirtyChunkBundleEntries = 32;
@@ -1250,7 +1254,10 @@ public static partial class UltraSimGameProtocol
 
     private static bool ValidSnapshotRecord(in RemoteChunkPublicRecord record, ulong revision) =>
         record.EntityGeneration != 0 && record.EntityPublicVersion != 0 && record.PrefabId != 0 &&
-        (record.StateFlags & ~1) == 0 && record.LastChangedRevision != 0 &&
+        (record.StateFlags & ~AdmittedPublicStateFlags) == 0 &&
+        ((record.StateFlags & PublicGroundItemStateFlag) == 0 ||
+         (record.StateFlags & PublicVisibleStateFlag) != 0) &&
+        record.LastChangedRevision != 0 &&
         record.LastChangedRevision <= revision;
 
     private static bool ValidateDeltaRecords(
@@ -1280,7 +1287,10 @@ public static partial class UltraSimGameProtocol
                 record.StateFlags == 0 && record.LastChangedRevision == 0;
         return record.Operation == RemoteChunkPublicOperation.Present &&
             record.Fields != RemoteChunkPublicFieldMask.None && record.PrefabId != 0 &&
-            (record.StateFlags & ~1) == 0 && record.LastChangedRevision > baseRevision &&
+            (record.StateFlags & ~AdmittedPublicStateFlags) == 0 &&
+            ((record.StateFlags & PublicGroundItemStateFlag) == 0 ||
+             (record.StateFlags & PublicVisibleStateFlag) != 0) &&
+            record.LastChangedRevision > baseRevision &&
             record.LastChangedRevision <= currentRevision;
     }
 

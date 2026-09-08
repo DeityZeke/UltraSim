@@ -27,6 +27,7 @@ namespace UltraSim.Client.Local;
 public sealed class LocalPlayableSession : IDisposable
 {
     private const int MaximumPublicationRecords = 64;
+    private const int MaximumPublicPresentationRecords = 128;
     private const int MaximumSubscriptions = 1_024;
     private const int MaximumTopologyChanges = MaximumSubscriptions * 2;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
@@ -51,7 +52,7 @@ public sealed class LocalPlayableSession : IDisposable
     private readonly ulong _applicationSessionEpoch;
     private LocalPlayableAuthorityView _latestView;
     private readonly ClientPublicPresentationMetadata[] _latestPublicPresentation =
-        new ClientPublicPresentationMetadata[64];
+        new ClientPublicPresentationMetadata[MaximumPublicPresentationRecords];
     private int _latestPublicPresentationCount;
     private Exception? _fault;
     private volatile bool _stopRequested;
@@ -480,7 +481,9 @@ public sealed class LocalPlayableSession : IDisposable
             var recipients = new ParticipantId[chatLimits.MaximumRecipientsPerSpeech];
             var snapshotScratch = new WorldPublicRecord[MaximumPublicationRecords];
             var deltaScratch = new WorldPublicDeltaRecord[MaximumPublicationRecords];
-            var publicPresentationScratch = new ClientPublicPresentationMetadata[64];
+            var publicPresentationScratch =
+                new ClientPublicPresentationMetadata[MaximumPublicPresentationRecords];
+            var publicItemScratch = new GamePublicWeaponPresentation[64];
             ulong observedGeneration = runtime.ActiveGenerationId;
             ulong lastChatSubmission = 0;
             ulong lastAdministrative = 0;
@@ -498,7 +501,8 @@ public sealed class LocalPlayableSession : IDisposable
                 lastAdmin, lastAdminSucceeded, lastAdminMessage,
                 serverExtension?.GetSnapshot() ?? default,
                 serverExtension,
-                publicPresentationScratch);
+                publicPresentationScratch,
+                publicItemScratch);
             _running = true;
             _ready.Set();
 
@@ -557,7 +561,8 @@ public sealed class LocalPlayableSession : IDisposable
                     lastAdmin, lastAdminSucceeded, lastAdminMessage,
                     serverExtension?.GetSnapshot() ?? default,
                     serverExtension,
-                    publicPresentationScratch);
+                    publicPresentationScratch,
+                    publicItemScratch);
             }
 
             // Remote applications borrow this running authority. Retire the optional hosted
@@ -981,7 +986,8 @@ public sealed class LocalPlayableSession : IDisposable
         string? lastAdministrativeMessage,
         LocalPlayableServerExtensionSnapshot serverExtension,
         ILocalPlayableServerExtension? extension,
-        ClientPublicPresentationMetadata[] publicPresentationScratch)
+        ClientPublicPresentationMetadata[] publicPresentationScratch,
+        GamePublicWeaponPresentation[] publicItemScratch)
     {
         if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, LocalPlayableAuthorityView>(
                 (world, generationId, game) =>
@@ -1026,6 +1032,25 @@ public sealed class LocalPlayableSession : IDisposable
             publicPresentationCount > _latestPublicPresentation.Length)
             throw new InvalidOperationException(
                 "The local shared public-presentation snapshot exceeded capacity.");
+        if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, int>(
+                (world, _, game) => game.Items.CopyPublicWeaponPresentations(
+                    world, game.WorldState, publicItemScratch),
+                out int publicItemCount) || publicItemCount < 0 ||
+            publicPresentationCount + publicItemCount > publicPresentationScratch.Length)
+            throw new InvalidOperationException(
+                "The local public-item presentation snapshot exceeded capacity.");
+        for (int item = 0; item < publicItemCount; item++)
+        {
+            GamePublicWeaponPresentation source = publicItemScratch[item];
+            publicPresentationScratch[publicPresentationCount++] =
+                new ClientPublicPresentationMetadata(
+                    view.GenerationId,
+                    source.Id,
+                    1,
+                    ClientPublicPresentationFlags.ItemProperties,
+                    source.DisplayName,
+                    source.DetailText);
+        }
         lock (_viewGate)
         {
             _latestView = view;

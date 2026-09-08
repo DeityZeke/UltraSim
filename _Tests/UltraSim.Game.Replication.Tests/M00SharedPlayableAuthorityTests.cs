@@ -72,9 +72,17 @@ internal static class M00SharedPlayableAuthorityTests
                 Check.True(game.WorldState.TryReadPublic(
                     world, first.Item, out WorldPublicDescriptor equipped));
                 Check.True((equipped.Flags & WorldPublicStateFlags.Visible) != 0);
+                Check.True((equipped.Flags & WorldPublicStateFlags.GroundItem) == 0);
+                Check.Equal(GameWorldActionStatus.MissingTarget, game.Items.TryPickup(
+                    world, game.WorldState, game.Inventory, bobActor, first.Item, bobBackpack));
                 Check.Equal(
                     GameWorldActionStatus.Accepted,
                     game.Items.TryDrop(world, game.WorldState, game.Inventory, aliceActor, first.Item));
+                Check.True(game.WorldState.TryReadPublic(
+                    world, first.Item, out WorldPublicDescriptor droppedPublic));
+                Check.Equal(
+                    WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem,
+                    droppedPublic.Flags);
                 Check.True(world.TryGetPersistentId(first.Item, out PersistentEntityId dropped));
                 Check.Equal(first.PersistentId, dropped);
                 Check.True(game.Items.TryReadWeapon(world, first.Item, out GameWeaponInstance droppedWeapon));

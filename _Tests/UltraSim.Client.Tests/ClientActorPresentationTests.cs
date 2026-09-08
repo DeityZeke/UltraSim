@@ -118,6 +118,24 @@ internal static class ClientActorPresentationTests
         Equal(1, snapshot.CurrentActors);
         True(snapshot.ReservedBytes > 0);
         Equal(2, metadata.GetSnapshot().KnownIdentityFloors);
+
+        var itemMetadata = new ClientPublicPresentationMetadataState(1);
+        itemMetadata.ResetServerGeneration(82);
+        WorldPublicEntityId sword = new(41, 7);
+        var properties = new ClientPublicPresentationMetadata(
+            82,
+            sword,
+            1,
+            ClientPublicPresentationFlags.ItemProperties,
+            "Iron Sword",
+            "Damage 3-8 · Fire · Quality 61 · Durability 45/45");
+        Equal(ClientPublicPresentationApplyStatus.Applied, itemMetadata.TryApply(
+            ClientPublicPresentationOperation.Present, in properties));
+        True(itemMetadata.TryGet(sword, out ClientPublicPresentationMetadata retained));
+        Equal(properties.DetailText, retained.DetailText);
+        var invalid = properties with { Revision = 2, DetailText = string.Empty };
+        Equal(ClientPublicPresentationApplyStatus.Rejected, itemMetadata.TryApply(
+            ClientPublicPresentationOperation.Present, in invalid));
     }
 
     private static void Apply(

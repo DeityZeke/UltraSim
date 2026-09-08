@@ -21,6 +21,25 @@ public readonly record struct GameWeaponSpawnRecipe(
 }
 
 /// <summary>
+/// One bounded cold public item-property fact. It joins an already-admitted public lifetime; it
+/// is not part of the hot movement/publication record and carries no client interaction authority.
+/// </summary>
+public readonly record struct GamePublicWeaponPresentation(
+    WorldPublicEntityId Id,
+    WorldPosition Position,
+    WorldPublicStateFlags StateFlags,
+    GameWeaponInstance Weapon,
+    string DisplayName,
+    string DetailText)
+{
+    public bool IsValid => Id.IsValid &&
+        (StateFlags & (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)) ==
+            (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem) &&
+        Weapon.IsCanonical() &&
+        !string.IsNullOrWhiteSpace(DisplayName) && !string.IsNullOrWhiteSpace(DetailText);
+}
+
+/// <summary>
 /// Concrete Game-owned item-instance lifecycle. Compiled prefabs remain constant; this capability
 /// performs deterministic one-time rolls, owns respawn lineage, and coordinates public/private
 /// representation without making Inventory aware of weapon schemas.
@@ -46,6 +65,8 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
     private readonly ComponentLookup<InventoryItem> _inventoryItem;
     private readonly Entity[] _items;
     private readonly Entity[] _spawners;
+    private readonly GameWeaponInstance[] _describedWeapons;
+    private readonly string?[] _descriptions;
     private int _itemCount;
     private int _spawnerCount;
 
@@ -63,17 +84,35 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
         _inventoryItem = world.PrepareLookup<InventoryItem>();
         _items = new Entity[world.Options.EntityCapacity.MaximumEntities];
         _spawners = new Entity[world.Options.EntityCapacity.MaximumEntities];
+        _describedWeapons = new GameWeaponInstance[_items.Length];
+        _descriptions = new string?[_items.Length];
     }
 
     public int ItemCount => _itemCount;
     public int SpawnerCount => _spawnerCount;
-    public long ReservedBytes => checked((long)(_items.Length + _spawners.Length) * sizeof(ulong));
+    public long ReservedBytes
+    {
+        get
+        {
+            long textBytes = 0;
+            for (int index = 0; index < _descriptions.Length; index++)
+                if (_descriptions[index] is { } value)
+                    textBytes = checked(textBytes + (long)value.Length * sizeof(char));
+            return checked(
+                (long)(_items.Length + _spawners.Length) * sizeof(ulong) +
+                (long)_describedWeapons.Length * 16 +
+                (long)_descriptions.Length * IntPtr.Size +
+                textBytes);
+        }
+    }
 
     public void Rebuild(EcsWorld world)
     {
         EnsureWorld(world);
         _itemCount = 0;
         _spawnerCount = 0;
+        Array.Clear(_describedWeapons);
+        Array.Clear(_descriptions);
         int maximum = world.Options.EntityCapacity.MaximumEntities;
         for (uint index = 0; index < unchecked((uint)maximum); index++)
         {
@@ -86,7 +125,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
                     origin.Spawner.IsValid && !world.IsAlive(origin.Spawner) ||
                     !world.TryRead(entity, _inventoryItem, out _))
                     throw new InvalidOperationException("A persisted weapon instance is noncanonical.");
-                _items[_itemCount++] = entity;
+                TrackItem(entity, in weapon);
             }
             if (world.TryRead(entity, _spawner, out GameItemSpawnerState spawner))
             {
@@ -159,7 +198,8 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
             !world.TryRead(item, _weapon, out GameWeaponInstance weapon) || !weapon.IsCanonical() ||
             !worldState.TryReadPublic(world, item, out WorldPublicDescriptor descriptor) ||
             descriptor.PrefabId != GameWorldPublicPrefabIds.IronSword ||
-            (descriptor.Flags & WorldPublicStateFlags.Visible) == 0)
+            (descriptor.Flags & (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)) !=
+                (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem))
             return GameWorldActionStatus.MissingTarget;
         if (!WithinInteractionRange(actorPosition, itemPosition))
             return GameWorldActionStatus.OutOfRange;
@@ -199,7 +239,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
             !worldState.TrySetPublic(world, item, itemPublic with
             {
                 Orientation = actorPublic.Orientation,
-                Flags = WorldPublicStateFlags.Visible,
+                Flags = WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem,
             }))
             throw new InvalidOperationException("A dropped item could not publish its world state.");
         return GameWorldActionStatus.Accepted;
@@ -237,13 +277,70 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
     {
         if (TryReadWeapon(world, item, out GameWeaponInstance weapon))
         {
-            description = $"Damage {weapon.DamageMinimum}-{weapon.DamageMaximum} · " +
-                $"{weapon.Element} · Quality {weapon.Quality} · " +
-                $"Durability {weapon.CurrentDurability}/{weapon.MaximumDurability}";
+            int slot = FindItem(item);
+            if (slot >= 0)
+            {
+                if (_descriptions[slot] is null ||
+                    !WeaponsEqual(in _describedWeapons[slot], in weapon))
+                {
+                    _describedWeapons[slot] = weapon;
+                    _descriptions[slot] = Describe(in weapon);
+                }
+                description = _descriptions[slot]!;
+                return true;
+            }
+            description = Describe(in weapon);
             return true;
         }
         description = string.Empty;
         return false;
+    }
+
+    public static string Describe(in GameWeaponInstance weapon)
+    {
+        if (!weapon.IsCanonical())
+            throw new ArgumentException("Weapon properties must be canonical.", nameof(weapon));
+        return $"Damage {weapon.DamageMinimum}-{weapon.DamageMaximum} · " +
+            $"{weapon.Element} · Quality {weapon.Quality} · " +
+            $"Durability {weapon.CurrentDurability}/{weapon.MaximumDurability}";
+    }
+
+    public int CopyPublicWeaponPresentations(
+        EcsWorld world,
+        GameWorldState worldState,
+        Span<GamePublicWeaponPresentation> destination)
+    {
+        EnsureWorld(world);
+        ArgumentNullException.ThrowIfNull(worldState);
+        int count = 0;
+        for (int slot = 0; slot < _itemCount; slot++)
+        {
+            Entity item = _items[slot];
+            if (!world.IsAlive(item) ||
+                !worldState.TryReadPublic(world, item, out WorldPublicDescriptor descriptor) ||
+                (descriptor.Flags &
+                    (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)) !=
+                    (WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem) ||
+                !worldState.TryReadPosition(world, item, out WorldPosition position) ||
+                !worldState.Publications.TryGetPublicEntityId(item, out WorldPublicEntityId id) ||
+                !TryReadWeapon(world, item, out GameWeaponInstance weapon))
+                continue;
+            if (count == destination.Length) return -1;
+            if (_descriptions[slot] is null ||
+                !WeaponsEqual(in _describedWeapons[slot], in weapon))
+            {
+                _describedWeapons[slot] = weapon;
+                _descriptions[slot] = Describe(in weapon);
+            }
+            destination[count++] = new GamePublicWeaponPresentation(
+                id,
+                position,
+                descriptor.Flags,
+                weapon,
+                "Iron Sword",
+                _descriptions[slot]!);
+        }
+        return count;
     }
 
     public void CommitAfterEcsStep(
@@ -278,9 +375,11 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
                 continue;
             bool equipped = location.EquipSlot == InventoryEquipSlot.MainHand;
             bool worldItem = !location.Parent.IsValid;
-            WorldPublicStateFlags flags = equipped || worldItem
-                ? WorldPublicStateFlags.Visible
-                : WorldPublicStateFlags.None;
+            WorldPublicStateFlags flags = worldItem
+                ? WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem
+                : equipped
+                    ? WorldPublicStateFlags.Visible
+                    : WorldPublicStateFlags.None;
             if (equipped && worldState.TryReadPosition(world, location.Parent, out WorldPosition ownerPosition) &&
                 worldState.TryReadPublic(world, location.Parent, out WorldPublicDescriptor ownerPublic))
             {
@@ -333,7 +432,7 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
             item = Entity.Null;
             return SpawnResult.InvariantViolation;
         }
-        Track(_items, ref _itemCount, item);
+        TrackItem(item, in rolled);
         return SpawnResult.Spawned;
     }
 
@@ -420,6 +519,34 @@ public sealed class GameItemGenerationState : IInventoryItemDescriptionProvider
             throw new InvalidOperationException("Item lifecycle tracking exceeded ECS entity capacity.");
         destination[count++] = entity;
     }
+
+    private void TrackItem(Entity entity, in GameWeaponInstance weapon)
+    {
+        if (_itemCount >= _items.Length)
+            throw new InvalidOperationException("Item lifecycle tracking exceeded ECS entity capacity.");
+        int slot = _itemCount++;
+        _items[slot] = entity;
+        _describedWeapons[slot] = weapon;
+        _descriptions[slot] = Describe(in weapon);
+    }
+
+    private int FindItem(Entity item)
+    {
+        for (int slot = 0; slot < _itemCount; slot++)
+            if (_items[slot] == item) return slot;
+        return -1;
+    }
+
+    private static bool WeaponsEqual(
+        in GameWeaponInstance left,
+        in GameWeaponInstance right) =>
+        left.DamageMinimum == right.DamageMinimum &&
+        left.DamageMaximum == right.DamageMaximum &&
+        left.MaximumDurability == right.MaximumDurability &&
+        left.CurrentDurability == right.CurrentDurability &&
+        left.Quality == right.Quality &&
+        left.Element == right.Element &&
+        left.SpawnOrdinal == right.SpawnOrdinal;
 
     private static ulong Mix(ulong value)
     {

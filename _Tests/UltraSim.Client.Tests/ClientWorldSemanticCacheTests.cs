@@ -343,6 +343,13 @@ internal static class ClientWorldSemanticCacheTests
         };
         False(cache.TryApplySnapshot(handle, next, [unknownFlags], out ClientSemanticChunkError flags));
         Equal(ClientSemanticChunkError.InvalidPublication, flags);
+        WorldPublicRecord ungroundedItem = unknownFlags with
+        {
+            StateFlags = WorldPublicStateFlags.GroundItem,
+        };
+        False(cache.TryApplySnapshot(
+            handle, next, [ungroundedItem], out ClientSemanticChunkError groundItem));
+        Equal(ClientSemanticChunkError.InvalidPublication, groundItem);
         WorldPublicRecord zeroRevision = unknownFlags with
         {
             StateFlags = WorldPublicStateFlags.Visible,
