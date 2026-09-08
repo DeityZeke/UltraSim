@@ -14,6 +14,7 @@ using UltraSim.Game.World;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
+using UltraSim.UI;
 
 namespace UltraSim.Client.Local;
 
@@ -52,6 +53,8 @@ public sealed class LocalPlayableSession : IDisposable
     private volatile bool _stopRequested;
     private volatile bool _disposed;
     private volatile bool _running;
+    private int _uiAttached;
+    private int _inventoryHotOpen;
     private long _authorityTicks;
 
     public static LocalPlayableSession CreateCabin(
@@ -158,6 +161,15 @@ public sealed class LocalPlayableSession : IDisposable
     public GameControlSessionEpoch ControlSession => _controlSession;
     public ulong ApplicationSessionEpoch => _applicationSessionEpoch;
 
+    /// <summary>Exact stock Inventory identity used by this local application composition.</summary>
+    public static UiDefinitionCacheKey InventoryDefinitionCacheKey => new(
+        "local-server",
+        "game-composition",
+        1,
+        InventoryUi.Definition.Key,
+        InventoryUi.Definition.Version,
+        InventoryUi.Definition.Hash);
+
     public void WaitUntilReady(TimeSpan timeout)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -231,11 +243,35 @@ public sealed class LocalPlayableSession : IDisposable
         return count;
     }
 
-    public LocalQueuedUiClient AttachUiClient(UiClientRuntime client)
+    public LocalQueuedUiClient AttachUiClient(
+        UiClientRuntime client,
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardDefinitionResolver = null)
     {
         EnsureOperational();
         ArgumentNullException.ThrowIfNull(client);
-        return new LocalQueuedUiClient(_uiChannel, client);
+        if (Interlocked.CompareExchange(ref _uiAttached, 1, 0) != 0)
+            throw new InvalidOperationException("The local session already has a UI client attached.");
+        try
+        {
+            if (standardDefinitionResolver?.Invoke(InventoryDefinitionCacheKey) is
+                CompiledUiDefinition inventory)
+            {
+                _ = client.CacheDefinition(InventoryDefinitionCacheKey, inventory);
+                Volatile.Write(ref _inventoryHotOpen, 1);
+            }
+            return new LocalQueuedUiClient(_uiChannel, client, ReleaseUiClient);
+        }
+        catch
+        {
+            ReleaseUiClient();
+            throw;
+        }
+    }
+
+    private void ReleaseUiClient()
+    {
+        Volatile.Write(ref _inventoryHotOpen, 0);
+        Volatile.Write(ref _uiAttached, 0);
     }
 
     public LocalPlayableSessionSnapshot GetSnapshot()
@@ -264,6 +300,8 @@ public sealed class LocalPlayableSession : IDisposable
             _chatChannel.Rejected,
             _uiChannel.Applied,
             _uiChannel.Rejected,
+            _uiChannel.ColdOpensApplied,
+            _uiChannel.HotOpensApplied,
             reserved,
             fault);
     }
@@ -595,8 +633,11 @@ public sealed class LocalPlayableSession : IDisposable
                             Resolve(world, entities.CabinChestId)),
                         out InventoryOpenEntities openedEntities);
                     InventoryUiOpenResult opened = ran
-                        ? inventoryUi.OpenOwned(
-                            openedEntities.Backpack, openedEntities.Player)
+                        ? Volatile.Read(ref _inventoryHotOpen) != 0
+                            ? inventoryUi.OpenOwnedHot(
+                                openedEntities.Backpack, openedEntities.Player)
+                            : inventoryUi.OpenOwned(
+                                openedEntities.Backpack, openedEntities.Player)
                         : default;
                     lastSucceeded = ran && opened.Succeeded;
                     lastMessage = opened.Message;

@@ -57,6 +57,8 @@ acceptance narratives remain available through git history.
   repair, mirror, Optional-upgrade, bounded-concurrency, and DNS-target hardening, A0.6 canonical
   typed UI-definition resolution, A0.7 complete WorldPack resolution through the applied realm
   catalog with World-owned open/bind validation, and A0.8 native Contentless Online closure.
+- [Client Standard UI](../Client/StandardUi/README.md) — the F0.5 passive stock-definition
+  composition library, physically separate from Game UI/Inventory authority.
 - [Built-in Test Worlds](../Client/BuiltInTestWorlds/README.md) — A0.1 local Cabin
   Default/Replace/Add package oracle, frozen catalog fingerprints, and exact ownership deltas.
 - [Local client application bridge](../Client/Local/README.md) — the F0.0b
@@ -184,9 +186,8 @@ consumer/deployment need earns them.
   response and alternate-provider work still stopped.
 - [Client F0](Plans/CLIENT.md) records the frozen real-client shell/composition,
   authority-thread/local-session extraction, Direct Connect trust, settings/control-
-  profile, and world-presentation work through F0.4, the A0-derived F0.6 closure,
-  F0.5's remaining standard-UI convergence, and the later shared-authority/lifecycle/parity
-  roadmap.
+  profile, world-presentation, and standard-UI convergence work through F0.5, the A0-derived
+  F0.6 closure, and the next shared-authority/lifecycle/parity roadmap.
 - [Asset Streaming A0](Plans/ASSET_STREAMING.md) records the passive content package,
   activation proof, CAS/cache, hosting/source, Default/Replace/Add, catalog/resource
   lifetime, Cabin parity, complete-WorldPack canary, Contentless Online, and deferred

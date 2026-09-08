@@ -1,12 +1,12 @@
 # UltraSim Client — Thin Shell, Capability Composition, and Playable Client Plan
 
-**Status:** frozen architectural direction with F0.0a-F0.4 accepted, including executable
+**Status:** frozen architectural direction with F0.0a-F0.5 accepted, including executable
 composition, the permanent Network-free local path, persistent shell/settings/focus, Direct
 Connect trust, remote controlled play, declarative client-profile consent, and generalized actor
-presentation. A0.0-A0.8 are also accepted, including the actual exported Contentless Online
-product. F0.5 is next as a deliberately small standard/preinstalled-versus-content-backed compiled
-UI closure campaign. F0.6 is already closed/superseded by A0.2-A0.8. Shared multi-participant
-authority remains the major unproven cross-cutting boundary after F0.5; F0.7 and F0.8 remain open.
+presentation and standard/content-backed compiled-UI convergence. A0.0-A0.8 are also accepted,
+including the actual exported Contentless Online product. F0.6 is already closed/superseded by
+A0.2-A0.8. Shared multi-participant authority is now the major unproven cross-cutting boundary;
+F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -1882,14 +1882,14 @@ other already-known eligible actor. Expiry and reveal do not request disclosure 
 
 ## F0.5 — Server-composed UI + standard compiled library
 
-**Status: NEXT — CLOSURE CAMPAIGN.** Most of the original vertical was earned before its numbered
+**Status: CLOSED.** Most of the original vertical was earned before its numbered
 checkpoint. `UiClientRuntime` already owns exact bounded definition caching plus cold/hot opens;
 local and remote Game UI use the same model/action semantics; `GodotUiRenderer` realizes the
 engine-neutral compiled tree; Inventory v6 is a real interactive compiled definition; and A0.6
 proves exact content-backed `.usui` resolution through an applied realm catalog. Human-play
 hardening additionally supplies centered opaque views and validated close behavior.
 
-Close only the remaining source-convergence gap:
+F0.5 closed the remaining source-convergence gap:
 
 - define one small explicitly selected stock/preinstalled compiled-UI library at the client
   composition boundary;
@@ -1901,16 +1901,26 @@ Close only the remaining source-convergence gap:
   through teardown;
 - retain the already-accepted local/remote semantic result and cold/hot failure behavior.
 
-The standard library is explicit composition data, not a reason for generic Client Core to depend
-on every Game UI definition. In particular, the Online product must preseed selected passive
+`Client.StandardUi` is explicit composition data and references only the UI kernel. Its embedded
+1,054-byte canonical Inventory v6 artifact decodes to the exact
+`game.inventory.gump/v6/608912922e71821517d2e025bb5645c6` identity. It is not a reason for generic
+Client Core to depend on every Game UI definition. In particular, the Online product preseeds passive
 definition bytes/data without acquiring the Game UI/Inventory authority assemblies. Main
 Menu/Settings/Exit stay client-owned. Required content authorization/application proof also remains
 independent: possessing the same preinstalled definition cannot claim that a required realm catalog
 was applied.
 
-**Gate:** the same Inventory definition and authoritative actions work through preinstalled
+**Accepted gate:** the same Inventory definition and authoritative actions work through preinstalled
 standard, cached exact, and content-backed exact sources in local/remote composition; identity,
 application proof, session teardown, and Online's no-local-authority dependency gate remain exact.
+
+The local standard path emits a real `HotOpen`; the remote standard path resolves the passive stock
+artifact with zero content-definition resolutions; and both reach the same authoritative Inventory
+Select result. Independently decoded exact definitions may rebind dynamic model state by complete
+compiled handle, never by object reference or a partial key. A different key/version/hash rejects.
+The exported Online product contains `Client.StandardUi` but still contains neither Game UI nor
+Game Inventory authority assemblies. Possession of the stock bytes does not bypass the already-
+accepted authenticated content-plan or `ContentSetApplied` gates.
 
 Human-play hardening centers the fixed logical Canvas within the current viewport. Informational
 and Inventory definitions provide an opaque surface and a compiled, validated Close action;
@@ -2342,11 +2352,11 @@ F0.3c server client-profile consent/settings                              CLOSED
         |
 F0.4  actor definitions/nameplates/Ctrl/chat presentation parity          CLOSED
         |
-F0.5  standard/preinstalled + cached/content-backed compiled UI closure   NEXT
+F0.5  standard/preinstalled + cached/content-backed compiled UI closure   CLOSED
         |
 shared multi-participant authority
       one Game/World authority + multiple independent application sessions
-      owning checkpoint to be reviewed/named after F0.5                    NEXT AFTER F0.5
+      owning checkpoint to be reviewed/named before implementation         NEXT
         |
 remaining Concept Demo gameplay/presentation consumers
         |

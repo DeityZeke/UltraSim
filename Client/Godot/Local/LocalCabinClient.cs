@@ -4,6 +4,7 @@ using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.Client.Local;
+using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
@@ -993,7 +994,9 @@ public partial class LocalCabinClient : Node3D
         _uiClient = new UiClientRuntime(
             new GodotUiRenderer(_inventoryHost),
             new UiClientLimits(8, 8));
-        _uiBridge = _localSession.AttachUiClient(_uiClient);
+        _uiBridge = _localSession.AttachUiClient(
+            _uiClient,
+            ClientStandardUiLibrary.Resolve);
     }
 
     private void OpenInventory()

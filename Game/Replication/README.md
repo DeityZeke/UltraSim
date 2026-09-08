@@ -75,7 +75,7 @@ independent Direct Connect runtimes.
 
 ## Next shared multi-participant authority boundary
 
-After the small Client F0.5 compiled-UI convergence closure, shared authority is the next major
+With the small Client F0.5 compiled-UI convergence closure accepted, shared authority is the next major
 cross-cutting Concept Demo checkpoint. Its owning plan/checkpoint name must be reviewed before
 implementation. It must compose one authoritative Game/World generation with several independently
 authenticated application, participant, and control lineages; it must not construct one isolated

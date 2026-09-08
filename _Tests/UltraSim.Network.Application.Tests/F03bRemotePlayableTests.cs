@@ -4,6 +4,7 @@ using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Network;
+using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
@@ -24,8 +25,9 @@ internal static class F03bRemotePlayableTests
     internal const int A06TestCount = 2;
     internal const int A07TestCount = 2;
     internal const int F04TestCount = 2;
+    internal const int F05TestCount = 1;
     internal const int TestCount = F03bTestCount + A03TestCount + A04TestCount + A05TestCount +
-        A06TestCount + A07TestCount + F04TestCount;
+        A06TestCount + A07TestCount + F04TestCount + F05TestCount;
 
     internal static void RunAll()
     {
@@ -73,6 +75,47 @@ internal static class F03bRemotePlayableTests
             PublicPresentationMetadataProtocolIsCanonicalAndBounded);
         Run("RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement",
             RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement);
+        Run("PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction",
+            PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction);
+    }
+
+    private static void PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction()
+    {
+        CompiledUiDefinition standard = ClientStandardUiLibrary.InventoryDefinition;
+        Equal(InventoryUi.Definition.Key, standard.Key);
+        Equal(InventoryUi.Definition.Version, standard.Version);
+        Equal(InventoryUi.Definition.Hash, standard.Hash);
+        True(UiDefinitionArtifactCodec.TryEncodeCanonical(standard, out byte[] standardBytes));
+        True(UiDefinitionArtifactCodec.TryEncodeCanonical(
+            InventoryUi.Definition, out byte[] authoredBytes));
+        True(standardBytes.AsSpan().SequenceEqual(authoredBytes));
+
+        using var remote = RemotePlayableFixture.CreateWithStandardUi();
+        Equal(0, remote.UiClient.CachedDefinitionCount);
+        remote.Admit("Standard UI Guest", GameGuestBody.HumanFemale);
+        True(remote.Playable.TrySubmitCommand(
+            new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+            flags: RemotePlayableCommandFlags.OpenInventoryRequested));
+        remote.DriveUntil(() => remote.UiClient.OpenViewCount == 1);
+        RemoteUiClientSnapshot ui = remote.SessionSnapshot.Ui;
+        Equal(1UL, ui.StandardDefinitionsResolved);
+        Equal(0UL, ui.ContentDefinitionsResolved);
+        Equal(1, remote.UiClient.CachedDefinitionCount);
+
+        var view = new UiViewInstanceId(1);
+        ReadOnlySpan<UiListRow> rows = remote.UiClient.GetRows(view, InventoryUi.Items);
+        True(rows.Length != 0);
+        ulong before = remote.UiClient.GetView(view).LastSequence;
+        remote.UiClient.SubmitAction(view, InventoryUi.Select, rows[0].Id);
+        remote.DriveUntil(() => remote.UiClient.GetView(view).LastSequence > before);
+        Equal("Item selected.", remote.UiClient.GetValue(view, InventoryUi.Status).Text);
+        Console.WriteLine(
+            $"EVIDENCE F0.5 remote_standard bytes={standardBytes.Length} " +
+            $"definition={standard.Key}/v{standard.Version} hash={standard.Hash} " +
+            $"standard_resolutions={ui.StandardDefinitionsResolved} " +
+            $"content_resolutions={ui.ContentDefinitionsResolved} " +
+            $"action_model_sequence={remote.UiClient.GetView(view).LastSequence}");
     }
 
     private static void PublicPresentationMetadataProtocolIsCanonicalAndBounded()
@@ -1481,6 +1524,13 @@ internal static class F03bRemotePlayableTests
         internal static RemotePlayableFixture Create()
             => CreateCore(new UltraSim.Game.Application.ApplicationRealmId(0xF03B, 1));
 
+        internal static RemotePlayableFixture CreateWithStandardUi()
+            => CreateCore(
+                new UltraSim.Game.Application.ApplicationRealmId(0xF050, 1),
+                standardUiDefinitions:
+                    [UiDefinitionIdentity.From(InventoryUi.Definition)],
+                standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
+
         internal static RemotePlayableFixture CreateWithContent(
             CabinContentOracle oracle,
             IContentPackageSource source,
@@ -1592,7 +1642,9 @@ internal static class F03bRemotePlayableTests
             string? contentRoot = null,
             bool preserveContentRoot = false,
             IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
-            RemoteRequiredWorldBinding? requiredWorld = null)
+            RemoteRequiredWorldBinding? requiredWorld = null,
+            IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
+            Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null)
         {
             string trustDirectory = Path.Combine(Path.GetTempPath(),
                 $"ultrasim-f03b-{Environment.ProcessId}-{Guid.NewGuid():N}");
@@ -1609,7 +1661,8 @@ internal static class F03bRemotePlayableTests
                     Admission,
                     Owners,
                     new RemoteGuestPlayableApplicationFactory(
-                        realm, contentAuthorization, contentBackedUiDefinitions),
+                        realm, contentAuthorization, contentBackedUiDefinitions,
+                        standardUiDefinitions: standardUiDefinitions),
                     UltraSimGameProtocol.Manifest);
                 try
                 {
@@ -1638,7 +1691,8 @@ internal static class F03bRemotePlayableTests
                                 new ClientChatLimits(16, 256, 128),
                                 new UiClientLimits(8, 8),
                                 maximumPendingWorldProofs: 256,
-                                requiredContent: requiredContent);
+                                requiredContent: requiredContent,
+                                standardUiDefinitionResolver: standardUiDefinitionResolver);
                         }
                         else
                         {
@@ -1651,7 +1705,8 @@ internal static class F03bRemotePlayableTests
                                 new NullRenderer(),
                                 new ClientChatLimits(16, 256, 128),
                                 new UiClientLimits(8, 8),
-                                maximumPendingWorldProofs: 256);
+                                maximumPendingWorldProofs: 256,
+                                standardUiDefinitionResolver: standardUiDefinitionResolver);
                         }
                         return new RemotePlayableFixture(
                             trustDirectory, identity, host, direct, session,

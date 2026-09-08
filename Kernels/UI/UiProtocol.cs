@@ -344,6 +344,14 @@ public readonly struct UiHotOpenView
 
     public UiModel SnapshotModel() => CloneModel();
 
+    /// <summary>
+    /// Snapshots the dynamic state against an independently decoded instance of the exact cached
+    /// compiled definition. A different key, version, or hash is rejected.
+    /// </summary>
+    public UiModel SnapshotModel(CompiledUiDefinition exactDefinition) =>
+        (_model ?? throw new InvalidOperationException("The hot-open model is not initialized."))
+        .CloneForExactDefinition(exactDefinition);
+
     internal UiModel CloneModel() => _model?.Clone() ??
         throw new InvalidOperationException("The hot-open model is not initialized.");
 }

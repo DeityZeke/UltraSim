@@ -3,6 +3,7 @@ using Godot;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Network;
+using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
@@ -132,7 +133,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                     realm, _cache!, ContentBaseCatalog.Empty, _source),
                 RemoteConceptDemoWorldProfile.CreateRequiredBinding(),
                 new GodotUiRenderer(_uiHost),
-                new ClientChatLimits(64, 256, 128));
+                new ClientChatLimits(64, 256, 128),
+                standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
             _settings = settings;
             _smoke = smoke;
             BuildBootstrapHud();

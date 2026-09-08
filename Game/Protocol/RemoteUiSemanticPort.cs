@@ -5,15 +5,15 @@ namespace UltraSim.Game.Protocol;
 
 public readonly record struct RemoteUiPortLimits(
     int MaximumOpenViews = 1_024,
-    int MaximumContentBackedDefinitions = 256)
+    int MaximumHotOpenDefinitions = 256)
 {
     public static RemoteUiPortLimits Default => new(1_024, 256);
     internal void Validate()
     {
         if (MaximumOpenViews <= 0 || MaximumOpenViews > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumOpenViews));
-        if (MaximumContentBackedDefinitions <= 0 || MaximumContentBackedDefinitions > 4_096)
-            throw new ArgumentOutOfRangeException(nameof(MaximumContentBackedDefinitions));
+        if (MaximumHotOpenDefinitions <= 0 || MaximumHotOpenDefinitions > 4_096)
+            throw new ArgumentOutOfRangeException(nameof(MaximumHotOpenDefinitions));
     }
 }
 
@@ -25,7 +25,7 @@ public readonly record struct RemoteUiPortSnapshot(
     ulong AcceptedActions,
     ulong RejectedActions,
     int DesynchronizedViews,
-    ulong ContentBackedHotOpens);
+    ulong HotOpens);
 
 /// <summary>Normal bounded transport backpressure while publishing a remote UI operation.</summary>
 public sealed class RemoteUiTransportBackpressureException : InvalidOperationException
@@ -48,7 +48,7 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
     private readonly byte[] _semanticScratch;
     private readonly byte[] _messageScratch;
     private readonly Dictionary<UiViewInstanceId, ViewState> _views = [];
-    private readonly HashSet<UiDefinitionIdentity> _contentBackedDefinitions;
+    private readonly HashSet<UiDefinitionIdentity> _hotOpenDefinitions;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private ulong _applicationSessionEpoch;
     private ulong _nextView = 1;
@@ -56,7 +56,7 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
     private ulong _lastAppliedOperation;
     private ulong _acceptedActions;
     private ulong _rejectedActions;
-    private ulong _contentBackedHotOpens;
+    private ulong _hotOpens;
     private bool _disposed;
 
     public RemoteUiSemanticPort(
@@ -64,7 +64,8 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
         ulong applicationSessionEpoch,
         UiSemanticWireLimits wireLimits = default,
         RemoteUiPortLimits limits = default,
-        IEnumerable<UiDefinitionIdentity>? contentBackedDefinitions = null)
+        IEnumerable<UiDefinitionIdentity>? contentBackedDefinitions = null,
+        IEnumerable<UiDefinitionIdentity>? standardDefinitions = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (applicationSessionEpoch == 0)
@@ -78,17 +79,22 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
             throw new ArgumentOutOfRangeException(nameof(wireLimits));
         _wireLimits = wireLimits;
         _limits = limits;
-        UiDefinitionIdentity[] admitted = (contentBackedDefinitions ?? [])
-            .Take(limits.MaximumContentBackedDefinitions + 1).ToArray();
-        if (admitted.Length > limits.MaximumContentBackedDefinitions ||
-            admitted.Any(static identity => !identity.IsValid))
+        UiDefinitionIdentity[] contentBacked = (contentBackedDefinitions ?? [])
+            .Take(limits.MaximumHotOpenDefinitions + 1).ToArray();
+        UiDefinitionIdentity[] standard = (standardDefinitions ?? [])
+            .Take(limits.MaximumHotOpenDefinitions + 1).ToArray();
+        if (contentBacked.Length + standard.Length > limits.MaximumHotOpenDefinitions ||
+            contentBacked.Any(static identity => !identity.IsValid) ||
+            standard.Any(static identity => !identity.IsValid))
             throw new ArgumentException(
-                "The content-backed UI definition set is invalid or exceeds its bounded capacity.",
+                "The hot-open UI definition sets are invalid or exceed their bounded capacity.",
                 nameof(contentBackedDefinitions));
-        _contentBackedDefinitions = new HashSet<UiDefinitionIdentity>(admitted);
-        if (_contentBackedDefinitions.Count != admitted.Length)
+        _hotOpenDefinitions = new HashSet<UiDefinitionIdentity>(contentBacked);
+        foreach (UiDefinitionIdentity identity in standard)
+            _hotOpenDefinitions.Add(identity);
+        if (_hotOpenDefinitions.Count != contentBacked.Length + standard.Length)
             throw new ArgumentException(
-                "The content-backed UI definition set contains duplicates.",
+                "The hot-open UI definition sets contain duplicates or overlap.",
                 nameof(contentBackedDefinitions));
         _applicationSessionEpoch = applicationSessionEpoch;
         _semanticScratch = new byte[wireLimits.MaximumOperationBytes];
@@ -102,17 +108,17 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
         EnsureOperational();
         UiViewInstanceId instance = AllocateView(operation.Instance);
         UiModel model = operation.SnapshotModel();
-        bool contentBacked = _contentBackedDefinitions.Contains(
+        bool hotOpen = _hotOpenDefinitions.Contains(
             UiDefinitionIdentity.From(operation.Definition));
         RemoteUiOperationKind kind;
         int bytes;
-        if (contentBacked)
+        if (hotOpen)
         {
             var hot = new UiHotOpenView(
                 operation.CacheKey, model, instance, operation.Sequence);
             if (!UiSemanticWireCodec.TryWriteHotOpen(
                     _semanticScratch, hot, _wireLimits, out bytes))
-                throw new InvalidOperationException("The content-backed UI operation exceeds its bounded wire representation.");
+                throw new InvalidOperationException("The hot-open UI operation exceeds its bounded wire representation.");
             kind = RemoteUiOperationKind.HotOpen;
         }
         else
@@ -125,8 +131,8 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
             kind = RemoteUiOperationKind.ColdOpen;
         }
         ulong operationId = QueueOperation(kind, _semanticScratch.AsSpan(0, bytes));
-        if (contentBacked && _contentBackedHotOpens != ulong.MaxValue)
-            _contentBackedHotOpens++;
+        if (hotOpen && _hotOpens != ulong.MaxValue)
+            _hotOpens++;
         _views.Add(instance, new ViewState(instance, operation.CacheKey, operation.Definition.Hash,
             operation.Sequence, operationId));
         return instance;
@@ -251,7 +257,7 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
             if (view.Desynchronized) desynchronized++;
         return new(_applicationSessionEpoch, _views.Count, _nextOperation,
             _lastAppliedOperation, _acceptedActions, _rejectedActions, desynchronized,
-            _contentBackedHotOpens);
+            _hotOpens);
     }
 
     public void Dispose()

@@ -26,6 +26,7 @@ var tests = new (string Name, Action Body)[]
     ("DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode", DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode),
     ("SemanticWireCodecIsCanonicalBoundedAndTransactional", SemanticWireCodecIsCanonicalBoundedAndTransactional),
     ("DefinitionArtifactIsCanonicalBoundedAndExact", DefinitionArtifactIsCanonicalBoundedAndExact),
+    ("HotOpenModelRebindRequiresExactCompiledIdentity", HotOpenModelRebindRequiresExactCompiledIdentity),
 };
 
 foreach ((string name, Action body) in tests)
@@ -681,6 +682,28 @@ static void DefinitionArtifactIsCanonicalBoundedAndExact()
 
     var tooSmall = new UiDefinitionArtifactLimits(64, UiCompileLimits.Default);
     Assert.False(UiDefinitionArtifactCodec.TryEncodeCanonical(source, out _, tooSmall));
+}
+
+static void HotOpenModelRebindRequiresExactCompiledIdentity()
+{
+    CompiledUiDefinition authored = UiDefinitionCompiler.Compile(CreateFixture());
+    Assert.True(UiDefinitionArtifactCodec.TryEncodeCanonical(authored, out byte[] bytes));
+    Assert.True(UiDefinitionArtifactCodec.TryReadCanonical(
+        bytes, out CompiledUiDefinition? decoded));
+    Assert.False(ReferenceEquals(authored, decoded));
+
+    var cacheKey = new UiDefinitionCacheKey(
+        "server", "composition", 1, authored.Key, authored.Version, authored.Hash);
+    var model = new UiModel(authored);
+    UiSlotId title = authored.Bindings.RequireSlot("title");
+    model.SetText(title, "Exact passive artifact");
+    var hot = new UiHotOpenView(cacheKey, model, new UiViewInstanceId(9), sequence: 2);
+    UiModel rebound = hot.SnapshotModel(decoded!);
+    Assert.True(ReferenceEquals(decoded, rebound.Definition));
+    Assert.Equal("Exact passive artifact", rebound.Get(title).Text);
+
+    CompiledUiDefinition changed = UiDefinitionCompiler.Compile(CreateFixture(canvasWidth: 801));
+    Assert.Throws<InvalidOperationException>(() => hot.SnapshotModel(changed));
 }
 
 static UiDefinitionBuilder CreateMixedOrderFixture(bool layoutLast)

@@ -1,5 +1,6 @@
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
+using UltraSim.Client.StandardUi;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
@@ -18,6 +19,7 @@ var tests = new (string Name, Action Body)[]
     ("ChatIngressRejectsUnboundedText", ChatIngressRejectsUnboundedText),
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
+    ("PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache", PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache),
     ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
     ("SaveLoadReplacesGenerationAndRebuildsPublicLineage", SaveLoadReplacesGenerationAndRebuildsPublicLineage),
     ("DistantInterestReentryInvalidatesOldPublicDebt", DistantInterestReentryInvalidatesOldPublicDebt),
@@ -197,6 +199,55 @@ static void UiOperationsAndActionsUseBoundedLocalBridge()
             "Item selected.",
             StringComparison.Ordinal);
     });
+}
+
+static void PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache()
+{
+    using Fixture fixture = Fixture.Create();
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    Equal(0, client.CachedDefinitionCount);
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(
+        client,
+        ClientStandardUiLibrary.Resolve);
+    Equal(1, client.CachedDefinitionCount);
+    CompiledUiDefinition standard = ClientStandardUiLibrary.InventoryDefinition;
+    Equal(InventoryUi.Definition.Key, standard.Key);
+    Equal(InventoryUi.Definition.Version, standard.Version);
+    Equal(InventoryUi.Definition.Hash, standard.Hash);
+
+    True(fixture.Session.TryRequestOpenInventory(1));
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 1 &&
+            fixture.Session.GetSnapshot().UiHotOpensApplied == 1;
+    });
+    LocalPlayableSessionSnapshot snapshot = fixture.Session.GetSnapshot();
+    Equal(0UL, snapshot.UiColdOpensApplied);
+    Equal(1UL, snapshot.UiHotOpensApplied);
+
+    UiViewInstanceId view = renderer.LastInstance;
+    ReadOnlySpan<UiListRow> items = client.GetRows(view, InventoryUi.Items);
+    True(items.Length != 0);
+    client.SubmitAction(view, InventoryUi.Select, items[0].Id);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return string.Equals(
+            client.GetValue(view, InventoryUi.Status).Text,
+            "Item selected.",
+            StringComparison.Ordinal);
+    });
+
+    using Fixture freshFixture = Fixture.Create();
+    var freshRenderer = new MemoryRenderer();
+    using var freshClient = new UiClientRuntime(freshRenderer, new UiClientLimits(8, 8));
+    Equal(0, freshClient.CachedDefinitionCount);
+    Console.WriteLine(
+        $"EVIDENCE F0.5 local_standard definition={standard.Key}/v{standard.Version} " +
+        $"hash={standard.Hash} hot_opens={snapshot.UiHotOpensApplied} " +
+        $"fresh_cached={freshClient.CachedDefinitionCount}");
 }
 
 static void ConceptDemoSignUsesAuthoritativeInformationalUi()

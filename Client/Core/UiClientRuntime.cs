@@ -147,9 +147,7 @@ public sealed class UiClientRuntime : IDisposable
             throw new KeyNotFoundException("The exact UI definition is not present in the client cache.");
         }
         operation.CacheKey.Validate(definition);
-        UiModel model = operation.SnapshotModel();
-        if (!ReferenceEquals(model.Definition, definition))
-            throw new InvalidOperationException("The opening model does not match the cached definition.");
+        UiModel model = operation.SnapshotModel(definition);
         if (_views.Count >= _limits.MaximumOpenViews)
             throw new InvalidOperationException("The retained UI view limit was reached.");
 

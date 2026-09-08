@@ -9,6 +9,9 @@ companion to [`CLIENT.md`](CLIENT.md). The client executable/local-session/shell
 (F0.0a/F0.0b/F0.0c/F0.1/F0.2) and A0.0-A0.8 are closed.
 Client F0.6's historical content-source/Contentless Online gate is therefore also closed and
 superseded by this accepted A0 campaign; no duplicate F0.6 implementation remains.
+Client F0.5 is also closed: one passive stock Inventory artifact, reopened CAS bytes, and newly
+acquired realm-content bytes converge on the same exact compiled definition and runtime while
+content authorization/application proof remains independent.
 Runtime mesh/audio import, package dependencies, executable extensions, mutable overlay artifacts,
 and independently streamed chunk artifacts remain deferred.
 

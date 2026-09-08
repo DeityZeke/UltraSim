@@ -78,3 +78,8 @@ path. Hover is derived only from resident/presented public kind. Interact nomina
 selection; Game resolves the trusted sign identity, validates current kind and range, and supplies
 the immutable title/body. The sign's compiled Close action crosses the same retained semantic
 operation and explicit apply/reject proof boundary as other local UI.
+
+F0.5 lets composition supply the exact passive stock Inventory definition when attaching the
+client runtime. The definition is cached before use and the local Game authority emits the ordinary
+`HotOpen`; without that exact stock capability it retains the accepted cold-open path. Dynamic
+model values/actions remain Game-owned, and every new local session owns a fresh bounded UI cache.

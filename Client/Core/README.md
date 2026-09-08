@@ -9,11 +9,15 @@ A0.6 permits an exact already-validated passive UI definition to enter the bound
 supersession rules and does not publish model values or action handlers. A subsequent semantic
 `HotOpen` still carries the Game-owned model and must match that exact cached definition.
 
-Client F0.5's remaining closure uses this existing mechanism. One explicitly selected stock
+Client F0.5 closes this source-convergence seam. One explicitly selected stock
 Inventory definition may preseed the same cache at composition time, while a reopened content blob
 or newly acquired `.usui` may seed it after exact validation/authorization. All sources converge on
 one `UiDefinitionCacheKey`; no source changes model/action authority, and session disposal still
 retires the complete runtime cache and its views.
+
+Because independently decoded canonical artifacts are distinct objects, `UiHotOpenView` can clone
+dynamic state against another definition instance only when its complete compiled handle matches.
+Reference identity is not semantic identity; a different key, version, or hash remains rejected.
 
 F0.1 also places the application-shell state and local settings model here. The owner-thread-bound
 `ClientShellCoordinator` owns Main Menu/loading/session/options/settings/error transitions, while

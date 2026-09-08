@@ -57,6 +57,8 @@ internal sealed class LocalQueuedUiChannel
     private ulong _nextOperationId = 1;
     private ulong _applied;
     private ulong _rejected;
+    private ulong _coldOpensApplied;
+    private ulong _hotOpensApplied;
 
     internal LocalQueuedUiChannel(LocalPlayableSessionLimits limits)
     {
@@ -76,6 +78,8 @@ internal sealed class LocalQueuedUiChannel
 
     internal ulong Applied { get { lock (_gate) return _applied; } }
     internal ulong Rejected { get { lock (_gate) return _rejected; } }
+    internal ulong ColdOpensApplied { get { lock (_gate) return _coldOpensApplied; } }
+    internal ulong HotOpensApplied { get { lock (_gate) return _hotOpensApplied; } }
     internal int Pending { get { lock (_gate) return _rows.Length - _freeCount; } }
     internal long ReservedBytes => checked(
         (long)_rows.Length * IntPtr.Size * 6L +
@@ -166,9 +170,15 @@ internal sealed class LocalQueuedUiChannel
             {
                 LocalUiOperationRow row = _rows[index];
                 if (row.OperationId != proof.OperationId) continue;
+                LocalUiOperationKind kind = row.Kind;
                 row.Clear();
                 _free[_freeCount++] = index;
-                if (proof.Status == LocalSemanticProofStatus.Applied) _applied++;
+                if (proof.Status == LocalSemanticProofStatus.Applied)
+                {
+                    _applied++;
+                    if (kind == LocalUiOperationKind.ColdOpen) _coldOpensApplied++;
+                    else if (kind == LocalUiOperationKind.HotOpen) _hotOpensApplied++;
+                }
                 else _rejected++;
                 return;
             }
@@ -338,13 +348,18 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
 {
     private readonly LocalQueuedUiChannel _channel;
     private readonly UiClientRuntime _client;
+    private readonly Action _detached;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _disposed;
 
-    internal LocalQueuedUiClient(LocalQueuedUiChannel channel, UiClientRuntime client)
+    internal LocalQueuedUiClient(
+        LocalQueuedUiChannel channel,
+        UiClientRuntime client,
+        Action detached)
     {
         _channel = channel;
         _client = client;
+        _detached = detached;
         _client.AttachActionSink(this);
     }
 
@@ -399,7 +414,8 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
         EnsureOwner();
         if (_disposed) return;
         _disposed = true;
-        _client.DetachActionSink(this);
+        try { _client.DetachActionSink(this); }
+        finally { _detached(); }
     }
 
     private void EnsureOperational()

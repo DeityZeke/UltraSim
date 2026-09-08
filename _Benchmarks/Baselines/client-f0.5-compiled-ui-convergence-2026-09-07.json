@@ -1,0 +1,94 @@
+{
+  "Checkpoint": "F0.5 standard/preinstalled + cached/content-backed compiled UI convergence",
+  "Workload": "exact-passive-inventory-definition-through-one-ui-runtime",
+  "CaptureDate": "2026-09-07",
+  "BaseCommit": "44d0964363f81f1453c24c35d9a151b47019ee96",
+  "StandardUiArtifact": {
+    "DefinitionKey": "game.inventory.gump",
+    "Version": 6,
+    "DefinitionHash": "608912922e71821517d2e025bb5645c6",
+    "ArtifactBytes": 1054,
+    "ArtifactSha256": "bc4230f6163d6c50eed5b26f94bab90e1178b1db68a1ad19263d45a2fb5e2e7e",
+    "Assembly": "UltraSim.Client.StandardUi",
+    "ReleaseAssemblyBytes": 8192,
+    "DirectDependencies": [
+      "UltraSim.UI"
+    ],
+    "GameUiAssemblyAbsent": true,
+    "GameInventoryAssemblyAbsent": true
+  },
+  "SourceConvergence": {
+    "PreinstalledStandard": {
+      "LocalHotOpens": 1,
+      "LocalColdOpens": 0,
+      "RemoteStandardResolutions": 1,
+      "RemoteContentResolutions": 0,
+      "InventoryActionReachedGame": true,
+      "RemoteActionModelSequence": 2
+    },
+    "ReopenedWarmCache": {
+      "ExactDefinitionIdentity": true,
+      "FilesFetched": 0,
+      "PayloadBytesFetched": 0,
+      "FreshContentSetAppliedProofs": 1
+    },
+    "ColdContentBacked": {
+      "Origins": [
+        "local archive",
+        "server HTTP",
+        "external HTTPS"
+      ],
+      "RemoteContentResolutions": 1,
+      "InventoryActionReachedGame": true,
+      "RemoteActionModelSequence": 2
+    },
+    "SameCompiledIdentity": true,
+    "SameUiClientRuntime": true,
+    "SameGodotRenderer": true,
+    "SameGameActionPath": true
+  },
+  "AuthorizationBoundary": {
+    "PreinstalledPossessionDoesNotSatisfyRealmAuthorization": true,
+    "ColdExportFilesFetched": 2,
+    "ColdExportPayloadBytesFetched": 732438,
+    "ColdExportFreshContentSetAppliedProofs": 1,
+    "WarmExportFilesFetched": 0,
+    "WarmExportPayloadBytesFetched": 0,
+    "WarmExportFreshContentSetAppliedProofs": 1
+  },
+  "SessionLifetime": {
+    "FreshLocalClientCachedDefinitions": 0,
+    "LocalUiAttachmentIsSingleOwner": true,
+    "ReplacementClientCannotInheritHotCapability": true
+  },
+  "ProductClosure": {
+    "ActualOnlineExportUltraSimAssemblies": 13,
+    "ActualOnlineExportManagedBytes": 2441728,
+    "OnlinePublishedReleaseManagedBytes": 2316288,
+    "BundledWorldPacks": 0,
+    "BundledPackageEnvelopes": 0,
+    "GameUiAssemblyAbsent": true,
+    "GameInventoryAssemblyAbsent": true,
+    "LocalAuthorityAbsent": true
+  },
+  "FocusedTests": {
+    "UiKernel": 25,
+    "LocalClientSession": 12,
+    "NetworkApplicationBase": 70,
+    "F05CompiledUiConvergence": 1
+  },
+  "PermanentGate": {
+    "CanonicalDebugAndReleaseVerifier": true,
+    "GodotHeadlessAcceptance": true,
+    "ActualOnlineExportInspected": true,
+    "ActualOnlineExportExecutedColdAndWarm": true,
+    "ExactIdentityRebindRejectsChangedDefinition": true,
+    "PublishedProductGraphRejectsGameUiAndInventory": true
+  },
+  "DeliberateDeferrals": [
+    "shared multi-participant authority",
+    "bounded historical standard-definition library beyond the one Inventory canary",
+    "runtime model-content migration",
+    "general UI authoring tools"
+  ]
+}

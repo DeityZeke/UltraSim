@@ -130,9 +130,10 @@ public sealed class RemotePlayableSession : IDisposable
         ClientChatLimits chatLimits = default,
         UiClientLimits uiLimits = default,
         int maximumPendingWorldProofs = 256,
-        RemoteRequiredContentBinding? requiredContent = null)
+        RemoteRequiredContentBinding? requiredContent = null,
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null)
         : this(peer, applicationSessionEpoch, worldCache, requiredContent, null, uiRenderer,
-            chatLimits, uiLimits, maximumPendingWorldProofs)
+            chatLimits, uiLimits, maximumPendingWorldProofs, standardUiDefinitionResolver)
     {
     }
 
@@ -144,9 +145,10 @@ public sealed class RemotePlayableSession : IDisposable
         IUiRenderer uiRenderer,
         ClientChatLimits chatLimits = default,
         UiClientLimits uiLimits = default,
-        int maximumPendingWorldProofs = 256)
+        int maximumPendingWorldProofs = 256,
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver = null)
         : this(peer, applicationSessionEpoch, null, requiredContent, requiredWorld, uiRenderer,
-            chatLimits, uiLimits, maximumPendingWorldProofs)
+            chatLimits, uiLimits, maximumPendingWorldProofs, standardUiDefinitionResolver)
     {
     }
 
@@ -159,7 +161,8 @@ public sealed class RemotePlayableSession : IDisposable
         IUiRenderer uiRenderer,
         ClientChatLimits chatLimits,
         UiClientLimits uiLimits,
-        int maximumPendingWorldProofs)
+        int maximumPendingWorldProofs,
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardUiDefinitionResolver)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -189,6 +192,7 @@ public sealed class RemotePlayableSession : IDisposable
         _ui = new RemoteUiClientBridge(
             peer,
             UiClient,
+            standardDefinitionResolver: standardUiDefinitionResolver,
             contentDefinitionResolver: _content is null
                 ? null
                 : key => _content.TryResolveUiDefinition(

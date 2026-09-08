@@ -107,7 +107,7 @@ or new protocol message is introduced. A0.8 supplies the native Godot consumer: 
 substrate can boot before content exists, required World/UI content still fails closed, and a warm
 cache still requires fresh application-session proof.
 
-Client F0.5 does not add another remote UI protocol. Its preinstalled-standard canary must converge
+Client F0.5 adds no remote UI protocol. Its accepted preinstalled-standard canary converges
 with this A0.6 resolver on the same `UiDefinitionCacheKey` and existing `HotOpen`; when a realm
 requires content application, a matching preinstalled definition may avoid redundant realization
 work but cannot replace the authenticated catalog or `ContentSetApplied` proof.

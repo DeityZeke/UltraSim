@@ -109,6 +109,8 @@ public readonly record struct LocalPlayableSessionSnapshot(
     ulong ChatDeliveriesRejected,
     ulong UiOperationsApplied,
     ulong UiOperationsRejected,
+    ulong UiColdOpensApplied,
+    ulong UiHotOpensApplied,
     long KnownReservedBytes,
     string? Fault);
 

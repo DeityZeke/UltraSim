@@ -31,6 +31,26 @@ public sealed class UiModel
     public UiModel Clone()
     {
         var clone = new UiModel(_definition);
+        CopyStateTo(clone);
+        return clone;
+    }
+
+    /// <summary>
+    /// Rebinds dynamic values to another independently decoded instance of the exact same compiled
+    /// definition. This is the source-convergence seam for passive cached definition artifacts.
+    /// </summary>
+    internal UiModel CloneForExactDefinition(CompiledUiDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (_definition.Handle != definition.Handle)
+            throw new InvalidOperationException("The UI model cannot bind to a different definition identity.");
+        var clone = new UiModel(definition);
+        CopyStateTo(clone);
+        return clone;
+    }
+
+    private void CopyStateTo(UiModel clone)
+    {
         Array.Copy(_values, clone._values, _values.Length);
         Array.Copy(_actionStates, clone._actionStates, _actionStates.Length);
         // Row arrays and UiListRow cell arrays are immutable snapshots: the
@@ -38,7 +58,6 @@ public sealed class UiModel
         // private array. Clones can therefore share them until a list slot is
         // replaced, avoiding a whole-list deep copy for scalar deltas.
         Array.Copy(_rows, clone._rows, _rows.Length);
-        return clone;
     }
 
     /// <summary>Sets one prepared scalar slot without performing source-key lookup.</summary>

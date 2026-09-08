@@ -8,8 +8,8 @@ real Game/Physics, public-world, Chat, Inventory, and informational-UI semantic 
 F0.3b deliberately admits one external participant. The Game runtime stays on the
 existing Hosted connection-owner thread; shared multi-participant world ownership is a
 later checkpoint rather than one runtime being silently constructed per player.
-After Client F0.5 closes the remaining compiled-UI source convergence, that shared-authority
-composition is the next major cross-cutting checkpoint. It will replace this one-participant
+Client F0.5 now closes compiled-UI source convergence, so that shared-authority composition is the
+next major cross-cutting checkpoint. It will replace this one-participant
 development limitation without changing endpoint, Network connection, application session,
 participant, and control-session identity into one shared concept.
 

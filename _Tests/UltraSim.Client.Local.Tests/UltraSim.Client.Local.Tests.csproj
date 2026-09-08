@@ -10,5 +10,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Client/Local/UltraSim.Client.Local.csproj" />
+    <ProjectReference Include="../../Client/StandardUi/UltraSim.Client.StandardUi.csproj" />
   </ItemGroup>
 </Project>

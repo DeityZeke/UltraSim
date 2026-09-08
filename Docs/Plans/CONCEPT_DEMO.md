@@ -31,8 +31,9 @@ WorldPack acquisition, typed World open/bind, and atomic initial client structur
 with exact local semantic parity. A0.8 now closes the native Contentless Online journey through a
 separately running deployment, persistent CAS, primitive presentation fallback, guest admission,
 movement, dynamic-public state, typed Inventory UI, and Chat. That A0 campaign also closes and
-supersedes the historical Client F0.6 content-integration gate. The small F0.5 standard compiled-UI
-source-convergence closure is next, followed by shared multi-participant authority.
+supersedes the historical Client F0.6 content-integration gate. F0.5 also closes stock/preinstalled,
+reopened-cache, and content-backed compiled-UI source convergence. Shared multi-participant
+authority is next.
 
 The demo has two purposes:
 
@@ -1514,10 +1515,9 @@ then prioritize the first meaningful remote vertical:
     F0.6 Contentless Online client integration                       CLOSED
          superseded/satisfied by A0.2-A0.8
 
-next close the small remaining Client UI source-convergence gap:
-    F0.5 standard/preinstalled + cached/content-backed compiled UI   NEXT
+    F0.5 standard/preinstalled + cached/content-backed compiled UI   CLOSED
 
-then earn the major shared-world boundary:
+next earn the major shared-world boundary:
     one shared Game/World authority
     multiple independent authenticated application/participant/control sessions
     real other-player F0.4 presentation and per-recipient AOI/Chat

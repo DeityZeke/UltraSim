@@ -23,6 +23,7 @@ public readonly record struct RemoteUiClientSnapshot(
     ulong OperationsApplied,
     ulong DuplicateOperations,
     ulong RejectedOperations,
+    ulong StandardDefinitionsResolved,
     ulong ContentDefinitionsResolved);
 
 /// <summary>
@@ -43,6 +44,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private readonly UiSemanticWireLimits _wireLimits;
     private readonly byte[] _semanticScratch;
     private readonly byte[] _messageScratch;
+    private readonly Func<UiDefinitionCacheKey, CompiledUiDefinition?>? _standardDefinitionResolver;
     private readonly Func<UiDefinitionCacheKey, CompiledUiDefinition?>? _contentDefinitionResolver;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private RemoteClientApplicationState _state;
@@ -55,6 +57,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private ulong _operationsApplied;
     private ulong _duplicateOperations;
     private ulong _rejectedOperations;
+    private ulong _standardDefinitionsResolved;
     private ulong _contentDefinitionsResolved;
     private IRemoteGameProtocolHandler? _additionalHandler;
     private bool _disposed;
@@ -63,6 +66,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
         NetworkProtocolPeer peer,
         UiClientRuntime client,
         UiSemanticWireLimits wireLimits = default,
+        Func<UiDefinitionCacheKey, CompiledUiDefinition?>? standardDefinitionResolver = null,
         Func<UiDefinitionCacheKey, CompiledUiDefinition?>? contentDefinitionResolver = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
@@ -75,6 +79,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
         _wireLimits = wireLimits;
         _semanticScratch = new byte[wireLimits.MaximumOperationBytes];
         _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        _standardDefinitionResolver = standardDefinitionResolver;
         _contentDefinitionResolver = contentDefinitionResolver;
         _client.AttachActionSink(this);
     }
@@ -182,7 +187,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
         EnsureOwnerThread();
         return new(_state, _applicationSessionEpoch, _participantId, _lastOperationId,
             _actionsQueued, _operationsApplied, _duplicateOperations, _rejectedOperations,
-            _contentDefinitionsResolved);
+            _standardDefinitionsResolved, _contentDefinitionsResolved);
     }
 
     public void Dispose()
@@ -282,6 +287,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
                     }
                     break;
                 case RemoteUiOperationKind.HotOpen:
+                    CompiledUiDefinition? resolvedFromStandard = null;
                     CompiledUiDefinition? resolvedFromContent = null;
                     decoded = UiSemanticWireCodec.TryReadHotOpen(
                         semantic, _wireLimits,
@@ -289,6 +295,8 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
                         {
                             if (_client.TryGetCachedDefinition(
                                     key, out CompiledUiDefinition? cached)) return cached;
+                            resolvedFromStandard = _standardDefinitionResolver?.Invoke(key);
+                            if (resolvedFromStandard is not null) return resolvedFromStandard;
                             resolvedFromContent = _contentDefinitionResolver?.Invoke(key);
                             return resolvedFromContent;
                         },
@@ -297,11 +305,16 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
                     {
                         instance = hot.Instance;
                         modelSequence = hot.Sequence;
-                        if (resolvedFromContent is not null)
+                        CompiledUiDefinition? resolved =
+                            resolvedFromStandard ?? resolvedFromContent;
+                        if (resolved is not null)
                         {
-                            if (_client.CacheDefinition(hot.CacheKey, resolvedFromContent))
+                            if (_client.CacheDefinition(hot.CacheKey, resolved))
                             {
-                                if (_contentDefinitionsResolved != ulong.MaxValue)
+                                if (resolvedFromStandard is not null &&
+                                    _standardDefinitionsResolved != ulong.MaxValue)
+                                    _standardDefinitionsResolved++;
+                                else if (_contentDefinitionsResolved != ulong.MaxValue)
                                     _contentDefinitionsResolved++;
                             }
                         }

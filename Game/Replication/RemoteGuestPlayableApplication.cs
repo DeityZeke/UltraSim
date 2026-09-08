@@ -57,10 +57,11 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
 /// </summary>
 public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApplicationFactory
 {
-    private const int MaximumContentBackedUiDefinitions = 256;
+    private const int MaximumHotOpenUiDefinitions = 256;
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
+    private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
     private long _nextParticipant;
 
@@ -68,7 +69,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         ApplicationRealmId realm,
         RemoteContentAuthorization? contentAuthorization = null,
         IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
-        RemoteClientProfileAdvertisement? clientProfile = null)
+        RemoteClientProfileAdvertisement? clientProfile = null,
+        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (contentAuthorization is not null &&
@@ -79,12 +81,18 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
                 nameof(contentAuthorization));
         _realm = realm;
         _contentAuthorization = contentAuthorization;
-        _contentBackedUiDefinitions = CopyContentBackedDefinitions(contentBackedUiDefinitions);
+        _contentBackedUiDefinitions = CopyUiDefinitions(
+            contentBackedUiDefinitions, nameof(contentBackedUiDefinitions));
+        _standardUiDefinitions = CopyUiDefinitions(
+            standardUiDefinitions, nameof(standardUiDefinitions));
         _clientProfile = clientProfile;
         if (_contentBackedUiDefinitions.Length != 0 && contentAuthorization is null)
             throw new ArgumentException(
                 "Content-backed UI definitions require an exact authenticated content authorization.",
                 nameof(contentBackedUiDefinitions));
+        ValidateHotOpenDefinitionSets(
+            _contentBackedUiDefinitions, _standardUiDefinitions,
+            nameof(standardUiDefinitions));
     }
 
     public IHostedUdpSessionApplication Create(ConnectionId connection, NetworkProtocolPeer peer)
@@ -95,7 +103,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
             throw new InvalidOperationException("The remote participant identity space is exhausted.");
         return new RemoteGuestPlayableApplication(
             peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(),
-            _contentAuthorization, _contentBackedUiDefinitions, _clientProfile);
+            _contentAuthorization, _contentBackedUiDefinitions, _clientProfile,
+            _standardUiDefinitions);
     }
 
     private static ulong CreateEpoch()
@@ -110,18 +119,31 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         return epoch;
     }
 
-    private static UiDefinitionIdentity[] CopyContentBackedDefinitions(
-        IEnumerable<UiDefinitionIdentity>? source)
+    private static UiDefinitionIdentity[] CopyUiDefinitions(
+        IEnumerable<UiDefinitionIdentity>? source,
+        string parameterName)
     {
         UiDefinitionIdentity[] values = (source ?? [])
-            .Take(MaximumContentBackedUiDefinitions + 1).ToArray();
-        if (values.Length > MaximumContentBackedUiDefinitions ||
+            .Take(MaximumHotOpenUiDefinitions + 1).ToArray();
+        if (values.Length > MaximumHotOpenUiDefinitions ||
             values.Any(static value => !value.IsValid) ||
             values.Distinct().Count() != values.Length)
             throw new ArgumentException(
-                "The content-backed UI definition set is invalid, duplicated, or over capacity.",
-                nameof(source));
+                "The UI definition set is invalid, duplicated, or over capacity.",
+                parameterName);
         return values;
+    }
+
+    private static void ValidateHotOpenDefinitionSets(
+        UiDefinitionIdentity[] contentBacked,
+        UiDefinitionIdentity[] standard,
+        string parameterName)
+    {
+        if (contentBacked.Length + standard.Length > MaximumHotOpenUiDefinitions ||
+            standard.Intersect(contentBacked).Any())
+            throw new ArgumentException(
+                "Standard and content-backed hot-open UI definitions exceed capacity or overlap.",
+                parameterName);
     }
 }
 
@@ -142,6 +164,7 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
     private readonly ApplicationRealmId _realm;
     private readonly RemoteContentAuthorization? _contentAuthorization;
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
+    private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
     private readonly ParticipantId _participant;
     private readonly ulong _applicationSessionEpoch;
@@ -211,7 +234,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         ulong applicationSessionEpoch,
         RemoteContentAuthorization? contentAuthorization = null,
         IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
-        RemoteClientProfileAdvertisement? clientProfile = null)
+        RemoteClientProfileAdvertisement? clientProfile = null,
+        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -229,6 +253,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         _clientProfile = clientProfile;
         _contentBackedUiDefinitions = (contentBackedUiDefinitions ?? [])
             .Take(257).ToArray();
+        _standardUiDefinitions = (standardUiDefinitions ?? [])
+            .Take(257).ToArray();
         if (_contentBackedUiDefinitions.Length > 256 ||
             _contentBackedUiDefinitions.Any(static value => !value.IsValid) ||
             _contentBackedUiDefinitions.Distinct().Count() != _contentBackedUiDefinitions.Length ||
@@ -236,6 +262,14 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
             throw new ArgumentException(
                 "Content-backed UI definitions require bounded exact content authorization.",
                 nameof(contentBackedUiDefinitions));
+        if (_standardUiDefinitions.Length > 256 ||
+            _standardUiDefinitions.Any(static value => !value.IsValid) ||
+            _standardUiDefinitions.Distinct().Count() != _standardUiDefinitions.Length ||
+            _standardUiDefinitions.Intersect(_contentBackedUiDefinitions).Any() ||
+            _standardUiDefinitions.Length + _contentBackedUiDefinitions.Length > 256)
+            throw new ArgumentException(
+                "Standard UI definitions must be bounded, exact, unique, and distinct from content-backed definitions.",
+                nameof(standardUiDefinitions));
         _contentApplied = contentAuthorization is null;
         _clientProfileApplied = clientProfile is null;
     }
@@ -615,7 +649,8 @@ public sealed class RemoteGuestPlayableApplication : IHostedUdpSessionApplicatio
         _ui = new RemoteUiSemanticPort(
             _peer,
             _applicationSessionEpoch,
-            contentBackedDefinitions: _contentBackedUiDefinitions);
+            contentBackedDefinitions: _contentBackedUiDefinitions,
+            standardDefinitions: _standardUiDefinitions);
         _admission = new AdmissionService(_runtime.Game, _composition);
         AdmissionResult entered = _admission.JoinGuest(_participant, request);
         if (!entered.IsEntered) return entered;
