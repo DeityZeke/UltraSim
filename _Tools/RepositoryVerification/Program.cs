@@ -1174,10 +1174,10 @@ static void VerifyClientPresentationAssets(string root)
 {
     var expected = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["Client/PresentationAssets/Avatars/x_bot/X Bot.fbx"] =
-            "706ffe9e298271fa69a3a8e28dc6a391479f58c4945a63608d33e2fb87e09aa6",
-        ["Client/PresentationAssets/Avatars/y_bot/Y Bot.fbx"] =
-            "ed035787491803490456840a1f2479e8c0a7ae65cfa38b5447fb2f1a9f8e2fd5",
+        ["Client/PresentationAssets/Avatars/x_bot/x_bot_animated.glb"] =
+            "811c8a6c07692e353ff1a8364db142dd84b88b119e34c4747c51e1a2568db049",
+        ["Client/PresentationAssets/Avatars/y_bot/y_bot_animated.glb"] =
+            "adeffa5fff32e0e8420107d0f25c11897f2141bd5ac817ad01d6298a484f25bc",
     };
     foreach ((string relative, string hash) in expected)
     {
@@ -1186,6 +1186,25 @@ static void VerifyClientPresentationAssets(string root)
             !string.Equals(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(),
                 hash, StringComparison.Ordinal))
             throw new InvalidOperationException($"The frozen human calibration asset is missing or changed: {relative}.");
+    }
+    string sourceBuild = Path.Combine(
+        root, "Client", "PresentationSource", "Avatars", "build_animated_bodies.py");
+    if (!File.Exists(sourceBuild) || Directory.EnumerateFiles(
+            Path.Combine(root, "Client", "PresentationAssets", "Avatars"),
+            "*.fbx", SearchOption.AllDirectories).Any())
+        throw new InvalidOperationException(
+            "Animated body authoring inputs must remain reproducible and outside the Godot runtime tree.");
+    foreach ((string body, string asset) in new[]
+        {
+            ("x_bot", "x_bot_animated.glb"),
+            ("y_bot", "y_bot_animated.glb"),
+        })
+    {
+        string scene = File.ReadAllText(Path.Combine(
+            root, "Client", "PresentationAssets", "Avatars", body, $"{body}_visual.tscn"));
+        if (!scene.Contains($"res://Assets/Avatars/{body}/{asset}", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The {body} runtime scene does not consume its consolidated animated body.");
     }
     string link = Path.Combine(root, "Client", "Godot", "Assets");
     if (!Directory.Exists(link) ||

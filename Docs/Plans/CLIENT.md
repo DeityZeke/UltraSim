@@ -11,8 +11,9 @@ remaining a pointer-nominated world pickup, and I0.13 replaces its temporary col
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
-read-only, content-backed Server Monitor and trusted test-marker producer. X/Y content-backed
-animation/public action realization is next; F0.7 and F0.8 remain open.
+read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
+actor motion/equipment/action presentation semantics and a safe bundled X/Y Idle/Walk/Jump canary.
+Runtime content-backed model/animation realization remains D0.7b; F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2084,6 +2085,58 @@ and the explicit mixed-session lifecycle torture pass remain open.
 
 ---
 
+## D0.7a — Actor motion/equipment/action presentation foundation
+
+**Status: CLOSED.** This is the first half of the Concept Demo animation closure. It proves shared
+presentation semantics and safe local/default animation assets without claiming that runtime models
+are already an A0 content kind.
+
+The existing F0.4 cold actor row now carries only three additional public facts:
+
+```text
+MainHand
+    equipped public prefab only
+
+Vertical phase
+    Grounded | Rising | Falling
+
+Latest accepted presentation action
+    Interact | Primary
+    + actor-local control sequence
+```
+
+Game derives Main Hand from the authoritative Inventory index and records an action only after its
+command succeeds. Exact sword identity/rolls, Inventory topology, and action legality remain private
+or Game-owned. Hot position records remain unchanged. Dedicated shared authority, remote guests of
+a Complete host, and the host's packet-free adapter converge on the same bounded actor read model.
+A client which first sees an actor after an action records the sequence without replaying the cue.
+
+Godot derives horizontal `Idle`/`Walk` from successive committed authoritative poses. It selects
+`Rising`/`Falling` from Game's finite vertical phase, and produces one landing cue only when that
+phase transitions from airborne to `Grounded`. A jump apex or ceiling bonk therefore cannot be
+misread as landing. Godot never publishes animation state upstream. A semantic
+`MainHandSocket` attaches public equipment to a matching right-hand bone or to a primitive actor's
+fixed fallback anchor. Equipped gear is excluded from independent world batching/picking; the same
+entity returns to ordinary GroundItem presentation after authoritative Drop.
+
+The historical V1.5 X/Y FBXs kept model and action skeletons as separate Godot imports. D0.7a moves
+those inputs out of the runtime resource tree and uses one reproducible Blender conversion per body.
+Each generated GLB contains one body, one ordered 65-bone skeleton, and sampled `Idle`, `Walk`, and
+`Jump` actions. Native acceptance loads both real generated scenes, verifies their clips/socket, and
+drives committed movement through the Walk phase. This avoids runtime cross-scene skeleton
+attachment/retargeting and its prior distortion/misalignment failure mode.
+
+The archive contains no Attack or Interact clip. Accepted actions therefore retain short bounded
+primitive cues; missing animation never changes Game success. Online excludes bundled `Assets/**`
+and exercises the same semantic presenter through the humanoid/equipment primitive substrate.
+
+**D0.7b remains open:** introduce a bounded passive model/animation artifact kind, verified catalog
+resolution, native resource realization/lifetime, and real server Add/Replace presentation before
+claiming content-backed X/Y parity. Preinstalled GLBs may not substitute for realm authorization or
+application proof.
+
+---
+
 ## F0.7 — Settings/debug/lifecycle hardening
 
 **Status: OPEN; partially earned hardening is already accepted.** Settings focus, Chat focus,
@@ -2512,7 +2565,9 @@ C0.2  routed Global + authority System Chat / transient banner              CLOS
         |
 D0.6  read-only Server Monitor / ping / trusted test markers                  CLOSED
         |
-remaining X/Y content-backed animation / public action presentation           NEXT
+D0.7a shared actor motion/equipment/action + bundled X/Y animation             CLOSED
+        |
+D0.7b runtime content-backed model/animation realization                       NEXT
         |
 F0.7  explicit settings/debug/mixed-session lifecycle closure             OPEN
         |

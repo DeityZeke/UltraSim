@@ -935,7 +935,7 @@ public sealed class GodotWorldRenderer : IDisposable
             foreach (WorldPublicRecord record in semantic.PublicRecords)
             {
                 if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0 ||
-                    _publicBatchFilter?.ShouldBatch(record.PrefabId) == false) continue;
+                    _publicBatchFilter?.ShouldBatch(in record) == false) continue;
                 if (!groups.TryGetValue(record.PrefabId, out List<Transform3D>? transforms))
                     groups.Add(record.PrefabId, transforms = []);
                 Transform3D transform = ToLocalTransform(
@@ -1227,12 +1227,12 @@ public sealed class GodotWorldRenderer : IDisposable
         {
             WorldPublicRecord record = semantic.PublicRecords[index];
             if ((record.StateFlags & WorldPublicStateFlags.Visible) == 0 ||
-                _publicBatchFilter?.ShouldBatch(record.PrefabId) == false) continue;
+                _publicBatchFilter?.ShouldBatch(in record) == false) continue;
             bool prior = false;
             for (int scan = 0; scan < index; scan++)
                 if ((semantic.PublicRecords[scan].StateFlags & WorldPublicStateFlags.Visible) != 0 &&
                     _publicBatchFilter?.ShouldBatch(
-                        semantic.PublicRecords[scan].PrefabId) != false &&
+                        in semantic.PublicRecords[scan]) != false &&
                     semantic.PublicRecords[scan].PrefabId == record.PrefabId) prior = true;
             if (!prior) groups++;
         }

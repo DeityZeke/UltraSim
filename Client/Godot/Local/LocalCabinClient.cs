@@ -1286,10 +1286,10 @@ public partial class LocalCabinClient : Node3D
         {
             _publicPresentationMetadata?.ResetServerGeneration(view.GenerationId);
             _previousSharedMetadataCount = 0;
-            if (!view.ServerExtension.Available)
-                ApplyControlledActorMetadata(in view);
             SynchronizeColdPublicPresentationMetadata();
         }
+        if (!view.ServerExtension.Available)
+            ApplyControlledActorMetadata(in view);
         _actorPresenter?.SetControlledActorPose(
             view.PublicActor, view.PlayerPosition, view.PlayerOrientation, Time.GetTicksMsec());
         TrackPresentation(reset: true);
@@ -1302,12 +1302,49 @@ public partial class LocalCabinClient : Node3D
         if (_publicPresentationMetadata is null || !view.PublicActor.IsValid ||
             !view.GuestIdentity.IsValid)
             throw new InvalidOperationException("The controlled actor metadata source was incomplete.");
+        bool retained = _publicPresentationMetadata.TryGet(
+            view.PublicActor, out ClientPublicPresentationMetadata prior);
+        ClientPublicActorActionKind actorAction = retained
+            ? prior.ActorAction
+            : ClientPublicActorActionKind.None;
+        ulong actorActionSequence = retained ? prior.ActorActionSequence : 0;
+        if (view.LastCommandResult.Primary == GameWorldActionStatus.Accepted)
+        {
+            actorAction = ClientPublicActorActionKind.Primary;
+            actorActionSequence = view.LastCommandSequence;
+        }
+        else if (view.LastCommandResult.Interaction == GameWorldActionStatus.Accepted)
+        {
+            actorAction = ClientPublicActorActionKind.Interact;
+            actorActionSequence = view.LastCommandSequence;
+        }
+        ClientPublicPresentationFlags flags = ClientPublicPresentationFlags.NameplateEligible |
+            ClientPublicPresentationFlags.ActorState;
+        ClientPublicActorVerticalPhase verticalPhase = view.VerticalMotion.Kind switch
+        {
+            GameVerticalMotionKind.Grounded => ClientPublicActorVerticalPhase.Grounded,
+            GameVerticalMotionKind.Airborne when
+                view.VerticalMotion.VelocityMillimetersPerSecond > 0 =>
+                    ClientPublicActorVerticalPhase.Rising,
+            GameVerticalMotionKind.Airborne => ClientPublicActorVerticalPhase.Falling,
+            _ => throw new InvalidOperationException(
+                "The local actor vertical state was not presentable."),
+        };
+        if (retained && prior.Flags == flags && prior.MainHandPrefabId == view.MainHandPrefabId &&
+            prior.VerticalPhase == verticalPhase &&
+            prior.ActorAction == actorAction && prior.ActorActionSequence == actorActionSequence &&
+            string.Equals(prior.DisplayLabel, view.GuestIdentity.DisplayName, StringComparison.Ordinal))
+            return;
         var metadata = new ClientPublicPresentationMetadata(
             view.GenerationId,
             view.PublicActor,
-            1,
-            ClientPublicPresentationFlags.NameplateEligible,
-            view.GuestIdentity.DisplayName!);
+            retained ? checked(prior.Revision + 1) : 1,
+            flags,
+            view.GuestIdentity.DisplayName!,
+            MainHandPrefabId: view.MainHandPrefabId,
+            VerticalPhase: verticalPhase,
+            ActorAction: actorAction,
+            ActorActionSequence: actorActionSequence);
         ClientPublicPresentationApplyStatus applied = _publicPresentationMetadata.TryApply(
             ClientPublicPresentationOperation.Present, in metadata);
         if (applied is not (ClientPublicPresentationApplyStatus.Applied or
@@ -1370,6 +1407,8 @@ public partial class LocalCabinClient : Node3D
         if (_window is null || _cache is null || _actorState is null ||
             _publicPresentationMetadata is null || _actorPresenter is null)
             return;
+        if (!view.ServerExtension.Available)
+            ApplyControlledActorMetadata(in view);
         if (!_window.TryCopyBindings(_presentationBindings, out int count, out _))
             throw new InvalidOperationException("Actor presentation bindings exceeded capacity.");
         for (int index = 0; index < count; index++)

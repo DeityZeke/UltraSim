@@ -169,6 +169,24 @@ existing compact HotOpen. Both render through the same `UiClientRuntime`/`GodotU
 exported Online smoke now opens Inventory, then the content-backed Server Monitor, and requires its
 native participant list before completing Chat and movement evidence.
 
+D0.7a makes actor motion, equipment, and accepted actions one shared presentation path. The
+presenter derives horizontal `Idle`/`Walk` from successive committed authoritative positions, while
+Game-owned `Grounded`/`Rising`/`Falling` presentation state selects vertical motion and an exact
+airborne-to-grounded transition produces the one-shot landing cue. Animation playback never becomes
+Physics or Game truth. The local X/Y presentation uses reproducibly consolidated GLBs containing one body skeleton
+plus exact `Idle`, `Walk`, and `Jump` actions. An explicit semantic `MainHandSocket` follows the
+body's right-hand bone, with a fixed primitive anchor only for fallback actors. The public actor
+metadata exposes only the equipped public prefab and latest accepted `Interact`/`Primary` sequence;
+private sword rolls stay in Inventory/Inspection state. Late actor realization records the sequence
+without replaying the old cue. Dropped swords return to ordinary batched world presentation, while
+equipped swords remain attached, visible, and non-pickable.
+
+The archived source has no Attack or Interact clips. Those actions therefore retain short bounded
+primitive cues; a missing animation can never block accepted gameplay. Online also deliberately
+retains primitive actor presentation because `Assets/**` is excluded and runtime model/animation
+artifact realization is not implemented yet. D0.7a is local/default animation and local/remote
+semantic parity evidence, not a claim that model content has joined A0's PNG/UI/World consumers.
+
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a
 magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby

@@ -46,8 +46,11 @@ C0.2 now closes one routed Global channel plus explicit authority-originated Sys
 through the same local/remote retained delivery and proof path. Godot projects the applied System
 fact into both the feed and a transient presentation-local banner. D0.6 now closes the first
 sanitized read-only Server Monitor, direct local/remote ping indication, and the concrete trusted
-test-marker producer. X/Y content-backed animation and public action realization are next; broad
-diagnostic capture and the explicit F0.7 lifecycle campaign remain open.
+test-marker producer. D0.7a now closes shared public equipment/action state, semantic Main Hand
+attachment, position-derived horizontal motion plus Game-owned vertical phases, and safe bundled X/Y
+Idle/Walk/Jump playback.
+D0.7b runtime content-backed model/animation realization remains next; broad diagnostic capture and
+the explicit F0.7 lifecycle campaign remain open.
 
 The demo has two purposes:
 
@@ -895,6 +898,48 @@ claim crouch gameplay is implemented.
 Animation is presentation derived from authoritative/public motion/action facts where appropriate.
 Do not make the loaded animation state gameplay truth.
 
+## D0.7a implemented animation/presentation foundation — CLOSED
+
+D0.7a deliberately separates semantic closure from runtime model-content closure.
+
+```text
+authoritative successive actor poses
+    -> client Idle / Walk
+
+Game-owned vertical phase
+    -> Rising / Falling
+    -> exact airborne-to-grounded landing transition
+
+authoritative Inventory MainHand
+    -> public equipped prefab identity
+    -> semantic MainHandSocket
+
+accepted Interact / Primary
+    -> latest actor-local presentation sequence
+    -> bounded one-shot cue for already-present observers
+```
+
+These facts flow through the same F0.4 actor presenter for packet-free Local and Network recipients.
+The Main Hand projection exposes no rolled stats or Inventory topology. A retained action sequence
+does not replay when an actor first enters presentation, and rejected actions never enter the read
+model. Equipped items stay attached and non-pickable; authoritative Drop returns the same entity to
+ordinary GroundItem presentation.
+
+The V1.5 X/Y model and action FBXs are now authoring inputs outside Godot's runtime resource tree.
+A reproducible Blender conversion verifies an exact ordered 65-bone match and emits one GLB per body
+with one skeleton plus sampled `Idle`, `Walk`, and `Jump` actions. Godot never attaches a clip scene's
+skeleton to a separate model scene at runtime. Native acceptance opens both generated scenes and
+requires the finite clips, animation player, semantic hand socket, and committed-pose Walk change.
+
+No archived Attack or Interact clip exists, so those accepted actions use explicit bounded primitive
+cues. Online likewise keeps primitive actor presentation because `Assets/**` is excluded. This is
+correct fallback evidence, not content-backed model evidence.
+
+**D0.7b remains open.** `ContentFileKind` currently supports PNG/WebP, WorldPack, and UI-definition
+artifacts, but no runtime GLB/model/animation kind or native resource-lifetime cache. The final
+multiplayer demo must add that production-shaped consumer before claiming local/server Add/Replace
+X/Y presentation origin parity. Bundled GLBs cannot satisfy required realm content proof.
+
 ---
 
 # 11. Cabin, player Inventory, pickup/equip/drop, and swing
@@ -1653,7 +1698,8 @@ then continue:
          sanitized cold read model; content-backed remote UI
          packet-free Local parity; no administration
 
-    X/Y content-backed animation + public action realization           NEXT
+    D0.7a actor motion/equipment/action + bundled X/Y animation         CLOSED
+    D0.7b runtime content-backed model/animation realization            NEXT
 
 then close:
     F0.7 explicit mixed-session settings/debug/lifecycle torture pass

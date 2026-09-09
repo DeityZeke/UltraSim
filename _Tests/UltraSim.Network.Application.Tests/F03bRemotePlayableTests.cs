@@ -149,7 +149,27 @@ internal static class F03bRemotePlayableTests
         False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
             bytes, in header, "bad\uD800", null, out _));
 
+        header.Flags = RemotePublicPresentationFlags.NameplateEligible |
+            RemotePublicPresentationFlags.ActorState;
+        header.MainHandPrefabId = GameWorldPublicPrefabIds.IronSword;
+        header.VerticalPhase = RemotePublicActorVerticalPhase.Grounded;
+        header.ActorAction = RemotePublicActorActionKind.Primary;
+        header.ActorActionSequence = 41;
+        True(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, "Remote Éowyn", null, out written));
+        True(UltraSimGameProtocol.TryReadPublicPresentationMetadata(
+            bytes.AsSpan(0, written), out decoded, out label, out decodedProperties));
+        Equal(header, decoded);
+        header.ActorActionSequence = 0;
+        False(UltraSimGameProtocol.TryWritePublicPresentationMetadata(
+            bytes, in header, "Remote Éowyn", null, out _));
+        header.ActorActionSequence = 41;
+
         header.Flags = RemotePublicPresentationFlags.ItemProperties;
+        header.MainHandPrefabId = 0;
+        header.VerticalPhase = RemotePublicActorVerticalPhase.None;
+        header.ActorAction = RemotePublicActorActionKind.None;
+        header.ActorActionSequence = 0;
         InspectionPropertySet properties = GameItemGenerationState.BuildInspectionProperties(
             new GameWeaponInstance
             {
@@ -529,7 +549,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)25, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)26, UltraSimGameProtocol.Manifest.Version);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()

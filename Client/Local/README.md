@@ -112,3 +112,11 @@ is active, the optional extension supplies the shared authority's one-Local-plus
 snapshot without replacing the local world or clock. Refresh is cold (approximately one second),
 and only the typed local UI-queue backpressure condition is deferred; unrelated authority failures
 are not swallowed. Local HUD latency remains the literal label `Local`, never a loopback RTT.
+
+D0.7a adds no packets to this path. The immutable authority view exposes only the currently equipped
+Main Hand public prefab and finite Game-owned vertical phase. An accepted Interact/Primary command
+is observed after Game acceptance and published as a bounded public actor cue; rejected actions
+never advance it. Without hosting, the local client applies that state directly under the same
+generational cold-metadata contract. With Complete hosting, the optional extension records the
+local host in the same shared actor read model consumed by remote participants. The local control
+path remains packet-free in both cases.

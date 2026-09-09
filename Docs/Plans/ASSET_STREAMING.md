@@ -12,8 +12,11 @@ superseded by this accepted A0 campaign; no duplicate F0.6 implementation remain
 Client F0.5 is also closed: one passive stock Inventory artifact, reopened CAS bytes, and newly
 acquired realm-content bytes converge on the same exact compiled definition and runtime while
 content authorization/application proof remains independent.
-Runtime mesh/audio import, package dependencies, executable extensions, mutable overlay artifacts,
-and independently streamed chunk artifacts remain deferred.
+D0.7a now supplies safe bundled X/Y GLBs and shared actor animation/equipment/action semantics, but
+does not add a model kind to Content. Runtime mesh/animation/audio import, package dependencies,
+executable extensions, mutable overlay artifacts, and independently streamed chunk artifacts remain
+deferred. D0.7b is the next concrete model/animation consumer and must reuse this cache/catalog
+authority rather than treating a Godot path as content identity.
 
 **Purpose:** restore the useful V2 content-pack, resolver, cache, server-patch, and asset-streaming ideas without reviving old ownership mistakes. The first proof uses the same Cabin in the Woods world locally and remotely so a preinstalled Single Player composition can act as a deterministic oracle for Online content.
 
@@ -1437,6 +1440,12 @@ model absence from texture absence and degrade only presentation while immutable
 physical bounds remain unchanged. Its four fixture outcomes are local/preinstalled test resolution,
 not CAS/source/download evidence. A0.2+ must eventually drive the same renderer contract from
 verified catalog/blob availability without changing these semantics.
+
+D0.7a adds another deliberate split: locally bundled X/Y GLBs may realize exact Idle/Walk/Jump
+presentation, while the Contentless Online product uses the humanoid and attached-equipment
+primitives against the same semantic actor state. This proves missing-animation fallback but does
+not authorize or cache the bundled GLBs for a realm. D0.7b must define the bounded passive model /
+animation artifact and native resource lifetime before server Add/Replace presentation can win.
 
 ---
 

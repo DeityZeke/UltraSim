@@ -16,6 +16,22 @@ public enum RemotePublicPresentationFlags : byte
     None = 0,
     NameplateEligible = 1 << 0,
     ItemProperties = 1 << 1,
+    ActorState = 1 << 2,
+}
+
+public enum RemotePublicActorActionKind : byte
+{
+    None = 0,
+    Interact = 1,
+    Primary = 2,
+}
+
+public enum RemotePublicActorVerticalPhase : byte
+{
+    None = 0,
+    Grounded = 1,
+    Rising = 2,
+    Falling = 3,
 }
 
 public enum RemotePublicPresentationApplyStatus : byte
@@ -29,7 +45,7 @@ public enum RemotePublicPresentationApplyStatus : byte
 /// One retained cold public-presentation metadata occurrence. A bounded display label and canonical
 /// typed inspection facts follow only for a Present operation; hot movement stays independent.
 /// </summary>
-[NetworkMessage(144, "ultrasim.game.public-presentation-metadata", 3, NetworkLane.Control)]
+[NetworkMessage(144, "ultrasim.game.public-presentation-metadata", 4, NetworkLane.Control)]
 public partial struct RemotePublicPresentationMetadataHeader
 {
     public ulong ApplicationSessionEpoch;
@@ -40,6 +56,10 @@ public partial struct RemotePublicPresentationMetadataHeader
     public uint PublicEntityGeneration;
     public RemotePublicPresentationOperation Operation;
     public RemotePublicPresentationFlags Flags;
+    public uint MainHandPrefabId;
+    public RemotePublicActorVerticalPhase VerticalPhase;
+    public RemotePublicActorActionKind ActorAction;
+    public ulong ActorActionSequence;
 }
 
 /// <summary>Exact client application result for one cold metadata delivery.</summary>
@@ -58,7 +78,8 @@ public static partial class UltraSimGameProtocol
     public const int MaximumPublicPresentationMessageBytes = 768;
     public const RemotePublicPresentationFlags AdmittedPublicPresentationFlags =
         RemotePublicPresentationFlags.NameplateEligible |
-        RemotePublicPresentationFlags.ItemProperties;
+        RemotePublicPresentationFlags.ItemProperties |
+        RemotePublicPresentationFlags.ActorState;
     private static readonly UTF8Encoding StrictPublicPresentationUtf8 = new(false, true);
 
     public static bool TryWritePublicPresentationMetadata(
@@ -148,8 +169,25 @@ public static partial class UltraSimGameProtocol
         (value.Operation != RemotePublicPresentationOperation.Present ||
          value.Flags != RemotePublicPresentationFlags.None) &&
         (value.Flags & ~AdmittedPublicPresentationFlags) == 0 &&
+        ((value.Flags & RemotePublicPresentationFlags.ItemProperties) == 0 ||
+         (value.Flags & RemotePublicPresentationFlags.ActorState) == 0) &&
+        ((value.Flags & RemotePublicPresentationFlags.ActorState) != 0
+            ? value.VerticalPhase is >= RemotePublicActorVerticalPhase.Grounded and
+                    <= RemotePublicActorVerticalPhase.Falling &&
+                value.ActorAction is >= RemotePublicActorActionKind.None and
+                    <= RemotePublicActorActionKind.Primary &&
+                (value.ActorAction == RemotePublicActorActionKind.None
+                    ? value.ActorActionSequence == 0
+                    : value.ActorActionSequence != 0)
+            : value.MainHandPrefabId == 0 && value.VerticalPhase == RemotePublicActorVerticalPhase.None &&
+                value.ActorAction == RemotePublicActorActionKind.None &&
+                value.ActorActionSequence == 0) &&
         (value.Operation != RemotePublicPresentationOperation.Remove ||
-         value.Flags == RemotePublicPresentationFlags.None);
+         value.Flags == RemotePublicPresentationFlags.None &&
+         value.MainHandPrefabId == 0 &&
+         value.VerticalPhase == RemotePublicActorVerticalPhase.None &&
+         value.ActorAction == RemotePublicActorActionKind.None &&
+         value.ActorActionSequence == 0);
 
     private static bool IsCanonicalPublicPresentationLabel(string value)
         => IsCanonicalPublicPresentationText(

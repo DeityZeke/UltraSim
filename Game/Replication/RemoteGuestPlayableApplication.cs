@@ -206,7 +206,7 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _duplicatePublicPresentationProofs;
     private ulong _rejectedPublicPresentationProofs;
     private readonly SharedPublicPresentationRow[]? _sharedPresentation;
-    private readonly SharedPlayableParticipant[]? _sharedParticipantScratch;
+    private readonly GamePublicActorPresentation[]? _sharedParticipantScratch;
     private ulong _nextSharedPresentationDeliveryId = 1;
     private int _sharedPresentationDeliverySlot = -1;
     private readonly SharedPublicPresentationRow[] _publicItemPresentations =
@@ -291,7 +291,7 @@ public sealed class RemoteGuestPlayableApplication :
         {
             int participantCapacity = sharedAuthority.GetSnapshot().MaximumParticipants;
             _sharedPresentation = new SharedPublicPresentationRow[participantCapacity];
-            _sharedParticipantScratch = new SharedPlayableParticipant[participantCapacity];
+            _sharedParticipantScratch = new GamePublicActorPresentation[participantCapacity];
         }
         _clientProfile = clientProfile;
         _contentBackedUiDefinitions = (contentBackedUiDefinitions ?? [])
@@ -1007,6 +1007,12 @@ public sealed class RemoteGuestPlayableApplication :
             Flags = row.DesiredPresent
                 ? row.DesiredFlags
                 : RemotePublicPresentationFlags.None,
+            MainHandPrefabId = row.DesiredPresent ? row.MainHandPrefabId : 0,
+            VerticalPhase = row.DesiredPresent
+                ? row.VerticalPhase
+                : RemotePublicActorVerticalPhase.None,
+            ActorAction = row.DesiredPresent ? row.ActorAction : RemotePublicActorActionKind.None,
+            ActorActionSequence = row.DesiredPresent ? row.ActorActionSequence : 0,
         };
         string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
         InspectionPropertySet? properties = row.DesiredPresent
@@ -1223,6 +1229,12 @@ public sealed class RemoteGuestPlayableApplication :
             Flags = row.DesiredPresent
                 ? row.DesiredFlags
                 : RemotePublicPresentationFlags.None,
+            MainHandPrefabId = row.DesiredPresent ? row.MainHandPrefabId : 0,
+            VerticalPhase = row.DesiredPresent
+                ? row.VerticalPhase
+                : RemotePublicActorVerticalPhase.None,
+            ActorAction = row.DesiredPresent ? row.ActorAction : RemotePublicActorActionKind.None,
+            ActorActionSequence = row.DesiredPresent ? row.ActorActionSequence : 0,
         };
         string label = row.DesiredPresent ? row.DisplayLabel! : string.Empty;
         if (!UltraSimGameProtocol.TryWritePublicPresentationMetadata(
@@ -1270,6 +1282,14 @@ public sealed class RemoteGuestPlayableApplication :
             ? row.DesiredFlags
             : RemotePublicPresentationFlags.None;
         row.AppliedInspectionProperties = null;
+        row.AppliedMainHandPrefabId = row.DesiredPresent ? row.MainHandPrefabId : 0;
+        row.AppliedVerticalPhase = row.DesiredPresent
+            ? row.VerticalPhase
+            : RemotePublicActorVerticalPhase.None;
+        row.AppliedActorAction = row.DesiredPresent
+            ? row.ActorAction
+            : RemotePublicActorActionKind.None;
+        row.AppliedActorActionSequence = row.DesiredPresent ? row.ActorActionSequence : 0;
         row.DeliveryId = 0;
         row.LastQueuedMilliseconds = 0;
         _sharedPresentationDeliverySlot = -1;
@@ -1279,7 +1299,7 @@ public sealed class RemoteGuestPlayableApplication :
     private void ReconcileSharedPresentation()
     {
         SharedPublicPresentationRow[] rows = _sharedPresentation!;
-        int count = _sharedAuthority!.CopyParticipants(_sharedParticipantScratch!);
+        int count = _sharedAuthority!.CopyActorPresentations(_sharedParticipantScratch!);
         if (count < 0)
             throw new InvalidOperationException("The shared participant census exceeded its bound.");
         for (int slot = 0; slot < rows.Length; slot++)
@@ -1290,10 +1310,10 @@ public sealed class RemoteGuestPlayableApplication :
             // would let an old delivery identity describe a newer participant (key ABA).
             if (row.DeliveryId != 0) continue;
 
-            SharedPlayableParticipant desired = default;
+            GamePublicActorPresentation desired = default;
             for (int index = 0; index < count; index++)
             {
-                if (_sharedParticipantScratch![index].Slot != slot) continue;
+                if (_sharedParticipantScratch![index].Participant.Slot != slot) continue;
                 desired = _sharedParticipantScratch[index];
                 break;
             }
@@ -1313,12 +1333,22 @@ public sealed class RemoteGuestPlayableApplication :
                 continue;
             }
 
-            bool identityChanged = row.PublicEntity != desired.PublicEntity ||
-                !string.Equals(row.DisplayLabel, desired.GuestIdentity.DisplayName,
+            SharedPlayableParticipant participant = desired.Participant;
+            bool identityChanged = row.PublicEntity != participant.PublicEntity ||
+                !string.Equals(row.DisplayLabel, participant.GuestIdentity.DisplayName,
                     StringComparison.Ordinal);
             if (!identityChanged)
             {
                 row.DesiredPresent = true;
+                if (row.SourceRevision != desired.Revision)
+                {
+                    row.SourceRevision = desired.Revision;
+                    row.MainHandPrefabId = desired.MainHandPrefabId;
+                    row.VerticalPhase = (RemotePublicActorVerticalPhase)desired.VerticalPhase;
+                    row.ActorAction = (RemotePublicActorActionKind)desired.Action;
+                    row.ActorActionSequence = desired.ActionSequence;
+                    row.Revision = checked(row.Revision + 1);
+                }
                 continue;
             }
             if (row.AppliedPresent)
@@ -1334,9 +1364,15 @@ public sealed class RemoteGuestPlayableApplication :
             }
             row = new SharedPublicPresentationRow
             {
-                PublicEntity = desired.PublicEntity,
-                DisplayLabel = desired.GuestIdentity.DisplayName,
-                DesiredFlags = RemotePublicPresentationFlags.NameplateEligible,
+                PublicEntity = participant.PublicEntity,
+                DisplayLabel = participant.GuestIdentity.DisplayName,
+                DesiredFlags = RemotePublicPresentationFlags.NameplateEligible |
+                    RemotePublicPresentationFlags.ActorState,
+                SourceRevision = desired.Revision,
+                MainHandPrefabId = desired.MainHandPrefabId,
+                VerticalPhase = (RemotePublicActorVerticalPhase)desired.VerticalPhase,
+                ActorAction = (RemotePublicActorActionKind)desired.Action,
+                ActorActionSequence = desired.ActionSequence,
                 Revision = 1,
                 DesiredPresent = true,
             };
@@ -1410,6 +1446,21 @@ public sealed class RemoteGuestPlayableApplication :
             {
                 Interaction = GameWorldActionStatus.InvariantViolation,
             };
+        }
+        if (_sharedAuthority is not null)
+        {
+            GamePublicActorActionKind presentationAction =
+                _lastCommandResult.Primary == GameWorldActionStatus.Accepted
+                    ? GamePublicActorActionKind.Primary
+                    : (command.PressedActions & GamePlayerActions.Interact) != 0 &&
+                        _lastCommandResult.Interaction == GameWorldActionStatus.Accepted
+                            ? GamePublicActorActionKind.Interact
+                            : GamePublicActorActionKind.None;
+            if (presentationAction != GamePublicActorActionKind.None &&
+                !_sharedAuthority.RecordPresentationAction(
+                    in _sharedParticipant, command.Sequence, presentationAction))
+                throw new InvalidOperationException(
+                    "An accepted public actor presentation action could not be recorded.");
         }
         SaturatingIncrement(ref _commandsApplied);
         _ = QueueOwnerState();
@@ -1884,6 +1935,15 @@ public sealed class RemoteGuestPlayableApplication :
         internal string? AppliedDisplayLabel;
         internal InspectionPropertySet? InspectionProperties;
         internal InspectionPropertySet? AppliedInspectionProperties;
+        internal uint MainHandPrefabId;
+        internal uint AppliedMainHandPrefabId;
+        internal RemotePublicActorVerticalPhase VerticalPhase;
+        internal RemotePublicActorVerticalPhase AppliedVerticalPhase;
+        internal RemotePublicActorActionKind ActorAction;
+        internal RemotePublicActorActionKind AppliedActorAction;
+        internal ulong ActorActionSequence;
+        internal ulong AppliedActorActionSequence;
+        internal ulong SourceRevision;
         internal RemotePublicPresentationFlags DesiredFlags;
         internal RemotePublicPresentationFlags AppliedFlags;
         internal GameWeaponInstance Weapon;
@@ -1898,7 +1958,11 @@ public sealed class RemoteGuestPlayableApplication :
              DesiredPresent && (AppliedPublicEntity != PublicEntity ||
                 AppliedFlags != DesiredFlags ||
                 !string.Equals(AppliedDisplayLabel, DisplayLabel, StringComparison.Ordinal) ||
-                !Equals(AppliedInspectionProperties, InspectionProperties)));
+                !Equals(AppliedInspectionProperties, InspectionProperties) ||
+                AppliedMainHandPrefabId != MainHandPrefabId ||
+                AppliedVerticalPhase != VerticalPhase ||
+                AppliedActorAction != ActorAction ||
+                AppliedActorActionSequence != ActorActionSequence));
     }
 
     private readonly record struct InventoryOpenEntities(Entity Container, Entity Owner);

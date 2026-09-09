@@ -77,7 +77,7 @@ contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
 guest admission. It hostile-validates the finite profile vocabulary introduced in manifest v19,
-retained unchanged through the current manifest v25, and maps it into
+retained unchanged through the current manifest v26, and maps it into
 Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not
@@ -132,6 +132,13 @@ per-recipient public state, cold presentation metadata, and Chat. A client sends
 application/participant lineage. If admission and the first semantic messages share one receive
 batch, the session activates its semantic consumers before continuing that batch so no initial
 public/UI/Chat occurrence is stranded behind admission state.
+
+D0.7a/manifest v26 extends only the retained cold public-presentation metadata row. `ActorState`
+carries the public Main Hand prefab, finite Game-owned Grounded/Rising/Falling phase, and latest
+accepted Interact/Primary sequence; it does not add item rolls to hot movement or grant the client
+action authority. Exact metadata apply proof is still required. Presentation suppresses replay when
+an actor enters with an already-retained sequence, while a newer row can drive one bounded cue. The
+Network client owns no clip, skeleton, attachment node, or motion-to-animation policy.
 
 ## Dynamic public chunk state
 

@@ -12,20 +12,40 @@ public interface IGodotActorVisualResolver
 /// <summary>Optional exclusion for public identities realized as individual actor roots.</summary>
 public interface IGodotWorldPublicBatchFilter
 {
-    bool ShouldBatch(uint prefabId);
+    bool ShouldBatch(in WorldPublicRecord record);
 }
 
 public readonly record struct GodotActorPresenterSnapshot(
     int ActiveActors,
     int PrimitiveFallbackActors,
+    int AnimatedActors,
+    int EquippedMainHands,
     int VisibleNameplates,
     int VisibleOverheadLabels,
     int VisiblePrimaryCues,
+    int VisibleInteractCues,
     bool RevealHeld,
     ulong Added,
     ulong Updated,
     ulong Removed,
-    ulong PrimaryCuesPresented);
+    ulong PrimaryCuesPresented,
+    ulong InteractCuesPresented,
+    ulong LandingCuesPresented);
+
+public enum GodotActorMotionPhase : byte
+{
+    Idle = 0,
+    Walk = 1,
+    Rising = 2,
+    Falling = 3,
+}
+
+public readonly record struct GodotActorPresentationDiagnostics(
+    GodotActorMotionPhase MotionPhase,
+    bool HasAnimationPlayer,
+    bool MainHandVisible,
+    bool PrimaryCueActive,
+    bool InteractCueActive);
 
 /// <summary>
 /// Native realization of engine-neutral actor state. One actor root is earned by moving/nameplate/
@@ -35,6 +55,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
 {
     public const ulong ControlledNameplateGraceMilliseconds = 2_500;
     public const ulong PrimaryCueDurationMilliseconds = 240;
+    public const ulong InteractCueDurationMilliseconds = 220;
+    public const ulong LandingCueDurationMilliseconds = 140;
+    public const ulong MotionHoldMilliseconds = 180;
+    private const int MotionThresholdMillimeters = 4;
     private const float MillimetersToMeters = 0.001f;
     private readonly ClientActorDefinitionCatalog _catalog;
     private readonly IGodotActorVisualResolver? _visuals;
@@ -50,10 +74,14 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private WorldPosition _origin;
     private int _active;
     private int _primitive;
+    private int _animated;
+    private int _equippedMainHands;
     private ulong _added;
     private ulong _updated;
     private ulong _removed;
     private ulong _primaryCuesPresented;
+    private ulong _interactCuesPresented;
+    private ulong _landingCuesPresented;
     private bool _disposed;
 
     public GodotActorPresenter(
@@ -73,7 +101,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
 
     public Node3D Root { get; }
 
-    public bool ShouldBatch(uint prefabId) => !_catalog.TryGet(prefabId, out _);
+    public bool ShouldBatch(in WorldPublicRecord record) =>
+        !_catalog.TryGet(record.PrefabId, out _) &&
+        (record.PrefabId != UltraSim.Game.Composition.GameWorldPublicPrefabIds.IronSword ||
+         (record.StateFlags & WorldPublicStateFlags.GroundItem) != 0);
 
     /// <summary>
     /// Supplies the fresh owner-private pose for the locally controlled actor. Its independently
@@ -100,6 +131,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
                 ulong.MaxValue - ControlledNameplateGraceMilliseconds
                     ? nowMilliseconds + ControlledNameplateGraceMilliseconds
                     : ulong.MaxValue;
+        int slot = Find(id);
+        if (slot >= 0)
+            ObserveMotion(
+                ref _slots[slot], position, _slots[slot].Record.VerticalPhase, nowMilliseconds);
         RefreshNameplates();
     }
 
@@ -179,13 +214,10 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         int index = Find(actor);
         if (index < 0) return false;
         ref ActorSlot slot = ref _slots[index];
-        if (commandSequence <= slot.LastPrimaryCommandSequence) return false;
-        slot.LastPrimaryCommandSequence = commandSequence;
-        slot.PrimaryCueStartedAtMilliseconds = nowMilliseconds;
-        slot.PrimaryCue!.Visible = true;
-        ApplyPrimaryCue(ref slot, nowMilliseconds);
-        SaturatingIncrement(ref _primaryCuesPresented);
-        return true;
+        if (commandSequence <= slot.LastActionSequence) return false;
+        slot.LastActionSequence = commandSequence;
+        return PresentAction(
+            ref slot, ClientPublicActorActionKind.Primary, commandSequence, nowMilliseconds);
     }
 
     public bool TryGetActorRoot(WorldPublicEntityId id, out Node3D? root)
@@ -196,22 +228,47 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         return root is not null;
     }
 
+    public bool TryGetActorDiagnostics(
+        WorldPublicEntityId id,
+        out GodotActorPresentationDiagnostics diagnostics)
+    {
+        EnsureOperational();
+        int index = Find(id);
+        if (index < 0)
+        {
+            diagnostics = default;
+            return false;
+        }
+        ref readonly ActorSlot slot = ref _slots[index];
+        diagnostics = new GodotActorPresentationDiagnostics(
+            slot.MotionPhase,
+            slot.AnimationPlayer is not null,
+            slot.MainHandPrefabId != 0 && slot.PrimaryCue?.Visible == true,
+            slot.PrimaryCueStartedAtMilliseconds != 0,
+            slot.InteractCue?.Visible == true);
+        return true;
+    }
+
     public GodotActorPresenterSnapshot GetSnapshot()
     {
         EnsureOperational();
         int nameplates = 0;
         int overhead = 0;
         int primaryCues = 0;
+        int interactCues = 0;
         for (int index = 0; index < _slots.Length; index++)
         {
             if (!_slots[index].Used) continue;
             if (_slots[index].Nameplate?.Visible == true) nameplates++;
             if (_slots[index].Overhead?.Visible == true) overhead++;
-            if (_slots[index].PrimaryCue?.Visible == true) primaryCues++;
+            if (_slots[index].PrimaryCueStartedAtMilliseconds != 0) primaryCues++;
+            if (_slots[index].InteractCue?.Visible == true) interactCues++;
         }
         return new GodotActorPresenterSnapshot(
-            _active, _primitive, nameplates, overhead, primaryCues, _revealHeld,
-            _added, _updated, _removed, _primaryCuesPresented);
+            _active, _primitive, _animated, _equippedMainHands,
+            nameplates, overhead, primaryCues, interactCues, _revealHeld,
+            _added, _updated, _removed, _primaryCuesPresented,
+            _interactCuesPresented, _landingCuesPresented);
     }
 
     public void Dispose()
@@ -243,6 +300,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         float scale = actor.Definition.VisualScalePermille / 1_000f;
         visual.Scale *= new Vector3(scale, scale, scale);
         root.AddChild(visual);
+        AnimationPlayer? animations = FindFirst<AnimationPlayer>(visual);
+        if (animations is not null) ConfigureAnimationLoops(animations);
         var nameplate = new Label3D
         {
             Name = "Nameplate",
@@ -254,12 +313,13 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             FontSize = 32,
         };
         root.AddChild(nameplate);
-        root.AddChild(new Marker3D
+        var effectsAnchor = new Marker3D
         {
             Name = "EffectsAnchor",
             Position = new Vector3(
                 0, actor.Definition.EffectsHeightMillimeters * MillimetersToMeters, 0),
-        });
+        };
+        root.AddChild(effectsAnchor);
         var overhead = new Label3D
         {
             Name = "OverheadSpeech",
@@ -272,21 +332,34 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Modulate = new Color(1f, 1f, 0.86f),
         };
         root.AddChild(overhead);
-        var primaryCue = CreatePrimaryCue();
-        root.AddChild(primaryCue);
+        Node3D mainHandSocket = CreateMainHandSocket(root, visual);
+        Node3D primaryCue = CreateMainHandPresentation();
+        mainHandSocket.AddChild(primaryCue);
+        Node3D interactCue = CreateInteractCue();
+        effectsAnchor.AddChild(interactCue);
         Root.AddChild(root);
         _slots[index] = new ActorSlot
         {
             Used = true,
             Record = actor,
             Root = root,
+            Visual = visual,
+            BaseVisualScale = visual.Scale,
             Nameplate = nameplate,
             Overhead = overhead,
             PrimaryCue = primaryCue,
+            InteractCue = interactCue,
+            AnimationPlayer = animations,
             PrimitiveFallback = primitive,
+            LastActionSequence = actor.ActionSequence,
+            LastVerticalPhase = actor.VerticalPhase,
+            MotionPhase = ToMotionPhase(actor.VerticalPhase),
         };
         _active++;
         if (primitive) _primitive++;
+        if (animations is not null) _animated++;
+        SynchronizeMainHand(ref _slots[index], actor.MainHandPrefabId);
+        PlayMotionAnimation(ref _slots[index], _slots[index].MotionPhase, force: true);
         SaturatingIncrement(ref _added);
         ApplySlot(index, nowMilliseconds: 0);
     }
@@ -297,6 +370,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         if (index < 0)
             throw new InvalidOperationException("An unknown actor presentation was updated.");
         ref ActorSlot slot = ref _slots[index];
+        ClientActorPresentationRecord previous = slot.Record;
         if (slot.Record.Definition.VisualKind != actor.Definition.VisualKind ||
             slot.Record.Definition.VisualScalePermille != actor.Definition.VisualScalePermille)
         {
@@ -320,6 +394,13 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             0, actor.Definition.NameplateHeightMillimeters * MillimetersToMeters, 0);
         slot.Overhead!.Position = new Vector3(
             0, (actor.Definition.NameplateHeightMillimeters + 400) * MillimetersToMeters, 0);
+        if (previous.MainHandPrefabId != actor.MainHandPrefabId)
+            SynchronizeMainHand(ref slot, actor.MainHandPrefabId);
+        if (actor.ActionSequence > slot.LastActionSequence)
+        {
+            slot.LastActionSequence = actor.ActionSequence;
+            _ = PresentAction(ref slot, actor.Action, actor.ActionSequence, _currentTimeMilliseconds);
+        }
         SaturatingIncrement(ref _updated);
         ApplySlot(index, nowMilliseconds: 0);
     }
@@ -342,6 +423,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             slot.Root.QueueFree();
         }
         if (slot.PrimitiveFallback) _primitive--;
+        if (slot.AnimationPlayer is not null) _animated--;
+        if (slot.MainHandPrefabId != 0) _equippedMainHands--;
         _active--;
         slot = default;
     }
@@ -359,6 +442,8 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         bool controlled = _controlledPoseAvailable && actor.Id == _controlledActor;
         WorldPosition position = controlled ? _controlledPosition : actor.Position;
         WorldYaw orientation = controlled ? _controlledOrientation : actor.Orientation;
+        if (nowMilliseconds != 0)
+            ObserveMotion(ref slot, position, actor.VerticalPhase, nowMilliseconds);
         slot.Root!.Position = new Vector3(
             checked(position.GlobalXMillimeters - _origin.GlobalXMillimeters) *
                 MillimetersToMeters,
@@ -379,23 +464,241 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             slot.OverheadExpiresAtMilliseconds = 0;
         }
         if (nowMilliseconds != 0)
+        {
             ApplyPrimaryCue(ref slot, nowMilliseconds);
+            ApplyInteractCue(ref slot, nowMilliseconds);
+            ApplyLandingCue(ref slot, nowMilliseconds);
+            ApplyPrimitiveMotion(ref slot, nowMilliseconds);
+        }
     }
 
     private static void ApplyPrimaryCue(ref ActorSlot slot, ulong nowMilliseconds)
     {
-        if (slot.PrimaryCue?.Visible != true || slot.PrimaryCueStartedAtMilliseconds == 0) return;
+        if (slot.PrimaryCue is null || slot.PrimaryCueStartedAtMilliseconds == 0) return;
         ulong elapsed = nowMilliseconds >= slot.PrimaryCueStartedAtMilliseconds
             ? nowMilliseconds - slot.PrimaryCueStartedAtMilliseconds
             : ulong.MaxValue;
         if (elapsed >= PrimaryCueDurationMilliseconds)
         {
-            slot.PrimaryCue.Visible = false;
             slot.PrimaryCueStartedAtMilliseconds = 0;
+            slot.PrimaryCue.Rotation = Vector3.Zero;
+            slot.PrimaryCue.Visible = slot.MainHandPrefabId != 0;
             return;
         }
+        slot.PrimaryCue.Visible = true;
         float progress = elapsed / (float)PrimaryCueDurationMilliseconds;
         slot.PrimaryCue.Rotation = new Vector3(-0.35f, Mathf.Lerp(-1.2f, 1.2f, progress), 0.25f);
+    }
+
+    private bool PresentAction(
+        ref ActorSlot slot,
+        ClientPublicActorActionKind action,
+        ulong actionSequence,
+        ulong nowMilliseconds)
+    {
+        if (actionSequence == 0 || nowMilliseconds == 0) return false;
+        switch (action)
+        {
+            case ClientPublicActorActionKind.Primary:
+                slot.PrimaryCueStartedAtMilliseconds = nowMilliseconds;
+                ApplyPrimaryCue(ref slot, nowMilliseconds);
+                SaturatingIncrement(ref _primaryCuesPresented);
+                return true;
+            case ClientPublicActorActionKind.Interact:
+                slot.InteractCueStartedAtMilliseconds = nowMilliseconds;
+                slot.InteractCue!.Visible = true;
+                ApplyInteractCue(ref slot, nowMilliseconds);
+                SaturatingIncrement(ref _interactCuesPresented);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static void ApplyInteractCue(ref ActorSlot slot, ulong nowMilliseconds)
+    {
+        if (slot.InteractCue?.Visible != true || slot.InteractCueStartedAtMilliseconds == 0) return;
+        ulong elapsed = nowMilliseconds >= slot.InteractCueStartedAtMilliseconds
+            ? nowMilliseconds - slot.InteractCueStartedAtMilliseconds
+            : ulong.MaxValue;
+        if (elapsed >= InteractCueDurationMilliseconds)
+        {
+            slot.InteractCue.Visible = false;
+            slot.InteractCue.Scale = Vector3.One;
+            slot.InteractCueStartedAtMilliseconds = 0;
+            return;
+        }
+        float pulse = 0.75f + 0.45f * MathF.Sin(
+            elapsed / (float)InteractCueDurationMilliseconds * MathF.PI);
+        slot.InteractCue.Scale = new Vector3(pulse, pulse, pulse);
+    }
+
+    private static void ApplyLandingCue(ref ActorSlot slot, ulong nowMilliseconds)
+    {
+        if (slot.Visual is null || slot.LandingCueStartedAtMilliseconds == 0) return;
+        ulong elapsed = nowMilliseconds >= slot.LandingCueStartedAtMilliseconds
+            ? nowMilliseconds - slot.LandingCueStartedAtMilliseconds
+            : ulong.MaxValue;
+        if (elapsed >= LandingCueDurationMilliseconds)
+        {
+            slot.Visual.Scale = slot.BaseVisualScale;
+            slot.LandingCueStartedAtMilliseconds = 0;
+            return;
+        }
+        float progress = elapsed / (float)LandingCueDurationMilliseconds;
+        float squash = 0.92f + 0.08f * progress;
+        slot.Visual.Scale = new Vector3(
+            slot.BaseVisualScale.X / MathF.Sqrt(squash),
+            slot.BaseVisualScale.Y * squash,
+            slot.BaseVisualScale.Z / MathF.Sqrt(squash));
+    }
+
+    private void ObserveMotion(
+        ref ActorSlot slot,
+        in WorldPosition position,
+        ClientPublicActorVerticalPhase verticalPhase,
+        ulong nowMilliseconds)
+    {
+        if (!slot.HasObservedPosition)
+        {
+            slot.HasObservedPosition = true;
+            slot.ObservedPosition = position;
+            slot.MotionExpiresAtMilliseconds = nowMilliseconds;
+            slot.LastVerticalPhase = verticalPhase;
+            SetMotionPhase(ref slot, ToMotionPhase(verticalPhase));
+            return;
+        }
+
+        long deltaX = position.GlobalXMillimeters - slot.ObservedPosition.GlobalXMillimeters;
+        long deltaZ = position.GlobalZMillimeters - slot.ObservedPosition.GlobalZMillimeters;
+        slot.ObservedPosition = position;
+        bool horizontal = Math.Abs(deltaX) >= MotionThresholdMillimeters ||
+            Math.Abs(deltaZ) >= MotionThresholdMillimeters;
+        if (horizontal)
+            slot.MotionExpiresAtMilliseconds = AddSaturated(
+                nowMilliseconds, MotionHoldMilliseconds);
+
+        if (slot.LastVerticalPhase != verticalPhase)
+        {
+            if (IsAirborne(slot.LastVerticalPhase) &&
+                verticalPhase == ClientPublicActorVerticalPhase.Grounded)
+                StartLanding(ref slot, nowMilliseconds);
+            slot.LastVerticalPhase = verticalPhase;
+        }
+
+        GodotActorMotionPhase verticalMotion = ToMotionPhase(verticalPhase);
+        if (IsAirborne(verticalMotion))
+        {
+            SetMotionPhase(ref slot, verticalMotion);
+            return;
+        }
+        SetMotionPhase(ref slot,
+            horizontal || nowMilliseconds < slot.MotionExpiresAtMilliseconds
+                ? GodotActorMotionPhase.Walk
+                : GodotActorMotionPhase.Idle);
+    }
+
+    private void StartLanding(ref ActorSlot slot, ulong nowMilliseconds)
+    {
+        slot.LandingCueStartedAtMilliseconds = nowMilliseconds;
+        SaturatingIncrement(ref _landingCuesPresented);
+    }
+
+    private static bool IsAirborne(ClientPublicActorVerticalPhase phase) =>
+        phase is ClientPublicActorVerticalPhase.Rising or
+            ClientPublicActorVerticalPhase.Falling;
+
+    private static bool IsAirborne(GodotActorMotionPhase phase) =>
+        phase is GodotActorMotionPhase.Rising or GodotActorMotionPhase.Falling;
+
+    private static GodotActorMotionPhase ToMotionPhase(
+        ClientPublicActorVerticalPhase phase) => phase switch
+        {
+            ClientPublicActorVerticalPhase.Rising => GodotActorMotionPhase.Rising,
+            ClientPublicActorVerticalPhase.Falling => GodotActorMotionPhase.Falling,
+            _ => GodotActorMotionPhase.Idle,
+        };
+
+    private static ulong AddSaturated(ulong value, ulong addition) =>
+        value <= ulong.MaxValue - addition ? value + addition : ulong.MaxValue;
+
+    private static void SetMotionPhase(ref ActorSlot slot, GodotActorMotionPhase phase)
+    {
+        if (slot.MotionPhase == phase) return;
+        bool remainedAirborne = IsAirborne(slot.MotionPhase) && IsAirborne(phase);
+        slot.MotionPhase = phase;
+        if (!remainedAirborne) PlayMotionAnimation(ref slot, phase);
+    }
+
+    private static void PlayMotionAnimation(
+        ref ActorSlot slot,
+        GodotActorMotionPhase phase,
+        bool force = false)
+    {
+        if (slot.AnimationPlayer is null || !force && slot.PlayedMotionPhase == phase) return;
+        string requested = phase switch
+        {
+            GodotActorMotionPhase.Walk => "Walk",
+            GodotActorMotionPhase.Rising or GodotActorMotionPhase.Falling => "Jump",
+            _ => "Idle",
+        };
+        if (!TryFindAnimation(slot.AnimationPlayer, requested, out StringName animation)) return;
+        slot.AnimationPlayer.Play(animation, 0.12);
+        slot.PlayedMotionPhase = phase;
+    }
+
+    private static void ApplyPrimitiveMotion(ref ActorSlot slot, ulong nowMilliseconds)
+    {
+        if (!slot.PrimitiveFallback || slot.Visual is null) return;
+        slot.Visual.Position = slot.MotionPhase == GodotActorMotionPhase.Walk
+            ? new Vector3(0, 0.035f * MathF.Sin(nowMilliseconds * 0.024f), 0)
+            : Vector3.Zero;
+        slot.Visual.Rotation = slot.MotionPhase switch
+        {
+            GodotActorMotionPhase.Rising => new Vector3(-0.08f, 0, 0),
+            GodotActorMotionPhase.Falling => new Vector3(0.08f, 0, 0),
+            _ => Vector3.Zero,
+        };
+    }
+
+    private void SynchronizeMainHand(ref ActorSlot slot, uint prefabId)
+    {
+        if (slot.MainHandPrefabId == prefabId) return;
+        if (slot.MainHandPrefabId != 0) _equippedMainHands--;
+        slot.MainHandPrefabId = prefabId;
+        if (prefabId != 0) _equippedMainHands++;
+        if (slot.PrimaryCue is not null)
+            slot.PrimaryCue.Visible = prefabId != 0 || slot.PrimaryCueStartedAtMilliseconds != 0;
+    }
+
+    private static void ConfigureAnimationLoops(AnimationPlayer player)
+    {
+        foreach (string requested in new[] { "Idle", "Walk" })
+        {
+            if (!TryFindAnimation(player, requested, out StringName name)) continue;
+            Animation? animation = player.GetAnimation(name);
+            if (animation is not null) animation.LoopMode = Animation.LoopModeEnum.Linear;
+        }
+    }
+
+    private static bool TryFindAnimation(
+        AnimationPlayer player,
+        string requested,
+        out StringName result)
+    {
+        foreach (StringName candidate in player.GetAnimationList())
+        {
+            string text = candidate.ToString();
+            int separator = Math.Max(text.LastIndexOf('/'), text.LastIndexOf(':'));
+            string leaf = separator >= 0 ? text[(separator + 1)..] : text;
+            if (leaf.EndsWith("-loop", StringComparison.OrdinalIgnoreCase))
+                leaf = leaf[..^5];
+            if (!string.Equals(leaf, requested, StringComparison.OrdinalIgnoreCase)) continue;
+            result = candidate;
+            return true;
+        }
+        result = new StringName();
+        return false;
     }
 
     private void RefreshNameplates()
@@ -440,7 +743,41 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         };
     }
 
-    private static Node3D CreatePrimaryCue()
+    private static Node3D CreateMainHandSocket(Node3D root, Node3D visual)
+    {
+        Skeleton3D? skeleton = FindFirst<Skeleton3D>(visual);
+        if (skeleton is not null)
+        {
+            string? rightHand = null;
+            for (int bone = 0; bone < skeleton.GetBoneCount(); bone++)
+            {
+                string candidate = skeleton.GetBoneName(bone);
+                if (!candidate.EndsWith("RightHand", StringComparison.OrdinalIgnoreCase)) continue;
+                rightHand = candidate;
+                break;
+            }
+            if (rightHand is not null)
+            {
+                var attachment = new BoneAttachment3D
+                {
+                    Name = "MainHandSocket",
+                    BoneName = rightHand,
+                };
+                skeleton.AddChild(attachment);
+                return attachment;
+            }
+        }
+
+        var fallback = new Marker3D
+        {
+            Name = "MainHandSocket",
+            Position = new Vector3(0.34f, 1.08f, 0),
+        };
+        root.AddChild(fallback);
+        return fallback;
+    }
+
+    private static Node3D CreateMainHandPresentation()
     {
         var material = new StandardMaterial3D
         {
@@ -450,17 +787,46 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         };
         var pivot = new Node3D
         {
-            Name = "AcceptedPrimaryCue",
-            Position = new Vector3(0, 1.05f, 0),
+            Name = "MainHandPresentation",
             Visible = false,
         };
         pivot.AddChild(new MeshInstance3D
         {
             Name = "PrimitiveBlade",
-            Mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(0.08f, 0.08f, 1.25f), material),
-            Position = new Vector3(0, 0, -0.9f),
+            Mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(0.08f, 1.0f, 0.08f), material),
+            Position = new Vector3(0, 0.04f, -0.48f),
+            Rotation = new Vector3(MathF.PI * 0.5f, 0, 0),
         });
         return pivot;
+    }
+
+    private static Node3D CreateInteractCue()
+    {
+        var material = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(1f, 0.82f, 0.2f),
+            EmissionEnabled = true,
+            Emission = new Color(0.8f, 0.45f, 0.05f),
+            EmissionEnergyMultiplier = 1.8f,
+        };
+        return new MeshInstance3D
+        {
+            Name = "AcceptedInteractCue",
+            Mesh = GodotMeshGeometry.CreateGroundedBox(new Vector3(0.18f, 0.18f, 0.18f), material),
+            Position = new Vector3(0, 0.12f, 0),
+            Visible = false,
+        };
+    }
+
+    private static T? FindFirst<T>(Node root) where T : Node
+    {
+        if (root is T match) return match;
+        foreach (Node child in root.GetChildren())
+        {
+            T? nested = FindFirst<T>(child);
+            if (nested is not null) return nested;
+        }
+        return null;
     }
 
     private static void SaturatingIncrement(ref ulong value)
@@ -485,12 +851,25 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         internal bool Used;
         internal ClientActorPresentationRecord Record;
         internal Node3D? Root;
+        internal Node3D? Visual;
+        internal Vector3 BaseVisualScale;
         internal Label3D? Nameplate;
         internal Label3D? Overhead;
         internal Node3D? PrimaryCue;
+        internal Node3D? InteractCue;
+        internal AnimationPlayer? AnimationPlayer;
+        internal WorldPosition ObservedPosition;
+        internal GodotActorMotionPhase MotionPhase;
+        internal GodotActorMotionPhase PlayedMotionPhase;
+        internal ClientPublicActorVerticalPhase LastVerticalPhase;
+        internal ulong MotionExpiresAtMilliseconds;
         internal ulong OverheadExpiresAtMilliseconds;
         internal ulong PrimaryCueStartedAtMilliseconds;
-        internal ulong LastPrimaryCommandSequence;
+        internal ulong InteractCueStartedAtMilliseconds;
+        internal ulong LandingCueStartedAtMilliseconds;
+        internal ulong LastActionSequence;
+        internal uint MainHandPrefabId;
+        internal bool HasObservedPosition;
         internal bool PrimitiveFallback;
     }
 }

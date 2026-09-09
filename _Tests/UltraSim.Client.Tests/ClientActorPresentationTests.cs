@@ -65,6 +65,35 @@ internal static class ClientActorPresentationTests
         Equal(bobId, changes[0].Id);
         Equal("Bob the Brave", changes[0].Current.DisplayLabel);
 
+        var equipped = new ClientPublicPresentationMetadata(
+            81,
+            bobId,
+            3,
+            ClientPublicPresentationFlags.NameplateEligible |
+                ClientPublicPresentationFlags.ActorState,
+            "Bob the Brave",
+            MainHandPrefabId: GameWorldPublicPrefabIds.IronSword,
+            VerticalPhase: ClientPublicActorVerticalPhase.Grounded,
+            ActorAction: ClientPublicActorActionKind.Primary,
+            ActorActionSequence: 11);
+        Equal(ClientPublicPresentationApplyStatus.Applied, metadata.TryApply(
+            ClientPublicPresentationOperation.Present, in equipped));
+        Equal(ClientActorPresentationSyncStatus.Applied,
+            actors.TrySynchronize(cache, presented, metadata, 81, changes,
+                out changeCount, out required));
+        Equal(1, changeCount);
+        Equal(GameWorldPublicPrefabIds.IronSword, changes[0].Current.MainHandPrefabId);
+        Equal(ClientPublicActorVerticalPhase.Grounded, changes[0].Current.VerticalPhase);
+        Equal(ClientPublicActorActionKind.Primary, changes[0].Current.Action);
+        Equal(11UL, changes[0].Current.ActionSequence);
+        var invalidActor = equipped with
+        {
+            Revision = 4,
+            ActorActionSequence = 0,
+        };
+        Equal(ClientPublicPresentationApplyStatus.Rejected, metadata.TryApply(
+            ClientPublicPresentationOperation.Present, in invalidActor));
+
         WorldPublicRecord movedAlice = publicRecords[0] with
         {
             EntityPublicVersion = 2,
@@ -89,11 +118,11 @@ internal static class ClientActorPresentationTests
             change.Kind == ClientActorPresentationChangeKind.Removed && change.Id == bobId));
         Equal(1, actors.GetSnapshot().CurrentActors);
 
-        var removed = new ClientPublicPresentationMetadata(81, bobId, 3,
+        var removed = new ClientPublicPresentationMetadata(81, bobId, 4,
             ClientPublicPresentationFlags.None, string.Empty);
         Equal(ClientPublicPresentationApplyStatus.Applied, metadata.TryApply(
             ClientPublicPresentationOperation.Remove, in removed));
-        var stale = new ClientPublicPresentationMetadata(81, bobId, 2,
+        var stale = new ClientPublicPresentationMetadata(81, bobId, 3,
             ClientPublicPresentationFlags.NameplateEligible, "Stale Bob");
         Equal(ClientPublicPresentationApplyStatus.Rejected, metadata.TryApply(
             ClientPublicPresentationOperation.Present, in stale));

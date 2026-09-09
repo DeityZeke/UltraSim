@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Inspection;
@@ -131,6 +132,28 @@ public enum ClientPublicPresentationFlags : byte
     None = 0,
     NameplateEligible = 1 << 0,
     ItemProperties = 1 << 1,
+    /// <summary>
+    /// Finite public actor presentation state. This may identify an equipped appearance and the
+    /// latest accepted presentation action, but never exposes private item rolls or Game behavior.
+    /// </summary>
+    ActorState = 1 << 2,
+}
+
+/// <summary>Finite accepted actor actions which may produce presentation-only one-shot cues.</summary>
+public enum ClientPublicActorActionKind : byte
+{
+    None = 0,
+    Interact = 1,
+    Primary = 2,
+}
+
+/// <summary>Finite Game-owned vertical state exposed only for presentation selection.</summary>
+public enum ClientPublicActorVerticalPhase : byte
+{
+    None = 0,
+    Grounded = 1,
+    Rising = 2,
+    Falling = 3,
 }
 
 public enum ClientPublicPresentationOperation : byte
@@ -149,12 +172,17 @@ public readonly record struct ClientPublicPresentationMetadata(
     ulong Revision,
     ClientPublicPresentationFlags Flags,
     string DisplayLabel,
-    InspectionPropertySet? InspectionProperties = null)
+    InspectionPropertySet? InspectionProperties = null,
+    uint MainHandPrefabId = 0,
+    ClientPublicActorVerticalPhase VerticalPhase = ClientPublicActorVerticalPhase.None,
+    ClientPublicActorActionKind ActorAction = ClientPublicActorActionKind.None,
+    ulong ActorActionSequence = 0)
 {
     public const int MaximumDisplayLabelUtf8Bytes = 128;
     public const ClientPublicPresentationFlags AdmittedFlags =
         ClientPublicPresentationFlags.NameplateEligible |
-        ClientPublicPresentationFlags.ItemProperties;
+        ClientPublicPresentationFlags.ItemProperties |
+        ClientPublicPresentationFlags.ActorState;
 
     public bool IsValid =>
         ServerGenerationId != 0 && Id.IsValid && Revision != 0 &&
@@ -163,7 +191,19 @@ public readonly record struct ClientPublicPresentationMetadata(
         ClientActorDefinition.IsCanonicalLabel(DisplayLabel, MaximumDisplayLabelUtf8Bytes) &&
         ((Flags & ClientPublicPresentationFlags.ItemProperties) != 0
             ? InspectionProperties is not null
-            : InspectionProperties is null);
+            : InspectionProperties is null) &&
+        ((Flags & ClientPublicPresentationFlags.ItemProperties) == 0 ||
+         (Flags & ClientPublicPresentationFlags.ActorState) == 0) &&
+        ((Flags & ClientPublicPresentationFlags.ActorState) != 0
+            ? VerticalPhase is >= ClientPublicActorVerticalPhase.Grounded and
+                    <= ClientPublicActorVerticalPhase.Falling &&
+                ActorAction is >= ClientPublicActorActionKind.None and
+                    <= ClientPublicActorActionKind.Primary &&
+                (ActorAction == ClientPublicActorActionKind.None
+                    ? ActorActionSequence == 0
+                    : ActorActionSequence != 0)
+            : MainHandPrefabId == 0 && VerticalPhase == ClientPublicActorVerticalPhase.None &&
+                ActorAction == ClientPublicActorActionKind.None && ActorActionSequence == 0);
 }
 
 public enum ClientPublicPresentationApplyStatus : byte
@@ -234,7 +274,10 @@ public sealed class ClientPublicPresentationMetadataState
                 (!metadata.Id.IsValid || metadata.Revision == 0 ||
                  metadata.ServerGenerationId == 0 || metadata.Flags != 0 ||
                  !string.IsNullOrEmpty(metadata.DisplayLabel) ||
-                 metadata.InspectionProperties is not null))
+                 metadata.InspectionProperties is not null || metadata.MainHandPrefabId != 0 ||
+                 metadata.VerticalPhase != ClientPublicActorVerticalPhase.None ||
+                 metadata.ActorAction != ClientPublicActorActionKind.None ||
+                 metadata.ActorActionSequence != 0))
             return Reject();
 
         int slot = Find(metadata.Id.Index);
@@ -261,7 +304,11 @@ public sealed class ClientPublicPresentationMetadataState
                      entry.Flags == metadata.Flags &&
                      string.Equals(entry.DisplayLabel, metadata.DisplayLabel,
                          StringComparison.Ordinal) &&
-                     Equals(entry.InspectionProperties, metadata.InspectionProperties));
+                     Equals(entry.InspectionProperties, metadata.InspectionProperties) &&
+                     entry.MainHandPrefabId == metadata.MainHandPrefabId &&
+                     entry.VerticalPhase == metadata.VerticalPhase &&
+                     entry.ActorAction == metadata.ActorAction &&
+                     entry.ActorActionSequence == metadata.ActorActionSequence);
                 if (!duplicate) return Reject();
                 SaturatingIncrement(ref _duplicates);
                 return ClientPublicPresentationApplyStatus.Duplicate;
@@ -281,6 +328,18 @@ public sealed class ClientPublicPresentationMetadataState
         entry.InspectionProperties = operation == ClientPublicPresentationOperation.Present
             ? metadata.InspectionProperties
             : null;
+        entry.MainHandPrefabId = operation == ClientPublicPresentationOperation.Present
+            ? metadata.MainHandPrefabId
+            : 0;
+        entry.VerticalPhase = operation == ClientPublicPresentationOperation.Present
+            ? metadata.VerticalPhase
+            : ClientPublicActorVerticalPhase.None;
+        entry.ActorAction = operation == ClientPublicPresentationOperation.Present
+            ? metadata.ActorAction
+            : ClientPublicActorActionKind.None;
+        entry.ActorActionSequence = operation == ClientPublicPresentationOperation.Present
+            ? metadata.ActorActionSequence
+            : 0;
         if (operation == ClientPublicPresentationOperation.Present)
         {
             if (!wasPresent) _current++;
@@ -310,7 +369,11 @@ public sealed class ClientPublicPresentationMetadataState
                     entry.Revision,
                     entry.Flags,
                     entry.DisplayLabel!,
-                    entry.InspectionProperties);
+                    entry.InspectionProperties,
+                    entry.MainHandPrefabId,
+                    entry.VerticalPhase,
+                    entry.ActorAction,
+                    entry.ActorActionSequence);
                 return true;
             }
         }
@@ -324,7 +387,7 @@ public sealed class ClientPublicPresentationMetadataState
         return new ClientPublicPresentationMetadataSnapshot(
             _serverGenerationId, _current, _known, _entries.Length,
             _applied, _removed, _duplicates, _rejected, _generationResets,
-            checked((long)_entries.Length * 56));
+            checked((long)_entries.Length * Unsafe.SizeOf<MetadataEntry>()));
     }
 
     private int Find(uint index)
@@ -368,6 +431,10 @@ public sealed class ClientPublicPresentationMetadataState
         internal ClientPublicPresentationFlags Flags;
         internal string? DisplayLabel;
         internal InspectionPropertySet? InspectionProperties;
+        internal uint MainHandPrefabId;
+        internal ClientPublicActorVerticalPhase VerticalPhase;
+        internal ClientPublicActorActionKind ActorAction;
+        internal ulong ActorActionSequence;
     }
 }
 
@@ -378,7 +445,11 @@ public readonly record struct ClientActorPresentationRecord(
     WorldYaw Orientation,
     ClientActorDefinition Definition,
     string DisplayLabel,
-    bool NameplateEligible);
+    bool NameplateEligible,
+    uint MainHandPrefabId = 0,
+    ClientPublicActorVerticalPhase VerticalPhase = ClientPublicActorVerticalPhase.None,
+    ClientPublicActorActionKind Action = ClientPublicActorActionKind.None,
+    ulong ActionSequence = 0);
 
 public enum ClientActorPresentationChangeKind : byte
 {
@@ -484,7 +555,23 @@ public sealed class ClientActorPresentationState
                     hasMetadata ? presentation.DisplayLabel : definition.DefaultDisplayLabel,
                     definition.NameplateEligible &&
                         (!hasMetadata ||
-                         (presentation.Flags & ClientPublicPresentationFlags.NameplateEligible) != 0));
+                         (presentation.Flags & ClientPublicPresentationFlags.NameplateEligible) != 0),
+                    hasMetadata &&
+                        (presentation.Flags & ClientPublicPresentationFlags.ActorState) != 0
+                            ? presentation.MainHandPrefabId
+                            : 0,
+                    hasMetadata &&
+                        (presentation.Flags & ClientPublicPresentationFlags.ActorState) != 0
+                            ? presentation.VerticalPhase
+                            : ClientPublicActorVerticalPhase.None,
+                    hasMetadata &&
+                        (presentation.Flags & ClientPublicPresentationFlags.ActorState) != 0
+                            ? presentation.ActorAction
+                            : ClientPublicActorActionKind.None,
+                    hasMetadata &&
+                        (presentation.Flags & ClientPublicPresentationFlags.ActorState) != 0
+                            ? presentation.ActorActionSequence
+                            : 0);
             }
         }
         InsertionSort(_candidate.AsSpan(0, candidateCount));
@@ -589,7 +676,8 @@ public sealed class ClientActorPresentationState
         return new ClientActorPresentationStateSnapshot(
             _serverGenerationId, _currentCount, _current.Length,
             _synchronizations, _added, _updated, _removed,
-            checked((long)(_current.Length + _candidate.Length) * 112));
+            checked((long)(_current.Length + _candidate.Length) *
+                Unsafe.SizeOf<ClientActorPresentationRecord>()));
     }
 
     private static int Find(

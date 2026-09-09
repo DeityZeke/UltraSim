@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3]
 
-[ext_resource type="PackedScene" path="res://Assets/Avatars/y_bot/Y Bot.fbx" id="1_model"]
+[ext_resource type="PackedScene" path="res://Assets/Avatars/y_bot/y_bot_animated.glb" id="1_model"]
 
 [node name="YBotVisual" type="Node3D"]
 

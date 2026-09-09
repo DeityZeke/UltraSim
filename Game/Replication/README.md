@@ -129,6 +129,14 @@ wire descriptors, AOI, and owner-private state are unchanged. The participant ta
 public label, Local/Remote role, sanitized RTT, and coarse chunk—never an endpoint, key, exact
 position, or administrative capability.
 
+D0.7a/manifest v26 advances the cold public-presentation metadata message to v4. One separately
+flagged actor row carries only the authoritative public Main Hand prefab, finite
+Grounded/Rising/Falling phase, and latest accepted Interact/Primary action sequence. Exact item
+identity and rolled/private Inventory facts do not enter it, and hot public movement records remain
+unchanged. `SharedPlayableAuthority` derives equipment and vertical phase from the real Game state
+and records an action only after Game accepts its command. Every recipient applies/proves the row
+independently; actor entry consumes a retained sequence without replaying an old action cue.
+
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.
 After that activation is semantically applied, `RemoteUiSemanticPort` translates a normal Game

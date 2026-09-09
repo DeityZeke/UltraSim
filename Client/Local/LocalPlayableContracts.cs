@@ -71,6 +71,8 @@ public readonly record struct LocalPlayableAuthorityView(
     bool LastAdministrativeSucceeded,
     string? LastAdministrativeMessage,
     LocalPlayableServerExtensionSnapshot ServerExtension,
+    uint MainHandPrefabId,
+    GameVerticalMotionSnapshot VerticalMotion,
     WorldPreparedView PreparedWorld)
 {
     public bool IsReady => GenerationId != 0 && PreparedWorld is not null;
@@ -150,6 +152,13 @@ public readonly record struct LocalPlayableServerExtensionSnapshot(
     ulong ServerGenerationId,
     string? Detail);
 
+/// <summary>Finite accepted local actions an embedded host may publish to remote observers.</summary>
+public enum LocalPublicActorActionKind : byte
+{
+    Interact = 1,
+    Primary = 2,
+}
+
 /// <summary>
 /// Optional deployment adapter progressed on the existing local authority owner thread. It may
 /// add recipients, but it never owns or replaces the supplied internal server.
@@ -164,6 +173,9 @@ public interface ILocalPlayableServerExtension : IDisposable
     {
         snapshot = null;
         return false;
+    }
+    void ObserveLocalPresentationAction(ulong commandSequence, LocalPublicActorActionKind action)
+    {
     }
     int CopyPublicPresentationMetadata(Span<ClientPublicPresentationMetadata> destination);
 }

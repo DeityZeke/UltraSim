@@ -88,8 +88,10 @@ acceptance narratives remain available through git history.
   semantic parity, Network-free local authority/session extraction, Direct Connect
   identity onboarding, human-scale presentation calibration, nameplates/chat,
   layered settings, server-recommended profiles, and server-composed UI. F0.5 and M0.0
-  are closed; F0.6 is closed by A0.2-A0.8, C0.2 closes Global/System Chat, and the remaining
-  Concept Demo diagnostics/presentation consumers precede explicit lifecycle/final matrices.
+  are closed; F0.6 is closed by A0.2-A0.8, C0.2 closes Global/System Chat, D0.6 closes the
+  read-only monitor, and D0.7a closes shared actor motion/equipment/action semantics plus the
+  bundled X/Y animation canary. Runtime model-content realization (D0.7b) precedes the explicit
+  lifecycle/final matrices.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,

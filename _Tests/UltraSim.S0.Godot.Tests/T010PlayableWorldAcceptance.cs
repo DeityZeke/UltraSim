@@ -19,6 +19,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunJoinedInputAuthorityAcceptance();
             RunRemotePublicActorAcceptance();
             RunControlledActorOwnerPoseAcceptance();
+            RunBakedBodyAnimationAcceptance();
             RunTallPublicObjectPickingAcceptance();
             RunSystemChatBannerAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
@@ -29,6 +30,115 @@ public partial class T010PlayableWorldAcceptance : Node3D
             GD.PushError($"T0.10 GODOT PLAYABLE WORLD ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private void RunBakedBodyAnimationAcceptance()
+    {
+        PackedScene? xScene = ResourceLoader.Load<PackedScene>(
+            "res://Assets/Avatars/x_bot/x_bot_visual.tscn");
+        PackedScene? yScene = ResourceLoader.Load<PackedScene>(
+            "res://Assets/Avatars/y_bot/y_bot_visual.tscn");
+        Expect(xScene is not null && yScene is not null,
+            "The baked X/Y body scenes were not available to the native acceptance project.");
+        var resolver = new BodySceneResolver(xScene!, yScene!);
+        ClientActorDefinitionCatalog catalog = ClientActorDefinitionCatalog.ConceptDemo;
+        bool hasX = catalog.TryGet(
+            GameWorldPublicPrefabIds.Character, out ClientActorDefinition xDefinition);
+        bool hasY = catalog.TryGet(
+            GameWorldPublicPrefabIds.CharacterMale, out ClientActorDefinition yDefinition);
+        Expect(hasX && hasY,
+            "The baked-body acceptance could not resolve X/Y actor definitions.");
+        bool hasXPosition = WorldPosition.TryFromGlobalMillimeters(
+            1_000, 1_000, 1_000, out WorldPosition xPosition);
+        bool hasYPosition = WorldPosition.TryFromGlobalMillimeters(
+            2_000, 1_000, 1_000, out WorldPosition yPosition);
+        Expect(hasXPosition && hasYPosition,
+            "The baked-body acceptance positions were invalid.");
+        WorldPublicEntityId xId = new(801, 1);
+        WorldPublicEntityId yId = new(802, 1);
+        ClientActorPresentationChange[] additions =
+        [
+            new(ClientActorPresentationChangeKind.Added, xId,
+                new ClientActorPresentationRecord(
+                    xId, GameWorldPublicPrefabIds.Character, xPosition, WorldYaw.Zero,
+                    xDefinition, "X", true, GameWorldPublicPrefabIds.IronSword,
+                    ClientPublicActorVerticalPhase.Grounded)),
+            new(ClientActorPresentationChangeKind.Added, yId,
+                new ClientActorPresentationRecord(
+                    yId, GameWorldPublicPrefabIds.CharacterMale, yPosition, WorldYaw.Zero,
+                    yDefinition, "Y", true)),
+        ];
+
+        using var presenter = new GodotActorPresenter(this, catalog, 2, resolver);
+        presenter.Apply(additions, xPosition, 1_000);
+        Expect(presenter.GetSnapshot() is
+            { ActiveActors: 2, PrimitiveFallbackActors: 0, AnimatedActors: 2,
+              EquippedMainHands: 1 },
+            "The baked X/Y bodies did not realize as two animated non-primitive actors.");
+        foreach (WorldPublicEntityId id in new[] { xId, yId })
+        {
+            Expect(presenter.TryGetActorRoot(id, out Node3D? root) && root is not null,
+                "A baked actor root was not realized.");
+            AnimationPlayer? player = FindDescendant<AnimationPlayer>(root!);
+            Expect(player is not null && HasAnimation(player, "Idle") &&
+                HasAnimation(player, "Walk") && HasAnimation(player, "Jump"),
+                "A baked body did not expose the finite Idle/Walk/Jump animation set.");
+            Skeleton3D? skeleton = FindDescendant<Skeleton3D>(root!);
+            Expect(skeleton is not null && skeleton.GetBoneCount() == 65,
+                "A baked body did not retain its exact 65-bone destination skeleton.");
+            Expect(FindNamedDescendant(root!, "MainHandSocket") is not null,
+                "A baked body did not expose its semantic MainHand socket.");
+            Expect(presenter.TryGetActorDiagnostics(
+                    id, out GodotActorPresentationDiagnostics diagnostics) &&
+                diagnostics.HasAnimationPlayer,
+                "The presenter did not bind the baked body's AnimationPlayer.");
+        }
+
+        Expect(WorldPosition.TryFromGlobalMillimeters(
+                1_300, 1_000, 1_000, out WorldPosition moved),
+            "The baked-body walk pose was invalid.");
+        ClientActorPresentationRecord movedX = additions[0].Current with { Position = moved };
+        presenter.Apply(
+            [new ClientActorPresentationChange(
+                ClientActorPresentationChangeKind.Updated, xId, movedX)],
+            moved,
+            1_040);
+        Expect(presenter.TryGetActorDiagnostics(
+                xId, out GodotActorPresentationDiagnostics walking) &&
+            walking.MotionPhase == GodotActorMotionPhase.Walk,
+            "The baked X body did not consume authoritative position change as Walk presentation.");
+        GD.Print("EVIDENCE D0.7a baked_bodies=2 bones_each=65 clips=Idle,Walk,Jump " +
+            "animated=2 primitive=0 main_hand_socket=true walk_transition=true");
+    }
+
+    private static bool HasAnimation(AnimationPlayer player, string expected)
+    {
+        foreach (StringName animation in player.GetAnimationList())
+            if (animation.ToString().Contains(expected, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    private static Node? FindNamedDescendant(Node root, string name)
+    {
+        if (string.Equals(root.Name, name, StringComparison.Ordinal)) return root;
+        foreach (Node child in root.GetChildren())
+        {
+            Node? found = FindNamedDescendant(child, name);
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
+    private static T? FindDescendant<T>(Node root) where T : Node
+    {
+        if (root is T match) return match;
+        foreach (Node child in root.GetChildren())
+        {
+            T? found = FindDescendant<T>(child);
+            if (found is not null) return found;
+        }
+        return null;
     }
 
     private void RunSystemChatBannerAcceptance()
@@ -174,7 +284,11 @@ public partial class T010PlayableWorldAcceptance : Node3D
                     WorldYaw.Zero,
                     controlledDefinition,
                     "Controlled",
-                    true)),
+                    true,
+                    MainHandPrefabId: GameWorldPublicPrefabIds.IronSword,
+                    VerticalPhase: ClientPublicActorVerticalPhase.Grounded,
+                    Action: ClientPublicActorActionKind.Primary,
+                    ActionSequence: 5)),
             new(
                 ClientActorPresentationChangeKind.Added,
                 otherId,
@@ -197,6 +311,13 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(controlled.Position.IsEqualApprox(Vector3.Zero) &&
             Mathf.IsEqualApprox(controlled.Rotation.Y, MathF.PI),
             "A stale public record displaced or rotated the controlled actor away from its fresh owner pose.");
+        Expect(presenter.GetSnapshot() is
+            { EquippedMainHands: 1, VisiblePrimaryCues: 0, PrimaryCuesPresented: 0 },
+            "An equipped MainHand was not attached, or an old retained action replayed on first presentation.");
+        Expect(presenter.TryGetActorDiagnostics(
+                controlledId, out GodotActorPresentationDiagnostics initialPresentation) &&
+            initialPresentation.MainHandVisible && !initialPresentation.PrimaryCueActive,
+            "The controlled actor did not expose its semantic MainHand socket presentation.");
         if (!presenter.TryGetActorRoot(otherId, out Node3D? other) || other is null)
             throw new InvalidOperationException("The other actor root was not realized.");
         Expect(other.Position.IsEqualApprox(new Vector3(2f, -0.3f, 3f)) &&
@@ -208,12 +329,59 @@ public partial class T010PlayableWorldAcceptance : Node3D
             "The next controlled owner pose was invalid.");
         presenter.SetControlledActorPose(
             controlledId, nextOwnerPose, WorldYaw.ThreeQuarterTurn, nowMilliseconds: 2);
+        ClientActorPresentationRecord risingRecord = additions[0].Current with
+        {
+            VerticalPhase = ClientPublicActorVerticalPhase.Rising,
+        };
+        presenter.Apply(
+            [new ClientActorPresentationChange(
+                ClientActorPresentationChangeKind.Updated, controlledId, risingRecord)],
+            nextOwnerPose,
+            nowMilliseconds: 2);
         presenter.UpdateOriginAndLifetimes(nextOwnerPose, nowMilliseconds: 2);
         Expect(controlled.Position.IsEqualApprox(Vector3.Zero) &&
             Mathf.IsEqualApprox(controlled.Rotation.Y, MathF.PI * 1.5f),
             "Owner movement did not keep the controlled actor pinned to the player-relative origin.");
         Expect(other.Position.IsEqualApprox(new Vector3(1.8f, -0.5f, 2.7f)),
             "An ordinary public actor stopped following the player-relative render origin.");
+        Expect(presenter.TryGetActorDiagnostics(
+                controlledId, out GodotActorPresentationDiagnostics rising) &&
+            rising.MotionPhase == GodotActorMotionPhase.Rising,
+            "An authoritative upward pose transition did not select Rising presentation.");
+
+        Expect(WorldPosition.TryFromGlobalMillimeters(
+                2_200, 1_300, 2_300, out WorldPosition fallingPose),
+            "The falling presentation pose was invalid.");
+        presenter.SetControlledActorPose(controlledId, fallingPose, WorldYaw.ThreeQuarterTurn, 40);
+        ClientActorPresentationRecord fallingRecord = risingRecord with
+        {
+            VerticalPhase = ClientPublicActorVerticalPhase.Falling,
+        };
+        presenter.Apply(
+            [new ClientActorPresentationChange(
+                ClientActorPresentationChangeKind.Updated, controlledId, fallingRecord)],
+            fallingPose,
+            nowMilliseconds: 40);
+        presenter.UpdateOriginAndLifetimes(fallingPose, 40);
+        Expect(presenter.TryGetActorDiagnostics(
+                controlledId, out GodotActorPresentationDiagnostics falling) &&
+            falling.MotionPhase == GodotActorMotionPhase.Falling &&
+            presenter.GetSnapshot().LandingCuesPresented == 0,
+            "Falling was not selected, or the rising-to-falling apex produced a false landing.");
+        ClientActorPresentationRecord groundedRecord = fallingRecord with
+        {
+            VerticalPhase = ClientPublicActorVerticalPhase.Grounded,
+        };
+        presenter.Apply(
+            [new ClientActorPresentationChange(
+                ClientActorPresentationChangeKind.Updated, controlledId, groundedRecord)],
+            fallingPose,
+            nowMilliseconds: 40 + GodotActorPresenter.MotionHoldMilliseconds);
+        Expect(presenter.TryGetActorDiagnostics(
+                controlledId, out GodotActorPresentationDiagnostics landed) &&
+            landed.MotionPhase == GodotActorMotionPhase.Idle &&
+            presenter.GetSnapshot().LandingCuesPresented == 1,
+            "Falling did not converge once to Idle through the bounded landing presentation cue.");
 
         presenter.UpdateOriginAndLifetimes(
             nextOwnerPose,
@@ -240,6 +408,39 @@ public partial class T010PlayableWorldAcceptance : Node3D
         Expect(presenter.GetSnapshot() is
             { VisiblePrimaryCues: 0, PrimaryCuesPresented: 1 },
             "The transient Primary cue did not retire at its fixed presentation lifetime.");
+
+        ClientActorPresentationRecord interacted = additions[0].Current with
+        {
+            Position = fallingPose,
+            Action = ClientPublicActorActionKind.Interact,
+            ActionSequence = 8,
+        };
+        presenter.Apply(
+            [new ClientActorPresentationChange(
+                ClientActorPresentationChangeKind.Updated, controlledId, interacted)],
+            fallingPose,
+            swingStarted + GodotActorPresenter.PrimaryCueDurationMilliseconds + 1);
+        Expect(presenter.TryGetActorDiagnostics(
+                controlledId, out GodotActorPresentationDiagnostics interaction) &&
+            interaction.InteractCueActive && presenter.GetSnapshot().InteractCuesPresented == 1,
+            "An accepted public Interact transition did not produce its bounded native cue.");
+
+        WorldPublicRecord equippedSword = new(
+            new WorldPublicEntityId(999, 1),
+            1,
+            GameWorldPublicPrefabIds.IronSword,
+            fallingPose,
+            WorldYaw.Zero,
+            WorldPublicStateFlags.Visible,
+            new ChunkPublicationRevision(1));
+        Expect(!presenter.ShouldBatch(in equippedSword),
+            "The equipped sword remained independently batched despite its actor attachment.");
+        WorldPublicRecord groundSword = equippedSword with
+        {
+            StateFlags = WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem,
+        };
+        Expect(presenter.ShouldBatch(in groundSword),
+            "A dropped GroundItem sword failed to return to ordinary world presentation.");
     }
 
     private void RunJoinedInputAuthorityAcceptance()
@@ -730,6 +931,26 @@ public partial class T010PlayableWorldAcceptance : Node3D
             Expect(rawCross.Dot(normal) < -0.999f,
                 $"Godot character wedge face {face} did not preserve native winding plus outward normal.");
         }
+    }
+
+    private sealed class BodySceneResolver : IGodotActorVisualResolver
+    {
+        private readonly PackedScene _x;
+        private readonly PackedScene _y;
+
+        internal BodySceneResolver(PackedScene x, PackedScene y)
+        {
+            _x = x;
+            _y = y;
+        }
+
+        public Node3D? Instantiate(in ClientActorDefinition definition) =>
+            definition.VisualKind switch
+            {
+                ClientActorVisualKind.HumanX => _x.Instantiate<Node3D>(),
+                ClientActorVisualKind.HumanY => _y.Instantiate<Node3D>(),
+                _ => null,
+            };
     }
 
     private static int Drain(GodotWorldRenderer renderer)

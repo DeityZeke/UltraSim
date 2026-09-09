@@ -1386,11 +1386,14 @@ spurious `MissingTarget` interaction. Contained items remain non-public. This fl
 selection eligibility only; exact Game identity, range, and Inventory mutation are still validated
 by authority.
 
-The first swing is an admitted Game action with no damage. The controlled client realizes one
-bounded 240 ms primitive cue only after that exact authoritative Primary result; generalized public
-action occurrence delivery and content-backed X/Y animation remain a separate Concept Demo
-animation closure. Combat, hit testing, durability loss, death, loot rarity/affixes, and
-account-owned character persistence are not implied.
+The first swing is an admitted Game action with no damage. D0.7a now projects the equipped public
+Main Hand prefab plus the actor's latest accepted Interact/Primary sequence through the bounded cold
+presentation row. Already-present local and remote observers realize the cue once; actor entry does
+not replay an older retained sequence. Godot attaches the sword to a semantic Main Hand socket, and
+authoritative Drop removes that attachment and restores ordinary GroundItem presentation. Exact
+rolls remain private. The archived bodies have no Attack clip, so the swing itself remains a bounded
+primitive cue; runtime content-backed X/Y/action animation is D0.7b. Combat, hit testing, durability
+loss, death, loot rarity/affixes, and account-owned character persistence are not implied.
 
 The accepted shared-authority journey proves one exact item lifetime across public world,
 Alice's Inventory, Main Hand equipment, world drop, and Bob's Inventory. Pickup starts the

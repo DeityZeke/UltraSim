@@ -95,7 +95,11 @@ public sealed class RemotePublicPresentationMetadataClient :
                 header.MetadataRevision,
                 (ClientPublicPresentationFlags)header.Flags,
                 displayLabel,
-                properties);
+                properties,
+                header.MainHandPrefabId,
+                (ClientPublicActorVerticalPhase)header.VerticalPhase,
+                (ClientPublicActorActionKind)header.ActorAction,
+                header.ActorActionSequence);
             result = _state.TryApply(
                 (ClientPublicPresentationOperation)header.Operation, in metadata);
         }

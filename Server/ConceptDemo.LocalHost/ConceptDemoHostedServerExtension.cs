@@ -64,7 +64,8 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
     private readonly SharedPlayableAuthority _authority;
     private readonly RemoteChatDeliveryService _chatDelivery;
     private readonly RemoteChatLocalRegistration _localChat;
-    private readonly SharedPlayableParticipant[] _participantScratch;
+    private readonly GamePublicActorPresentation[] _participantScratch;
+    private readonly SharedPlayableParticipant _localParticipant;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private HostedUdpAdmissionHost? _host;
     private ConceptDemoContentDeployment? _content;
@@ -115,7 +116,8 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
             _localChat = delivery.RegisterLocal(
                 context.LocalParticipant,
                 new LocalChatRecipient(context.LocalChat));
-            _participantScratch = new SharedPlayableParticipant[options.MaximumParticipants];
+            _localParticipant = local;
+            _participantScratch = new GamePublicActorPresentation[options.MaximumParticipants];
         }
         catch
         {
@@ -237,20 +239,44 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
         Span<UltraSim.Client.Core.ClientPublicPresentationMetadata> destination)
     {
         EnsureOperational();
-        int count = _authority.CopyParticipants(_participantScratch);
+        int count = _authority.CopyActorPresentations(_participantScratch);
         if (count < 0 || destination.Length < count) return -1;
         ulong generation = _authority.GetSnapshot().GenerationId;
         for (int index = 0; index < count; index++)
         {
-            SharedPlayableParticipant participant = _participantScratch[index];
+            GamePublicActorPresentation presentation = _participantScratch[index];
+            SharedPlayableParticipant participant = presentation.Participant;
             destination[index] = new UltraSim.Client.Core.ClientPublicPresentationMetadata(
                 generation,
                 participant.PublicEntity,
-                1,
-                UltraSim.Client.Core.ClientPublicPresentationFlags.NameplateEligible,
-                participant.GuestIdentity.DisplayName!);
+                presentation.Revision,
+                UltraSim.Client.Core.ClientPublicPresentationFlags.NameplateEligible |
+                    UltraSim.Client.Core.ClientPublicPresentationFlags.ActorState,
+                participant.GuestIdentity.DisplayName!,
+                MainHandPrefabId: presentation.MainHandPrefabId,
+                VerticalPhase:
+                    (UltraSim.Client.Core.ClientPublicActorVerticalPhase)presentation.VerticalPhase,
+                ActorAction: (UltraSim.Client.Core.ClientPublicActorActionKind)presentation.Action,
+                ActorActionSequence: presentation.ActionSequence);
         }
         return count;
+    }
+
+    public void ObserveLocalPresentationAction(
+        ulong commandSequence,
+        LocalPublicActorActionKind action)
+    {
+        EnsureOperational();
+        GamePublicActorActionKind shared = action switch
+        {
+            LocalPublicActorActionKind.Interact => GamePublicActorActionKind.Interact,
+            LocalPublicActorActionKind.Primary => GamePublicActorActionKind.Primary,
+            _ => throw new ArgumentOutOfRangeException(nameof(action)),
+        };
+        if (!_authority.RecordPresentationAction(
+                in _localParticipant, commandSequence, shared))
+            throw new InvalidOperationException(
+                "The accepted local actor presentation action could not be recorded.");
     }
 
     public void Dispose()

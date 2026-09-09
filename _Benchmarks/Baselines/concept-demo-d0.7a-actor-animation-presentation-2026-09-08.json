@@ -1,0 +1,88 @@
+{
+  "Checkpoint": "D0.7a shared actor motion/equipment/action presentation and bundled X/Y animation canary",
+  "CaptureDate": "2026-09-08",
+  "BaseCommit": "f9a6d7fa267c05cde07c065b451d7575392a5921",
+  "ActorSemantics": {
+    "HorizontalMotionSource": "successive committed authoritative WorldPosition samples",
+    "VerticalMotionSource": "Game-owned Grounded/Rising/Falling presentation phase",
+    "MotionPhases": [
+      "Idle",
+      "Walk",
+      "Rising",
+      "Falling"
+    ],
+    "LandingSource": "authoritative Rising/Falling to Grounded presentation transition",
+    "PublicEquipment": "MainHand public prefab identity only",
+    "PrivateItemRollsDisclosed": false,
+    "PublicActions": [
+      "Interact",
+      "Primary"
+    ],
+    "ActionSource": "accepted Game command only",
+    "LateActorEntryReplaysRetainedAction": false,
+    "HotWorldRecordChanged": false
+  },
+  "BundledBodies": {
+    "BuildTool": "Blender 5.2 LTS reproducible conversion script",
+    "OneSkeletonPerBody": true,
+    "OrderedBonesPerBody": 65,
+    "Clips": [
+      "Idle",
+      "Walk",
+      "Jump"
+    ],
+    "X": {
+      "Path": "Client/PresentationAssets/Avatars/x_bot/x_bot_animated.glb",
+      "Bytes": 2254704,
+      "Sha256": "811c8a6c07692e353ff1a8364db142dd84b88b119e34c4747c51e1a2568db049"
+    },
+    "Y": {
+      "Path": "Client/PresentationAssets/Avatars/y_bot/y_bot_animated.glb",
+      "Bytes": 2551864,
+      "Sha256": "adeffa5fff32e0e8420107d0f25c11897f2141bd5ac817ad01d6298a484f25bc"
+    },
+    "SeparateActionSkeletonImportedAtRuntime": false,
+    "SemanticMainHandSocket": true,
+    "MissingAttackAndInteractClipUsesPrimitiveCue": true
+  },
+  "Protocol": {
+    "GeneratedGameProtocolVersion": 13,
+    "ApplicationManifestVersion": 26,
+    "ApplicationManifestFingerprint": 4558939223638628032,
+    "ApplicationManifestFingerprintHex": "3f449b11d19356c0",
+    "ColdPublicPresentationMessageVersion": 4,
+    "NewTransportLane": false,
+    "ItemPropertiesMutuallyExclusiveWithActorState": true,
+    "MetadataApplicationProofPreserved": true
+  },
+  "ProductComposition": {
+    "SinglePlayerBundledBodies": true,
+    "CompleteBundledBodies": true,
+    "OnlineBundledBodies": false,
+    "OnlinePrimitiveActorFallback": true,
+    "BundledBodyCanSatisfyRealmContentProof": false
+  },
+  "PermanentAcceptance": {
+    "ClientCoreActorStateValidationAndAbaFence": true,
+    "PacketFreeLocalEquipmentAndAcceptedAction": true,
+    "DedicatedSharedAuthorityABC": true,
+    "CompletePacketFreeHostPlusRemoteBC": true,
+    "AllRecipientsObserveMainHandEquipAndDrop": true,
+    "AllRecipientsObserveAcceptedPrimarySequence": true,
+    "EquippedSwordIndependentlyPickableOrBatched": false,
+    "DroppedSwordReturnsToWorldPresentation": true,
+    "GodotLoadsTwoAnimatedNonPrimitiveBodies": true,
+    "GodotVerifiesExactBonesClipsAndSockets": true,
+    "GodotCommittedPoseSelectsWalk": true,
+    "PrimitiveFallbackMotionAndActionCues": true
+  },
+  "DeliberateDeferrals": [
+    "runtime GLB/model/animation ContentFileKind and passive validation",
+    "realm-catalog-backed native model resource realization and leases",
+    "server Add/Replace and user override for X/Y presentation",
+    "Attack and Interact body clips",
+    "root motion, blend trees, IK, animation notifications, and paper-doll equipment",
+    "Combat, hit testing, damage, stamina, and combos",
+    "lossless non-coalescible public action occurrence history"
+  ]
+}

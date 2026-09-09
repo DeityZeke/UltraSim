@@ -101,6 +101,25 @@ internal static class M00SharedAuthorityTests
                 row.DisplayLabel == "Iron Sword" &&
                 (row.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
 
+            True(localInput.TryCreateSemanticCommand(new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Stop,
+                GamePlayerActions.Interact,
+                true), out GamePlayerCommand hostInteract));
+            True(local.TrySubmit(new LocalPlayableCommand(
+                hostInteract,
+                LocalPlayableSelection.CabinDoor,
+                false,
+                default,
+                false)));
+            DriveHostedUntil(local, localWorld, localChat, [bob], () =>
+                local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                current.LastCommandSequence == hostInteract.Sequence &&
+                current.LastCommandResult.Interaction == GameWorldActionStatus.Accepted &&
+                bob.Session.PublicPresentationState.TryGet(
+                    hosted.PublicActor, out ClientPublicPresentationMetadata hostMetadata) &&
+                hostMetadata.ActorAction == ClientPublicActorActionKind.Interact &&
+                hostMetadata.ActorActionSequence == hostInteract.Sequence);
+
             carol = ClientNode.Connect(root, "hosted-carol", endpoint, fingerprint);
             True(carol.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
                 GameGuestBody.HumanFemale, "Remote Carol")));
@@ -375,6 +394,13 @@ internal static class M00SharedAuthorityTests
                         out _);
             });
             RemotePlayableClientSnapshot equippedOwner = alice.Session.Playable.GetSnapshot();
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    equippedOwner.PublicActor, out ClientPublicPresentationMetadata metadata) &&
+                (metadata.Flags & ClientPublicPresentationFlags.ActorState) != 0 &&
+                metadata.VerticalPhase is >= ClientPublicActorVerticalPhase.Grounded and
+                    <= ClientPublicActorVerticalPhase.Falling &&
+                metadata.MainHandPrefabId == GameWorldPublicPrefabIds.IronSword));
             True(TryFindPublicNear(
                 alice.Session.WorldCache,
                 GameWorldPublicPrefabIds.IronSword,
@@ -389,6 +415,11 @@ internal static class M00SharedAuthorityTests
             DriveUntil(host, authority, clients, () =>
                 alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == primarySequence &&
                 alice.Session.Playable.GetSnapshot().Primary == RemotePlayableActionStatus.Accepted);
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    equippedOwner.PublicActor, out ClientPublicPresentationMetadata metadata) &&
+                metadata.ActorAction == ClientPublicActorActionKind.Primary &&
+                metadata.ActorActionSequence == primarySequence));
             ulong beforeDropSelection = alice.Session.UiClient.GetView(aliceInventory).LastSequence;
             alice.Session.UiClient.SubmitAction(aliceInventory, InventoryUi.Select, swordRow);
             DriveUntil(host, authority, clients, () =>
@@ -400,6 +431,10 @@ internal static class M00SharedAuthorityTests
                     client.Session.WorldCache,
                     equippedSword.Id,
                     WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)));
+            DriveUntil(host, authority, clients, () => clients.All(client =>
+                client.Session.PublicPresentationState.TryGet(
+                    equippedOwner.PublicActor, out ClientPublicPresentationMetadata metadata) &&
+                metadata.MainHandPrefabId == 0));
 
             True(bob.Session.Playable.TrySubmitCommand(
                 new ClientWorldCommandIntent(
@@ -1016,8 +1051,9 @@ internal static class M00SharedAuthorityTests
         private readonly SharedPlayableAuthority _authority;
         private readonly RemoteChatDeliveryService _chatDelivery;
         private readonly RemoteChatLocalRegistration _localChat;
-        private readonly SharedPlayableParticipant[] _participants =
-            new SharedPlayableParticipant[MaximumParticipants];
+        private readonly GamePublicActorPresentation[] _presentations =
+            new GamePublicActorPresentation[MaximumParticipants];
+        private readonly SharedPlayableParticipant _localParticipant;
         private readonly System.Collections.Concurrent.ConcurrentQueue<string> _systemRequests = new();
         private readonly NetworkServerIdentity _identity = NetworkServerIdentity.CreateEphemeral();
         private readonly ApplicationRealmId _realm = new(0x4D00, 2);
@@ -1038,6 +1074,13 @@ internal static class M00SharedAuthorityTests
                     1_000));
             try
             {
+                var local = new SharedPlayableParticipant(
+                    context.LocalParticipant,
+                    context.LocalGuestIdentity,
+                    context.LocalControlSession,
+                    context.LocalEntities,
+                    context.LocalPublicEntity,
+                    0);
                 _authority = SharedPlayableAuthority.AttachExisting(
                     context.WorldPack,
                     context.Composition,
@@ -1046,16 +1089,11 @@ internal static class M00SharedAuthorityTests
                     context.Chat,
                     delivery,
                     context.Scene,
-                    new SharedPlayableParticipant(
-                        context.LocalParticipant,
-                        context.LocalGuestIdentity,
-                        context.LocalControlSession,
-                        context.LocalEntities,
-                        context.LocalPublicEntity,
-                        0),
+                    local,
                     context.TickTimings,
                     context.GenerationStartedTimestamp,
                     new SharedPlayableAuthorityLimits(MaximumParticipants));
+                _localParticipant = local;
                 _chatDelivery = delivery;
                 _localChat = delivery.RegisterLocal(
                     context.LocalParticipant,
@@ -1158,20 +1196,41 @@ internal static class M00SharedAuthorityTests
         public int CopyPublicPresentationMetadata(
             Span<ClientPublicPresentationMetadata> destination)
         {
-            int count = _authority.CopyParticipants(_participants);
+            int count = _authority.CopyActorPresentations(_presentations);
             if (count < 0 || destination.Length < count) return -1;
             ulong generation = _authority.GetSnapshot().GenerationId;
             for (int index = 0; index < count; index++)
             {
-                SharedPlayableParticipant participant = _participants[index];
+                GamePublicActorPresentation presentation = _presentations[index];
+                SharedPlayableParticipant participant = presentation.Participant;
                 destination[index] = new ClientPublicPresentationMetadata(
                     generation,
                     participant.PublicEntity,
-                    1,
-                    ClientPublicPresentationFlags.NameplateEligible,
-                    participant.GuestIdentity.DisplayName!);
+                    presentation.Revision,
+                    ClientPublicPresentationFlags.NameplateEligible |
+                        ClientPublicPresentationFlags.ActorState,
+                    participant.GuestIdentity.DisplayName!,
+                    MainHandPrefabId: presentation.MainHandPrefabId,
+                    VerticalPhase:
+                        (ClientPublicActorVerticalPhase)presentation.VerticalPhase,
+                    ActorAction: (ClientPublicActorActionKind)presentation.Action,
+                    ActorActionSequence: presentation.ActionSequence);
             }
             return count;
+        }
+
+        public void ObserveLocalPresentationAction(
+            ulong commandSequence,
+            LocalPublicActorActionKind action)
+        {
+            GamePublicActorActionKind shared = action switch
+            {
+                LocalPublicActorActionKind.Interact => GamePublicActorActionKind.Interact,
+                LocalPublicActorActionKind.Primary => GamePublicActorActionKind.Primary,
+                _ => throw new ArgumentOutOfRangeException(nameof(action)),
+            };
+            True(_authority.RecordPresentationAction(
+                in _localParticipant, commandSequence, shared));
         }
 
         public void Dispose()

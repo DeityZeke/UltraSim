@@ -545,6 +545,7 @@ public sealed class LocalPlayableSession : IDisposable
                     runtime,
                     signUi,
                     entities,
+                    serverExtension,
                     ref lastCommandSequence,
                     ref lastSelection,
                     ref lastCommand,
@@ -620,6 +621,7 @@ public sealed class LocalPlayableSession : IDisposable
         ServerRuntime runtime,
         InformationalSignUiController signUi,
         GamePlayableWorldEntities entities,
+        ILocalPlayableServerExtension? serverExtension,
         ref ulong lastSequence,
         ref LocalPlayableSelection lastSelection,
         ref GamePlayerCommandResult lastResult,
@@ -731,6 +733,15 @@ public sealed class LocalPlayableSession : IDisposable
             lastSelection = request.Selection;
             lastResult = outcome.Result;
             lastChest = outcome.Chest;
+            LocalPublicActorActionKind? presentationAction =
+                outcome.Result.Primary == GameWorldActionStatus.Accepted
+                    ? LocalPublicActorActionKind.Primary
+                    : (request.Command.PressedActions & GamePlayerActions.Interact) != 0 &&
+                        outcome.Result.Interaction == GameWorldActionStatus.Accepted
+                            ? LocalPublicActorActionKind.Interact
+                            : null;
+            if (presentationAction is LocalPublicActorActionKind action)
+                serverExtension?.ObserveLocalPresentationAction(request.Command.Sequence, action);
         }
     }
 
@@ -1141,6 +1152,17 @@ public sealed class LocalPlayableSession : IDisposable
                             world, Resolve(world, entities.BreadId), out InventoryItem bread))
                         throw new InvalidOperationException("The local owner/private view was incomplete.");
                     bool inBackpack = bread.Parent == Resolve(world, entities.BackpackId);
+                    uint mainHandPrefabId = 0;
+                    if (game.Inventory.Index.TryGetEquipped(
+                            player, InventoryEquipSlot.MainHand, out Entity mainHand) &&
+                        game.WorldState.TryReadPublic(
+                            world, mainHand, out WorldPublicDescriptor mainHandPublic))
+                        mainHandPrefabId = mainHandPublic.PrefabId;
+                    if (!game.WorldActions.TryReadVerticalMotion(
+                            world, player, out GameVerticalMotionSnapshot verticalMotion) ||
+                        verticalMotion.Kind == GameVerticalMotionKind.None)
+                        throw new InvalidOperationException(
+                            "The local actor vertical presentation state was unavailable.");
                     WorldPreparedView prepared = game.WorldState.PreparedWorld ??
                         throw new InvalidOperationException("The local prepared world was unavailable.");
                     return new LocalPlayableAuthorityView(
@@ -1161,6 +1183,8 @@ public sealed class LocalPlayableSession : IDisposable
                         lastAdministrativeSucceeded,
                         lastAdministrativeMessage,
                         serverExtension,
+                        mainHandPrefabId,
+                        verticalMotion,
                         prepared);
                 }, out LocalPlayableAuthorityView view))
             throw new InvalidOperationException("The local owner/private view could not be captured.");

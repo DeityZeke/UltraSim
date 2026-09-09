@@ -168,6 +168,16 @@ by stable property ID, while a presentation profile independently controls categ
 Missing per-instance metadata changes only presentation fallback; it never changes Game identity,
 disclosure, or interaction authority.
 
+D0.7a extends that same cold row with a separately flagged actor appearance/action projection. The
+equipped `MainHand` value is only a public prefab identity; exact item entity identity, rolls,
+durability, and owner Inventory state remain absent. `Interact` and `Primary` are a finite latest-
+accepted cue plus the actor's monotonic control sequence. The same row carries only the finite
+Game-owned `Grounded`/`Rising`/`Falling` phase needed to distinguish a real landing from an apex or
+ceiling contact. Actor realization consumes an existing sequence without replay, and only a newer
+sequence may produce a one-shot presentation cue. Horizontal motion remains derived downstream
+from committed authoritative positions; animation state is never a new movement or grounding
+authority.
+
 `ClientChatState` owns the engine-neutral C0.1-C0.2 recent-feed projection. Spatial, Global, and
 authority-originated System facts
 are ordered, append-only occurrences rather than latest state: session/server

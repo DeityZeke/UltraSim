@@ -205,6 +205,15 @@ packet-free and says `Local`; Online reads sanitized RTT directly from its authe
 peer. The remotely opened monitor definition is an exact realm-authorized `.usui`, while the model
 and sole Close action remain Game-owned. No endpoint/IP, credential/key, exact position,
 owner-private state, or administrative command is exposed.
+
+Concept Demo D0.7a adds the first shared actor motion/equipment/action presentation vertical.
+Successive authoritative poses drive horizontal Idle/Walk, while Game's finite vertical phase drives
+Rising/Falling and exact airborne-to-grounded landing presentation. Game-owned Inventory exposes
+only the equipped Main Hand public prefab, and accepted Interact/Primary sequences produce bounded
+one-shot cues without replay on late actor entry. Single Player and Complete use
+reproducibly consolidated X/Y GLBs with one 65-bone skeleton and Idle/Walk/Jump clips. Contentless
+Online uses the same semantics with humanoid/equipment primitives. Runtime realm-content model and
+animation realization remains D0.7b and is not implied by the bundled asset canary.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
