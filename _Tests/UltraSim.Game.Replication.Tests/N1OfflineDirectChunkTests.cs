@@ -955,6 +955,20 @@ internal static class N1OfflineDirectChunkTests
         int absent = FindAbsentSubscription(recipient, Key(0, 0));
         byte[] bytes = new byte[4_096];
 
+        foreach (int invalidSubscription in new[]
+                 {
+                     int.MinValue,
+                     -1,
+                     recipient.Subscriptions.Length,
+                     int.MaxValue,
+                 })
+        {
+            Equal(OfflineDirectChunkWireEncodeStatus.InvalidSubscription,
+                encoder.TryEncode(recipient, fixture.Store, invalidSubscription, 0, 1, bytes,
+                    out OfflineDirectChunkWireEncodeResult invalid));
+            Equal(0, invalid.Written);
+        }
+
         Equal(OfflineDirectChunkWireEncodeStatus.Snapshot,
             encoder.TryEncode(recipient, fixture.Store, occupied, 0, 1, bytes,
                 out OfflineDirectChunkWireEncodeResult snapshot));

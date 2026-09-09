@@ -175,7 +175,7 @@ public readonly ref struct WorldTerrainSurfaceBandChunkView
 
     public WorldTerrainSurfaceBandView GetBand(int index)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
+        if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
         int descriptorsOffset = BinaryPrimitives.ReadInt32LittleEndian(_payload[20..]);
         ReadOnlySpan<byte> descriptor = _payload.Slice(
             descriptorsOffset + (_start + index) * AdditionalTerrainSurfaceFormat.DescriptorBytes,
@@ -250,8 +250,10 @@ public readonly ref struct WorldTerrainSurfaceBandView
 
     public bool IsCellPresent(int localCellX, int localCellZ)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localCellX, Bounds.CellWidth);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localCellZ, Bounds.CellDepth);
+        if (localCellX < 0 || localCellX >= Bounds.CellWidth)
+            throw new ArgumentOutOfRangeException(nameof(localCellX));
+        if (localCellZ < 0 || localCellZ >= Bounds.CellDepth)
+            throw new ArgumentOutOfRangeException(nameof(localCellZ));
         int cell = localCellZ * Bounds.CellWidth + localCellX;
         ulong word = BinaryPrimitives.ReadUInt64LittleEndian(
             _payload[(_presenceOffset + (cell >> 6) * sizeof(ulong))..]);
@@ -260,8 +262,10 @@ public readonly ref struct WorldTerrainSurfaceBandView
 
     public TerrainSurfaceEdgeConnection GetEdgeConnections(int localCellX, int localCellZ)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localCellX, Bounds.CellWidth);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localCellZ, Bounds.CellDepth);
+        if (localCellX < 0 || localCellX >= Bounds.CellWidth)
+            throw new ArgumentOutOfRangeException(nameof(localCellX));
+        if (localCellZ < 0 || localCellZ >= Bounds.CellDepth)
+            throw new ArgumentOutOfRangeException(nameof(localCellZ));
         return (TerrainSurfaceEdgeConnection)_payload[
             _connectionsOffset + localCellZ * Bounds.CellWidth + localCellX];
     }
@@ -274,8 +278,10 @@ public readonly ref struct WorldTerrainSurfaceBandView
             WorldTerrainSurfaceFace.Bottom when HasBottom => _bottomMaterialsOffset,
             _ => throw new ArgumentOutOfRangeException(nameof(face)),
         };
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localCellX, Bounds.CellWidth);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localCellZ, Bounds.CellDepth);
+        if (localCellX < 0 || localCellX >= Bounds.CellWidth)
+            throw new ArgumentOutOfRangeException(nameof(localCellX));
+        if (localCellZ < 0 || localCellZ >= Bounds.CellDepth)
+            throw new ArgumentOutOfRangeException(nameof(localCellZ));
         int cell = localCellZ * Bounds.CellWidth + localCellX;
         return BinaryPrimitives.ReadUInt16LittleEndian(_payload[(offset + cell * sizeof(ushort))..]);
     }
@@ -289,9 +295,10 @@ public readonly ref struct WorldTerrainSurfaceBandView
             _ => throw new ArgumentOutOfRangeException(nameof(face)),
         };
         int edge = Bounds.CellWidth + 1;
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)localVertexX, (uint)edge);
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(
-            (uint)localVertexZ, (uint)(Bounds.CellDepth + 1));
+        if (localVertexX < 0 || localVertexX >= edge)
+            throw new ArgumentOutOfRangeException(nameof(localVertexX));
+        if (localVertexZ < 0 || localVertexZ >= Bounds.CellDepth + 1)
+            throw new ArgumentOutOfRangeException(nameof(localVertexZ));
         int vertex = localVertexZ * edge + localVertexX;
         int heightBase = BinaryPrimitives.ReadInt32LittleEndian(_payload[offset..]);
         ushort units = BinaryPrimitives.ReadUInt16LittleEndian(

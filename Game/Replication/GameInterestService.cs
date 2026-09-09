@@ -794,7 +794,7 @@ public sealed class GameInterestService
         for (int index = 0; index < bundle.Count; index++)
         {
             SentBundleItem item = _bundleItems[baseIndex + index];
-            if ((uint)item.Relation >= (uint)_relations.Length) continue;
+            if (item.Relation < 0 || item.Relation >= _relations.Length) continue;
             ref RelationState relation = ref _relations[item.Relation];
             if (!relation.Active || relation.Generation != item.RelationGeneration) continue;
             if (applied)
@@ -836,7 +836,7 @@ public sealed class GameInterestService
         for (int index = 0; index < bundle.Count; index++)
         {
             SentBundleItem item = _bundleItems[baseIndex + index];
-            if ((uint)item.Relation >= (uint)_relations.Length) continue;
+            if (item.Relation < 0 || item.Relation >= _relations.Length) continue;
             ref RelationState relation = ref _relations[item.Relation];
             if (relation.Active && relation.Generation == item.RelationGeneration && relation.Pending &&
                 relation.PendingRelationSequence == item.RelationSequence)
@@ -1722,7 +1722,7 @@ public sealed class GameInterestService
 
     private void MarkReadyDeadlineDirty(int recipientIndex, GameInterestTier tier)
     {
-        if ((uint)recipientIndex >= (uint)_recipients.Length || tier == GameInterestTier.None) return;
+        if (recipientIndex < 0 || recipientIndex >= _recipients.Length || tier == GameInterestTier.None) return;
         _recipients[recipientIndex].ReadyDeadlineDirtyMask |= TierBit(tier);
     }
 
@@ -2401,7 +2401,7 @@ public sealed class GameInterestService
             for (int itemIndex = 0; itemIndex < bundle.Count; itemIndex++)
             {
                 SentBundleItem item = _bundleItems[baseIndex + itemIndex];
-                if ((uint)item.Relation >= (uint)_relations.Length) continue;
+                if (item.Relation < 0 || item.Relation >= _relations.Length) continue;
                 ref RelationState relation = ref _relations[item.Relation];
                 if (relation.Active && relation.Generation == item.RelationGeneration && relation.Pending &&
                     relation.PendingRelationSequence == item.RelationSequence)

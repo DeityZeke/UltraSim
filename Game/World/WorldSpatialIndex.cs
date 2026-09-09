@@ -15,6 +15,9 @@ public readonly record struct WorldSpatialIndexSnapshot(
     long Removals,
     long SameChunkObservations,
     long CrossChunkMigrations,
+    long MapLookups,
+    long MapProbes,
+    int MaximumMapProbe,
     long ReservedBytes);
 
 /// <summary>
@@ -42,6 +45,9 @@ public sealed class WorldSpatialIndex
     private long _removals;
     private long _sameChunkObservations;
     private long _crossChunkMigrations;
+    private long _mapLookups;
+    private long _mapProbes;
+    private int _maximumMapProbe;
 
     public WorldSpatialIndex(int entityCapacity, int? chunkCapacity = null)
     {
@@ -52,7 +58,7 @@ public sealed class WorldSpatialIndex
             throw new ArgumentOutOfRangeException(nameof(chunkCapacity),
                 "Chunk capacity must admit the theoretical one-chunk-per-spatial-entity maximum.");
 
-        int mapCapacity = GetMapCapacity(chunks);
+        int mapCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(chunks);
         _homes = new HomeRecord[entityCapacity];
         _chunks = new ChunkRecord[chunks];
         _freeChunks = new int[chunks];
@@ -76,6 +82,9 @@ public sealed class WorldSpatialIndex
         _removals,
         _sameChunkObservations,
         _crossChunkMigrations,
+        _mapLookups,
+        _mapProbes,
+        _maximumMapProbe,
         CalculateReservedBytes());
 
     public bool TryGetHome(Entity entity, out SpatialChunkKey key)
@@ -249,9 +258,11 @@ public sealed class WorldSpatialIndex
 
     private bool TryFindChunk(SpatialChunkKey key, out int slot)
     {
+        _mapLookups++;
         int bucket = key.GetHashCode() & _mapMask;
         for (int probe = 0; probe < _mapStates.Length; probe++)
         {
+            RecordMapProbe(probe + 1);
             byte state = _mapStates[bucket];
             if (state == 0) break;
             if (state == 1 && _mapKeys[bucket] == key)
@@ -267,48 +278,71 @@ public sealed class WorldSpatialIndex
 
     private bool TryAddMap(SpatialChunkKey key, int slot)
     {
+        _mapLookups++;
         int bucket = key.GetHashCode() & _mapMask;
-        int firstTombstone = -1;
         for (int probe = 0; probe < _mapStates.Length; probe++)
         {
+            RecordMapProbe(probe + 1);
             byte state = _mapStates[bucket];
             if (state == 1)
             {
                 if (_mapKeys[bucket] == key) return false;
             }
-            else if (state == 2)
-            {
-                if (firstTombstone < 0) firstTombstone = bucket;
-            }
             else
             {
-                WriteMap(firstTombstone >= 0 ? firstTombstone : bucket, key, slot);
+                WriteMap(bucket, key, slot);
                 return true;
             }
             bucket = (bucket + 1) & _mapMask;
         }
-        if (firstTombstone < 0) return false;
-        WriteMap(firstTombstone, key, slot);
-        return true;
+        return false;
     }
 
     private void RemoveMap(SpatialChunkKey key)
     {
+        _mapLookups++;
         int bucket = key.GetHashCode() & _mapMask;
         for (int probe = 0; probe < _mapStates.Length; probe++)
         {
+            RecordMapProbe(probe + 1);
             byte state = _mapStates[bucket];
             if (state == 0) break;
             if (state == 1 && _mapKeys[bucket] == key)
             {
-                _mapStates[bucket] = 2;
-                _mapValues[bucket] = 0;
-                _mapKeys[bucket] = default;
+                CloseMapDeletionGap(bucket);
                 return;
             }
             bucket = (bucket + 1) & _mapMask;
         }
         throw new InvalidOperationException("Spatial chunk lookup and chunk storage diverged.");
+    }
+
+    // Linear-probe deletion moves later occupants whose probe path crossed the gap. This keeps
+    // historical chunk turnover from turning every future miss into a full-table scan.
+    private void CloseMapDeletionGap(int hole)
+    {
+        int scan = (hole + 1) & _mapMask;
+        while (_mapStates[scan] != 0)
+        {
+            int home = _mapKeys[scan].GetHashCode() & _mapMask;
+            if (((hole - home) & _mapMask) < ((scan - home) & _mapMask))
+            {
+                _mapKeys[hole] = _mapKeys[scan];
+                _mapValues[hole] = _mapValues[scan];
+                _mapStates[hole] = 1;
+                hole = scan;
+            }
+            scan = (scan + 1) & _mapMask;
+        }
+        _mapKeys[hole] = default;
+        _mapValues[hole] = 0;
+        _mapStates[hole] = 0;
+    }
+
+    private void RecordMapProbe(int probes)
+    {
+        _mapProbes++;
+        _maximumMapProbe = Math.Max(_maximumMapProbe, probes);
     }
 
     private void WriteMap(int bucket, SpatialChunkKey key, int slot)
@@ -339,15 +373,6 @@ public sealed class WorldSpatialIndex
         (long)_mapKeys.Length * Unsafe.SizeOf<SpatialChunkKey>() +
         (long)_mapValues.Length * sizeof(int) +
         _mapStates.Length);
-
-    private static int GetMapCapacity(int chunks)
-    {
-        int required = checked(chunks * 2);
-        int capacity = 1;
-        while (capacity < required)
-            capacity = checked(capacity << 1);
-        return capacity;
-    }
 
     private struct HomeRecord
     {

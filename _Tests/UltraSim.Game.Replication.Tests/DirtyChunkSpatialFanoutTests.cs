@@ -447,6 +447,75 @@ internal static class DirtyChunkSpatialFanoutTests
         }
     }
 
+    internal static void GridCoversWorldAndSaturatedMovement()
+    {
+        using var fixture = new Fixture(32, 4);
+        var pointInterest = new ChunkInterestProfile(0, 0, 0, 0, 0, 1);
+        DirtyChunkSpatialFanout service = Create(
+            fixture, maximumRecipients: 2, maximumRecipientChunkRows: 32,
+            maximumSpatialRegions: 1, interest: pointInterest,
+            spatialRegionEdgeMillimeters:
+                DirtyChunkSpatialFanoutLimits.MinimumSpatialRegionEdgeMillimeters);
+        ParticipantId first = new(1);
+        WorldPosition minimum = new(int.MinValue, int.MinValue, 0, 0, 0);
+        WorldPosition maximum = new(int.MaxValue, int.MaxValue,
+            GameWorldSpatialProfile.WorldChunkEdgeUnits - 1,
+            GameWorldSpatialProfile.WorldChunkEdgeUnits - 1, 0);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace, minimum, 0));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace, maximum, 1));
+        Equal(1, service.GetSnapshot().RecipientSpatialRegionCount);
+
+        // A constant one-recipient live set can cross arbitrarily many regions without needing
+        // transient headroom or retaining historical lookup occupancy.
+        for (int chunk = -1_024; chunk < 1_024; chunk++)
+            True(service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+                Position(chunk, -chunk, 0, 0), checked((ulong)(chunk + 1_025))) is
+                DirtyChunkRecipientUpdateStatus.Reconciled or DirtyChunkRecipientUpdateStatus.NoChange);
+        Equal(1, service.GetSnapshot().RecipientSpatialRegionCount);
+
+        ParticipantId second = new(2);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(second, GameWorldState.DefaultSpace,
+                Position(1_023, -1_023, 0, 0), 3_000));
+        Equal(DirtyChunkRecipientUpdateStatus.CapacityExceeded,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+                Position(2_000, 0, 0, 0), 3_001));
+        True(service.RemoveRecipient(second));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            service.SetRecipientAnchor(first, GameWorldState.DefaultSpace,
+                Position(2_000, 0, 0, 0), 3_002));
+
+        DirtyChunkSpatialFanout existingDestination = Create(
+            fixture, maximumRecipients: 2, maximumRecipientChunkRows: 32,
+            maximumSpatialRegions: 2, interest: pointInterest,
+            spatialRegionEdgeMillimeters: 128_000);
+        ParticipantId third = new(3);
+        ParticipantId fourth = new(4);
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            existingDestination.SetRecipientAnchor(third, GameWorldState.DefaultSpace,
+                Position(0, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            existingDestination.SetRecipientAnchor(fourth, GameWorldState.DefaultSpace,
+                Position(10, 0, 8_000, 8_000), 0));
+        Equal(DirtyChunkRecipientUpdateStatus.Reconciled,
+            existingDestination.SetRecipientAnchor(third, GameWorldState.DefaultSpace,
+                Position(10, 0, 8_000, 8_000), 1));
+        Equal(1, existingDestination.GetSnapshot().RecipientSpatialRegionCount);
+
+        Check.Throws<ArgumentOutOfRangeException>(() => Create(
+            fixture, maximumSpatialRegions: 1,
+            spatialRegionEdgeMillimeters:
+                DirtyChunkSpatialFanoutLimits.MinimumSpatialRegionEdgeMillimeters - 1));
+        var excessiveInterest = new ChunkInterestProfile(
+            0, 0, 0, 0, 1_000_000, 1_000_000);
+        Check.Throws<ArgumentOutOfRangeException>(() => Create(
+            fixture, maximumSpatialRegions: 1, interest: excessiveInterest,
+            spatialRegionEdgeMillimeters:
+                DirtyChunkSpatialFanoutLimits.MinimumSpatialRegionEdgeMillimeters));
+    }
+
     internal static void CleanEntryLeaveReentryAndTeleportAreFenced()
     {
         using var fixture = new Fixture(32, 4);
@@ -1497,12 +1566,13 @@ internal static class DirtyChunkSpatialFanoutTests
         ulong maximumDeliveryAgeSteps = 1_024,
         OfflineDirectChunkCadence cadence = default,
         ChunkInterestProfile interest = default,
-        int spatialRegionEdgeMillimeters = 128_000) =>
+        int spatialRegionEdgeMillimeters = 128_000,
+        int maximumSpatialRegions = 512) =>
         new(fixture.Store,
             new DirtyChunkSpatialFanoutLimits(
                 maximumRecipients,
                 maximumRecipientChunkRows,
-                512,
+                maximumSpatialRegions,
                 maximumDirtyChunks,
                 maximumOutstandingDeliveries,
                 16,

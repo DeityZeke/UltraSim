@@ -19,6 +19,10 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
     ulong MaximumDeliveryAgeSteps = 1_024,
     int MaximumChunksPerBundle = DirtyReplicationEncoding.MaximumChunksPerBundle)
 {
+    public const int MinimumSpatialRegionEdgeMillimeters =
+        GameWorldSpatialProfile.WorldChunkEdgeUnits;
+    public const int MaximumSpatialCellsPerDirtyChunk = 4_096;
+
     public static DirtyChunkSpatialFanoutLimits Default => new(
         MaximumRecipients: 256,
         MaximumRecipientChunkRows: 262_144,
@@ -33,10 +37,12 @@ public readonly record struct DirtyChunkSpatialFanoutLimits(
 
     internal void Validate()
     {
+        if (SpatialRegionEdgeMillimeters < MinimumSpatialRegionEdgeMillimeters)
+            throw new ArgumentOutOfRangeException(nameof(SpatialRegionEdgeMillimeters));
         if (MaximumRecipients <= 0 || MaximumRecipientChunkRows <= 0 ||
             MaximumSpatialRegions <= 0 || MaximumDirtyChunks <= 0 ||
             MaximumOutstandingDeliveries < MaximumRecipients || MaximumSnapshotRecords <= 0 ||
-            MaximumDeltaRecords <= 0 || SpatialRegionEdgeMillimeters <= 0 ||
+            MaximumDeltaRecords <= 0 ||
             MaximumDeliveryAgeSteps == 0 || MaximumChunksPerBundle <= 0 ||
             MaximumChunksPerBundle > DirtyReplicationEncoding.MaximumChunksPerBundle)
             throw new ArgumentOutOfRangeException(nameof(MaximumRecipients));
@@ -329,6 +335,17 @@ public sealed class DirtyChunkSpatialFanout
         limits.Validate();
         if (!interestProfile.IsValid) throw new ArgumentOutOfRangeException(nameof(interestProfile));
         if (!cadence.IsValid) throw new ArgumentOutOfRangeException(nameof(cadence));
+        ValidateSpatialDiscoveryWork(limits, interestProfile);
+        int rowIndexCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
+            limits.MaximumRecipientChunkRows);
+        int regionMapCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
+            limits.MaximumSpatialRegions);
+        int dirtyIndexCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
+            limits.MaximumDirtyChunks);
+        int sharedPageCapacity = Math.Max(1, Math.Min(
+            limits.MaximumDirtyChunks, source.Limits.MaximumResidentChunks));
+        int sharedPageIndexCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
+            sharedPageCapacity);
         _source = source;
         _limits = limits;
         _interestProfile = interestProfile;
@@ -342,7 +359,6 @@ public sealed class DirtyChunkSpatialFanout
         _recipientOutstandingDeliveries = new int[limits.MaximumRecipients];
         _rows = new DirtyChunkRecipientRow[limits.MaximumRecipientChunkRows];
         _freeRows = new int[limits.MaximumRecipientChunkRows];
-        int rowIndexCapacity = MapCapacity(limits.MaximumRecipientChunkRows);
         _rowIndex = new int[rowIndexCapacity];
         _rowIndexMask = rowIndexCapacity - 1;
         _recipientPendingHeads = new int[limits.MaximumRecipients];
@@ -363,14 +379,12 @@ public sealed class DirtyChunkSpatialFanout
         _readyRecipientQueued = new bool[limits.MaximumRecipients];
         Array.Fill(_readyRecipientPrevious, -1);
         Array.Fill(_readyRecipientNext, -1);
-        int mapCapacity = MapCapacity(limits.MaximumSpatialRegions);
-        _regionKeys = new SpatialRegionKey[mapCapacity];
-        _regionHeads = new int[mapCapacity];
-        _regionStates = new byte[mapCapacity];
-        _regionMask = mapCapacity - 1;
+        _regionKeys = new SpatialRegionKey[regionMapCapacity];
+        _regionHeads = new int[regionMapCapacity];
+        _regionStates = new byte[regionMapCapacity];
+        _regionMask = regionMapCapacity - 1;
         Array.Fill(_regionHeads, -1);
         _dirtyKeys = new SpatialChunkKey[limits.MaximumDirtyChunks];
-        int dirtyIndexCapacity = MapCapacity(limits.MaximumDirtyChunks);
         _dirtyIndexKeys = new SpatialChunkKey[dirtyIndexCapacity];
         _dirtyIndexStates = new byte[dirtyIndexCapacity];
         _dirtyIndexMask = dirtyIndexCapacity - 1;
@@ -379,10 +393,7 @@ public sealed class DirtyChunkSpatialFanout
         _changes = new OfflineDirectChunkSubscriptionChange[checked(_subscriptionsPerRecipient * 2)];
         _snapshotScratch = new WorldPublicRecord[limits.MaximumSnapshotRecords];
         _deltaScratch = new WorldPublicDeltaRecord[limits.MaximumDeltaRecords];
-        int sharedPageCapacity = Math.Max(1, Math.Min(
-            limits.MaximumDirtyChunks, source.Limits.MaximumResidentChunks));
         _sharedPages = new SharedPageSlot[sharedPageCapacity];
-        int sharedPageIndexCapacity = MapCapacity(sharedPageCapacity);
         _sharedPageIndex = new int[sharedPageIndexCapacity];
         _sharedPageIndexMask = sharedPageIndexCapacity - 1;
         _sharedSnapshotRecords = new WorldPublicRecord[source.Limits.MaximumPublicEntities];
@@ -442,8 +453,13 @@ public sealed class DirtyChunkSpatialFanout
         ref RecipientSlot slot = ref _recipients[recipientIndex];
         SpatialRegionKey newRegion = RegionFor(space, anchor);
         int oldRegion = slot.Active ? slot.RegionMapIndex : -1;
-        if (FindRegion(newRegion) < 0 &&
-            _regionCount >= _limits.MaximumSpatialRegions)
+        int existingRegion = FindRegion(newRegion);
+        bool canReplaceSoleRegion = existingRegion < 0 && oldRegion >= 0 &&
+            _regionCount >= _limits.MaximumSpatialRegions &&
+            _regionHeads[oldRegion] == recipientIndex &&
+            slot.NextRegionRecipient < 0;
+        if (existingRegion < 0 &&
+            _regionCount >= _limits.MaximumSpatialRegions && !canReplaceSoleRegion)
             return CapacityFailure<DirtyChunkRecipientUpdateStatus>(DirtyChunkRecipientUpdateStatus.CapacityExceeded);
 
         if (!TryPreflightReconcile(slot.Recipient, space, anchor, out int desiredCount,
@@ -472,11 +488,21 @@ public sealed class DirtyChunkSpatialFanout
         }
         slot.Space = space;
         slot.Anchor = anchor;
-        slot.RegionMapIndex = FindOrCreateRegion(newRegion);
-        if (oldRegion >= 0 && oldRegion != slot.RegionMapIndex)
-            MoveRecipientRegion(recipientIndex, oldRegion, slot.RegionMapIndex);
-        else if (oldRegion < 0)
-            AddRecipientToRegion(recipientIndex, slot.RegionMapIndex);
+        if (canReplaceSoleRegion)
+        {
+            RemoveRecipientFromRegion(recipientIndex, oldRegion);
+            AddRecipientToRegion(recipientIndex, FindOrCreateRegion(newRegion));
+        }
+        else
+        {
+            int newRegionIndex = existingRegion >= 0
+                ? existingRegion
+                : FindOrCreateRegion(newRegion);
+            if (oldRegion >= 0 && oldRegion != newRegionIndex)
+                MoveRecipientRegion(recipientIndex, oldRegion, newRegionIndex);
+            else if (oldRegion < 0)
+                AddRecipientToRegion(recipientIndex, newRegionIndex);
+        }
 
         _recipientTopologyReconciliations++;
         ApplyReconciliation(recipientIndex, changes, result);
@@ -1383,22 +1409,15 @@ public sealed class DirtyChunkSpatialFanout
     {
         ref DirtyChunkRecipientRow row = ref _rows[rowIndex];
         int slot = RowHash(row.RecipientIndex, row.Key) & _rowIndexMask;
-        int firstDeleted = -1;
         for (int probe = 0; probe < _rowIndex.Length; probe++)
         {
             int value = _rowIndex[slot];
             if (value == 0)
             {
-                _rowIndex[firstDeleted >= 0 ? firstDeleted : slot] = rowIndex + 1;
+                _rowIndex[slot] = rowIndex + 1;
                 return;
             }
-            if (value < 0 && firstDeleted < 0) firstDeleted = slot;
             slot = (slot + 1) & _rowIndexMask;
-        }
-        if (firstDeleted >= 0)
-        {
-            _rowIndex[firstDeleted] = rowIndex + 1;
-            return;
         }
         throw new InvalidOperationException("Dirty-chunk row index capacity diverged from row capacity.");
     }
@@ -1413,11 +1432,29 @@ public sealed class DirtyChunkSpatialFanout
             if (value == 0) return;
             if (value == rowIndex + 1)
             {
-                _rowIndex[slot] = -1;
+                CloseRowIndexDeletionGap(slot);
                 return;
             }
             slot = (slot + 1) & _rowIndexMask;
         }
+    }
+
+    private void CloseRowIndexDeletionGap(int hole)
+    {
+        int scan = (hole + 1) & _rowIndexMask;
+        while (_rowIndex[scan] != 0)
+        {
+            int value = _rowIndex[scan];
+            ref readonly DirtyChunkRecipientRow row = ref _rows[value - 1];
+            int home = RowHash(row.RecipientIndex, row.Key) & _rowIndexMask;
+            if (((hole - home) & _rowIndexMask) < ((scan - home) & _rowIndexMask))
+            {
+                _rowIndex[hole] = value;
+                hole = scan;
+            }
+            scan = (scan + 1) & _rowIndexMask;
+        }
+        _rowIndex[hole] = 0;
     }
 
     private void ActivatePending(int rowIndex)
@@ -1728,25 +1765,16 @@ public sealed class DirtyChunkSpatialFanout
     private void AddDirtyIndex(SpatialChunkKey key)
     {
         int slot = Hash(key) & _dirtyIndexMask;
-        int firstDeleted = -1;
         for (int probe = 0; probe < _dirtyIndexKeys.Length; probe++)
         {
             byte state = _dirtyIndexStates[slot];
             if (state == 0)
             {
-                int target = firstDeleted >= 0 ? firstDeleted : slot;
-                _dirtyIndexKeys[target] = key;
-                _dirtyIndexStates[target] = 1;
+                _dirtyIndexKeys[slot] = key;
+                _dirtyIndexStates[slot] = 1;
                 return;
             }
-            if (state == 2 && firstDeleted < 0) firstDeleted = slot;
             slot = (slot + 1) & _dirtyIndexMask;
-        }
-        if (firstDeleted >= 0)
-        {
-            _dirtyIndexKeys[firstDeleted] = key;
-            _dirtyIndexStates[firstDeleted] = 1;
-            return;
         }
         throw new InvalidOperationException("Dirty-chunk key index capacity diverged from queue capacity.");
     }
@@ -1760,12 +1788,29 @@ public sealed class DirtyChunkSpatialFanout
             if (state == 0) return;
             if (state == 1 && _dirtyIndexKeys[slot] == key)
             {
-                _dirtyIndexStates[slot] = 2;
-                _dirtyIndexKeys[slot] = default;
+                CloseDirtyIndexDeletionGap(slot);
                 return;
             }
             slot = (slot + 1) & _dirtyIndexMask;
         }
+    }
+
+    private void CloseDirtyIndexDeletionGap(int hole)
+    {
+        int scan = (hole + 1) & _dirtyIndexMask;
+        while (_dirtyIndexStates[scan] != 0)
+        {
+            int home = Hash(_dirtyIndexKeys[scan]) & _dirtyIndexMask;
+            if (((hole - home) & _dirtyIndexMask) < ((scan - home) & _dirtyIndexMask))
+            {
+                _dirtyIndexKeys[hole] = _dirtyIndexKeys[scan];
+                _dirtyIndexStates[hole] = 1;
+                hole = scan;
+            }
+            scan = (scan + 1) & _dirtyIndexMask;
+        }
+        _dirtyIndexKeys[hole] = default;
+        _dirtyIndexStates[hole] = 0;
     }
 
     private int FindRecipient(ParticipantId participant)
@@ -1800,16 +1845,13 @@ public sealed class DirtyChunkSpatialFanout
     private int FindOrCreateRegion(SpatialRegionKey key)
     {
         int index = Hash(key) & _regionMask;
-        int tombstone = -1;
         for (int probe = 0; probe < _regionStates.Length && _regionStates[index] != 0; probe++)
         {
             if (_regionStates[index] == 1 && _regionKeys[index] == key) return index;
-            if (_regionStates[index] == 2 && tombstone < 0) tombstone = index;
             index = (index + 1) & _regionMask;
         }
-        if (_regionStates[index] != 0 && tombstone < 0)
+        if (_regionStates[index] != 0)
             throw new InvalidOperationException("The recipient spatial index has no reusable slot.");
-        if (tombstone >= 0) index = tombstone;
         _regionStates[index] = 1;
         _regionKeys[index] = key;
         _regionHeads[index] = -1;
@@ -1838,18 +1880,59 @@ public sealed class DirtyChunkSpatialFanout
             _recipients[current].NextRegionRecipient = -1;
             if (_regionHeads[region] < 0)
             {
-                _regionStates[region] = 2;
-                _regionKeys[region] = default;
+                CloseRegionDeletionGap(region);
                 _regionCount--;
             }
             return;
         }
     }
 
+    private void CloseRegionDeletionGap(int hole)
+    {
+        int scan = (hole + 1) & _regionMask;
+        while (_regionStates[scan] != 0)
+        {
+            int home = Hash(_regionKeys[scan]) & _regionMask;
+            if (((hole - home) & _regionMask) < ((scan - home) & _regionMask))
+            {
+                _regionKeys[hole] = _regionKeys[scan];
+                _regionHeads[hole] = _regionHeads[scan];
+                _regionStates[hole] = 1;
+                for (int recipient = _regionHeads[hole]; recipient >= 0;
+                    recipient = _recipients[recipient].NextRegionRecipient)
+                    _recipients[recipient].RegionMapIndex = hole;
+                hole = scan;
+            }
+            scan = (scan + 1) & _regionMask;
+        }
+        _regionKeys[hole] = default;
+        _regionHeads[hole] = -1;
+        _regionStates[hole] = 0;
+    }
+
     private void MoveRecipientRegion(int recipientIndex, int oldRegion, int newRegion)
     {
+        SpatialRegionKey newKey = _regionKeys[newRegion];
         RemoveRecipientFromRegion(recipientIndex, oldRegion);
-        AddRecipientToRegion(recipientIndex, newRegion);
+        int relocatedRegion = FindRegion(newKey);
+        if (relocatedRegion < 0)
+            throw new InvalidOperationException("Recipient destination region vanished during movement.");
+        AddRecipientToRegion(recipientIndex, relocatedRegion);
+    }
+
+    private static void ValidateSpatialDiscoveryWork(
+        in DirtyChunkSpatialFanoutLimits limits,
+        in ChunkInterestProfile profile)
+    {
+        long expandedEdge = checked(
+            GameWorldSpatialProfile.WorldChunkEdgeUnits + 2L * profile.FarLeaveRadiusMillimeters);
+        long cellsPerAxis = checked(
+            (expandedEdge + limits.SpatialRegionEdgeMillimeters - 1L) /
+            limits.SpatialRegionEdgeMillimeters + 1L);
+        if ((Int128)cellsPerAxis * cellsPerAxis >
+            DirtyChunkSpatialFanoutLimits.MaximumSpatialCellsPerDirtyChunk)
+            throw new ArgumentOutOfRangeException(nameof(limits),
+                "The admitted region geometry exceeds the bounded dirty-chunk discovery workload.");
     }
 
     private static int FloorDiv(long value, int divisor)
@@ -1898,13 +1981,6 @@ public sealed class DirtyChunkSpatialFanout
             hash = (hash ^ (uint)recipientIndex) * 16_777_619u;
             return (int)hash & int.MaxValue;
         }
-    }
-
-    private static int MapCapacity(int maximum)
-    {
-        int capacity = 2;
-        while (capacity < maximum * 2) capacity = checked(capacity << 1);
-        return capacity;
     }
 
     private static long DictionaryReservation(int capacity, int keySize) => checked(

@@ -326,7 +326,7 @@ public sealed class OfflineDirectChunkRecipient
     internal OfflineDirectChunkSubscription GetSubscriptionForView(int index)
     {
         EnsureOwner();
-        if ((uint)index >= (uint)_subscriptionCount) throw new IndexOutOfRangeException();
+        if (index < 0 || index >= _subscriptionCount) throw new IndexOutOfRangeException();
         ref readonly OfflineDirectChunkSubscriptionState subscription = ref _subscriptions[index];
         ChunkPublicationCursor cursor = subscription.AppliedRevision.IsValid
             ? new ChunkPublicationCursor(_sourceEpoch, subscription.Key, subscription.AppliedRevision)
@@ -492,7 +492,7 @@ public sealed class OfflineDirectChunkRecipient
             read = EmptyRead(OfflineDirectChunkReadStatus.SourceRequiresReconcile, source.Epoch);
             return read.Status;
         }
-        if ((uint)subscriptionIndex >= (uint)_subscriptionCount)
+        if (subscriptionIndex < 0 || subscriptionIndex >= _subscriptionCount)
         {
             read = EmptyRead(OfflineDirectChunkReadStatus.InvalidSubscription, source.Epoch);
             return read.Status;
@@ -574,7 +574,7 @@ public sealed class OfflineDirectChunkRecipient
             read = EmptyRead(OfflineDirectChunkReadStatus.SourceRequiresReconcile, source.Epoch);
             return read.Status;
         }
-        if ((uint)subscriptionIndex >= (uint)_subscriptionCount)
+        if (subscriptionIndex < 0 || subscriptionIndex >= _subscriptionCount)
         {
             read = EmptyRead(OfflineDirectChunkReadStatus.InvalidSubscription, source.Epoch);
             return read.Status;

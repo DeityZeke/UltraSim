@@ -695,9 +695,9 @@ public sealed class LocalChunkStreamingOracle
 
     private void ApplyCandidateDelta(SpatialChunkKey key, in WorldPublicDeltaRecord delta)
     {
-        int index = checked((int)delta.Id.Index);
-        if ((uint)index >= (uint)_candidatePresent.Length)
+        if (delta.Id.Index >= (uint)_candidatePresent.Length)
             throw new InvalidOperationException("Publication identity exceeds local semantic capacity.");
+        int index = checked((int)delta.Id.Index);
         if (delta.Operation is not (WorldPublicOperation.Present or WorldPublicOperation.Remove))
             throw new InvalidOperationException("The public operation is not recognized.");
         if (delta.Operation == WorldPublicOperation.Present &&

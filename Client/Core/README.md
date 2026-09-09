@@ -61,7 +61,11 @@ post-supersession semantic page is identical. Known state flags and change
 revisions are validated before mutation. A bounded public-index lookup, resident-
 location hint, and touched-slot list keep public application shaped by changed
 client-resident state rather than a scan of all resident chunks or all retained
-identity knowledge.
+identity knowledge. The resident `SpatialChunkKey` index closes linear-probe gaps
+when a chunk lifetime retires, so long-running exploration cost follows the current
+resident set rather than every chunk ever visited. Its checked table size is admitted
+before proportional cache arrays are allocated; lookup/probe counters make that
+maintenance observable.
 
 Terrain T1.0 adds the base-surface presence plane to bounded structural semantic
 residency. The cache exposes the exact 1,024-bit plane in its borrowed chunk view,

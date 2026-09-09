@@ -64,7 +64,8 @@ public sealed class OfflineDirectChunkWireEncoder
             return result.Status;
         }
 
-        bool knownAbsence = (uint)subscriptionIndex < (uint)recipient.Subscriptions.Length &&
+        bool knownAbsence = subscriptionIndex >= 0 &&
+            subscriptionIndex < recipient.Subscriptions.Length &&
             recipient.Subscriptions[subscriptionIndex].HasKnowledge &&
             !recipient.Subscriptions[subscriptionIndex].Cursor.IsValid;
         OfflineDirectChunkReadStatus readStatus = recipient.TryBeginRead(

@@ -129,7 +129,11 @@ chunk slots return to the free pool. At full capacity, a singleton source moving
 to an existing chunk collapses into that destination; moving to a new chunk
 re-keys the source slot in place. The table therefore admits the theoretical
 maximum of one occupied chunk per admitted entity, reports reserved
-payload/high-water diagnostics, and allocates nothing during ordinary movement.
+payload/high-water and lookup/probe diagnostics, and allocates nothing during
+ordinary movement. Linear-probe deletion closes the probe-chain gap: retired or
+moved chunks do not leave historical tombstones that make later misses scan the
+reserved table. Lookup sizing rejects an unrepresentable rounded capacity before
+allocating any proportional index storage.
 
 Runtime invokes the game generation through the domain-neutral
 `IServerGenerationStepParticipant` after `EcsWorld.Tick()` has completed its

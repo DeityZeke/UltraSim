@@ -307,7 +307,7 @@ public readonly ref struct WorldFrozenStaticChunkView
 
     public WorldFrozenStaticRecord GetRecord(int index)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
+        if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
         return !_records.IsEmpty ? _records[index] : FrozenWorldStructureCodec.ReadStaticRecord(
             _rows.Slice(index * FrozenWorldStructureFormat.StaticRowBytes,
                 FrozenWorldStructureFormat.StaticRowBytes), Key);
@@ -375,7 +375,7 @@ public readonly ref struct WorldMultiFragmentChunkView
 
     public WorldMultiFragmentRecord GetRecord(int index)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)Count);
+        if (index < 0 || index >= Count) throw new ArgumentOutOfRangeException(nameof(index));
         return !_records.IsEmpty ? _records[index] : FrozenWorldStructureCodec.ReadMultiFragment(
             _rows.Slice(index * FrozenWorldStructureFormat.MultiFragmentRowBytes,
                 FrozenWorldStructureFormat.MultiFragmentRowBytes), Key);

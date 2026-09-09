@@ -130,7 +130,7 @@ public readonly struct SpatialChunkGeometry : IEquatable<SpatialChunkGeometry>
     public bool TryReconstructAxis(int chunk, int local, out long global)
     {
         EnsureValid();
-        if ((uint)local >= (uint)EdgeUnits)
+        if (local < 0 || local >= EdgeUnits)
         {
             global = 0;
             return false;

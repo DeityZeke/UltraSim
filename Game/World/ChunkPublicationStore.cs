@@ -291,7 +291,7 @@ public sealed class ChunkPublicationStore
         int entities = limits.MaximumPublicEntities;
         int chunks = limits.MaximumResidentChunks;
         int rows = checked(entities * limits.RowsPerPage);
-        int mapCapacity = GetMapCapacity(chunks);
+        int mapCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(chunks);
         _entityMap = new EntityMap[entities];
         _slots = new PublicSlot[entities];
         _freeSlots = new int[entities];
@@ -1209,7 +1209,6 @@ public sealed class ChunkPublicationStore
     private bool TryAddMap(SpatialChunkKey key, int slot)
     {
         int bucket = key.GetHashCode() & _mapMask;
-        int tombstone = -1;
         for (int probe = 0; probe < _mapStates.Length; probe++)
         {
             byte state = _mapStates[bucket];
@@ -1217,20 +1216,14 @@ public sealed class ChunkPublicationStore
             {
                 if (_mapKeys[bucket] == key) return false;
             }
-            else if (state == 2)
-            {
-                if (tombstone < 0) tombstone = bucket;
-            }
             else
             {
-                WriteMap(tombstone >= 0 ? tombstone : bucket, key, slot);
+                WriteMap(bucket, key, slot);
                 return true;
             }
             bucket = (bucket + 1) & _mapMask;
         }
-        if (tombstone < 0) return false;
-        WriteMap(tombstone, key, slot);
-        return true;
+        return false;
     }
 
     private void RemoveMap(SpatialChunkKey key)
@@ -1242,14 +1235,32 @@ public sealed class ChunkPublicationStore
             if (state == 0) break;
             if (state == 1 && _mapKeys[bucket] == key)
             {
-                _mapStates[bucket] = 2;
-                _mapKeys[bucket] = default;
-                _mapValues[bucket] = 0;
+                CloseMapDeletionGap(bucket);
                 return;
             }
             bucket = (bucket + 1) & _mapMask;
         }
         throw new InvalidOperationException("Publication chunk lookup and storage diverged.");
+    }
+
+    private void CloseMapDeletionGap(int hole)
+    {
+        int scan = (hole + 1) & _mapMask;
+        while (_mapStates[scan] != 0)
+        {
+            int home = _mapKeys[scan].GetHashCode() & _mapMask;
+            if (((hole - home) & _mapMask) < ((scan - home) & _mapMask))
+            {
+                _mapKeys[hole] = _mapKeys[scan];
+                _mapValues[hole] = _mapValues[scan];
+                _mapStates[hole] = 1;
+                hole = scan;
+            }
+            scan = (scan + 1) & _mapMask;
+        }
+        _mapKeys[hole] = default;
+        _mapValues[hole] = 0;
+        _mapStates[hole] = 0;
     }
 
     private void WriteMap(int bucket, SpatialChunkKey key, int slot)
@@ -1498,14 +1509,6 @@ public sealed class ChunkPublicationStore
             (records[root], records[child]) = (records[child], records[root]);
             root = child;
         }
-    }
-
-    private static int GetMapCapacity(int chunks)
-    {
-        int required = checked(chunks * 2);
-        int capacity = 1;
-        while (capacity < required) capacity = checked(capacity << 1);
-        return capacity;
     }
 
     private enum PlannedMode : byte { None, Add, Update, Move, Remove, Replace }

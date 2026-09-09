@@ -925,7 +925,7 @@ public sealed class WorldPack
     /// <summary>Gets one canonical directory key by stable sorted pack index.</summary>
     public bool TryGetChunkKey(int index, out SpatialChunkKey key)
     {
-        if ((uint)index >= (uint)_metadata.ChunkCount)
+        if (index < 0 || index >= _metadata.ChunkCount)
         {
             key = default;
             return false;
@@ -1052,7 +1052,7 @@ public sealed class WorldPack
     /// <summary>Gets one canonical logical Multi root by sorted section-local index.</summary>
     public bool TryGetMultiInstanceAt(int index, out WorldMultiInstanceRecord instance)
     {
-        if ((uint)index >= (uint)MultiInstanceCount || !_metadata.MultiFragments.IsPresent)
+        if (index < 0 || index >= MultiInstanceCount || !_metadata.MultiFragments.IsPresent)
         {
             instance = default;
             return false;
@@ -1332,14 +1332,15 @@ public readonly ref struct WorldTerrainChunkView
 
     public ushort GetMaterial(int index)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)MaterialCount);
+        if (index < 0 || index >= MaterialCount)
+            throw new ArgumentOutOfRangeException(nameof(index));
         return BinaryPrimitives.ReadUInt16LittleEndian(_materials[(index * sizeof(ushort))..]);
     }
 
     public bool IsSurfacePresent(int materialCellIndex)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(
-            (uint)materialCellIndex, (uint)TerrainChunkFormat.MaterialCellCount);
+        if (materialCellIndex < 0 || materialCellIndex >= TerrainChunkFormat.MaterialCellCount)
+            throw new ArgumentOutOfRangeException(nameof(materialCellIndex));
         if (_surfacePresence.IsEmpty) return true;
         int word = materialCellIndex >> 6;
         ulong value = BinaryPrimitives.ReadUInt64LittleEndian(_surfacePresence[(word * sizeof(ulong))..]);
@@ -1351,7 +1352,8 @@ public readonly ref struct WorldTerrainChunkView
 
     public TerrainHeightOffset GetHeightOffset(int index)
     {
-        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual((uint)index, (uint)HeightVertexCount);
+        if (index < 0 || index >= HeightVertexCount)
+            throw new ArgumentOutOfRangeException(nameof(index));
         int offset = TerrainChunkFormat.HeightPlaneBaseBytes + index * sizeof(ushort);
         return new TerrainHeightOffset(BinaryPrimitives.ReadUInt16LittleEndian(_heights[offset..]));
     }

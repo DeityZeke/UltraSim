@@ -214,7 +214,8 @@ public sealed partial class WorldPackBuilder
         };
         int localX = targetCellX - target.Bounds.MinimumCellX;
         int localZ = targetCellZ - target.Bounds.MinimumCellZ;
-        if ((uint)localX >= target.Bounds.CellWidth || (uint)localZ >= target.Bounds.CellDepth)
+        if (localX < 0 || localX >= target.Bounds.CellWidth ||
+            localZ < 0 || localZ >= target.Bounds.CellDepth)
             return false;
         int targetCell = localZ * target.Bounds.CellWidth + localX;
         if ((target.SurfacePresence[targetCell >> 6] & (1UL << (targetCell & 63))) == 0 ||
@@ -701,7 +702,8 @@ internal static class AdditionalTerrainSurfaceCodec
         };
         int localX = targetCellX - targetBounds.MinimumCellX;
         int localZ = targetCellZ - targetBounds.MinimumCellZ;
-        if ((uint)localX >= targetBounds.CellWidth || (uint)localZ >= targetBounds.CellDepth)
+        if (localX < 0 || localX >= targetBounds.CellWidth ||
+            localZ < 0 || localZ >= targetBounds.CellDepth)
             return false;
         int targetCell = localZ * targetBounds.CellWidth + localX;
         int targetPresence = BinaryPrimitives.ReadInt32LittleEndian(targetDescriptor[16..]);

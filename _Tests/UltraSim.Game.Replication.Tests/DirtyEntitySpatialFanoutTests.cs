@@ -206,6 +206,38 @@ internal static class DirtyEntitySpatialFanoutTests
         }
     }
 
+    internal static void RejectsUnboundedDiscoveryGeometry()
+    {
+        var tinyCellLimits = new DirtyEntitySpatialFanoutLimits(
+            MaximumEntities: 8,
+            MaximumRecipients: 8,
+            MaximumSpatialRegions: 256,
+            MaximumSemanticKnowledgeRows: 64,
+            MaximumOutstandingBundles: 16,
+            MaximumRecordsPerBundle: 8,
+            SpatialRegionEdgeMillimeters: 1);
+        var profile = new GameInterestProfile(
+            10_000, 5_000, 6_000, 20_000, 40_000, 10, 20, 5, 100);
+        Check.Throws<ArgumentOutOfRangeException>(() =>
+            _ = new DirtyEntityChunkBatchFanout(new StateEpoch(1), tinyCellLimits, profile));
+
+        // Batch discovery can be one cell narrower than point-centered discovery for
+        // a large region edge and a radius just over an exact multiple. Admission must
+        // bound both algorithms rather than only the chunk-batched rectangle.
+        var pointDominatedLimits = tinyCellLimits with
+        {
+            SpatialRegionEdgeMillimeters = 1_000_000,
+        };
+        var pointDominatedProfile = new GameInterestProfile(
+            1_000_000, 5_000, 6_000, 20_000, 31_000_001, 10, 20, 5, 100);
+        Check.Throws<ArgumentOutOfRangeException>(() =>
+            _ = new DirtyEntitySpatialFanout(
+                new StateEpoch(1), pointDominatedLimits, pointDominatedProfile));
+        Check.Throws<ArgumentOutOfRangeException>(() =>
+            _ = new DirtyEntityChunkBatchFanout(
+                new StateEpoch(1), pointDominatedLimits, pointDominatedProfile));
+    }
+
     internal static void ChunkBatchUsesPointDiscoveryForSingleton()
     {
         var profile = new GameInterestProfile(

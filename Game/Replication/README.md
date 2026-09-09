@@ -274,13 +274,23 @@ coalesce before drain, and each drained key performs one bounded recipient-ancho
 spatial discovery. Final tier/membership admission is checked against the exact
 `ChunkInterestQuery` semantics.
 
+The reference fanout admits region edges of at least the canonical 16,000 mm World
+chunk edge, which keeps its signed region identity able to represent every canonical
+World position. Its expanded dirty-chunk discovery rectangle is limited to 4,096
+coarse cells per key before storage is allocated. The alternate dirty-entity batch
+discovery has the same explicit 4,096-cell admission bound. These are bounded-work
+configuration contracts, not disclosure policy; exact interest remains authoritative.
+
 Recipient anchor regions contain only current recipient spatial links. They do
 not contain chunk subscriber edges or a persistent `Chunk -> Recipient` reverse
 index. Recipient-local chunk rows retain only bounded scope, cursor, pending
 obligation, and proof lineage state. Recipient movement/admission reconciles
 current truth directly, so a clean-world entry can establish an unchanged chunk
 without dirty polling. AOI leave retires that scope and fences its deliveries;
-it is not encoded as authoritative `ChunkAbsent`.
+it is not encoded as authoritative `ChunkAbsent`. Empty region, row, and dirty-key
+lookup entries close their linear-probe gaps. At saturated region capacity a sole
+occupant may transactionally replace its region after subscription preflight;
+movement from a shared region to a missing destination still fails unchanged.
 
 `RemoteDirtyChunkSpatialFanoutServer` is a thin Game adapter over the existing
 chunk snapshot/delta/absence and applied-proof messages. `RemoteChunkWorldStateClient`

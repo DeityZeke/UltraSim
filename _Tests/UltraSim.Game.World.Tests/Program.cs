@@ -18,6 +18,8 @@ var tests = new (string Name, Action Body)[]
     ("GlobalLocalRoundTripsAcrossFullProfile", GlobalLocalRoundTripsAcrossFullProfile),
     ("NormalizationRejectsUnaddressableChunks", NormalizationRejectsUnaddressableChunks),
     ("MalformedValuesRejectWithoutSilentNormalization", MalformedValuesRejectWithoutSilentNormalization),
+    ("CheckedTryGuardsRejectSignedOutOfRangeInputs", CheckedTryGuardsRejectSignedOutOfRangeInputs),
+    ("SpatialMapCapacityRejectsUnrepresentableConfiguration", SpatialMapCapacityRejectsUnrepresentableConfiguration),
     ("ChunkIdentityOrderingAndHashAreCanonical", ChunkIdentityOrderingAndHashAreCanonical),
     ("SpaceIdentityCannotAliasChunkCoordinates", SpaceIdentityCannotAliasChunkCoordinates),
     ("HalfOpenBoundsAndCircleDistanceAreExact", HalfOpenBoundsAndCircleDistanceAreExact),
@@ -89,6 +91,7 @@ var tests = new (string Name, Action Body)[]
     ("SaturatedMigrationMergesIntoExistingDestination", SaturatedMigrationMergesIntoExistingDestination),
     ("SaturatedMigrationRekeysSingletonForNewDestination", SaturatedMigrationRekeysSingletonForNewDestination),
     ("SpatialIndexMatchesReferenceModelUnderBoundedChurn", SpatialIndexMatchesReferenceModelUnderBoundedChurn),
+    ("SpatialIndexTurnoverDoesNotRetainHistoricalProbeChains", SpatialIndexTurnoverDoesNotRetainHistoricalProbeChains),
     ("LifecycleOverrunRebuildsFromCurrentTruth", LifecycleOverrunRebuildsFromCurrentTruth),
     ("FailedRebuildPreservesPublishedSpatialIndex", FailedRebuildPreservesPublishedSpatialIndex),
     ("GenerationReplacementPublishesFreshDerivedIndex", GenerationReplacementPublishesFreshDerivedIndex),
@@ -817,6 +820,29 @@ static void AdditionalTerrainValidationAndCompatibilityAreFailClosed()
         materials, bottom, heights, 4, out _));
     False(brokenSeam.TryBuild(out _, out WorldPackBuildError brokenSeamError));
     Equal(WorldPackBuildError.InvalidAdditionalTerrainSurface, brokenSeamError);
+
+    // Both fragments are individually valid, but the east fragment points at a neighboring
+    // patch offset one cell from the seam. Checked builds must reject the derived -1 local
+    // coordinate through the builder's error protocol rather than throwing.
+    var offsetSeam = CreateFlatTwoChunkBuilder();
+    TerrainSurfacePatchBounds eastBounds = new(31, 4, 1, 1);
+    TerrainSurfacePatchBounds westOffsetBounds = new(1, 4, 1, 1);
+    True(offsetSeam.TryAddAdditionalTerrainSurfaceBand(
+        new SpatialChunkKey(WorldPackTestProfile.Space, 0, 0), new WorldSurfaceId(9), eastBounds,
+        WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom,
+        [1UL], [TerrainSurfaceEdgeConnection.East], [(ushort)2], top,
+        new TerrainHeightOffset[eastBounds.VertexCount], [(ushort)2], bottom,
+        new TerrainHeightOffset[eastBounds.VertexCount], 4, out _));
+    True(offsetSeam.TryAddAdditionalTerrainSurfaceBand(
+        new SpatialChunkKey(WorldPackTestProfile.Space, 1, 0), new WorldSurfaceId(9), westOffsetBounds,
+        WorldTerrainSurfaceFaces.Top | WorldTerrainSurfaceFaces.Bottom,
+        [1UL], [TerrainSurfaceEdgeConnection.None], [(ushort)2], top,
+        new TerrainHeightOffset[westOffsetBounds.VertexCount], [(ushort)2], bottom,
+        new TerrainHeightOffset[westOffsetBounds.VertexCount], 4, out _));
+    False(offsetSeam.TryBuild(out _, out WorldPackBuildError offsetSeamError));
+    Equal(WorldPackBuildError.InvalidAdditionalTerrainSurface, offsetSeamError);
+    False(offsetSeam.TryBuild(out _, out offsetSeamError));
+    Equal(WorldPackBuildError.InvalidAdditionalTerrainSurface, offsetSeamError);
 
     WorldPackArtifact artifact = CreateAdditionalTerrainWorldPack(false);
     var bytes = new byte[artifact.Length];
@@ -2903,6 +2929,28 @@ static void SpatialIndexMatchesReferenceModelUnderBoundedChurn()
     }
 }
 
+static void SpatialIndexTurnoverDoesNotRetainHistoricalProbeChains()
+{
+    using RawSpatialFixture fixture = new(lifecycleCapacity: 32, entityCapacity: 64);
+    True(fixture.World.TryCreate(fixture.SpatialArchetype, out Entity entity));
+    for (int chunk = 0; chunk < 2_048; chunk++)
+    {
+        True(fixture.State.TrySetPosition(
+            fixture.World, entity, new WorldPosition(chunk, -chunk, 0, 0, 0)));
+        fixture.State.CommitAfterEcsStep(fixture.World);
+    }
+    True(fixture.World.TryDestroy(entity));
+    fixture.State.CommitAfterEcsStep(fixture.World);
+    Equal(0, fixture.State.Index.GetSnapshot().ChunkCount);
+
+    WorldSpatialIndexSnapshot before = fixture.State.Index.GetSnapshot();
+    Equal(0, fixture.State.Index.GetMemberCount(
+        new SpatialChunkKey(GameWorldState.DefaultSpace, int.MinValue, int.MaxValue)));
+    WorldSpatialIndexSnapshot after = fixture.State.Index.GetSnapshot();
+    Equal(1L, after.MapLookups - before.MapLookups);
+    Equal(1L, after.MapProbes - before.MapProbes);
+}
+
 static WorldPosition RandomPosition(ref uint state)
 {
     state = unchecked(state * 1_664_525u + 1_013_904_223u);
@@ -3687,6 +3735,57 @@ static void MalformedValuesRejectWithoutSilentNormalization()
     Throws<ArgumentOutOfRangeException>(() => _ = new WorldLocalPosition(0, 16_000, 0));
     Throws<ArgumentOutOfRangeException>(() => _ = new TerrainCellCoord(32, 0));
     Throws<ArgumentOutOfRangeException>(() => SpatialMath.FloorDivRem(0, 0, out _, out _));
+}
+
+static void CheckedTryGuardsRejectSignedOutOfRangeInputs()
+{
+    SpatialChunkGeometry geometry = GameWorldSpatialProfile.ChunkGeometry;
+    foreach (int local in new[] { int.MinValue, -1, geometry.EdgeUnits, int.MaxValue })
+    {
+        False(geometry.TryReconstructAxis(0, local, out long rejected));
+        Equal(0L, rejected);
+    }
+    True(geometry.TryReconstructAxis(int.MinValue, 0, out long minimum));
+    Equal((long)int.MinValue * geometry.EdgeUnits, minimum);
+    True(geometry.TryReconstructAxis(int.MaxValue, geometry.EdgeUnits - 1, out long maximum));
+    Equal((long)int.MaxValue * geometry.EdgeUnits + geometry.EdgeUnits - 1L, maximum);
+
+    WorldPack pack = CreateStructuredWorldPackArtifact(reverse: false).Open();
+    foreach (int index in new[] { int.MinValue, -1, pack.ChunkCount, int.MaxValue })
+    {
+        False(pack.TryGetChunkKey(index, out SpatialChunkKey key));
+        Equal(default, key);
+    }
+    True(pack.TryGetChunkKey(0, out _));
+    True(pack.TryGetChunkKey(pack.ChunkCount - 1, out _));
+
+    foreach (int index in new[] { int.MinValue, -1, pack.MultiInstanceCount, int.MaxValue })
+    {
+        False(pack.TryGetMultiInstanceAt(index, out WorldMultiInstanceRecord instance));
+        Equal(default, instance);
+    }
+    True(pack.TryGetMultiInstanceAt(0, out _));
+    True(pack.TryGetMultiInstanceAt(pack.MultiInstanceCount - 1, out _));
+}
+
+static void SpatialMapCapacityRejectsUnrepresentableConfiguration()
+{
+    Equal(2, SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(1));
+    Equal(4, SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(2));
+    Equal(8, SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(3));
+    Equal(SpatialStorageCapacity.MaximumPowerOfTwoCapacity,
+        SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(1 << 29));
+    Throws<ArgumentOutOfRangeException>(() =>
+        SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(0));
+    Throws<ArgumentOutOfRangeException>(() =>
+        SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo((1 << 29) + 1));
+    Throws<ArgumentOutOfRangeException>(() =>
+        SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(int.MaxValue));
+
+    const int unsupported = (1 << 29) + 1;
+    Throws<ArgumentOutOfRangeException>(() => _ = new WorldSpatialIndex(1, unsupported));
+    Throws<ArgumentOutOfRangeException>(() => _ = new ChunkPublicationStore(
+        new PublicationEpoch(1), new ChunkPublicationLimits(1, unsupported, 1, 1)));
 }
 
 static void ChunkIdentityOrderingAndHashAreCanonical()

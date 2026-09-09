@@ -780,6 +780,12 @@ construction rejects inconsistent limits. If guaranteed insertion later fails,
 that is a terminal invariant/configuration fault—not a routine movement result
 and not a reason to roll back an already committed Position.
 
+The accepted fixed lookup uses gap-closing linear-probe deletion rather than
+retained tombstones. Its miss/insertion work therefore follows current collision
+clusters rather than historical world exploration. Checked power-of-two sizing is
+admitted before proportional table allocation, and lookup/probe diagnostics plus
+long-turnover tests make this maintenance contract observable.
+
 Avoid:
 
 - object-per-chunk graphs on the hot path;
@@ -2932,8 +2938,10 @@ copy, or group validation. Continuous LocalX/LocalZ and in-envelope Y motion
 therefore update one common root and nothing proportional to window area. Actual
 crossings resolve candidate keys through a client-owned fixed-capacity
 open-addressed `SpatialChunkKey -> semantic slot` index. The index includes
-generation-fenced slot reuse/tombstones in the existing 5,000-operation client
-cache oracle and reports lookup/probe counts. Retained presentation movement
+generation-fenced slot reuse with gap-closing deletion in the existing
+5,000-operation client cache oracle and reports lookup/probe counts. Historical
+residency therefore cannot leave a table full of tombstones or make an empty-cache
+miss scan reserved capacity. Retained presentation movement
 changes only its offset; it no longer runs semantic group admission twice.
 
 Vertical presentation uses a discrete integer anchor plus a continuous common-

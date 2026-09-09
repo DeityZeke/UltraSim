@@ -21,6 +21,7 @@ internal static class ClientWorldSemanticCacheTests
         SnapshotLineageAndCanonicality(world);
         PublicationEpochReplacementIsExplicit(world);
         DeterministicClientCacheChurnMatchesReference(world);
+        ChunkKeyTurnoverDoesNotRetainHistoricalProbeChains(world);
     }
 
     private static void BaseSurfaceTopologyIsResidentAndHashed()
@@ -87,6 +88,33 @@ internal static class ClientWorldSemanticCacheTests
         False(cache.TryBuildResidentAdditionalTerrainSurfaceMesh(
             handle, 1, vertices, indices, materials, out _, out semanticError, out _));
         Equal(ClientSemanticChunkError.InvalidState, semanticError);
+        foreach (int invalidIndex in new[] { int.MinValue, -1, int.MaxValue })
+        {
+            False(cache.TryBuildResidentAdditionalTerrainSurfaceMesh(
+                handle, invalidIndex, vertices, indices, materials,
+                out _, out semanticError, out _));
+            Equal(ClientSemanticChunkError.InvalidState, semanticError);
+        }
+    }
+
+    private static void ChunkKeyTurnoverDoesNotRetainHistoricalProbeChains(BoundWorldPack world)
+    {
+        var cache = new ClientWorldSemanticCache(
+            world, new ClientWorldSemanticCacheLimits(64, 0, 0, 1, 1));
+        for (int index = 0; index < 2_048; index++)
+        {
+            SpatialChunkKey key = Key(index + 10_000, -index - 10_000);
+            True(cache.TryRequest(key, out ClientSemanticChunkHandle handle, out _));
+            True(cache.BeginRetire(handle));
+            True(cache.CompleteRetire(handle));
+        }
+        Equal(0, cache.GetSnapshot().ResidentChunks);
+
+        ClientWorldSemanticCacheSnapshot before = cache.GetSnapshot();
+        False(cache.TryGetResidentHandle(Key(int.MinValue, int.MaxValue), out _));
+        ClientWorldSemanticCacheSnapshot after = cache.GetSnapshot();
+        Equal(1UL, after.ChunkKeyLookups - before.ChunkKeyLookups);
+        Equal(1UL, after.ChunkKeyProbes - before.ChunkKeyProbes);
     }
 
     private static void StructuralOverlayIdentityIsRetained(BoundWorldPack world)

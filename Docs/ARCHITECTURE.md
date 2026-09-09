@@ -123,8 +123,9 @@ derived/application indexes when their ownership and scale are explicit.
   dependency.
 - `Kernels/UI`: neutral view/model/action protocol.
 - `Kernels/Spatial`: dependency-neutral integer spatial values, explicit
-  geometry/bounds, floor normalization, and checked wide-distance math. It owns
-  no world storage, membership, AOI, publication, or threads.
+  geometry/bounds, floor normalization, checked wide-distance math, and checked
+  fixed-table capacity sizing. It owns no world storage, membership, AOI,
+  publication, or threads.
 - `Server/Runtime`, `Server/Hosting`, `Server/Persistence`: authority,
   deployment, and durable save-set mechanics.
 - `Client/Core`, `Client/Local`, `Client/Network`, `Client/Godot`: retained

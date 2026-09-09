@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.World;
+using UltraSim.Spatial;
 
 namespace UltraSim.Game.Replication;
 
@@ -73,6 +74,8 @@ public readonly record struct DirtyEntitySpatialFanoutLimits(
     int MaximumRecordsPerBundle,
     int SpatialRegionEdgeMillimeters = 128_000)
 {
+    public const int MaximumSpatialCellsPerBatch = 4_096;
+
     public static DirtyEntitySpatialFanoutLimits Default => new(
         MaximumEntities: 4_096,
         MaximumRecipients: 256,
@@ -297,6 +300,10 @@ public class DirtyEntitySpatialFanout
         if (profile == default) profile = GameInterestProfile.Reference;
         limits.Validate();
         profile.Validate();
+        ValidateSpatialDiscoveryWork(limits, profile);
+        int batchCapacity = chunkBatchedDiscovery
+            ? SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(limits.MaximumEntities)
+            : 0;
         _stateEpoch = stateEpoch;
         _limits = limits;
         _profile = profile;
@@ -322,7 +329,6 @@ public class DirtyEntitySpatialFanout
         _entityStamp = new int[limits.MaximumEntities];
         if (chunkBatchedDiscovery)
         {
-            int batchCapacity = MapCapacity(limits.MaximumEntities);
             _batchKeys = new DiscoveryChunkKey[batchCapacity];
             _batchEntityHeads = new int[batchCapacity];
             _batchStates = new byte[batchCapacity];
@@ -1086,9 +1092,9 @@ public class DirtyEntitySpatialFanout
         for (int dx = -cellRadius; dx <= cellRadius; dx++)
             for (int dz = -cellRadius; dz <= cellRadius; dz++)
             {
+                if (_attributionEnabled) _attributionCells++;
                 if (!TryOffset(center, dx, dz, out ReplicationSpatialRegionId region) ||
                     !_regionMap.TryGetValue(region, out int regionIndex)) continue;
-                if (_attributionEnabled) _attributionCells++;
                 int recipient = _regions[regionIndex].RecipientHead;
                 while (recipient >= 0)
                 {
@@ -1535,7 +1541,7 @@ public class DirtyEntitySpatialFanout
 
     private void RemoveRow(int index)
     {
-        if ((uint)index >= (uint)_rows.Length || !_rows[index].Active) return;
+        if (index < 0 || index >= _rows.Length || !_rows[index].Active) return;
         bool wasPending = _rows[index].Pending;
         UnlinkPending(index);
         int recipient = _rows[index].Recipient;
@@ -1735,13 +1741,13 @@ public class DirtyEntitySpatialFanout
         for (long x = firstX; x <= lastX; x++)
             for (long z = firstZ; z <= lastZ; z++)
             {
+                if (_attributionEnabled) _attributionCells++;
                 if (x < int.MinValue || x > int.MaxValue ||
                     z < int.MinValue || z > int.MaxValue)
                     continue;
                 if (!_regionMap.TryGetValue(
                         new ReplicationSpatialRegionId((int)x, (int)z), out int regionIndex))
                     continue;
-                if (_attributionEnabled) _attributionCells++;
                 for (int recipient = _regions[regionIndex].RecipientHead; recipient >= 0;
                     recipient = _recipients[recipient].RegionNext)
                 {
@@ -1773,6 +1779,26 @@ public class DirtyEntitySpatialFanout
     private int CellRadius(int radius) => checked(
         (radius + _limits.SpatialRegionEdgeMillimeters - 1) /
         _limits.SpatialRegionEdgeMillimeters);
+
+    private static void ValidateSpatialDiscoveryWork(
+        in DirtyEntitySpatialFanoutLimits limits,
+        in GameInterestProfile profile)
+    {
+        long pointCellRadius = checked(
+            (profile.FarRadiusMillimeters + limits.SpatialRegionEdgeMillimeters - 1L) /
+            limits.SpatialRegionEdgeMillimeters);
+        long pointCellsPerAxis = checked(pointCellRadius * 2L + 1L);
+        long expandedEdge = checked(
+            GameWorldSpatialProfile.WorldChunkEdgeUnits + 2L * profile.FarRadiusMillimeters);
+        long batchCellsPerAxis = checked(
+            (expandedEdge + limits.SpatialRegionEdgeMillimeters - 1L) /
+            limits.SpatialRegionEdgeMillimeters + 1L);
+        long cellsPerAxis = Math.Max(pointCellsPerAxis, batchCellsPerAxis);
+        if ((Int128)cellsPerAxis * cellsPerAxis >
+            DirtyEntitySpatialFanoutLimits.MaximumSpatialCellsPerBatch)
+            throw new ArgumentOutOfRangeException(nameof(limits),
+                "The admitted region geometry exceeds the bounded dirty-entity discovery workload.");
+    }
 
     private bool IsCurrentRelevant(
         int recipientIndex,
@@ -1885,14 +1911,6 @@ public class DirtyEntitySpatialFanout
 
     private static long DictionaryReservation(int capacity, int keySize) => checked(
         (long)capacity * (sizeof(int) * 3L + keySize + sizeof(int)));
-
-    private static int MapCapacity(int entries)
-    {
-        int capacity = 4;
-        int required = checked(entries * 2);
-        while (capacity < required) capacity = checked(capacity * 2);
-        return capacity;
-    }
 
     private static int BatchHash(in DiscoveryChunkKey key)
     {

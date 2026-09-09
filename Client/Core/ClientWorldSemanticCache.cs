@@ -218,6 +218,10 @@ public sealed class ClientWorldSemanticCache
         _baseWorld = preparedWorld.BaseWorld;
         if (limits == default) limits = ClientWorldSemanticCacheLimits.Default;
         limits.Validate();
+        int knowledgeBucketCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
+            limits.MaximumKnownPublicIdentities);
+        int chunkKeyBucketCapacity = SpatialStorageCapacity.DoubleAndRoundUpPowerOfTwo(
+            limits.MaximumResidentChunks);
         _limits = limits;
         _slots = new ChunkSlot[limits.MaximumResidentChunks];
         _freeSlots = new int[limits.MaximumResidentChunks];
@@ -242,8 +246,8 @@ public sealed class ClientWorldSemanticCache
         _publicScratch = new WorldPublicRecord[limits.MaximumPublicRecordsPerChunk];
         _acceptedDeltaScratch = new WorldPublicDeltaRecord[limits.MaximumPublicRecordsPerChunk];
         _knowledge = new KnowledgeEntry[limits.MaximumKnownPublicIdentities];
-        _knowledgeBuckets = new int[KnowledgeBucketCapacity(limits.MaximumKnownPublicIdentities)];
-        _chunkKeyBuckets = new int[KnowledgeBucketCapacity(limits.MaximumResidentChunks)];
+        _knowledgeBuckets = new int[knowledgeBucketCapacity];
+        _chunkKeyBuckets = new int[chunkKeyBucketCapacity];
         for (int index = 0; index < _freeSlots.Length; index++)
             _freeSlots[index] = _freeSlots.Length - index - 1;
         _freeSlotCount = _freeSlots.Length;
@@ -804,7 +808,8 @@ public sealed class ClientWorldSemanticCache
             return false;
         }
         if (_slots[slot].State != ClientSemanticChunkState.Resident ||
-            (uint)fragmentIndex >= (uint)_slots[slot].AdditionalTerrainSurfaceFragmentCount)
+            fragmentIndex < 0 ||
+            fragmentIndex >= _slots[slot].AdditionalTerrainSurfaceFragmentCount)
         {
             summary = default;
             semanticError = ClientSemanticChunkError.InvalidState;
@@ -1080,14 +1085,6 @@ public sealed class ClientWorldSemanticCache
         throw new InvalidOperationException("The bounded client knowledge index is full.");
     }
 
-    private static int KnowledgeBucketCapacity(int entries)
-    {
-        int required = checked(entries * 2);
-        int capacity = 1;
-        while (capacity < required) capacity = checked(capacity << 1);
-        return capacity;
-    }
-
     private void RemovePublicAt(int slot, int row)
     {
         ref ChunkSlot state = ref _slots[slot];
@@ -1352,22 +1349,15 @@ public sealed class ClientWorldSemanticCache
     {
         int mask = _chunkKeyBuckets.Length - 1;
         int bucket = ChunkKeyBucket(key, mask);
-        int tombstone = -1;
         for (int probe = 0; probe < _chunkKeyBuckets.Length; probe++)
         {
             int entry = _chunkKeyBuckets[bucket];
             if (entry == 0)
             {
-                _chunkKeyBuckets[tombstone >= 0 ? tombstone : bucket] = slot + 1;
+                _chunkKeyBuckets[bucket] = slot + 1;
                 return;
             }
-            if (entry < 0 && tombstone < 0) tombstone = bucket;
             bucket = (bucket + 1) & mask;
-        }
-        if (tombstone >= 0)
-        {
-            _chunkKeyBuckets[tombstone] = slot + 1;
-            return;
         }
         throw new InvalidOperationException("The bounded client chunk-key index is full.");
     }
@@ -1382,12 +1372,31 @@ public sealed class ClientWorldSemanticCache
             if (entry == 0) break;
             if (entry == slot + 1)
             {
-                _chunkKeyBuckets[bucket] = -1;
+                CloseChunkKeyDeletionGap(bucket);
                 return;
             }
             bucket = (bucket + 1) & mask;
         }
         throw new InvalidOperationException("The client chunk-key index lost an admitted slot.");
+    }
+
+    private void CloseChunkKeyDeletionGap(int hole)
+    {
+        int mask = _chunkKeyBuckets.Length - 1;
+        int scan = (hole + 1) & mask;
+        while (_chunkKeyBuckets[scan] != 0)
+        {
+            int entry = _chunkKeyBuckets[scan];
+            int slot = entry - 1;
+            int home = ChunkKeyBucket(_slots[slot].Key, mask);
+            if (((hole - home) & mask) < ((scan - home) & mask))
+            {
+                _chunkKeyBuckets[hole] = entry;
+                hole = scan;
+            }
+            scan = (scan + 1) & mask;
+        }
+        _chunkKeyBuckets[hole] = 0;
     }
 
     private static int ChunkKeyBucket(SpatialChunkKey key, int mask)
