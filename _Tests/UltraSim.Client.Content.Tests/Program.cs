@@ -342,6 +342,28 @@ static void ActorPresentationGlbIsBoundedPassiveAndCatalogResolved()
     False(ActorPresentationArtifact.TryInspect(
         cyclic, out _, out ActorPresentationArtifactError cyclicGraph));
     Equal(ActorPresentationArtifactError.InvalidReference, cyclicGraph);
+    byte[] unknownAnimation = RewriteActorJson(x, static root =>
+    {
+        JsonArray animations = root["animations"]!.AsArray();
+        JsonObject attack = animations[0]!.DeepClone().AsObject();
+        attack["name"] = "Attack";
+        animations.Add(attack);
+    });
+    False(ActorPresentationArtifact.TryInspect(
+        unknownAnimation, out _, out ActorPresentationArtifactError unknownClip));
+    Equal(ActorPresentationArtifactError.UnsupportedFeature, unknownClip);
+    byte[] duplicateSemanticAnimation = RewriteActorJson(x, static root =>
+    {
+        JsonArray animations = root["animations"]!.AsArray();
+        JsonObject duplicateIdle = animations.Single(animation =>
+            animation!["name"]!.GetValue<string>() == "Idle")!.DeepClone().AsObject();
+        duplicateIdle["name"] = "alternate/Idle-loop";
+        animations.Add(duplicateIdle);
+    });
+    False(ActorPresentationArtifact.TryInspect(
+        duplicateSemanticAnimation, out _,
+        out ActorPresentationArtifactError duplicateSemanticClip));
+    Equal(ActorPresentationArtifactError.UnsupportedFeature, duplicateSemanticClip);
 
     PackageFixture builtInX = ActorPackage(
         "ultrasim.actor.default-x", "actors", ContentTrustClass.BuiltIn,

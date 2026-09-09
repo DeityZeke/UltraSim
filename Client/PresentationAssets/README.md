@@ -10,6 +10,8 @@ owns one skeleton and the finite `Idle`, `Walk`, and `Jump` clips which were aut
 exact skeleton. This avoids Godot trying to associate an independently imported action skeleton
 with another scene's rest pose—the path which previously produced distorted/misaligned bodies.
 The authoring inputs and Blender build script live below `Client/PresentationSource/Avatars`.
+The build strips the incidental Mixamo model take before export, and passive admission rejects both
+unknown animation semantics and multiple names which normalize to the same semantic clip.
 
 These files remain optional bundled local/default presentation assets for products with local play;
 they are not primitive/bootstrap fallbacks. D0.7b also embeds the exact consolidated authoring bytes

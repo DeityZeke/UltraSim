@@ -1181,9 +1181,9 @@ static void VerifyClientPresentationAssets(string root)
     var expected = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["Client/PresentationAssets/Avatars/x_bot/x_bot_animated.glb"] =
-            "811c8a6c07692e353ff1a8364db142dd84b88b119e34c4747c51e1a2568db049",
+            "2704d59bee5f8046f335d7e4da05fb8f4f3c7c8f30cdf1e636c4de75ff3b5833",
         ["Client/PresentationAssets/Avatars/y_bot/y_bot_animated.glb"] =
-            "adeffa5fff32e0e8420107d0f25c11897f2141bd5ac817ad01d6298a484f25bc",
+            "553fb71ebe61caede890e582b93a37335ff554f1bb907c034658c5f434e6a567",
     };
     foreach ((string relative, string hash) in expected)
     {

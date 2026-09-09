@@ -1,0 +1,58 @@
+{
+  "Checkpoint": "D0.7b finite actor-animation vocabulary closure",
+  "CaptureDate": "2026-09-09",
+  "AcceptedCheckpointCommit": "f080ff2a2f20b45fc103a4cf833dc6707a05d862",
+  "CorrectionBaseCommit": "43d5184377e1a6da4be598a401d50ae9439c3b91",
+  "AdmissionRule": {
+    "SupportedSemanticClips": [
+      "Idle",
+      "Walk",
+      "Jump"
+    ],
+    "RequiresExactlyOneOfEachNormalizedSemantic": true,
+    "UnknownAnimationRejects": true,
+    "DuplicateNormalizedSemanticRejects": true,
+    "RejectionError": "UnsupportedFeature",
+    "ProtocolChanged": false
+  },
+  "AdversarialCandidates": {
+    "UnknownAnimationName": "Attack",
+    "UnknownAnimationRejected": true,
+    "DuplicateSemanticAlias": "alternate/Idle-loop",
+    "DuplicateSemanticAliasRejected": true
+  },
+  "SourceAssetCorrection": {
+    "AuthoringTool": "Blender 5.2",
+    "RemovedIncidentalModelTake": "Armature|mixamo.com|Layer0",
+    "XAnimationNames": [
+      "Idle",
+      "Jump",
+      "Walk"
+    ],
+    "YAnimationNames": [
+      "Idle",
+      "Jump",
+      "Walk"
+    ],
+    "XSourceBytes": 2213380,
+    "XSourceSha256": "2704d59bee5f8046f335d7e4da05fb8f4f3c7c8f30cdf1e636c4de75ff3b5833",
+    "YSourceBytes": 2509988,
+    "YSourceSha256": "553fb71ebe61caede890e582b93a37335ff554f1bb907c034658c5f434e6a567",
+    "CombinedSourceBytes": 4723368
+  },
+  "SkeletonIdentityScope": {
+    "Name": "ordered bone-name fingerprint",
+    "IncludesOrderedBoneNames": true,
+    "IncludesParentTopology": false,
+    "IncludesRestTransforms": false,
+    "IncludesInverseBindMatrices": false,
+    "ArbitrarySkeletonRetargetingSupported": false
+  },
+  "PermanentAcceptance": {
+    "ContentPureTests": 27,
+    "ExistingXAndYArtifactsAdmitted": true,
+    "NativeXAndYRealization": "PASS",
+    "PrimitiveToContentActorLifetimeCanary": "PASS",
+    "RepositoryVerification": "PASS"
+  }
+}

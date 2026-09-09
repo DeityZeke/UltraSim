@@ -63,8 +63,11 @@ it is classification before a later hardened decoder/engine realization and is n
 arbitrary image bytes are safe. WorldPack admission delegates to `Game.World`'s complete bounded
 container/hash/schema validator instead of defining a second WorldPack format here.
 Actor GLB admission bounds and validates its container, graph, meshes, accessors, embedded buffer,
-one skeleton, and finite animation vocabulary; the Concept Demo resolver additionally requires the
-exact 65-bone profile and Idle/Walk/Jump clips before an applied-catalog blob lease can reach Godot.
+one skeleton, and finite animation vocabulary with exactly one normalized occurrence of each clip;
+the Concept Demo resolver additionally requires the exact ordered 65-bone-name profile and
+Idle/Walk/Jump clips before an applied-catalog blob lease can reach Godot. The fingerprint covers
+ordered bone names, not parent topology, rest transforms, or inverse-bind matrices; arbitrary
+humanoid retargeting remains unsupported.
 
 Generic Godot resources, scenes, scripts, shaders, executable code, arbitrary GLB/audio, partial
 Patch, dependencies/version solving, and executable extensions remain unsupported. The one actor

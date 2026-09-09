@@ -84,7 +84,10 @@ public readonly record struct ActorPresentationArtifactLimits(
         MaximumStringCharacters is >= 1 and <= 4_096;
 }
 
-/// <summary>Validated, engine-neutral facts about one self-contained actor GLB.</summary>
+/// <summary>
+/// Validated, engine-neutral facts about one self-contained actor GLB. The skeleton
+/// fingerprint covers ordered bone names; it does not claim topology/rest-pose identity.
+/// </summary>
 public readonly record struct ActorPresentationArtifactInfo(
     int ArtifactBytes,
     int JsonBytes,
@@ -123,7 +126,7 @@ public static class ActorPresentationArtifact
     private const uint GlbVersion = 2;
     private const uint JsonChunk = 0x4E4F_534A;
     private const uint BinaryChunk = 0x004E_4942;
-    private const string SkeletonDomain = "ultrasim.actor-skeleton.v1";
+    private const string BoneNameFingerprintDomain = "ultrasim.actor-skeleton.v1";
     private static readonly string[] SupportedExtensions = ["KHR_materials_specular"];
 
     public static bool TryInspect(
@@ -210,9 +213,12 @@ public static class ActorPresentationArtifact
                     limits, out string[] boneNames, out string mainHand))
                 return Fail(ActorPresentationArtifactError.InvalidSkeleton, out error);
 
-            if (!TryValidateAnimations(animations, nodes.GetArrayLength(), accessorInfo,
-                    limits, out int tracks, out int keys,
+            if (!TryValidateAnimationVocabulary(
+                    animations, limits.MaximumStringCharacters,
                     out ActorPresentationSemanticClips clips))
+                return Fail(ActorPresentationArtifactError.UnsupportedFeature, out error);
+            if (!TryValidateAnimations(animations, nodes.GetArrayLength(), accessorInfo,
+                    limits, out int tracks, out int keys))
                 return Fail(ActorPresentationArtifactError.InvalidReference, out error);
             if ((clips & ActorPresentationSemanticClips.RequiredV1) !=
                 ActorPresentationSemanticClips.RequiredV1)
@@ -553,24 +559,55 @@ public static class ActorPresentationArtifact
         return mainHand.Length != 0;
     }
 
+    private static bool TryValidateAnimationVocabulary(
+        JsonElement animations,
+        int maximumStringCharacters,
+        out ActorPresentationSemanticClips clips)
+    {
+        clips = ActorPresentationSemanticClips.None;
+        foreach (JsonElement animation in animations.EnumerateArray())
+        {
+            if (!TryString(animation, "name", maximumStringCharacters, out string name) ||
+                !TryGetSemanticClip(name, out ActorPresentationSemanticClips clip) ||
+                (clips & clip) != 0)
+                return false;
+            clips |= clip;
+        }
+        return true;
+    }
+
+    private static bool TryGetSemanticClip(
+        string name,
+        out ActorPresentationSemanticClips clip)
+    {
+        string leaf = SemanticLeaf(name);
+        if (leaf.Equals("Idle", StringComparison.OrdinalIgnoreCase))
+            clip = ActorPresentationSemanticClips.Idle;
+        else if (leaf.Equals("Walk", StringComparison.OrdinalIgnoreCase))
+            clip = ActorPresentationSemanticClips.Walk;
+        else if (leaf.Equals("Jump", StringComparison.OrdinalIgnoreCase))
+            clip = ActorPresentationSemanticClips.Jump;
+        else
+        {
+            clip = ActorPresentationSemanticClips.None;
+            return false;
+        }
+        return true;
+    }
+
     private static bool TryValidateAnimations(
         JsonElement animations,
         int nodeCount,
         AccessorInfo[] accessors,
         ActorPresentationArtifactLimits limits,
         out int trackCount,
-        out int keyCount,
-        out ActorPresentationSemanticClips clips)
+        out int keyCount)
     {
         trackCount = 0;
         keyCount = 0;
-        clips = ActorPresentationSemanticClips.None;
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (JsonElement animation in animations.EnumerateArray())
         {
-            if (!TryString(animation, "name", limits.MaximumStringCharacters, out string name) ||
-                !names.Add(name) ||
-                !animation.TryGetProperty("samplers", out JsonElement samplers) ||
+            if (!animation.TryGetProperty("samplers", out JsonElement samplers) ||
                 samplers.ValueKind != JsonValueKind.Array || samplers.GetArrayLength() == 0 ||
                 !animation.TryGetProperty("channels", out JsonElement channels) ||
                 channels.ValueKind != JsonValueKind.Array || channels.GetArrayLength() == 0)
@@ -619,13 +656,6 @@ public static class ActorPresentationArtifact
                 if (keyCount > limits.MaximumAnimationKeys) return false;
             }
 
-            string leaf = SemanticLeaf(name);
-            if (leaf.Equals("Idle", StringComparison.OrdinalIgnoreCase))
-                clips |= ActorPresentationSemanticClips.Idle;
-            else if (leaf.Equals("Walk", StringComparison.OrdinalIgnoreCase))
-                clips |= ActorPresentationSemanticClips.Walk;
-            else if (leaf.Equals("Jump", StringComparison.OrdinalIgnoreCase))
-                clips |= ActorPresentationSemanticClips.Jump;
         }
         return true;
     }
@@ -640,7 +670,7 @@ public static class ActorPresentationArtifact
     private static ContentHash ComputeSkeletonFingerprint(IEnumerable<string> boneNames)
     {
         using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        Append(hash, SkeletonDomain);
+        Append(hash, BoneNameFingerprintDomain);
         foreach (string bone in boneNames) Append(hash, bone);
         Span<byte> digest = stackalloc byte[ContentHash.ByteLength];
         if (!hash.TryGetHashAndReset(digest, out int written) || written != digest.Length)

@@ -927,7 +927,7 @@ model. Equipped items stay attached and non-pickable; authoritative Drop returns
 ordinary GroundItem presentation.
 
 The V1.5 X/Y model and action FBXs are now authoring inputs outside Godot's runtime resource tree.
-A reproducible Blender conversion verifies an exact ordered 65-bone match and emits one GLB per body
+A reproducible Blender conversion verifies an exact ordered 65-bone-name match and emits one GLB per body
 with one skeleton plus sampled `Idle`, `Walk`, and `Jump` actions. Godot never attaches a clip scene's
 skeleton to a separate model scene at runtime. Native acceptance opens both generated scenes and
 requires the finite clips, animation player, semantic hand socket, and committed-pose Walk change.
@@ -948,7 +948,10 @@ Actor GLB is now a narrow passive content family, not generic engine resource lo
 requires a self-contained bounded binary glTF 2.0 artifact with no external references,
 images/textures, cameras, scenes, scripts, shader code, or unsupported extensions. It bounds the
 container and structural counts, validates buffer/accessor/mesh/animation references, and requires
-the Concept Demo's exact 65-bone fingerprint, right-hand socket, and Idle/Walk/Jump clips.
+the Concept Demo's exact ordered bone-name fingerprint, right-hand socket, and Idle/Walk/Jump clips.
+The authoring build removes the incidental model-FBX take. Passive admission normalizes each
+animation name into the finite semantic vocabulary, rejects unknown semantics, and rejects a second
+name mapping to an already-present semantic clip.
 
 Godot resolves only from the live applied catalog, pins the exact blob, imports and rechecks one
 inert native template lazily, and duplicates it for matching actors. When content becomes available,

@@ -1452,8 +1452,11 @@ The admitted actor profile is binary glTF 2.0 with exactly one embedded binary b
 image, texture, camera, script, scene, arbitrary shader, or unsupported extension. Bounded passive
 inspection covers nodes, meshes, triangle primitives, vertex/index totals, materials, accessors,
 buffer views, bones, animations, tracks, keys, strings, and byte sizes before catalog publication.
-The Concept Demo resolver then requires its exact ordered 65-bone fingerprint, right-hand semantic
-socket, and Idle/Walk/Jump vocabulary. Godot imports the validated bytes lazily, rechecks the native
+The Concept Demo resolver then requires its exact ordered 65-bone-name fingerprint, right-hand
+semantic socket, and exactly one normalized Idle/Walk/Jump clip. Unknown animation semantics and
+duplicate semantic aliases fail passive admission. The fingerprint does not cover parent topology,
+rest transforms, or inverse-bind matrices; arbitrary retargeting remains unsupported. Godot imports
+the validated bytes lazily, rechecks the native
 scene shape, and retains the source catalog/blob lease for the native template lifetime.
 
 ```text

@@ -2123,7 +2123,7 @@ entity returns to ordinary GroundItem presentation after authoritative Drop.
 
 The historical V1.5 X/Y FBXs kept model and action skeletons as separate Godot imports. D0.7a moves
 those inputs out of the runtime resource tree and uses one reproducible Blender conversion per body.
-Each generated GLB contains one body, one ordered 65-bone skeleton, and sampled `Idle`, `Walk`, and
+Each generated GLB contains one body, one ordered 65-bone-name profile, and sampled `Idle`, `Walk`, and
 `Jump` actions. Native acceptance loads both real generated scenes, verifies their clips/socket, and
 drives committed movement through the Walk phase. This avoids runtime cross-scene skeleton
 attachment/retargeting and its prior distortion/misalignment failure mode.
@@ -2143,7 +2143,10 @@ buffer views, bones, animations, tracks, keys, strings, and total bytes. The fir
 embedded binary data, triangle meshes, one skeleton, and only the reviewed material extension. It
 rejects external references, images/textures, cameras, unsupported extensions, Godot scenes,
 scripts, shaders, and generic executable resources. The Concept Demo then additionally requires its
-exact ordered 65-bone skeleton, semantic right-hand bone, and `Idle`/`Walk`/`Jump` clips.
+exact ordered 65-bone-name fingerprint, semantic right-hand bone, and exactly one normalized
+`Idle`/`Walk`/`Jump` clip. Unknown animation semantics and duplicate semantic aliases fail passive
+admission. The fingerprint does not claim parent-topology, rest-transform, or inverse-bind identity;
+arbitrary skeleton retargeting remains outside this profile.
 
 Actor semantics request stable logical definitions `actors:human/x` and `actors:human/y`, never a
 Godot path. The Direct Connect deployment authorizes a server actor package which Adds both bodies,

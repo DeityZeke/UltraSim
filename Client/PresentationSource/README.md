@@ -11,9 +11,10 @@ blender --background --factory-startup \
 ```
 
 The script admits an action only when its complete ordered bone-name set matches the destination
-body, then exports one GLB containing that body, its one skeleton, and the sampled `Idle`, `Walk`,
-and `Jump` actions. It does not invent Attack or Interact clips; missing action animation continues
-to use the renderer's bounded primitive cue.
+body, removes incidental animation carried by the model FBX, then exports one GLB containing that
+body, its one skeleton, and exactly one sampled `Idle`, `Walk`, and `Jump` action. It does not invent
+Attack or Interact clips; missing action animation continues to use the renderer's bounded primitive
+cue.
 
 The generated GLBs belong under `Client/PresentationAssets/Avatars`. Source FBXs must not also be
 placed in that runtime tree, because doing so recreates two unrelated Godot-imported skeleton

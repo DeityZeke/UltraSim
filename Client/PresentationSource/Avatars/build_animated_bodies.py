@@ -66,6 +66,15 @@ def bake_body(directory: Path, model_name: str, output: Path) -> None:
     if not model_bones:
         fail(f"The model {model_path} has no skeleton")
 
+    # The Mixamo body FBX may carry an incidental take.  It is not one of
+    # UltraSim's admitted semantic clips, so detach and remove every action
+    # brought in with the model before importing the reviewed clip set.
+    for obj in model_objects:
+        if obj.animation_data is not None:
+            obj.animation_data_clear()
+    for action in tuple(bpy.data.actions):
+        bpy.data.actions.remove(action)
+
     actions: list[bpy.types.Action] = []
     for action_name, file_name in CLIPS.items():
         clip_path = directory / file_name
@@ -83,7 +92,10 @@ def bake_body(directory: Path, model_name: str, output: Path) -> None:
         remove_import(clip_objects, action)
 
     model_armature.animation_data_create()
-    model_armature.animation_data.action = actions[0]
+    # ACTIONS mode exports the retained reviewed actions.  Do not bind an action
+    # slot imported for the temporary clip armature to the body armature: modern
+    # Blender treats that as a foreign slotted action and can omit it.
+    model_armature.animation_data.action = None
     model_armature.name = "BodySkeleton"
     model_armature.data.name = "BodySkeleton"
     for obj in model_objects:
