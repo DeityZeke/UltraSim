@@ -66,7 +66,9 @@ The trust record is not committed at candidate acceptance. After secure transpor
 first Game Control message must contain a nonzero `ApplicationRealmId` and fresh application-session
 epoch. That authenticated pair commits key/realm/endpoint through Client Core. Known-key reconnect
 skips consent, mismatch blocks without overwriting the pin, and teardown clears candidate/session
-lineage. `ClientDirectConnectEndpoint` remains IPv4-only while Hosted H0 is IPv4-only.
+lineage. Automatic underlying drain/closure is promoted before the established-state fast path:
+semantic consumers retire, the stale peer is no longer exposed, and the same wrapper may begin a
+fresh connection. `ClientDirectConnectEndpoint` remains IPv4-only while Hosted H0 is IPv4-only.
 
 F0.3a creates no participant or actor and consumes no world/UI/Chat state. F0.3b now attaches
 `RemotePlayableSession` to the established peer. Its bounded guest exchange yields server-issued
@@ -92,6 +94,13 @@ catalog lease, and emits `ContentSetApplied` only after catalog publication. `Re
 will not submit guest admission before that local application succeeds, while the authority also
 independently blocks hostile bypass until the exact session proof arrives. Cache presence alone is
 not proof, and reconnect always requires fresh application-session proof.
+
+Cold source/cache acquisition runs as one cancellable session-fenced worker rather than inside the
+protocol/Godot pump. The owner pump continues transport/application progression while the worker
+returns only an immutable completion. The completion's application epoch, requirement sequence,
+and plan hash must still match before the owner publishes state or queues proof; disconnect cancels
+and joins the worker before its source/cache lifetime is released. No admission semantics become
+available while the client is in `Acquiring`.
 
 The A0.8 contentless Online product now composes F0.3b's external semantic path with the accepted
 content pipeline. It starts from `ContentBaseCatalog.Empty`, applies the authenticated realm

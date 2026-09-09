@@ -127,6 +127,7 @@ Network identities are fixed/value identities with explicit generations/lifetime
 | `HostedConnectionOwnerId` | generation-fenced protocol/connection worker ownership |
 | `HostedPacketTransferId` | generation-fenced exclusive packet-slab ownership transfer |
 | `HostedPathGeneration` | authenticated current-path lineage for one established connection |
+| `PacketBufferToken` | pool-instance-bound, generation-fenced ownership of one packet slot |
 
 Game/application identities such as `ParticipantId`, `StateEpoch`,
 `ReplicationEntityId`, `WorldPublicEntityId`, `PersistentEntityKey`, ECS handles,
@@ -150,8 +151,9 @@ The kernel uses:
 - manifest/lane-aware retained payload arenas;
 - transactional capacity admission.
 
-Stale, foreign, double-returned, wrong-owner, or post-reuse tokens cannot access
-packet storage. Capacity failure must occur before partial publication. Shutdown
+Stale, foreign-pool, double-returned, wrong-owner, or post-reuse tokens cannot access
+packet storage. A token includes the issuing pool identity as well as slot/generation;
+matching slot layouts in unrelated pools do not confer ownership. Capacity failure must occur before partial publication. Shutdown
 requires connections, queues, and packet ownership to reconcile according to the
 owning lifecycle.
 
@@ -208,6 +210,12 @@ Network reliable ACK means the remote protocol peer authenticated the datagram a
 admitted its reliable payload into bounded receive/reassembly state. It does not
 prove that Game logic, UI, a world snapshot, or any other application semantic
 committed.
+
+An ACK authenticates the exact opposite-direction sending `SecurityEpoch` it
+acknowledges in addition to packet number/mask. A delayed genuine ACK from an older
+epoch is valid traffic but cannot retire reused packet numbers, update RTT, or alter
+congestion state in the current epoch. Transport wire revision 2 records this framing
+change in every protocol-manifest fingerprint independently of application messages.
 
 Unreliable state does not emit semantically useless transport ACKs merely to pretend
 knowledge. Game/application owners retain the semantic debt they require and advance
@@ -289,6 +297,14 @@ mechanisms summarized here:
 - authenticated IPv4 Request/Challenge/Proof/Commit path rebinding;
 - exclusive listener<->connection-owner packet-slab handoff;
 - fixed connection-owner runtime and real dedicated-server process composition.
+
+Scalar and sharded hosts share one application-retirement/idle/drain/deadline policy.
+Terminal sessions release their application, peer, route, connection-table row, and
+admission slot; the sharded owner applies peer transitions on its owner thread and the
+listener reaps only after quiescence. Owner ingress work per pass is explicitly bounded
+so a continuously refilled fixed queue cannot postpone application progress or shutdown
+indefinitely. Shutdown joins/reclaims every quiescent owner and closes the listener
+before reporting collected callback/worker failures.
 
 H0.5's accepted topology uses one dedicated server process, four owner threads,
 eight independent client processes, and two fresh application phases per client.

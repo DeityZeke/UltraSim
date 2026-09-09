@@ -100,8 +100,16 @@ public sealed class LocalContentPackageSource : IContentPackageSource
     public bool TryFetch(
         in ContentPackageFetchRequest request,
         out FetchedContentPackage? package,
+        out ContentSourceFetchError error) =>
+        TryFetch(in request, CancellationToken.None, out package, out error);
+
+    public bool TryFetch(
+        in ContentPackageFetchRequest request,
+        CancellationToken cancellationToken,
+        out FetchedContentPackage? package,
         out ContentSourceFetchError error)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         SaturatingIncrement(ref _requests);
         package = null;
         if (!request.IsValid || request.Source.Kind != ContentSourceKind.Local)
@@ -118,7 +126,8 @@ public sealed class LocalContentPackageSource : IContentPackageSource
             var info = new FileInfo(path);
             if (info.Length < 1 || info.Length > _limits.MaximumArchiveBytes || info.Length > int.MaxValue)
                 return Reject(ContentSourceFetchError.CapacityExceeded, out error);
-            byte[] bytes = File.ReadAllBytes(path);
+            byte[] bytes = File.ReadAllBytesAsync(path, cancellationToken)
+                .GetAwaiter().GetResult();
             _archiveBytesRead = checked(_archiveBytesRead + bytes.LongLength);
             if (!ContentPackageArchive.TryDecodeCanonical(
                     bytes, request.PackageId, request.ManifestHash, out package, _contentLimits))
@@ -126,6 +135,10 @@ public sealed class LocalContentPackageSource : IContentPackageSource
             SaturatingIncrement(ref _completed);
             error = ContentSourceFetchError.None;
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
                                            ArgumentException or NotSupportedException or OverflowException)
@@ -241,9 +254,17 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
     public bool TryFetch(
         in ContentPackageFetchRequest request,
         out FetchedContentPackage? package,
+        out ContentSourceFetchError error) =>
+        TryFetch(in request, CancellationToken.None, out package, out error);
+
+    public bool TryFetch(
+        in ContentPackageFetchRequest request,
+        CancellationToken cancellationToken,
+        out FetchedContentPackage? package,
         out ContentSourceFetchError error)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _requests);
         package = null;
         if (!request.IsValid || !TryAuthorizeUri(request.Source, out Uri? uri))
@@ -252,7 +273,8 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
         try
         {
             if (!TryRead(uri!, _limits.MaximumArchiveBytes,
-                    "application/vnd.ultrasim.content-package", out byte[] bytes, out error))
+                    "application/vnd.ultrasim.content-package", cancellationToken,
+                    out byte[] bytes, out error))
                 return false;
             Interlocked.Add(ref _archiveBytesRead, bytes.LongLength);
             if (!ContentPackageArchive.TryDecodeCanonical(
@@ -261,6 +283,10 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
             Interlocked.Increment(ref _completed);
             error = ContentSourceFetchError.None;
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or
                                            OperationCanceledException or OverflowException)
@@ -276,16 +302,25 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
     public bool TryFetchManifest(
         in ContentPackageManifestFetchRequest request,
         out ContentPackageManifest? manifest,
+        out ContentSourceFetchError error) =>
+        TryFetchManifest(in request, CancellationToken.None, out manifest, out error);
+
+    public bool TryFetchManifest(
+        in ContentPackageManifestFetchRequest request,
+        CancellationToken cancellationToken,
+        out ContentPackageManifest? manifest,
         out ContentSourceFetchError error)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _requests);
         manifest = null;
         if (!request.IsValid || !TryAuthorizeRoot(request.Source, out Uri? root))
             return Reject(ContentSourceFetchError.InvalidRequest, out error);
         Uri uri = new(root!, "manifest.usmanifest");
         if (!TryRead(uri, _limits.MaximumArchiveBytes,
-                "application/vnd.ultrasim.content-manifest", out byte[] bytes, out error))
+                "application/vnd.ultrasim.content-manifest", cancellationToken,
+                out byte[] bytes, out error))
             return false;
         Interlocked.Add(ref _manifestBytesRead, bytes.LongLength);
         if (!ContentPackageManifestEnvelope.TryDecodeCanonical(
@@ -299,16 +334,24 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
     public bool TryFetchFile(
         in ContentFileFetchRequest request,
         out ContentFilePayload payload,
+        out ContentSourceFetchError error) =>
+        TryFetchFile(in request, CancellationToken.None, out payload, out error);
+
+    public bool TryFetchFile(
+        in ContentFileFetchRequest request,
+        CancellationToken cancellationToken,
+        out ContentFilePayload payload,
         out ContentSourceFetchError error)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _requests);
         payload = default;
         if (!request.IsValid || !TryAuthorizeRoot(request.Source, out Uri? root))
             return Reject(ContentSourceFetchError.InvalidRequest, out error);
         Uri uri = new(root!, $"blobs/{request.File.Sha256}.blob");
         if (!TryRead(uri, request.File.SizeBytes, "application/octet-stream",
-                out byte[] bytes, out error))
+                cancellationToken, out byte[] bytes, out error))
             return false;
         Interlocked.Add(ref _payloadBytesRead, bytes.LongLength);
         if (!ContentPackageValidator.TryValidatePayload(request.File, bytes))
@@ -368,6 +411,7 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
         Uri uri,
         long maximumBytes,
         string accept,
+        CancellationToken cancellationToken,
         out byte[] bytes,
         out ContentSourceFetchError error)
     {
@@ -376,7 +420,8 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
         UpdateMaximum(ref _peakConcurrentRequests, active);
         try
         {
-            using var cancellation = new CancellationTokenSource(_limits.RequestTimeoutMilliseconds);
+            using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cancellation.CancelAfter(_limits.RequestTimeoutMilliseconds);
             using var message = new HttpRequestMessage(HttpMethod.Get, uri);
             message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
             using HttpResponseMessage response = _client.Send(
@@ -408,6 +453,7 @@ public sealed class HttpContentPackageSource : IContentPackageFileSource, IDispo
         catch (Exception exception) when (exception is HttpRequestException or IOException or
                                            OperationCanceledException or OverflowException or SocketException)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             return Reject(ContentSourceFetchError.Unavailable, out error);
         }
         finally

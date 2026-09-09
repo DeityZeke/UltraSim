@@ -33,6 +33,7 @@ public enum ClientDirectConnectFailure : byte
     InvalidApplicationIdentity = 8,
     TrustConflict = 9,
     TrustPersistenceFailed = 10,
+    TransportClosed = 11,
 }
 
 public readonly record struct ClientDirectConnectSnapshot(
@@ -236,10 +237,25 @@ public sealed class ClientDirectConnectSession : IDisposable
                 "The pinned Hosted handshake failed.");
             return;
         }
+        if (_transport.State == HostedUdpClientState.Closed)
+        {
+            if (_state != ClientDirectConnectState.Draining)
+            {
+                _failure = ClientDirectConnectFailure.TransportClosed;
+                _detail = "The authenticated transport closed without a local disconnect request.";
+            }
+            CloseTransport();
+            return;
+        }
+        if (_transport.State == HostedUdpClientState.Draining &&
+            _state != ClientDirectConnectState.Draining)
+        {
+            _failure = ClientDirectConnectFailure.TransportClosed;
+            _detail = "The authenticated transport stopped receiving the remote deployment.";
+            _state = ClientDirectConnectState.Draining;
+        }
         if (_state == ClientDirectConnectState.Draining)
         {
-            if (_transport.State == HostedUdpClientState.Closed)
-                CloseTransport();
             return;
         }
         // F0.3a stopped at establishment. F0.3b keeps the accepted transport pumping while

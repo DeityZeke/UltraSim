@@ -7,7 +7,7 @@ using UltraSim.Network;
 
 internal static class F03aDirectConnectTests
 {
-    internal const int TestCount = 7;
+    internal const int TestCount = 8;
 
     private static readonly NetworkProtocolLimits Protocol = NetworkProtocolLimits.Default;
     private static readonly UdpProtocolLimits Udp = new(
@@ -55,6 +55,8 @@ internal static class F03aDirectConnectTests
             DirectConnectTrustPersistenceFailureRollsBackMemory);
         Run("DirectConnectEndpointUpdatePersistenceFailureRestoresPriorLocation",
             DirectConnectEndpointUpdatePersistenceFailureRestoresPriorLocation);
+        Run("DirectConnectObservesAutomaticTransportClosureAndReconnects",
+            DirectConnectObservesAutomaticTransportClosureAndReconnects);
     }
 
     private static void DirectConnectFirstTrustPersistsOnlyAfterAuthenticatedRealm()
@@ -270,16 +272,66 @@ internal static class F03aDirectConnectTests
         }
     }
 
+    private static void DirectConnectObservesAutomaticTransportClosureAndReconnects()
+    {
+        UdpProtocolLimits shortUdp = Udp with
+        {
+            IdleTimeoutMilliseconds = 120,
+            DrainTimeoutMilliseconds = 20,
+            KeepAliveIntervalMilliseconds = 10,
+        };
+        HostedUdpAdmissionLimits shortAdmission = Admission with
+        {
+            ValidatedCandidateTimeoutMilliseconds = 60,
+        };
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        var realm = new ApplicationRealmId(0xF03A, 8);
+        using TemporaryTrust trust = TemporaryTrust.Create();
+        using var client = new ClientDirectConnectSession(
+            trust.Registry, trust.Store, Protocol, shortUdp);
+        int port;
+        using (HostedUdpAdmissionHost first = CreateHost(
+                   identity, realm, udp: shortUdp, admission: shortAdmission))
+        {
+            port = first.LocalEndPoint.Port;
+            True(client.TryStart(first.LocalEndPoint.ToString()));
+            PumpUntil(first, client, ClientDirectConnectState.AwaitingTrust);
+            True(client.TryAcceptCandidate());
+            PumpUntil(first, client, ClientDirectConnectState.Established);
+            True(client.Peer is not null);
+        }
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+        while (client.State != ClientDirectConnectState.Closed &&
+               DateTime.UtcNow < deadline)
+        {
+            client.Pump();
+            Thread.Sleep(1);
+        }
+        Equal(ClientDirectConnectState.Closed, client.State);
+        Equal(ClientDirectConnectFailure.TransportClosed, client.GetSnapshot().Failure);
+        True(client.Peer is null);
+
+        using HostedUdpAdmissionHost replacement = CreateHost(
+            identity, realm, new IPEndPoint(IPAddress.Loopback, port),
+            shortUdp, shortAdmission);
+        True(client.TryStart(replacement.LocalEndPoint.ToString()));
+        PumpUntil(replacement, client, ClientDirectConnectState.Established);
+        True(client.Peer is not null);
+    }
+
     private static HostedUdpAdmissionHost CreateHost(
         NetworkServerIdentity identity,
         ApplicationRealmId realm,
-        IPEndPoint? endpoint = null) => new(
+        IPEndPoint? endpoint = null,
+        UdpProtocolLimits? udp = null,
+        HostedUdpAdmissionLimits? admission = null) => new(
             endpoint ?? new IPEndPoint(IPAddress.Loopback, 0),
             identity,
             Protocol,
-            Udp,
+            udp ?? Udp,
             Shared,
-            Admission,
+            admission ?? Admission,
             Owners,
             new RemoteApplicationSessionIdentityFactory(realm),
             UltraSimGameProtocol.Manifest);

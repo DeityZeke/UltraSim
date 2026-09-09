@@ -1241,7 +1241,12 @@ public sealed class NetworkProtocolPeer : IDisposable
             return false;
         }
         var writer = new NetworkPacketWriter(_plaintextScratch);
-        if (!writer.TryWriteUInt64(largest) || !writer.TryWriteUInt64(mask))
+        // The outer secure-datagram epoch belongs to this peer's sending
+        // direction. It cannot identify the opposite sending direction being
+        // acknowledged, so carry that epoch explicitly in the authenticated
+        // acknowledgement payload.
+        if (!writer.TryWriteUInt32(_receiveCryptography.Epoch.Value) ||
+            !writer.TryWriteUInt64(largest) || !writer.TryWriteUInt64(mask))
             throw new InvalidOperationException("The acknowledgement buffer is invalid.");
         if (!TryEncryptAndSend(NetworkSecureDatagramKind.Acknowledgement, writer.WrittenSpan,
                 out _, out DatagramSendStatus status)) return false;
@@ -1591,8 +1596,14 @@ public sealed class NetworkProtocolPeer : IDisposable
     private bool ProcessAcknowledgement(ReadOnlySpan<byte> plaintext, ulong step)
     {
         var reader = new NetworkPacketReader(plaintext);
-        if (!reader.TryReadUInt64(out ulong largest) || !reader.TryReadUInt64(out ulong mask) ||
+        if (!reader.TryReadUInt32(out uint acknowledgedEpoch) || acknowledgedEpoch == 0 ||
+            !reader.TryReadUInt64(out ulong largest) || !reader.TryReadUInt64(out ulong mask) ||
             !reader.IsComplete || (mask & 1UL) == 0) return false;
+        // A genuine delayed ACK from an older opposite-direction epoch is valid
+        // authenticated traffic, but it has no authority over packet numbers
+        // reused by the current sending epoch. It must not affect flight, RTT, or
+        // congestion state.
+        if (acknowledgedEpoch != _sendCryptography.Epoch.Value) return true;
         for (int bit = 0; bit < 64; bit++)
         {
             if ((mask & (1UL << bit)) == 0 || largest < (ulong)bit) continue;

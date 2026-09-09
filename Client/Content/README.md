@@ -40,6 +40,12 @@ Payload validation produces a `VerifiedContentPackage` capability. Base-catalog 
 activation resolution accept that capability, not a bare manifest, so parsed metadata or
 partially/hash-failed bytes cannot become publishable catalog content.
 
+The source-neutral acquirer accepts cancellation across mirror/package/file boundaries. Blocking
+HTTP and rooted-local reads observe that cancellation; the remote client uses it to keep cold
+acquisition outside the protocol/UI owner while still joining the operation before releasing the
+shared source/cache lifetime. Catalog publication remains immutable and application proof remains
+an owner/session concern above this component.
+
 ## A0.0 formats and operations
 
 The current passive manifest permits only:

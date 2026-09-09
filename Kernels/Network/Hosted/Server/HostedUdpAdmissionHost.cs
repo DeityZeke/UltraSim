@@ -328,6 +328,23 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     {
     }
 
+    internal HostedUdpAdmissionHost(
+        IPEndPoint bindEndPoint,
+        NetworkServerIdentity serverIdentity,
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        SharedUdpProtocolLimits sharedLimits,
+        HostedUdpAdmissionLimits admissionLimits,
+        HostedUdpOwnerShardingLimits ownerLimits,
+        IHostedUdpSessionApplicationFactory applicationFactory,
+        INetworkMonotonicClock clock,
+        NetworkProtocolManifest? manifest = null)
+        : this(bindEndPoint, serverIdentity, (NetworkProtocolLimits?)protocolLimits,
+            udpLimits, sharedLimits, admissionLimits, clock, manifest,
+            ownerLimits, applicationFactory)
+    {
+    }
+
     private HostedUdpAdmissionHost(
         IPEndPoint bindEndPoint,
         NetworkServerIdentity serverIdentity,
@@ -434,7 +451,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                     _protocolLimits,
                     _udpLimits,
                     _admissionLimits,
-                    applicationFactory);
+                    applicationFactory,
+                    _clock);
             }
             else if (applicationFactory is not null && !_promotionEnabled)
                 throw new ArgumentException(
@@ -580,12 +598,6 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                                 "The caller-owned hosted application could not consume a message.");
                     }
                     _ = application.TryProgress();
-                    if (application is IHostedUdpSessionApplicationLifetime
-                            { RetirementRequested: true })
-                    {
-                        RetireCore(current);
-                        continue;
-                    }
                 }
                 if (current.RawState == UdpProtocolSessionState.Established &&
                     now - current.LastKeepAliveMilliseconds >=
@@ -603,19 +615,26 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         {
             _ownerRuntime.DrainListenerEgress(_listener, _sessions);
             _listener.PumpOutbound();
+            ReapOwnedSessions();
             return;
         }
         for (int index = 0; index < _sessions.Length; index++)
         {
             if (_sessions[index] is not HostedUdpProtocolSession current) continue;
-            if (current.RawState == UdpProtocolSessionState.Established &&
-                now - current.LastActivityMilliseconds >=
-                    (ulong)_udpLimits.IdleTimeoutMilliseconds)
+            HostedUdpSessionLifetimeDecision lifetime =
+                HostedUdpSessionLifetimePolicy.Evaluate(
+                    current.RawState,
+                    current.Application is IHostedUdpSessionApplicationLifetime
+                        { RetirementRequested: true },
+                    now,
+                    current.LastActivityMilliseconds,
+                    current.DrainDeadlineMilliseconds,
+                    current.Server.ReliableQueued,
+                    _udpLimits);
+            if (lifetime == HostedUdpSessionLifetimeDecision.BeginDrain)
                 BeginDrainCore(current, now);
-            if (current.RawState == UdpProtocolSessionState.Draining &&
-                (current.Server.ReliableQueued == 0 ||
-                 now >= current.DrainDeadlineMilliseconds))
-                CloseTransport(current);
+            else if (lifetime == HostedUdpSessionLifetimeDecision.Retire)
+                RetireCore(current);
         }
     }
 
@@ -878,15 +897,27 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     {
         EnsureOwnerThread();
         if (_disposed) return;
-        _ownerRuntime?.StopAndJoin();
-        for (int index = 0; index < _sessions.Length; index++)
-            if (_sessions[index] is HostedUdpProtocolSession session)
-                RetireCore(session);
+        List<Exception>? failures = null;
+        if (_ownerRuntime is not null)
+        {
+            try { _ownerRuntime.StopAndJoin(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+        }
+        bool ownersQuiescent = _ownerRuntime?.IsQuiescent ?? true;
+        if (ownersQuiescent)
+            for (int index = 0; index < _sessions.Length; index++)
+                if (_sessions[index] is HostedUdpProtocolSession session)
+                    try { RetireCore(session); }
+                    catch (Exception exception) { AddFailure(ref failures, exception); }
         for (int slot = 0; slot < _candidateStates.Length; slot++)
             if (_candidateStates[slot] != 0)
-                ReleaseCandidate(slot, releaseConnection: true);
-        _listener.Dispose();
-        _ownerRuntime?.Dispose();
+                try { ReleaseCandidate(slot, releaseConnection: true); }
+                catch (Exception exception) { AddFailure(ref failures, exception); }
+        try { _listener.Dispose(); }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
+        if (_ownerRuntime is not null && ownersQuiescent)
+            try { _ownerRuntime.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
         CryptographicOperations.ZeroMemory(_cookieKey);
         CryptographicOperations.ZeroMemory(_serverPublicKey);
         CryptographicOperations.ZeroMemory(_candidateNonces);
@@ -910,7 +941,10 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         Array.Clear(_rateBuckets);
         Array.Clear(_rateChallenges);
         Array.Clear(_rateValidations);
-        _disposed = true;
+        _disposed = ownersQuiescent;
+        if (failures is not null)
+            throw new AggregateException(
+                "The Hosted UDP admission host failed to dispose completely.", failures);
     }
 
     internal UdpProtocolSessionState GetState(HostedUdpProtocolSession session)
@@ -963,19 +997,45 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
         {
             session.RawState = UdpProtocolSessionState.Draining;
-            owned.RequestStop();
+            session.DrainDeadlineMilliseconds =
+                HostedUdpSessionLifetimePolicy.GetDrainDeadline(now, _udpLimits);
+            if (_connections!.TryGetState(
+                    session.Connection, out NetworkConnectionState ownedState) &&
+                ownedState == NetworkConnectionState.Established)
+                _ = _connections.TryAdvance(
+                    session.Connection, NetworkConnectionState.Draining);
+            owned.RequestDrain(now);
             owned.Worker.Wake();
             return;
         }
         session.Server.StopAcceptingNewSends();
         session.RawState = UdpProtocolSessionState.Draining;
-        session.DrainDeadlineMilliseconds = checked(
-            now + (ulong)_udpLimits.DrainTimeoutMilliseconds);
+        session.DrainDeadlineMilliseconds =
+            HostedUdpSessionLifetimePolicy.GetDrainDeadline(now, _udpLimits);
         if (_connections!.TryGetState(
                 session.Connection, out NetworkConnectionState state) &&
             state == NetworkConnectionState.Established)
             _ = _connections.TryAdvance(
                 session.Connection, NetworkConnectionState.Draining);
+    }
+
+    private void ReapOwnedSessions()
+    {
+        for (int index = 0; index < _sessions.Length; index++)
+        {
+            if (_sessions[index] is not HostedUdpProtocolSession session ||
+                session.OwnedTransport is not
+                    HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+                continue;
+            if (session.RawState == UdpProtocolSessionState.Draining &&
+                _connections!.TryGetState(
+                    session.Connection, out NetworkConnectionState state) &&
+                state == NetworkConnectionState.Established)
+                _ = _connections.TryAdvance(
+                    session.Connection, NetworkConnectionState.Draining);
+            if (owned.StoppedOnOwner)
+                RetireCore(session);
+        }
     }
 
     private void CloseTransport(HostedUdpProtocolSession session)
@@ -997,20 +1057,41 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
 
     private void RetireCore(HostedUdpProtocolSession session)
     {
+        List<Exception>? failures = null;
         if (session.RawState == UdpProtocolSessionState.Established)
-            BeginDrainCore(session, GetMonotonicMilliseconds());
+            try { BeginDrainCore(session, GetMonotonicMilliseconds()); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
         if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
-            _ownerRuntime!.RetireTransport(owned, _listener, _sessions);
-        CloseTransport(session);
+            try { _ownerRuntime!.RetireTransport(owned, _listener, _sessions); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+        try { CloseTransport(session); }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
         if (session.OwnedTransport is null)
         {
-            session.Application?.Dispose();
-            session.Server.Dispose();
+            try { session.Application?.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+            try { session.Server.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
         }
-        CloseAndReleaseConnection(session.Connection);
-        _sessions[session.Connection.Slot] = null;
-        _sessionCount--;
-        session.MarkDisposed();
+        try { CloseAndReleaseConnection(session.Connection); }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
+        if (session.Connection.Slot < (uint)_sessions.Length &&
+            ReferenceEquals(_sessions[session.Connection.Slot], session))
+        {
+            _sessions[session.Connection.Slot] = null;
+            _sessionCount--;
+        }
+        try { session.MarkDisposed(); }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
+        if (failures is not null)
+            throw new AggregateException(
+                "A Hosted UDP session failed to retire completely.", failures);
+    }
+
+    private static void AddFailure(ref List<Exception>? failures, Exception exception)
+    {
+        failures ??= new List<Exception>();
+        failures.Add(exception);
     }
 
     private void EnsureSession(HostedUdpProtocolSession session)
@@ -1849,6 +1930,10 @@ public readonly record struct HostedUdpProtocolSessionSnapshot(
 public sealed class HostedUdpProtocolSession : IDisposable
 {
     private bool _disposed;
+    private int _rawState;
+    private long _lastActivityMilliseconds;
+    private long _lastKeepAliveMilliseconds;
+    private long _drainDeadlineMilliseconds;
 
     internal HostedUdpProtocolSession(
         HostedUdpAdmissionHost owner,
@@ -1921,10 +2006,26 @@ public sealed class HostedUdpProtocolSession : IDisposable
         PendingPathChallengeFlight.Length + PendingPathBinding.Length +
         CurrentPathBinding.Length + LastPathProof.Length +
         LastPathCommit.Length);
-    internal UdpProtocolSessionState RawState { get; set; }
-    internal ulong LastActivityMilliseconds { get; set; }
-    internal ulong LastKeepAliveMilliseconds { get; set; }
-    internal ulong DrainDeadlineMilliseconds { get; set; }
+    internal UdpProtocolSessionState RawState
+    {
+        get => (UdpProtocolSessionState)Volatile.Read(ref _rawState);
+        set => Volatile.Write(ref _rawState, (int)value);
+    }
+    internal ulong LastActivityMilliseconds
+    {
+        get => unchecked((ulong)Volatile.Read(ref _lastActivityMilliseconds));
+        set => Volatile.Write(ref _lastActivityMilliseconds, unchecked((long)value));
+    }
+    internal ulong LastKeepAliveMilliseconds
+    {
+        get => unchecked((ulong)Volatile.Read(ref _lastKeepAliveMilliseconds));
+        set => Volatile.Write(ref _lastKeepAliveMilliseconds, unchecked((long)value));
+    }
+    internal ulong DrainDeadlineMilliseconds
+    {
+        get => unchecked((ulong)Volatile.Read(ref _drainDeadlineMilliseconds));
+        set => Volatile.Write(ref _drainDeadlineMilliseconds, unchecked((long)value));
+    }
 
     public ConnectionId Connection { get; }
     public HostedCandidateId Candidate { get; }

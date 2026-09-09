@@ -63,6 +63,13 @@ public readonly record struct NetworkMessageDescriptor(
 /// <summary>Immutable collision-checked message catalog built cold without runtime reflection.</summary>
 public sealed class NetworkProtocolManifest
 {
+    /// <summary>
+    /// Version of the role-neutral secure transport framing carried beneath every
+    /// application protocol manifest. A transport wire change participates in the
+    /// manifest fingerprint even when no application message descriptor changes.
+    /// </summary>
+    public const ushort CurrentTransportWireRevision = 2;
+
     private readonly NetworkMessageDescriptor[] _byId;
 
     private NetworkProtocolManifest(
@@ -78,6 +85,7 @@ public sealed class NetworkProtocolManifest
     }
 
     public ushort Version { get; }
+    public ushort TransportWireRevision => CurrentTransportWireRevision;
     public int Count => _byId.Length;
     public ulong Fingerprint { get; }
     /// <summary>
@@ -105,6 +113,7 @@ public sealed class NetworkProtocolManifest
         Array.Sort(copy, static (left, right) => left.Id.CompareTo(right.Id));
         ulong fingerprint = 14695981039346656037UL;
         Mix(ref fingerprint, version);
+        Mix(ref fingerprint, CurrentTransportWireRevision);
         Mix(ref fingerprint, unchecked((ulong)maximumUnreliableDataFramesPerDatagram));
         NetworkMessageDescriptor previous = default;
         for (int index = 0; index < copy.Length; index++)

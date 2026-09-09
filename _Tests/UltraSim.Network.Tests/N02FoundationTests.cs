@@ -47,7 +47,7 @@ internal static class N02FoundationTests
         Equal(4, Unsafe.SizeOf<SecurityEpoch>());
         Equal(8, Unsafe.SizeOf<PacketNumber>());
         Equal(8, Unsafe.SizeOf<LaneSequence>());
-        Equal(8, Unsafe.SizeOf<PacketBufferToken>());
+        Equal(16, Unsafe.SizeOf<PacketBufferToken>());
         False(new SecurityEpoch(uint.MaxValue).TryNext(out _));
         False(new PacketNumber(ulong.MaxValue).TryNext(out _));
         False(new LaneSequence(ulong.MaxValue).TryNext(out _));
@@ -88,7 +88,20 @@ internal static class N02FoundationTests
     private static void PacketPoolOwnershipTokensRejectStaleDoubleAndForeignUse()
     {
         var pool = new PacketBufferPool(1, 256);
+        var foreignPool = new PacketBufferPool(1, 256);
         True(pool.TryRent(PacketBufferOwner.Application, out PacketBufferToken first));
+        True(foreignPool.TryRent(PacketBufferOwner.Application, out PacketBufferToken foreign));
+        False(first == foreign);
+        Throws<InvalidOperationException>(() =>
+            foreignPool.GetWritableSpan(first, PacketBufferOwner.Application));
+        Throws<InvalidOperationException>(() =>
+            pool.GetWritableSpan(foreign, PacketBufferOwner.Application));
+        False(foreignPool.TryTransfer(
+            first, PacketBufferOwner.Application, PacketBufferOwner.Transport));
+        False(pool.TryReturn(foreign, PacketBufferOwner.Application));
+        foreignPool.GetWritableSpan(foreign, PacketBufferOwner.Application)[0] = 37;
+        Equal((byte)37,
+            foreignPool.GetReadOnlySpan(foreign, PacketBufferOwner.Application, 1)[0]);
         False(pool.TryRent(PacketBufferOwner.Application, out _));
         Span<byte> bytes = pool.GetWritableSpan(first, PacketBufferOwner.Application);
         bytes[0] = 91;
@@ -102,7 +115,9 @@ internal static class N02FoundationTests
         False(first == reused);
         Equal((byte)0, pool.GetWritableSpan(reused, PacketBufferOwner.Receive)[0]);
         True(pool.TryReturn(reused, PacketBufferOwner.Receive));
+        True(foreignPool.TryReturn(foreign, PacketBufferOwner.Application));
         pool.Dispose();
+        foreignPool.Dispose();
         Throws<ObjectDisposedException>(() => pool.TryRent(PacketBufferOwner.Application, out _));
     }
 
@@ -289,6 +304,8 @@ internal static class N02FoundationTests
     private static void ProtocolManifestIsStableAndRejectsCollisions()
     {
         NetworkProtocolManifest manifest = CoreNetworkProtocol.Manifest;
+        Equal(NetworkProtocolManifest.CurrentTransportWireRevision,
+            manifest.TransportWireRevision);
         Equal((ushort)1, manifest.Version);
         Equal(1, manifest.Count);
         True(manifest.TryGet(new NetworkMessageId(1), out NetworkMessageDescriptor descriptor));

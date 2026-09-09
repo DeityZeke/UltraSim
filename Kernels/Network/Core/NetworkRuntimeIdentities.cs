@@ -64,22 +64,26 @@ public readonly struct LaneSequence : IEquatable<LaneSequence>, IComparable<Lane
     public static bool operator !=(LaneSequence left, LaneSequence right) => !left.Equals(right);
 }
 
-/// <summary>Generation-protected ownership token for one fixed packet buffer slot.</summary>
-[StructLayout(LayoutKind.Sequential, Size = 8)]
+/// <summary>Pool-bound, generation-protected ownership token for one fixed packet buffer slot.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
 public readonly struct PacketBufferToken : IEquatable<PacketBufferToken>
 {
+    public ulong PoolId { get; }
     public uint Slot { get; }
     public uint Generation { get; }
-    public bool IsValid => Generation != 0;
-    public PacketBufferToken(uint slot, uint generation)
+    public bool IsValid => PoolId != 0 && Generation != 0;
+    public PacketBufferToken(ulong poolId, uint slot, uint generation)
     {
+        ArgumentOutOfRangeException.ThrowIfZero(poolId);
         ArgumentOutOfRangeException.ThrowIfZero(generation);
+        PoolId = poolId;
         Slot = slot;
         Generation = generation;
     }
-    public bool Equals(PacketBufferToken other) => Slot == other.Slot && Generation == other.Generation;
+    public bool Equals(PacketBufferToken other) =>
+        PoolId == other.PoolId && Slot == other.Slot && Generation == other.Generation;
     public override bool Equals(object? obj) => obj is PacketBufferToken other && Equals(other);
-    public override int GetHashCode() => HashCode.Combine(Slot, Generation);
+    public override int GetHashCode() => HashCode.Combine(PoolId, Slot, Generation);
     public static bool operator ==(PacketBufferToken left, PacketBufferToken right) => left.Equals(right);
     public static bool operator !=(PacketBufferToken left, PacketBufferToken right) => !left.Equals(right);
 }

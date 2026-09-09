@@ -21,6 +21,7 @@ var tests = new (string Name, Action Body)[]
     ("HostWrapperBenchmarkIsCaptured", HostWrapperBenchmarkIsCaptured),
     ("StaticContentHttpHostServesExactImmutableBytes", StaticContentHttpHostServesExactImmutableBytes),
     ("StaticContentHttpHostBoundsAndRejectsRequests", StaticContentHttpHostBoundsAndRejectsRequests),
+    ("StalledContentResponseCannotBlockIndependentDownload", StalledContentResponseCannotBlockIndependentDownload),
 };
 
 foreach ((string name, Action body) in tests)
@@ -131,6 +132,57 @@ static void StaticContentHttpHostBoundsAndRejectsRequests()
     Assert.Equal(2UL, snapshot.Requests);
     Assert.Equal(0UL, snapshot.Served);
     Assert.Equal(2UL, snapshot.Rejected);
+}
+
+static void StalledContentResponseCannotBlockIndependentDownload()
+{
+    byte[] large = GC.AllocateUninitializedArray<byte>(32 * 1024 * 1024);
+    Random.Shared.NextBytes(large);
+    var limits = new StaticContentHttpHostLimits(
+        maximumResources: 2,
+        maximumResourceBytes: large.Length + 16L,
+        maximumConcurrentResponses: 2,
+        maximumQueuedResponses: 1,
+        responseTimeoutMilliseconds: 10_000);
+    var host = new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [
+            new StaticContentHttpResource("/content/large.uspkg", large),
+            new StaticContentHttpResource("/content/small.uspkg", "ok"u8.ToArray()),
+        ],
+        limits);
+    using var client = new HttpClient(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        MaxConnectionsPerServer = 4,
+    });
+    using HttpResponseMessage stalled = client.Send(
+        new HttpRequestMessage(HttpMethod.Get, host.GetUri("/content/large.uspkg")),
+        HttpCompletionOption.ResponseHeadersRead);
+    Assert.Equal(HttpStatusCode.OK, stalled.StatusCode);
+    WaitUntil(() => host.GetSnapshot().ActiveResponses == 1,
+        TimeSpan.FromSeconds(2), "The large response did not occupy one bounded worker.");
+
+    Task<byte[]> independent = client.GetByteArrayAsync(
+        host.GetUri("/content/small.uspkg"));
+    Assert.True(independent.Wait(TimeSpan.FromSeconds(2)));
+    Assert.True(independent.Result.AsSpan().SequenceEqual("ok"u8));
+    StaticContentHttpHostSnapshot snapshot = host.GetSnapshot();
+    Assert.Equal(2, snapshot.MaximumConcurrentResponses);
+    Assert.Equal(1, snapshot.MaximumQueuedResponses);
+    Assert.True(snapshot.PeakActiveResponses >= 2);
+    Assert.True(snapshot.PeakActiveResponses <= snapshot.MaximumConcurrentResponses);
+
+    long started = Stopwatch.GetTimestamp();
+    host.Dispose();
+    Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2));
+}
+
+static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
+{
+    DateTime deadline = DateTime.UtcNow + timeout;
+    while (!condition() && DateTime.UtcNow < deadline) Thread.Sleep(1);
+    if (!condition()) throw new InvalidOperationException(failure);
 }
 
 static int ReserveLoopbackPort()

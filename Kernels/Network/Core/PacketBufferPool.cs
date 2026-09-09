@@ -21,7 +21,9 @@ public readonly record struct PacketBufferPoolSnapshot(
 /// <summary>Fixed packet/slab pool with generational tokens and explicit ownership transfer.</summary>
 public sealed class PacketBufferPool : IDisposable
 {
+    private static long s_nextPoolId;
     private readonly int _ownerThreadId;
+    private readonly ulong _poolId;
     private readonly int _bufferBytes;
     private readonly byte[] _storage;
     private readonly uint[] _generations;
@@ -36,6 +38,10 @@ public sealed class PacketBufferPool : IDisposable
         if (bufferCount <= 0) throw new ArgumentOutOfRangeException(nameof(bufferCount));
         if (bufferBytes is < 1 or > ushort.MaxValue) throw new ArgumentOutOfRangeException(nameof(bufferBytes));
         _ownerThreadId = Environment.CurrentManagedThreadId;
+        long poolId = Interlocked.Increment(ref s_nextPoolId);
+        if (poolId <= 0)
+            throw new InvalidOperationException("The packet-buffer pool identity space is exhausted.");
+        _poolId = checked((ulong)poolId);
         _bufferBytes = bufferBytes;
         _storage = new byte[checked(bufferCount * bufferBytes)];
         _generations = new uint[bufferCount];
@@ -63,7 +69,7 @@ public sealed class PacketBufferPool : IDisposable
             generation++;
             _generations[slot] = generation;
             _owners[slot] = owner;
-            token = new PacketBufferToken((uint)slot, generation);
+            token = new PacketBufferToken(_poolId, (uint)slot, generation);
             GetStorageSpan(slot).Clear();
             return true;
         }
@@ -147,7 +153,8 @@ public sealed class PacketBufferPool : IDisposable
 
     private bool TryValidateToken(PacketBufferToken token, PacketBufferOwner owner, out int slot)
     {
-        if (!token.IsValid || token.Slot >= (uint)_owners.Length) { slot = -1; return false; }
+        if (!token.IsValid || token.PoolId != _poolId ||
+            token.Slot >= (uint)_owners.Length) { slot = -1; return false; }
         slot = (int)token.Slot;
         return
             _generations[slot] == token.Generation && _owners[slot] == owner;

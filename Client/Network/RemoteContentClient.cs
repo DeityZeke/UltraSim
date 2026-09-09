@@ -13,6 +13,7 @@ public enum RemoteContentClientState : byte
     AwaitingRequirement = 1,
     Applied = 2,
     Rejected = 3,
+    Acquiring = 4,
 }
 
 public readonly record struct RemoteContentClientSnapshot(
@@ -126,6 +127,8 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
     private ulong _rejectedMessages;
     private ContentActivationAcquisitionResult _acquisition;
     private ContentCatalogLease? _catalog;
+    private CancellationTokenSource? _acquisitionCancellation;
+    private Task<AcquisitionCompletion>? _acquisitionTask;
     private string? _detail;
     private bool _disposed;
 
@@ -251,6 +254,7 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
     public bool TryProgress()
     {
         EnsureOperational();
+        CompleteAcquisition();
         return FlushProof();
     }
 
@@ -268,6 +272,26 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         EnsureOwner();
         if (_disposed) return;
         _disposed = true;
+        _acquisitionCancellation?.Cancel();
+        if (_acquisitionTask is not null)
+        {
+            try
+            {
+                AcquisitionCompletion completion = _acquisitionTask.GetAwaiter().GetResult();
+                completion.Catalog?.Dispose();
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // Disposal still owns the already-created resources. Acquisition failure has no
+                // semantic destination after this session lifetime ends.
+            }
+        }
+        _acquisitionTask = null;
+        _acquisitionCancellation?.Dispose();
+        _acquisitionCancellation = null;
         _catalog?.Dispose();
         _catalog = null;
         Array.Clear(_proofScratch);
@@ -294,27 +318,85 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
                 return;
             }
             SaturatingIncrement(ref _duplicateRequirements);
+            if (_state == RemoteContentClientState.Acquiring) return;
             QueueProof(_state == RemoteContentClientState.Applied
                 ? RemoteContentApplyStatus.Applied
                 : RemoteContentApplyStatus.Rejected);
             return;
         }
 
+        ContentActivationPlan acceptedPlan = plan!;
         _requirementSequence = remote.RequirementSequence;
-        _activation = plan!.Activation;
-        _planHash = plan.PlanHash;
-        if (!ContentActivationAcquirer.TryAcquireAndPublish(
-                _cache, _baseCatalog, plan, acquisitions, _source,
-                persistentlyPinned: false, out ContentCatalogLease? catalog, out _acquisition))
+        _activation = acceptedPlan.Activation;
+        _planHash = acceptedPlan.PlanHash;
+        _state = RemoteContentClientState.Acquiring;
+        _detail = "Acquiring required content…";
+        _acquisitionCancellation = new CancellationTokenSource();
+        CancellationToken cancellation = _acquisitionCancellation.Token;
+        ulong applicationSessionEpoch = _applicationSessionEpoch;
+        ulong requirementSequence = _requirementSequence;
+        ContentHash planHash = _planHash;
+        _acquisitionTask = Task.Run(() =>
         {
+            bool applied = ContentActivationAcquirer.TryAcquireAndPublish(
+                _cache, _baseCatalog, acceptedPlan, acquisitions, _source,
+                persistentlyPinned: false, out ContentCatalogLease? catalog,
+                out ContentActivationAcquisitionResult result,
+                cancellationToken: cancellation);
+            return new AcquisitionCompletion(
+                applicationSessionEpoch, requirementSequence, planHash,
+                applied, catalog, result);
+        });
+    }
+
+    private void CompleteAcquisition()
+    {
+        Task<AcquisitionCompletion>? task = _acquisitionTask;
+        if (task is null || !task.IsCompleted) return;
+
+        _acquisitionTask = null;
+        _acquisitionCancellation?.Dispose();
+        _acquisitionCancellation = null;
+        AcquisitionCompletion completion;
+        try
+        {
+            completion = task.GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _state = RemoteContentClientState.Rejected;
+            _detail = $"Required content acquisition failed: {exception.GetType().Name}.";
+            QueueProof(RemoteContentApplyStatus.Rejected);
+            return;
+        }
+
+        if (completion.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            completion.RequirementSequence != _requirementSequence ||
+            completion.PlanHash != _planHash)
+        {
+            completion.Catalog?.Dispose();
+            _state = RemoteContentClientState.Rejected;
+            _detail = "A stale required-content completion was rejected.";
+            QueueProof(RemoteContentApplyStatus.Rejected);
+            return;
+        }
+
+        _acquisition = completion.Result;
+        if (!completion.Applied || completion.Catalog is null)
+        {
+            completion.Catalog?.Dispose();
             _state = RemoteContentClientState.Rejected;
             _detail = $"Required content could not be applied: {_acquisition.Status} " +
                 $"(cache={_acquisition.CacheError}, source={_acquisition.SourceError}).";
             QueueProof(RemoteContentApplyStatus.Rejected);
             return;
         }
-        _catalog = catalog;
-        _resolvedFingerprint = catalog!.Catalog.Fingerprint;
+        _catalog = completion.Catalog;
+        _resolvedFingerprint = completion.Catalog.Catalog.Fingerprint;
         _state = RemoteContentClientState.Applied;
         _detail = null;
         QueueProof(RemoteContentApplyStatus.Applied);
@@ -426,4 +508,12 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("Remote content application is owner-thread-bound.");
     }
+
+    private readonly record struct AcquisitionCompletion(
+        ulong ApplicationSessionEpoch,
+        ulong RequirementSequence,
+        ContentHash PlanHash,
+        bool Applied,
+        ContentCatalogLease? Catalog,
+        ContentActivationAcquisitionResult Result);
 }

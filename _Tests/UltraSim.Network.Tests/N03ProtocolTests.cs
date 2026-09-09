@@ -39,6 +39,7 @@ internal static class N03ProtocolTests
         Run("AuthenticatedRegionsRejectWithoutStatePublication", AuthenticatedRegionsRejectWithoutStatePublication);
         Run("ReceiveBackpressureRetainsReliableMessage", ReceiveBackpressureRetainsReliableMessage);
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
+        Run("DelayedAcknowledgementCannotCrossSendingSecurityEpoch", DelayedAcknowledgementCannotCrossSendingSecurityEpoch);
         Run("AggregatedDataSurvivesSecurityEpochRotation", AggregatedDataSurvivesSecurityEpochRotation);
         Run("HostileNextEpochProbesReuseOnePreparedCipher", HostileNextEpochProbesReuseOnePreparedCipher);
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
@@ -969,6 +970,59 @@ internal static class N03ProtocolTests
         AssertReceive(loopback.Server, NetworkLane.OwnerState, stackalloc byte[] { 4 });
         Equal(new SecurityEpoch(2), loopback.Client.GetSnapshot().SendSecurityEpoch);
         Equal(new SecurityEpoch(2), loopback.Server.GetSnapshot().ReceiveSecurityEpoch);
+    }
+
+    private static void DelayedAcknowledgementCannotCrossSendingSecurityEpoch()
+    {
+        var datagrams = new DeterministicDatagramLimits(64, 512);
+        NetworkProtocolLimits limits = s_limits with
+        {
+            InitialCongestionWindowPackets = 1,
+            MaximumCongestionWindowPackets = 1,
+            MinimumRetransmissionSteps = 2,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, datagrams);
+        byte[] wire = new byte[datagrams.MaximumDatagramBytes];
+
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 1 }));
+        pair.Sender.Emit(0);
+        pair.Receiver.ProcessInbound(0);
+        AssertReceive(pair.Receiver, NetworkLane.Control, stackalloc byte[] { 1 });
+        pair.Receiver.Emit(0);
+        True(pair.Link.A.TryReceive(wire, out int delayedLength));
+        byte[] delayedEpochOneAcknowledgement = wire.AsSpan(0, delayedLength).ToArray();
+
+        // Let a retransmission receive a different ACK so the first genuine ACK
+        // remains unseen while the old epoch's reliable flight drains.
+        pair.Sender.Emit(64);
+        pair.Receiver.ProcessInbound(64);
+        pair.Receiver.Emit(64);
+        pair.Sender.ProcessInbound(64);
+        Equal(0, pair.Sender.ReliableQueued);
+        True(pair.Sender.TryRotateSendSecurityEpoch());
+        Equal(new SecurityEpoch(2), pair.Sender.GetSnapshot().SendSecurityEpoch);
+
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 2 }));
+        pair.Sender.Emit(65);
+        Equal(1, pair.Sender.GetSnapshot().InFlightPackets);
+        Equal(1, Drain(pair.Link.B)); // Lose epoch 2 packet number zero.
+
+        NetworkProtocolSnapshot before = pair.Sender.GetSnapshot();
+        Equal(DatagramSendStatus.Accepted,
+            pair.Link.B.TrySend(delayedEpochOneAcknowledgement));
+        pair.Sender.ProcessInbound(66);
+        NetworkProtocolSnapshot after = pair.Sender.GetSnapshot();
+        Equal(1, after.ReliableQueued);
+        Equal(1, after.InFlightPackets);
+        Equal(before.ReliableAcknowledgements, after.ReliableAcknowledgements);
+        Equal(before.SmoothedRoundTripSteps, after.SmoothedRoundTripSteps);
+        Equal(before.CongestionWindowPackets, after.CongestionWindowPackets);
+
+        Drive(pair, 67, () => pair.Receiver.ReceivedQueued == 1, 256);
+        AssertReceive(pair.Receiver, NetworkLane.Control, stackalloc byte[] { 2 });
+        Drive(pair, 323, () => pair.Sender.ReliableQueued == 0, 256);
     }
 
     private static void HostileNextEpochProbesReuseOnePreparedCipher()

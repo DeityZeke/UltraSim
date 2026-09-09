@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using UltraSim.Client.BuiltInTestWorlds;
@@ -20,7 +21,7 @@ using UltraSim.UI;
 internal static class F03bRemotePlayableTests
 {
     internal const int F03bTestCount = 4;
-    internal const int A03TestCount = 6;
+    internal const int A03TestCount = 7;
     internal const int A04TestCount = 5;
     internal const int A05TestCount = 1;
     internal const int A06TestCount = 2;
@@ -44,6 +45,8 @@ internal static class F03bRemotePlayableTests
             RequiredContentProtocolIsCanonicalAndBounded);
         Run("ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle",
             ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle);
+        Run("ContentAcquisitionRunsOutsideProtocolPumpAndCancelsWithSession",
+            ContentAcquisitionRunsOutsideProtocolPumpAndCancelsWithSession);
         Run("WarmCacheReconnectReusesBytesButProvesFreshSession",
             WarmCacheReconnectReusesBytesButProvesFreshSession);
         Run("FailedContentAcquisitionCannotUnlockGuestSemantics",
@@ -577,6 +580,43 @@ internal static class F03bRemotePlayableTests
             $"A0.3 COLD packages_fetched={applied.Acquisition.PackagesFetched} " +
             $"files_fetched={applied.Acquisition.FilesFetched} bytes={applied.Acquisition.BytesFetched} " +
             $"fingerprint={applied.ResolvedCatalogFingerprint}");
+    }
+
+    private static void ContentAcquisitionRunsOutsideProtocolPumpAndCancelsWithSession()
+    {
+        CabinContentOracle oracle = CabinContentOracle.Create();
+        var completingSource = new CancellableBlockingSource(oracle);
+        using (var fixture = RemotePlayableFixture.CreateWithContent(oracle, completingSource))
+        {
+            fixture.DriveUntil(() => completingSource.Started);
+            Equal(RemoteContentClientState.Acquiring, fixture.Content!.GetSnapshot().State);
+            False(fixture.SessionSnapshot.RequiredContentApplied);
+            False(fixture.TrySubmitGuest("Too Early", GameGuestBody.HumanFemale));
+
+            var pump = Stopwatch.StartNew();
+            fixture.DriveSteps(1);
+            pump.Stop();
+            if (pump.Elapsed >= TimeSpan.FromSeconds(1))
+                throw new InvalidOperationException(
+                    $"A blocked content source held the protocol pump for {pump.Elapsed}.");
+            Equal(ClientDirectConnectState.Established, fixture.DirectState);
+
+            completingSource.Release();
+            fixture.DriveUntil(() => fixture.Content!.Applied);
+            Equal(1, completingSource.Fetches);
+            True(fixture.Content.GetSnapshot().ProofsQueued != 0);
+        }
+
+        var cancelledSource = new CancellableBlockingSource(oracle);
+        var cancelled = RemotePlayableFixture.CreateWithContent(oracle, cancelledSource);
+        cancelled.DriveUntil(() => cancelledSource.Started);
+        var disposal = Stopwatch.StartNew();
+        cancelled.Dispose();
+        disposal.Stop();
+        True(cancelledSource.CancellationObserved);
+        if (disposal.Elapsed >= TimeSpan.FromSeconds(2))
+            throw new InvalidOperationException(
+                $"Content acquisition cancellation took {disposal.Elapsed}.");
     }
 
     private static void WarmCacheReconnectReusesBytesButProvesFreshSession()
@@ -1543,6 +1583,53 @@ internal static class F03bRemotePlayableTests
         }
     }
 
+    private sealed class CancellableBlockingSource : IContentPackageSource
+    {
+        private readonly CabinContentOracle _oracle;
+        private readonly ManualResetEventSlim _started = new(false);
+        private readonly ManualResetEventSlim _release = new(false);
+        private int _fetches;
+        private int _cancellationObserved;
+
+        internal CancellableBlockingSource(CabinContentOracle oracle) => _oracle = oracle;
+
+        internal bool Started => _started.IsSet;
+        internal bool CancellationObserved => Volatile.Read(ref _cancellationObserved) != 0;
+        internal int Fetches => Volatile.Read(ref _fetches);
+        internal void Release() => _release.Set();
+
+        public bool CanFetch(ContentSourceKind kind) => kind == ContentSourceKind.ExternalHttps;
+
+        public bool TryFetch(
+            in ContentPackageFetchRequest request,
+            out FetchedContentPackage? package,
+            out ContentSourceFetchError error) =>
+            TryFetch(in request, CancellationToken.None, out package, out error);
+
+        public bool TryFetch(
+            in ContentPackageFetchRequest request,
+            CancellationToken cancellationToken,
+            out FetchedContentPackage? package,
+            out ContentSourceFetchError error)
+        {
+            Interlocked.Increment(ref _fetches);
+            _started.Set();
+            try
+            {
+                _release.Wait(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Volatile.Write(ref _cancellationObserved, 1);
+                throw;
+            }
+            package = new FetchedContentPackage(
+                _oracle.ReplacePackage.Manifest, _oracle.ReplacePackage.Payloads);
+            error = ContentSourceFetchError.None;
+            return true;
+        }
+    }
+
     private sealed class RemotePlayableFixture : IDisposable
     {
         private static readonly NetworkProtocolLimits Protocol = NetworkProtocolLimits.Default;
@@ -1613,6 +1700,7 @@ internal static class F03bRemotePlayableTests
             _session.PublicPresentationState;
         internal UiClientRuntime UiClient => _session.UiClient;
         internal RemoteContentClient? Content => _session.Content;
+        internal ClientDirectConnectState DirectState => _direct.State;
         internal ContentCache? ContentStore => _contentCache;
         internal ClientWorldSemanticCache Cache => _session.WorldCache;
         internal RemotePlayableSessionSnapshot SessionSnapshot => _session.GetSnapshot();

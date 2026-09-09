@@ -1,7 +1,7 @@
 # Hosted Network H0: accepted external UDP lifecycle
 
 Status: **H0.0-H0.5 accepted / localhost deployment gate closed**, with Hosted
-role packaging reconciled, as of 2026-09-08.
+role packaging reconciled and the 2026-09-09 defensive lifetime correction closed.
 
 Hosted H0 is the Network-generic lifecycle between an unknown external UDP path and
 an authenticated UltraSim protocol session. It is not a replication profile, does
@@ -82,6 +82,8 @@ COOKIE VALIDATION PRECEDES EXPENSIVE/STATEFUL HANDSHAKE WORK.
 UNAUTHENTICATED RESPONSE MUST NOT AMPLIFY THE TRIGGERING REQUEST.
 PATH REBINDING IS AUTHENTICATED AND TRANSACTIONAL.
 PACKET MEMORY HAS ONE OWNER AT A TIME.
+SCALAR AND SHARDED HOSTS HAVE THE SAME SESSION-LIFETIME SEMANTICS.
+TERMINAL TRANSPORT STATE EVENTUALLY RELEASES APPLICATION AND ADMISSION OWNERSHIP.
 HOSTED NETWORK CONTAINS NO AOI OR GAME-SEMANTIC VOCABULARY.
 ```
 
@@ -310,6 +312,19 @@ Permanent H0.5 acceptance proves:
 - packet leases and owner queues drain to zero;
 - host disposal requests worker stop, observes join/quiescence, then performs any
   required failed-owner reclamation.
+
+The defensive lifetime correction after H0.5 makes the same policy explicit in both
+execution shapes: application-requested retirement, idle transition, reliable drain,
+deadline retirement, and terminal slot release are decided by one shared policy.
+Sharded peer mutation still occurs only on the connection-owner thread; a
+generation-matching listener-side reaper releases routing/admission state only after
+that owner reports quiescence. Each owner pass admits at most the configured
+`MaximumIngressTransfersPerPass` before progressing applications/lifecycle work.
+
+Failure reporting is cleanup-last: all workers are asked to stop, every joined owner
+is reclaimed, independent application/peer/endpoint cleanup is attempted, and the
+listener is closed before collected failures are reported. A worker that has not
+become quiescent is not unsafely reclaimed.
 
 ### Dedicated-process evidence
 

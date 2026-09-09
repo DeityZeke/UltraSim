@@ -614,6 +614,17 @@ The accepted lower mechanisms include:
 - Hosted H0 authenticated external admission, IPv4 rebinding, and connection-owner
   packet handoff.
 
+Transport wire revision 2 adds the acknowledged opposite-direction `SecurityEpoch` to every
+authenticated ACK. Delayed genuine ACKs from an older epoch therefore cannot retire reused packet
+numbers or alter current RTT/congestion state. This role-neutral wire revision participates in
+every protocol-manifest fingerprint independently of the Game message-manifest version.
+
+The 2026-09-09 defensive correction also binds packet-buffer tokens to their issuing pool,
+unifies scalar/sharded Hosted application-retirement and idle/drain cleanup, bounds sharded owner
+ingress work per pass, makes Direct Connect observe automatic closure, and makes Hosted shutdown
+finish safe independent cleanup before reporting worker/application failures. These are repairs to
+existing ownership/lifetime contracts, not a new replication profile or authority layer.
+
 Hosted/deployment claims and exclusions live in `HOSTED_NETWORK.md` and may not be
 inferred from replication benchmarks.
 
@@ -625,7 +636,7 @@ fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
 As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 13
-and `UltraSimGameProtocol` constructs manifest version 25. Version 20 added the bounded cold
+and `UltraSimGameProtocol` constructs manifest version 26. Version 20 added the bounded cold
 public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
 adds the authoritative `Primary` result to the playable owner-state schema for I0.12. Version 22
 widens the existing cold presentation occurrence with an independently bounded optional item-detail
@@ -641,7 +652,10 @@ semantics. Version 25 advances only the retained player-command message to v2 fo
 read-only Server Monitor request. The sanitized model remains Game/UI-owned, its content-backed
 definition uses the existing UI protocol, HUD ping reads the existing peer snapshot, and test
 markers reuse the unchanged System occurrence path. No diagnostic payload, endpoint, key, or
-administrative command enters the Network kernel. Future schema changes must advance the appropriate generated/
+administrative command enters the Network kernel. Version 26 advances the cold public-presentation
+metadata message to v4 for the bounded public Main Hand prefab, finite Game-owned vertical phase,
+and latest accepted Interact/Primary sequence used by D0.7a actor presentation; hot movement and
+private item rolls remain unchanged. Future schema changes must advance the appropriate generated/
 manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy

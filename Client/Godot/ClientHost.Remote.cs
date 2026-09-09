@@ -47,8 +47,6 @@ public partial class ClientHost
         try
         {
             _remoteSession.Pump();
-            _remoteProfile?.ProcessReceived();
-            _remotePlayable?.Pump(ShellSnapshot().Focus.GameplayInputAllowed);
             ClientDirectConnectState current = _remoteSession.State;
             if (_remoteRetiring)
             {
@@ -61,6 +59,20 @@ public partial class ClientHost
                         GetTree().Quit(0);
                 }
                 return;
+            }
+            if (current != ClientDirectConnectState.Established)
+            {
+                // The semantic consumers retain the authenticated peer but do not
+                // own it. Retire them before a remotely closed transport can make
+                // that retained peer stale or disposed.
+                ReleaseRemotePlayable();
+                _remoteProfile = null;
+                _remoteProfileActivated = false;
+            }
+            else
+            {
+                _remoteProfile?.ProcessReceived();
+                _remotePlayable?.Pump(ShellSnapshot().Focus.GameplayInputAllowed);
             }
             if (_remotePlayable is not null)
             {
@@ -209,6 +221,18 @@ public partial class ClientHost
                     {
                         GD.PushError(
                             $"A0.8 Direct Connect smoke failed: {snapshot.Failure}: {snapshot.Detail}");
+                        GetTree().Quit(1);
+                    }
+                    break;
+                }
+                case ClientDirectConnectState.Closed:
+                {
+                    ClientDirectConnectSnapshot snapshot = _remoteSession.GetSnapshot();
+                    FailSession(snapshot.Detail ?? "The remote deployment disconnected.");
+                    if (IsRemoteSmoke())
+                    {
+                        GD.PushError(
+                            $"A0.8 Direct Connect smoke closed: {snapshot.Failure}: {snapshot.Detail}");
                         GetTree().Quit(1);
                     }
                     break;

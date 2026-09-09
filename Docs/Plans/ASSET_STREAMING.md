@@ -1676,8 +1676,10 @@ size, SHA-256, and passive-format validation before A0.2 installation and catalo
 
 `Server.Hosting` now provides a small immutable-byte `StaticContentHttpHost` that is independent of
 Game ticks, Network lanes, realm authorization, and content meaning. Its admitted route/resource
-set and total retained bytes are fixed at construction, it handles one request at a time, accepts
-GET for exact lowercase routes only, and copies configured bytes before serving them. The initial
+set and total retained bytes are fixed at construction, it accepts GET for exact lowercase routes
+only, and copies configured bytes before serving them. A fixed response-worker set, bounded pending
+queue, and per-response deadline prevent one stalled consumer from blocking every independent
+download; excess work is rejected rather than creating unbounded tasks. The initial
 client source disables redirects and decompression, bounds response bytes and request time, and
 allows plaintext server-hosted HTTP or loopback/private targets only through explicit policy.
 External sources remain HTTPS-only. Literal private/loopback addresses are rejected by default;
@@ -1762,6 +1764,11 @@ The default HTTP transport now binds hostname policy to the actual connection. I
 link-local, multicast, or otherwise prohibited endpoint unless private targets were explicitly
 authorized, and connects to an admitted resolved address with redirects still disabled. This
 closes the hostname/DNS-rebinding bypass left explicit at A0.4.
+
+Cold authenticated acquisition is also isolated from the live client protocol/UI pump. One
+session-fenced cancellable worker performs source/cache work; only an exact immutable completion is
+consumed by the owner, and no `ContentSetApplied` proof or guest admission advances while that work
+is pending. Teardown cancels and joins the operation before its cache/source lifetime ends.
 
 Permanent evidence covers zero-byte warm reuse from A0.3, unavailable and corrupt first-mirror
 fallback, a two-file revision transferring only one changed 25-byte payload while reusing the

@@ -59,6 +59,13 @@ internal static class H05HostedUdpCompositionTests
         Run("HostedShardedSessionRetirementIsQuiescentAndReusable", HostedShardedSessionRetirementIsQuiescentAndReusable);
         Run("HostedShardedPathRebindCommitsThroughOwnerHandoff", HostedShardedPathRebindCommitsThroughOwnerHandoff);
         Run("HostedShardedLostCommitRecoversThroughOwnerHandoff", HostedShardedLostCommitRecoversThroughOwnerHandoff);
+        Run("HostedShardedApplicationRetirementReclaimsAdmission", HostedShardedApplicationRetirementReclaimsAdmission);
+        Run("HostedShardedIdleClosureReclaimsAdmission", HostedShardedIdleClosureReclaimsAdmission);
+        Run("HostedShardedIngressBudgetPreservesApplicationProgress",
+            HostedShardedIngressBudgetPreservesApplicationProgress);
+        Run("HostedOwnerFailureReportsAfterCompleteHostCleanup", HostedOwnerFailureReportsAfterCompleteHostCleanup);
+        Run("HostedApplicationDisposeFailureCannotSkipIndependentCleanup",
+            HostedApplicationDisposeFailureCannotSkipIndependentCleanup);
     }
 
     private static void HostedShardedListenerCarriesSecureApplications()
@@ -171,32 +178,207 @@ internal static class H05HostedUdpCompositionTests
         DrainHandoff(host, [client]);
     }
 
+    private static void HostedShardedApplicationRetirementReclaimsAdmission()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        var clock = new ManualClock(100);
+        var factory = new LifetimeFactory();
+        using var host = CreateHost(identity, maximumOwners: 1, factory, clock);
+        using HostedUdpProtocolClient client = CreateClient(host, identity, clock);
+        PumpUntil(host, [client], () =>
+            client.State == HostedUdpClientState.Established &&
+            factory.Latest is not null);
+        ConnectionId retired = client.Connection;
+        factory.Latest!.RequestRetirement();
+        PumpUntil(host, [client], () => host.SessionCount == 0);
+        Equal(1, factory.DisposalCount);
+        Equal(0, host.GetSnapshot().Connections.Active);
+        True(host.TryGetConnectionOwnerSnapshot(
+            out HostedUdpConnectionOwnerRuntimeSnapshot owners));
+        Equal(0, owners.ActiveTransports);
+        Equal(0, owners.Handoff.BoundConnections);
+
+        using HostedUdpProtocolClient replacement = CreateClient(host, identity, clock);
+        PumpUntil(host, [replacement], () =>
+            replacement.State == HostedUdpClientState.Established);
+        True(replacement.Connection != retired);
+    }
+
+    private static void HostedShardedIdleClosureReclaimsAdmission()
+    {
+        UdpProtocolLimits shortUdp = s_udp with
+        {
+            IdleTimeoutMilliseconds = 200,
+            DrainTimeoutMilliseconds = 50,
+            KeepAliveIntervalMilliseconds = 25,
+        };
+        HostedUdpAdmissionLimits shortAdmission = s_admission with
+        {
+            ValidatedCandidateTimeoutMilliseconds = 100,
+        };
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        var clock = new ManualClock(100);
+        var factory = new LifetimeFactory();
+        using var host = CreateHost(
+            identity, maximumOwners: 1, factory, clock, shortUdp, shortAdmission);
+        HostedUdpProtocolClient client = CreateClient(host, identity, clock, shortUdp);
+        PumpUntil(host, [client], () =>
+            client.State == HostedUdpClientState.Established &&
+            factory.Latest is not null);
+        client.Dispose();
+        clock.Value = 301;
+        PumpUntil(host, [], () => host.SessionCount == 0);
+        Equal(1, factory.DisposalCount);
+        Equal(0, host.GetSnapshot().Connections.Active);
+        True(host.TryGetConnectionOwnerSnapshot(
+            out HostedUdpConnectionOwnerRuntimeSnapshot owners));
+        Equal(0, owners.ActiveTransports);
+        Equal(0, owners.Handoff.BoundConnections);
+    }
+
+    private static void HostedShardedIngressBudgetPreservesApplicationProgress()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using var host = CreateHost(identity, maximumOwners: 1, ingressTransfersPerPass: 1);
+        using HostedUdpProtocolClient first = CreateClient(host, identity);
+        using HostedUdpProtocolClient second = CreateClient(host, identity);
+        PumpUntil(host, [first, second], () =>
+            first.State == HostedUdpClientState.Established &&
+            second.State == HostedUdpClientState.Established);
+
+        Equal(NetworkQueueStatus.Accepted, first.Peer!.TryQueue(s_messageId, "budget-one"u8));
+        Equal(NetworkQueueStatus.Accepted, second.Peer!.TryQueue(s_messageId, "budget-two"u8));
+        bool firstReceived = false;
+        bool secondReceived = false;
+        PumpUntil(host, [first, second], () =>
+        {
+            firstReceived |= HasPayload(first, "budget-one"u8);
+            secondReceived |= HasPayload(second, "budget-two"u8);
+            return firstReceived && secondReceived;
+        });
+
+        True(host.TryGetConnectionOwnerSnapshot(
+            out HostedUdpConnectionOwnerRuntimeSnapshot owners));
+        Equal(1, owners.MaximumIngressTransfersPerPass);
+        Equal(1, owners.PeakIngressTransfersPerPass);
+        True(owners.ApplicationMessages >= 2);
+    }
+
+    private static void HostedOwnerFailureReportsAfterCompleteHostCleanup()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        var factory = new FaultingFactory();
+        var host = CreateHost(identity, maximumOwners: 2, factory);
+        int port = host.LocalEndPoint.Port;
+        using HostedUdpProtocolClient first = CreateClient(host, identity);
+        using HostedUdpProtocolClient second = CreateClient(host, identity);
+        try
+        {
+            PumpUntil(host, [first, second], () =>
+                first.State == HostedUdpClientState.Established &&
+                second.State == HostedUdpClientState.Established &&
+                factory.Applications.Length == 2);
+            factory.Applications[0].FailProgress();
+            True(SpinWait.SpinUntil(
+                () => factory.DisposalCount >= 1, TimeSpan.FromSeconds(5)),
+                "The injected owner failure did not reach owner-side cleanup.");
+
+            Throws<AggregateException>(() => host.Dispose());
+            Equal(2, factory.DisposalCount,
+                "A failure on one owner prevented independent owner disposal.");
+            using var rebound = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Dgram,
+                System.Net.Sockets.ProtocolType.Udp);
+            rebound.Bind(new IPEndPoint(IPAddress.Loopback, port));
+            host.Dispose(); // Cleanup-complete failure reporting is idempotent.
+        }
+        finally
+        {
+            try { host.Dispose(); }
+            catch (AggregateException) { }
+        }
+    }
+
+    private static void HostedApplicationDisposeFailureCannotSkipIndependentCleanup()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        var factory = new DisposalFaultFactory();
+        var host = CreateHost(identity, maximumOwners: 2, factory);
+        int port = host.LocalEndPoint.Port;
+        using HostedUdpProtocolClient first = CreateClient(host, identity);
+        using HostedUdpProtocolClient second = CreateClient(host, identity);
+        PumpUntil(host, [first, second], () =>
+            first.State == HostedUdpClientState.Established &&
+            second.State == HostedUdpClientState.Established &&
+            factory.Created == 2);
+
+        Throws<AggregateException>(() => host.Dispose());
+        Equal(2, factory.DisposalAttempts,
+            "One failing application disposal skipped an independent application.");
+        using var rebound = new System.Net.Sockets.Socket(
+            System.Net.Sockets.AddressFamily.InterNetwork,
+            System.Net.Sockets.SocketType.Dgram,
+            System.Net.Sockets.ProtocolType.Udp);
+        rebound.Bind(new IPEndPoint(IPAddress.Loopback, port));
+        host.Dispose();
+    }
+
     private static HostedUdpAdmissionHost CreateHost(
         NetworkServerIdentity identity,
-        int maximumOwners = 2) =>
-        new(
+        int maximumOwners = 2,
+        IHostedUdpSessionApplicationFactory? factory = null,
+        ManualClock? clock = null,
+        UdpProtocolLimits? udp = null,
+        HostedUdpAdmissionLimits? admission = null,
+        int? ingressTransfersPerPass = null) =>
+        clock is null ? new HostedUdpAdmissionHost(
             new IPEndPoint(IPAddress.Loopback, 0),
             identity,
             s_protocol,
-            s_udp,
+            udp ?? s_udp,
             s_shared,
-            s_admission,
-            s_sharding with { MaximumOwners = maximumOwners },
-            new EchoFactory(),
+            admission ?? s_admission,
+            s_sharding with
+            {
+                MaximumOwners = maximumOwners,
+                MaximumIngressTransfersPerPass = ingressTransfersPerPass ??
+                    s_sharding.MaximumIngressTransfersPerPass,
+            },
+            factory ?? new EchoFactory(),
+            s_manifest) : new HostedUdpAdmissionHost(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            identity,
+            s_protocol,
+            udp ?? s_udp,
+            s_shared,
+            admission ?? s_admission,
+            s_sharding with
+            {
+                MaximumOwners = maximumOwners,
+                MaximumIngressTransfersPerPass = ingressTransfersPerPass ??
+                    s_sharding.MaximumIngressTransfersPerPass,
+            },
+            factory ?? new EchoFactory(),
+            clock,
             s_manifest);
 
     private static HostedUdpProtocolClient CreateClient(
         HostedUdpAdmissionHost host,
-        NetworkServerIdentity identity)
+        NetworkServerIdentity identity,
+        ManualClock? clock = null,
+        UdpProtocolLimits? udp = null)
     {
-        True(HostedUdpProtocolClient.TryCreate(
-            host.LocalEndPoint,
-            identity.PublicKey,
-            s_protocol,
-            s_udp,
-            out HostedUdpProtocolClient? client,
-            s_manifest,
-            new IPEndPoint(IPAddress.Loopback, 0)));
+        bool created = clock is null
+            ? HostedUdpProtocolClient.TryCreate(
+                host.LocalEndPoint, identity.PublicKey, s_protocol, udp ?? s_udp,
+                out HostedUdpProtocolClient? client, s_manifest,
+                new IPEndPoint(IPAddress.Loopback, 0))
+            : HostedUdpProtocolClient.TryCreateForTesting(
+                host.LocalEndPoint, identity.PublicKey, s_protocol, udp ?? s_udp,
+                clock, out client, s_manifest,
+                new IPEndPoint(IPAddress.Loopback, 0));
+        True(created);
         return client!;
     }
 
@@ -260,6 +442,156 @@ internal static class H05HostedUdpCompositionTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class LifetimeFactory : IHostedUdpSessionApplicationFactory
+    {
+        private LifetimeApplication? _latest;
+        private int _disposalCount;
+
+        internal LifetimeApplication? Latest => Volatile.Read(ref _latest);
+        internal int DisposalCount => Volatile.Read(ref _disposalCount);
+
+        public IHostedUdpSessionApplication Create(
+            ConnectionId connection,
+            NetworkProtocolPeer peer)
+        {
+            var application = new LifetimeApplication(this);
+            Volatile.Write(ref _latest, application);
+            return application;
+        }
+
+        internal void RecordDisposal() => Interlocked.Increment(ref _disposalCount);
+    }
+
+    private sealed class LifetimeApplication(LifetimeFactory owner) :
+        IHostedUdpSessionApplication,
+        IHostedUdpSessionApplicationLifetime
+    {
+        private int _retirementRequested;
+        private int _disposed;
+
+        public bool RetirementRequested =>
+            Volatile.Read(ref _retirementRequested) != 0;
+
+        internal void RequestRetirement() =>
+            Volatile.Write(ref _retirementRequested, 1);
+
+        public bool TryProcess(
+            in NetworkDeliveredMessage message,
+            ReadOnlySpan<byte> payload) => false;
+
+        public bool TryProgress() => true;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                owner.RecordDisposal();
+        }
+    }
+
+    private sealed class FaultingFactory : IHostedUdpSessionApplicationFactory
+    {
+        private readonly object _gate = new();
+        private readonly List<FaultingApplication> _applications = [];
+        private int _disposalCount;
+
+        internal FaultingApplication[] Applications
+        {
+            get { lock (_gate) return _applications.ToArray(); }
+        }
+
+        internal int DisposalCount => Volatile.Read(ref _disposalCount);
+
+        public IHostedUdpSessionApplication Create(
+            ConnectionId connection,
+            NetworkProtocolPeer peer)
+        {
+            var application = new FaultingApplication(this);
+            lock (_gate) _applications.Add(application);
+            return application;
+        }
+
+        internal void RecordDisposal() => Interlocked.Increment(ref _disposalCount);
+    }
+
+    private sealed class FaultingApplication(FaultingFactory owner) :
+        IHostedUdpSessionApplication
+    {
+        private int _failProgress;
+        private int _disposed;
+
+        internal void FailProgress() => Volatile.Write(ref _failProgress, 1);
+
+        public bool TryProcess(
+            in NetworkDeliveredMessage message,
+            ReadOnlySpan<byte> payload) => false;
+
+        public bool TryProgress()
+        {
+            if (Volatile.Read(ref _failProgress) != 0)
+                throw new InvalidOperationException("Injected owner progression failure.");
+            return true;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                owner.RecordDisposal();
+        }
+    }
+
+    private sealed class DisposalFaultFactory : IHostedUdpSessionApplicationFactory
+    {
+        private int _created;
+        private int _disposalAttempts;
+
+        internal int Created => Volatile.Read(ref _created);
+        internal int DisposalAttempts => Volatile.Read(ref _disposalAttempts);
+
+        public IHostedUdpSessionApplication Create(
+            ConnectionId connection,
+            NetworkProtocolPeer peer)
+        {
+            int ordinal = Interlocked.Increment(ref _created);
+            return new DisposalFaultApplication(this, fail: ordinal == 1);
+        }
+
+        internal void RecordDisposal() => Interlocked.Increment(ref _disposalAttempts);
+    }
+
+    private sealed class DisposalFaultApplication(
+        DisposalFaultFactory owner,
+        bool fail) : IHostedUdpSessionApplication
+    {
+        private int _disposed;
+
+        public bool TryProcess(
+            in NetworkDeliveredMessage message,
+            ReadOnlySpan<byte> payload) => false;
+
+        public bool TryProgress() => true;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            owner.RecordDisposal();
+            if (fail)
+                throw new InvalidOperationException("Injected application disposal failure.");
+        }
+    }
+
+    private sealed class ManualClock(ulong milliseconds) : INetworkMonotonicClock
+    {
+        private long _milliseconds = checked((long)milliseconds);
+
+        public ulong Milliseconds =>
+            checked((ulong)Volatile.Read(ref _milliseconds));
+
+        internal ulong Value
+        {
+            set => Volatile.Write(ref _milliseconds, checked((long)value));
         }
     }
 

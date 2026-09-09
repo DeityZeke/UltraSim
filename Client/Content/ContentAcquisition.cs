@@ -106,6 +106,20 @@ public interface IContentPackageSource
         in ContentPackageFetchRequest request,
         out FetchedContentPackage? package,
         out ContentSourceFetchError error);
+
+    /// <summary>
+    /// Cancellable form used by cold-path acquisition workers. Implementations that can block
+    /// on external I/O should override this member and observe cancellation throughout that I/O.
+    /// </summary>
+    bool TryFetch(
+        in ContentPackageFetchRequest request,
+        CancellationToken cancellationToken,
+        out FetchedContentPackage? package,
+        out ContentSourceFetchError error)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return TryFetch(in request, out package, out error);
+    }
 }
 
 /// <summary>
@@ -121,10 +135,30 @@ public interface IContentPackageFileSource : IContentPackageSource
         out ContentPackageManifest? manifest,
         out ContentSourceFetchError error);
 
+    bool TryFetchManifest(
+        in ContentPackageManifestFetchRequest request,
+        CancellationToken cancellationToken,
+        out ContentPackageManifest? manifest,
+        out ContentSourceFetchError error)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return TryFetchManifest(in request, out manifest, out error);
+    }
+
     bool TryFetchFile(
         in ContentFileFetchRequest request,
         out ContentFilePayload payload,
         out ContentSourceFetchError error);
+
+    bool TryFetchFile(
+        in ContentFileFetchRequest request,
+        CancellationToken cancellationToken,
+        out ContentFilePayload payload,
+        out ContentSourceFetchError error)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return TryFetchFile(in request, out payload, out error);
+    }
 }
 
 public readonly record struct ContentActivationAcquisitionResult(
@@ -161,7 +195,8 @@ public static class ContentActivationAcquirer
         bool persistentlyPinned,
         out ContentCatalogLease? lease,
         out ContentActivationAcquisitionResult result,
-        ContentActivationAcquirerLimits limits = default)
+        ContentActivationAcquirerLimits limits = default,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(cache);
         ArgumentNullException.ThrowIfNull(baseCatalog);
@@ -170,6 +205,7 @@ public static class ContentActivationAcquirer
         ArgumentNullException.ThrowIfNull(source);
         limits = ContentActivationAcquirerLimits.Resolve(limits);
         lease = null;
+        cancellationToken.ThrowIfCancellationRequested();
 
         ContentPackageAcquisition[] candidates = acquisitions.Take(plan.Packages.Count + 1).ToArray();
         if (candidates.Length != plan.Packages.Count ||
@@ -179,6 +215,7 @@ public static class ContentActivationAcquirer
         var progress = new AcquisitionProgress();
         foreach (ContentActivationPackage requirement in plan.Packages)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             ContentPackageAcquisition? acquisition = candidates.FirstOrDefault(value =>
                 value.Package == requirement.PackageId && value.ManifestHash == requirement.ManifestHash);
             if (acquisition is null)
@@ -211,6 +248,7 @@ public static class ContentActivationAcquirer
             ContentSourceFetchError lastSourceError = ContentSourceFetchError.UnsupportedSource;
             foreach (ContentSourceDescriptor candidate in acquisition.Sources)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 if (packageSourceAttempts == limits.MaximumSourceAttemptsPerPackage) break;
                 bool granular = source is IContentPackageFileSource files && files.CanFetchFiles(in candidate);
                 if (!granular && !source.CanFetch(candidate.Kind)) continue;
@@ -225,12 +263,12 @@ public static class ContentActivationAcquirer
                 {
                     success = TryAcquireGranular(cache, plan.Realm, requirement, candidate,
                         (IContentPackageFileSource)source, cachedManifest, limits,
-                        progress, out installError, out lastSourceError);
+                        progress, cancellationToken, out installError, out lastSourceError);
                 }
                 else
                 {
                     success = TryAcquireArchive(cache, plan.Realm, requirement, candidate, source,
-                        progress, out installError, out lastSourceError);
+                        progress, cancellationToken, out installError, out lastSourceError);
                 }
                 if (success)
                 {
@@ -277,6 +315,7 @@ public static class ContentActivationAcquirer
         ContentSourceDescriptor candidate,
         IContentPackageSource source,
         AcquisitionProgress progress,
+        CancellationToken cancellationToken,
         out ContentCacheError installError,
         out ContentSourceFetchError sourceError)
     {
@@ -285,7 +324,9 @@ public static class ContentActivationAcquirer
             requirement.ManifestHash, candidate);
         try
         {
-            if (!source.TryFetch(in request, out FetchedContentPackage? downloaded, out sourceError))
+            if (!source.TryFetch(
+                    in request, cancellationToken, out FetchedContentPackage? downloaded,
+                    out sourceError))
                 return false;
             if (downloaded is null || downloaded.Manifest.PackageId != requirement.PackageId ||
                 downloaded.Manifest.ManifestHash != requirement.ManifestHash)
@@ -311,6 +352,10 @@ public static class ContentActivationAcquirer
             sourceError = ContentSourceFetchError.None;
             return true;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             sourceError = ContentSourceFetchError.SourceFailure;
@@ -327,6 +372,7 @@ public static class ContentActivationAcquirer
         ContentPackageManifest? cachedManifest,
         ContentActivationAcquirerLimits limits,
         AcquisitionProgress progress,
+        CancellationToken cancellationToken,
         out ContentCacheError installError,
         out ContentSourceFetchError sourceError)
     {
@@ -338,7 +384,9 @@ public static class ContentActivationAcquirer
             {
                 var manifestRequest = new ContentPackageManifestFetchRequest(
                     realm, requirement.PackageId, requirement.ManifestHash, candidate);
-                if (!source.TryFetchManifest(in manifestRequest, out manifest, out sourceError)) return false;
+                if (!source.TryFetchManifest(
+                        in manifestRequest, cancellationToken, out manifest, out sourceError))
+                    return false;
                 if (manifest is null || manifest.PackageId != requirement.PackageId ||
                     manifest.ManifestHash != requirement.ManifestHash)
                 {
@@ -359,6 +407,7 @@ public static class ContentActivationAcquirer
             Parallel.For(0, needed.Length, new ParallelOptions
             {
                 MaxDegreeOfParallelism = limits.MaximumConcurrentFileFetches,
+                CancellationToken = cancellationToken,
             }, index =>
             {
                 int now = Interlocked.Increment(ref active);
@@ -367,7 +416,8 @@ public static class ContentActivationAcquirer
                 {
                     var fileRequest = new ContentFileFetchRequest(
                         realm, requirement.PackageId, requirement.ManifestHash, needed[index], candidate);
-                    if (!source.TryFetchFile(in fileRequest, out ContentFilePayload payload,
+                    if (!source.TryFetchFile(in fileRequest, cancellationToken,
+                            out ContentFilePayload payload,
                             out ContentSourceFetchError fetchError) ||
                         payload.Path != needed[index].Path ||
                         !ContentPackageValidator.TryValidatePayload(needed[index], payload.Bytes.Span))
@@ -378,6 +428,10 @@ public static class ContentActivationAcquirer
                         return;
                     }
                     payloads[index] = payload;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {
@@ -407,6 +461,10 @@ public static class ContentActivationAcquirer
                 progress.BytesFetched = checked(progress.BytesFetched + payload.Bytes.Length);
             sourceError = ContentSourceFetchError.None;
             return true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {

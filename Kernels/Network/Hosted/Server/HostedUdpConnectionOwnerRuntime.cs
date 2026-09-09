@@ -8,6 +8,8 @@ namespace UltraSim.Network;
 public readonly record struct HostedUdpConnectionOwnerRuntimeSnapshot(
     int OwnerCount,
     int ActiveTransports,
+    int MaximumIngressTransfersPerPass,
+    int PeakIngressTransfersPerPass,
     ulong OwnerPasses,
     ulong ApplicationMessages,
     ulong UnhandledApplicationMessages,
@@ -39,6 +41,8 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly UdpProtocolLimits _udpLimits;
     private readonly HostedUdpAdmissionLimits _admissionLimits;
+    private readonly HostedUdpOwnerShardingLimits _ownerLimits;
+    private readonly INetworkMonotonicClock _clock;
     private readonly IHostedUdpSessionApplicationFactory _applicationFactory;
     private readonly byte[] _listenerPayloadScratch;
     private readonly byte[] _listenerPathScratch =
@@ -56,7 +60,9 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
     private long _listenerPathDatagrams;
     private long _listenerCapacityDrops;
     private long _ownerProtocolStopwatchTicks;
+    private int _peakIngressTransfersPerPass;
     private bool _stopped;
+    private bool _joinCleanupComplete;
     private bool _disposed;
 
     internal HostedUdpConnectionOwnerRuntime(
@@ -65,10 +71,12 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         NetworkProtocolLimits protocolLimits,
         UdpProtocolLimits udpLimits,
         HostedUdpAdmissionLimits admissionLimits,
-        IHostedUdpSessionApplicationFactory applicationFactory)
+        IHostedUdpSessionApplicationFactory applicationFactory,
+        INetworkMonotonicClock clock)
     {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(applicationFactory);
+        ArgumentNullException.ThrowIfNull(clock);
         limits.Validate();
         protocolLimits.Validate(new DeterministicDatagramLimits(
             1, udpLimits.MaximumDatagramBytes));
@@ -80,6 +88,8 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         _protocolLimits = protocolLimits;
         _udpLimits = udpLimits;
         _admissionLimits = admissionLimits;
+        _ownerLimits = limits;
+        _clock = clock;
         _applicationFactory = applicationFactory;
         _handoff = new HostedUdpConnectionOwnerHandoff(limits);
         _listenerPayloadScratch = new byte[limits.MaximumDatagramBytes];
@@ -117,6 +127,8 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         _listenerPathScratch.Length +
         (long)_workers.Length * IntPtr.Size +
         (long)_workerByOwnerSlot.Length * IntPtr.Size);
+
+    internal bool IsQuiescent => _joinCleanupComplete;
 
     internal bool TryCreateTransport(
         ConnectionId connection,
@@ -296,6 +308,8 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         return new(
             _workers.Length,
             active,
+            _ownerLimits.MaximumIngressTransfersPerPass,
+            Volatile.Read(ref _peakIngressTransfersPerPass),
             checked((ulong)Interlocked.Read(ref _ownerPasses)),
             checked((ulong)Interlocked.Read(ref _applicationMessages)),
             checked((ulong)Interlocked.Read(ref _unhandledApplicationMessages)),
@@ -315,31 +329,59 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
     internal void StopAndJoin()
     {
         EnsureListenerThread();
-        if (_stopped) return;
-        _stopped = true;
-        for (int index = 0; index < _workers.Length; index++)
-            _workers[index].RequestStop();
+        if (_joinCleanupComplete) return;
+        if (!_stopped)
+        {
+            _stopped = true;
+            for (int index = 0; index < _workers.Length; index++)
+                _workers[index].RequestStop();
+        }
+        List<Exception>? failures = null;
+        bool allJoined = true;
         for (int index = 0; index < _workers.Length; index++)
         {
             OwnerWorker worker = _workers[index];
             if (!worker.Join(TimeSpan.FromSeconds(10)))
-                throw new InvalidOperationException(
-                    "A hosted connection-owner worker did not become quiescent.");
-            if (worker.Failure is not null) throw new InvalidOperationException(
-                "A hosted connection-owner worker failed.", worker.Failure);
-            _ = _handoff.ForceCloseFailedOwner(worker.Owner);
+            {
+                allJoined = false;
+                AddFailure(ref failures, new InvalidOperationException(
+                    $"Hosted connection-owner worker {worker.Ordinal} did not become quiescent."));
+                continue;
+            }
+            if (worker.Failure is not null)
+                AddFailure(ref failures, new InvalidOperationException(
+                    $"Hosted connection-owner worker {worker.Ordinal} failed.", worker.Failure));
+            HostedPacketHandoffStatus close =
+                _handoff.ForceCloseFailedOwner(worker.Owner);
+            if (close is not (HostedPacketHandoffStatus.Accepted or
+                HostedPacketHandoffStatus.DestinationClosed))
+                AddFailure(ref failures, new InvalidOperationException(
+                    $"Hosted connection-owner worker {worker.Ordinal} could not release its handoff ownership ({close})."));
         }
+        _joinCleanupComplete = allJoined;
+        if (failures is not null)
+            throw new AggregateException(
+                "One or more hosted connection owners failed during shutdown.", failures);
     }
 
     public void Dispose()
     {
         EnsureListenerThread();
         if (_disposed) return;
-        StopAndJoin();
-        _handoff.Dispose();
-        CryptographicOperations.ZeroMemory(_listenerPayloadScratch);
-        CryptographicOperations.ZeroMemory(_listenerPathScratch);
-        _disposed = true;
+        List<Exception>? failures = null;
+        try { StopAndJoin(); }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
+        if (_joinCleanupComplete)
+        {
+            try { _handoff.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+            CryptographicOperations.ZeroMemory(_listenerPayloadScratch);
+            CryptographicOperations.ZeroMemory(_listenerPathScratch);
+            _disposed = true;
+        }
+        if (failures is not null)
+            throw new AggregateException(
+                "The hosted connection-owner runtime failed to dispose completely.", failures);
     }
 
     private void ApplyPathCommit(
@@ -453,6 +495,9 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
     {
         private readonly HostedUdpConnectionOwnerRuntime _runtime;
         private int _stopRequested;
+        private int _drainRequested;
+        private long _requestedDrainMilliseconds;
+        private int _drainApplied;
         private int _stoppedOnOwner;
         private int _committed;
         private int _listenerCommitState;
@@ -516,6 +561,12 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
 
         internal void RequestStop() => Volatile.Write(ref _stopRequested, 1);
 
+        internal void RequestDrain(ulong now)
+        {
+            Volatile.Write(ref _requestedDrainMilliseconds, unchecked((long)now));
+            Volatile.Write(ref _drainRequested, 1);
+        }
+
         internal bool WaitStopped(TimeSpan timeout) =>
             SpinWait.SpinUntil(() => StoppedOnOwner, timeout);
 
@@ -547,6 +598,9 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
             HostedUdpProtocolSession session = _session ??
                 throw new InvalidOperationException(
                     "A committed owner transport has no hosted session.");
+            if (Volatile.Read(ref _drainRequested) != 0)
+                BeginDrainOnOwner(unchecked((ulong)Volatile.Read(
+                    ref _requestedDrainMilliseconds)));
             if (session.HasPendingPathRebind && !session.PathCommitAwaitingListener &&
                 now >= session.PendingPathExpiration)
             {
@@ -574,11 +628,30 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
             }
             _ = Application.TryProgress();
             protocolStarted = Stopwatch.GetTimestamp();
-            if (now - session.LastKeepAliveMilliseconds >=
+            if (session.RawState == UdpProtocolSessionState.Established &&
+                now - session.LastKeepAliveMilliseconds >=
                     (ulong)_runtime._udpLimits.KeepAliveIntervalMilliseconds &&
                 Peer.TryEmitKeepAlive())
                 session.LastKeepAliveMilliseconds = now;
             Peer.Emit(now);
+            HostedUdpSessionLifetimeDecision lifetime =
+                HostedUdpSessionLifetimePolicy.Evaluate(
+                    session.RawState,
+                    Application is IHostedUdpSessionApplicationLifetime
+                        { RetirementRequested: true },
+                    now,
+                    session.LastActivityMilliseconds,
+                    session.DrainDeadlineMilliseconds,
+                    Peer.ReliableQueued,
+                    _runtime._udpLimits);
+            if (lifetime == HostedUdpSessionLifetimeDecision.BeginDrain)
+                BeginDrainOnOwner(now);
+            else if (lifetime == HostedUdpSessionLifetimeDecision.Retire)
+            {
+                if (session.RawState == UdpProtocolSessionState.Established)
+                    BeginDrainOnOwner(now);
+                RequestStop();
+            }
             Interlocked.Add(
                 ref _runtime._ownerProtocolStopwatchTicks,
                 Stopwatch.GetTimestamp() - protocolStarted);
@@ -674,9 +747,29 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
 
         internal void DisposeOnOwner()
         {
-            Application.Dispose();
-            Peer.Dispose();
-            Endpoint.Dispose();
+            List<Exception>? failures = null;
+            try { Application.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+            try { Peer.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+            try { Endpoint.Dispose(); }
+            catch (Exception exception) { AddFailure(ref failures, exception); }
+            if (failures is not null)
+                throw new AggregateException(
+                    "A hosted owner transport failed to dispose completely.", failures);
+        }
+
+        private void BeginDrainOnOwner(ulong now)
+        {
+            if (Interlocked.Exchange(ref _drainApplied, 1) != 0) return;
+            Peer.StopAcceptingNewSends();
+            HostedUdpProtocolSession session = _session ??
+                throw new InvalidOperationException(
+                    "A committed owner transport has no hosted session.");
+            session.DrainDeadlineMilliseconds =
+                HostedUdpSessionLifetimePolicy.GetDrainDeadline(
+                    now, _runtime._udpLimits);
+            session.RawState = UdpProtocolSessionState.Draining;
         }
 
         private void HandleRequest(
@@ -725,7 +818,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
             session.PendingPathGeneration = new(session.LastIssuedPathGeneration);
             session.PendingPathAttempt = attempt;
             session.PendingPathExpiration = checked(
-                NowMilliseconds() +
+                _runtime._clock.Milliseconds +
                 (ulong)_runtime._admissionLimits.ValidatedCandidateTimeoutMilliseconds);
             nonce.CopyTo(session.PendingPathNonce);
             observedPathBinding.CopyTo(session.PendingPathBinding);
@@ -839,8 +932,6 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                 Interlocked.Increment(ref _runtime._listenerCapacityDrops);
         }
 
-        internal static ulong NowMilliseconds() => checked((ulong)(
-            Stopwatch.GetTimestamp() * 1_000L / Stopwatch.Frequency));
     }
 
     internal sealed class OwnerWorker
@@ -947,8 +1038,9 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                 while (Volatile.Read(ref _stop) == 0)
                 {
                     ProcessCreateRequest();
-                    ulong now = HostedUdpOwnedTransport.NowMilliseconds();
-                    DrainIngress(now);
+                    ulong now = _runtime._clock.Milliseconds;
+                    int ingress = DrainIngress(now);
+                    UpdateMaximum(ref _runtime._peakIngressTransfersPerPass, ingress);
                     for (int index = 0; index < _transports.Length; index++)
                     {
                         HostedUdpOwnedTransport? transport = _transports[index];
@@ -1033,12 +1125,15 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
             }
         }
 
-        private void DrainIngress(ulong now)
+        private int DrainIngress(ulong now)
         {
             Span<byte> path =
                 stackalloc byte[HostedUdpConnectionOwnerHandoff.PathBindingBytes];
-            while (_runtime._handoff.TryAcquireIngress(
-                Owner, out HostedPacketTransfer transfer))
+            int admitted = 0;
+            for (;
+                 admitted < _runtime._ownerLimits.MaximumIngressTransfersPerPass &&
+                 _runtime._handoff.TryAcquireIngress(
+                    Owner, out HostedPacketTransfer transfer); admitted++)
             {
                 HostedUdpOwnedTransport? transport =
                     transfer.Connection.IsValid &&
@@ -1046,7 +1141,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                     ? _transports[transfer.Connection.Slot]
                     : null;
                 if (transport is null || transport.Connection != transfer.Connection ||
-                    !transport.IsCommitted)
+                    !transport.IsCommitted || transport.StopRequested)
                 {
                     ReleaseIngress(transfer.Id);
                     continue;
@@ -1079,6 +1174,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                     ReleaseIngress(transfer.Id);
                 }
             }
+            return admitted;
         }
 
         private void ReleaseIngress(HostedPacketTransferId id)
@@ -1087,5 +1183,22 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                 throw new InvalidOperationException(
                     "The connection owner could not release a demultiplexed packet lease.");
         }
+
+        private static void UpdateMaximum(ref int target, int value)
+        {
+            while (true)
+            {
+                int current = Volatile.Read(ref target);
+                if (current >= value ||
+                    Interlocked.CompareExchange(ref target, value, current) == current)
+                    return;
+            }
+        }
+    }
+
+    private static void AddFailure(ref List<Exception>? failures, Exception exception)
+    {
+        failures ??= new List<Exception>();
+        failures.Add(exception);
     }
 }

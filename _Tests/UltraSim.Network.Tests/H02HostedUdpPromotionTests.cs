@@ -68,6 +68,7 @@ internal static class H02HostedUdpPromotionTests
         Run("HostedPromotionResamplesMonotonicTimeAfterInboundPublication", HostedPromotionResamplesMonotonicTimeAfterInboundPublication);
         Run("WarmedHostedSecureDeliveryAllocatesZero", WarmedHostedSecureDeliveryAllocatesZero);
         Run("HostedManifestCookieBindingAndDeploymentSignerLifetimeAreExact", HostedManifestCookieBindingAndDeploymentSignerLifetimeAreExact);
+        Run("HostedScalarIdleClosureRetiresAdmissionAndPeerState", HostedScalarIdleClosureRetiresAdmissionAndPeerState);
     }
 
     private static void HostedCandidateIdentityIsGenerationFencedAndFixedWidth()
@@ -505,6 +506,33 @@ internal static class H02HostedUdpPromotionTests
         True(secondHost.TryCopyServerPublicKey(
             new byte[before.Length], out int written));
         Equal(before.Length, written);
+    }
+
+    private static void HostedScalarIdleClosureRetiresAdmissionAndPeerState()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        var clock = new ManualClock(100);
+        using var host = CreateHost(identity, clock);
+        HostedUdpProtocolClient client = CreateClient(host, identity);
+        PumpUntilEstablished(host, client);
+        ConnectionId retiredConnection = client.Connection;
+        True(host.TryGetSession(retiredConnection, out HostedUdpProtocolSession? retained));
+        client.Dispose(); // Abrupt peer loss: no semantic detach reaches the host.
+
+        clock.Milliseconds = 10_101;
+        host.Pump();
+        Equal(UdpProtocolSessionState.Draining, retained!.State);
+        host.Pump();
+        Equal(UdpProtocolSessionState.Closed, retained.State);
+        Equal(0, host.SessionCount);
+        HostedUdpAdmissionSnapshot retired = host.GetSnapshot();
+        Equal(0, retired.Connections.Active);
+        Equal(0, retired.Listener.RegisteredPaths);
+
+        using HostedUdpProtocolClient replacement = CreateClient(host, identity);
+        PumpUntilEstablished(host, replacement);
+        Equal(1, host.SessionCount);
+        True(replacement.Connection != retiredConnection);
     }
 
     private static HostedUdpAdmissionHost CreateHost(

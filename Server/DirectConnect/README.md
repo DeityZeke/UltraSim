@@ -23,6 +23,9 @@ outside Game/Network progression and knows no realm, manifest, or package semant
 composes the development executable with one canonical Concept Demo deployment package containing
 the complete WorldPack plus standard Inventory and read-only Server Monitor UI definitions. The authority publishes the exact
 authenticated requirement while the separate HTTP host only serves its immutable `.uspkg` bytes.
+The host uses fixed concurrent response workers, a bounded pending queue, and per-response
+deadlines; one stalled download cannot serialize every other client behind it, and overload is
+rejected without unbounded task creation.
 
 D0.6 makes each application expose the Game-owned Server Monitor through that exact
 content-backed definition. A shared authority supplies a bounded sanitized participant census,

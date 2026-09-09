@@ -164,7 +164,7 @@ internal sealed class RingScenario : IKernelBenchmarkScenario
         ulong checksum = 0;
         for (int index = 0; index < operations; index++)
         {
-            var token = new PacketBufferToken(0, unchecked((uint)index + 1));
+            var token = new PacketBufferToken(1, 0, unchecked((uint)index + 1));
             if (!_ring.TryEnqueue(token) || !_ring.TryDequeue(out PacketBufferToken read))
                 throw new InvalidOperationException("Ring benchmark failed.");
             checksum += read.Generation;
