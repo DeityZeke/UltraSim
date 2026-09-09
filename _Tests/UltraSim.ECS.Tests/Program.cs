@@ -112,6 +112,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit), PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit);
         Run(nameof(PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel), PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel);
         Run(nameof(PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary), PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary);
+        Run(nameof(PublicEcsWorld_RejectedDisposePreservesScheduler), PublicEcsWorld_RejectedDisposePreservesScheduler);
         Run(nameof(PublicGeneratedChunkJobs_PrepareSealExecuteAndValidateOwnership), PublicGeneratedChunkJobs_PrepareSealExecuteAndValidateOwnership);
         Run(nameof(PublicGeneratedTrackedJobs_PublishExactRowsAndReleaseExceptions), PublicGeneratedTrackedJobs_PublishExactRowsAndReleaseExceptions);
         Run(nameof(PublicGeneratedChunkJobs_WarmedExecutionAllocatesZeroManagedBytes), PublicGeneratedChunkJobs_WarmedExecutionAllocatesZeroManagedBytes);
@@ -231,6 +232,8 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeChunkStore_SparseRowVersionsAreOptInBoundedAndReset), ArchetypeChunkStore_SparseRowVersionsAreOptInBoundedAndReset);
         Run(nameof(EcsWorld_ChangedRowsRefineScalarWritesInsideChangedChunks), EcsWorld_ChangedRowsRefineScalarWritesInsideChangedChunks);
         Run(nameof(EcsWorld_ChangedRowsTrackFilteredAndDenseWritesExactly), EcsWorld_ChangedRowsTrackFilteredAndDenseWritesExactly);
+        Run(nameof(EcsWorld_DenseHistoryDoesNotLeakIntoLaterOccupants), EcsWorld_DenseHistoryDoesNotLeakIntoLaterOccupants);
+        Run(nameof(EcsWorld_DenseHistoryDoesNotLeakThroughOptimizedTransition), EcsWorld_DenseHistoryDoesNotLeakThroughOptimizedTransition);
         Run(nameof(EcsWorld_ChangedRowsRetainCursorAfterExceptionAndWrap), EcsWorld_ChangedRowsRetainCursorAfterExceptionAndWrap);
         Run(nameof(EcsWorld_ChangedRowsNativePinnedParity), EcsWorld_ChangedRowsNativePinnedParity);
         Run(nameof(EcsWorld_WarmedChangedRowsAllocateZeroManagedBytes), EcsWorld_WarmedChangedRowsAllocateZeroManagedBytes);
@@ -4121,6 +4124,58 @@ internal static class EcsPrimitiveTests
             rejectedInvalid = true;
         }
         Assert.True(rejectedInvalid);
+    }
+
+    private static void PublicEcsWorld_RejectedDisposePreservesScheduler()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        var scheduler = new EcsSchedulerOptions(
+            maximumSystems: 1,
+            maximumDependencies: 0,
+            maximumWorkItems: 1,
+            maximumStructuralSegments: 1,
+            backgroundWorkerCount: 0,
+            structuralCommandsPerProducer: 0,
+            structuralPayloadBytesPerProducer: 0);
+        var world = new EcsWorld(
+            schema,
+            new EcsWorldOptions(
+                new EntityCapacity(1),
+                maximumArchetypes: 1,
+                maximumPreparedPlans: 1,
+                maximumPreparedTransitions: 0,
+                maximumStructuralCommands: 0,
+                scheduler: scheduler));
+        ComponentId valueId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ArchetypeHandle archetype = world.RegisterArchetype(
+            [valueId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> lookup =
+            world.PrepareLookup<UltraSim.ECS.Tests.LayoutEnableLong>();
+        var runtime = new ShutdownCountingRangeRuntime();
+        world.RegisterRangeSystem<ShutdownCountingRangeRuntime, NoOpRangeJob>(
+            new SystemDefinition(
+                "test.dispose-admission",
+                SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Serial),
+            runtime);
+        world.Seal();
+        world.Initialize();
+        world.BeginRun();
+        Assert.True(world.TryCreate(archetype, out _));
+
+        var callback = new DisposeAttemptAccessJob(world);
+        world.ExecuteAccess(lookup, ref callback);
+
+        Assert.True(callback.Rejected);
+        Assert.Equal(0, runtime.ShutdownCount);
+        Assert.Equal(EcsWorldState.Running, world.State);
+        world.Tick(1d / 60d);
+        Assert.Equal(1UL, world.TickCount);
+        world.Dispose();
+        Assert.Equal(1, runtime.ShutdownCount);
     }
 
     private static void PublicGeneratedChunkJobs_PrepareSealExecuteAndValidateOwnership()
@@ -11307,6 +11362,155 @@ internal static class EcsPrimitiveTests
             ref denseExact));
     }
 
+    private static void EcsWorld_DenseHistoryDoesNotLeakIntoLaterOccupants()
+    {
+        RunDenseHistoryLaterOccupantCase<NativeChunkArena>();
+        RunDenseHistoryLaterOccupantCase<PinnedChunkArena>();
+    }
+
+    private static void RunDenseHistoryLaterOccupantCase<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        using var fixture = new ChangedQueryFixture<TArena>(maximumChunks: 1, entityCapacity: 8);
+        Entity written = fixture.Create(first: false, seed: 11);
+        Entity migrant = fixture.Create(first: true, seed: 22);
+        ChangeCursor older = fixture.World.CreateChangeCursorFromNow();
+
+        var writer = new IntChunkWriter();
+        Assert.Equal(1, fixture.World.VisitWriteChunks(fixture.SecondIntBinding, ref writer));
+        ChangeCursor newer = fixture.World.CreateChangeCursorFromNow();
+        Assert.True(fixture.World.TryTransition(migrant, fixture.FirstToSecond, out _));
+        Assert.True(fixture.World.TryCreateDefault(fixture.Second.Id, out Entity appended));
+
+        var expected = new bool[8];
+        expected[written.Index] = true;
+        var exact = new ExactChangedWideVisitor(expected);
+        Assert.Equal(1, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref older,
+            ref exact));
+        Assert.Equal(1, exact.SeenRows);
+        Assert.False(expected[written.Index]);
+        Assert.False(expected[migrant.Index]);
+        Assert.False(expected[appended.Index]);
+
+        var noStructuralChanges = new ChangedWideVisitor();
+        Assert.Equal(0, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref newer,
+            ref noStructuralChanges));
+
+        ChangeCursor beforeCompaction = fixture.World.CreateChangeCursorFromNow();
+        Assert.Equal(3, fixture.World.VisitWriteChunks(fixture.SecondIntBinding, ref writer));
+        ChangeCursor afterCompactionWrite = fixture.World.CreateChangeCursorFromNow();
+        Assert.True(fixture.World.TryDestroy(migrant));
+        Assert.True(fixture.World.TryCreateDefault(fixture.Second.Id, out Entity reused));
+
+        expected.AsSpan().Clear();
+        expected[written.Index] = true;
+        expected[appended.Index] = true;
+        exact = new ExactChangedWideVisitor(expected);
+        Assert.Equal(2, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref beforeCompaction,
+            ref exact));
+        Assert.Equal(2, exact.SeenRows);
+        Assert.False(expected[written.Index]);
+        Assert.False(expected[appended.Index]);
+        Assert.False(expected[reused.Index]);
+
+        noStructuralChanges = new ChangedWideVisitor();
+        Assert.Equal(0, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref afterCompactionWrite,
+            ref noStructuralChanges));
+    }
+
+    private static void EcsWorld_DenseHistoryDoesNotLeakThroughOptimizedTransition()
+    {
+        const int sourceCount = ArchetypeMigrator.MaximumBatchSize * 2 + 17;
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        using var world = new EcsWorld<NativeChunkArena>(
+            schema,
+            new EntityCapacity(sourceCount + 1),
+            maximumArchetypes: 2,
+            static capacity => new NativeChunkArena(capacity),
+            maximumQueryPlans: 1,
+            maximumPublicTransitions: 1);
+        ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+        ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ComponentId tagId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutTag>();
+        ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        ArchetypeId source = world.RegisterArchetype(
+            [intId, wideId], ChunkLayoutOptions.KiB16, maximumChunks: 8);
+        ComponentId[] destinationSignature = [byteId, intId, tagId, wideId];
+        Array.Sort(destinationSignature, static (left, right) => left.CompareTo(right));
+        ArchetypeId destination = world.RegisterArchetype(
+            destinationSignature, ChunkLayoutOptions.KiB16, maximumChunks: 8);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> sourceWide =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutWide>(source, wideId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> destinationWide =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutWide>(destination, wideId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> destinationInt =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutInt>(destination, intId);
+        ArchetypeChangedReadQueryPlan<NativeChunkArena, UltraSim.ECS.Tests.LayoutWide> exact =
+            world.PrepareChangedRowsQuery<UltraSim.ECS.Tests.LayoutWide>(wideId, intId);
+        uint transitionId = world.PreparePublicTransition(
+            source, destination, out StructuralTransitionPhase phase);
+        var transition = new ArchetypeTransition(
+            world.Id,
+            transitionId,
+            new ArchetypeHandle(world.Id, source),
+            new ArchetypeHandle(world.Id, destination),
+            phase);
+        world.Seal();
+
+        Assert.True(world.TryCreateInitialized(
+            destination,
+            destinationWide,
+            CreateGeneratedWideValue(991),
+            out Entity incumbent));
+        var sourceEntities = new Entity[sourceCount];
+        for (int index = 0; index < sourceEntities.Length; index++)
+        {
+            Assert.True(world.TryCreateInitialized(
+                source,
+                sourceWide,
+                CreateGeneratedWideValue(index),
+                out sourceEntities[index]));
+        }
+
+        ChangeCursor older = world.CreateChangeCursorFromNow();
+        var writer = new IntChunkWriter();
+        Assert.Equal(1, world.VisitWriteChunks(destinationInt, ref writer));
+        ChangeCursor newer = world.CreateChangeCursorFromNow();
+        var commands = new StructuralCommandBuffer(
+            world.Id,
+            Environment.CurrentManagedThreadId,
+            sourceCount,
+            maximumArchetypes: 2);
+        commands.EnqueueTransition(sourceEntities, transition);
+        StructuralPlaybackResult result = commands.Playback(world);
+        Assert.Equal(sourceCount, result.AddedCount);
+        Assert.Equal(1, commands.LastPlaybackDiagnostics.ExactWholeSourceResets);
+
+        var expected = new bool[sourceCount + 1];
+        expected[incumbent.Index] = true;
+        var visitor = new ExactChangedWideVisitor(expected);
+        Assert.Equal(1, world.VisitChangedReadRows(exact, ref older, ref visitor));
+        Assert.Equal(1, visitor.SeenRows);
+        Assert.False(expected[incumbent.Index]);
+        for (int index = 0; index < sourceEntities.Length; index++)
+            Assert.False(expected[sourceEntities[index].Index]);
+
+        var none = new ChangedWideVisitor();
+        Assert.Equal(0, world.VisitChangedReadRows(exact, ref newer, ref none));
+    }
+
     private static void EcsWorld_ChangedRowsRetainCursorAfterExceptionAndWrap()
     {
         using var fixture = new ChangedQueryFixture<NativeChunkArena>(
@@ -13244,6 +13448,46 @@ internal static class EcsPrimitiveTests
     private struct PublicNoOpAccessJob : IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
     {
         public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access)
+        {
+        }
+    }
+
+    private struct DisposeAttemptAccessJob : IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly EcsWorld _world;
+
+        internal DisposeAttemptAccessJob(EcsWorld world)
+        {
+            _world = world;
+            Rejected = false;
+        }
+
+        internal bool Rejected;
+
+        public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access)
+        {
+            try
+            {
+                _world.Dispose();
+            }
+            catch (InvalidOperationException)
+            {
+                Rejected = true;
+            }
+        }
+    }
+
+    private sealed class ShutdownCountingRangeRuntime : IRangeSystemRuntime<NoOpRangeJob>
+    {
+        internal int ShutdownCount;
+        public int GetRangeCount(in SystemPrepareContext context) => 0;
+        public NoOpRangeJob Prepare(in SystemPrepareContext context) => default;
+        public void Shutdown(in SystemShutdownContext context) => ShutdownCount++;
+    }
+
+    private readonly struct NoOpRangeJob : IRangeJob
+    {
+        public void Execute(in SystemJobContext context, int start, int count)
         {
         }
     }

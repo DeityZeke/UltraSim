@@ -84,11 +84,24 @@ Changed values and structural lifecycle are separate observations. A change
 cursor cannot infer that an entity was destroyed; a lifecycle cursor does not
 carry arbitrary component values.
 
+Dense exact-row refinement belongs to the logical occupants present when the
+writable range publishes. Before append, migration, donor compaction, or row
+reuse changes occupancy, storage materializes that dense stamp into those prior
+occupants' row history. New occupants initialize or transfer their own history;
+they never inherit a physical chunk's older dense stamp. This rule applies only
+to exact-row selection. Coarse changed-chunk queries intentionally retain their
+conservative physical-chunk history.
+
 ## Ownership and cost
 
 - Prepared plans and lookups belong to one sealed world/schema.
 - Chunk views, contexts, spans, and structural writers expire with their callback.
 - Public checked operations reject stale/wrong-world identity transactionally.
+- Lifecycle teardown is pre-admitted. Rejected disposal from a callback cannot
+  shut down the scheduler while leaving the aggregate world nominally running.
+- Exact-row tracking is opt-in per watched component and fully reserves one
+  `ulong` per configured row plus one per chunk. Sparse publication does not mean
+  sparse allocation.
 - Hot generated traversal and admitted scheduled paths are allocation-free after
   warmup under their configured capacities.
 - Capacity exhaustion is explicit; no unbounded fallback is substituted.

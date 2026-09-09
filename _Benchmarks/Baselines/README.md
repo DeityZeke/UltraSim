@@ -26,6 +26,15 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `ecs-v3-3.4.3-adversarial-correctness-hardening-2026-09-09.json` — independent
+  reproduction and repair evidence for exact-row history leaking into later occupants,
+  rejected-disposal scheduler teardown, expanded decode-scratch undercounting, persistence
+  callback reentry, and destructive invalid staging-factory cleanup; it records the permanent
+  Native/Pinned, scalar/optimized, rejection-recovery, and ownership gates;
+- `ecs-v3-3.4.3-changed-rows-regression-control-2026-09-09.json` and
+  `ecs-v3-3.4.3-exact-history-structural-control-2026-09-09.json` — Release controls for
+  100K-row exact change selection and 10K-of-100K optimized exact-history structural playback;
+  all six measured scenarios retain zero managed allocation;
 - `chat-c0.2-global-system-2026-09-08.json` — one Game-owned routed Global audience,
   explicit authority-originated System occurrences without a forged participant, shared
   packet-free/remote retained delivery and application proof, zero warmed allocation, dedicated

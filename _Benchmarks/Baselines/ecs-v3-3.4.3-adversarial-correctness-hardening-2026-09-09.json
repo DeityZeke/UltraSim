@@ -1,0 +1,109 @@
+{
+  "Profile": "ecs-3.4.3-adversarial-boundary-correctness-hardening",
+  "CapturedAtUtc": "2026-09-09T04:46:53Z",
+  "ReviewReferenceRevision": "f9a6d7fa267c05cde07c065b451d7575392a5921",
+  "CorrectionBaseRevision": "aafb421f88d39a5db728fec164c51e475b818f1e",
+  "ExternalReviewProbeSourceUsed": false,
+  "IndependentReproduction": [
+    {
+      "Id": "ECS-01",
+      "Confirmed": true,
+      "PreRepairObservation": "A dense write to one existing row was reported for three rows after an untouched entity migrated into the chunk and a new row was appended.",
+      "Repair": "Materialize dense exact history into the prior logical occupants before append, row reuse, compaction, or migration changes occupancy; retain the separate coarse chunk stamp.",
+      "PermanentGates": [
+        "EcsWorld_DenseHistoryDoesNotLeakIntoLaterOccupants",
+        "EcsWorld_DenseHistoryDoesNotLeakThroughOptimizedTransition"
+      ]
+    },
+    {
+      "Id": "ECS-02",
+      "Confirmed": true,
+      "PreRepairObservation": "Dispose rejected inside direct component access only after invoking scheduler shutdown; the world remained Running and its next Tick rejected as disposed.",
+      "Repair": "Pre-admit lifecycle mutation against owner, scheduler, persistence-capture, and direct-core execution state before scheduler teardown.",
+      "PermanentGates": [
+        "PublicEcsWorld_RejectedDisposePreservesScheduler"
+      ]
+    },
+    {
+      "Id": "ECS-03",
+      "Confirmed": true,
+      "PreRepairObservation": "Preflight admitted a compact one-byte-per-row encoding whose 4096-byte runtime component required a 524288-byte whole-column decode buffer above the configured temporary limit.",
+      "Repair": "Resolve and include the largest row-count times current-runtime-size decoded column plus coexisting known restore buffers before staging-world construction.",
+      "PermanentGates": [
+        "Persistence_ExpandedRuntimeDecodeScratchIsPreflighted"
+      ],
+      "ExpandedRuntimeColumnBytes": 524288
+    },
+    {
+      "Id": "ECS-04",
+      "Confirmed": true,
+      "PreRepairObservation": "A persistent-system state callback could reenter Tick before ECS values and scheduler tick were collected, allowing one artifact to span different logical ticks.",
+      "Repair": "Hold an exception-safe exclusive capture scope from before persistent-system size/write callbacks through logical ECS collection.",
+      "PermanentGates": [
+        "Persistence_CaptureRejectsPersistentCallbackReentry"
+      ]
+    },
+    {
+      "Id": "ECS-05",
+      "Confirmed": true,
+      "PreRepairObservation": "Rejecting a staging factory that returned an existing Running world disposed that caller-owned world.",
+      "Repair": "Adopt cleanup ownership only after the candidate passes the newly-created-state admission check; retain cleanup of admitted candidates on later failure.",
+      "PermanentGates": [
+        "Persistence_RejectedStagingFactoryDoesNotDisposeLiveWorld",
+        "Persistence_ExpandedRuntimeDecodeScratchIsPreflighted"
+      ]
+    }
+  ],
+  "Coverage": {
+    "ExactHistoryBackends": [
+      "NativeChunkArena",
+      "PinnedChunkArena"
+    ],
+    "ExactHistoryStructuralPaths": [
+      "scalar append",
+      "cross-archetype migration",
+      "donor compaction",
+      "row reuse",
+      "optimized exact whole-source transition"
+    ],
+    "CaptureReentryAttempts": [
+      "Tick from size callback",
+      "Tick from write callback",
+      "Dispose from write callback",
+      "nested capture from write callback"
+    ],
+    "RejectedOperationRecovery": [
+      "next ordinary Tick succeeds",
+      "capture succeeds after callback exception",
+      "caller-owned live staging result remains usable",
+      "adopted new staging candidate is disposed after hydration failure"
+    ]
+  },
+  "Verification": {
+    "EcsRuntimePrimitiveChecks": 221,
+    "EcsGeneratorChecks": 28,
+    "CanonicalRepositoryVerification": "PASS",
+    "ReleaseBuildWarnings": 0,
+    "ReleaseBuildErrors": 0
+  },
+  "PerformanceEvidence": [
+    {
+      "Artifact": "ecs-v3-3.4.3-changed-rows-regression-control-2026-09-09.json",
+      "Scenarios": 4,
+      "Population": 100000,
+      "MeanManagedAllocatedBytes": 0
+    },
+    {
+      "Artifact": "ecs-v3-3.4.3-exact-history-structural-control-2026-09-09.json",
+      "Scenarios": 2,
+      "TransitionRows": 10000,
+      "Population": 100000,
+      "MeanManagedAllocatedBytes": 0
+    }
+  ],
+  "ScopeNotes": [
+    "The restore temporary estimate is a conservative bound for kernel-owned managed buffers known after codec/schema resolution, not an exact CLR or process working-set limit.",
+    "Application-owned shape migrators and derived reconstructors remain responsible for their own bounded allocation policies.",
+    "No active production Game or Server runtime currently implements IPersistentSystemState; ECS-04 is retained as an interface-boundary defense."
+  ]
+}

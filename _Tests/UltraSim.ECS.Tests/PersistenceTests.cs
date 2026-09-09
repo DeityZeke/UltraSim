@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 
 internal static class PersistenceTests
@@ -28,6 +29,12 @@ internal static class PersistenceTests
         Console.WriteLine("PASS Persistence_DerivedStateReconstructsAfterHydration");
         PersistentSystemStateAndTickRoundTrip();
         Console.WriteLine("PASS Persistence_PersistentSystemStateAndTickRoundTrip");
+        CaptureRejectsPersistentCallbackReentry();
+        Console.WriteLine("PASS Persistence_CaptureRejectsPersistentCallbackReentry");
+        ExpandedRuntimeDecodeScratchIsPreflighted();
+        Console.WriteLine("PASS Persistence_ExpandedRuntimeDecodeScratchIsPreflighted");
+        RejectedStagingFactoryDoesNotDisposeLiveWorld();
+        Console.WriteLine("PASS Persistence_RejectedStagingFactoryDoesNotDisposeLiveWorld");
         CanonicalBytesIgnorePackedRowHistory();
         Console.WriteLine("PASS Persistence_CanonicalBytesIgnorePackedRowHistory");
         NativeAndPinnedCaptureAreByteExact();
@@ -358,6 +365,230 @@ internal static class PersistenceTests
             using EcsWorld unexpected = missingRequiredPlan.Restore(
                 requirements => new EcsWorld(requirements.Schema, Options(requirements.IdentityOptions, scheduler)), out _);
         });
+    }
+
+    private static void CaptureRejectsPersistentCallbackReentry()
+    {
+        ComponentSchema schema = PersistenceTestSchema.CreateSchema();
+        PersistenceCatalog catalog = PersistenceTestSchema.CreatePersistenceCatalog();
+        EcsSchedulerOptions scheduler = SchedulerOptions();
+        var runtime = new ReentrantPersistentRuntime();
+        using var world = new EcsWorld(
+            schema,
+            Options(new PersistenceIdentityOptions(new PersistentWorldId(0xC4A7)), scheduler));
+        world.RegisterRangeSystem<ReentrantPersistentRuntime, EmptyPersistenceJob>(
+            new SystemDefinition(
+                "persistence.reentry",
+                SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Serial,
+                persistenceId: 0xC4A7,
+                stateSchemaVersion: 1),
+            runtime);
+        world.Seal();
+        world.Initialize();
+        world.BeginRun();
+        runtime.World = world;
+        runtime.Catalog = catalog;
+
+        runtime.ReenterFromSize = true;
+        using (EcsPersistence.BeginCapture(world, catalog, new PersistenceCaptureOptions(1)))
+        {
+        }
+        Assert.Equal(1, runtime.ReentryAttempts);
+        Assert.Equal(1, runtime.ReentryRejections);
+        Assert.Equal(0UL, world.TickCount);
+        Assert.Equal(0, runtime.Value);
+
+        runtime.ReenterFromSize = false;
+        runtime.ReenterFromWrite = true;
+        using (EcsPersistence.BeginCapture(world, catalog, new PersistenceCaptureOptions(2)))
+        {
+        }
+        Assert.Equal(2, runtime.ReentryAttempts);
+        Assert.Equal(2, runtime.ReentryRejections);
+        Assert.Equal(0UL, world.TickCount);
+        Assert.Equal(0, runtime.Value);
+
+        runtime.ReenterFromWrite = false;
+        runtime.DisposeFromWrite = true;
+        using (EcsPersistence.BeginCapture(world, catalog, new PersistenceCaptureOptions(3)))
+        {
+        }
+        Assert.Equal(3, runtime.ReentryAttempts);
+        Assert.Equal(3, runtime.ReentryRejections);
+        Assert.False(world.IsDisposed);
+        Assert.Equal(0UL, world.TickCount);
+
+        runtime.DisposeFromWrite = false;
+        runtime.NestedCaptureFromWrite = true;
+        using (EcsPersistence.BeginCapture(world, catalog, new PersistenceCaptureOptions(4)))
+        {
+        }
+        Assert.Equal(4, runtime.ReentryAttempts);
+        Assert.Equal(4, runtime.ReentryRejections);
+        Assert.Equal(0UL, world.TickCount);
+
+        runtime.NestedCaptureFromWrite = false;
+        runtime.ThrowFromWrite = true;
+        Assert.Throws<PersistenceCallbackSentinelException>(() =>
+            EcsPersistence.BeginCapture(world, catalog, new PersistenceCaptureOptions(5)));
+        runtime.ThrowFromWrite = false;
+        using (EcsPersistence.BeginCapture(world, catalog, new PersistenceCaptureOptions(6)))
+        {
+        }
+        world.Tick(1d / 60d);
+        Assert.Equal(1UL, world.TickCount);
+        Assert.Equal(1, runtime.Value);
+    }
+
+    private static void ExpandedRuntimeDecodeScratchIsPreflighted()
+    {
+        ComponentSchema schema = ExpandedPersistenceSchema.CreateSchema();
+        var codec = new ExpandedPersistenceCodec();
+        PersistenceCatalog catalog = new PersistenceCatalogBuilder(schema)
+            .Register<ExpandedPersistenceValue>(
+                new PersistenceSchemaFingerprint(0xE1A2, 0x4096),
+                codec)
+            .Build();
+        using var source = new EcsWorld(
+            schema,
+            Options(new PersistenceIdentityOptions(new PersistentWorldId(0xE1A2))));
+        ArchetypeHandle shape = source.RegisterArchetype(
+            [ExpandedPersistenceSchema.GetComponentId<ExpandedPersistenceValue>()],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 64);
+        source.Seal();
+        source.Initialize();
+        source.BeginRun();
+        for (int index = 0; index < 128; index++)
+            Assert.True(source.TryCreate(shape, out _));
+        PersistenceSnapshotArtifact artifact = EcsPersistence.Capture(
+            source,
+            catalog,
+            new PersistenceCaptureOptions(1),
+            out _);
+
+        PersistenceRestoreOptions generous = new(
+            new PersistenceLimits(
+                1_000_000,
+                256,
+                10,
+                10,
+                100,
+                1_000_000,
+                4_000_000),
+            ChunkLayoutOptions.KiB16);
+        PersistenceRestorePlan admitted = EcsPersistenceRestore.Preflight(
+            artifact.Bytes,
+            catalog,
+            generous);
+        const long decodedColumnBytes = 128L * 4096L;
+        Assert.Equal(decodedColumnBytes, admitted.Requirements.MaximumDecodedColumnBytes);
+        Assert.True(admitted.Requirements.EstimatedTemporaryBytes >= decodedColumnBytes);
+
+        long admittedBytes = admitted.Requirements.EstimatedTemporaryBytes;
+        PersistenceRestoreOptions insufficient = new(
+            new PersistenceLimits(
+                1_000_000,
+                256,
+                10,
+                10,
+                100,
+                1_000_000,
+                admittedBytes - 1),
+            ChunkLayoutOptions.KiB16);
+        Assert.Throws<PersistenceValidationException>(() =>
+            EcsPersistenceRestore.Preflight(artifact.Bytes, catalog, insufficient));
+
+        PersistenceRestoreOptions exactBudget = new(
+            new PersistenceLimits(
+                1_000_000,
+                256,
+                10,
+                10,
+                100,
+                1_000_000,
+                admittedBytes),
+            ChunkLayoutOptions.KiB16);
+        PersistenceRestorePlan exactPlan = EcsPersistenceRestore.Preflight(
+            artifact.Bytes,
+            catalog,
+            exactBudget);
+        Assert.Equal(admittedBytes, exactPlan.Requirements.EstimatedTemporaryBytes);
+        codec.MaximumDecodeBytes = 0;
+        using EcsWorld restored = exactPlan.Restore(
+            requirements => new EcsWorld(
+                requirements.Schema,
+                Options(requirements.IdentityOptions)),
+            out _);
+        Assert.Equal(decodedColumnBytes, (long)codec.MaximumDecodeBytes);
+        Assert.Equal(128, restored.AliveCount);
+
+        PersistenceRestorePlan failingPlan = EcsPersistenceRestore.Preflight(
+            artifact.Bytes,
+            catalog,
+            generous);
+        EcsWorld? acceptedCandidate = null;
+        codec.ThrowOnDecode = true;
+        Assert.Throws<PersistenceCallbackSentinelException>(() => failingPlan.Restore(
+            requirements => acceptedCandidate = new EcsWorld(
+                requirements.Schema,
+                Options(requirements.IdentityOptions)),
+            out _));
+        codec.ThrowOnDecode = false;
+        Assert.True(acceptedCandidate is not null);
+        Assert.True(acceptedCandidate!.IsDisposed);
+    }
+
+    private static void RejectedStagingFactoryDoesNotDisposeLiveWorld()
+    {
+        ComponentSchema schema = PersistenceTestSchema.CreateSchema();
+        PersistenceCatalog catalog = PersistenceTestSchema.CreatePersistenceCatalog();
+        EcsSchedulerOptions scheduler = SchedulerOptions();
+        var runtime = new PersistentCounterRuntime();
+        var active = new EcsWorld(
+            schema,
+            Options(new PersistenceIdentityOptions(new PersistentWorldId(0xFAC7)), scheduler));
+        active.RegisterRangeSystem<PersistentCounterRuntime, EmptyPersistenceJob>(
+            new SystemDefinition(
+                "persistence.factory-active",
+                SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Serial),
+            runtime);
+        ArchetypeHandle shape = active.RegisterArchetype(
+            [PersistenceTestSchema.GetComponentId<PersistPosition>()],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        active.Seal();
+        active.Initialize();
+        active.BeginRun();
+        Assert.True(active.TryCreate(shape, out Entity entity));
+        PersistenceSnapshotArtifact artifact = EcsPersistence.Capture(
+            active,
+            catalog,
+            new PersistenceCaptureOptions(1),
+            out _);
+        PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(
+            artifact.Bytes,
+            catalog,
+            new PersistenceRestoreOptions(
+                new PersistenceLimits(
+                    1_000_000,
+                    10,
+                    10,
+                    10,
+                    100,
+                    1_000_000,
+                    1_000_000),
+                ChunkLayoutOptions.KiB16));
+
+        Assert.Throws<PersistenceValidationException>(() => plan.Restore(_ => active, out _));
+        Assert.False(active.IsDisposed);
+        Assert.True(active.IsAlive(entity));
+        Assert.Equal(EcsWorldState.Running, active.State);
+        active.Tick(1d / 60d);
+        Assert.Equal(1UL, active.TickCount);
+        active.Dispose();
     }
 
     private static void DirectHistoricalReaderUpgradesToCurrentVersion()
@@ -920,6 +1151,137 @@ internal sealed class PersistentCounterRuntime : IRangeSystemRuntime<EmptyPersis
     {
         if (savedVersion != 1 || source.Length != sizeof(int)) throw new PersistenceCompatibilityException("Unsupported counter state.");
         Value = BinaryPrimitives.ReadInt32LittleEndian(source);
+    }
+}
+
+internal sealed class ReentrantPersistentRuntime :
+    IRangeSystemRuntime<EmptyPersistenceJob>,
+    IPersistentSystemState
+{
+    internal EcsWorld? World;
+    internal bool ReenterFromSize;
+    internal bool ReenterFromWrite;
+    internal bool DisposeFromWrite;
+    internal bool NestedCaptureFromWrite;
+    internal bool ThrowFromWrite;
+    internal int ReentryAttempts;
+    internal int ReentryRejections;
+    internal int Value;
+    internal PersistenceCatalog? Catalog;
+
+    public int PersistenceStateByteCount
+    {
+        get
+        {
+            if (ReenterFromSize)
+                AttemptReentry();
+            return sizeof(int);
+        }
+    }
+
+    public int GetRangeCount(in SystemPrepareContext context) => 0;
+
+    public EmptyPersistenceJob Prepare(in SystemPrepareContext context)
+    {
+        Value++;
+        return default;
+    }
+
+    public void WritePersistenceState(Span<byte> destination)
+    {
+        BinaryPrimitives.WriteInt32LittleEndian(destination, Value);
+        if (ReenterFromWrite)
+            AttemptReentry();
+        if (DisposeFromWrite)
+            AttemptReentry(static world => world.Dispose());
+        if (NestedCaptureFromWrite)
+        {
+            AttemptReentry(world =>
+            {
+                using PersistenceWorldCapture ignored = EcsPersistence.BeginCapture(
+                    world,
+                    Catalog!,
+                    new PersistenceCaptureOptions(999));
+            });
+        }
+        if (ThrowFromWrite)
+            throw new PersistenceCallbackSentinelException();
+    }
+
+    public void ReadPersistenceState(ushort savedVersion, ReadOnlySpan<byte> source) =>
+        Value = BinaryPrimitives.ReadInt32LittleEndian(source);
+
+    private void AttemptReentry() => AttemptReentry(static world => world.Tick(1d / 60d));
+
+    private void AttemptReentry(Action<EcsWorld> operation)
+    {
+        ReentryAttempts++;
+        try
+        {
+            operation(World!);
+        }
+        catch (InvalidOperationException)
+        {
+            ReentryRejections++;
+        }
+    }
+}
+
+internal sealed class PersistenceCallbackSentinelException : Exception
+{
+}
+
+[StructLayout(LayoutKind.Sequential, Size = 4096)]
+[EcsComponent("persistence.expanded", PersistenceId = 2701)]
+internal struct ExpandedPersistenceValue : IComponent<ExpandedPersistenceValue>
+{
+    public byte Marker;
+}
+
+[EcsSchema(typeof(ExpandedPersistenceValue))]
+internal static partial class ExpandedPersistenceSchema
+{
+}
+
+internal sealed class ExpandedPersistenceCodec :
+    IPersistenceComponentCodec<ExpandedPersistenceValue>,
+    IPersistenceBatchComponentCodec<ExpandedPersistenceValue>
+{
+    public int EncodedSize => 1;
+    internal int MaximumDecodeBytes;
+    internal bool ThrowOnDecode;
+
+    public void Encode(
+        in ExpandedPersistenceValue value,
+        Span<byte> destination,
+        PersistenceWriteContext context) => destination[0] = value.Marker;
+
+    public void Decode(
+        ReadOnlySpan<byte> source,
+        ref ExpandedPersistenceValue value,
+        PersistenceReadContext context) => value.Marker = source[0];
+
+    public void EncodeBatch(
+        ReadOnlySpan<ExpandedPersistenceValue> values,
+        Span<byte> destination,
+        PersistenceWriteContext context)
+    {
+        for (int index = 0; index < values.Length; index++)
+            destination[index] = values[index].Marker;
+    }
+
+    public void DecodeBatch(
+        ReadOnlySpan<byte> source,
+        Span<ExpandedPersistenceValue> values,
+        PersistenceReadContext context)
+    {
+        if (ThrowOnDecode)
+            throw new PersistenceCallbackSentinelException();
+        MaximumDecodeBytes = Math.Max(
+            MaximumDecodeBytes,
+            checked(values.Length * Marshal.SizeOf<ExpandedPersistenceValue>()));
+        for (int index = 0; index < values.Length; index++)
+            values[index].Marker = source[index];
     }
 }
 

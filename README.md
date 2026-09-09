@@ -1,7 +1,7 @@
 # UltraSim
 
 UltraSim is a bounded, deterministic simulation and game-runtime foundation for
-very large persistent worlds. The repository contains the accepted ECS 3.4.2
+very large persistent worlds. The repository contains the accepted ECS 3.4.3
 kernel, authoritative Runtime/hosts, transactional persistence, neutral UI
 protocol and Godot renderer, concrete game composition, Accounting, Admission,
 Inventory, the accepted Terrain/World T0 vertical, and the completed hosted

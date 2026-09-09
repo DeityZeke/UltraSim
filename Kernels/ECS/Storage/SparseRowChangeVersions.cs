@@ -4,9 +4,16 @@ namespace UltraSim.ECS;
 
 /// <summary>
 /// Optional bounded row-precision refinement for one physical component column.
-/// Dense writes retain one version per chunk; sparse writes retain one version per
-/// physical row so independent cursors can reconstruct an exact changed-row mask.
+/// Dense writes initially retain one version per chunk and are materialized into
+/// the then-current occupants before occupancy changes. Sparse writes retain one
+/// version per physical row so independent cursors can reconstruct an exact
+/// logical changed-row mask.
 /// </summary>
+/// <remarks>
+/// Storage is fully reserved when tracking is enabled: one dense stamp per chunk
+/// plus one row stamp for every configured row in every configured chunk. "Sparse"
+/// describes publication behavior, not allocation density.
+/// </remarks>
 internal sealed class SparseRowChangeVersions
 {
     private readonly ulong[] _denseVersions;
@@ -48,6 +55,31 @@ internal sealed class SparseRowChangeVersions
         System.Diagnostics.Debug.Assert(rowOffset + rowCount <= _rowCapacity);
         System.Diagnostics.Debug.Assert(version.IsValid);
         _rowVersions.AsSpan(GetRowIndex(chunkIndex, rowOffset), rowCount).Fill(version.Value);
+    }
+
+    /// <summary>
+    /// Converts a chunk-wide publication into row-owned history for the logical
+    /// occupants that exist immediately before an occupancy change. The dense
+    /// refinement can then no longer leak into a later occupant of the same
+    /// physical chunk or row.
+    /// </summary>
+    internal void MaterializeDenseForOccupancyChange(uint chunkIndex, int activeRows)
+    {
+        System.Diagnostics.Debug.Assert(chunkIndex < unchecked((uint)_denseVersions.Length));
+        System.Diagnostics.Debug.Assert(activeRows >= 0 && activeRows <= _rowCapacity);
+
+        ChangeVersion dense = new(_denseVersions[chunkIndex]);
+        if (!dense.IsValid)
+            return;
+
+        int versionOffset = GetRowIndex(chunkIndex, 0);
+        for (int row = 0; row < activeRows; row++)
+        {
+            ChangeVersion current = new(_rowVersions[versionOffset + row]);
+            if (dense.IsNewerThan(current))
+                _rowVersions[versionOffset + row] = dense.Value;
+        }
+        _denseVersions[chunkIndex] = 0;
     }
 
     /// <summary>

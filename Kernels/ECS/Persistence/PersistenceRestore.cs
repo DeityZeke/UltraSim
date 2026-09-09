@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -68,11 +69,13 @@ public sealed class PersistenceRestoreRequirements
     private readonly PersistenceRestoreShapeRequirement[] _shapes;
     internal PersistenceRestoreRequirements(ComponentSchema schema, PersistentWorldId worldId, ulong highWater,
         ulong snapshotSequence, int entityCount, PersistenceRestoreShapeRequirement[] shapes, int requiredArchetypes,
-        long estimatedTemporaryBytes, long estimatedChunkBytes)
+        long estimatedTemporaryBytes, long maximumDecodedColumnBytes, long estimatedChunkBytes)
     {
         Schema = schema; PersistentWorldId = worldId; AllocatorHighWater = highWater; SnapshotSequence = snapshotSequence; EntityCount = entityCount;
         RequiredArchetypes = requiredArchetypes;
-        _shapes = shapes; EstimatedTemporaryBytes = estimatedTemporaryBytes; EstimatedChunkPayloadBytes = estimatedChunkBytes;
+        _shapes = shapes; EstimatedTemporaryBytes = estimatedTemporaryBytes;
+        MaximumDecodedColumnBytes = maximumDecodedColumnBytes;
+        EstimatedChunkPayloadBytes = estimatedChunkBytes;
     }
     public ComponentSchema Schema { get; }
     public PersistentWorldId PersistentWorldId { get; }
@@ -81,7 +84,13 @@ public sealed class PersistenceRestoreRequirements
     public int EntityCount { get; }
     public IReadOnlyList<PersistenceRestoreShapeRequirement> Shapes => _shapes;
     public int RequiredArchetypes { get; }
+    /// <summary>
+    /// Conservative total for kernel-owned managed buffers known after schema
+    /// and codec resolution; not an exact CLR or process working-set bound.
+    /// </summary>
     public long EstimatedTemporaryBytes { get; }
+    /// <summary>Largest whole runtime component column decoded during hydration.</summary>
+    public long MaximumDecodedColumnBytes { get; }
     public long EstimatedChunkPayloadBytes { get; }
     public PersistenceIdentityOptions IdentityOptions => new(PersistentWorldId, AllocatorHighWater);
 }
@@ -133,9 +142,14 @@ public sealed class PersistenceRestorePlan
         EcsWorld? world = null;
         try
         {
-            world = stagingWorldFactory(Requirements) ?? throw new PersistenceValidationException("The staging factory returned null.");
-            if (world.State != EcsWorldState.Created)
+            EcsWorld candidate = stagingWorldFactory(Requirements) ??
+                throw new PersistenceValidationException("The staging factory returned null.");
+            if (candidate.State != EcsWorldState.Created)
                 throw new PersistenceValidationException("The staging factory must return a newly created, unsealed world.");
+            // Ownership transfers only after the factory result passes the
+            // side-effect-free new-world admission check. A rejected live world
+            // remains owned by its caller and must never be disposed here.
+            world = candidate;
             if (world.Schema.Id != _catalog.Schema.Id)
                 throw new PersistenceCompatibilityException("The staging world uses a different current schema.");
             if (world.Options.EntityCapacity.MaximumEntities < Requirements.EntityCount ||
@@ -358,6 +372,7 @@ internal sealed class ParsedSnapshot
                         Shapes[candidate].CurrentComponents, Shapes[candidate].EntityCount, Math.Max(1, chunks));
         }
 
+        long maximumDecodedColumnBytes = 0;
         foreach (ResolvedColumn column in Columns)
         {
             if (Shapes[column.ShapeIndex].Migration is not null)
@@ -380,6 +395,9 @@ internal sealed class ParsedSnapshot
                 throw new PersistenceCompatibilityException($"No direct compatible reader exists for persistence ID {column.SavedPersistenceId} version {column.SavedVersion}.");
             column.ComponentId = id;
             column.Reader = reader;
+            maximumDecodedColumnBytes = Math.Max(
+                maximumDecodedColumnBytes,
+                checked((long)column.RowCount * metadata.Size));
             if (column.SavedVersion != metadata.Version) MigratedComponents++;
         }
         foreach (ResolvedEnable enable in Enables)
@@ -400,13 +418,23 @@ internal sealed class ParsedSnapshot
             enable.ComponentId = id;
         }
 
-        long restoreScratch = checked((long)Entities.Length * (sizeof(uint) + 12 + sizeof(ulong)) +
-            (long)Entities.Length * sizeof(uint) + (long)Shapes.Length * 64);
-        long temporary = Math.Max(KnownTemporaryBytes, restoreScratch);
+        long restoreScratch = checked(
+            (long)Entities.Length * (sizeof(uint) + Unsafe.SizeOf<Entity>() + sizeof(ulong)) +
+            (long)Entities.Length * sizeof(uint) +
+            (long)Shapes.Length * 64);
+        long shapeScratch = checked(
+            (long)Entities.Length * Unsafe.SizeOf<Entity>() +
+            (long)Columns.Length * Unsafe.SizeOf<PersistenceSavedColumn>() +
+            (long)Enables.Length * Unsafe.SizeOf<PersistenceSavedEnablePlane>());
+        // This is a conservative ceiling for kernel-owned managed buffers known
+        // after schema/codec resolution, not a promise about CLR/process working
+        // set or allocations made inside application migrators/reconstructors.
+        long temporary = checked(
+            KnownTemporaryBytes + restoreScratch + shapeScratch + maximumDecodedColumnBytes);
         if (temporary > options.Limits.MaximumTemporaryBytes)
             throw new PersistenceValidationException("Restore scratch estimate exceeds the configured temporary-memory limit.");
         return new PersistenceRestoreRequirements(catalog.Schema, WorldId, AllocatorHighWater, Sequence, Entities.Length,
-            requirements, requiredArchetypes, temporary, chunkBytes);
+            requirements, requiredArchetypes, temporary, maximumDecodedColumnBytes, chunkBytes);
     }
 }
 

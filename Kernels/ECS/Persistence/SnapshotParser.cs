@@ -25,8 +25,9 @@ internal static class SnapshotParser
         {
             // The parser owns an immutable artifact clone and may copy every
             // section payload once. A third artifact-sized allowance covers
-            // parsed tables/strings and the largest transient decoded column;
-            // entity/shape/directory arrays are accounted separately.
+            // parsed tables and strings; entity/shape/directory arrays are
+            // accounted separately. Runtime decode expansion is known only
+            // after catalog resolution and is added by ParsedSnapshot.Resolve.
             return checked((long)bytes.Length * 3L + (long)entities * 40L +
                 (long)shapes * 128L + (long)sections * 64L);
         }

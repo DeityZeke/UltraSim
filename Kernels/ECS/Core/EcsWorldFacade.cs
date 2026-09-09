@@ -20,6 +20,7 @@ public sealed partial class EcsWorld : IDisposable
     private readonly StructuralRecordingGate _structuralRecordingGate;
     private readonly SystemScheduler? _scheduler;
     private readonly int _ownerThreadId;
+    private bool _persistenceCaptureActive;
 
     /// <summary>Constructs a fixed-capacity world owned by the calling thread.</summary>
     /// <remarks>
@@ -598,7 +599,7 @@ public sealed partial class EcsWorld : IDisposable
         if (_core.IsDisposed)
             return;
 
-        EnsureOwnerThread();
+        EnsureLifecycleMutationAdmission();
         Exception? schedulerFault = null;
         try { _scheduler?.Dispose(); }
         catch (Exception exception) { schedulerFault = exception; }
@@ -613,7 +614,7 @@ public sealed partial class EcsWorld : IDisposable
 
     internal void MarkFaulted(Exception exception)
     {
-        EnsureOwnerThread();
+        EnsureLifecycleMutationAdmission();
         _core.MarkFaulted(exception);
         if (_core.State == EcsWorldState.Faulted)
             _structuralCommands.Invalidate();
@@ -645,8 +646,23 @@ public sealed partial class EcsWorld : IDisposable
         if (_scheduler?.IsExecuting == true)
         {
             throw new InvalidOperationException(
-                "Direct EcsWorld runtime access is unavailable while the system graph is executing. " +
-                "Systems must use scheduler-issued job and structural capabilities.");
+                "Direct EcsWorld runtime access is unavailable while the scheduler is executing.");
+        }
+        if (_persistenceCaptureActive)
+        {
+            throw new InvalidOperationException(
+                "Direct EcsWorld access is unavailable while a persistence capture owns the frozen logical boundary.");
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EnsureLifecycleMutationAdmission()
+    {
+        EnsureOwnerThread();
+        if (_core.IsSystemGraphExecuting)
+        {
+            throw new InvalidOperationException(
+                "World lifecycle mutation is unavailable while a direct ECS execution scope is active.");
         }
     }
 

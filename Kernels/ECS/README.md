@@ -1,4 +1,4 @@
-# UltraSim ECS 3.4.2
+# UltraSim ECS 3.4.3
 
 UltraSim ECS is a bounded, owner-controlled, archetype/SoA kernel for large
 deterministic simulations. It combines compact generational entity identity,
@@ -70,6 +70,11 @@ Value writes publish dense/exact change state according to their API. Entity
 shape/existence changes cross the structural barrier. Lifecycle cursors observe
 successful topology history independently from change cursors.
 
+Exact changed-row history belongs to the logical occupants present when a write
+is published. Append, migration, compaction, and row reuse do not inherit an old
+dense write merely because they later occupy the same physical chunk. Coarse
+changed-chunk observation remains deliberately conservative.
+
 ### Scheduler
 
 The optional scheduler seals a deterministic stage/wave graph, partitions typed
@@ -92,6 +97,10 @@ which phases they admit. The owner thread coordinates structural, lifecycle,
 publication, and disposal boundaries; scheduler workers receive narrow expiring
 capabilities instead of the world facade.
 
+Lifecycle mutation is admitted before teardown begins. A rejected `Dispose`
+from a direct ECS callback or persistence-capture callback leaves the scheduler,
+world state, and next ordinary tick intact.
+
 ## Capacity and memory
 
 `EcsWorldOptions` fixes entity/archetype/plan/chunk, structural, change,
@@ -99,14 +108,24 @@ lifecycle, scheduler, prefab, and persistence-related capacities. Native/Pinned
 backends share semantics. Reserved-payload snapshots report known storage; they
 are not process working-set claims.
 
+Exact row tracking is conditionally installed per watched physical component.
+When installed, its predictable reservation is approximately
+`8 * maximumChunks * (rowCapacity + 1)` bytes: one stamp per configured row plus
+one dense stamp per chunk, regardless of live population. "Sparse" describes
+write publication, not allocation density.
+
 Warmed admitted hot paths are managed-allocation-free where tests declare that
 contract. Cold schema/content/planning/persistence work may allocate within
-reported and bounded policies.
+reported and bounded policies. Restore planning resolves the largest expanded
+runtime column before admitting its current whole-column decoder scratch; that
+known-buffer estimate is not a claim about complete CLR/process working set or
+arbitrary allocations inside application migration callbacks.
 
 ## Version and evidence
 
-The active internal engineering identity is `3.4.2`. It adds the scheduler
-typed-structural-payload epoch correction discovered by Network N0.1. It
+The active internal engineering identity is `3.4.3`. It hardens exact change
+history across occupancy changes, lifecycle/capture rejection atomicity,
+expanded persistence scratch admission, and staging-factory ownership. It
 identifies benchmark and persistence evidence; it is not SemVer or a broad
 public compatibility promise.
 Format/schema versions are owned separately by their persisted/protocol contracts.

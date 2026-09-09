@@ -1661,6 +1661,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
 
     private void InitializeRows(int chunkIndex, Span<byte> chunk, int startRow, int count)
     {
+        MaterializeDenseChangeHistory(chunkIndex);
         for (int i = 0; i < _columns.Length; i++)
         {
             ComponentColumnLayout column = _columns[i];
@@ -1686,6 +1687,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         Span<byte> destination,
         int destinationRow)
     {
+        MaterializeDenseChangeHistory(destinationChunkIndex);
         GetEntityIndices(source)[sourceRow..(sourceRow + 1)]
             .CopyTo(GetEntityIndices(destination)[destinationRow..(destinationRow + 1)]);
         for (int i = 0; i < _columns.Length; i++)
@@ -1721,6 +1723,23 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 _changeVersions[(i * _chunks.Length) + sourceChunkIndex]);
             if (sourceVersion.IsNewerThan(current))
                 _changeVersions[destinationVersionIndex] = sourceVersion.Value;
+        }
+    }
+
+    /// <summary>
+    /// Dense exact-row refinement belongs to the logical occupants present at
+    /// publication time, whereas the coarse chunk stamp deliberately remains a
+    /// physical-chunk observation. Materialize only the exact refinement before
+    /// append, row reuse, or compaction replaces that occupancy.
+    /// </summary>
+    private void MaterializeDenseChangeHistory(int chunkIndex)
+    {
+        int activeRows = _chunks[chunkIndex].RowCount;
+        for (int columnIndex = 0; columnIndex < _sparseRowChangeVersions.Length; columnIndex++)
+        {
+            _sparseRowChangeVersions[columnIndex]?.MaterializeDenseForOccupancyChange(
+                (uint)chunkIndex,
+                activeRows);
         }
     }
 

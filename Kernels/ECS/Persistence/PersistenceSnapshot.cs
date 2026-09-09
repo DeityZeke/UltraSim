@@ -127,11 +127,21 @@ public static class EcsPersistence
         if (!world.PersistenceCore.IsPersistenceEnabled)
             throw new InvalidOperationException("The world was not configured with persistence identity storage.");
 
-        long collectStart = Stopwatch.GetTimestamp();
-        PersistentSystemStateRecord[] systems = world.CapturePersistenceSystemState(options.MaximumSystemStateBytes);
-        CaptureModel model = Collect(world.PersistenceCore, catalog, world.PersistenceSchedulerTick, systems);
-        long collectTicks = Stopwatch.GetTimestamp() - collectStart;
-        return new PersistenceWorldCapture(model, catalog, options, collectTicks);
+        world.EnterPersistenceCapture();
+        try
+        {
+            long collectStart = Stopwatch.GetTimestamp();
+            ulong schedulerTick = world.PersistenceSchedulerTick;
+            PersistentSystemStateRecord[] systems =
+                world.CapturePersistenceSystemState(options.MaximumSystemStateBytes);
+            CaptureModel model = Collect(world.PersistenceCore, catalog, schedulerTick, systems);
+            long collectTicks = Stopwatch.GetTimestamp() - collectStart;
+            return new PersistenceWorldCapture(model, catalog, options, collectTicks);
+        }
+        finally
+        {
+            world.ExitPersistenceCapture();
+        }
     }
 
     /// <summary>Backend-neutral cold capture seam used to prove storage-backend parity.</summary>
