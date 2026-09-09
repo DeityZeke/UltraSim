@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `chat-c0.2-global-system-2026-09-08.json` — one Game-owned routed Global audience,
+  explicit authority-originated System occurrences without a forged participant, shared
+  packet-free/remote retained delivery and application proof, zero warmed allocation, dedicated
+  and Complete-hosted A/B/C fanout, reconnect without invented history, and the native transient
+  banner derived from the applied feed fact;
 - `network-capability-packaging-2026-09-08.md` — canonical/default Full
   `UltraSim.Network.dll`, optional same-identity ClientOnly/ServerOnly physical
   stripping, isolated build roots, exact API-union/protocol identity evidence,

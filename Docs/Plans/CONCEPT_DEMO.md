@@ -42,6 +42,10 @@ Human-play hardening adds the same bounded rolled facts to the world-hover panel
 public metadata and separates a selectable ground item from visible equipped presentation. I0.13
 supersedes that temporary formatted text with canonical typed Inspection Properties, a configurable
 presentation order shared by Inventory and world hover, and content-sized native tooltip layout.
+C0.2 now closes one routed Global channel plus explicit authority-originated System occurrences
+through the same local/remote retained delivery and proof path. Godot projects the applied System
+fact into both the feed and a transient presentation-local banner. Diagnostics/Server Monitor and
+the concrete test-marker producer remain next.
 
 The demo has two purposes:
 
@@ -297,9 +301,10 @@ one remote leave/reconnect, and stable authoritative generation. The dedicated p
 shared authority with all three participants remote. The native path launches the actual Complete
 Godot composition and two inspected exported Online products against its dynamically enabled host.
 
-M0.0 deliberately does not claim routed Global Chat, public-WAN deployment, NAT traversal, broad
-population capacity, host migration, or the distributed Central/Far/Sky/Cave player matrix. Those
-remain explicit later consumers and pre-freeze evidence.
+M0.0 itself did not claim routed Global Chat; C0.2 subsequently closes that consumer against both
+of M0.0's deployment shapes. Public-WAN deployment, NAT traversal, broad population capacity, host
+migration, and the distributed Central/Far/Sky/Cave player matrix remain explicit later consumers
+and pre-freeze evidence.
 
 Desired Online flow:
 
@@ -995,7 +1000,7 @@ lose the old nameplate/overhead anchor without stale ghosts.
 
 ---
 
-# 14. Local spatial chat and first Global routed channel
+# 14. Local spatial chat and first Global routed channel — C0.2 CLOSED
 
 Round 1 opens exactly one routed chat consumer without turning Chat into a full social suite.
 
@@ -1032,6 +1037,11 @@ eligible global-chat recipients, independent from world hearing distance/AOI.
 Global remains an occurrence/fact with bounded fanout/debt/application-proof behavior. It does not
 create Party/Guild/DM/moderation/history infrastructure.
 
+C0.2 implements that exact boundary. `Global` is a finite player submission mode whose recipients
+are the canonical current entered census in one Game authority. Dedicated A/B/C and Complete's
+packet-free Host A plus remote B/C receive the same occurrence exactly once even when participants
+are spatially separated. Disconnect/reconnect does not synthesize missed history.
+
 ## Commands remain separate
 
 Recognized command input remains command intent and never falls through to speech. `/help`, `/where`,
@@ -1039,7 +1049,7 @@ and future operator/admin commands keep their own authority path.
 
 ---
 
-# 15. System broadcasts and test-marker announcements
+# 15. System broadcasts and test-marker announcements — occurrence path CLOSED
 
 The live test system deliberately uses every test marker start/completion to exercise system
 broadcast presentation.
@@ -1067,6 +1077,12 @@ not visible because of timing/focus/presentation conditions, the chat-feed occur
 
 Do not implement the banner as a second independently authoritative message and do not let a
 presentation timeout erase the chat fact.
+
+C0.2 closes the explicit non-player `SystemBroadcast` occurrence, complete routed audience,
+local/remote application proof, retained feed row, and 4.5-second Godot banner. It deliberately does
+not auto-publish join/leave announcements. The next diagnostics/Server Monitor checkpoint owns the
+concrete marker-start/marker-complete producer and may call this accepted bounded authority surface;
+it must not invent another broadcast or banner protocol.
 
 Test marker activation/completion should also be written into the client/server diagnostic timelines
 so performance changes can be correlated to the live activity.
@@ -1600,9 +1616,12 @@ then continue remaining Round 1 consumers as earned:
          one formatter for world hover and Inventory
 
 then continue:
+    C0.2 Global/System Chat + transient banner                         CLOSED
+         one Game authority routed census; no fake System participant
+         same retained occurrence/application-proof path local/remote
+
+    diagnostics/Server Monitor/test markers                            NEXT
     X/Y content-backed animation + public action realization
-    Global/system Chat
-    diagnostics/Server Monitor/test markers
 
 then close:
     F0.7 explicit mixed-session settings/debug/lifecycle torture pass

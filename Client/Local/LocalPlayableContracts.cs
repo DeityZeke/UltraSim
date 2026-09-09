@@ -77,7 +77,7 @@ public readonly record struct LocalPlayableAuthorityView(
 public interface ILocalPlayableChatSink
 {
     bool CanPublish { get; }
-    bool TryPublishSpatial(in GameSpeechFact fact);
+    bool TryPublish(in GameSpeechFact fact);
 }
 
 /// <summary>Cold authority-thread inputs for an optional deployment adapter.</summary>

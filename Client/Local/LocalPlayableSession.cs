@@ -207,7 +207,8 @@ public sealed class LocalPlayableSession : IDisposable
     public bool TrySubmitChat(ulong sequence, ClientChatSpeechMode mode, string text)
     {
         EnsureOperational();
-        if (sequence == 0 || mode is < ClientChatSpeechMode.Whisper or > ClientChatSpeechMode.Yell ||
+        if (sequence == 0 ||
+            mode is < ClientChatSpeechMode.Whisper or > ClientChatSpeechMode.Global ||
             !IsBoundedChatText(text))
             return false;
         bool queued = _chatSubmissions.TryEnqueue(new LocalChatSubmission(sequence, mode, text));
@@ -830,7 +831,7 @@ public sealed class LocalPlayableSession : IDisposable
         if (!chat.TryConsumeNextSpeech(recipients, out GameSpeechFact consumed, out int consumedCount) ||
             consumed.Id != fact.Id || consumedCount != copied)
             throw new InvalidOperationException("The local Chat occurrence changed during handoff.");
-        if (!_chatChannel.TryPublishSpatial(consumed))
+        if (!_chatChannel.TryPublish(consumed))
             throw new InvalidOperationException("Preflighted local Chat occurrence could not be retained.");
     }
 

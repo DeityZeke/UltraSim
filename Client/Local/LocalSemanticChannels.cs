@@ -403,15 +403,23 @@ internal sealed class LocalChatSemanticChannel : ILocalPlayableChatSink
         (long)_rows.Length * (System.Runtime.CompilerServices.Unsafe.SizeOf<ClientChatOccurrence>() +
             sizeof(bool) + sizeof(int)));
 
-    internal bool TryPublishSpatial(in GameSpeechFact fact)
+    internal bool TryPublish(in GameSpeechFact fact)
     {
+        ClientChatOccurrenceKind kind = fact.Kind switch
+        {
+            GameChatFactKind.SpatialSpeech => ClientChatOccurrenceKind.SpatialSpeech,
+            GameChatFactKind.GlobalSpeech => ClientChatOccurrenceKind.GlobalSpeech,
+            GameChatFactKind.SystemBroadcast => ClientChatOccurrenceKind.SystemBroadcast,
+            _ => throw new InvalidOperationException(
+                "The Game Chat occurrence has an unknown semantic kind."),
+        };
         var occurrence = new ClientChatOccurrence(
             fact.GenerationId,
             NextDeliveryId(),
             NextRecipientSequence(),
             fact.Id.Value,
             fact.SimulationTick,
-            ClientChatOccurrenceKind.SpatialSpeech,
+            kind,
             (ClientChatSpeechMode)fact.Mode,
             fact.PublicAnchor,
             fact.DisplayLabel,
@@ -420,8 +428,8 @@ internal sealed class LocalChatSemanticChannel : ILocalPlayableChatSink
     }
 
     bool ILocalPlayableChatSink.CanPublish => CanPublish;
-    bool ILocalPlayableChatSink.TryPublishSpatial(in GameSpeechFact fact) =>
-        TryPublishSpatial(in fact);
+    bool ILocalPlayableChatSink.TryPublish(in GameSpeechFact fact) =>
+        TryPublish(in fact);
 
     internal bool TryPublishPrivate(
         ulong generationId,

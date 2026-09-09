@@ -139,6 +139,7 @@ public partial class LocalCabinClient : Node3D
     private LineEdit? _chatInput;
     private OptionButton? _chatMode;
     private Label? _overheadSpeech;
+    private GodotSystemChatBanner? _systemChatBanner;
     private GodotWorldHoverTooltip? _hoverTooltip;
     private Control? _ownedHudRoot;
     private Control? _ownedWorldUiRoot;
@@ -706,6 +707,8 @@ public partial class LocalCabinClient : Node3D
         _uiClient = null;
         _actorPresenter?.Dispose();
         _actorPresenter = null;
+        _systemChatBanner?.Dispose();
+        _systemChatBanner = null;
         _actorState = null;
         _publicPresentationMetadata = null;
         _renderer?.Dispose();
@@ -2873,6 +2876,7 @@ public partial class LocalCabinClient : Node3D
         _chatMode.AddItem("Whisper", (int)ClientChatSpeechMode.Whisper);
         _chatMode.AddItem("Say", (int)ClientChatSpeechMode.Say);
         _chatMode.AddItem("Yell", (int)ClientChatSpeechMode.Yell);
+        _chatMode.AddItem("Global", (int)ClientChatSpeechMode.Global);
         _chatMode.Select(1);
         chatEntry.AddChild(_chatMode);
         _chatInput = new LineEdit
@@ -2896,6 +2900,7 @@ public partial class LocalCabinClient : Node3D
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _ownedWorldUiRoot.AddChild(_overheadSpeech);
+        _systemChatBanner = new GodotSystemChatBanner(_ownedWorldUiRoot);
 
         _hoverTooltip = new GodotWorldHoverTooltip(_ownedWorldUiRoot);
 
@@ -2984,9 +2989,14 @@ public partial class LocalCabinClient : Node3D
             for (int index = first; index < count; index++)
             {
                 ClientChatOccurrence row = _chatRows[index];
-                string prefix = row.Kind == ClientChatOccurrenceKind.SpatialSpeech
-                    ? $"[{row.SpeechMode}] {row.DisplayLabel}: "
-                    : $"[{row.DisplayLabel}] ";
+                string prefix = row.Kind switch
+                {
+                    ClientChatOccurrenceKind.SpatialSpeech =>
+                        $"[{row.SpeechMode}] {row.DisplayLabel}: ",
+                    ClientChatOccurrenceKind.GlobalSpeech =>
+                        $"[Global] {row.DisplayLabel}: ",
+                    _ => $"[{row.DisplayLabel}] ",
+                };
                 lines[index - first] = prefix + row.Text;
             }
             _chatFeed.Text = string.Join('\n', lines);
@@ -3010,10 +3020,12 @@ public partial class LocalCabinClient : Node3D
                     _overheadOriginGenerationId = 0;
                 }
             }
+            _systemChatBanner?.Observe(_chatRows.AsSpan(0, count), Time.GetTicksMsec());
             _chatAppliedPresentationCount = snapshot.Applied;
         }
 
         if (_overheadSpeech is not null) _overheadSpeech.Visible = false;
+        _systemChatBanner?.Update(Time.GetTicksMsec());
         _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
     }
 

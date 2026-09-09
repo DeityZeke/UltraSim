@@ -134,6 +134,10 @@ cardinality, independent control, public actor fanout, spatial Chat, owner-priva
 leave/reconnect lifetime. It is not the PF1 bot harness, a high-population result, or the complete
 distributed AOI/stress matrix described below.
 
+C0.2 subsequently closes functional Global/System fanout across the same dedicated and
+Complete-hosted three-participant shapes. The larger crowd/distributed/concurrent Chat workloads in
+this plan remain stress and characterization work rather than being implied by that small canary.
+
 ---
 
 # 5. Synthetic Network Bot / Headless Client Harness
@@ -1697,27 +1701,28 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 2. Keep M0.0 shared multi-participant authority closed.
 3. Keep Inventory I0.12's persistent rolled world-item vertical closed.
 4. Keep I0.13 typed Inspection Properties and content-sized shared tooltip closure closed.
-5. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
-6. Select one exact feature-complete pre-freeze candidate.
-7. Build the real headless Network bot client.
-8. Add first-class wire/per-message accounting.
-9. Establish high-performance quiet/moving/crowd baselines.
-10. Decouple render FPS from input submission cadence.
-11. Define/advertise/enforce the bounded Server Performance Profile.
-12. Run mismatched-cadence correctness matrix.
-13. Evaluate input/owner/public cadence reductions.
-14. Evaluate unreliable frame aggregation.
-15. Measure dense vs distributed AOI/fanout.
-16. Evaluate selective compression only where payload shape justifies it.
-17. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-18. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-18. Run mixed headless + exported Godot clients.
-19. Run external human Concept Demo validation.
-20. Choose/document the default deployment-performance policy.
-21. Record decisive performance/bandwidth/failure evidence.
-22. Full exact-tree verifier and export closure.
-23. Freeze/tag the Concept Demo baseline.
-23. Begin the separate extraction/genericization/ecosystem roadmap.
+5. Keep C0.2 routed Global and authority System occurrence closure closed.
+6. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
+7. Select one exact feature-complete pre-freeze candidate.
+8. Build the real headless Network bot client.
+9. Add first-class wire/per-message accounting.
+10. Establish high-performance quiet/moving/crowd baselines.
+11. Decouple render FPS from input submission cadence.
+12. Define/advertise/enforce the bounded Server Performance Profile.
+13. Run mismatched-cadence correctness matrix.
+14. Evaluate input/owner/public cadence reductions.
+15. Evaluate unreliable frame aggregation.
+16. Measure dense vs distributed AOI/fanout.
+17. Evaluate selective compression only where payload shape justifies it.
+18. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+19. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+20. Run mixed headless + exported Godot clients.
+21. Run external human Concept Demo validation.
+22. Choose/document the default deployment-performance policy.
+23. Record decisive performance/bandwidth/failure evidence.
+24. Full exact-tree verifier and export closure.
+25. Freeze/tag the Concept Demo baseline.
+26. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

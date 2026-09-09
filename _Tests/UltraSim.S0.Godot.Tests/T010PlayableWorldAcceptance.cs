@@ -20,6 +20,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunRemotePublicActorAcceptance();
             RunControlledActorOwnerPoseAcceptance();
             RunTallPublicObjectPickingAcceptance();
+            RunSystemChatBannerAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
             GetTree().Quit(0);
         }
@@ -28,6 +29,75 @@ public partial class T010PlayableWorldAcceptance : Node3D
             GD.PushError($"T0.10 GODOT PLAYABLE WORLD ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private void RunSystemChatBannerAcceptance()
+    {
+        var host = new Control { Name = "SystemBannerAcceptanceHost" };
+        AddChild(host);
+        using var banner = new GodotSystemChatBanner(host);
+        var system = new ClientChatOccurrence(
+            7,
+            1,
+            1,
+            9,
+            20,
+            ClientChatOccurrenceKind.SystemBroadcast,
+            ClientChatSpeechMode.None,
+            default,
+            "System",
+            "Authoritative test marker reached.");
+        Expect(banner.TryPresent(in system, 100),
+            "An authoritative system occurrence did not enter the transient banner.");
+        Expect(banner.GetSnapshot() is
+            { Visible: true, Text: "Authoritative test marker reached.", Presented: 1 },
+            "The native system banner did not expose its current bounded presentation state.");
+        banner.Update(100 + GodotSystemChatBanner.DisplayDurationMilliseconds - 1);
+        Expect(banner.GetSnapshot().Visible,
+            "The native system banner retired before its presentation-local deadline.");
+        banner.Update(100 + GodotSystemChatBanner.DisplayDurationMilliseconds);
+        Expect(!banner.GetSnapshot().Visible,
+            "The native system banner did not retire at its presentation-local deadline.");
+        var global = system with
+        {
+            DeliveryId = 2,
+            RecipientSequence = 2,
+            Kind = ClientChatOccurrenceKind.GlobalSpeech,
+            SpeechMode = ClientChatSpeechMode.Global,
+            DisplayLabel = "Alice",
+        };
+        Expect(!banner.TryPresent(in global, 10_000),
+            "Ordinary Global speech incorrectly entered the system-only banner.");
+        var laterGlobal = global with { DeliveryId = 3, RecipientSequence = 3 };
+        Span<ClientChatOccurrence> batch = [system, laterGlobal];
+        banner.Observe(batch, 20_000);
+        Expect(banner.GetSnapshot() is
+            { Visible: true, Text: "Authoritative test marker reached.", Presented: 2 },
+            "A later player occurrence hid a system occurrence delivered in the same Chat batch.");
+        var oldGenerationSystem = system with
+        {
+            ServerGenerationId = 6,
+            DeliveryId = 4,
+            RecipientSequence = 4,
+            Text = "Retained old-generation marker.",
+        };
+        var newGenerationSystem = system with
+        {
+            ServerGenerationId = 8,
+            DeliveryId = 5,
+            RecipientSequence = 5,
+            Text = "Current-generation marker.",
+        };
+        Span<ClientChatOccurrence> retainedAcrossGenerations =
+            [oldGenerationSystem, newGenerationSystem];
+        banner.Observe(retainedAcrossGenerations, 30_000);
+        Expect(banner.GetSnapshot() is
+            { Visible: true, Text: "Current-generation marker.", Presented: 4 },
+            "The banner did not converge on the newest retained system occurrence across generations.");
+        banner.Observe(retainedAcrossGenerations, 30_001);
+        Expect(banner.GetSnapshot().Presented == 4,
+            "Rescanning retained occurrences replayed old/new generation system banners.");
+        host.QueueFree();
     }
 
     private static void RunTallPublicObjectPickingAcceptance()

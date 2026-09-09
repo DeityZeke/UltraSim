@@ -624,8 +624,8 @@ version and fingerprint. Historical N1/P0 evidence records the exact manifest an
 fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
-As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 11
-and `UltraSimGameProtocol` constructs manifest version 23. Version 20 added the bounded cold
+As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 12
+and `UltraSimGameProtocol` constructs manifest version 24. Version 20 added the bounded cold
 public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
 adds the authoritative `Primary` result to the playable owner-state schema for I0.12. Version 22
 widens the existing cold presentation occurrence with an independently bounded optional item-detail
@@ -634,7 +634,10 @@ remain absent from hot records. Version 23 supersedes that temporary formatted d
 canonical set of at most 16 stable typed Inspection Property facts. The decoder requires ascending
 unique property identity, a finite value grammar, bounded tokens, exact kind/value validity, and no
 trailing bytes before Client Core publication. Network still owns neither item state, presentation
-order/labels, nor action meaning. Future schema changes must advance the appropriate generated/
+order/labels, nor action meaning. Version 24 advances Chat submit/occurrence to message version 2,
+adding only the finite `Global` submission mode and explicit routed-Global/System occurrence kinds.
+System has no forged player identity or public anchor; audience and broadcast authority remain Game
+semantics. Future schema changes must advance the appropriate generated/
 manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy
@@ -736,6 +739,12 @@ normal multi-recipient scheduling from repeatedly cancelling a healthy transfer.
 M0.0 remains Game/server composition evidence, not an implicit N1.5 or another Network-profile
 campaign. Reopen lower Network design only if later crowd/distributed/churn acceptance exposes a
 correctness, boundedness, or measured capacity failure.
+
+C0.2 consumes the unchanged reliable Event plus Control-proof machinery for one first routed
+Global channel and authority-originated System broadcasts. Spatial hearing, routed audience, and
+system-origin authority remain in Game/Chat. The Network kernel sees only the versioned bounded
+message descriptors and bytes; no new transport lane, replication profile, or session authority
+was added.
 
 The current exclusions and deployment gates for externally admitted UDP remain in
 [HOSTED_NETWORK.md](HOSTED_NETWORK.md).

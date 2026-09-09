@@ -52,7 +52,8 @@ public sealed class RemoteChatClient : IRemoteGameProtocolHandler, IRemoteGamePr
     public bool TrySubmit(string text, ClientChatSpeechMode mode = ClientChatSpeechMode.Say)
     {
         EnsureOwnerThread();
-        if (_nextSubmissionSequence == 0 || mode is < ClientChatSpeechMode.Whisper or > ClientChatSpeechMode.Yell ||
+        if (_nextSubmissionSequence == 0 ||
+            mode is < ClientChatSpeechMode.Whisper or > ClientChatSpeechMode.Global ||
             !UltraSimGameProtocol.TryWriteChatSubmission(
                 _messageScratch, _applicationSessionEpoch, _nextSubmissionSequence,
                 (byte)mode, text, out int written) ||

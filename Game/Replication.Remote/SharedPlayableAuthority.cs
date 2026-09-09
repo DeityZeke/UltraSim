@@ -213,6 +213,21 @@ public sealed class SharedPlayableAuthority : IDisposable
     internal GameChatService Chat { get; }
     internal RemoteChatDeliveryService ChatDelivery { get; }
 
+    /// <summary>
+    /// Publishes one authority-originated routed Chat occurrence to the exact currently entered
+    /// participant census. Presentation timing remains a client concern.
+    /// </summary>
+    public GameSystemBroadcastResult PublishSystem(
+        string text,
+        string displayLabel = "System")
+    {
+        EnsureOperational();
+        GameSystemBroadcastResult result = Chat.PublishSystem(text, displayLabel);
+        if (result.Accepted)
+            _ = ChatDelivery.TryHandoffPendingOccurrences();
+        return result;
+    }
+
     /// <summary>Advances an owned server clock without coupling it to any one connection.</summary>
     public int TickDue()
     {
@@ -230,7 +245,7 @@ public sealed class SharedPlayableAuthority : IDisposable
         }
         if (steps == 4 && now >= _nextTickTimestamp)
             _nextTickTimestamp = checked(now + _tickInterval);
-        _ = ChatDelivery.TryHandoffPendingSpeech();
+        _ = ChatDelivery.TryHandoffPendingOccurrences();
         return steps;
     }
 

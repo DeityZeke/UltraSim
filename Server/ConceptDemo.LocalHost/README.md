@@ -8,6 +8,8 @@ Game generation, prepared World, shared scene, Chat service, and packet-free hos
 then adds the deployment identity, static content host, UDP listener, and independent remote
 applications. Enabling hosting does not restart the world or move the host through loopback
 Network. Stopping hosting retires remote sessions and endpoints while the local server continues.
+C0.2 routes Global and authority System occurrences over that same shared Game census: the host's
+recipient remains packet-free while remote recipients retain their normal Network delivery/proof.
 
 This assembly is present only in the Complete product. Single Player has no Network family, Online
 has no local authority family, and the dedicated server uses `Server/ConceptDemo` without this

@@ -110,12 +110,16 @@ I0.12 composes one respawning public Iron Sword through that shared authority. E
 nominates pickup; the same persistent entity disappears from every recipient when contained,
 appears only in the owner's private Inventory/UI, follows Main Hand equipment, and becomes public
 again on an authority-positioned Drop. Another participant can then pick up that same item. The
-spawner independently publishes a newly rolled occurrence after its bounded delay. Protocol v21
-adds only the owner-visible Primary result. Protocol v22 adds a bounded, recipient-interest-coupled
+spawner independently publishes a newly rolled occurrence after its bounded delay. Manifest v21
+adds only the owner-visible Primary result. Manifest v22 adds a bounded, recipient-interest-coupled
 cold weapon-property fact and the hot `GroundItem` eligibility bit; rolled item details remain out
-of hot public records. I0.13/protocol v23 replaces that temporary formatted detail string with at
+of hot public records. I0.13/manifest v23 replaces that temporary formatted detail string with at
 most 16 canonical typed Inspection Property facts. Their stable IDs/value grammar are transported;
 labels, categories, row order, punctuation, and native layout are not Network authority.
+
+C0.2/manifest v24 widens only the existing Chat submit/occurrence vocabulary for finite Global and
+explicit System kinds. It does not change hot public records, item metadata, or the selected
+replication profile.
 
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.
@@ -127,14 +131,16 @@ view and does not advance server presentation knowledge.
 
 ## Remote Chat occurrence delivery
 
-Chat C0.1 consumes the packet-free `GameChatService` through a bounded
-`RemoteChatDeliveryService`. One accepted C0.0 speech audience is preflighted and
+Chat C0.1-C0.2 consume the packet-free `GameChatService` through a bounded
+`RemoteChatDeliveryService`. One accepted spatial, routed Global, or authority-owned System
+audience is preflighted and
 handed off completely into independent recipient debts; it is never partially
 consumed. Reliable Event transport preserves the occurrence, while the Control
 proof advances only the exact recipient delivery after `ClientChatState` applies
 it. Lost proof retries the same delivery and speech-fact identities. Private
 command/error output uses the same recipient-relative occurrence contract without
-becoming public speech.
+becoming public speech. Global audience selection and explicit non-player System publication stay
+in Game; the delivery adapter only preserves the accepted fact and exact audience.
 
 The adapter derives participant authority from the authenticated application
 session and attaches each concrete Admission owner to Chat's bounded census for

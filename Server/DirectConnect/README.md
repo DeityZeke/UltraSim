@@ -6,6 +6,8 @@ independent guest/application/control lineage inside one bounded shared Game/Wor
 Each guest uses the real Game/Physics, per-recipient public-world, Chat, owner-private Inventory,
 and informational-UI semantic paths. A disconnect retires only that participant; the remaining
 authority and guests continue, and reconnect creates fresh participant/control/public identity.
+C0.2's Global and explicit System occurrences therefore fan out over one shared authority rather
+than one isolated Chat service per connection; reconnect does not inherit prior occurrence history.
 
 The default development profile admits at most eight simultaneous participants. That is a bounded
 functional profile, not a production-capacity claim. Endpoint, Network connection, application

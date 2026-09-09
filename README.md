@@ -190,12 +190,13 @@ rejects invalidating shrink transactionally, and reprojects upgrades through the
 remote UI. Weight, nesting, Slot, Freeform, rotation, automatic packing, and
 capacity-effect policy remain explicitly unsupported.
 
-Chat C0.0 adds a third concrete Game semantic without changing Network: trusted
-entered actors can produce bounded packet-free Whisper/Say/Yell occurrences using
-current authoritative world position and exact X/Z hearing. Commands are
-intercepted before speech; `/help` and `/where` return private results. Remote
-protocol, client state, and Godot presentation remain deliberately deferred to
-C0.1.
+Chat C0.0-C0.2 add a third concrete Game semantic without moving authority into Network. Trusted
+entered actors produce bounded Whisper/Say/Yell occurrences from current authoritative position
+and exact X/Z hearing, while the first Global mode routes over the exact current entered census
+independently of AOI. Explicit authority-owned System broadcasts use the same retained occurrence
+and application-proof path without forging a player speaker. Commands are intercepted before
+speech; `/help` and `/where` remain private results. Local and remote clients converge on the same
+bounded feed, spatial overhead projection, and presentation-local transient System banner.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

@@ -1,10 +1,10 @@
 # UltraSim Chat + Commands
 
-**Status:** C0.0 + C0.0a + C0.1 + C0.1a accepted; C0.2+ stopped forward context
+**Status:** C0.0 + C0.0a + C0.1 + C0.1a + C0.2 accepted; C0.3+ stopped forward context
 
 **Prepared after:** Inventory I0.11 (`305e40f4`)
 
-**Accepted checkpoint:** C0.1a — occurrence lineage and bounded delivery-work closure
+**Accepted checkpoint:** C0.2 — first routed Global and authority-originated System occurrences
 
 This document preserves the intended Chat/Commands semantics before implementation pressure causes speech, channels, commands, Network delivery, and presentation to be collapsed into one subsystem.
 
@@ -34,10 +34,10 @@ They may share input parsing and presentation surfaces where useful, but they do
 
 # 1. Archaeology and lessons
 
-The active V3 implementation contains the packet-free C0.0 Chat oracle and the
-C0.1/C0.1a authenticated remote/Game/client/Godot consumer vertical. Routed channels,
-moderation, history, social policy, and privileged-command extensibility remain
-forward context only.
+The active V3 implementation contains the packet-free C0.0 Chat oracle, the C0.1/C0.1a
+authenticated remote/Game/client/Godot consumer vertical, and C0.2's one routed Global audience
+plus explicit System broadcast. Additional routed channels, moderation, history, social policy,
+and privileged-command extensibility remain forward context only.
 Relevant historical references for the deliberately deferred work are:
 
 - `_Archive/References/runuo-2.7`
@@ -814,22 +814,54 @@ complete handoff preflights.
 Default-capacity evidence uses 256 sessions and 16,384 global delivery rows. One
 idle progression round examines zero delivery rows; one active session among the
 idle population examines exactly its one FIFO head. The known fixed-array
-reservation for that configuration is 1,325,056 bytes.
+reservation at C0.1a was 1,325,056 bytes; C0.2's explicit occurrence-kind widening makes the
+current reservation 1,329,152 bytes.
 
 ---
 
-## C0.2 — first routed chat semantics
+## C0.2 — first routed chat semantics — ACCEPTED
 
-Only when the game has a concrete reason.
+C0.2 adds exactly two public occurrence kinds to the accepted retained Chat path:
 
-Potential first additions:
+```text
+GlobalSpeech
+    trusted entered participant submission
+    audience = exact current entered census in this Game authority
+    independent of spatial hearing and dynamic-public AOI
 
-- server/system announcement;
-- one explicit global channel;
-- direct message with stable identity resolution;
-- bounded local client tab/filter state.
+SystemBroadcast
+    explicit authority publication
+    same bounded current entered census
+    no participant, ECS speaker, or public actor anchor
+```
 
-Do not manufacture Party/Guild ownership before Party/Guild exist.
+Both kinds use the existing complete-audience retention, per-recipient delivery debt, reliable
+Event transport, `ClientChatState` application, and Control-lane application proof. The packet-free
+local recipient and authenticated remote recipients receive the same Game fact; Network still owns
+neither channel policy nor audience selection. A reconnect receives later occurrences only and no
+history is invented.
+
+The playable Godot feed renders Global and System rows. An already-applied System fact also drives
+a presentation-local 4.5-second top banner. The banner owns only native layout and expiry; it is not
+a second server message. Batch projection selects the newest unseen System fact even when later
+player speech arrived in the same client-state copy.
+
+The generated Game protocol is version 12 and the composed application manifest is version 24.
+Chat submit/occurrence messages advance to version 2, retaining their bounded shape while adding
+the finite `Global` mode and explicit `GlobalSpeech`/`SystemBroadcast` occurrence kinds.
+
+Default-capacity evidence retains at most 64 facts with at most 256 recipients per fact. Current
+fixed Game Chat arrays reserve 214,672 bytes; the 256-session/16,384-row remote ledger reserves
+1,329,152 bytes. Warmed Global plus System acceptance/consume allocates zero managed bytes.
+
+Permanent acceptance proves spatial-versus-routed audience independence, canonical malformed-wire
+rejection, no forged System speaker, complete local/remote A/B/C fanout, independent application
+proof, disconnect/reconnect without prior occurrence history, a native banner lifecycle, and the
+existing M0.0 dedicated plus Complete packet-free-host deployment shapes.
+
+C0.2 deliberately does not add direct messages, tabs/filters, party/guild channels, cross-server
+routing, persistent history, automatic join/leave policy, moderation, accounts, or a general
+operator-command framework. Do not manufacture Party/Guild ownership before Party/Guild exist.
 
 ---
 

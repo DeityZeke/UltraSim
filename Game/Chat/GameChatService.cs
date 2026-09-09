@@ -39,10 +39,13 @@ public sealed class GameChatService : IDisposable
     private readonly ParticipantId[] _speechRecipients;
     private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameChatSubmissionResult>
         _submitOperation;
+    private readonly ServerGenerationStateOperation<IGameGenerationStateProvider, GameSystemBroadcastResult>
+        _systemBroadcastOperation;
 
     private AdmissionResult _pendingSpeaker;
     private GameSpeechMode _pendingMode;
     private string? _pendingText;
+    private string? _pendingDisplayLabel;
     private int _speechHead;
     private int _speechCount;
     private int _pendingRecipientDeliveries;
@@ -61,6 +64,8 @@ public sealed class GameChatService : IDisposable
     private long _recipientDeliveries;
     private long _participantCensuses;
     private long _participantCapacityFailures;
+    private long _acceptedGlobalSpeech;
+    private long _acceptedSystemBroadcasts;
 
     public GameChatService(
         ServerGameFacet runtime,
@@ -94,6 +99,7 @@ public sealed class GameChatService : IDisposable
         _speechRecipients = new ParticipantId[checked(
             limits.MaximumRetainedSpeechFacts * limits.MaximumRecipientsPerSpeech)];
         _submitOperation = SubmitInsideGeneration;
+        _systemBroadcastOperation = PublishSystemInsideGeneration;
         AddAdmission(admission, primary: true);
         _runtime.GenerationPublished += HandleGenerationPublished;
         _ = RefreshEnteredParticipantsCore();
@@ -172,7 +178,7 @@ public sealed class GameChatService : IDisposable
             return Reject(GameChatSubmissionStatus.Faulted, _fault.Message);
         if (!participant.IsValid)
             return Reject(GameChatSubmissionStatus.InvalidParticipant, "The participant identity is invalid.");
-        if (mode is < GameSpeechMode.Whisper or > GameSpeechMode.Yell)
+        if (mode is < GameSpeechMode.Whisper or > GameSpeechMode.Global)
             return Reject(GameChatSubmissionStatus.InvalidSpeechMode, "The speech mode is invalid.");
         GameChatSubmissionStatus textStatus = ValidateText(text, _limits.MaximumTextUtf8Bytes);
         if (textStatus != GameChatSubmissionStatus.None)
@@ -208,7 +214,44 @@ public sealed class GameChatService : IDisposable
         }
     }
 
-    /// <summary>Copies the exact retained audience of one pending speech fact.</summary>
+    /// <summary>
+    /// Publishes one authority-originated routed occurrence to the exact current entered census.
+    /// No participant identity, actor, public anchor, or fake player speaker is manufactured.
+    /// </summary>
+    public GameSystemBroadcastResult PublishSystem(
+        string? text,
+        string displayLabel = "System")
+    {
+        EnsureOperational();
+        if (_fault is not null)
+            return RejectSystem(GameChatSubmissionStatus.Faulted);
+        GameChatSubmissionStatus textStatus = ValidateText(text, _limits.MaximumTextUtf8Bytes);
+        if (textStatus != GameChatSubmissionStatus.None)
+            return RejectSystem(textStatus);
+        GameChatSubmissionStatus labelStatus = ValidateText(
+            displayLabel, MaximumDisplayLabelUtf8Bytes);
+        if (labelStatus != GameChatSubmissionStatus.None)
+            return RejectSystem(labelStatus);
+        if (!_recipientRegistryComplete && !RefreshEnteredParticipantsCore())
+            return RejectSystem(GameChatSubmissionStatus.RecipientRegistryIncomplete);
+
+        _pendingText = text;
+        _pendingDisplayLabel = displayLabel;
+        try
+        {
+            if (!_runtime.TryUseActiveGeneration(
+                    _systemBroadcastOperation, out GameSystemBroadcastResult result))
+                return RejectSystem(GameChatSubmissionStatus.RuntimeUnavailable);
+            return result;
+        }
+        finally
+        {
+            _pendingText = null;
+            _pendingDisplayLabel = null;
+        }
+    }
+
+    /// <summary>Copies the exact retained audience of one pending public Chat fact.</summary>
     public bool TryCopyRecipients(
         GameSpeechFactId fact,
         Span<ParticipantId> destination,
@@ -304,6 +347,8 @@ public sealed class GameChatService : IDisposable
             _recipientDeliveries,
             _participantCensuses,
             _participantCapacityFailures,
+            _acceptedGlobalSpeech,
+            _acceptedSystemBroadcasts,
             reserved);
     }
 
@@ -328,6 +373,7 @@ public sealed class GameChatService : IDisposable
         _speechRecipients.AsSpan().Clear();
         _speechRecipientCounts.AsSpan().Clear();
         _pendingText = null;
+        _pendingDisplayLabel = null;
         _fault = null;
     }
 
@@ -351,12 +397,46 @@ public sealed class GameChatService : IDisposable
 
         if (text[0] == GameChatCommandRegistry.PlayerPrefix)
             return ExecuteCommand(world, game, speaker, text);
+        if (_pendingMode == GameSpeechMode.Global)
+            return RouteGlobal(world, generationId, game, speaker, text);
         if (!game.WorldState.TryReadPosition(world, speaker.Entity, out WorldPosition position))
         {
             return Reject(GameChatSubmissionStatus.MissingSpeakerPosition,
                 "The trusted speaker has no authoritative world position.");
         }
         return RouteSpeech(world, generationId, game, speaker, position, text, _pendingMode);
+    }
+
+    private GameSystemBroadcastResult PublishSystemInsideGeneration(
+        EcsWorld world,
+        ulong generationId,
+        IGameGenerationStateProvider game)
+    {
+        _ = world;
+        _ = game;
+        string text = _pendingText ??
+            throw new InvalidOperationException("Chat lost its pending system text.");
+        string displayLabel = _pendingDisplayLabel ??
+            throw new InvalidOperationException("Chat lost its pending system label.");
+        if (!TryCollectRoutedRecipients(out int recipientCount, out GameChatSubmissionStatus status))
+            return RejectSystem(status);
+        if (!TryRetainFact(
+                generationId,
+                world.TickCount,
+                GameChatFactKind.SystemBroadcast,
+                default,
+                default,
+                GameSpeechMode.None,
+                text,
+                displayLabel,
+                default,
+                recipientCount,
+                out GameSpeechFact fact,
+                out status))
+            return RejectSystem(status);
+        _acceptedSystemBroadcasts++;
+        return new GameSystemBroadcastResult(
+            GameChatSubmissionStatus.SystemBroadcastAccepted, fact, recipientCount);
     }
 
     private GameChatSubmissionResult ExecuteCommand(
@@ -505,7 +585,7 @@ public sealed class GameChatService : IDisposable
             if (recipientCount == _recipientScratch.Length)
             {
                 return Reject(GameChatSubmissionStatus.RecipientCapacityExceeded,
-                    "The complete speech audience exceeds recipient capacity.");
+                    "The complete Chat audience exceeds recipient capacity.");
             }
             _recipientScratch[recipientCount++] = recipient;
             foundSpeaker |= recipient == speaker.Participant;
@@ -519,30 +599,123 @@ public sealed class GameChatService : IDisposable
         }
         InsertionSortRecipients(_recipientScratch.AsSpan(0, recipientCount));
 
-        if (_speechCount == _speechFacts.Length)
-        {
-            return Reject(GameChatSubmissionStatus.SpeechRetentionCapacityExceeded,
-                "The retained speech occurrence queue is full.");
-        }
-        if (_nextSpeechSequence == ulong.MaxValue)
-        {
-            return Reject(GameChatSubmissionStatus.SpeechSequenceExhausted,
-                "The speech occurrence sequence is exhausted.");
-        }
-
         string displayLabel = ResolveDisplayLabel(game, speaker);
         _ = game.WorldState.Publications.TryGetPublicEntityId(
             speaker.Entity, out WorldPublicEntityId publicAnchor);
-        var fact = new GameSpeechFact(
-            new GameSpeechFactId(_nextSpeechSequence),
+        if (!TryRetainFact(
             generationId,
             world.TickCount,
+            GameChatFactKind.SpatialSpeech,
             speaker.Participant,
             speaker.Entity,
             mode,
             text,
             displayLabel,
+            publicAnchor,
+            recipientCount,
+            out GameSpeechFact fact,
+            out GameChatSubmissionStatus status))
+            return Reject(status, TextFailure(status));
+        _acceptedSpeech++;
+        return new GameChatSubmissionResult(
+            GameChatSubmissionStatus.SpeechAccepted,
+            fact,
+            recipientCount,
+            null);
+    }
+
+    private GameChatSubmissionResult RouteGlobal(
+        EcsWorld world,
+        ulong generationId,
+        IGameGenerationStateProvider game,
+        in AdmissionResult speaker,
+        string text)
+    {
+        if (!TryCollectRoutedRecipients(out int recipientCount, out GameChatSubmissionStatus status))
+            return Reject(status, TextFailure(status));
+        string displayLabel = ResolveDisplayLabel(game, speaker);
+        if (!TryRetainFact(
+                generationId,
+                world.TickCount,
+                GameChatFactKind.GlobalSpeech,
+                speaker.Participant,
+                speaker.Entity,
+                GameSpeechMode.Global,
+                text,
+                displayLabel,
+                default,
+                recipientCount,
+                out GameSpeechFact fact,
+                out status))
+            return Reject(status, TextFailure(status));
+        _acceptedSpeech++;
+        _acceptedGlobalSpeech++;
+        return new GameChatSubmissionResult(
+            GameChatSubmissionStatus.SpeechAccepted, fact, recipientCount, null);
+    }
+
+    private bool TryCollectRoutedRecipients(
+        out int recipientCount,
+        out GameChatSubmissionStatus status)
+    {
+        recipientCount = 0;
+        foreach (ParticipantId participant in _entered.Keys)
+        {
+            if (recipientCount == _recipientScratch.Length)
+            {
+                status = GameChatSubmissionStatus.RecipientCapacityExceeded;
+                return false;
+            }
+            _recipientScratch[recipientCount++] = participant;
+        }
+        if (recipientCount == 0)
+        {
+            status = GameChatSubmissionStatus.NoEligibleRecipients;
+            return false;
+        }
+        InsertionSortRecipients(_recipientScratch.AsSpan(0, recipientCount));
+        status = GameChatSubmissionStatus.None;
+        return true;
+    }
+
+    private bool TryRetainFact(
+        ulong generationId,
+        ulong simulationTick,
+        GameChatFactKind kind,
+        ParticipantId speaker,
+        Entity speakerEntity,
+        GameSpeechMode mode,
+        string text,
+        string displayLabel,
+        WorldPublicEntityId publicAnchor,
+        int recipientCount,
+        out GameSpeechFact fact,
+        out GameChatSubmissionStatus status)
+    {
+        fact = default;
+        if (_speechCount == _speechFacts.Length)
+        {
+            status = GameChatSubmissionStatus.SpeechRetentionCapacityExceeded;
+            return false;
+        }
+        if (_nextSpeechSequence == ulong.MaxValue)
+        {
+            status = GameChatSubmissionStatus.SpeechSequenceExhausted;
+            return false;
+        }
+        fact = new GameSpeechFact(
+            new GameSpeechFactId(_nextSpeechSequence),
+            generationId,
+            simulationTick,
+            kind,
+            speaker,
+            speakerEntity,
+            mode,
+            text,
+            displayLabel,
             publicAnchor);
+        if (!fact.IsValid)
+            throw new InvalidOperationException("Chat attempted to retain a noncanonical public occurrence.");
         int slot = (_speechHead + _speechCount) % _speechFacts.Length;
         _recipientScratch.AsSpan(0, recipientCount).CopyTo(RecipientBlock(slot, recipientCount));
         _speechFacts[slot] = fact;
@@ -551,13 +724,9 @@ public sealed class GameChatService : IDisposable
         _pendingRecipientDeliveries += recipientCount;
         _speechHighWater = Math.Max(_speechHighWater, _speechCount);
         _nextSpeechSequence++;
-        _acceptedSpeech++;
         _recipientDeliveries = checked(_recipientDeliveries + recipientCount);
-        return new GameChatSubmissionResult(
-            GameChatSubmissionStatus.SpeechAccepted,
-            fact,
-            recipientCount,
-            null);
+        status = GameChatSubmissionStatus.None;
+        return true;
     }
 
     private bool RefreshEnteredParticipantsCore()
@@ -783,6 +952,9 @@ public sealed class GameChatService : IDisposable
         _rejectedSubmissions++;
         return new GameChatSubmissionResult(status, default, 0, message);
     }
+
+    private static GameSystemBroadcastResult RejectSystem(GameChatSubmissionStatus status) =>
+        new(status, default, 0);
 
     private static GameChatSubmissionStatus ValidateText(string? text, int maximumUtf8Bytes)
     {

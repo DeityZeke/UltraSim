@@ -28,11 +28,12 @@ acceptance narratives remain available through git history.
   Inspection Properties shared by Inventory and world hover.
 - [Inventory plan/status](Plans/INVENTORY.md) — current accepted Inventory
   contracts plus explicitly deferred placement, capacity, nesting, and viewer work.
-- [Chat](../Game/Chat/README.md) — packet-free authoritative spatial speech,
-  command interception, exact hearing, and retained occurrence semantics.
-- [Chat plan/status](Plans/CHAT.md) — accepted C0.0-C0.1a spatial/remote occurrence
-  semantics plus deliberately deferred routed-channel, moderation, history, and
-  richer extensibility work.
+- [Chat](../Game/Chat/README.md) — packet-free authoritative spatial speech, the first routed
+  Global audience, explicit non-player System broadcasts, command interception, exact hearing,
+  and retained local/remote occurrence semantics.
+- [Chat plan/status](Plans/CHAT.md) — accepted C0.0-C0.2 spatial/remote/routed occurrence
+  semantics plus deliberately deferred additional channels, moderation, history, and richer
+  extensibility work.
 - [UltraSim Simple Physics](../Game/Physics/README.md) — the concrete generation-owned
   P0.0-P0.1d resolver: first-class occupancy, bounded swept blocking, multi-surface
   support/clearance, and airborne contact beneath Game-owned vertical motion.
@@ -87,8 +88,8 @@ acceptance narratives remain available through git history.
   semantic parity, Network-free local authority/session extraction, Direct Connect
   identity onboarding, human-scale presentation calibration, nameplates/chat,
   layered settings, server-recommended profiles, and server-composed UI. F0.5 and M0.0
-  are closed; F0.6 is closed by A0.2-A0.8, followed by remaining Concept Demo consumers
-  and explicit lifecycle/final matrices.
+  are closed; F0.6 is closed by A0.2-A0.8, C0.2 closes Global/System Chat, and the remaining
+  Concept Demo diagnostics/presentation consumers precede explicit lifecycle/final matrices.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,

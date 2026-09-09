@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("HelpAndWhereArePrivateCommands", HelpAndWhereArePrivateCommands),
     ("UnknownAndMalformedCommandsNeverBecomeSpeech", UnknownAndMalformedCommandsNeverBecomeSpeech),
     ("WhisperSayAndYellProduceNestedExactAudiences", WhisperSayAndYellProduceNestedExactAudiences),
+    ("GlobalAndSystemRouteWithoutSpatialAuthority", GlobalAndSystemRouteWithoutSpatialAuthority),
     ("NegativeCornerAndCrossChunkRoutingAreExact", NegativeCornerAndCrossChunkRoutingAreExact),
     ("CurrentAuthoritativeMovementChangesLaterAudience", CurrentAuthoritativeMovementChangesLaterAudience),
     ("MissingAndPositionlessSpeakersReject", MissingAndPositionlessSpeakersReject),
@@ -32,8 +33,10 @@ var tests = new (string Name, Action Body)[]
     ("ExistingAdmissionsAreCensusedAndWorldMismatchRejects", ExistingAdmissionsAreCensusedAndWorldMismatchRejects),
     ("MultipleAdmissionOwnersFormOneBoundedCensus", MultipleAdmissionOwnersFormOneBoundedCensus),
     ("WarmedSpeechDiscoveryAllocatesZero", WarmedSpeechDiscoveryAllocatesZero),
+    ("WarmedRoutedOccurrencesAllocateZero", WarmedRoutedOccurrencesAllocateZero),
     ("RemoteChatCodecAndClientStateFailClosed", RemoteChatCodecAndClientStateFailClosed),
     ("RemoteSpeechAndPrivateCommandsConverge", RemoteSpeechAndPrivateCommandsConverge),
+    ("RemoteGlobalAndSystemOccurrencesConverge", RemoteGlobalAndSystemOccurrencesConverge),
     ("RemoteRecipientProofsAdvanceIndependently", RemoteRecipientProofsAdvanceIndependently),
     ("RemoteDuplicateSubmissionCannotRepeatAuthority", RemoteDuplicateSubmissionCannotRepeatAuthority),
     ("LostApplicationProofRetriesSameOccurrence", LostApplicationProofRetriesSameOccurrence),
@@ -53,7 +56,12 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Chat C0.0-C0.1 tests passed.");
+Console.WriteLine(
+    $"EVIDENCE C0.2 protocol={typeof(GeneratedUltraSimGameProtocol).GetCustomAttribute<NetworkProtocolAttribute>()!.Version} " +
+    $"manifest={UltraSimGameProtocol.Manifest.Version}/" +
+    $"{UltraSimGameProtocol.Manifest.Fingerprint} routed=Global system=explicit-authority " +
+    "banner=presentation-local");
+Console.WriteLine($"All {tests.Length} Chat C0.0-C0.2 tests passed.");
 
 static void RemoteChatCodecAndClientStateFailClosed()
 {
@@ -113,6 +121,45 @@ static void RemoteChatCodecAndClientStateFailClosed()
     Assert.Equal(4UL, state.GetSnapshot().NextRecipientSequence);
     Assert.Equal(11UL, state.GetSnapshot().ServerGenerationId);
     Assert.False(delayedOldOrigin.CanPresentOverhead(11));
+
+    var invalidGlobal = delayedOldOrigin with
+    {
+        DeliveryId = 5,
+        RecipientSequence = 4,
+        Kind = ClientChatOccurrenceKind.GlobalSpeech,
+        SpeechMode = ClientChatSpeechMode.Say,
+        PublicAnchor = default,
+    };
+    Assert.Equal(ClientChatApplyStatus.Rejected, state.TryApply(in invalidGlobal));
+}
+
+static void RemoteGlobalAndSystemOccurrencesConverge()
+{
+    using var fixture = new RemoteChatFixture();
+    Assert.True(fixture.FirstClient.TrySubmit("global remote", ClientChatSpeechMode.Global));
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 2);
+    ClientChatOccurrence[] first = fixture.CopyFirst();
+    ClientChatOccurrence[] second = fixture.CopySecond();
+    Assert.Equal(ClientChatOccurrenceKind.GlobalSpeech, first[0].Kind);
+    Assert.Equal(ClientChatSpeechMode.Global, first[0].SpeechMode);
+    Assert.False(first[0].PublicAnchor.IsValid);
+    Assert.Equal(first[0].SpeechFactId, second[0].SpeechFactId);
+
+    GameSystemBroadcastResult broadcast =
+        fixture.Authority.Chat.PublishSystem("authoritative test broadcast");
+    Assert.True(broadcast.Accepted);
+    Assert.False(broadcast.Fact.Speaker.IsValid);
+    Assert.False(broadcast.Fact.SpeakerEntity.IsValid);
+    Assert.True(fixture.Service.TryHandoffPendingOccurrences());
+    fixture.DriveUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 4);
+    first = fixture.CopyFirst();
+    second = fixture.CopySecond();
+    Assert.Equal(ClientChatOccurrenceKind.SystemBroadcast, first[1].Kind);
+    Assert.Equal(ClientChatSpeechMode.None, first[1].SpeechMode);
+    Assert.False(first[1].PublicAnchor.IsValid);
+    Assert.Equal("System", first[1].DisplayLabel);
+    Assert.Equal("authoritative test broadcast", first[1].Text);
+    Assert.Equal(first[1].SpeechFactId, second[1].SpeechFactId);
 }
 
 static void MultipleAdmissionOwnersFormOneBoundedCensus()
@@ -309,7 +356,7 @@ static void DelayedHandoffUsesAcceptanceTimePresentation()
     GameChatSubmissionResult delayed = fixture.Authority.Chat.Submit(
         fixture.FirstParticipant, "speaker vanished");
     Assert.True(delayed.AcceptedSpeech);
-    Assert.False(fixture.Service.TryHandoffPendingSpeech());
+    Assert.False(fixture.Service.TryHandoffPendingOccurrences());
     Assert.Equal(1, fixture.Authority.Chat.PendingSpeechCount);
 
     fixture.Authority.Destroy(fixture.FirstParticipant);
@@ -372,16 +419,16 @@ static void TerminalRecipientCannotBlockSpeechFifo()
     fixture.ReceiveFirstSubmissionOnly();
     Assert.True(fixture.Authority.Chat.Submit(
         fixture.FirstParticipant, "survivor").AcceptedSpeech);
-    Assert.False(fixture.Service.TryHandoffPendingSpeech());
+    Assert.False(fixture.Service.TryHandoffPendingOccurrences());
 
     fixture.DisposeSecondServer();
     using RemoteChatServerSession reconnectedSecond = fixture.Service.Register(
         fixture.SecondLoop.Server, fixture.SecondParticipant, 0xC102, () => fixture.Now);
-    Assert.True(fixture.Service.TryHandoffPendingSpeech());
+    Assert.True(fixture.Service.TryHandoffPendingOccurrences());
     fixture.Authority.Move(fixture.SecondParticipant, At(100_000, 0));
     Assert.True(fixture.Authority.Chat.Submit(
         fixture.FirstParticipant, "later").AcceptedSpeech);
-    Assert.False(fixture.Service.TryHandoffPendingSpeech());
+    Assert.False(fixture.Service.TryHandoffPendingOccurrences());
     fixture.DriveFirstUntil(() => fixture.Service.GetSnapshot().DeliveriesApplied == 3);
 
     RemoteChatDeliveryServiceSnapshot snapshot = fixture.Service.GetSnapshot();
@@ -415,7 +462,7 @@ static void NewApplicationSessionRejectsOldLineage()
     GameChatSubmissionResult current = fixture.Authority.Chat.Submit(
         fixture.FirstParticipant, "current lineage");
     Assert.True(current.AcceptedSpeech);
-    Assert.True(fixture.Service.TryHandoffPendingSpeech());
+    Assert.True(fixture.Service.TryHandoffPendingOccurrences());
     var staleProof = new RemoteChatAppliedMessage
     {
         ApplicationSessionEpoch = fixture.FirstEpoch,
@@ -464,7 +511,7 @@ static void DeliveryLedgerIdleAndOneActiveWorkAreConstant()
         Assert.Equal(before.HandoffPreflights, idle.HandoffPreflights);
 
         Assert.True(authority.Chat.Submit(participants[0], "one active").AcceptedSpeech);
-        Assert.True(service.TryHandoffPendingSpeech());
+        Assert.True(service.TryHandoffPendingOccurrences());
         RemoteChatDeliveryServiceSnapshot queued = service.GetSnapshot();
         Assert.Equal(1, queued.PendingDeliveries);
         for (int index = 0; index < sessions.Length; index++)
@@ -507,6 +554,15 @@ static void DefaultsAndAuthoritySurfaceAreExplicit()
     Assert.False(parameters.Contains(typeof(Entity)));
     Assert.False(parameters.Contains(typeof(WorldPosition)));
     Assert.False(parameters.Any(static type => type.IsArray));
+
+    MethodInfo publishSystem = typeof(GameChatService).GetMethod(nameof(GameChatService.PublishSystem)) ??
+        throw new InvalidOperationException("Chat PublishSystem is missing.");
+    Type[] systemParameters = publishSystem.GetParameters()
+        .Select(static parameter => parameter.ParameterType)
+        .ToArray();
+    Assert.SequenceEqual(new[] { typeof(string), typeof(string) }, systemParameters);
+    Assert.False(systemParameters.Contains(typeof(ParticipantId)));
+    Assert.False(systemParameters.Contains(typeof(Entity)));
 
     string[] remoteFields = typeof(RemoteChatSubmitHeader)
         .GetFields(BindingFlags.Instance | BindingFlags.Public)
@@ -625,6 +681,52 @@ static void WhisperSayAndYellProduceNestedExactAudiences()
     Assert.SequenceEqual(new[] { p1, p2 }, fixture.CopyRecipients(whisper.Speech.Id));
     Assert.SequenceEqual(new[] { p1, p2, p3, p4 }, fixture.CopyRecipients(say.Speech.Id));
     Assert.SequenceEqual(new[] { p1, p2, p3, p4, p5, p6 }, fixture.CopyRecipients(yell.Speech.Id));
+}
+
+static void GlobalAndSystemRouteWithoutSpatialAuthority()
+{
+    using (var empty = new ChatFixture())
+    {
+        GameSystemBroadcastResult nobody = empty.Chat.PublishSystem("nobody");
+        Assert.Equal(GameChatSubmissionStatus.NoEligibleRecipients, nobody.Status);
+        Assert.False(nobody.Accepted);
+        Assert.Equal(0, empty.Chat.PendingSpeechCount);
+    }
+
+    using var fixture = new ChatFixture(entityCapacity: 16);
+    ParticipantId central = fixture.Enter(1, At(0, 0));
+    ParticipantId far = fixture.Enter(2, At(2_000_000, 0));
+    ParticipantId sky = fixture.Enter(3, At(4_000, 4_000, 25_000));
+
+    GameChatSubmissionResult global =
+        fixture.Chat.Submit(central, "everywhere", GameSpeechMode.Global);
+    Assert.True(global.AcceptedSpeech);
+    Assert.Equal(GameChatFactKind.GlobalSpeech, global.Speech.Kind);
+    Assert.Equal(GameSpeechMode.Global, global.Speech.Mode);
+    Assert.False(global.Speech.PublicAnchor.IsValid);
+    Assert.SequenceEqual(
+        new[] { central, far, sky }, fixture.CopyRecipients(global.Speech.Id));
+
+    GameChatSubmissionResult say = fixture.Chat.Submit(central, "nearby", GameSpeechMode.Say);
+    Assert.True(say.AcceptedSpeech);
+    Assert.Equal(GameChatFactKind.SpatialSpeech, say.Speech.Kind);
+    Assert.SequenceEqual(new[] { central, sky }, fixture.CopyRecipients(say.Speech.Id));
+
+    GameSystemBroadcastResult system =
+        fixture.Chat.PublishSystem("test marker reached", "System");
+    Assert.True(system.Accepted);
+    Assert.Equal(GameChatFactKind.SystemBroadcast, system.Fact.Kind);
+    Assert.False(system.Fact.Speaker.IsValid);
+    Assert.False(system.Fact.SpeakerEntity.IsValid);
+    Assert.Equal(GameSpeechMode.None, system.Fact.Mode);
+    Assert.SequenceEqual(
+        new[] { central, far, sky }, fixture.CopyRecipients(system.Fact.Id));
+    Assert.Equal(1L, fixture.Chat.GetSnapshot().AcceptedGlobalSpeech);
+    Assert.Equal(1L, fixture.Chat.GetSnapshot().AcceptedSystemBroadcasts);
+
+    int pending = fixture.Chat.PendingSpeechCount;
+    Assert.False(fixture.Chat.PublishSystem(new string('x', 257)).Accepted);
+    Assert.Equal(pending, fixture.Chat.PendingSpeechCount);
 }
 
 static void NegativeCornerAndCrossChunkRoutingAreExact()
@@ -857,6 +959,44 @@ static void WarmedSpeechDiscoveryAllocatesZero()
         $"C0.0 CHAT METRICS submissions={snapshot.Submissions} accepted={snapshot.AcceptedSpeech} " +
         $"candidate_chunks={snapshot.CandidateChunksExamined} candidates={snapshot.CandidateEntitiesCopied} " +
         $"exact_tests={snapshot.ExactDistanceTests} deliveries={snapshot.RecipientDeliveries} " +
+        $"reserved_array_bytes={snapshot.KnownArrayReservedBytes} warmed_alloc={allocated}B");
+}
+
+static void WarmedRoutedOccurrencesAllocateZero()
+{
+    using var fixture = new ChatFixture();
+    ParticipantId speaker = fixture.Enter(1, At(0, 0));
+    _ = fixture.Enter(2, At(2_000_000, 0));
+    Span<ParticipantId> recipients = stackalloc ParticipantId[4];
+
+    static void Exercise(
+        ChatFixture fixture,
+        ParticipantId speaker,
+        Span<ParticipantId> recipients)
+    {
+        if (!fixture.Chat.Submit(speaker, "global warm", GameSpeechMode.Global).AcceptedSpeech ||
+            !fixture.Chat.TryConsumeNextSpeech(recipients, out GameSpeechFact global, out int globalCount) ||
+            global.Kind != GameChatFactKind.GlobalSpeech || globalCount != 2 ||
+            !fixture.Chat.PublishSystem("system warm").Accepted ||
+            !fixture.Chat.TryConsumeNextSpeech(recipients, out GameSpeechFact system, out int systemCount) ||
+            system.Kind != GameChatFactKind.SystemBroadcast || systemCount != 2)
+        {
+            throw new InvalidOperationException("Routed Chat measured path failed.");
+        }
+    }
+
+    for (int index = 0; index < 128; index++) Exercise(fixture, speaker, recipients);
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 1_000; index++) Exercise(fixture, speaker, recipients);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Assert.Equal(0L, allocated);
+    GameChatSnapshot snapshot = fixture.Chat.GetSnapshot();
+    Console.WriteLine(
+        $"C0.2 ROUTED CHAT METRICS global={snapshot.AcceptedGlobalSpeech} " +
+        $"system={snapshot.AcceptedSystemBroadcasts} deliveries={snapshot.RecipientDeliveries} " +
         $"reserved_array_bytes={snapshot.KnownArrayReservedBytes} warmed_alloc={allocated}B");
 }
 

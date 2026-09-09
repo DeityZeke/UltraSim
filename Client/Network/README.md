@@ -76,8 +76,8 @@ Chat occurrence, and generic UI adapters preserve their existing independent app
 contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
-guest admission. It hostile-validates the finite profile vocabulary introduced in protocol v19,
-retained unchanged through protocol v23, and maps it into
+guest admission. It hostile-validates the finite profile vocabulary introduced in manifest v19,
+retained unchanged through the current manifest v24, and maps it into
 Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not
@@ -237,15 +237,17 @@ silently erase independently retained facts.
 
 ## Chat occurrences
 
-`RemoteChatClient` is the C0.1 authenticated consumer for reliable,
-non-coalescible spatial speech and private command/error rows. It submits only
+`RemoteChatClient` is the C0.1-C0.2 authenticated consumer for reliable,
+non-coalescible spatial/Global speech plus private command/error rows. It submits only
 session epoch, monotonic sequence, speech mode, and bounded text. Incoming
 occurrences commit to `ClientChatState` before an explicit Control-lane proof is
 queued; duplicates re-prove the same delivery without appending twice, while a
 rejected semantic occurrence never advances server knowledge.
 
-The optional `WorldPublicEntityId` is presentation-only. A missing resident actor
-suppresses an overhead bubble but never suppresses the feed occurrence.
+The optional `WorldPublicEntityId` is presentation-only and valid only for spatial speech. A
+missing resident actor suppresses an overhead bubble but never suppresses the feed occurrence.
+Explicit System broadcasts arrive through the same occurrence/proof path with no participant
+speaker or public anchor; Network does not decide their audience or presentation lifetime.
 
 ## Current stop
 

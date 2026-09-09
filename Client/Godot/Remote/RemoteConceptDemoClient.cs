@@ -68,6 +68,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private Label? _status;
     private RichTextLabel? _chatFeed;
     private LineEdit? _chatInput;
+    private OptionButton? _chatMode;
+    private GodotSystemChatBanner? _systemChatBanner;
     private GodotWorldHoverTooltip? _hoverTooltip;
     private WorldPosition _player;
     private WorldPosition _smokeStart;
@@ -319,6 +321,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_disposed) return;
         _disposed = true;
         _actorPresenter?.Dispose();
+        _systemChatBanner?.Dispose();
         _renderer?.Dispose();
         _ = _session?.TryRequestDetach();
         _session?.Dispose();
@@ -326,6 +329,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _cache?.Dispose();
         _renderer = null;
         _actorPresenter = null;
+        _systemChatBanner = null;
         _actorState = null;
         _session = null;
         _source = null;
@@ -629,27 +633,46 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             BbcodeEnabled = false,
         };
         _ownedHud.AddChild(_chatFeed);
-        _chatInput = new LineEdit
+        _chatMode = new OptionButton
         {
             OffsetLeft = 16,
             AnchorTop = 1,
             AnchorBottom = 1,
             OffsetTop = -46,
+            OffsetRight = 124,
+            OffsetBottom = -16,
+        };
+        _chatMode.AddItem("Whisper", (int)ClientChatSpeechMode.Whisper);
+        _chatMode.AddItem("Say", (int)ClientChatSpeechMode.Say);
+        _chatMode.AddItem("Yell", (int)ClientChatSpeechMode.Yell);
+        _chatMode.AddItem("Global", (int)ClientChatSpeechMode.Global);
+        _chatMode.Select(1);
+        _ownedHud.AddChild(_chatMode);
+        _chatInput = new LineEdit
+        {
+            OffsetLeft = 128,
+            AnchorTop = 1,
+            AnchorBottom = 1,
+            OffsetTop = -46,
             OffsetRight = 680,
             OffsetBottom = -16,
-            PlaceholderText = "Say…",
+            PlaceholderText = "Enter chat or /help /where",
             MaxLength = 256,
         };
         _chatInput.TextSubmitted += SubmitChat;
         _ownedHud.AddChild(_chatInput);
+        _systemChatBanner = new GodotSystemChatBanner(_ownedHud);
         _hoverTooltip = new GodotWorldHoverTooltip(_ownedHud);
         UpdateHud("Authenticated session established; acquiring required content…");
     }
 
     private void SubmitChat(string text)
     {
+        ClientChatSpeechMode mode = _chatMode is null
+            ? ClientChatSpeechMode.Say
+            : (ClientChatSpeechMode)_chatMode.GetSelectedId();
         if (_chatInput is null || _state != RemoteConceptDemoClientState.Active ||
-            _session?.Chat.TrySubmit(text) != true)
+            _session?.Chat.TrySubmit(text, mode) != true)
             return;
         _chatInput.Clear();
         _chatInput.ReleaseFocus();
@@ -685,12 +708,20 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ClientChatStateSnapshot snapshot = _session!.ChatState.GetSnapshot();
         if (snapshot.Applied == _lastChatApplied || _chatFeed is null)
         {
+            _systemChatBanner?.Update(Time.GetTicksMsec());
             _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
             return;
         }
         int count = _session.ChatState.CopyRecent(_chatRows);
         _chatFeed.Text = string.Join('\n', _chatRows.AsSpan(0, count).ToArray()
-            .Select(static row => $"{row.DisplayLabel}: {row.Text}"));
+            .Select(static row => row.Kind switch
+            {
+                ClientChatOccurrenceKind.SpatialSpeech =>
+                    $"[{row.SpeechMode}] {row.DisplayLabel}: {row.Text}",
+                ClientChatOccurrenceKind.GlobalSpeech =>
+                    $"[Global] {row.DisplayLabel}: {row.Text}",
+                _ => $"[{row.DisplayLabel}] {row.Text}",
+            }));
         if (count != 0)
         {
             ClientChatOccurrence newest = _chatRows[count - 1];
@@ -699,7 +730,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 _session.Playable.GetSnapshot().ServerGenerationId,
                 checked(Time.GetTicksMsec() + 4_000));
         }
+        _systemChatBanner?.Observe(_chatRows.AsSpan(0, count), Time.GetTicksMsec());
         _lastChatApplied = snapshot.Applied;
+        _systemChatBanner?.Update(Time.GetTicksMsec());
         _actorPresenter?.UpdateOriginAndLifetimes(_player, Time.GetTicksMsec());
     }
 

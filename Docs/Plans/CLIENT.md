@@ -9,7 +9,9 @@ A0.2-A0.8. M0.0 now closes the first shared multi-participant authority in both 
 Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible equipped gear from
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
-F0.7 and F0.8 remain open.
+C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
+broadcast/feed/banner convergence. Diagnostics/Server Monitor/test markers are next; F0.7 and F0.8
+remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2467,7 +2469,11 @@ Network physical capability packaging
         |
 I0.13 typed Inspection Properties + content-sized shared tooltip              CLOSED
         |
-remaining Concept Demo gameplay/presentation consumers
+C0.2  routed Global + authority System Chat / transient banner              CLOSED
+        |
+diagnostics / Server Monitor / test markers                                  NEXT
+        |
+remaining animation/presentation consumers
         |
 F0.7  explicit settings/debug/mixed-session lifecycle closure             OPEN
         |

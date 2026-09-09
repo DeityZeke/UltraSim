@@ -52,6 +52,8 @@ public enum RemoteChatOccurrenceKind : byte
     SpatialSpeech = 1,
     PrivateSystem = 2,
     PrivateError = 3,
+    GlobalSpeech = 4,
+    SystemBroadcast = 5,
 }
 
 public enum RemoteChatApplyStatus : byte
@@ -61,7 +63,7 @@ public enum RemoteChatApplyStatus : byte
     CapacityExceeded = 3,
 }
 
-[NetworkProtocol(11)]
+[NetworkProtocol(12)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -308,7 +310,7 @@ public partial struct RemoteApplicationEventAppliedMessage
 }
 
 /// <summary>One authenticated, sequenced Chat submission. Text follows this header.</summary>
-[NetworkMessage(131, "ultrasim.game.chat-submit", 1, NetworkLane.Event)]
+[NetworkMessage(131, "ultrasim.game.chat-submit", 2, NetworkLane.Event)]
 public partial struct RemoteChatSubmitHeader
 {
     public ulong ApplicationSessionEpoch;
@@ -317,7 +319,7 @@ public partial struct RemoteChatSubmitHeader
 }
 
 /// <summary>One recipient-relative, non-coalescible Chat occurrence. Label and text follow.</summary>
-[NetworkMessage(132, "ultrasim.game.chat-occurrence", 1, NetworkLane.Event)]
+[NetworkMessage(132, "ultrasim.game.chat-occurrence", 2, NetworkLane.Event)]
 public partial struct RemoteChatOccurrenceHeader
 {
     public ulong ApplicationSessionEpoch;
@@ -389,7 +391,7 @@ public readonly record struct RemoteDirtyEntityRecord(
     public const int EncodedSize = RemoteWorldStateRecord.EncodedSize;
 }
 
-/// <summary>Accepted bounded Game application protocol manifest, including F0.3b remote play.</summary>
+/// <summary>Accepted bounded Game application protocol manifest through C0.2 routed Chat.</summary>
 public static partial class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
@@ -408,7 +410,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 23,
+        version: 24,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -494,7 +496,7 @@ public static partial class UltraSimGameProtocol
         out int written)
     {
         written = 0;
-        if (applicationSessionEpoch == 0 || submissionSequence == 0 || speechMode is < 1 or > 3)
+        if (applicationSessionEpoch == 0 || submissionSequence == 0 || speechMode is < 1 or > 4)
             return false;
         var writer = new NetworkPacketWriter(destination);
         var header = new RemoteChatSubmitHeader
@@ -522,7 +524,7 @@ public static partial class UltraSimGameProtocol
         var reader = new NetworkPacketReader(source);
         if (!RemoteChatSubmitHeaderCodec.TryRead(ref reader, out RemoteChatSubmitHeader staged) ||
             staged.ApplicationSessionEpoch == 0 || staged.SubmissionSequence == 0 ||
-            staged.SpeechMode is < 1 or > 3 ||
+            staged.SpeechMode is < 1 or > 4 ||
             !reader.TryReadBoundedUtf8Bytes(MaximumChatTextUtf8Bytes, out ReadOnlySpan<byte> bytes) ||
             bytes.IsEmpty || !reader.IsComplete)
             return false;
@@ -540,14 +542,22 @@ public static partial class UltraSimGameProtocol
     {
         written = 0;
         bool spatial = header.Kind == RemoteChatOccurrenceKind.SpatialSpeech;
+        bool global = header.Kind == RemoteChatOccurrenceKind.GlobalSpeech;
+        bool system = header.Kind == RemoteChatOccurrenceKind.SystemBroadcast;
         bool canonicalAnchor = header.PublicEntityGeneration != 0 || header.PublicEntityIndex == 0;
         if (header.ApplicationSessionEpoch == 0 || header.ServerGenerationId == 0 ||
             header.DeliveryId == 0 || header.RecipientSequence == 0 ||
-            header.Kind is < RemoteChatOccurrenceKind.SpatialSpeech or > RemoteChatOccurrenceKind.PrivateError ||
+            header.Kind is < RemoteChatOccurrenceKind.SpatialSpeech or > RemoteChatOccurrenceKind.SystemBroadcast ||
             !canonicalAnchor ||
             (spatial
                 ? header.SpeechFactId == 0 || header.SpeechMode is < 1 or > 3
-                : header.SpeechFactId != 0 || header.SpeechMode != 0 ||
+                : global
+                    ? header.SpeechFactId == 0 || header.SpeechMode != 4 ||
+                        header.PublicEntityIndex != 0 || header.PublicEntityGeneration != 0
+                    : system
+                        ? header.SpeechFactId == 0 || header.SpeechMode != 0 ||
+                            header.PublicEntityIndex != 0 || header.PublicEntityGeneration != 0
+                        : header.SpeechFactId != 0 || header.SpeechMode != 0 ||
                     header.PublicEntityIndex != 0 || header.PublicEntityGeneration != 0))
             return false;
         var writer = new NetworkPacketWriter(destination);
@@ -576,14 +586,22 @@ public static partial class UltraSimGameProtocol
             labelBytes.IsEmpty || textBytes.IsEmpty || !reader.IsComplete)
             return false;
         bool spatial = staged.Kind == RemoteChatOccurrenceKind.SpatialSpeech;
+        bool global = staged.Kind == RemoteChatOccurrenceKind.GlobalSpeech;
+        bool system = staged.Kind == RemoteChatOccurrenceKind.SystemBroadcast;
         bool canonicalAnchor = staged.PublicEntityGeneration != 0 || staged.PublicEntityIndex == 0;
         if (staged.ApplicationSessionEpoch == 0 || staged.ServerGenerationId == 0 ||
             staged.DeliveryId == 0 || staged.RecipientSequence == 0 ||
-            staged.Kind is < RemoteChatOccurrenceKind.SpatialSpeech or > RemoteChatOccurrenceKind.PrivateError ||
+            staged.Kind is < RemoteChatOccurrenceKind.SpatialSpeech or > RemoteChatOccurrenceKind.SystemBroadcast ||
             !canonicalAnchor ||
             (spatial
                 ? staged.SpeechFactId == 0 || staged.SpeechMode is < 1 or > 3
-                : staged.SpeechFactId != 0 || staged.SpeechMode != 0 ||
+                : global
+                    ? staged.SpeechFactId == 0 || staged.SpeechMode != 4 ||
+                        staged.PublicEntityIndex != 0 || staged.PublicEntityGeneration != 0
+                    : system
+                        ? staged.SpeechFactId == 0 || staged.SpeechMode != 0 ||
+                            staged.PublicEntityIndex != 0 || staged.PublicEntityGeneration != 0
+                        : staged.SpeechFactId != 0 || staged.SpeechMode != 0 ||
                     staged.PublicEntityIndex != 0 || staged.PublicEntityGeneration != 0))
             return false;
         header = staged;

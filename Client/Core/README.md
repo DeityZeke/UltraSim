@@ -168,13 +168,15 @@ by stable property ID, while a presentation profile independently controls categ
 Missing per-instance metadata changes only presentation fallback; it never changes Game identity,
 disclosure, or interaction authority.
 
-`ClientChatState` owns the engine-neutral C0.1 recent-feed projection. Chat facts
+`ClientChatState` owns the engine-neutral C0.1-C0.2 recent-feed projection. Spatial, Global, and
+authority-originated System facts
 are ordered, append-only occurrences rather than latest state: session/server
 generation and recipient sequence fence application, exact duplicates are
 idempotent, gaps and malformed facts reject, and only a successful apply may be
 proved upstream. Its fixed ring may evict an old already-applied presentation row
-without changing server application knowledge. It owns no speech routing,
-authoritative history, public-actor residency, or overhead-bubble lifetime.
+without changing server application knowledge. Only spatial facts may carry a public anchor;
+Global and System facts fail closed if they do. Client Core owns no speech/routed audience,
+authoritative history, public-actor residency, overhead-bubble lifetime, or banner timing.
 
 T0.10 adds the first engine-neutral playable input seam. A concrete engine
 captures raw axes, action-map state, and focus into `ClientWorldInputSample`.

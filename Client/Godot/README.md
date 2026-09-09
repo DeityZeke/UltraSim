@@ -154,6 +154,12 @@ the normal actor presenter, then observes both remote detaches and stops hosting
 the local Game generation. Single Player and Online do not compile the Complete-only local-host
 adapter.
 
+C0.2 extends both local and Online Chat selectors with `Global`. The feed presents the same applied
+spatial/Global/System occurrences in both compositions. Only spatial facts can create actor-anchored
+overhead text; an explicit System fact also drives a top-centered banner for 4.5 seconds. That
+timeout is Godot presentation state and does not remove the retained feed occurrence or create a
+second protocol message.
+
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a
 magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby

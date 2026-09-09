@@ -4,12 +4,22 @@ using UltraSim.Game.World;
 
 namespace UltraSim.Game.Chat;
 
-/// <summary>Current Game-owned spatial speech modes.</summary>
+/// <summary>Current Game-owned player Chat submission modes.</summary>
 public enum GameSpeechMode : byte
 {
+    None = 0,
     Whisper = 1,
     Say = 2,
     Yell = 3,
+    Global = 4,
+}
+
+/// <summary>Semantic source/routing kind of one accepted public Chat occurrence.</summary>
+public enum GameChatFactKind : byte
+{
+    SpatialSpeech = 1,
+    GlobalSpeech = 2,
+    SystemBroadcast = 3,
 }
 
 /// <summary>Exact current-game X/Z hearing radii in authoritative millimeters.</summary>
@@ -75,7 +85,7 @@ public readonly record struct GameChatLimits(
     }
 }
 
-/// <summary>Monotonic identity of one independently meaningful accepted speech occurrence.</summary>
+/// <summary>Monotonic identity of one independently meaningful accepted public Chat occurrence.</summary>
 public readonly struct GameSpeechFactId : IEquatable<GameSpeechFactId>, IComparable<GameSpeechFactId>
 {
     public GameSpeechFactId(ulong value)
@@ -96,11 +106,15 @@ public readonly struct GameSpeechFactId : IEquatable<GameSpeechFactId>, ICompara
     public static bool operator !=(GameSpeechFactId left, GameSpeechFactId right) => !left.Equals(right);
 }
 
-/// <summary>One accepted server-created spatial speech occurrence.</summary>
+/// <summary>
+/// One accepted server-created public Chat occurrence. Player speech owns a trusted speaker;
+/// an authority-originated system broadcast deliberately does not forge one.
+/// </summary>
 public readonly record struct GameSpeechFact(
     GameSpeechFactId Id,
     ulong GenerationId,
     ulong SimulationTick,
+    GameChatFactKind Kind,
     ParticipantId Speaker,
     Entity SpeakerEntity,
     GameSpeechMode Mode,
@@ -108,9 +122,38 @@ public readonly record struct GameSpeechFact(
     string DisplayLabel,
     WorldPublicEntityId PublicAnchor)
 {
-    public bool IsValid => Id.IsValid && GenerationId != 0 && Speaker.IsValid &&
-        SpeakerEntity.IsValid && Mode is >= GameSpeechMode.Whisper and <= GameSpeechMode.Yell &&
-        !string.IsNullOrWhiteSpace(Text) && !string.IsNullOrWhiteSpace(DisplayLabel);
+    public bool IsValid
+    {
+        get
+        {
+            if (!Id.IsValid || GenerationId == 0 || string.IsNullOrWhiteSpace(Text) ||
+                string.IsNullOrWhiteSpace(DisplayLabel))
+                return false;
+            return Kind switch
+            {
+                GameChatFactKind.SpatialSpeech =>
+                    Speaker.IsValid && SpeakerEntity.IsValid &&
+                    Mode is >= GameSpeechMode.Whisper and <= GameSpeechMode.Yell,
+                GameChatFactKind.GlobalSpeech =>
+                    Speaker.IsValid && SpeakerEntity.IsValid && Mode == GameSpeechMode.Global &&
+                    !PublicAnchor.IsValid,
+                GameChatFactKind.SystemBroadcast =>
+                    !Speaker.IsValid && !SpeakerEntity.IsValid && Mode == GameSpeechMode.None &&
+                    !PublicAnchor.IsValid,
+                _ => false,
+            };
+        }
+    }
+}
+
+/// <summary>Authority-owned result for one attempted routed system occurrence.</summary>
+public readonly record struct GameSystemBroadcastResult(
+    GameChatSubmissionStatus Status,
+    GameSpeechFact Fact,
+    int RecipientCount)
+{
+    public bool Accepted => Status == GameChatSubmissionStatus.SystemBroadcastAccepted &&
+        Fact.IsValid && Fact.Kind == GameChatFactKind.SystemBroadcast && RecipientCount > 0;
 }
 
 /// <summary>Expected semantic outcome of one trusted packet-free text submission.</summary>
@@ -139,9 +182,11 @@ public enum GameChatSubmissionStatus : byte
     UnknownCommand = 20,
     InvalidCommandSyntax = 21,
     Faulted = 22,
+    SystemBroadcastAccepted = 23,
+    NoEligibleRecipients = 24,
 }
 
-/// <summary>Speech fact or private command response produced by one submission.</summary>
+/// <summary>Public Chat fact or private command response produced by one participant submission.</summary>
 public readonly record struct GameChatSubmissionResult(
     GameChatSubmissionStatus Status,
     GameSpeechFact Speech,
@@ -174,4 +219,6 @@ public readonly record struct GameChatSnapshot(
     long RecipientDeliveries,
     long ParticipantCensuses,
     long ParticipantCapacityFailures,
+    long AcceptedGlobalSpeech,
+    long AcceptedSystemBroadcasts,
     long KnownArrayReservedBytes);

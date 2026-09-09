@@ -129,7 +129,7 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
     {
         EnsureOperational();
         _host?.Pump();
-        _ = _chatDelivery.TryHandoffPendingSpeech();
+        _ = _chatDelivery.TryHandoffPendingOccurrences();
     }
 
     public bool TrySetHostingEnabled(bool enabled, out string? detail)
@@ -281,8 +281,8 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
         private readonly ILocalPlayableChatSink _sink;
         internal LocalChatRecipient(ILocalPlayableChatSink sink) => _sink = sink;
         public bool CanPublish => _sink.CanPublish;
-        public bool TryPublishSpatial(in GameSpeechFact fact) =>
-            _sink.TryPublishSpatial(in fact);
+        public bool TryPublish(in GameSpeechFact fact) =>
+            _sink.TryPublish(in fact);
     }
 }
 

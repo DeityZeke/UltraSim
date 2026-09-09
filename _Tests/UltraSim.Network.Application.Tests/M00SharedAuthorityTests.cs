@@ -152,6 +152,19 @@ internal static class M00SharedAuthorityTests
             DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
                 ContainsChat(localChat, "remote network hello") &&
                 ContainsChat(carol.Session.ChatState, "remote network hello"));
+            True(local.TrySubmitChat(2, ClientChatSpeechMode.Global, "host global hello"));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                ContainsChat(localChat, "host global hello", ClientChatOccurrenceKind.GlobalSpeech) &&
+                ContainsChat(bob.Session.ChatState, "host global hello", ClientChatOccurrenceKind.GlobalSpeech) &&
+                ContainsChat(carol.Session.ChatState, "host global hello", ClientChatOccurrenceKind.GlobalSpeech));
+            True(factory.RequestSystem("hosted authority test broadcast"));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+                ContainsChat(localChat, "hosted authority test broadcast",
+                    ClientChatOccurrenceKind.SystemBroadcast) &&
+                ContainsChat(bob.Session.ChatState, "hosted authority test broadcast",
+                    ClientChatOccurrenceKind.SystemBroadcast) &&
+                ContainsChat(carol.Session.ChatState, "hosted authority test broadcast",
+                    ClientChatOccurrenceKind.SystemBroadcast));
 
             True(bob.Session.Playable.TrySubmitCommand(
                 new ClientWorldCommandIntent(
@@ -174,6 +187,11 @@ internal static class M00SharedAuthorityTests
             True(local.TryGetLatestView(out LocalPlayableAuthorityView afterLeave));
             Equal(generation, afterLeave.GenerationId);
             True(carol.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active);
+            True(local.TrySubmitChat(3, ClientChatSpeechMode.Global, "global after Bob left"));
+            DriveHostedUntil(local, localWorld, localChat, [carol], () =>
+                ContainsChat(localChat, "global after Bob left", ClientChatOccurrenceKind.GlobalSpeech) &&
+                ContainsChat(carol.Session.ChatState, "global after Bob left",
+                    ClientChatOccurrenceKind.GlobalSpeech));
 
             bobAgain = ClientNode.Connect(root, "hosted-bob-again", endpoint, fingerprint);
             True(bobAgain.Session.TrySubmitGuest(new GameGuestAdmissionRequest(
@@ -186,6 +204,8 @@ internal static class M00SharedAuthorityTests
                 local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
                 current.ServerExtension.RemoteParticipants == 2);
             Equal(generation, bobAgain.Session.Playable.GetSnapshot().ServerGenerationId);
+            True(!ContainsChat(bobAgain.Session.ChatState, "hosted authority test broadcast"));
+            True(!ContainsChat(bobAgain.Session.ChatState, "global after Bob left"));
 
             True(local.TryRequestHosting(2, enabled: false));
             DriveLocalUntil(local, localWorld, localChat, () =>
@@ -353,7 +373,10 @@ internal static class M00SharedAuthorityTests
                 alice.Session.UiClient.GetActionState(aliceInventory, InventoryUi.Drop).Enabled);
             alice.Session.UiClient.SubmitAction(aliceInventory, InventoryUi.Drop);
             DriveUntil(host, authority, clients, () => clients.All(client =>
-                ContainsPublic(client.Session.WorldCache, equippedSword.Id)));
+                ContainsPublicWithFlags(
+                    client.Session.WorldCache,
+                    equippedSword.Id,
+                    WorldPublicStateFlags.Visible | WorldPublicStateFlags.GroundItem)));
 
             True(bob.Session.Playable.TrySubmitCommand(
                 new ClientWorldCommandIntent(
@@ -404,6 +427,15 @@ internal static class M00SharedAuthorityTests
                 client.Session.ChatState.GetSnapshot().RetainedOccurrences >= 1));
             for (int index = 0; index < clients.Count; index++)
                 True(ContainsChat(clients[index].Session.ChatState, "shared authority hello"));
+            True(alice.Session.Chat.TrySubmit(
+                "dedicated global hello", ClientChatSpeechMode.Global));
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                ContainsChat(client.Session.ChatState, "dedicated global hello",
+                    ClientChatOccurrenceKind.GlobalSpeech)));
+            True(authority.PublishSystem("dedicated authority test broadcast").Accepted);
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                ContainsChat(client.Session.ChatState, "dedicated authority test broadcast",
+                    ClientChatOccurrenceKind.SystemBroadcast)));
 
             bob.Dispose();
             clients.RemoveAt(1);
@@ -416,6 +448,11 @@ internal static class M00SharedAuthorityTests
             DriveUntil(host, authority, clients, () =>
                 alice.Session.Playable.GetSnapshot().LastProcessedCommandSequence == stopSequence);
             True(carol.Session.Playable.GetSnapshot().State == RemotePlayableClientState.Active);
+            True(alice.Session.Chat.TrySubmit(
+                "dedicated global after Bob left", ClientChatSpeechMode.Global));
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                ContainsChat(client.Session.ChatState, "dedicated global after Bob left",
+                    ClientChatOccurrenceKind.GlobalSpeech)));
 
             ClientNode bobAgain = ClientNode.Connect(root, "bob-again", host, identity);
             clients.Add(bobAgain);
@@ -427,6 +464,10 @@ internal static class M00SharedAuthorityTests
             DriveUntil(host, authority, clients, () => clients.All(static client =>
                 client.Session.PublicPresentationState.GetSnapshot().CurrentRecords >= 3));
             Equal(generation, authority.GetSnapshot().GenerationId);
+            True(!ContainsChat(
+                bobAgain.Session.ChatState, "dedicated authority test broadcast"));
+            True(!ContainsChat(
+                bobAgain.Session.ChatState, "dedicated global after Bob left"));
 
             SharedPlayableAuthoritySnapshot evidence = authority.GetSnapshot();
             Console.WriteLine(
@@ -603,6 +644,24 @@ internal static class M00SharedAuthorityTests
         return false;
     }
 
+    private static bool ContainsPublicWithFlags(
+        ClientWorldSemanticCache cache,
+        WorldPublicEntityId id,
+        WorldPublicStateFlags requiredFlags)
+    {
+        Span<ClientSemanticChunkInfo> chunks = stackalloc ClientSemanticChunkInfo[192];
+        True(cache.TryCopyResidentInfo(chunks, out int count, out _));
+        for (int chunk = 0; chunk < count; chunk++)
+        {
+            if (!cache.TryGetResidentView(chunks[chunk].Handle, out ClientSemanticChunkView view))
+                continue;
+            foreach (WorldPublicRecord record in view.PublicRecords)
+                if (record.Id == id && (record.StateFlags & requiredFlags) == requiredFlags)
+                    return true;
+        }
+        return false;
+    }
+
     private static bool TryFindPublicNear(
         ClientWorldSemanticCache cache,
         uint prefabId,
@@ -655,12 +714,17 @@ internal static class M00SharedAuthorityTests
         return $"{prefabs.Count}:[{string.Join(',', prefabs.Take(24))}]";
     }
 
-    private static bool ContainsChat(ClientChatState state, string text)
+    private static bool ContainsChat(
+        ClientChatState state,
+        string text,
+        ClientChatOccurrenceKind? kind = null)
     {
         var occurrences = new ClientChatOccurrence[16];
         int count = state.CopyRecent(occurrences);
         for (int index = 0; index < count; index++)
-            if (string.Equals(occurrences[index].Text, text, StringComparison.Ordinal)) return true;
+            if (string.Equals(occurrences[index].Text, text, StringComparison.Ordinal) &&
+                (!kind.HasValue || occurrences[index].Kind == kind.Value))
+                return true;
         return false;
     }
 
@@ -850,8 +914,14 @@ internal static class M00SharedAuthorityTests
 
     private sealed class EmbeddedTestExtensionFactory : ILocalPlayableServerExtensionFactory
     {
+        private EmbeddedTestExtension? _extension;
+
         public ILocalPlayableServerExtension Create(LocalPlayableServerContext context) =>
-            new EmbeddedTestExtension(context);
+            _extension = new EmbeddedTestExtension(context);
+
+        internal bool RequestSystem(string text) =>
+            (_extension ?? throw new InvalidOperationException(
+                "The embedded test extension is not initialized.")).RequestSystem(text);
     }
 
     private sealed class EmbeddedTestExtension : ILocalPlayableServerExtension
@@ -862,6 +932,7 @@ internal static class M00SharedAuthorityTests
         private readonly RemoteChatLocalRegistration _localChat;
         private readonly SharedPlayableParticipant[] _participants =
             new SharedPlayableParticipant[MaximumParticipants];
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _systemRequests = new();
         private readonly NetworkServerIdentity _identity = NetworkServerIdentity.CreateEphemeral();
         private readonly ApplicationRealmId _realm = new(0x4D00, 2);
         private HostedUdpAdmissionHost? _host;
@@ -912,11 +983,24 @@ internal static class M00SharedAuthorityTests
 
         public bool OwnsSharedChatHandoff => true;
 
+        internal bool RequestSystem(string text)
+        {
+            if (_disposed || string.IsNullOrWhiteSpace(text)) return false;
+            _systemRequests.Enqueue(text);
+            return true;
+        }
+
         public void Pump()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            while (_systemRequests.TryDequeue(out string? text))
+            {
+                if (!_authority.PublishSystem(text).Accepted)
+                    throw new InvalidOperationException(
+                        "The embedded authority rejected its bounded test system broadcast.");
+            }
             _host?.Pump();
-            _ = _chatDelivery.TryHandoffPendingSpeech();
+            _ = _chatDelivery.TryHandoffPendingOccurrences();
         }
 
         public bool TrySetHostingEnabled(bool enabled, out string? detail)
@@ -1011,8 +1095,8 @@ internal static class M00SharedAuthorityTests
             private readonly ILocalPlayableChatSink _sink;
             internal PacketFreeChatRecipient(ILocalPlayableChatSink sink) => _sink = sink;
             public bool CanPublish => _sink.CanPublish;
-            public bool TryPublishSpatial(in UltraSim.Game.Chat.GameSpeechFact fact) =>
-                _sink.TryPublishSpatial(in fact);
+            public bool TryPublish(in UltraSim.Game.Chat.GameSpeechFact fact) =>
+                _sink.TryPublish(in fact);
         }
     }
 

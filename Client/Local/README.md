@@ -99,3 +99,8 @@ the same persistent sword entity into the player's backpack. No ECS handle, roll
 position crosses from Godot into authority. I0.13 replaces the local formatted detail string with
 the same immutable typed Inspection Property set consumed remotely. Local still remains packet-free:
 it publishes those facts directly into Client Core under the same identity/revision semantics.
+
+C0.2 likewise keeps the embedded host packet-free. Local Global submissions enter the same
+Game-owned routed audience used by remote participants, and the registered local recipient receives
+Global/System facts through the same bounded Client Core occurrence/application-proof seam. No
+loopback packet or local-only Chat rule is introduced.

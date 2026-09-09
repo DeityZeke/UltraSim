@@ -8,6 +8,8 @@ public enum ClientChatOccurrenceKind : byte
     SpatialSpeech = 1,
     PrivateSystem = 2,
     PrivateError = 3,
+    GlobalSpeech = 4,
+    SystemBroadcast = 5,
 }
 
 public enum ClientChatSpeechMode : byte
@@ -16,6 +18,7 @@ public enum ClientChatSpeechMode : byte
     Whisper = 1,
     Say = 2,
     Yell = 3,
+    Global = 4,
 }
 
 public enum ClientChatApplyStatus : byte
@@ -54,6 +57,8 @@ public readonly record struct ClientChatOccurrence(
     string Text)
 {
     public bool IsSpatial => Kind == ClientChatOccurrenceKind.SpatialSpeech;
+    public bool IsGlobal => Kind == ClientChatOccurrenceKind.GlobalSpeech;
+    public bool IsSystemBroadcast => Kind == ClientChatOccurrenceKind.SystemBroadcast;
     public bool CanPresentOverhead(ulong residentServerGenerationId) =>
         IsSpatial && PublicAnchor.IsValid && residentServerGenerationId != 0 &&
         ServerGenerationId == residentServerGenerationId;
@@ -163,13 +168,21 @@ public sealed class ClientChatState
     private bool IsCanonical(in ClientChatOccurrence value)
     {
         bool spatial = value.Kind == ClientChatOccurrenceKind.SpatialSpeech;
+        bool global = value.Kind == ClientChatOccurrenceKind.GlobalSpeech;
+        bool system = value.Kind == ClientChatOccurrenceKind.SystemBroadcast;
         return value.ServerGenerationId != 0 && value.DeliveryId != 0 &&
             value.RecipientSequence != 0 &&
-            value.Kind is >= ClientChatOccurrenceKind.SpatialSpeech and <= ClientChatOccurrenceKind.PrivateError &&
+            value.Kind is >= ClientChatOccurrenceKind.SpatialSpeech and <= ClientChatOccurrenceKind.SystemBroadcast &&
             (spatial
                 ? value.SpeechFactId != 0 && value.SpeechMode is >= ClientChatSpeechMode.Whisper and <= ClientChatSpeechMode.Yell
-                : value.SpeechFactId == 0 && value.SpeechMode == ClientChatSpeechMode.None &&
-                    !value.PublicAnchor.IsValid) &&
+                : global
+                    ? value.SpeechFactId != 0 && value.SpeechMode == ClientChatSpeechMode.Global &&
+                        !value.PublicAnchor.IsValid
+                    : system
+                        ? value.SpeechFactId != 0 && value.SpeechMode == ClientChatSpeechMode.None &&
+                            !value.PublicAnchor.IsValid
+                        : value.SpeechFactId == 0 && value.SpeechMode == ClientChatSpeechMode.None &&
+                            !value.PublicAnchor.IsValid) &&
             IsBoundedText(value.DisplayLabel, _limits.MaximumDisplayLabelUtf8Bytes) &&
             IsBoundedText(value.Text, _limits.MaximumTextUtf8Bytes);
     }

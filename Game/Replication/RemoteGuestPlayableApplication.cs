@@ -417,7 +417,7 @@ public sealed class RemoteGuestPlayableApplication :
                 _ = QueueOwnerState();
             }
         }
-        _ = _chatDelivery!.TryHandoffPendingSpeech();
+        _ = _chatDelivery!.TryHandoffPendingOccurrences();
         complete &= _chatSession!.TryProgress();
         complete &= _worldDelivery!.TryProgress();
         return complete;

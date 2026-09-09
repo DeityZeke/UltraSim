@@ -1,0 +1,83 @@
+{
+  "Checkpoint": "C0.2 first routed Global and authority-originated System Chat",
+  "CaptureDate": "2026-09-08",
+  "BaseCommit": "2bc7905200fe71ac1351dd2a0130b5020683248b",
+  "Authority": {
+    "GlobalSubmissionHasTrustedEnteredParticipant": true,
+    "GlobalAudience": "exact current entered census in one Game authority",
+    "GlobalIndependentOfSpatialHearingAndAoi": true,
+    "SystemUsesSeparateAuthorityPublication": true,
+    "SystemHasParticipantSpeaker": false,
+    "SystemHasEcsSpeaker": false,
+    "SystemHasPublicAnchor": false,
+    "AutomaticJoinLeavePolicy": false
+  },
+  "OccurrenceAndDelivery": {
+    "SharedRetainedOccurrenceFifo": true,
+    "CompleteAudienceOrReject": true,
+    "PacketFreeLocalUsesSameGameFact": true,
+    "RemoteUsesExistingReliableEvent": true,
+    "ExplicitControlLaneApplicationProof": true,
+    "ReconnectInventsHistory": false,
+    "MaximumRetainedFacts": 64,
+    "MaximumRecipientsPerFact": 256,
+    "GameChatArrayReservedBytes": 214672,
+    "RemoteLedgerSessions": 256,
+    "RemoteLedgerRows": 16384,
+    "RemoteLedgerReservedBytes": 1329152
+  },
+  "Protocol": {
+    "GeneratedGameProtocolVersion": 12,
+    "ApplicationManifestVersion": 24,
+    "ApplicationManifestFingerprint": 8683661613071573985,
+    "ChatSubmitMessageVersion": 2,
+    "ChatOccurrenceMessageVersion": 2,
+    "NewPlayerMode": "Global",
+    "NewOccurrenceKinds": [
+      "GlobalSpeech",
+      "SystemBroadcast"
+    ],
+    "NewTransportLane": false,
+    "HotPublicRecordChanged": false
+  },
+  "WarmedGamePath": {
+    "GlobalOccurrences": 1128,
+    "SystemOccurrences": 1128,
+    "RecipientDeliveries": 4512,
+    "ManagedAllocationBytesPerMeasured2000Occurrences": 0
+  },
+  "GodotPresentation": {
+    "LocalAndRemoteModeSelectorsIncludeGlobal": true,
+    "GlobalFeedPrefix": true,
+    "SystemFeedRow": true,
+    "SystemBannerDerivedFromAppliedOccurrence": true,
+    "SystemBannerDurationMilliseconds": 4500,
+    "BannerIsSecondProtocolFact": false,
+    "BatchSelectsNewestUnseenSystemOccurrence": true,
+    "RetainedOldGenerationRowsDoNotReplay": true,
+    "SpatialOverheadSemanticsChanged": false
+  },
+  "PermanentAcceptance": {
+    "FocusedChatTests": 35,
+    "DedicatedSharedAuthorityABC": true,
+    "CompletePacketFreeHostPlusRemoteBC": true,
+    "DisconnectAndReconnect": true,
+    "NativeGodotBannerLifecycle": true,
+    "DebugAndReleaseCanonicalVerifier": true
+  },
+  "AcceptanceCorrection": {
+    "M00SwordDropWaitsForGroundItemState": true,
+    "GameplaySemanticsChanged": false,
+    "Reason": "visible equipped presentation already satisfied the former visibility-only wait"
+  },
+  "DeliberateDeferrals": [
+    "concrete diagnostics/test-marker producer",
+    "automatic join/leave announcements",
+    "party, guild, faction, direct-message, or user-created channels",
+    "cross-server or shard-wide routing",
+    "persistent Chat history",
+    "moderation, ignore, account, or staff-permission systems",
+    "general operator-command framework",
+    "client Chat tabs and filters"
+  ]
+}

@@ -57,11 +57,11 @@ public readonly record struct RemoteChatDeliveryServiceSnapshot(
 public interface IRemoteChatLocalRecipient
 {
     bool CanPublish { get; }
-    bool TryPublishSpatial(in GameSpeechFact fact);
+    bool TryPublish(in GameSpeechFact fact);
 }
 
 /// <summary>
-/// Game-owned bounded handoff from C0.0 occurrences to independent per-session
+/// Game-owned bounded handoff from C0.0-C0.2 occurrences to independent per-session
 /// application debt. It owns no socket or transport acknowledgement semantics.
 /// </summary>
 public sealed class RemoteChatDeliveryService : IDisposable
@@ -219,7 +219,7 @@ public sealed class RemoteChatDeliveryService : IDisposable
     internal GameChatService Chat => _chat;
     internal RemoteChatServerLimits Limits => _limits;
 
-    public bool TryHandoffPendingSpeech()
+    public bool TryHandoffPendingOccurrences()
     {
         EnsureOperational();
         _handoffDirty = true;
@@ -435,7 +435,7 @@ public sealed class RemoteChatDeliveryService : IDisposable
             if (!_chat.TryConsumeNextSpeech(
                     _recipientScratch, out GameSpeechFact consumed, out int consumedRecipients) ||
                 consumed != _handoffFact || consumedRecipients != _handoffRecipientCount)
-                throw new InvalidOperationException("C0.0 occurrence handoff was not transactional.");
+                throw new InvalidOperationException("The Chat occurrence handoff was not transactional.");
 
             for (int index = 0; index < _handoffRecipientCount; index++)
             {
@@ -443,20 +443,28 @@ public sealed class RemoteChatDeliveryService : IDisposable
                 if (recipient.Terminal) continue;
                 if (recipient.Local is not null)
                 {
-                    if (!recipient.Local.TryPublishSpatial(in consumed))
+                    if (!recipient.Local.TryPublish(in consumed))
                         throw new InvalidOperationException(
                             "A preflighted local Chat recipient lost bounded delivery capacity.");
                     continue;
                 }
                 RemoteChatServerSession session = recipient.Session ??
                     throw new InvalidOperationException("A preflighted Chat recipient lost its session.");
+                RemoteChatOccurrenceKind kind = consumed.Kind switch
+                {
+                    GameChatFactKind.SpatialSpeech => RemoteChatOccurrenceKind.SpatialSpeech,
+                    GameChatFactKind.GlobalSpeech => RemoteChatOccurrenceKind.GlobalSpeech,
+                    GameChatFactKind.SystemBroadcast => RemoteChatOccurrenceKind.SystemBroadcast,
+                    _ => throw new InvalidOperationException(
+                        "The Game Chat occurrence has an unknown semantic kind."),
+                };
                 AddDelivery(session, new DeliveryRow(
                     _nextDeliveryId++,
                     session.TakeRecipientSequence(),
                     consumed.Id.Value,
                     consumed.GenerationId,
                     consumed.SimulationTick,
-                    RemoteChatOccurrenceKind.SpatialSpeech,
+                    kind,
                     (byte)consumed.Mode,
                     consumed.PublicAnchor,
                     consumed.DisplayLabel,
@@ -792,8 +800,8 @@ public sealed class RemoteChatLocalRegistration : IDisposable
 
     internal ParticipantId Participant { get; }
     internal bool CanPublish => _attached && _recipient.CanPublish;
-    internal bool TryPublishSpatial(in GameSpeechFact fact) =>
-        _attached && _recipient.TryPublishSpatial(in fact);
+    internal bool TryPublish(in GameSpeechFact fact) =>
+        _attached && _recipient.TryPublish(in fact);
 
     public void Dispose()
     {
@@ -953,7 +961,7 @@ public sealed class RemoteChatServerSession : IRemoteGameProtocolHandler, IRemot
         if (result.AcceptedSpeech)
         {
             _service.RecordAccepted();
-            _ = _service.TryHandoffPendingSpeech();
+            _ = _service.TryHandoffPendingOccurrences();
             return;
         }
         if (result.CommandSucceeded)
