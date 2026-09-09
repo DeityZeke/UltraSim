@@ -37,6 +37,7 @@ public enum ClientSemanticAction : byte
     OpenInventory = 14,
     Chat = 15,
     Jump = 16,
+    OpenServerMonitor = 17,
 }
 
 public enum ClientPhysicalInputKind : byte
@@ -109,7 +110,7 @@ public readonly record struct ClientPhysicalBinding(
     ClientSemanticAction Action,
     ClientPhysicalInput Input)
 {
-    public bool IsValid => Action is >= ClientSemanticAction.ExitApplication and <= ClientSemanticAction.Jump &&
+    public bool IsValid => Action is >= ClientSemanticAction.ExitApplication and <= ClientSemanticAction.OpenServerMonitor &&
         Input.IsValid;
 }
 
@@ -181,7 +182,7 @@ public sealed class ClientSettingsLayer
             bindings.Length > ClientSettingsResolver.MaximumBindings)
             throw new ArgumentOutOfRangeException(nameof(ClientSettingsLayer));
 
-        Span<bool> actions = stackalloc bool[(int)ClientSemanticAction.Jump + 1];
+        Span<bool> actions = stackalloc bool[(int)ClientSemanticAction.OpenServerMonitor + 1];
         for (int index = 0; index < bindings.Length; index++)
         {
             ClientPhysicalBinding binding = bindings[index];
@@ -473,6 +474,7 @@ public static class ClientSettingsResolver
         AddDefault(settings, ClientSemanticAction.OpenInventory, ClientPhysicalInputKind.Keyboard, "I");
         AddDefault(settings, ClientSemanticAction.Chat, ClientPhysicalInputKind.Keyboard, "ENTER");
         AddDefault(settings, ClientSemanticAction.Jump, ClientPhysicalInputKind.Keyboard, "SPACE");
+        AddDefault(settings, ClientSemanticAction.OpenServerMonitor, ClientPhysicalInputKind.Keyboard, "F4");
         return settings;
     }
 

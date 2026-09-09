@@ -10,6 +10,9 @@ applications. Enabling hosting does not restart the world or move the host throu
 Network. Stopping hosting retires remote sessions and endpoints while the local server continues.
 C0.2 routes Global and authority System occurrences over that same shared Game census: the host's
 recipient remains packet-free while remote recipients retain their normal Network delivery/proof.
+D0.6 uses the same borrowed authority for a sanitized monitor snapshot. Its participant list marks
+the host `Local` and remote guests `Remote`, shares the original local generation uptime/tick timing,
+and never turns the monitor into a Network or administration surface.
 
 This assembly is present only in the Complete product. Single Player has no Network family, Online
 has no local authority family, and the dedicated server uses `Server/ConceptDemo` without this

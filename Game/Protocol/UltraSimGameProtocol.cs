@@ -63,7 +63,7 @@ public enum RemoteChatApplyStatus : byte
     CapacityExceeded = 3,
 }
 
-[NetworkProtocol(12)]
+[NetworkProtocol(13)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -391,7 +391,7 @@ public readonly record struct RemoteDirtyEntityRecord(
     public const int EncodedSize = RemoteWorldStateRecord.EncodedSize;
 }
 
-/// <summary>Accepted bounded Game application protocol manifest through C0.2 routed Chat.</summary>
+/// <summary>Accepted bounded Game application protocol manifest through the read-only monitor.</summary>
 public static partial class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
@@ -410,7 +410,7 @@ public static partial class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 24,
+        version: 25,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },

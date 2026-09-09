@@ -44,8 +44,10 @@ supersedes that temporary formatted text with canonical typed Inspection Propert
 presentation order shared by Inventory and world hover, and content-sized native tooltip layout.
 C0.2 now closes one routed Global channel plus explicit authority-originated System occurrences
 through the same local/remote retained delivery and proof path. Godot projects the applied System
-fact into both the feed and a transient presentation-local banner. Diagnostics/Server Monitor and
-the concrete test-marker producer remain next.
+fact into both the feed and a transient presentation-local banner. D0.6 now closes the first
+sanitized read-only Server Monitor, direct local/remote ping indication, and the concrete trusted
+test-marker producer. X/Y content-backed animation and public action realization are next; broad
+diagnostic capture and the explicit F0.7 lifecycle campaign remain open.
 
 The demo has two purposes:
 
@@ -980,8 +982,8 @@ window resets/enters/exits
 
 # 13. Nameplates, overhead speech, chat feed, and ping
 
-**F0.4 actor/nameplate/overhead foundation: CLOSED.** Ping/connection indication and the shared
-many-player Far-gate retirement journey remain Round 1 integration work.
+**F0.4 actor/nameplate/overhead foundation: CLOSED. D0.6 ping indication: CLOSED.** The larger
+many-player Far-gate retirement journey remains Round 1 integration work.
 
 Round 1 requires:
 
@@ -994,6 +996,11 @@ Round 1 requires:
 
 A local host using the in-process application bridge should display `Local` rather than inventing a
 fake Network RTT.
+
+D0.6 implements that rule literally. The Online HUD projects the authenticated protocol peer's
+sanitized smoothed RTT (`<1 ms` or whole milliseconds); the local HUD says `Local` and
+`packet-free internal authority`. Neither value is supplied by Game state or fabricated through a
+loopback connection.
 
 Far-gate movement is a permanent presentation test: a player who leaves another player's AOI must
 lose the old nameplate/overhead anchor without stale ghosts.
@@ -1049,7 +1056,7 @@ and future operator/admin commands keep their own authority path.
 
 ---
 
-# 15. System broadcasts and test-marker announcements — occurrence path CLOSED
+# 15. System broadcasts and test-marker announcements — D0.6 CLOSED
 
 The live test system deliberately uses every test marker start/completion to exercise system
 broadcast presentation.
@@ -1079,70 +1086,92 @@ Do not implement the banner as a second independently authoritative message and 
 presentation timeout erase the chat fact.
 
 C0.2 closes the explicit non-player `SystemBroadcast` occurrence, complete routed audience,
-local/remote application proof, retained feed row, and 4.5-second Godot banner. It deliberately does
-not auto-publish join/leave announcements. The next diagnostics/Server Monitor checkpoint owns the
-concrete marker-start/marker-complete producer and may call this accepted bounded authority surface;
-it must not invent another broadcast or banner protocol.
+local/remote application proof, retained feed row, and 4.5-second Godot banner. D0.6 adds the
+trusted `SharedPlayableAuthority.PublishTestMarker` producer over that exact occurrence surface.
+It accepts a bounded START followed by the matching COMPLETE, assigns one monotonic marker sequence,
+and emits one canonical `TEST START/COMPLETE #N: label` System occurrence per accepted transition.
+An out-of-order or mismatched completion is rejected. The client receives no second marker/banner
+protocol, and ordinary players receive no marker-production command.
 
-Test marker activation/completion should also be written into the client/server diagnostic timelines
-so performance changes can be correlated to the live activity.
+Automatic join/leave announcements remain deliberately absent.
+
+The last accepted marker transition is also projected into the D0.6 Server Monitor snapshot so the
+visible diagnostic timing can be correlated with the live activity. A broader retained diagnostic
+timeline remains part of the later capture campaign.
 
 Marker control initially belongs to a trusted server console/test operator path. Do not manufacture a
 large player RBAC framework merely to start a concept-test phase.
 
 ---
 
-# 16. Read-only Server Monitor
+# 16. Read-only Server Monitor — D0.6 CLOSED
 
-Round 1 may expose a read-only server-composed **Server Monitor** to ordinary demo users.
+Round 1 exposes a read-only server-composed **Server Monitor** to ordinary demo users. D0.6 closes a
+deliberately narrow first vertical rather than the full diagnostic wishlist below.
 
 It is intentionally observational and sanitized.
 
-Suggested tabs:
+D0.6 publishes one bounded/versioned authority read model containing:
 
 ```text
-Overview
-ECS
-World
-Network
-Players
+authority generation / uptime
+simulation tick / configured frequency
+recent and p95 authoritative tick duration
+entered participant count / capacity
+ECS entity count
+join / leave totals
+last accepted test-marker transition
+
+at most 64 entered participant rows:
+    canonical public display name
+    Local or Remote
+    sanitized RTT for Remote; Local for packet-free host
+    coarse current Spatial chunk
 ```
 
-Candidate fields:
+It deliberately excludes exact position, owner-private state, endpoints/IP addresses, credentials,
+deployment keys, account/machine identities, and all mutable administrative actions. `F4` is a
+client-owned stock binding that requests/toggles the view; it is not a server-supplied action grammar.
+
+The server composes the normal `game.server-monitor.gump/v1` UI definition and bounded model. Local
+play sends the cold compiled definition through the packet-free semantic UI bridge. Remote
+composition declares the exact same passive `.usui` definition in the authenticated applied content
+catalog, so the existing UI port emits the compact `HotOpen`; a matching blob in CAS without realm
+authorization/application proof is still insufficient. Both paths terminate in the same
+`UiClientRuntime` and generic Godot renderer. The only compiled action is `Close`.
+
+The open view refreshes at approximately one second rather than on every simulation/render frame.
+Tick recording is a fixed 128-sample owner-thread ring with zero allocation per recorded tick; the
+cold snapshot calculates p95. Temporary UI queue pressure retains the prior valid view and tries a
+later refresh rather than failing the authority worker.
+
+Permanent acceptance covers:
 
 ```text
-Overview
-    authority frequency
-    current/peak players
-    entity/archetype counts
-    coarse process memory/timing
+dedicated A/B/C
+    three Remote rows
+    independent sanitized RTT and coarse chunks
+    disconnect retires B; reconnect creates fresh B identity/row
 
-ECS
-    archetype/entity/system counts
-    useful bounded/high-water metrics
+Complete hosted A + Online B/C
+    exactly one Local row and two Remote rows
+    host movement remains packet-free
 
-World
-    public/spatial chunks
-    AOI/subscriber counts
-    publication debt/recovery counters
+trusted marker START/COMPLETE
+    same System occurrence reaches feed/banner
+    last transition appears in monitor
 
-Network
-    aggregate send/receive rate
-    queue/high-water/retransmit/application-proof metrics
+Single Player
+    one Local row through the packet-free path
 
-Players
-    display name
-    current sanitized ping/RTT
+exported Contentless Online smoke
+    acquires the exact monitor .usui through authenticated content
+    opens and renders the native participant list
 ```
 
-Do **not** expose IP addresses, transport endpoints, cryptographic identity/key material, passwords,
-account identifiers, machine identifiers, or mutable administrative controls.
-
-Update cadence should be intentionally cold, such as approximately once per second, rather than
-making the diagnostic UI itself a hot workload.
-
-The monitor should consume existing/coherently sampled diagnostic snapshots where possible instead
-of creating a second metrics implementation.
+The larger tabbed Overview/ECS/World/Network breakdown, process memory, aggregate bandwidth,
+archetype/system counts, AOI debt, operator controls, and diagnostic report capture remain deferred.
+They must extend coherent read models when earned, not turn this view into an authority console.
 
 ---
 
@@ -1620,8 +1649,11 @@ then continue:
          one Game authority routed census; no fake System participant
          same retained occurrence/application-proof path local/remote
 
-    diagnostics/Server Monitor/test markers                            NEXT
-    X/Y content-backed animation + public action realization
+    D0.6 read-only Server Monitor / ping / trusted test markers         CLOSED
+         sanitized cold read model; content-backed remote UI
+         packet-free Local parity; no administration
+
+    X/Y content-backed animation + public action realization           NEXT
 
 then close:
     F0.7 explicit mixed-session settings/debug/lifecycle torture pass
@@ -1706,9 +1738,12 @@ M0.0 satisfies the first functional shared-authority canary behind item 15 with 
 participants in both dedicated and Complete-hosted shapes. It does not satisfy the later
 feature-complete distributed/crowd/stress population matrix by itself.
 
+D0.6 satisfies item 12 and the concrete marker-production portion of item 14. It does not satisfy
+item 13's opt-in client report workflow or item 14's broader retained server diagnostic capture.
+
 The final remote proof also routes informational signs, container/player Inventory surfaces, and
-appropriate Server Monitor panels through the typed UI-definition/cache/application-proof path.
-D0.3/D0.4's compiled informational definition is the accepted local canary, not a claim that remote
-UI-definition acquisition is already complete.
+the Server Monitor through the typed UI-definition/cache/application-proof path. D0.6 closes that
+monitor proof with the exact content-backed `.usui`; D0.3/D0.4's informational sign remains an
+earlier compiled local canary rather than a claim about every future UI definition.
 
 Round 2 combat remains separately authorized after this baseline is useful and stable.

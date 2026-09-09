@@ -104,3 +104,11 @@ C0.2 likewise keeps the embedded host packet-free. Local Global submissions ente
 Game-owned routed audience used by remote participants, and the registered local recipient receives
 Global/System facts through the same bounded Client Core occurrence/application-proof seam. No
 loopback packet or local-only Chat rule is introduced.
+
+D0.6 adds one more packet-free consumer on the same authority owner thread. The local session records
+authoritative tick durations into a fixed bounded window, composes a sanitized one-participant
+Server Monitor snapshot, and opens the ordinary cold compiled UI definition. When Complete hosting
+is active, the optional extension supplies the shared authority's one-Local-plus-remote participant
+snapshot without replacing the local world or clock. Refresh is cold (approximately one second),
+and only the typed local UI-queue backpressure condition is deferred; unrelated authority failures
+are not swallowed. Local HUD latency remains the literal label `Local`, never a loopback RTT.

@@ -312,6 +312,10 @@ internal static class F03bRemotePlayableTests
         malformed.Flags = (RemotePlayableCommandFlags)0x80;
         False(UltraSimGameProtocol.TryCreatePlayableCommand(in malformed, out _, out _));
         malformed = remote;
+        malformed.Flags = RemotePlayableCommandFlags.OpenInventoryRequested |
+            RemotePlayableCommandFlags.OpenServerMonitorRequested;
+        False(UltraSimGameProtocol.TryCreatePlayableCommand(in malformed, out _, out _));
+        malformed = remote;
         malformed.Flags = RemotePlayableCommandFlags.None;
         False(UltraSimGameProtocol.TryCreatePlayableCommand(in malformed, out _, out _));
 
@@ -525,7 +529,7 @@ internal static class F03bRemotePlayableTests
         True(UltraSimGameProtocol.IsValidContentApplied(in proof));
         Equal(NetworkLane.Event, RemoteContentRequirementHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteContentSetAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)24, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)25, UltraSimGameProtocol.Manifest.Version);
     }
 
     private static void ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle()

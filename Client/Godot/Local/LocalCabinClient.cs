@@ -1144,6 +1144,25 @@ public partial class LocalCabinClient : Node3D
             : "Inventory request queue busy";
     }
 
+    private void OpenServerMonitor()
+    {
+        if (_localSession is null || _uiClient is null) return;
+        if (TryRequestCloseOpenServerMonitor())
+        {
+            _lastOutcome = "Server Monitor close requested";
+            return;
+        }
+        if (_uiClient.OpenViewCount != 0)
+        {
+            _lastOutcome = "Close the current window before opening Server Monitor";
+            return;
+        }
+        ulong request = _nextAdministrativeRequest++;
+        _lastOutcome = _localSession.TryRequestOpenServerMonitor(request)
+            ? "Server Monitor requested"
+            : "Server Monitor request queue busy";
+    }
+
     private bool TryRequestCloseOpenInventory()
     {
         Control? view = FindOpenInventoryView();
@@ -1162,6 +1181,28 @@ public partial class LocalCabinClient : Node3D
         {
             if (child is Control candidate &&
                 candidate.FindChild("Element_items", recursive: true, owned: false) is not null)
+                return candidate;
+        }
+        return null;
+    }
+
+    private bool TryRequestCloseOpenServerMonitor()
+    {
+        Control? view = FindOpenServerMonitorView();
+        Button? close = view?.FindChild(
+            "Element_close", recursive: true, owned: false) as Button;
+        if (close is null || close.Disabled) return false;
+        close.EmitSignal(BaseButton.SignalName.Pressed);
+        return true;
+    }
+
+    private Control? FindOpenServerMonitorView()
+    {
+        if (_inventoryHost is null) return null;
+        foreach (Node child in _inventoryHost.GetChildren())
+        {
+            if (child is Control candidate &&
+                candidate.FindChild("Element_participants", recursive: true, owned: false) is not null)
                 return candidate;
         }
         return null;
@@ -1953,6 +1994,12 @@ public partial class LocalCabinClient : Node3D
             GodotWorldInput.Matches(input, _settings, ClientSemanticAction.OpenInventory))
         {
             OpenInventory();
+            return;
+        }
+        if (_settings is not null &&
+            GodotWorldInput.Matches(input, _settings, ClientSemanticAction.OpenServerMonitor))
+        {
+            OpenServerMonitor();
             return;
         }
         switch (input.Keycode)
@@ -2846,7 +2893,7 @@ public partial class LocalCabinClient : Node3D
                     ? "MMB drag camera • wheel zoom • E use selected door/chest/sign/telepad/gate • I inventory\n"
                     : "MMB drag camera • wheel zoom • E use selected door/chest • I inventory\n") +
                 "Space jump (direct profiles) • 1/F1 Orbit • 2/F2 third-person • " +
-                "3/F3 fixed iso move/look • F5 save • F9 load",
+                "3/F3 fixed iso move/look • F4 Server Monitor • F5 save • F9 load",
         });
 
         var chatPanel = new PanelContainer
@@ -3097,6 +3144,7 @@ public partial class LocalCabinClient : Node3D
         ClientPresentationWindowSnapshot presentation = _window?.GetSnapshot() ?? default;
         _details.Text =
             $"Profile {_profile} • Selected {_selection} • Tick {view.SimulationTick}\n" +
+            "Ping Local • packet-free internal authority\n" +
             $"Player {_player.Chunk} + ({_player.Local.XMillimeters}, {_player.Local.ZMillimeters}) mm • " +
             $"door {(view.DoorIsOpen ? "open" : "closed")} • " +
             $"bread in {(view.BreadIsInBackpack ? "backpack" : "chest")}\n" +

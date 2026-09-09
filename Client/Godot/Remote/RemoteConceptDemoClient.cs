@@ -57,6 +57,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ContentCache? _cache;
     private HttpContentPackageSource? _source;
     private RemotePlayableSession? _session;
+    private NetworkProtocolPeer? _networkPeer;
     private GodotWorldRenderer? _renderer;
     private GodotSlidingRenderWindow? _window;
     private ClientActorPresentationState? _actorState;
@@ -66,6 +67,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private Control? _ownedHud;
     private Control? _uiHost;
     private Label? _status;
+    private Label? _ping;
     private RichTextLabel? _chatFeed;
     private LineEdit? _chatInput;
     private OptionButton? _chatMode;
@@ -77,6 +79,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ulong _lastPrimaryCommandSequence;
     private ulong _lastChatApplied;
     private bool _inventoryRequested;
+    private bool _serverMonitorRequested;
     private bool _primaryDown;
     private bool _primaryPressed;
     private bool _primaryReleased;
@@ -141,6 +144,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 new GodotUiRenderer(_uiHost),
                 new ClientChatLimits(64, 256, 128),
                 standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
+            _networkPeer = peer;
             _settings = settings;
             _smoke = smoke;
             BuildBootstrapHud();
@@ -249,7 +253,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _session.UiClient.OpenViewCount,
             _actorPresenter?.GetSnapshot() ?? default,
             true,
-            _smokePhase == 6,
+            _smokePhase == 8,
             _fault);
     }
 
@@ -275,7 +279,21 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             GodotWorldInput.Matches(key, _settings, ClientSemanticAction.OpenInventory))
         {
             if (!TryRequestCloseOpenInventory() && _session!.UiClient.OpenViewCount == 0)
+            {
                 _inventoryRequested = true;
+                _serverMonitorRequested = false;
+            }
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+        if (inputEvent is InputEventKey monitor && monitor.Pressed && !monitor.Echo &&
+            GodotWorldInput.Matches(monitor, _settings, ClientSemanticAction.OpenServerMonitor))
+        {
+            if (!TryRequestCloseOpenServerMonitor() && _session!.UiClient.OpenViewCount == 0)
+            {
+                _serverMonitorRequested = true;
+                _inventoryRequested = false;
+            }
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -332,6 +350,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _systemChatBanner = null;
         _actorState = null;
         _session = null;
+        _networkPeer = null;
         _source = null;
         _cache = null;
         if (_ownedHud is not null && GodotObject.IsInstanceValid(_ownedHud))
@@ -441,6 +460,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         RemotePlayableCommandFlags flags = _inventoryRequested
             ? RemotePlayableCommandFlags.OpenInventoryRequested
             : RemotePlayableCommandFlags.None;
+        if (_serverMonitorRequested)
+            flags |= RemotePlayableCommandFlags.OpenServerMonitorRequested;
         long faceX = 0;
         long faceZ = 0;
         if (TryResolveFacing(in decision, out ClientControlWorldPoint facing,
@@ -459,6 +480,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 faceXMillimeters: faceX,
                 faceZMillimeters: faceZ))
             _inventoryRequested = false;
+            _serverMonitorRequested = false;
         _primaryPressed = false;
         _primaryReleased = false;
         _secondaryPressed = false;
@@ -560,16 +582,29 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 _smokePhase = 3;
                 break;
             case 3 when _session!.UiClient.OpenViewCount == 1:
-                if (!_session.Chat.TrySubmit("A0.8 native remote speech")) return;
+                if (!TryRequestCloseOpenInventory()) return;
                 _smokePhase = 4;
                 break;
-            case 4 when _session!.ChatState.GetSnapshot().Applied > _lastChatApplied:
+            case 4 when _session!.UiClient.OpenViewCount == 0 &&
+                !snapshot.Playable.CommandRetainedLocally:
+                if (!_session.Playable.TrySubmitCommand(
+                        new ClientWorldCommandIntent(
+                            GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true),
+                        flags: RemotePlayableCommandFlags.OpenServerMonitorRequested))
+                    return;
                 _smokePhase = 5;
                 break;
-            case 5 when _renderer!.GetSnapshot().PendingBuilds == 0 &&
+            case 5 when _session!.UiClient.OpenViewCount == 1 && HasOpenServerMonitor():
+                if (!_session.Chat.TrySubmit("A0.8 native remote speech")) return;
+                _smokePhase = 6;
+                break;
+            case 6 when _session!.ChatState.GetSnapshot().Applied > _lastChatApplied:
+                _smokePhase = 7;
+                break;
+            case 7 when _renderer!.GetSnapshot().PendingBuilds == 0 &&
                 _actorPresenter!.GetSnapshot() is
                 { VisibleNameplates: >= 2, VisibleOverheadLabels: >= 1 }:
-                _smokePhase = 6;
+                _smokePhase = 8;
                 UpdateHud("A0.8 native smoke complete");
                 break;
         }
@@ -615,11 +650,13 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         });
         _status = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
         stack.AddChild(_status);
+        _ping = new Label { Text = "Ping: pending" };
+        stack.AddChild(_ping);
         stack.AddChild(new Label
         {
             Text = "Remote content supplies World/UI. Unresolved models and materials use the " +
                 "always-available primitive substrate. Movement and camera follow the accepted " +
-                "server profile; I opens Inventory.",
+            "server profile; I opens Inventory and F4 opens the read-only Server Monitor.",
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         });
         _chatFeed = new RichTextLabel
@@ -965,6 +1002,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private void UpdateHud(string text)
     {
         if (_status is not null) _status.Text = text;
+        if (_ping is not null && _networkPeer is not null)
+        {
+            NetworkProtocolSnapshot network = _networkPeer.GetSnapshot();
+            ulong milliseconds = Math.Min(network.SmoothedRoundTripSteps, 60_000UL);
+            _ping.Text = !network.Established ||
+                milliseconds == 0 && network.ReliableAcknowledgements == 0
+                    ? "Ping: pending"
+                    : milliseconds == 0 ? "Ping: <1 ms" : $"Ping: {milliseconds} ms";
+        }
     }
 
     private bool TryRequestCloseOpenInventory()
@@ -983,6 +1029,28 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             return true;
         }
         return false;
+    }
+
+    private bool TryRequestCloseOpenServerMonitor()
+    {
+        Control? view = FindOpenServerMonitorView();
+        Button? close = view?.FindChild(
+            "Element_close", recursive: true, owned: false) as Button;
+        if (close is null || close.Disabled) return false;
+        close.EmitSignal(BaseButton.SignalName.Pressed);
+        return true;
+    }
+
+    private bool HasOpenServerMonitor() => FindOpenServerMonitorView() is not null;
+
+    private Control? FindOpenServerMonitorView()
+    {
+        if (_uiHost is null) return null;
+        foreach (Node child in _uiHost.GetChildren())
+            if (child is Control candidate &&
+                candidate.FindChild("Element_participants", recursive: true, owned: false) is not null)
+                return candidate;
+        return null;
     }
 
     private void EnsureOperational()

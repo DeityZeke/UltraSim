@@ -115,3 +115,7 @@ and privileged-command policy remain stopped. Accepted evidence covers spatial-v
 audience independence, explicit non-player System identity, reconnect without invented history,
 zero warmed allocation for both routed occurrence kinds, and local/remote/Godot convergence. See
 [the Chat plan](../../Docs/Plans/CHAT.md).
+
+D0.6 later consumes `PublishSystem` for trusted test-marker START/COMPLETE transitions. That
+producer remains outside participant Chat input and emits the same one retained System occurrence
+used by the feed/banner; it adds no Chat wire kind, audience policy, history, or player permission.

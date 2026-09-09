@@ -36,8 +36,10 @@ They may share input parsing and presentation surfaces where useful, but they do
 
 The active V3 implementation contains the packet-free C0.0 Chat oracle, the C0.1/C0.1a
 authenticated remote/Game/client/Godot consumer vertical, and C0.2's one routed Global audience
-plus explicit System broadcast. Additional routed channels, moderation, history, social policy,
-and privileged-command extensibility remain forward context only.
+plus explicit System broadcast. D0.6 subsequently adds a trusted test-marker producer by calling
+that accepted System-publication surface; it does not widen Chat semantics or add a player command.
+Additional routed channels, moderation, history, social policy, and privileged-command
+extensibility remain forward context only.
 Relevant historical references for the deliberately deferred work are:
 
 - `_Archive/References/runuo-2.7`
@@ -862,6 +864,19 @@ existing M0.0 dedicated plus Complete packet-free-host deployment shapes.
 C0.2 deliberately does not add direct messages, tabs/filters, party/guild channels, cross-server
 routing, persistent history, automatic join/leave policy, moderation, accounts, or a general
 operator-command framework. Do not manufacture Party/Guild ownership before Party/Guild exist.
+
+### D0.6 diagnostic consumer follow-on
+
+D0.6 retains the C0.2 Chat submit/occurrence message versions and audience/application-proof
+semantics. A trusted authority-only test-marker transition emits one ordinary canonical
+`SystemBroadcast`; Client Chat state, feed, and presentation-local banner consume that same fact.
+The last marker label is additionally copied into a cold sanitized Server Monitor read model, not a
+second Chat or banner message. Marker ordering is bounded to one START followed by its matching
+COMPLETE, and no ordinary participant can forge either transition.
+
+The composed Game application manifest advances to version 25 only because the player-command
+message adds the finite read-only Server Monitor request flag. No Chat wire descriptor, routed
+audience, automatic join/leave policy, or persistent history changes in D0.6.
 
 ---
 

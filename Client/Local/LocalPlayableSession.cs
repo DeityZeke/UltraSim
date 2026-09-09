@@ -232,6 +232,10 @@ public sealed class LocalPlayableSession : IDisposable
         TryRequestAdministrative(new LocalAdministrativeRequest(
             sequence, LocalAdministrativeOperationKind.OpenInventory, default));
 
+    public bool TryRequestOpenServerMonitor(ulong sequence) =>
+        TryRequestAdministrative(new LocalAdministrativeRequest(
+            sequence, LocalAdministrativeOperationKind.OpenServerMonitor, default));
+
     public bool TryRequestHosting(ulong sequence, bool enabled) =>
         TryRequestAdministrative(new LocalAdministrativeRequest(
             sequence,
@@ -379,9 +383,12 @@ public sealed class LocalPlayableSession : IDisposable
         LocalQueuedUiSemanticPort? ui = null;
         InventoryUiController? inventoryUi = null;
         InformationalSignUiController? signUi = null;
+        ServerMonitorUiController? serverMonitorUi = null;
         ILocalPlayableServerExtension? serverExtension = null;
         try
         {
+            var tickTimings = new GameTickTimingWindow();
+            long generationStartedTimestamp = Stopwatch.GetTimestamp();
             GameRuntimeProfile runtimeProfile = _serverExtensionFactory is null
                 ? GameRuntimeProfile.Local
                 : GameRuntimeProfile.Networked;
@@ -428,7 +435,9 @@ public sealed class LocalPlayableSession : IDisposable
                     out LocalPopulation population))
                 throw new InvalidOperationException("The local playable world could not populate.");
             GamePlayableWorldEntities entities = population.Entities;
+            long initialTickStarted = Stopwatch.GetTimestamp();
             runtime.Tick();
+            tickTimings.RecordElapsed(initialTickStarted);
 
             GameChatLimits chatLimits = GameChatLimits.Default with
             {
@@ -439,6 +448,7 @@ public sealed class LocalPlayableSession : IDisposable
             ui = new LocalQueuedUiSemanticPort(_uiChannel, _limits.UiOperationCapacity);
             inventoryUi = new InventoryUiController(runtime.Game, ui);
             signUi = new InformationalSignUiController(ui);
+            serverMonitorUi = new ServerMonitorUiController(ui);
             var persistence = new GameRuntimePersistence(
                 runtime.Game,
                 composition,
@@ -475,6 +485,8 @@ public sealed class LocalPlayableSession : IDisposable
                     _controlSession,
                     population.Participant,
                     localPublic,
+                    tickTimings,
+                    generationStartedTimestamp,
                     _chatChannel));
             }
 
@@ -496,6 +508,8 @@ public sealed class LocalPlayableSession : IDisposable
             LocalAdministrativeRequest lastAdmin = default;
             bool lastAdminSucceeded = false;
             string? lastAdminMessage = null;
+            ulong localMonitorRevision = 0;
+            ulong lastMonitorRefreshTick = 0;
 
             CaptureView(runtime, entities, entered.GuestIdentity,
                 lastCommandSequence, lastSelection, lastCommand, lastChest,
@@ -536,12 +550,17 @@ public sealed class LocalPlayableSession : IDisposable
                     ref lastCommand,
                     ref lastChest);
                 ProcessAdministrative(
-                    runtime, persistence, inventoryUi, entities, serverExtension,
+                    runtime, persistence, inventoryUi, serverMonitorUi, tickTimings,
+                    entered.Participant, entered.GuestIdentity, entities, serverExtension,
+                    generationStartedTimestamp,
                     ref lastAdministrative, ref lastAdminSucceeded, ref lastAdminMessage,
-                    ref lastAdmin, ref saveSequence);
+                    ref lastAdmin, ref saveSequence, ref localMonitorRevision,
+                    ref lastMonitorRefreshTick);
                 ProcessChatSubmissions(runtime, chat, entered.Participant, ref lastChatSubmission);
 
+                long tickStarted = Stopwatch.GetTimestamp();
                 runtime.Tick();
+                tickTimings.RecordElapsed(tickStarted);
                 Interlocked.Increment(ref _authorityTicks);
                 if (runtime.ActiveGenerationId != observedGeneration)
                 {
@@ -555,6 +574,11 @@ public sealed class LocalPlayableSession : IDisposable
                 if (serverExtension?.OwnsSharedChatHandoff != true)
                     DriveChat(chat, entered.Participant, recipients);
                 serverExtension?.Pump();
+                RefreshServerMonitorIfDue(
+                    runtime, serverMonitorUi, tickTimings,
+                    entered.Participant, entered.GuestIdentity, entities, serverExtension,
+                    generationStartedTimestamp, ref localMonitorRevision,
+                    ref lastMonitorRefreshTick);
                 DriveWorld(
                     runtime, entities, recipient, worldPump, snapshotScratch, deltaScratch);
                 CaptureView(runtime, entities, entered.GuestIdentity,
@@ -583,6 +607,7 @@ public sealed class LocalPlayableSession : IDisposable
             _running = false;
             serverExtension?.Dispose();
             signUi?.Dispose();
+            serverMonitorUi?.Dispose();
             inventoryUi?.Dispose();
             ui?.Dispose();
             chat?.Dispose();
@@ -713,13 +738,20 @@ public sealed class LocalPlayableSession : IDisposable
         ServerRuntime runtime,
         GameRuntimePersistence persistence,
         InventoryUiController inventoryUi,
+        ServerMonitorUiController serverMonitorUi,
+        GameTickTimingWindow tickTimings,
+        ParticipantId participant,
+        GameGuestIdentity guestIdentity,
         GamePlayableWorldEntities entities,
         ILocalPlayableServerExtension? serverExtension,
+        long generationStartedTimestamp,
         ref ulong lastAcceptedSequence,
         ref bool lastSucceeded,
         ref string? lastMessage,
         ref LocalAdministrativeRequest lastRequest,
-        ref ulong saveSequence)
+        ref ulong saveSequence,
+        ref ulong localMonitorRevision,
+        ref ulong lastMonitorRefreshTick)
     {
         while (_administrative.TryDequeue(out LocalAdministrativeRequest request))
         {
@@ -779,6 +811,18 @@ public sealed class LocalPlayableSession : IDisposable
                     lastMessage = opened.Message;
                     break;
                 }
+                case LocalAdministrativeOperationKind.OpenServerMonitor:
+                {
+                    ServerMonitorSnapshot snapshot = CaptureServerMonitor(
+                        runtime, tickTimings, participant, guestIdentity, entities,
+                        serverExtension, generationStartedTimestamp,
+                        ref localMonitorRevision);
+                    ServerMonitorUiOpenResult opened = serverMonitorUi.Open(snapshot);
+                    lastMonitorRefreshTick = runtime.SimulationTick;
+                    lastSucceeded = opened.Succeeded;
+                    lastMessage = opened.Message;
+                    break;
+                }
                 case LocalAdministrativeOperationKind.EnableHosting:
                 case LocalAdministrativeOperationKind.DisableHosting:
                 {
@@ -792,6 +836,99 @@ public sealed class LocalPlayableSession : IDisposable
                 }
             }
         }
+    }
+
+    private static void RefreshServerMonitorIfDue(
+        ServerRuntime runtime,
+        ServerMonitorUiController monitor,
+        GameTickTimingWindow tickTimings,
+        ParticipantId participant,
+        GameGuestIdentity guestIdentity,
+        GamePlayableWorldEntities entities,
+        ILocalPlayableServerExtension? extension,
+        long generationStartedTimestamp,
+        ref ulong localRevision,
+        ref ulong lastRefreshTick)
+    {
+        if (!monitor.HasOpenView) return;
+        ulong tick = runtime.SimulationTick;
+        ulong interval = checked((ulong)Math.Max(1, runtime.SimulationFrequencyHz));
+        if (tick < lastRefreshTick || tick - lastRefreshTick < interval) return;
+        try
+        {
+            _ = monitor.Refresh(CaptureServerMonitor(
+                runtime, tickTimings, participant, guestIdentity, entities,
+                extension, generationStartedTimestamp, ref localRevision));
+            lastRefreshTick = tick;
+        }
+        catch (LocalUiTransportBackpressureException)
+        {
+            // Local UI backpressure leaves the previous read model visible. The next slow cadence
+            // may retry; this observation surface must not fault the authority loop.
+            lastRefreshTick = tick;
+        }
+    }
+
+    private static ServerMonitorSnapshot CaptureServerMonitor(
+        ServerRuntime runtime,
+        GameTickTimingWindow tickTimings,
+        ParticipantId participant,
+        GameGuestIdentity guestIdentity,
+        GamePlayableWorldEntities entities,
+        ILocalPlayableServerExtension? extension,
+        long generationStartedTimestamp,
+        ref ulong localRevision)
+    {
+        if (extension?.TryCaptureServerMonitor(out ServerMonitorSnapshot? shared) == true &&
+            shared is not null)
+            return shared;
+        int entityCount = 0;
+        WorldPosition position = default;
+        WorldPublicEntityId publicActor = default;
+        if (!runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    entityCount = world.AliveCount;
+                    Entity actor = Resolve(world, entities.PlayerId);
+                    return game.WorldState.TryReadPosition(world, actor, out position) &&
+                        game.WorldState.Publications.TryGetPublicEntityId(actor, out publicActor);
+                }, out bool captured) || !captured)
+            throw new InvalidOperationException("The local Server Monitor snapshot was incomplete.");
+        GameTickTimingSnapshot timing = tickTimings.Capture();
+        ulong tick = runtime.SimulationTick;
+        int frequency = runtime.SimulationFrequencyHz;
+        ServerMonitorParticipant[] participants =
+        [
+            new ServerMonitorParticipant(
+                participant,
+                publicActor.Index,
+                publicActor.Generation,
+                guestIdentity.DisplayName!,
+                ServerMonitorConnectionKind.Local,
+                -1,
+                position.Chunk.X,
+                position.Chunk.Z),
+        ];
+        return new ServerMonitorSnapshot(
+            checked(++localRevision),
+            runtime.ActiveGenerationId,
+            tick,
+            frequency,
+            ElapsedSeconds(generationStartedTimestamp),
+            timing.RecentMicroseconds,
+            timing.P95Microseconds,
+            entityCount,
+            1,
+            1,
+            0,
+            null,
+            participants);
+    }
+
+    private static long ElapsedSeconds(long startedTimestamp)
+    {
+        long elapsed = Math.Max(0, Stopwatch.GetTimestamp() - startedTimestamp);
+        return elapsed / Stopwatch.Frequency;
     }
 
     private void ProcessChatSubmissions(

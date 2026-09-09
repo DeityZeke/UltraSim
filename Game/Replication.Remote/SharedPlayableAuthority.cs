@@ -7,6 +7,7 @@ using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.Inventory;
 using UltraSim.Game.Protocol;
+using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.Runtime;
@@ -51,6 +52,19 @@ public readonly record struct SharedPlayableAuthoritySnapshot(
     ulong Ticks,
     bool OwnsRuntime);
 
+public enum GameTestMarkerPhase : byte
+{
+    Start = 1,
+    Complete = 2,
+}
+
+public readonly record struct GameTestMarkerResult(
+    bool Accepted,
+    ulong Sequence,
+    GameTestMarkerPhase Phase,
+    string? Label,
+    string? Message);
+
 /// <summary>
 /// One owner-thread Game generation and Concept Demo world serving several independent participant
 /// and control lineages. Network and local adapters borrow this authority; neither owns its world.
@@ -63,13 +77,19 @@ public sealed class SharedPlayableAuthority : IDisposable
     private readonly bool[] _externallyOwned;
     private readonly RemoteGuestPlayableApplication?[] _remoteApplications;
     private readonly bool _ownsRuntime;
+    private readonly GameTickTimingWindow _tickTimings;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private readonly long _generationStartedTimestamp;
     private readonly long _tickInterval;
     private long _nextTickTimestamp;
     private int _participantCount;
     private ulong _joins;
     private ulong _leaves;
     private ulong _ticks;
+    private ulong _monitorRevision;
+    private ulong _testMarkerSequence;
+    private string? _activeTestMarker;
+    private string? _lastTestMarker;
     private bool _disposed;
 
     private SharedPlayableAuthority(
@@ -81,6 +101,8 @@ public sealed class SharedPlayableAuthority : IDisposable
         RemoteChatDeliveryService chatDelivery,
         GamePlayableWorldScene scene,
         bool ownsRuntime,
+        GameTickTimingWindow tickTimings,
+        long generationStartedTimestamp,
         SharedPlayableAuthorityLimits limits)
     {
         WorldPack = worldPack;
@@ -91,6 +113,10 @@ public sealed class SharedPlayableAuthority : IDisposable
         ChatDelivery = chatDelivery;
         Scene = scene;
         _ownsRuntime = ownsRuntime;
+        _tickTimings = tickTimings ?? throw new ArgumentNullException(nameof(tickTimings));
+        if (generationStartedTimestamp < 0)
+            throw new ArgumentOutOfRangeException(nameof(generationStartedTimestamp));
+        _generationStartedTimestamp = generationStartedTimestamp;
         _limits = limits;
         _participants = new SharedPlayableParticipant[limits.MaximumParticipants];
         _occupied = new bool[limits.MaximumParticipants];
@@ -106,6 +132,7 @@ public sealed class SharedPlayableAuthority : IDisposable
     {
         if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
         limits.Validate();
+        long generationStartedTimestamp = Stopwatch.GetTimestamp();
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
         var composition = new UltraSimGameComposition(
             new InventoryLimits(32, 128, 32),
@@ -133,7 +160,10 @@ public sealed class SharedPlayableAuthority : IDisposable
                         GamePlayableWorld.PopulateSharedConceptDemoScene(world, game),
                     out GamePlayableWorldScene scene) || !scene.IsValid)
                 throw new InvalidOperationException("The shared Concept Demo scene could not populate.");
+            var tickTimings = new GameTickTimingWindow();
+            long initialTickStarted = Stopwatch.GetTimestamp();
             runtime.Tick();
+            tickTimings.RecordElapsed(initialTickStarted);
             var chatLimits = GameChatLimits.Default with
             {
                 MaximumParticipants = limits.MaximumParticipants,
@@ -152,7 +182,7 @@ public sealed class SharedPlayableAuthority : IDisposable
                     1_000));
             return new SharedPlayableAuthority(
                 pack, composition, runtime, admission, chat, delivery, scene,
-                ownsRuntime: true, limits);
+                ownsRuntime: true, tickTimings, generationStartedTimestamp, limits);
         }
         catch
         {
@@ -179,6 +209,8 @@ public sealed class SharedPlayableAuthority : IDisposable
         RemoteChatDeliveryService chatDelivery,
         GamePlayableWorldScene scene,
         SharedPlayableParticipant localParticipant,
+        GameTickTimingWindow tickTimings,
+        long generationStartedTimestamp,
         SharedPlayableAuthorityLimits limits = default)
     {
         ArgumentNullException.ThrowIfNull(worldPack);
@@ -187,6 +219,9 @@ public sealed class SharedPlayableAuthority : IDisposable
         ArgumentNullException.ThrowIfNull(admission);
         ArgumentNullException.ThrowIfNull(chat);
         ArgumentNullException.ThrowIfNull(chatDelivery);
+        ArgumentNullException.ThrowIfNull(tickTimings);
+        if (generationStartedTimestamp < 0)
+            throw new ArgumentOutOfRangeException(nameof(generationStartedTimestamp));
         if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
         limits.Validate();
         if (runtime.State != ServerRuntimeState.Running || !scene.IsValid ||
@@ -195,7 +230,7 @@ public sealed class SharedPlayableAuthority : IDisposable
                 "The borrowed shared-authority composition is not currently playable.");
         var authority = new SharedPlayableAuthority(
             worldPack, composition, runtime, admission, chat, chatDelivery, scene,
-            ownsRuntime: false, limits);
+            ownsRuntime: false, tickTimings, generationStartedTimestamp, limits);
         int slot = localParticipant.Slot;
         authority._participants[slot] = localParticipant;
         authority._occupied[slot] = true;
@@ -228,6 +263,109 @@ public sealed class SharedPlayableAuthority : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Emits one trusted test-marker transition through the ordinary System occurrence path.
+    /// This is an authority API, not a participant Chat command or administrative client action.
+    /// </summary>
+    public GameTestMarkerResult PublishTestMarker(GameTestMarkerPhase phase, string label)
+    {
+        EnsureOperational();
+        string canonical = label?.Trim() ?? string.Empty;
+        if (phase is not (GameTestMarkerPhase.Start or GameTestMarkerPhase.Complete) ||
+            canonical.Length is 0 or > 64 || canonical.Any(char.IsControl))
+            return new GameTestMarkerResult(false, _testMarkerSequence, phase, canonical,
+                "The test marker phase or label is invalid.");
+        if (phase == GameTestMarkerPhase.Start && _activeTestMarker is not null)
+            return new GameTestMarkerResult(false, _testMarkerSequence, phase, canonical,
+                "Another test marker is already active.");
+        if (phase == GameTestMarkerPhase.Complete &&
+            !string.Equals(_activeTestMarker, canonical, StringComparison.Ordinal))
+            return new GameTestMarkerResult(false, _testMarkerSequence, phase, canonical,
+                "The completed marker does not match the active marker.");
+
+        ulong sequence = phase == GameTestMarkerPhase.Start
+            ? checked(_testMarkerSequence + 1)
+            : _testMarkerSequence;
+        string text = $"TEST {phase.ToString().ToUpperInvariant()} #{sequence}: {canonical}";
+        GameSystemBroadcastResult broadcast = PublishSystem(text, "Test");
+        if (!broadcast.Accepted)
+            return new GameTestMarkerResult(false, _testMarkerSequence, phase, canonical,
+                $"The System occurrence was rejected: {broadcast.Status}.");
+        if (phase == GameTestMarkerPhase.Start)
+        {
+            _testMarkerSequence = sequence;
+            _activeTestMarker = canonical;
+            _lastTestMarker = $"#{sequence} START — {canonical}";
+        }
+        else
+        {
+            _lastTestMarker = $"#{sequence} COMPLETE — {canonical}";
+            _activeTestMarker = null;
+        }
+        return new GameTestMarkerResult(true, sequence, phase, canonical, text);
+    }
+
+    /// <summary>Captures one bounded sanitized monitor view of this authority.</summary>
+    public ServerMonitorSnapshot CaptureServerMonitor()
+    {
+        EnsureOperational();
+        var rows = new ServerMonitorParticipant[_participantCount];
+        int count = 0;
+        int entityCount = 0;
+        bool captured = Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+            (world, _, game) =>
+            {
+                entityCount = world.AliveCount;
+                for (int slot = 0; slot < _participants.Length; slot++)
+                {
+                    if (!_occupied[slot]) continue;
+                    SharedPlayableParticipant participant = _participants[slot];
+                    Entity actor = Resolve(world, participant.Entities.PlayerId);
+                    if (!game.WorldState.TryReadPosition(world, actor, out WorldPosition position))
+                        throw new InvalidOperationException(
+                            "A monitored participant had no authoritative position.");
+                    bool local = _externallyOwned[slot];
+                    rows[count++] = new ServerMonitorParticipant(
+                        participant.Participant,
+                        participant.PublicEntity.Index,
+                        participant.PublicEntity.Generation,
+                        participant.GuestIdentity.DisplayName!,
+                        local ? ServerMonitorConnectionKind.Local : ServerMonitorConnectionKind.Remote,
+                        local ? -1 : FindRoundTripMilliseconds(participant.Participant),
+                        position.Chunk.X,
+                        position.Chunk.Z);
+                }
+                return true;
+            }, out bool complete) && complete;
+        if (!captured || count != rows.Length)
+            throw new InvalidOperationException("The shared Server Monitor snapshot was incomplete.");
+        Array.Sort(rows, static (left, right) =>
+            left.Participant.Value.CompareTo(right.Participant.Value));
+        GameTickTimingSnapshot timing = _tickTimings.Capture();
+        ulong tick = Runtime.SimulationTick;
+        int frequency = Runtime.SimulationFrequencyHz;
+        return new ServerMonitorSnapshot(
+            checked(++_monitorRevision),
+            Runtime.ActiveGenerationId,
+            tick,
+            frequency,
+            ElapsedSeconds(_generationStartedTimestamp),
+            timing.RecentMicroseconds,
+            timing.P95Microseconds,
+            entityCount,
+            _limits.MaximumParticipants,
+            _joins,
+            _leaves,
+            _lastTestMarker,
+            rows);
+    }
+
+    private static long ElapsedSeconds(long startedTimestamp)
+    {
+        long elapsed = Math.Max(0, Stopwatch.GetTimestamp() - startedTimestamp);
+        return elapsed / Stopwatch.Frequency;
+    }
+
     /// <summary>Advances an owned server clock without coupling it to any one connection.</summary>
     public int TickDue()
     {
@@ -238,7 +376,9 @@ public sealed class SharedPlayableAuthority : IDisposable
         int steps = 0;
         while (now >= _nextTickTimestamp && steps < 4)
         {
+            long started = Stopwatch.GetTimestamp();
             Runtime.Tick();
+            _tickTimings.RecordElapsed(started);
             _ticks++;
             _nextTickTimestamp = checked(_nextTickTimestamp + _tickInterval);
             steps++;
@@ -290,7 +430,9 @@ public sealed class SharedPlayableAuthority : IDisposable
                         return new JoinCapture(entities, publicId);
                     }, out JoinCapture capture))
                 throw new InvalidOperationException("The shared participant had no active generation.");
+            long started = Stopwatch.GetTimestamp();
             Runtime.Tick();
+            _tickTimings.RecordElapsed(started);
             _ticks++;
             if (!capture.PublicEntity.IsValid)
             {
@@ -355,7 +497,9 @@ public sealed class SharedPlayableAuthority : IDisposable
         _occupied[playable.Slot] = false;
         _participantCount--;
         _leaves++;
+        long started = Stopwatch.GetTimestamp();
         Runtime.Tick();
+        _tickTimings.RecordElapsed(started);
         _ticks++;
         if (!Chat.RefreshEnteredParticipants())
             throw new InvalidOperationException("Chat could not retire the shared participant census.");
@@ -465,6 +609,15 @@ public sealed class SharedPlayableAuthority : IDisposable
         for (int slot = 0; slot < _occupied.Length; slot++)
             if (!_occupied[slot]) return slot;
         return -1;
+    }
+
+    private int FindRoundTripMilliseconds(ParticipantId participant)
+    {
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            if (_remoteApplications[index] is RemoteGuestPlayableApplication application &&
+                application.Participant == participant)
+                return application.GetSanitizedRoundTripMilliseconds();
+        return 0;
     }
 
     private static WorldPosition SpawnForSlot(int slot)

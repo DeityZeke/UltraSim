@@ -1204,8 +1204,10 @@ static void VerifyClientExportComposition(string root)
         (reference.Attribute("Include")?.Value ?? "").Contains("BuiltInTestWorlds", StringComparison.Ordinal) ||
         (reference.Attribute("Include")?.Value ?? "").EndsWith(
             "Local/UltraSim.Client.Local.csproj", StringComparison.Ordinal) ||
-        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Composition", StringComparison.Ordinal) ||
-        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Contracts", StringComparison.Ordinal)).ToArray();
+        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Composition", StringComparison.Ordinal)).ToArray();
+    XElement sharedGameContracts = references.Single(reference =>
+        (reference.Attribute("Include")?.Value ?? "").EndsWith(
+            "Game/Contracts/UltraSim.Game.Contracts.csproj", StringComparison.Ordinal));
     XElement online = references.Single(reference =>
         reference.Attribute("Include")?.Value.EndsWith(
             "Network/UltraSim.Client.Network.csproj", StringComparison.Ordinal) == true);
@@ -1215,11 +1217,14 @@ static void VerifyClientExportComposition(string root)
             "ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj",
             StringComparison.Ordinal) == true);
     string localHostCondition = localHost.Attribute("Condition")?.Value ?? "";
-    if (localReferences.Length != 4 || localReferences.Any(reference =>
+    if (localReferences.Length != 3 || localReferences.Any(reference =>
         !(reference.Attribute("Condition")?.Value ?? "").Contains("SinglePlayer", StringComparison.Ordinal) ||
         !(reference.Attribute("Condition")?.Value ?? "").Contains("Complete", StringComparison.Ordinal) ||
         (reference.Attribute("Condition")?.Value ?? "").Contains("Online", StringComparison.Ordinal)))
         throw new InvalidOperationException("The local client references are not edition-fenced.");
+    if (!string.IsNullOrWhiteSpace(sharedGameContracts.Attribute("Condition")?.Value))
+        throw new InvalidOperationException(
+            "The renderer-neutral Game contract vocabulary must be available to every client edition.");
     if (!onlineCondition.Contains("Online", StringComparison.Ordinal) ||
         !onlineCondition.Contains("Complete", StringComparison.Ordinal) ||
         onlineCondition.Contains("SinglePlayer", StringComparison.Ordinal))

@@ -40,7 +40,7 @@ internal static class F03cClientProfileTests
             bytes.AsSpan(0, written + 1), out _, out _));
         Equal(NetworkLane.Control, RemoteClientProfileHeaderCodec.Descriptor.Lane);
         Equal(NetworkLane.Control, RemoteClientProfileAppliedMessageCodec.Descriptor.Lane);
-        Equal((ushort)24, UltraSimGameProtocol.Manifest.Version);
+        Equal((ushort)25, UltraSimGameProtocol.Manifest.Version);
 
         string fields = string.Join(',', typeof(RemoteClientProfileHeader).GetFields()
             .Select(static value => value.Name).OrderBy(static value => value, StringComparer.Ordinal));

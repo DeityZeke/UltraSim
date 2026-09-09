@@ -48,7 +48,10 @@ RemoteClientProfileAdvertisement clientProfile =
     ConceptDemoClientProfiles.Create(options.ClientProfile);
 using HostedUdpAdmissionHost host = CreateHost(
     options.BindEndPoint, identity, realm, authority, content.Authorization,
-    [UiDefinitionIdentity.From(InventoryUi.Definition)], clientProfile);
+    [
+        UiDefinitionIdentity.From(InventoryUi.Definition),
+        UiDefinitionIdentity.From(ServerMonitorUi.Definition),
+    ], clientProfile);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");

@@ -28,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="../Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../StandardUi/UltraSim.Client.StandardUi.csproj" />
+    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
     <ProjectReference Include="../../Game/World/UltraSim.Game.World.csproj" />
     <ProjectReference Include="../../Kernels/Spatial/UltraSim.Spatial.csproj" />
     <ProjectReference Include="../BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj"
@@ -35,8 +36,6 @@
     <ProjectReference Include="../Local/UltraSim.Client.Local.csproj"
                       Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj"
-                      Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
-    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj"
                       Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../Network/UltraSim.Client.Network.csproj"
                       Condition="'$(UltraSimEdition)' == 'Online' Or '$(UltraSimEdition)' == 'Complete'" />

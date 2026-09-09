@@ -3,6 +3,8 @@ using UltraSim.Game.Admission;
 using UltraSim.Game.Chat;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
+using UltraSim.Game.Replication;
+using UltraSim.Game.UI;
 using UltraSim.Game.World;
 using UltraSim.Server.Runtime;
 using UltraSim.Spatial;
@@ -43,6 +45,7 @@ public enum LocalAdministrativeOperationKind : byte
     OpenInventory = 4,
     EnableHosting = 5,
     DisableHosting = 6,
+    OpenServerMonitor = 7,
 }
 
 public readonly record struct LocalAdministrativeRequest(
@@ -96,6 +99,8 @@ public sealed class LocalPlayableServerContext
         GameControlSessionEpoch localControlSession,
         GamePlayableParticipantEntities localEntities,
         WorldPublicEntityId localPublicEntity,
+        GameTickTimingWindow tickTimings,
+        long generationStartedTimestamp,
         ILocalPlayableChatSink localChat)
     {
         IdentityRoot = identityRoot;
@@ -110,6 +115,10 @@ public sealed class LocalPlayableServerContext
         LocalControlSession = localControlSession;
         LocalEntities = localEntities;
         LocalPublicEntity = localPublicEntity;
+        TickTimings = tickTimings ?? throw new ArgumentNullException(nameof(tickTimings));
+        if (generationStartedTimestamp < 0)
+            throw new ArgumentOutOfRangeException(nameof(generationStartedTimestamp));
+        GenerationStartedTimestamp = generationStartedTimestamp;
         LocalChat = localChat;
     }
 
@@ -125,6 +134,9 @@ public sealed class LocalPlayableServerContext
     public GameControlSessionEpoch LocalControlSession { get; }
     public GamePlayableParticipantEntities LocalEntities { get; }
     public WorldPublicEntityId LocalPublicEntity { get; }
+    public GameTickTimingWindow TickTimings { get; }
+    /// <summary>Monotonic Stopwatch timestamp captured when this Game generation began.</summary>
+    public long GenerationStartedTimestamp { get; }
     public ILocalPlayableChatSink LocalChat { get; }
 }
 
@@ -148,6 +160,11 @@ public interface ILocalPlayableServerExtension : IDisposable
     void Pump();
     bool TrySetHostingEnabled(bool enabled, out string? detail);
     LocalPlayableServerExtensionSnapshot GetSnapshot();
+    bool TryCaptureServerMonitor(out ServerMonitorSnapshot? snapshot)
+    {
+        snapshot = null;
+        return false;
+    }
     int CopyPublicPresentationMetadata(Span<ClientPublicPresentationMetadata> destination);
 }
 

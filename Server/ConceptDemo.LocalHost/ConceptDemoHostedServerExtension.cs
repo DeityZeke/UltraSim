@@ -108,6 +108,8 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
                 delivery,
                 context.Scene,
                 local,
+                context.TickTimings,
+                context.GenerationStartedTimestamp,
                 new SharedPlayableAuthorityLimits(options.MaximumParticipants));
             _chatDelivery = delivery;
             _localChat = delivery.RegisterLocal(
@@ -163,7 +165,10 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
                 _authority,
                 realm,
                 content.Authorization,
-                [UiDefinitionIdentity.From(InventoryUi.Definition)],
+                [
+                    UiDefinitionIdentity.From(InventoryUi.Definition),
+                    UiDefinitionIdentity.From(ServerMonitorUi.Definition),
+                ],
                 profile,
                 firstParticipantId: 1);
             var shared = SharedUdpProtocolLimits.Default with
@@ -219,6 +224,13 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
             RemoteParticipants: Math.Max(0, authority.ParticipantCount - 1),
             ServerGenerationId: authority.GenerationId,
             Detail: _detail);
+    }
+
+    public bool TryCaptureServerMonitor(out ServerMonitorSnapshot? snapshot)
+    {
+        EnsureOperational();
+        snapshot = _authority.CaptureServerMonitor();
+        return true;
     }
 
     public int CopyPublicPresentationMetadata(

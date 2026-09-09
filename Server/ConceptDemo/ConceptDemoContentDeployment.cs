@@ -63,6 +63,15 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 ContentHash.Compute(uiBytes), default, out ContentFileDescriptor uiFile))
             throw new InvalidOperationException("The standard Inventory UI artifact is invalid.");
 
+        CompiledUiDefinition monitor = ServerMonitorUi.Definition;
+        if (!UiDefinitionArtifactCodec.TryEncodeCanonical(monitor, out byte[] monitorUiBytes) ||
+            !ContentUiDefinitionPath.TryCreate(
+                UiDefinitionIdentity.From(monitor), out ContentFilePath monitorUiPath) ||
+            !ContentFileDescriptor.TryCreate(
+                monitorUiPath, ContentFileKind.UiDefinition, monitorUiBytes.Length,
+                ContentHash.Compute(monitorUiBytes), default, out ContentFileDescriptor monitorUiFile))
+            throw new InvalidOperationException("The Server Monitor UI artifact is invalid.");
+
         string? manifestError = null;
         if (!ContentPackageId.TryCreate(
                 "server.concept-demo.bootstrap", out ContentPackageId packageId) ||
@@ -71,7 +80,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 1, 1, packageId, contentNamespace,
                 "Concept Demo world and standard UI", "1.0.0",
                 ContentTrustClass.ServerAuthorizedPassive,
-                [worldFile, uiFile], [worldDefinition!],
+                [worldFile, uiFile, monitorUiFile], [worldDefinition!],
                 out ContentPackageManifest? manifest, out manifestError))
             throw new InvalidOperationException(
                 $"The Concept Demo content manifest is invalid: {manifestError}");
@@ -80,6 +89,7 @@ public sealed class ConceptDemoContentDeployment : IDisposable
         [
             new ContentFilePayload(worldPath, worldBytes),
             new ContentFilePayload(uiPath, uiBytes),
+            new ContentFilePayload(monitorUiPath, monitorUiBytes),
         ];
         string? planError = null;
         ContentCatalogResolutionError catalogError = ContentCatalogResolutionError.None;
@@ -116,7 +126,8 @@ public sealed class ConceptDemoContentDeployment : IDisposable
                 host,
                 authorization,
                 new ContentDeploymentSnapshot(
-                    host.GetUri(ArchiveRoute), archive.Length, worldBytes.Length, uiBytes.Length,
+                    host.GetUri(ArchiveRoute), archive.Length, worldBytes.Length,
+                    checked(uiBytes.Length + monitorUiBytes.Length),
                     manifest!.ManifestHash, plan!.PlanHash, catalog!.Fingerprint,
                     pack.Fingerprint, pack.ContentFingerprint, pack.ChunkCount));
         }

@@ -1,0 +1,114 @@
+{
+  "Checkpoint": "D0.6 read-only Server Monitor, ping, and trusted test markers",
+  "CaptureDate": "2026-09-08",
+  "BaseCommit": "952cf36429158600e17146880a5c12a25e9f7356",
+  "AuthorityReadModel": {
+    "MaximumParticipantRows": 64,
+    "RefreshCadence": "approximately once per second while open",
+    "TickTimingWindowSamples": 128,
+    "TickRecordingManagedAllocation": "zero by construction after fixed-window creation",
+    "Fields": [
+      "authority generation and uptime",
+      "simulation tick and configured frequency",
+      "recent and p95 authoritative tick duration",
+      "entered participant count and capacity",
+      "ECS entity count",
+      "join and leave totals",
+      "last trusted test-marker transition",
+      "participant public display name",
+      "Local or Remote connection kind",
+      "sanitized remote RTT or Local",
+      "coarse Spatial chunk"
+    ],
+    "Excluded": [
+      "IP addresses and transport endpoints",
+      "deployment keys, credentials, and trust material",
+      "account and machine identities",
+      "exact position and owner-private state",
+      "mutable administration"
+    ]
+  },
+  "Ui": {
+    "DefinitionKey": "game.server-monitor.gump",
+    "DefinitionVersion": 1,
+    "DefinitionHash": "84f9d63c006483823535928f732c60f3",
+    "CanonicalArtifactBytes": 650,
+    "CompiledActions": [
+      "Close"
+    ],
+    "LocalDefinitionPath": "cold compiled definition over packet-free semantic UI",
+    "RemoteDefinitionPath": "realm-authorized content-backed .usui to existing HotOpen",
+    "GenericGodotRenderer": true,
+    "RequiredContentApplicationProofPreserved": true
+  },
+  "ExportedOnlineContent": {
+    "DeploymentPayloads": 3,
+    "ArchiveBytes": 733835,
+    "WorldPackBytes": 731384,
+    "InventoryUiBytes": 1158,
+    "ServerMonitorUiBytes": 650,
+    "ColdFetchedFiles": 3,
+    "ColdFetchedBytes": 733192,
+    "WarmFetchedFiles": 0,
+    "WarmFetchedBytes": 0,
+    "FreshApplicationProofRequiredOnWarmReconnect": true
+  },
+  "Protocol": {
+    "GeneratedGameProtocolVersion": 13,
+    "ApplicationManifestVersion": 25,
+    "ApplicationManifestFingerprint": 4238109217938245120,
+    "ApplicationManifestFingerprintHex": "3ad0c9e116848600",
+    "PlayerCommandMessageVersion": 2,
+    "NewFiniteFlag": "OpenServerMonitorRequested",
+    "NewTransportLane": false,
+    "ChatWireChanged": false,
+    "HotPublicRecordChanged": false
+  },
+  "Ping": {
+    "OnlineSource": "authenticated protocol peer sanitized smoothed RTT",
+    "RemoteRangeMilliseconds": [
+      0,
+      60000
+    ],
+    "LocalDisplay": "Local",
+    "LocalLoopbackPeerCreated": false
+  },
+  "TestMarkers": {
+    "Producer": "trusted SharedPlayableAuthority API",
+    "Phases": [
+      "Start",
+      "Complete"
+    ],
+    "MaximumLabelCharacters": 64,
+    "OneActiveMarker": true,
+    "CompletionMustMatchStart": true,
+    "UsesExistingSystemOccurrence": true,
+    "CreatesSecondBannerOrProtocolFact": false,
+    "OrdinaryParticipantCanPublish": false
+  },
+  "PermanentAcceptance": {
+    "LocalSinglePlayerRows": 1,
+    "LocalLatencyLabel": "Local",
+    "LocalRefreshModelSequence": "1 -> 2",
+    "OpeningMonitorMutatesPlayerOrCommandState": false,
+    "DedicatedSharedAuthorityABC": true,
+    "DedicatedRowsAllRemote": true,
+    "CompletePacketFreeHostPlusRemoteBC": true,
+    "CompleteRowsLocal": 1,
+    "CompleteRowsRemote": 2,
+    "DisconnectRetiresOnlyDepartedRow": true,
+    "ReconnectCreatesFreshLabelAndIdentity": true,
+    "PrivateEndpointTextAbsent": true,
+    "MarkerSystemFanoutABC": true,
+    "ExportedContentlessOnlineNativeMonitor": true
+  },
+  "DeliberateDeferrals": [
+    "administrative actions, kick, ban, teleport, spawn, or ECS editing",
+    "tabbed subsystem and broad server diagnostics",
+    "process memory and aggregate network-rate reporting",
+    "retained diagnostic timelines and full report capture",
+    "opt-in local client diagnostic recording/upload UX",
+    "automatic join/leave System announcements",
+    "production capacity or public-WAN claims"
+  ]
+}

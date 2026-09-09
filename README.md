@@ -197,6 +197,14 @@ independently of AOI. Explicit authority-owned System broadcasts use the same re
 and application-proof path without forging a player speaker. Commands are intercepted before
 speech; `/help` and `/where` remain private results. Local and remote clients converge on the same
 bounded feed, spatial overhead projection, and presentation-local transient System banner.
+
+Concept Demo D0.6 adds a bounded read-only Server Monitor over the ordinary compiled UI path.
+`F4` shows authority generation/uptime/tick timing, entered/entity/join/leave counts, the last trusted
+test marker, and sanitized participant name/Local-or-Remote/RTT/coarse-chunk rows. Local play remains
+packet-free and says `Local`; Online reads sanitized RTT directly from its authenticated protocol
+peer. The remotely opened monitor definition is an exact realm-authorized `.usui`, while the model
+and sole Close action remain Game-owned. No endpoint/IP, credential/key, exact position,
+owner-private state, or administrative command is exposed.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

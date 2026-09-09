@@ -3,8 +3,8 @@
 `UltraSim.Server.ConceptDemo` owns the passive deployment composition shared by dedicated Direct
 Connect and Complete-hosted Concept Demo servers:
 
-- the exact authenticated content activation containing the canonical Concept Demo WorldPack and
-  standard Inventory UI definition;
+- the exact authenticated content activation containing the canonical Concept Demo WorldPack plus
+  standard Inventory and read-only Server Monitor UI definitions;
 - the finite stock client-profile advertisements used by F0.3c.
 
 It references server/Game/Network/content foundations but deliberately does not reference

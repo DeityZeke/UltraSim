@@ -18,6 +18,13 @@ internal readonly record struct LocalUiProof(
 
 internal readonly record struct LocalUiAction(UiActionRequest Request);
 
+/// <summary>
+/// Expected bounded-channel pressure. Callers may retain their prior read model and retry later;
+/// other InvalidOperationException instances still represent semantic/lifetime defects.
+/// </summary>
+internal sealed class LocalUiTransportBackpressureException(string message)
+    : InvalidOperationException(message);
+
 internal sealed class LocalUiOperationRow
 {
     internal ulong OperationId;
@@ -97,7 +104,8 @@ internal sealed class LocalQueuedUiChannel
         lock (_gate)
         {
             if (_freeCount == 0 || _nextOperationId == 0)
-                throw new InvalidOperationException("The bounded local UI operation store is full.");
+                throw new LocalUiTransportBackpressureException(
+                    "The bounded local UI operation store is full.");
             int rowIndex = _free[--_freeCount];
             LocalUiOperationRow row = _rows[rowIndex];
             row.OperationId = _nextOperationId;
@@ -111,7 +119,8 @@ internal sealed class LocalQueuedUiChannel
             {
                 row.Clear();
                 _free[_freeCount++] = rowIndex;
-                throw new InvalidOperationException("The bounded local UI ready queue is full.");
+                throw new LocalUiTransportBackpressureException(
+                    "The bounded local UI ready queue is full.");
             }
             _queued[rowIndex] = true;
             _nextOperationId = _nextOperationId == ulong.MaxValue ? 0 : _nextOperationId + 1;

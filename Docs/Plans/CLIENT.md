@@ -10,8 +10,9 @@ Complete-hosted deployment shapes. I0.12 human-play hardening prevents visible e
 remaining a pointer-nominated world pickup, and I0.13 replaces its temporary cold property text
 with bounded typed Inspection Properties plus content-sized world-hover/Inventory presentation.
 C0.2 now closes the first routed Global Chat mode plus explicit authority-originated System
-broadcast/feed/banner convergence. Diagnostics/Server Monitor/test markers are next; F0.7 and F0.8
-remain open.
+broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
+read-only, content-backed Server Monitor and trusted test-marker producer. X/Y content-backed
+animation/public action realization is next; F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2045,6 +2046,44 @@ acquired world without a bundled playable world or local authority implementatio
 
 ---
 
+## D0.6 — Read-only Server Monitor, ping, and trusted test markers
+
+**Status: CLOSED.** This is a bounded diagnostic consumer checkpoint, not the full F0.7 lifecycle
+or diagnostic-capture campaign.
+
+Game/authority owns one sanitized `ServerMonitorSnapshot`: generation and uptime, simulation
+tick/frequency, recent and p95 tick duration, entered/capacity/entity/join/leave counts, last trusted
+test-marker transition, and at most 64 entered participant rows. Rows carry public display name,
+Local/Remote kind, sanitized remote RTT, and coarse Spatial chunk. They carry no endpoint/IP,
+credential/key, account/machine identity, exact position, owner-private state, or administrative
+action.
+
+`F4` is the stock client binding for opening/toggling the monitor. Local play emits the normal cold
+compiled `game.server-monitor.gump/v1` definition through its packet-free semantic bridge. Remote
+play authorizes the exact passive `.usui` in the applied realm catalog and converges through the
+existing content-backed `HotOpen`, `UiClientRuntime`, and generic Godot renderer. The server UI
+controller does not choose transport hot/cold behavior, and its sole action is Close.
+
+Online HUD ping is projected directly from the authenticated protocol peer's sanitized smoothed
+RTT. Packet-free local play displays `Local`; it does not construct a loopback peer. Monitor models
+refresh approximately once per second. Authoritative tick sampling uses a fixed 128-sample ring;
+temporary bounded UI backpressure leaves the prior view valid and retries later.
+
+Trusted marker START/COMPLETE transitions publish the already-accepted C0.2 System occurrence, so
+the same fact reaches retained Chat feed and transient banner. The last transition also appears in
+the monitor. No player marker command, second banner message, or general operator/RBAC system was
+added.
+
+Permanent gates cover dedicated A/B/C, Complete packet-free Host A plus remote B/C,
+disconnect/reconnect row retirement, local single-player parity, marker fanout, absence of private
+endpoint material, and the exported Contentless Online monitor `.usui`/native participant-list path.
+Opening the monitor does not mutate simulation or owner state.
+
+Broad diagnostic capture, tabbed subsystem telemetry, process/network-rate detail, admin controls,
+and the explicit mixed-session lifecycle torture pass remain open.
+
+---
+
 ## F0.7 — Settings/debug/lifecycle hardening
 
 **Status: OPEN; partially earned hardening is already accepted.** Settings focus, Chat focus,
@@ -2471,9 +2510,9 @@ I0.13 typed Inspection Properties + content-sized shared tooltip              CL
         |
 C0.2  routed Global + authority System Chat / transient banner              CLOSED
         |
-diagnostics / Server Monitor / test markers                                  NEXT
+D0.6  read-only Server Monitor / ping / trusted test markers                  CLOSED
         |
-remaining animation/presentation consumers
+remaining X/Y content-backed animation / public action presentation           NEXT
         |
 F0.7  explicit settings/debug/mixed-session lifecycle closure             OPEN
         |

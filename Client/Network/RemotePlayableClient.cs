@@ -127,7 +127,10 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
             !intent.IsValid ||
             (flags & ~(RemotePlayableCommandFlags.FaceRequested |
                 RemotePlayableCommandFlags.FacingRequiresAcceptedLocomotion |
-                RemotePlayableCommandFlags.OpenInventoryRequested)) != 0 ||
+                RemotePlayableCommandFlags.OpenInventoryRequested |
+                RemotePlayableCommandFlags.OpenServerMonitorRequested)) != 0 ||
+            (flags & RemotePlayableCommandFlags.OpenInventoryRequested) != 0 &&
+                (flags & RemotePlayableCommandFlags.OpenServerMonitorRequested) != 0 ||
             (flags & RemotePlayableCommandFlags.FacingRequiresAcceptedLocomotion) != 0 &&
                 (flags & RemotePlayableCommandFlags.FaceRequested) == 0 ||
             (flags & RemotePlayableCommandFlags.FaceRequested) == 0 &&

@@ -624,8 +624,8 @@ version and fingerprint. Historical N1/P0 evidence records the exact manifest an
 fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
-As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 12
-and `UltraSimGameProtocol` constructs manifest version 24. Version 20 added the bounded cold
+As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 13
+and `UltraSimGameProtocol` constructs manifest version 25. Version 20 added the bounded cold
 public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
 adds the authoritative `Primary` result to the playable owner-state schema for I0.12. Version 22
 widens the existing cold presentation occurrence with an independently bounded optional item-detail
@@ -637,7 +637,11 @@ trailing bytes before Client Core publication. Network still owns neither item s
 order/labels, nor action meaning. Version 24 advances Chat submit/occurrence to message version 2,
 adding only the finite `Global` submission mode and explicit routed-Global/System occurrence kinds.
 System has no forged player identity or public anchor; audience and broadcast authority remain Game
-semantics. Future schema changes must advance the appropriate generated/
+semantics. Version 25 advances only the retained player-command message to v2 for the finite
+read-only Server Monitor request. The sanitized model remains Game/UI-owned, its content-backed
+definition uses the existing UI protocol, HUD ping reads the existing peer snapshot, and test
+markers reuse the unchanged System occurrence path. No diagnostic payload, endpoint, key, or
+administrative command enters the Network kernel. Future schema changes must advance the appropriate generated/
 manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy

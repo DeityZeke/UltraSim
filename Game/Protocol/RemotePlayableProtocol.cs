@@ -44,6 +44,7 @@ public enum RemotePlayableCommandFlags : byte
     FaceRequested = 1 << 0,
     FacingRequiresAcceptedLocomotion = 1 << 1,
     OpenInventoryRequested = 1 << 2,
+    OpenServerMonitorRequested = 1 << 3,
 }
 
 public readonly record struct RemotePublicEntityTarget(uint Index, uint Generation)
@@ -90,7 +91,7 @@ public partial struct RemoteGuestAdmissionAppliedMessage
 /// <summary>
 /// One real retained GamePlayerCommand. A public entity is only an untrusted interaction nomination.
 /// </summary>
-[NetworkMessage(138, "ultrasim.game.player-command", 1, NetworkLane.Event)]
+[NetworkMessage(138, "ultrasim.game.player-command", 2, NetworkLane.Event)]
 public partial struct RemotePlayableCommandMessage
 {
     public ulong ApplicationSessionEpoch;
@@ -266,7 +267,10 @@ public static partial class UltraSimGameProtocol
             remote.CommandSequence == 0 ||
             (remote.Flags & ~(RemotePlayableCommandFlags.FaceRequested |
                 RemotePlayableCommandFlags.FacingRequiresAcceptedLocomotion |
-                RemotePlayableCommandFlags.OpenInventoryRequested)) != 0 ||
+                RemotePlayableCommandFlags.OpenInventoryRequested |
+                RemotePlayableCommandFlags.OpenServerMonitorRequested)) != 0 ||
+            (remote.Flags & RemotePlayableCommandFlags.OpenInventoryRequested) != 0 &&
+                (remote.Flags & RemotePlayableCommandFlags.OpenServerMonitorRequested) != 0 ||
             (remote.Flags & RemotePlayableCommandFlags.FacingRequiresAcceptedLocomotion) != 0 &&
                 (remote.Flags & RemotePlayableCommandFlags.FaceRequested) == 0 ||
             remote.TargetPublicEntityGeneration == 0 && remote.TargetPublicEntityIndex != 0 ||

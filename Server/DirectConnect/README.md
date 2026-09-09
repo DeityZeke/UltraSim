@@ -21,8 +21,14 @@ realm, activation, plan, and expected resolved fingerprint.
 A0.4 adds a neutral bounded immutable-byte `StaticContentHttpHost` in `Server.Hosting`. It runs
 outside Game/Network progression and knows no realm, manifest, or package semantics. A0.8 now
 composes the development executable with one canonical Concept Demo deployment package containing
-the complete WorldPack and standard Inventory UI definition. The authority publishes the exact
+the complete WorldPack plus standard Inventory and read-only Server Monitor UI definitions. The authority publishes the exact
 authenticated requirement while the separate HTTP host only serves its immutable `.uspkg` bytes.
+
+D0.6 makes each application expose the Game-owned Server Monitor through that exact
+content-backed definition. A shared authority supplies a bounded sanitized participant census,
+tick timing, entity/capacity totals, and last trusted test marker. Remote endpoints and deployment
+identity material are deliberately absent from the read model. Test-marker publication is a trusted
+server/test surface that reuses C0.2 System occurrences; it is not a participant command.
 
 Shared deployment content and profile definitions live in `Server/ConceptDemo`, which has no
 `Client.Local` dependency. The Complete-only adapter in `Server/ConceptDemo.LocalHost` reuses those

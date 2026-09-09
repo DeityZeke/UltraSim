@@ -77,7 +77,7 @@ contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
 guest admission. It hostile-validates the finite profile vocabulary introduced in manifest v19,
-retained unchanged through the current manifest v24, and maps it into
+retained unchanged through the current manifest v25, and maps it into
 Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not
@@ -248,6 +248,16 @@ The optional `WorldPublicEntityId` is presentation-only and valid only for spati
 missing resident actor suppresses an overhead bubble but never suppresses the feed occurrence.
 Explicit System broadcasts arrive through the same occurrence/proof path with no participant
 speaker or public anchor; Network does not decide their audience or presentation lifetime.
+
+## Read-only diagnostics
+
+D0.6 adds only a finite `OpenServerMonitorRequested` bit to the existing retained player-command
+message (v2; composed manifest v25). The authority composes the sanitized read model and normal UI
+operations; `Client.Network` continues to carry the generic UI protocol without owning diagnostic
+meaning. The content-backed `.usui` must resolve from the current applied realm catalog before the
+view can open. HUD RTT is a direct presentation of the authenticated peer's already-bounded smoothed
+round-trip snapshot, not another Game message. Test markers reuse the unchanged C0.2 System
+occurrence/proof path.
 
 ## Current stop
 

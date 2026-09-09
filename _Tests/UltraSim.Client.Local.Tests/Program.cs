@@ -20,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("ChatIngressRejectsUnboundedText", ChatIngressRejectsUnboundedText),
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
+    ("ServerMonitorIsReadOnlyLocalAndRefreshesSlowly", ServerMonitorIsReadOnlyLocalAndRefreshesSlowly),
     ("PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache", PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache),
     ("ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath", ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath),
     ("ConceptDemoSignUsesAuthoritativeInformationalUi", ConceptDemoSignUsesAuthoritativeInformationalUi),
@@ -201,6 +202,66 @@ static void UiOperationsAndActionsUseBoundedLocalBridge()
             "Item selected.",
             StringComparison.Ordinal);
     });
+}
+
+static void ServerMonitorIsReadOnlyLocalAndRefreshesSlowly()
+{
+    using Fixture fixture = Fixture.CreateConcept();
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView before));
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(client);
+
+    True(fixture.Session.TryRequestOpenServerMonitor(1));
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 1 &&
+            fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+            current.LastAdministrativeSequence == 1 &&
+            current.LastAdministrativeKind == LocalAdministrativeOperationKind.OpenServerMonitor &&
+            current.LastAdministrativeSucceeded;
+    });
+
+    UiViewInstanceId monitor = renderer.LastInstance;
+    Equal("UltraSim Server Monitor — Read Only",
+        client.GetValue(monitor, ServerMonitorUi.Title).Text!);
+    Equal(1, ServerMonitorUi.Definition.ActionCount);
+    string summary = client.GetValue(monitor, ServerMonitorUi.Summary).Text ?? string.Empty;
+    True(summary.Contains("1/1 entered", StringComparison.Ordinal));
+    True(summary.Contains("ECS entities", StringComparison.Ordinal));
+    string timing = client.GetValue(monitor, ServerMonitorUi.Timing).Text ?? string.Empty;
+    True(timing.Contains("Authoritative tick:", StringComparison.Ordinal));
+    ReadOnlySpan<UiListRow> participants = client.GetRows(monitor, ServerMonitorUi.Participants);
+    Equal(1, participants.Length);
+    string row = participants[0].Values[0].Text ?? string.Empty;
+    True(row.Contains("Local", StringComparison.Ordinal));
+    True(row.Contains("Chunk (", StringComparison.Ordinal));
+    True(!row.Contains("127.0.0.1", StringComparison.Ordinal));
+
+    ulong initialModelSequence = client.GetView(monitor).LastSequence;
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.GetView(monitor).LastSequence > initialModelSequence;
+    }, milliseconds: 3_000);
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView after));
+    Equal(before.PlayerPosition, after.PlayerPosition);
+    Equal(before.LastCommandSequence, after.LastCommandSequence);
+
+    client.SubmitAction(monitor, ServerMonitorUi.Close);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 0;
+    });
+    True(UiDefinitionArtifactCodec.TryEncodeCanonical(
+        ServerMonitorUi.Definition, out byte[] monitorDefinitionBytes));
+    Console.WriteLine(
+        $"EVIDENCE D0.6 local_monitor definition={ServerMonitorUi.Definition.Key}/" +
+        $"v{ServerMonitorUi.Definition.Version}/{ServerMonitorUi.Definition.Hash} " +
+        $"bytes={monitorDefinitionBytes.Length} rows={participants.Length} latency=Local " +
+        $"refresh_sequence={initialModelSequence}->{initialModelSequence + 1} read_only=pass");
 }
 
 static void PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache()

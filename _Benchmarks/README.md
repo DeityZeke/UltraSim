@@ -59,6 +59,11 @@ when those systems exist.
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
 
+Cross-cutting Concept Demo closure artifacts in `Baselines/` also retain bounded functional and
+allocation evidence that is not a throughput benchmark. D0.6 records the exact Server Monitor UI
+artifact/protocol identity, cold refresh/capacity policy, packet-free Local and remote shared-
+authority shapes, sanitized participant lifecycle, and trusted marker-to-System convergence.
+
 Network benchmarks/tests consume deterministic impairment, ProtocolLoopback,
 two-ended connected UDP, and self-trusted topology from the separate
 `UltraSim.Network.Testing` assembly. That assembly is evidence infrastructure and

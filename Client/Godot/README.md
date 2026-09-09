@@ -116,7 +116,8 @@ complete nonzero public render bounds before accepting the informational-object 
 Local saves live below `user://single-player/`. Controls are shown in the in-session HUD: F1/F2/F3
 select movement profiles; F1 single-click selects, hold steers, and double-clicking ground creates a
 destination; WASD moves in direct profiles; E interacts with the selected target; Space jumps in
-direct profiles; and the mouse wheel adjusts supported camera profiles. The Central Island welcome sign exposes a local `Sign`
+direct profiles; F4 toggles the read-only Server Monitor; and the mouse wheel adjusts supported
+camera profiles. The Central Island welcome sign exposes a local `Sign`
 hover from resident presentation state; select it and press E to open its authoritative
 informational view, then use the view's Close action to dismiss it.
 
@@ -159,6 +160,14 @@ spatial/Global/System occurrences in both compositions. Only spatial facts can c
 overhead text; an explicit System fact also drives a top-centered banner for 4.5 seconds. That
 timeout is Godot presentation state and does not remove the retained feed occurrence or create a
 second protocol message.
+
+D0.6 displays `Ping: Local` for the packet-free internal authority and sanitized smoothed peer RTT
+for Online. F4 requests the normal Game-composed `game.server-monitor.gump/v1` read-only view. Local
+receives its compiled definition over the direct semantic UI bridge; remote play acquires and
+authorizes the exact passive `.usui` with the World/Inventory deployment content and receives the
+existing compact HotOpen. Both render through the same `UiClientRuntime`/`GodotUiRenderer`. The
+exported Online smoke now opens Inventory, then the content-backed Server Monitor, and requires its
+native participant list before completing Chat and movement evidence.
 
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a

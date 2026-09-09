@@ -121,6 +121,14 @@ C0.2/manifest v24 widens only the existing Chat submit/occurrence vocabulary for
 explicit System kinds. It does not change hot public records, item metadata, or the selected
 replication profile.
 
+D0.6/manifest v25 advances the retained player-command message to v2 solely for the finite
+read-only Server Monitor request. `SharedPlayableAuthority` owns the bounded sanitized snapshot and
+the trusted test-marker START/COMPLETE producer. Marker transitions reuse the unchanged System
+occurrence/proof path; monitor presentation reuses normal UI operations. Hot public records, Chat
+wire descriptors, AOI, and owner-private state are unchanged. The participant table exposes only
+public label, Local/Remote role, sanitized RTT, and coarse chunk—never an endpoint, key, exact
+position, or administrative capability.
+
 A0.6 allows deployment composition to name a bounded set of exact content-backed UI-definition
 identities, but only when the application also requires an exact authenticated content activation.
 After that activation is semantically applied, `RemoteUiSemanticPort` translates a normal Game
@@ -141,6 +149,11 @@ it. Lost proof retries the same delivery and speech-fact identities. Private
 command/error output uses the same recipient-relative occurrence contract without
 becoming public speech. Global audience selection and explicit non-player System publication stay
 in Game; the delivery adapter only preserves the accepted fact and exact audience.
+
+The D0.6 test-marker producer sits above this delivery adapter. It publishes one accepted
+`SystemBroadcast` for each valid marker transition and copies only the last bounded marker label
+into the cold Server Monitor snapshot. It does not introduce a second delivery ledger or let a
+participant submit System facts.
 
 The adapter derives participant authority from the authenticated application
 session and attaches each concrete Admission owner to Chat's bounded census for

@@ -222,6 +222,7 @@ public sealed class RemoteGuestPlayableApplication :
     private RemoteUiSemanticPort? _ui;
     private InventoryUiController? _inventoryUi;
     private InformationalSignUiController? _signUi;
+    private ServerMonitorUiController? _serverMonitorUi;
     private GameChatService? _chat;
     private RemoteChatDeliveryService? _chatDelivery;
     private RemoteChatServerSession? _chatSession;
@@ -243,10 +244,23 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _rejectedCommands;
     private ulong _uiBackpressureRejections;
     private ulong _ownerStatesQueued;
+    private readonly GameTickTimingWindow _tickTimings = new();
+    private long _generationStartedTimestamp;
+    private ulong _lastServerMonitorRefreshTick;
+    private ulong _serverMonitorRevision;
     private long _nextTickTimestamp;
     private long _tickInterval;
     private bool _disposed;
     private SharedPlayableParticipant _sharedParticipant;
+
+    internal ParticipantId Participant => _participant;
+
+    internal int GetSanitizedRoundTripMilliseconds()
+    {
+        EnsureOperational();
+        ulong measured = _peer.GetSnapshot().SmoothedRoundTripSteps;
+        return checked((int)Math.Min(measured, 60_000UL));
+    }
 
     public RemoteGuestPlayableApplication(
         NetworkProtocolPeer peer,
@@ -395,7 +409,9 @@ public sealed class RemoteGuestPlayableApplication :
             int steps = 0;
             while (now >= _nextTickTimestamp && steps < 4)
             {
+                long started = Stopwatch.GetTimestamp();
                 _runtime!.Tick();
+                _tickTimings.RecordElapsed(started);
                 _authorityTicks++;
                 _nextTickTimestamp = checked(_nextTickTimestamp + _tickInterval);
                 steps++;
@@ -418,6 +434,7 @@ public sealed class RemoteGuestPlayableApplication :
             }
         }
         _ = _chatDelivery!.TryHandoffPendingOccurrences();
+        RefreshServerMonitorIfDue();
         complete &= _chatSession!.TryProgress();
         complete &= _worldDelivery!.TryProgress();
         return complete;
@@ -456,6 +473,8 @@ public sealed class RemoteGuestPlayableApplication :
         // must not turn terminal application cleanup into an owner-worker failure.
         try { _signUi?.Dispose(); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        try { _serverMonitorUi?.Dispose(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { }
         try { _inventoryUi?.Dispose(); }
         catch (Exception exception) when (exception is not OutOfMemoryException) { }
         _ui?.Dispose();
@@ -478,6 +497,7 @@ public sealed class RemoteGuestPlayableApplication :
         _chatSession = null;
         _chatDelivery = null;
         _signUi = null;
+        _serverMonitorUi = null;
         _inventoryUi = null;
         _chat = null;
         _admission = null;
@@ -710,6 +730,7 @@ public sealed class RemoteGuestPlayableApplication :
                     new PersistenceIdentityOptions(new PersistentWorldId(0xF0_3B00UL)),
                     GameRuntimeProfile.Networked),
                 WorldClockOptions.Default));
+        _generationStartedTimestamp = Stopwatch.GetTimestamp();
         _runtime.Initialize();
         _runtime.Start();
         _ui = new RemoteUiSemanticPort(
@@ -728,11 +749,14 @@ public sealed class RemoteGuestPlayableApplication :
             throw new InvalidOperationException("The remote Concept Demo could not populate.");
         _controlSession = GameControlSessionEpoch.Create();
         BindControl();
+        long started = Stopwatch.GetTimestamp();
         _runtime.Tick();
+        _tickTimings.RecordElapsed(started);
         _authorityTicks++;
 
         _inventoryUi = new InventoryUiController(_runtime.Game, _ui);
         _signUi = new InformationalSignUiController(_ui);
+        _serverMonitorUi = new ServerMonitorUiController(_ui);
         var chatLimits = GameChatLimits.Default with
         {
             MaximumParticipants = 1,
@@ -818,6 +842,7 @@ public sealed class RemoteGuestPlayableApplication :
             standardDefinitions: _standardUiDefinitions);
         _inventoryUi = new InventoryUiController(_runtime.Game, _ui);
         _signUi = new InformationalSignUiController(_ui);
+        _serverMonitorUi = new ServerMonitorUiController(_ui);
         _chatSession = _chatDelivery.Register(
             _peer, _participant, _applicationSessionEpoch);
         ChunkPublicationStore publications = CapturePublications();
@@ -1462,6 +1487,9 @@ public sealed class RemoteGuestPlayableApplication :
         if (result.WasAdmitted &&
             (remote.Flags & RemotePlayableCommandFlags.OpenInventoryRequested) != 0)
             return new CommandOutcome(result, PostCommandSemantic.Inventory);
+        if (result.WasAdmitted &&
+            (remote.Flags & RemotePlayableCommandFlags.OpenServerMonitorRequested) != 0)
+            return new CommandOutcome(result, PostCommandSemantic.ServerMonitor);
         return new CommandOutcome(result, PostCommandSemantic.None);
     }
 
@@ -1508,6 +1536,18 @@ public sealed class RemoteGuestPlayableApplication :
                         : GameWorldActionStatus.InvariantViolation,
                 };
             }
+            case PostCommandSemantic.ServerMonitor:
+            {
+                ServerMonitorUiOpenResult opened = _serverMonitorUi!.Open(
+                    CaptureServerMonitor());
+                _lastServerMonitorRefreshTick = _runtime!.SimulationTick;
+                return outcome.Result with
+                {
+                    Interaction = opened.Succeeded
+                        ? GameWorldActionStatus.Accepted
+                        : GameWorldActionStatus.InvariantViolation,
+                };
+            }
             default:
                 throw new InvalidOperationException("The post-command semantic kind is invalid.");
         }
@@ -1527,6 +1567,81 @@ public sealed class RemoteGuestPlayableApplication :
         return game.WorldActions.MoveItemToNearbyContainer(
             world, game.WorldState, game.Inventory,
             player, bread, item.Parent, destination, out _);
+    }
+
+    private void RefreshServerMonitorIfDue()
+    {
+        if (_serverMonitorUi?.HasOpenView != true || _runtime is null) return;
+        ulong tick = _runtime.SimulationTick;
+        ulong interval = checked((ulong)Math.Max(1, _runtime.SimulationFrequencyHz));
+        if (tick < _lastServerMonitorRefreshTick ||
+            tick - _lastServerMonitorRefreshTick < interval)
+            return;
+        try
+        {
+            _ = _serverMonitorUi.Refresh(CaptureServerMonitor());
+            _lastServerMonitorRefreshTick = tick;
+        }
+        catch (RemoteUiTransportBackpressureException)
+        {
+            // A monitor refresh is cold read-model work. Leave the prior snapshot current and
+            // retry after another cadence interval instead of faulting the Game application.
+            _lastServerMonitorRefreshTick = tick;
+            SaturatingIncrement(ref _uiBackpressureRejections);
+        }
+    }
+
+    private ServerMonitorSnapshot CaptureServerMonitor()
+    {
+        if (_sharedAuthority is not null)
+            return _sharedAuthority.CaptureServerMonitor();
+        if (_runtime is null || !_guestIdentity.IsValid || !_playerPublicId.IsValid)
+            throw new InvalidOperationException("The remote Server Monitor authority is unavailable.");
+        int entityCount = 0;
+        WorldPosition position = default;
+        if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
+                (world, _, game) =>
+                {
+                    entityCount = world.AliveCount;
+                    Entity actor = Resolve(world, _entities.PlayerId);
+                    return game.WorldState.TryReadPosition(world, actor, out position);
+                }, out bool captured) || !captured)
+            throw new InvalidOperationException("The remote Server Monitor snapshot was incomplete.");
+        GameTickTimingSnapshot timing = _tickTimings.Capture();
+        ulong tick = _runtime.SimulationTick;
+        int frequency = _runtime.SimulationFrequencyHz;
+        ServerMonitorParticipant[] participants =
+        [
+            new ServerMonitorParticipant(
+                _participant,
+                _playerPublicId.Index,
+                _playerPublicId.Generation,
+                _guestIdentity.DisplayName!,
+                ServerMonitorConnectionKind.Remote,
+                GetSanitizedRoundTripMilliseconds(),
+                position.Chunk.X,
+                position.Chunk.Z),
+        ];
+        return new ServerMonitorSnapshot(
+            checked(++_serverMonitorRevision),
+            _runtime.ActiveGenerationId,
+            tick,
+            frequency,
+            ElapsedSeconds(_generationStartedTimestamp),
+            timing.RecentMicroseconds,
+            timing.P95Microseconds,
+            entityCount,
+            1,
+            1,
+            0,
+            null,
+            participants);
+    }
+
+    private static long ElapsedSeconds(long startedTimestamp)
+    {
+        long elapsed = Math.Max(0, Stopwatch.GetTimestamp() - startedTimestamp);
+        return elapsed / Stopwatch.Frequency;
     }
 
     private void DrivePublicWorld()
@@ -1754,6 +1869,7 @@ public sealed class RemoteGuestPlayableApplication :
         Inventory = 1,
         WelcomeSign = 2,
         FallbackLabSign = 3,
+        ServerMonitor = 4,
     }
 
     private readonly record struct CommandOutcome(

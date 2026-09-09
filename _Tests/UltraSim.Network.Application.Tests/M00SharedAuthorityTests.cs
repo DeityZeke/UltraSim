@@ -38,6 +38,8 @@ internal static class M00SharedAuthorityTests
         local.WaitUntilReady(TimeSpan.FromSeconds(10));
         ClientWorldSemanticCache localWorld = CreateWorldCache(local.BoundWorld);
         var localChat = new ClientChatState(local.ApplicationSessionEpoch);
+        using var localUi = new UiClientRuntime(new NullRenderer(), new UiClientLimits(8, 8));
+        using LocalQueuedUiClient localUiBridge = local.AttachUiClient(localUi);
         ClientNode? bob = null;
         ClientNode? carol = null;
         ClientNode? bobAgain = null;
@@ -117,6 +119,24 @@ internal static class M00SharedAuthorityTests
             True(metadata.Take(4).Any(static row =>
                 row.DisplayLabel == "Iron Sword" &&
                 (row.Flags & ClientPublicPresentationFlags.ItemProperties) != 0));
+            True(local.TryRequestOpenServerMonitor(2));
+            DriveHostedUntil(local, localWorld, localChat, [bob, carol], () =>
+            {
+                localUiBridge.Pump();
+                return localUi.OpenViewCount == 1 &&
+                    local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
+                    current.LastAdministrativeSequence == 2 &&
+                    current.LastAdministrativeSucceeded;
+            });
+            var hostedMonitorView = new UiViewInstanceId(1);
+            ReadOnlySpan<UiListRow> hostedMonitorRows =
+                localUi.GetRows(hostedMonitorView, ServerMonitorUi.Participants);
+            Equal(3, hostedMonitorRows.Length);
+            Equal(1, hostedMonitorRows.ToArray().Count(static row =>
+                row.Values[0].Text!.Contains("Host Alice", StringComparison.Ordinal) &&
+                row.Values[0].Text!.Contains("Local", StringComparison.Ordinal)));
+            Equal(2, hostedMonitorRows.ToArray().Count(static row =>
+                row.Values[0].Text!.Contains("Remote", StringComparison.Ordinal)));
 
             RemotePlayableClientSnapshot bobBefore = bob.Session.Playable.GetSnapshot();
             RemotePlayableClientSnapshot carolBefore = carol.Session.Playable.GetSnapshot();
@@ -166,6 +186,8 @@ internal static class M00SharedAuthorityTests
                 ContainsChat(carol.Session.ChatState, "hosted authority test broadcast",
                     ClientChatOccurrenceKind.SystemBroadcast));
 
+            ulong localUiAppliedBeforeRemoteInventory =
+                local.GetSnapshot().UiOperationsApplied;
             True(bob.Session.Playable.TrySubmitCommand(
                 new ClientWorldCommandIntent(
                     GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
@@ -175,7 +197,8 @@ internal static class M00SharedAuthorityTests
                 bob.Session.Playable.GetSnapshot().LastProcessedCommandSequence == bobInventory &&
                 bob.Session.UiClient.OpenViewCount == 1);
             Equal(0, carol.Session.UiClient.OpenViewCount);
-            Equal(0UL, local.GetSnapshot().UiOperationsApplied);
+            Equal(localUiAppliedBeforeRemoteInventory,
+                local.GetSnapshot().UiOperationsApplied);
 
             bob.Dispose();
             bob = null;
@@ -207,10 +230,10 @@ internal static class M00SharedAuthorityTests
             True(!ContainsChat(bobAgain.Session.ChatState, "hosted authority test broadcast"));
             True(!ContainsChat(bobAgain.Session.ChatState, "global after Bob left"));
 
-            True(local.TryRequestHosting(2, enabled: false));
+            True(local.TryRequestHosting(3, enabled: false));
             DriveLocalUntil(local, localWorld, localChat, () =>
                 local.TryGetLatestView(out LocalPlayableAuthorityView current) &&
-                current.LastAdministrativeSequence == 2 &&
+                current.LastAdministrativeSequence == 3 &&
                 current.LastAdministrativeSucceeded &&
                 !current.ServerExtension.HostingEnabled &&
                 current.ServerExtension.RemoteParticipants == 0);
@@ -437,10 +460,66 @@ internal static class M00SharedAuthorityTests
                 ContainsChat(client.Session.ChatState, "dedicated authority test broadcast",
                     ClientChatOccurrenceKind.SystemBroadcast)));
 
+            True(!authority.PublishTestMarker(
+                GameTestMarkerPhase.Complete, "Far Island journey").Accepted);
+            GameTestMarkerResult markerStart = authority.PublishTestMarker(
+                GameTestMarkerPhase.Start, "Far Island journey");
+            True(markerStart.Accepted);
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                ContainsChat(client.Session.ChatState,
+                    "TEST START #1: Far Island journey",
+                    ClientChatOccurrenceKind.SystemBroadcast)));
+            GameTestMarkerResult markerComplete = authority.PublishTestMarker(
+                GameTestMarkerPhase.Complete, "Far Island journey");
+            True(markerComplete.Accepted);
+            Equal(markerStart.Sequence, markerComplete.Sequence);
+            DriveUntil(host, authority, clients, () => clients.All(static client =>
+                ContainsChat(client.Session.ChatState,
+                    "TEST COMPLETE #1: Far Island journey",
+                    ClientChatOccurrenceKind.SystemBroadcast)));
+
+            ServerMonitorSnapshot monitorSnapshot = authority.CaptureServerMonitor();
+            Equal(generation, monitorSnapshot.GenerationId);
+            Equal(3, monitorSnapshot.Participants.Length);
+            Equal(maximumParticipants, monitorSnapshot.MaximumParticipants);
+            True(monitorSnapshot.EntityCount >= 3);
+            Equal("#1 COMPLETE — Far Island journey", monitorSnapshot.TestMarker!);
+            True(monitorSnapshot.Participants.ToArray().All(static row =>
+                row.Connection == ServerMonitorConnectionKind.Remote &&
+                row.RoundTripMilliseconds is >= 0 and <= 60_000));
+            True(monitorSnapshot.Participants.ToArray().Select(static row => row.DisplayName)
+                .OrderBy(static name => name, StringComparer.Ordinal)
+                .SequenceEqual(new[] { "Alice", "Bob", "Carol" }));
+
+            True(carol.Session.Playable.TrySubmitCommand(
+                new ClientWorldCommandIntent(
+                    GameLocomotionUpdate.Stop, GamePlayerActions.None, true),
+                flags: RemotePlayableCommandFlags.OpenServerMonitorRequested));
+            ulong monitorCommand = carol.Session.Playable.Input.Snapshot().LastSequence;
+            DriveUntil(host, authority, clients, () =>
+                carol.Session.Playable.GetSnapshot().LastProcessedCommandSequence == monitorCommand &&
+                carol.Session.UiClient.OpenViewCount == 1);
+            var monitorView = new UiViewInstanceId(1);
+            ReadOnlySpan<UiListRow> monitorRows =
+                carol.Session.UiClient.GetRows(monitorView, ServerMonitorUi.Participants);
+            Equal(3, monitorRows.Length);
+            True(monitorRows.ToArray().All(static row =>
+                row.Values[0].Text!.Contains("Remote", StringComparison.Ordinal) &&
+                row.Values[0].Text!.Contains("Chunk (", StringComparison.Ordinal) &&
+                !row.Values[0].Text!.Contains("127.0.0.1", StringComparison.Ordinal)));
+            True((carol.Session.UiClient.GetValue(
+                    monitorView, ServerMonitorUi.Marker).Text ?? string.Empty)
+                .Contains("#1 COMPLETE — Far Island journey", StringComparison.Ordinal));
+            Equal(1, alice.Session.UiClient.OpenViewCount);
+            Equal(1, bob.Session.UiClient.OpenViewCount);
+
             bob.Dispose();
             clients.RemoveAt(1);
             DriveUntil(host, authority, clients,
                 () => authority.GetSnapshot().ParticipantCount == 2);
+            ServerMonitorSnapshot afterBobLeft = authority.CaptureServerMonitor();
+            Equal(2, afterBobLeft.Participants.Length);
+            True(afterBobLeft.Participants.ToArray().All(static row => row.DisplayName != "Bob"));
             Equal(generation, authority.GetSnapshot().GenerationId);
             True(alice.Session.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
                 GameLocomotionUpdate.Stop, GamePlayerActions.None, true)));
@@ -464,6 +543,11 @@ internal static class M00SharedAuthorityTests
             DriveUntil(host, authority, clients, () => clients.All(static client =>
                 client.Session.PublicPresentationState.GetSnapshot().CurrentRecords >= 3));
             Equal(generation, authority.GetSnapshot().GenerationId);
+            ServerMonitorSnapshot afterBobReturned = authority.CaptureServerMonitor();
+            Equal(3, afterBobReturned.Participants.Length);
+            True(afterBobReturned.Participants.ToArray().Any(static row =>
+                row.DisplayName == "Bob Again"));
+            True(afterBobReturned.Participants.ToArray().All(static row => row.DisplayName != "Bob"));
             True(!ContainsChat(
                 bobAgain.Session.ChatState, "dedicated authority test broadcast"));
             True(!ContainsChat(
@@ -475,7 +559,8 @@ internal static class M00SharedAuthorityTests
                 $"participants={evidence.ParticipantCount}/{evidence.MaximumParticipants} " +
                 $"joins={evidence.Joins} leaves={evidence.Leaves} ticks={evidence.Ticks} " +
                 "public_actors=3 chat_recipients=3 independent_commands=pass reconnect=pass " +
-                "item_world_inventory_equip_primary_drop_other_owner=pass");
+                "item_world_inventory_equip_primary_drop_other_owner=pass " +
+                "monitor_rows=3 sanitized=pass marker_start_complete=pass");
         }
         finally
         {
@@ -922,6 +1007,7 @@ internal static class M00SharedAuthorityTests
         internal bool RequestSystem(string text) =>
             (_extension ?? throw new InvalidOperationException(
                 "The embedded test extension is not initialized.")).RequestSystem(text);
+
     }
 
     private sealed class EmbeddedTestExtension : ILocalPlayableServerExtension
@@ -967,6 +1053,8 @@ internal static class M00SharedAuthorityTests
                         context.LocalEntities,
                         context.LocalPublicEntity,
                         0),
+                    context.TickTimings,
+                    context.GenerationStartedTimestamp,
                     new SharedPlayableAuthorityLimits(MaximumParticipants));
                 _chatDelivery = delivery;
                 _localChat = delivery.RegisterLocal(
@@ -982,6 +1070,13 @@ internal static class M00SharedAuthorityTests
         }
 
         public bool OwnsSharedChatHandoff => true;
+
+        public bool TryCaptureServerMonitor(out ServerMonitorSnapshot? snapshot)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            snapshot = _authority.CaptureServerMonitor();
+            return true;
+        }
 
         internal bool RequestSystem(string text)
         {
