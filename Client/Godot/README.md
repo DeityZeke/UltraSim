@@ -195,6 +195,16 @@ action fence, and equipped Main Hand survive. Import failure has a finite diagno
 humanoid primitive. The actual cold/warm Online export canary contains no body GLB, downloads actor
 bytes only on cold entry, and reopens them from CAS with fresh session proof on warm entry.
 
+F0.7 adds a permanent Complete-client mixed-session lifecycle canary. One native process enters
+two independent local sessions, remote deployment A, distinct remote deployment B, deployment A
+again, and a final local session. Each lifetime is populated with an open compiled UI view, actors,
+nameplates, overhead Chat, rendered chunks, focused Chat input, and—remotely—leased actor content
+before retirement. Every menu boundary must return to the exact persistent root shape, clear the
+active realm profile and transient transport/content consumers, and restore global input/camera
+settings. The deployments retain distinct realm-bound catalog identities over the same content
+payload contract. Realm A's exact durable profile decision is reused on its same-process reconnect
+while a fresh application-session epoch is still required.
+
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a
 magenta/yellow diagnostic material for a missing texture, and both fallbacks together. The nearby

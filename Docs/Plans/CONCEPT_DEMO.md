@@ -51,7 +51,9 @@ attachment, position-derived horizontal motion plus Game-owned vertical phases, 
 Idle/Walk/Jump playback.
 D0.7b now closes applied-catalog-backed X/Y Add/Replace presentation, bounded passive actor-GLB
 validation, lazy native realization, and primitive-to-content visual replacement without replacing
-actor identity. Broad diagnostic capture and the explicit F0.7 lifecycle campaign remain open.
+actor identity. F0.7 now closes the explicit same-process local/remote/multi-realm lifecycle
+campaign with populated UI, actor, nameplate, overhead Chat, structural, native-content, profile,
+and focus state retired at every menu boundary. Broad opt-in diagnostic capture remains future.
 
 The demo has two purposes:
 
@@ -1731,8 +1733,8 @@ then continue:
     D0.7b runtime content-backed model/animation realization            CLOSED
 
 then close:
-    F0.7 explicit mixed-session settings/debug/lifecycle torture pass   NEXT
-    F0.8 final composition/parity matrix
+    F0.7 explicit mixed-session settings/debug/lifecycle torture pass   CLOSED
+    F0.8 final composition/parity matrix                                NEXT
     external Concept Demo multiplayer/stress and pre-freeze campaign
 ```
 

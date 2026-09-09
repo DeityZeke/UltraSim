@@ -17,6 +17,24 @@ public readonly record struct GodotClientRootSnapshot(
     bool DebugLayerPresent);
 
 /// <summary>
+/// Exact persistent-root shape captured at a session boundary. Capability implementations use
+/// this to prove that their transient presentation and active server profile did not leak across
+/// a return to the main menu.
+/// </summary>
+public readonly record struct GodotClientSessionBoundarySnapshot(
+    int ControllerChildren,
+    int ContentCatalogChildren,
+    int WorldChildren,
+    int WorldUiChildren,
+    int HudChildren,
+    int DebugChildren,
+    bool ServerProfileActive,
+    ClientControlGrammar ControlGrammar,
+    ClientCameraProfile CameraProfile,
+    int RenderDistanceChunks,
+    ClientShellSnapshot Shell);
+
+/// <summary>
 /// Persistent F0.1 Godot client root. Concrete executables supply only their
 /// compile-time capability manifest and later capability activation hooks.
 /// </summary>
@@ -98,6 +116,50 @@ public abstract partial class ClientRoot : Control
 
     protected ClientShellSnapshot ShellSnapshot() => _shell.Snapshot(
         textEntryFocused: GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit);
+
+    protected GodotClientSessionBoundarySnapshot CaptureSessionBoundary()
+    {
+        return new GodotClientSessionBoundarySnapshot(
+            ControllerRoot.GetChildCount(),
+            ContentCatalogRoot.GetChildCount(),
+            WorldRoot.GetChildCount(),
+            WorldUiLayer.GetChildCount(),
+            HudLayer.GetChildCount(),
+            _debugLayer?.GetChildCount() ?? 0,
+            _activeSettingsScope.IsValid || _activeProfileRecommendation is not null ||
+                _activeProfileMode != ClientProfileApplicationMode.Ignore,
+            _resolved.ControlGrammar,
+            _resolved.CameraProfile,
+            _resolved.RenderDistanceChunks,
+            ShellSnapshot());
+    }
+
+    protected void RequireCleanSessionBoundary(
+        in GodotClientSessionBoundarySnapshot baseline,
+        string stage)
+    {
+        GodotClientSessionBoundarySnapshot current = CaptureSessionBoundary();
+        if (current.ControllerChildren != baseline.ControllerChildren ||
+            current.ContentCatalogChildren != baseline.ContentCatalogChildren ||
+            current.WorldChildren != baseline.WorldChildren ||
+            current.WorldUiChildren != baseline.WorldUiChildren ||
+            current.HudChildren != baseline.HudChildren ||
+            current.DebugChildren != baseline.DebugChildren ||
+            current.ServerProfileActive ||
+            current.ControlGrammar != baseline.ControlGrammar ||
+            current.CameraProfile != baseline.CameraProfile ||
+            current.RenderDistanceChunks != baseline.RenderDistanceChunks ||
+            current.Shell.Screen != ClientShellScreen.MainMenu ||
+            current.Shell.SessionActive ||
+            current.Shell.Focus.Owner != ClientInputFocusOwner.ModalMenu ||
+            current.Shell.Focus.GameplayInputAllowed ||
+            current.Shell.Focus.TextInputActive ||
+            WorldRoot.FindChild("LocalCabinSession", recursive: true, owned: false) is not null ||
+            WorldRoot.FindChild("RemoteConceptDemoSession", recursive: true, owned: false) is not null)
+            throw new InvalidOperationException(
+                $"The {stage} session boundary retained transient client state: " +
+                $"baseline={baseline}; current={current}.");
+    }
 
     protected void BeginSessionLoading(string status)
     {

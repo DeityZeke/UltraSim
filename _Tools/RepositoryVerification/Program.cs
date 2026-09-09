@@ -27,6 +27,7 @@ if (options.ArchitectureOnly)
 
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];
 bool contentlessOnlineVerified = false;
+bool mixedSessionLifecycleVerified = false;
 string[] testProjects =
 [
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
@@ -226,6 +227,11 @@ foreach (string configuration in configurations)
             "--", "--f0-2-smoke", "--expect-edition=Complete",
             "--cabin-content=default", "--human=x",
         ]);
+        if (!mixedSessionLifecycleVerified)
+        {
+            VerifyMixedSessionLifecycleNative(root, configuration, godot);
+            mixedSessionLifecycleVerified = true;
+        }
     }
 }
 
@@ -976,6 +982,87 @@ static void VerifyEmbeddedCompleteHostedNative(
     finally
     {
         StopOwnedProcess(host);
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
+static void VerifyMixedSessionLifecycleNative(
+    string root,
+    string configuration,
+    string godot)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "f0.7-mixed-session");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    Process? serverA = null;
+    Process? serverB = null;
+    try
+    {
+        serverA = StartNativeDeployment(
+            root,
+            configuration,
+            Path.Combine(scope, "deployment-a"),
+            Path.Combine(scope, "deployment-a-ready.json"),
+            ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+            ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp),
+            out NativeDeploymentReady readyA);
+        serverB = StartNativeDeployment(
+            root,
+            configuration,
+            Path.Combine(scope, "deployment-b"),
+            Path.Combine(scope, "deployment-b-ready.json"),
+            ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+            ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp),
+            out NativeDeploymentReady readyB);
+        if (readyA.Realm == readyB.Realm || readyA.Fingerprint == readyB.Fingerprint ||
+            readyA.CatalogFingerprint == readyB.CatalogFingerprint ||
+            readyA.WorldPackFingerprint != readyB.WorldPackFingerprint ||
+            readyA.ArchiveBytes != readyB.ArchiveBytes ||
+            readyA.ActorPresentationBytes != readyB.ActorPresentationBytes ||
+            readyA.WorldChunks != readyB.WorldChunks ||
+            readyA.ClientProfileRevision != readyB.ClientProfileRevision ||
+            readyA.ClientProfileHash != readyB.ClientProfileHash)
+            throw new InvalidOperationException(
+                "F0.7 requires distinct realm-bound deployment/catalog identities over the same " +
+                "World, actor, and client-profile payload contract.");
+
+        string output = RunCaptured(root, godot,
+        [
+            "--headless",
+            "--path", "Client/Godot",
+            "--",
+            "--f0-7-smoke",
+            "--expect-edition=Complete",
+            $"--f0-7-a-endpoint={readyA.Endpoint}",
+            $"--f0-7-a-fingerprint={readyA.Fingerprint}",
+            $"--f0-7-b-endpoint={readyB.Endpoint}",
+            $"--f0-7-b-fingerprint={readyB.Fingerprint}",
+            $"--a0-8-cache={Path.Combine(scope, "content-cache")}",
+            $"--a0-8-trust={Path.Combine(scope, "client", "trusted-servers.json")}",
+            $"--f0-3c-profile-decisions={Path.Combine(scope, "client", "server-profiles.json")}",
+        ], 240_000);
+        if (!output.Contains("F0.7 MIXED SESSION LIFECYCLE PASS", StringComparison.Ordinal) ||
+            !output.Contains($"realms={readyA.Realm}/{readyB.Realm}/{readyA.Realm}",
+                StringComparison.Ordinal) ||
+            !output.Contains("profile_reuse=False/False/True", StringComparison.Ordinal) ||
+            !output.Contains("local_surfaces=1/1/1", StringComparison.Ordinal) ||
+            !output.Contains("remote_surfaces=1/1/1", StringComparison.Ordinal) ||
+            !output.Contains("boundaries=clean", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                $"The F0.7 native lifecycle evidence was incomplete:\n{Tail(output, 8_000)}");
+        Console.WriteLine(
+            $"PASS F0.7_MixedSessionLifecycleNative realms={readyA.Realm}/{readyB.Realm} " +
+            "sequence=local-local-remoteA-remoteB-remoteA-local profileReuse=exact " +
+            "sessionResidue=none");
+    }
+    finally
+    {
+        if (serverB is not null) StopOwnedProcess(serverB);
+        if (serverA is not null) StopOwnedProcess(serverA);
+        serverB?.Dispose();
+        serverA?.Dispose();
         if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
     }
 }

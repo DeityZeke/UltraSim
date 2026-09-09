@@ -53,6 +53,15 @@ public readonly record struct LocalCabinPresentationSnapshot(
     int PeakRenderedChunks,
     string? InitializationError);
 
+public readonly record struct LocalCabinLifecycleResidueSnapshot(
+    int OpenUiViews,
+    int ActiveActors,
+    int VisibleNameplates,
+    int VisibleOverheadLabels,
+    int RenderedChunks,
+    bool ChatFocused,
+    bool GameplayInputAllowed);
+
 /// <summary>
 /// Permanent Godot consumer for one Network-free local playable application session.
 /// Authority remains behind <see cref="LocalPlayableSession"/>; this node owns only Client Core
@@ -1083,6 +1092,48 @@ public partial class LocalCabinClient : Node3D
             _chatInput.Text,
             _gameplayInputAllowed,
             _chatState.GetSnapshot().Applied);
+    }
+
+    /// <summary>
+    /// Deliberately leaves every major session-owned presentation surface live so F0.7 can prove
+    /// that aggregate retirement removes state rather than merely succeeding from an empty scene.
+    /// </summary>
+    public LocalCabinLifecycleResidueSnapshot PrepareF07RetirementCanary(
+        string expectedDisplayName,
+        CabinHumanBody expectedBody)
+    {
+        _ = RunD05Acceptance(expectedDisplayName, expectedBody);
+        if (_localSession is null || _uiClient is null || _uiBridge is null ||
+            _chatInput is null || _actorPresenter is null || _renderer is null)
+            throw new InvalidOperationException("The F0.7 local retirement canary is incomplete.");
+
+        ulong before = _localSession.GetSnapshot().UiOperationsApplied;
+        OpenInventory();
+        DriveLocalUntil(() =>
+        {
+            _ = _uiBridge.Pump();
+            return _uiClient.OpenViewCount == 1 &&
+                _localSession.GetSnapshot().UiOperationsApplied > before;
+        });
+        _actorPresenter.SetRevealHeld(true);
+        _chatInput.Text = "F0.7 local draft must retire";
+        _chatInput.GrabFocus();
+
+        GodotActorPresenterSnapshot actors = _actorPresenter.GetSnapshot();
+        var result = new LocalCabinLifecycleResidueSnapshot(
+            _uiClient.OpenViewCount,
+            actors.ActiveActors,
+            actors.VisibleNameplates,
+            actors.VisibleOverheadLabels,
+            _renderer.GetSnapshot().ActiveRenderChunks,
+            _chatInput.HasFocus(),
+            _gameplayInputAllowed);
+        if (result.OpenUiViews != 1 || result.ActiveActors < 2 ||
+            result.VisibleNameplates < 2 || result.VisibleOverheadLabels < 1 ||
+            result.RenderedChunks <= 0 || !result.ChatFocused)
+            throw new InvalidOperationException(
+                $"The F0.7 local retirement canary did not populate every surface: {result}.");
+        return result;
     }
 
     private MultiMeshInstance3D RequireFallbackLabGroup(

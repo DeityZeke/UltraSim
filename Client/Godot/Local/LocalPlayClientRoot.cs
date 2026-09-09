@@ -421,6 +421,24 @@ public abstract partial class LocalPlayClientRoot : ClientRoot
     protected override void OnEffectiveSettingsChanged(ResolvedClientSettings settings) =>
         _cabin?.ApplySettings(settings);
 
+    protected LocalCabinPresentationSnapshot StartF07LocalSession(
+        string displayName,
+        CabinHumanBody body)
+    {
+        StartLocalCabin(
+            CabinContentVariant.Default,
+            body,
+            useConceptDemoWorld: true,
+            displayName);
+        return _cabin!.GetPresentationSnapshot();
+    }
+
+    protected LocalCabinLifecycleResidueSnapshot PrepareF07LocalRetirement(
+        string displayName,
+        CabinHumanBody body) =>
+        _cabin?.PrepareF07RetirementCanary(displayName, body) ??
+        throw new InvalidOperationException("No local session is active for the F0.7 canary.");
+
     protected override void BuildAdditionalInSessionOptions(VBoxContainer column)
     {
 #if ULTRASIM_COMPLETE

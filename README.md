@@ -216,6 +216,12 @@ Online excludes those bundled assets. D0.7b now supplies X/Y through exact serve
 ActorPresentation definitions, a bounded self-contained GLB profile, the applied realm catalog/CAS,
 and lazy native realization. Primitive actors and missing-clip cues remain downstream fallback;
 content realization never replaces the authoritative actor lifetime.
+F0.7 then closes the real same-process mixed-session boundary in the Complete client: local X,
+local Y, remote realm A, remote realm B, realm A reconnect, and local X again. Every session is
+deliberately retired while UI, actor/nameplate/overhead, chunk, content-resource, and Chat-focus
+state are live; every menu boundary returns to the exact persistent shell/root shape. Durable
+realm trust, cached bytes, and exact profile consent survive where intended, while application,
+transport, active profile, presentation, and input-focus lifetimes do not leak.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 

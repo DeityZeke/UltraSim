@@ -1,0 +1,59 @@
+{
+  "Checkpoint": "F0.7 explicit mixed-session settings/debug/lifecycle closure",
+  "CaptureDate": "2026-09-09",
+  "BaseCommit": "43d943d63015f71b9ef5d12131a9ae6fefd4efd7",
+  "NativeProduct": "Complete",
+  "Sequence": [
+    "local-x",
+    "local-y",
+    "remote-realm-a",
+    "remote-realm-b",
+    "remote-realm-a-reconnect",
+    "local-x"
+  ],
+  "RemoteDeployments": {
+    "DistinctDeploymentKeys": true,
+    "DistinctApplicationRealmIds": true,
+    "SameClientProfileContract": true,
+    "SameContentPayloadContract": true,
+    "CatalogFingerprintsAreDistinctAndRealmBound": true,
+    "RealmAProfileDecisionRemembered": [
+      false,
+      true
+    ],
+    "RealmBProfileDecisionRemembered": false,
+    "RealmAReconnectUsesFreshApplicationSessionEpoch": true,
+    "RealmAReconnectRetainsServerGeneration": true,
+    "RealmAReconnectRetainsCatalogFingerprint": true
+  },
+  "PreRetirementCanaries": {
+    "EveryLifetimeHasOpenCompiledUiView": true,
+    "EveryLifetimeHasMultipleActors": true,
+    "EveryLifetimeHasVisibleNameplates": true,
+    "EveryLifetimeHasVisibleOverheadChat": true,
+    "EveryLifetimeHasRenderedStructuralChunks": true,
+    "EveryLifetimeHasFocusedChatDraft": true,
+    "EveryRemoteLifetimeHasRetainedNativeActorResources": true
+  },
+  "BoundaryRequirements": {
+    "ExactPersistentRootChildCountsRestored": true,
+    "LocalAndRemoteSessionNodesAbsent": true,
+    "DirectConnectTransportRetired": true,
+    "ActiveServerProfileCleared": true,
+    "GlobalControlGrammarRestored": true,
+    "GlobalCameraProfileRestored": true,
+    "GlobalRenderDistanceRestored": true,
+    "ShellScreen": "MainMenu",
+    "FocusOwner": "ModalMenu",
+    "GameplayInputAllowed": false,
+    "TextInputActive": false
+  },
+  "Repair": {
+    "Issue": "Automatic profile consent persisted the decision file without updating the live decision document.",
+    "Result": "A same-process exact realm reconnect now reuses the durable decision without weakening fresh application-session proof."
+  },
+  "PermanentAcceptance": {
+    "ManualNativeTwoDeploymentCanary": "PASS",
+    "RepositoryVerification": "PASS"
+  }
+}

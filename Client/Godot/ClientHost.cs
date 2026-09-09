@@ -57,6 +57,10 @@ public partial class ClientHost :
             return;
         }
         base._Ready();
+#if ULTRASIM_COMPLETE
+        if (OS.GetCmdlineUserArgs().Contains("--f0-7-smoke", StringComparer.Ordinal))
+            Callable.From(RunF07MixedSessionLifecycleSmoke).CallDeferred();
+#endif
     }
 
     // Godot's native script dispatch generator binds lifecycle overrides from the canonical

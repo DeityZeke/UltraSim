@@ -35,6 +35,17 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     bool SmokeComplete,
     string? Fault);
 
+public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
+    ulong ApplicationSessionEpoch,
+    ulong ServerGenerationId,
+    int OpenUiViews,
+    int ActiveActors,
+    int VisibleNameplates,
+    int VisibleOverheadLabels,
+    int RenderedChunks,
+    int RetainedActorResources,
+    bool ChatFocused);
+
 /// <summary>
 /// Native A0.8 consumer over one authenticated remote application session. The Online product
 /// starts with an empty local content catalog; authenticated content supplies World/UI bytes while
@@ -258,6 +269,43 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             true,
             _smokePhase == 8,
             _fault);
+    }
+
+    /// <summary>
+    /// Populates and observes the session-owned surfaces which aggregate F0.7 retirement must
+    /// remove. This changes only local presentation/focus state after the ordinary smoke journey.
+    /// </summary>
+    public RemoteConceptDemoLifecycleResidueSnapshot PrepareF07RetirementCanary()
+    {
+        EnsureOperational();
+        if (_state != RemoteConceptDemoClientState.Active || _smokePhase != 8 ||
+            _session is null || _actorPresenter is null || _actorVisuals is null ||
+            _renderer is null || _chatInput is null)
+            throw new InvalidOperationException(
+                "The F0.7 remote retirement canary requires a completed active smoke journey.");
+        _actorPresenter.SetRevealHeld(true);
+        _chatInput.Text = "F0.7 remote draft must retire";
+        _chatInput.GrabFocus();
+
+        RemotePlayableSessionSnapshot session = _session.GetSnapshot();
+        GodotActorPresenterSnapshot actors = _actorPresenter.GetSnapshot();
+        var result = new RemoteConceptDemoLifecycleResidueSnapshot(
+            session.Playable.ApplicationSessionEpoch,
+            session.Playable.ServerGenerationId,
+            _session.UiClient.OpenViewCount,
+            actors.ActiveActors,
+            actors.VisibleNameplates,
+            actors.VisibleOverheadLabels,
+            _renderer.GetSnapshot().ActiveRenderChunks,
+            _actorVisuals.GetSnapshot().RealizedResources,
+            _chatInput.HasFocus());
+        if (result.OpenUiViews != 1 || result.ActiveActors < 2 ||
+            result.VisibleNameplates < 2 || result.VisibleOverheadLabels < 1 ||
+            result.RenderedChunks <= 0 || result.RetainedActorResources <= 0 ||
+            !result.ChatFocused)
+            throw new InvalidOperationException(
+                $"The F0.7 remote retirement canary did not populate every surface: {result}.");
+        return result;
     }
 
     public override void _Input(InputEvent inputEvent)

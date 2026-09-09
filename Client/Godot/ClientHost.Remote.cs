@@ -40,7 +40,10 @@ public partial class ClientHost
         if (!_remoteProcessObserved)
         {
             _remoteProcessObserved = true;
-            if (IsRemoteSmoke()) GD.Print("A0.8 remote process loop started");
+            if (IsAutomatedRemoteSmoke())
+                GD.Print(IsF07LifecycleSmoke()
+                    ? "F0.7 remote process loop started"
+                    : "A0.8 remote process loop started");
         }
         TryStartRemoteSmoke();
         if (_remoteSession is null) return;
@@ -82,16 +85,17 @@ public partial class ClientHost
                     string fault = playable.Fault ?? "Remote playable session failed.";
                     GD.PushError($"A0.8 remote playable fault: {fault}");
                     FailSession(BoundedShellMessage(fault));
-                    if (IsRemoteSmoke()) GetTree().Quit(1);
+                    if (IsAutomatedRemoteSmoke()) GetTree().Quit(1);
                     return;
                 }
                 if (playable.State == RemoteConceptDemoClientState.AwaitingGuest &&
                     ShellSnapshot().Screen == ClientShellScreen.Loading)
                 {
-                    if (IsRemoteSmoke())
+                    if (IsAutomatedRemoteSmoke())
                     {
                         _ = _remotePlayable.TrySubmitGuest(new GameGuestAdmissionRequest(
-                            GameGuestBody.HumanFemale, "A0.8 Native Guest"));
+                            _remoteGuestBody,
+                            IsF07LifecycleSmoke() ? _remoteGuestName : "A0.8 Native Guest"));
                     }
                     else
                     {
@@ -101,7 +105,7 @@ public partial class ClientHost
                 if (playable.State == RemoteConceptDemoClientState.Active &&
                     ShellSnapshot().Screen != ClientShellScreen.InSession)
                     CommitSession("Remote Concept Demo active.");
-                if (playable.SmokeComplete &&
+                if (IsRemoteSmoke() && playable.SmokeComplete &&
                     playable.Actors.ActiveActors >= RemoteSmokeExpectedActors() &&
                     !_remoteSmokeDisconnectStarted)
                 {
@@ -136,17 +140,18 @@ public partial class ClientHost
                 {
                     FailSession(BoundedShellMessage(
                         profile.Detail ?? "The server client profile was rejected."));
-                    if (IsRemoteSmoke()) GetTree().Quit(1);
+                    if (IsAutomatedRemoteSmoke()) GetTree().Quit(1);
                     return;
                 }
                 if (profile.State == RemoteClientProfileState.AwaitingDecision)
                 {
-                    if (IsRemoteSmoke())
+                    if (IsAutomatedRemoteSmoke())
                     {
                         if (!_remoteProfile.TryChoose(ClientProfileApplicationMode.UseServerDefaults))
                             throw new InvalidOperationException(
                                 _remoteProfile.GetSnapshot().Detail ??
                                 "The native smoke profile decision could not be persisted.");
+                        _profileDecisions = _remoteProfile.DecisionDocument;
                     }
                     else if (ShellSnapshot().Screen != ClientShellScreen.Admission)
                         BeginAdmission("Review this server's declarative client profile.");
@@ -217,7 +222,7 @@ public partial class ClientHost
                     }
                     else
                         FailSession(snapshot.Detail ?? $"Direct Connect failed: {snapshot.Failure}.");
-                    if (IsRemoteSmoke())
+                    if (IsAutomatedRemoteSmoke())
                     {
                         GD.PushError(
                             $"A0.8 Direct Connect smoke failed: {snapshot.Failure}: {snapshot.Detail}");
@@ -229,7 +234,7 @@ public partial class ClientHost
                 {
                     ClientDirectConnectSnapshot snapshot = _remoteSession.GetSnapshot();
                     FailSession(snapshot.Detail ?? "The remote deployment disconnected.");
-                    if (IsRemoteSmoke())
+                    if (IsAutomatedRemoteSmoke())
                     {
                         GD.PushError(
                             $"A0.8 Direct Connect smoke closed: {snapshot.Failure}: {snapshot.Detail}");
@@ -244,7 +249,7 @@ public partial class ClientHost
             GD.PushError($"A0.8 remote client failure: {exception}");
             FailSession(BoundedShellMessage(
                 $"Direct Connect failed safely: {exception.Message}"));
-            if (IsRemoteSmoke())
+            if (IsAutomatedRemoteSmoke())
             {
                 GetTree().Quit(1);
             }
@@ -602,7 +607,7 @@ public partial class ClientHost
             HudLayer,
             EffectiveSettings,
             _allowInsecurePrivateContent,
-            IsRemoteSmoke());
+            IsAutomatedRemoteSmoke());
         WorldRoot.AddChild(playable);
         _remotePlayable = playable;
     }
@@ -727,6 +732,12 @@ public partial class ClientHost
     private static bool IsRemoteSmoke() => OS.GetCmdlineUserArgs().Contains(
         "--a0-8-smoke", StringComparer.Ordinal);
 
+    private static bool IsF07LifecycleSmoke() => OS.GetCmdlineUserArgs().Contains(
+        "--f0-7-smoke", StringComparer.Ordinal);
+
+    private static bool IsAutomatedRemoteSmoke() =>
+        IsRemoteSmoke() || IsF07LifecycleSmoke();
+
     private static int RemoteSmokeExpectedActors()
     {
         string? value = ReadArgument("--m0-0-expect-actors=");
@@ -800,5 +811,190 @@ public partial class ClientHost
         return string.Join(':', Enumerable.Range(0, 32)
             .Select(index => fingerprint.Substring(index * 2, 2)));
     }
+
+#if ULTRASIM_COMPLETE
+    private readonly record struct F07RemoteLifetime(
+        string Realm,
+        ulong ApplicationSessionEpoch,
+        ulong ServerGenerationId,
+        bool RememberedProfile,
+        ClientControlGrammar ControlGrammar,
+        ClientCameraProfile CameraProfile,
+        string CatalogFingerprint,
+        RemoteConceptDemoLifecycleResidueSnapshot Residue);
+
+    private async void RunF07MixedSessionLifecycleSmoke()
+    {
+        GodotClientSessionBoundarySnapshot baseline = CaptureSessionBoundary();
+        try
+        {
+            const string localOneName = "F0.7 Local One";
+            LocalCabinPresentationSnapshot localOne = StartF07LocalSession(
+                localOneName, CabinHumanBody.XBot);
+            LocalCabinLifecycleResidueSnapshot localOneResidue =
+                PrepareF07LocalRetirement(localOneName, CabinHumanBody.XBot);
+            await RetireF07ToCleanMenu(baseline, "first local");
+
+            const string localTwoName = "F0.7 Local Two";
+            LocalCabinPresentationSnapshot localTwo = StartF07LocalSession(
+                localTwoName, CabinHumanBody.YBot);
+            LocalCabinLifecycleResidueSnapshot localTwoResidue =
+                PrepareF07LocalRetirement(localTwoName, CabinHumanBody.YBot);
+            if (localTwo.ApplicationSessionEpoch == localOne.ApplicationSessionEpoch ||
+                localTwo.ControlSessionEpoch == localOne.ControlSessionEpoch ||
+                localTwo.ContentGeneration == localOne.ContentGeneration)
+                throw new InvalidOperationException(
+                    "Repeated local entry reused retired application/control/content lineage.");
+            await RetireF07ToCleanMenu(baseline, "second local");
+
+            F07RemoteLifetime remoteA = await EnterF07Remote(
+                ReadRequiredF07Argument("--f0-7-a-endpoint="),
+                ReadRequiredF07Argument("--f0-7-a-fingerprint="),
+                "F0.7 Remote A",
+                GameGuestBody.HumanFemale);
+            if (remoteA.RememberedProfile)
+                throw new InvalidOperationException(
+                    "The first visit to F0.7 realm A unexpectedly reused a profile decision.");
+            await RetireF07ToCleanMenu(baseline, "remote realm A");
+
+            F07RemoteLifetime remoteB = await EnterF07Remote(
+                ReadRequiredF07Argument("--f0-7-b-endpoint="),
+                ReadRequiredF07Argument("--f0-7-b-fingerprint="),
+                "F0.7 Remote B",
+                GameGuestBody.HumanMale);
+            if (remoteB.RememberedProfile || remoteB.Realm == remoteA.Realm ||
+                remoteB.ApplicationSessionEpoch == remoteA.ApplicationSessionEpoch)
+                throw new InvalidOperationException(
+                    "The second deployment did not establish independent realm/session lineage.");
+            await RetireF07ToCleanMenu(baseline, "remote realm B");
+
+            F07RemoteLifetime remoteAReconnect = await EnterF07Remote(
+                ReadRequiredF07Argument("--f0-7-a-endpoint="),
+                ReadRequiredF07Argument("--f0-7-a-fingerprint="),
+                "F0.7 Remote A Reconnect",
+                GameGuestBody.HumanFemale);
+            if (!remoteAReconnect.RememberedProfile ||
+                remoteAReconnect.Realm != remoteA.Realm ||
+                remoteAReconnect.ApplicationSessionEpoch == remoteA.ApplicationSessionEpoch ||
+                remoteAReconnect.ServerGenerationId != remoteA.ServerGenerationId ||
+                remoteAReconnect.CatalogFingerprint != remoteA.CatalogFingerprint)
+                throw new InvalidOperationException(
+                    "Returning to realm A did not retain durable identity/content while creating " +
+                    "a fresh application-session lifetime.");
+            await RetireF07ToCleanMenu(baseline, "remote realm A reconnect");
+
+            const string finalLocalName = "F0.7 Final Local";
+            LocalCabinPresentationSnapshot finalLocal = StartF07LocalSession(
+                finalLocalName, CabinHumanBody.XBot);
+            if (finalLocal.ApplicationSessionEpoch == localOne.ApplicationSessionEpoch ||
+                finalLocal.ApplicationSessionEpoch == localTwo.ApplicationSessionEpoch ||
+                finalLocal.ControlSessionEpoch == localOne.ControlSessionEpoch ||
+                finalLocal.ControlSessionEpoch == localTwo.ControlSessionEpoch ||
+                finalLocal.ContentGeneration == localOne.ContentGeneration ||
+                finalLocal.ContentGeneration == localTwo.ContentGeneration ||
+                finalLocal.ControlGrammar != baseline.ControlGrammar ||
+                finalLocal.CameraProfile != baseline.CameraProfile)
+                throw new InvalidOperationException(
+                    "The final local session retained prior local or realm-scoped client state.");
+            LocalCabinLifecycleResidueSnapshot finalLocalResidue =
+                PrepareF07LocalRetirement(finalLocalName, CabinHumanBody.XBot);
+            await RetireF07ToCleanMenu(baseline, "final local");
+
+            GD.Print(
+                "F0.7 MIXED SESSION LIFECYCLE PASS " +
+                $"local_epochs={localOne.ApplicationSessionEpoch}/" +
+                $"{localTwo.ApplicationSessionEpoch}/{finalLocal.ApplicationSessionEpoch} " +
+                $"realms={remoteA.Realm}/{remoteB.Realm}/{remoteAReconnect.Realm} " +
+                $"remote_epochs={remoteA.ApplicationSessionEpoch}/" +
+                $"{remoteB.ApplicationSessionEpoch}/{remoteAReconnect.ApplicationSessionEpoch} " +
+                $"profile_reuse={remoteA.RememberedProfile}/" +
+                $"{remoteB.RememberedProfile}/{remoteAReconnect.RememberedProfile} " +
+                $"local_surfaces={localOneResidue.OpenUiViews}/" +
+                $"{localTwoResidue.OpenUiViews}/{finalLocalResidue.OpenUiViews} " +
+                $"remote_surfaces={remoteA.Residue.OpenUiViews}/" +
+                $"{remoteB.Residue.OpenUiViews}/{remoteAReconnect.Residue.OpenUiViews} " +
+                "boundaries=clean");
+            GetTree().Quit(0);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            GD.PushError($"F0.7 mixed-session lifecycle failed: {exception}");
+            RetireCurrentSession();
+            ReturnToMainMenu("F0.7 lifecycle failed safely.");
+            GetTree().Quit(1);
+        }
+    }
+
+    private async Task<F07RemoteLifetime> EnterF07Remote(
+        string endpoint,
+        string fingerprint,
+        string displayName,
+        GameGuestBody body)
+    {
+        BeginCapability(ClientCapability.Multiplayer);
+        _allowInsecurePrivateContent = true;
+        _remoteGuestName = displayName;
+        _remoteGuestBody = body;
+        _remoteGuestError = null;
+        SubmitDirectConnect(endpoint, fingerprint);
+
+        ulong deadline = checked(Time.GetTicksMsec() + 90_000UL);
+        while (Time.GetTicksMsec() < deadline)
+        {
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (_remoteSession?.State is ClientDirectConnectState.Failed or
+                    ClientDirectConnectState.Closed)
+            {
+                ClientDirectConnectSnapshot failed = _remoteSession.GetSnapshot();
+                throw new InvalidOperationException(
+                    $"F0.7 Direct Connect failed: {failed.Failure}: {failed.Detail}");
+            }
+            if (_remotePlayable is not { } playable) continue;
+            RemoteConceptDemoClientSnapshot snapshot = playable.GetSnapshot();
+            if (!snapshot.SmokeComplete) continue;
+            if (_remoteSession is null || _remoteProfile is null ||
+                ShellSnapshot().Screen != ClientShellScreen.InSession ||
+                !CaptureSessionBoundary().ServerProfileActive)
+                throw new InvalidOperationException(
+                    "The F0.7 remote session completed without an active shell/profile lifetime.");
+            ClientDirectConnectSnapshot connected = _remoteSession.GetSnapshot();
+            RemoteClientProfileSnapshot profile = _remoteProfile.GetSnapshot();
+            RemoteConceptDemoLifecycleResidueSnapshot residue =
+                playable.PrepareF07RetirementCanary();
+            return new F07RemoteLifetime(
+                connected.Realm.ToString(),
+                connected.ApplicationSessionEpoch,
+                snapshot.Session.Playable.ServerGenerationId,
+                profile.RememberedDecision,
+                EffectiveSettings.ControlGrammar,
+                EffectiveSettings.CameraProfile,
+                snapshot.Session.Content.ResolvedCatalogFingerprint.ToString(),
+                residue);
+        }
+        throw new TimeoutException(
+            $"The F0.7 remote session '{displayName}' did not converge in 90 seconds.");
+    }
+
+    private async Task RetireF07ToCleanMenu(
+        GodotClientSessionBoundarySnapshot baseline,
+        string stage)
+    {
+        RetireCurrentSession();
+        ReturnToMainMenu($"F0.7 retired {stage}.");
+        ulong deadline = checked(Time.GetTicksMsec() + 30_000UL);
+        while (_remoteSession is not null && Time.GetTicksMsec() < deadline)
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        if (_remoteSession is not null)
+            throw new TimeoutException($"The {stage} transport did not retire in 30 seconds.");
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        RequireCleanSessionBoundary(in baseline, stage);
+    }
+
+    private static string ReadRequiredF07Argument(string prefix) =>
+        ReadArgument(prefix) is { Length: > 0 } value
+            ? value
+            : throw new InvalidOperationException($"F0.7 requires '{prefix}<value>'.");
+#endif
 }
 #endif

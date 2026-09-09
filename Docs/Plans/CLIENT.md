@@ -15,7 +15,9 @@ read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a
 actor motion/equipment/action presentation semantics and a safe bundled X/Y Idle/Walk/Jump canary.
 D0.7b now closes bounded passive actor-GLB admission, applied-catalog resolution, lazy native
 resource realization, and real server Add/Replace X/Y presentation in the exported Contentless
-Online product. F0.7 and F0.8 remain open.
+Online product. F0.7 now closes the explicit same-process local/remote/multi-realm lifecycle
+campaign, including exact retirement of UI, actors, Chat, chunks, native content, server profile,
+and input focus. F0.8 is next.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2082,8 +2084,8 @@ disconnect/reconnect row retirement, local single-player parity, marker fanout, 
 endpoint material, and the exported Contentless Online monitor `.usui`/native participant-list path.
 Opening the monitor does not mutate simulation or owner state.
 
-Broad diagnostic capture, tabbed subsystem telemetry, process/network-rate detail, admin controls,
-and the explicit mixed-session lifecycle torture pass remain open.
+Broad diagnostic capture, tabbed subsystem telemetry, process/network-rate detail, and admin
+controls remain open. The separate F0.7 mixed-session lifecycle torture pass is now closed.
 
 ---
 
@@ -2181,10 +2183,9 @@ bounded primitive action cues remain the correct fallback for the absent clips.
 
 ## F0.7 — Settings/debug/lifecycle hardening
 
-**Status: OPEN; partially earned hardening is already accepted.** Settings focus, Chat focus,
-Render Distance projection replacement, export cleanup, client-profile persistence, content-cache
-restart, controlled-actor lifetime, and repeated local session entry have each closed concrete
-bugs. They do not replace an explicit mixed-session lifecycle closure.
+**Status: CLOSED.** Earlier settings focus, Chat focus, Render Distance projection replacement,
+export cleanup, client-profile persistence, content-cache restart, controlled-actor lifetime, and
+repeated local entry fixes are now joined by an explicit native same-process lifecycle gate.
 
 Implement:
 
@@ -2200,6 +2201,39 @@ Implement:
 disconnect -> another remote realm -> menu -> local leaves no stale world, panels, actors,
 nameplates, overhead Chat, render chunks, control profile, trust candidate, content application
 session, or input focus across boundaries.
+
+The permanent Complete-client gate runs this exact sequence:
+
+```text
+local X
+    -> retire
+local Y
+    -> retire
+remote realm A
+    -> retire
+remote realm B
+    -> retire
+remote realm A reconnect
+    -> retire
+local X
+    -> retire
+```
+
+Before each retirement it deliberately leaves a real UI view open, multiple actors/nameplates,
+overhead Chat, rendered chunks, and focused Chat input. Remote lifetimes additionally retain lazy
+native actor resources. Every return to the main menu must reproduce the exact persistent Godot
+root shape captured before the first session, clear the active server profile, restore global
+controls/camera/render distance, release the Direct Connect transport and presentation consumers,
+and contain no local or remote session node.
+
+The two remote deployments have distinct deployment keys, `ApplicationRealmId` values, and
+realm-bound catalog fingerprints, but serve the same World/actor/profile payload contract. First
+entry into A and B each creates an independent decision; returning to A reuses its one durable exact
+current profile decision while establishing a fresh
+application-session epoch. The same-process test caught and repaired an automatic-consent path that
+wrote the decision file without updating the live decision document. Durable trust, content bytes,
+and exact profile consent are intentionally retained; transient session/application/presentation
+state is not.
 
 ---
 
@@ -2611,9 +2645,9 @@ D0.7a shared actor motion/equipment/action + bundled X/Y animation             C
         |
 D0.7b runtime content-backed model/animation realization                       CLOSED
         |
-F0.7  explicit settings/debug/mixed-session lifecycle closure             NEXT
+F0.7  explicit settings/debug/mixed-session lifecycle closure             CLOSED
         |
-F0.8  final local/remote/complete/contentless + different-feel matrix      OPEN
+F0.8  final local/remote/complete/contentless + different-feel matrix      NEXT
         |
 pre-freeze campaign: bots/bandwidth/tuning/ObjectScript/human testing
         |
