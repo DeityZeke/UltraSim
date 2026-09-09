@@ -1,8 +1,10 @@
 using Godot;
+using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.ECS;
 using UltraSim.Game.Admission;
+using UltraSim.Game.Application;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Input;
 using UltraSim.Game.World;
@@ -20,6 +22,7 @@ public partial class T010PlayableWorldAcceptance : Node3D
             RunRemotePublicActorAcceptance();
             RunControlledActorOwnerPoseAcceptance();
             RunBakedBodyAnimationAcceptance();
+            RunContentBackedBodyRealizationAcceptance();
             RunTallPublicObjectPickingAcceptance();
             RunSystemChatBannerAcceptance();
             GD.Print("T0.10 GODOT PLAYABLE WORLD ACCEPTANCE PASS");
@@ -109,6 +112,205 @@ public partial class T010PlayableWorldAcceptance : Node3D
             "The baked X body did not consume authoritative position change as Walk presentation.");
         GD.Print("EVIDENCE D0.7a baked_bodies=2 bones_each=65 clips=Idle,Walk,Jump " +
             "animated=2 primitive=0 main_hand_socket=true walk_transition=true");
+    }
+
+    private void RunContentBackedBodyRealizationAcceptance()
+    {
+        byte[] xBytes = File.ReadAllBytes(ProjectSettings.GlobalizePath(
+            "res://Assets/Avatars/x_bot/x_bot_animated.glb"));
+        byte[] yBytes = File.ReadAllBytes(ProjectSettings.GlobalizePath(
+            "res://Assets/Avatars/y_bot/y_bot_animated.glb"));
+        ActorContentFixture fixture = CreateActorContentFixture(xBytes, yBytes);
+        var realm = new ApplicationRealmId(0xD07B, 1);
+        string cacheRoot = Path.Combine(Path.GetTempPath(),
+            $"ultrasim-godot-actor-{System.Environment.ProcessId}-{Guid.NewGuid():N}");
+        try
+        {
+            Expect(ContentCache.TryOpen(
+                    cacheRoot, out ContentCache? cache, out ContentCacheError openError),
+                $"The actor-content native cache could not open: {openError}.");
+            using (cache)
+            {
+                Expect(cache!.TryInstallPackage(
+                        realm, fixture.Manifest, fixture.Payloads, out _,
+                        out ContentCacheError installError),
+                    $"The actor-content native package could not install: {installError}.");
+                Expect(ContentActivationPlan.TryCreate(
+                        realm, new ContentActivationId(0xD07B, 2),
+                        ContentBaseCatalog.Empty.Fingerprint,
+                        [new ContentActivationPackage(
+                            fixture.Manifest.PackageId, fixture.Manifest.ManifestHash,
+                            ContentRequirementPolicy.Required)],
+                        out ContentActivationPlan? plan, out string? planError),
+                    $"The actor-content native plan was invalid: {planError}.");
+                Expect(cache.TryPublishCatalog(
+                        ContentBaseCatalog.Empty, plan!, false,
+                        out ContentCatalogLease? catalogLease,
+                        out ContentCacheError publishError),
+                    $"The actor-content native catalog could not publish: {publishError}.");
+                using (catalogLease)
+                {
+                    var source = new SwitchableActorContentSource(catalogLease!);
+                    using var visuals = new GodotContentActorVisualResolver(source);
+                    ClientActorDefinitionCatalog definitions = ClientActorDefinitionCatalog.ConceptDemo;
+                    Expect(definitions.TryGet(
+                            GameWorldPublicPrefabIds.Character,
+                            out ClientActorDefinition xDefinition),
+                        "The content-backed actor definition was unavailable.");
+                    Expect(WorldPosition.TryFromGlobalMillimeters(
+                            4_000, 1_000, 5_000, out WorldPosition position),
+                        "The content-backed actor position was invalid.");
+                    var actorId = new WorldPublicEntityId(901, 4);
+                    var actor = new ClientActorPresentationRecord(
+                        actorId, GameWorldPublicPrefabIds.Character, position, WorldYaw.Zero,
+                        xDefinition, "Content Alice", true,
+                        GameWorldPublicPrefabIds.IronSword,
+                        ClientPublicActorVerticalPhase.Grounded);
+                    using var presenter = new GodotActorPresenter(this, definitions, 2, visuals);
+
+                    presenter.Apply(
+                        [new ClientActorPresentationChange(
+                            ClientActorPresentationChangeKind.Added, actorId, actor)],
+                        position, 1_000);
+                    Expect(presenter.GetSnapshot() is
+                        { ActiveActors: 1, PrimitiveFallbackActors: 1, AnimatedActors: 0,
+                          EquippedMainHands: 1 },
+                        "Unavailable actor content did not degrade to the primitive substrate.");
+                    Expect(presenter.TryGetActorRoot(actorId, out Node3D? originalRoot) &&
+                        originalRoot is not null,
+                        "The primitive actor root was not created.");
+                    ulong rootLifetime = originalRoot!.GetInstanceId();
+                    var speech = new ClientChatOccurrence(
+                        71, 1, 1, 1, 100,
+                        ClientChatOccurrenceKind.SpatialSpeech, ClientChatSpeechMode.Say,
+                        actorId, "Content Alice", "Still the same actor.");
+                    Expect(presenter.TryPresentOverhead(in speech, 71, 10_000) &&
+                        presenter.TryPresentPrimaryAction(actorId, 1, 1_200),
+                        "The primitive actor's retained presentation state was not established.");
+                    presenter.UpdateOriginAndLifetimes(position, 1_200);
+
+                    source.Enabled = true;
+                    int replacements = presenter.RefreshResolvedVisuals();
+                    GodotContentActorVisualResolverSnapshot resourceSnapshot = visuals.GetSnapshot();
+                    Expect(replacements == 1,
+                        "The newly available exact actor content did not replace the primitive visual: " +
+                        resourceSnapshot.LastFailure);
+                    Expect(presenter.TryGetActorRoot(actorId, out Node3D? upgradedRoot) &&
+                        upgradedRoot is not null && upgradedRoot.GetInstanceId() == rootLifetime,
+                        "Native actor realization replaced the authoritative actor presentation lifetime.");
+                    Node3D retainedRoot = upgradedRoot!;
+                    Expect(presenter.GetSnapshot() is
+                        { ActiveActors: 1, PrimitiveFallbackActors: 0, AnimatedActors: 1,
+                          EquippedMainHands: 1, VisibleOverheadLabels: 1, VisualReplacements: 1 },
+                        "Native actor realization did not retain actor-local presentation state.");
+                    Expect(presenter.TryGetActorDiagnostics(
+                            actorId, out GodotActorPresentationDiagnostics actorDiagnostics) &&
+                        actorDiagnostics.HasAnimationPlayer &&
+                        !actorDiagnostics.UsesPrimitiveFallback &&
+                        actorDiagnostics.PrimaryCueActive,
+                        "The upgraded actor did not retain animation/action presentation state.");
+                    Expect(FindNamedDescendant(retainedRoot, "Nameplate") is not null &&
+                        FindNamedDescendant(retainedRoot, "OverheadSpeech") is not null &&
+                        FindNamedDescendant(retainedRoot, "MainHandSocket") is not null,
+                        "Visual replacement discarded an actor-owned anchor or label.");
+                    Expect(resourceSnapshot is
+                        { RealizedResources: 1, RealizationAttempts: 2,
+                          RealizationFailures: 1, InstancesCreated: 1 } &&
+                        resourceSnapshot.RetainedArtifactBytes == xBytes.Length,
+                        "The lazy actor native-resource cache did not retain exactly one demanded asset.");
+                    Expect(visuals.TryGetDiagnostics(
+                            ClientActorVisualKind.HumanX,
+                            out GodotContentActorResourceDiagnostics resource) &&
+                        resource.OwnerPackage == fixture.Manifest.PackageId &&
+                        resource.CatalogGeneration == catalogLease!.Catalog.Generation &&
+                        resource.Artifact.Bones == 65 &&
+                        resource.Artifact.SemanticClips.HasFlag(
+                            ActorPresentationSemanticClips.RequiredV1),
+                        "The realized native actor did not retain its applied-catalog identity/profile.");
+
+                    Expect(definitions.TryGet(
+                            GameWorldPublicPrefabIds.CharacterMale,
+                            out ClientActorDefinition yDefinition),
+                        "The content-backed Y actor definition was unavailable.");
+                    Node3D? yVisual = visuals.Instantiate(in yDefinition);
+                    Expect(yVisual is not null &&
+                        FindDescendant<Skeleton3D>(yVisual) is { } ySkeleton &&
+                        ySkeleton.GetBoneCount() == 65 &&
+                        FindDescendant<AnimationPlayer>(yVisual) is { } yAnimations &&
+                        HasAnimation(yAnimations, "Idle") && HasAnimation(yAnimations, "Walk") &&
+                        HasAnimation(yAnimations, "Jump"),
+                        "The exact Y actor artifact did not realize through the same native cache.");
+                    yVisual!.Free();
+                    GodotContentActorVisualResolverSnapshot completeResources = visuals.GetSnapshot();
+                    Expect(completeResources is
+                        { RealizedResources: 2, RealizationAttempts: 3,
+                          RealizationFailures: 1, InstancesCreated: 2,
+                          LastFailure: GodotActorNativeRealizationError.None } &&
+                        completeResources.RetainedArtifactBytes == xBytes.Length + yBytes.Length,
+                        "The content-backed X/Y native resource set was not exact and bounded.");
+
+                    GD.Print(
+                        $"EVIDENCE D0.7b actor_root_preserved=true primitive_to_content=true " +
+                        $"lazy_first={resourceSnapshot.RealizedResources} " +
+                        $"xy_resources={completeResources.RealizedResources} " +
+                        $"retained_bytes={completeResources.RetainedArtifactBytes} " +
+                        "bones_each=65 clips=Idle,Walk,Jump anchors_retained=true");
+                }
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+        }
+    }
+
+    private static ActorContentFixture CreateActorContentFixture(byte[] xBytes, byte[] yBytes)
+    {
+        string[] logicalIds =
+        [
+            ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+            ConceptDemoActorPresentationProfile.HumanYDefinitionId,
+        ];
+        string[] pathValues = ["actors/human-x.glb", "actors/human-y.glb"];
+        byte[][] bytes = [xBytes, yBytes];
+        var files = new ContentFileDescriptor[2];
+        var definitions = new ContentDefinitionDescriptor[2];
+        var payloads = new ContentFilePayload[2];
+        for (int index = 0; index < 2; index++)
+        {
+            Expect(ContentFilePath.TryCreate(pathValues[index], out ContentFilePath path),
+                $"The native actor fixture path {index} was invalid.");
+            Expect(ContentFileDescriptor.TryCreate(
+                    path, ContentFileKind.ActorGltfBinary, bytes[index].Length,
+                    ContentHash.Compute(bytes[index]), default, out files[index]),
+                $"The native actor fixture file {index} was invalid.");
+            Expect(LogicalContentId.TryCreate(
+                    logicalIds[index], out LogicalContentId logicalId),
+                $"The native actor fixture logical ID {index} was invalid.");
+            Expect(ContentDefinitionDescriptor.TryCreateFileDefinition(
+                    logicalId, ContentDefinitionKind.ActorPresentation,
+                    ContentDefinitionOperation.Add, path,
+                    out ContentDefinitionDescriptor? definition),
+                $"The native actor fixture descriptor {index} was invalid.");
+            definitions[index] = definition!;
+            payloads[index] = new ContentFilePayload(path, bytes[index]);
+        }
+        Expect(ContentPackageId.TryCreate(
+                "test.native-actors", out ContentPackageId packageId),
+            "The native actor fixture identity was invalid.");
+        Expect(ContentNamespaceId.TryCreate(
+                "actors", out ContentNamespaceId contentNamespace),
+            "The native actor fixture namespace was invalid.");
+        Expect(ContentPackageManifest.TryCreate(
+                1, 1, packageId, contentNamespace,
+                "Native actor realization fixture", "1.0.0",
+                ContentTrustClass.ServerAuthorizedPassive, files, definitions,
+                out ContentPackageManifest? manifest, out string? manifestError),
+            $"The native actor fixture manifest was invalid: {manifestError}.");
+        Expect(ContentPackageValidator.TryValidatePayloads(
+                manifest!, payloads, out _, out string? payloadError),
+            $"The native actor fixture payload was invalid: {payloadError}.");
+        return new ActorContentFixture(manifest!, payloads);
     }
 
     private static bool HasAnimation(AnimationPlayer player, string expected)
@@ -952,6 +1154,35 @@ public partial class T010PlayableWorldAcceptance : Node3D
                 _ => null,
             };
     }
+
+    private sealed class SwitchableActorContentSource : IActorPresentationContentSource
+    {
+        private readonly ContentCatalogLease _catalog;
+
+        internal SwitchableActorContentSource(ContentCatalogLease catalog) =>
+            _catalog = catalog;
+
+        internal bool Enabled { get; set; }
+
+        public bool TryResolveActorPresentation(
+            LogicalContentId definitionId,
+            ActorPresentationResolutionRequirements requirements,
+            out ActorPresentationContentLease? lease,
+            out ContentActorPresentationResolutionError error,
+            ActorPresentationArtifactLimits limits = default)
+        {
+            if (Enabled)
+                return ContentActorPresentationResolver.TryResolve(
+                    _catalog, definitionId, requirements, out lease, out error, limits);
+            lease = null;
+            error = ContentActorPresentationResolutionError.DefinitionNotFound;
+            return false;
+        }
+    }
+
+    private sealed record ActorContentFixture(
+        ContentPackageManifest Manifest,
+        ContentFilePayload[] Payloads);
 
     private static int Drain(GodotWorldRenderer renderer)
     {

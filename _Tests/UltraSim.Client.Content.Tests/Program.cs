@@ -1,5 +1,8 @@
 using System.Buffers.Binary;
 using System.Net;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using UltraSim.Client.Content;
 using UltraSim.Game.Application;
 using UltraSim.Game.World;
@@ -34,6 +37,7 @@ var tests = new (string Name, Action Body)[]
     ("ResolvedPrivateDnsTargetIsRejectedAtConnectTime", ResolvedPrivateDnsTargetIsRejectedAtConnectTime),
     ("UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog", UiDefinitionArtifactResolvesOnlyThroughAppliedRealmCatalog),
     ("WorldPackResolvesThroughAppliedCatalogAndWorldBinding", WorldPackResolvesThroughAppliedCatalogAndWorldBinding),
+    ("ActorPresentationGlbIsBoundedPassiveAndCatalogResolved", ActorPresentationGlbIsBoundedPassiveAndCatalogResolved),
 };
 
 foreach ((string name, Action body) in tests)
@@ -282,6 +286,146 @@ static void PassivePayloadsRequireExactBytesAndAllowedEnvelopes()
         ContentTrustClass.ServerAuthorizedPassive, [damagedDescriptor], [damagedDefinition]);
     False(ContentPackageValidator.TryValidatePayloads(damagedManifest,
         [new ContentFilePayload(worldPayload.Path, damagedWorld)], out _, out _));
+}
+
+static void ActorPresentationGlbIsBoundedPassiveAndCatalogResolved()
+{
+    byte[] x = Embedded("UltraSim.TestAssets.ActorX.glb");
+    byte[] y = Embedded("UltraSim.TestAssets.ActorY.glb");
+    True(ActorPresentationArtifact.TryInspect(
+        x, out ActorPresentationArtifactInfo xInfo, out ActorPresentationArtifactError xError),
+        xError.ToString());
+    True(ActorPresentationArtifact.TryInspect(
+        y, out ActorPresentationArtifactInfo yInfo, out ActorPresentationArtifactError yError),
+        yError.ToString());
+    Equal(65, xInfo.Bones);
+    Equal(65, yInfo.Bones);
+    Equal(xInfo.OrderedSkeletonFingerprint, yInfo.OrderedSkeletonFingerprint);
+    Equal(ActorPresentationSemanticClips.RequiredV1,
+        xInfo.SemanticClips & ActorPresentationSemanticClips.RequiredV1);
+    True(xInfo.MainHandBone.EndsWith("RightHand", StringComparison.Ordinal));
+    True(xInfo.AnimationTracks > 0 && xInfo.AnimationKeys > 0);
+    True(xInfo.MeshVertices > 0 && xInfo.MeshIndices > xInfo.MeshVertices);
+
+    var tooSmall = ActorPresentationArtifactLimits.Default with
+    {
+        MaximumArtifactBytes = x.Length - 1,
+    };
+    False(ActorPresentationArtifact.TryInspect(x, out _, out ActorPresentationArtifactError bounded, tooSmall));
+    Equal(ActorPresentationArtifactError.LimitExceeded, bounded);
+    var tooManyVertices = ActorPresentationArtifactLimits.Default with
+    {
+        MaximumMeshVertices = xInfo.MeshVertices - 1,
+    };
+    False(ActorPresentationArtifact.TryInspect(
+        x, out _, out ActorPresentationArtifactError vertexBound, tooManyVertices));
+    Equal(ActorPresentationArtifactError.InvalidReference, vertexBound);
+    var tooManyIndices = ActorPresentationArtifactLimits.Default with
+    {
+        MaximumMeshIndices = xInfo.MeshIndices - 1,
+    };
+    False(ActorPresentationArtifact.TryInspect(
+        x, out _, out ActorPresentationArtifactError indexBound, tooManyIndices));
+    Equal(ActorPresentationArtifactError.InvalidReference, indexBound);
+    byte[] damaged = x.ToArray();
+    BinaryPrimitives.WriteUInt32LittleEndian(damaged.AsSpan(8), checked((uint)(damaged.Length - 4)));
+    False(ActorPresentationArtifact.TryInspect(
+        damaged, out _, out ActorPresentationArtifactError container));
+    Equal(ActorPresentationArtifactError.InvalidContainer, container);
+    byte[] external = RewriteActorJson(x, static root =>
+        root["buffers"]!.AsArray()[0]!.AsObject()["uri"] = "https://invalid.example/body.bin");
+    False(ActorPresentationArtifact.TryInspect(
+        external, out _, out ActorPresentationArtifactError externalReference));
+    Equal(ActorPresentationArtifactError.UnsupportedFeature, externalReference);
+    byte[] cyclic = RewriteActorJson(x, static root =>
+        root["nodes"]!.AsArray()[0]!.AsObject()["children"] = new JsonArray(0));
+    False(ActorPresentationArtifact.TryInspect(
+        cyclic, out _, out ActorPresentationArtifactError cyclicGraph));
+    Equal(ActorPresentationArtifactError.InvalidReference, cyclicGraph);
+
+    PackageFixture builtInX = ActorPackage(
+        "ultrasim.actor.default-x", "actors", ContentTrustClass.BuiltIn,
+        "actors:human/x", ContentDefinitionOperation.Add,
+        "actors/human-x.glb", x);
+    PackageFixture serverY = ActorPackage(
+        "server.actor.add-y", "actors-server", ContentTrustClass.ServerAuthorizedPassive,
+        "actors-server:human/y", ContentDefinitionOperation.Add,
+        "actors/human-y.glb", y);
+    PackageFixture replaceX = ActorPackage(
+        "server.actor.replace-x", "actors-server", ContentTrustClass.ServerAuthorizedPassive,
+        "actors:human/x", ContentDefinitionOperation.Replace,
+        "actors/replacement-x.glb", x);
+    ContentBaseCatalog baseCatalog = BaseCatalog(builtInX);
+    ContentActivationPlan plan = Plan(
+        new ApplicationRealmId(0xD07B, 1), new ContentActivationId(0xD07B, 2),
+        baseCatalog.Fingerprint,
+        [Required(serverY.Manifest), Required(replaceX.Manifest)]);
+    True(ContentCatalogResolver.TryResolve(
+        baseCatalog, plan, [Verified(replaceX), Verified(serverY)],
+        out ResolvedContentCatalog? catalog, out ContentCatalogResolutionError resolution),
+        resolution.ToString());
+    True(catalog!.TryGet(Logical("actors:human/x"), out ResolvedContentEntry? resolvedX));
+    True(catalog.TryGet(Logical("actors-server:human/y"), out ResolvedContentEntry? resolvedY));
+    Equal(replaceX.Manifest.PackageId, resolvedX!.OwnerPackageId);
+    Equal(serverY.Manifest.PackageId, resolvedY!.OwnerPackageId);
+    Equal(ContentDefinitionKind.ActorPresentation, resolvedX.Kind);
+
+    string cacheRoot = Path.Combine(Path.GetTempPath(),
+        $"ultrasim-actor-content-{Environment.ProcessId}-{Guid.NewGuid():N}");
+    try
+    {
+        True(ContentCache.TryOpen(cacheRoot, out ContentCache? cache, out ContentCacheError openError),
+            openError.ToString());
+        using (cache)
+        {
+            True(cache!.TryInstallPackage(
+                plan.Realm, serverY.Manifest, serverY.Payloads, out _, out ContentCacheError yInstall),
+                yInstall.ToString());
+            True(cache.TryInstallPackage(
+                plan.Realm, replaceX.Manifest, replaceX.Payloads, out _, out ContentCacheError xInstall),
+                xInstall.ToString());
+            True(cache.TryPublishCatalog(
+                baseCatalog, plan, false, out ContentCatalogLease? liveCatalog,
+                out ContentCacheError publishError), publishError.ToString());
+            using (liveCatalog)
+            {
+                var requirements = new ActorPresentationResolutionRequirements(
+                    65, xInfo.OrderedSkeletonFingerprint,
+                    ActorPresentationSemanticClips.RequiredV1);
+                True(ContentActorPresentationResolver.TryResolve(
+                    liveCatalog!, Logical("actors:human/x"), requirements,
+                    out ActorPresentationContentLease? xLease,
+                    out ContentActorPresentationResolutionError xResolution), xResolution.ToString());
+                True(ContentActorPresentationResolver.TryResolve(
+                    liveCatalog!, Logical("actors-server:human/y"), requirements,
+                    out ActorPresentationContentLease? yLease,
+                    out ContentActorPresentationResolutionError yResolution), yResolution.ToString());
+                using (xLease)
+                using (yLease)
+                {
+                    Equal(replaceX.Manifest.PackageId, xLease!.OwnerPackage);
+                    Equal(serverY.Manifest.PackageId, yLease!.OwnerPackage);
+                    Equal(xInfo.OrderedSkeletonFingerprint,
+                        xLease.Info.OrderedSkeletonFingerprint);
+                    Equal(y.Length, yLease.Bytes.Length);
+                    True(xLease.CatalogGeneration == yLease.CatalogGeneration);
+                }
+
+                var wrong = requirements with
+                {
+                    OrderedSkeletonFingerprint = ContentHash.Compute("wrong-skeleton"u8),
+                };
+                False(ContentActorPresentationResolver.TryResolve(
+                    liveCatalog!, Logical("actors:human/x"), wrong, out _,
+                    out ContentActorPresentationResolutionError mismatch));
+                Equal(ContentActorPresentationResolutionError.SkeletonProfileMismatch, mismatch);
+            }
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(cacheRoot)) Directory.Delete(cacheRoot, recursive: true);
+    }
 }
 
 static void ActivationIdentityPreservesAuthorityOrderNotByteSource()
@@ -1311,6 +1455,64 @@ static ContentPackageManifest Manifest(
     True(ContentPackageManifest.TryCreate(1, 1, Package(package), Namespace(contentNamespace),
         package, "1.0.0", trust, files, definitions, out ContentPackageManifest? manifest, out string? error), error);
     return manifest!;
+}
+
+static PackageFixture ActorPackage(
+    string package,
+    string contentNamespace,
+    ContentTrustClass trust,
+    string logicalId,
+    ContentDefinitionOperation operation,
+    string filePath,
+    byte[] bytes)
+{
+    ContentFilePath path = FilePath(filePath);
+    ContentFileDescriptor file = File(path, ContentFileKind.ActorGltfBinary, bytes);
+    ContentDefinitionDescriptor definition = FileDefinition(
+        logicalId, ContentDefinitionKind.ActorPresentation, operation, filePath);
+    return new PackageFixture(
+        Manifest(package, contentNamespace, trust, [file], [definition]),
+        [new ContentFilePayload(path, bytes)]);
+}
+
+static byte[] Embedded(string name)
+{
+    using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(name) ??
+        throw new InvalidOperationException($"Missing embedded test resource '{name}'.");
+    var bytes = new byte[checked((int)stream.Length)];
+    stream.ReadExactly(bytes);
+    return bytes;
+}
+
+static byte[] RewriteActorJson(byte[] source, Action<JsonObject> mutate)
+{
+    const uint jsonChunk = 0x4E4F_534A;
+    const uint binaryChunk = 0x004E_4942;
+    int jsonLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(12)));
+    int jsonStart = 20;
+    int binaryHeader = checked(jsonStart + jsonLength);
+    int binaryLength = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+        source.AsSpan(binaryHeader)));
+    Equal(binaryChunk, BinaryPrimitives.ReadUInt32LittleEndian(source.AsSpan(binaryHeader + 4)));
+    Equal(source.Length, checked(binaryHeader + 8 + binaryLength));
+    JsonObject root = JsonNode.Parse(source.AsSpan(jsonStart, jsonLength))!.AsObject();
+    mutate(root);
+    byte[] json = JsonSerializer.SerializeToUtf8Bytes(root);
+    int paddedJsonLength = checked((json.Length + 3) & ~3);
+    var result = new byte[checked(12 + 8 + paddedJsonLength + 8 + binaryLength)];
+    BinaryPrimitives.WriteUInt32LittleEndian(result, 0x4654_6C67);
+    BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(4), 2);
+    BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(8), checked((uint)result.Length));
+    BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(12), checked((uint)paddedJsonLength));
+    BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(16), jsonChunk);
+    json.CopyTo(result.AsSpan(20));
+    result.AsSpan(20 + json.Length, paddedJsonLength - json.Length).Fill(0x20);
+    int outputBinaryHeader = 20 + paddedJsonLength;
+    BinaryPrimitives.WriteUInt32LittleEndian(
+        result.AsSpan(outputBinaryHeader), checked((uint)binaryLength));
+    BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(outputBinaryHeader + 4), binaryChunk);
+    source.AsSpan(binaryHeader + 8, binaryLength).CopyTo(result.AsSpan(outputBinaryHeader + 8));
+    return result;
 }
 
 static ContentFileDescriptor File(ContentFilePath path, ContentFileKind kind, byte[] bytes)

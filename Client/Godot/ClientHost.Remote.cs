@@ -106,7 +106,10 @@ public partial class ClientHost
                         $"proofs={playable.Session.Content.ProofsQueued} " +
                         $"ui={playable.OpenUiViews} chat={playable.Session.Chat.OccurrencesApplied} " +
                         $"actors={playable.Actors.ActiveActors} primitiveActors=" +
-                        $"{playable.Actors.PrimitiveFallbackActors} nameplates=" +
+                        $"{playable.Actors.PrimitiveFallbackActors} animatedActors=" +
+                        $"{playable.Actors.AnimatedActors} actorResources=" +
+                        $"{playable.ActorResources.RealizedResources} actorResourceBytes=" +
+                        $"{playable.ActorResources.RetainedArtifactBytes} nameplates=" +
                         $"{playable.Actors.VisibleNameplates} overhead=" +
                         $"{playable.Actors.VisibleOverheadLabels} publicMetadataProofs=" +
                         $"{playable.Session.PublicPresentation.ProofsQueued}");
@@ -675,9 +678,16 @@ public partial class ClientHost
         string expected = ReadArgument("--a0-8-expect=") ?? "cold";
         bool cold = string.Equals(expected, "cold", StringComparison.OrdinalIgnoreCase);
         bool warm = string.Equals(expected, "warm", StringComparison.OrdinalIgnoreCase);
-        if (!cold && !warm || snapshot.RenderedChunks != 9 || snapshot.TerrainTriangles <= 0 ||
+        bool bundledActorContent =
+            ResourceLoader.Exists("res://Assets/Avatars/x_bot/x_bot_animated.glb") ||
+            ResourceLoader.Exists("res://Assets/Avatars/y_bot/y_bot_animated.glb");
+        if (!cold && !warm || bundledActorContent ||
+            snapshot.RenderedChunks != 9 || snapshot.TerrainTriangles <= 0 ||
             snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
-            snapshot.Actors.ActiveActors < 2 || snapshot.Actors.PrimitiveFallbackActors < 2 ||
+            snapshot.Actors.ActiveActors < 2 || snapshot.Actors.PrimitiveFallbackActors < 1 ||
+            snapshot.Actors.AnimatedActors < 1 ||
+            snapshot.ActorResources.RealizedResources < 1 ||
+            snapshot.ActorResources.RealizationFailures != 0 ||
             snapshot.Actors.VisibleNameplates < 2 || snapshot.Actors.VisibleOverheadLabels < 1 ||
             snapshot.Session.PublicPresentation.Applied == 0 ||
             snapshot.Session.PublicPresentation.ProofsQueued == 0 ||

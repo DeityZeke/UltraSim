@@ -130,7 +130,7 @@ public sealed class ContentBaseCatalog
             PendingContentEntry source = ordered[index];
             ContentHash[] references;
             if (source.Definition.Kind is ContentDefinitionKind.Texture or ContentDefinitionKind.Icon or
-                ContentDefinitionKind.WorldPack)
+                ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation)
             {
                 if (source.ResolvedReferences is not null)
                 {

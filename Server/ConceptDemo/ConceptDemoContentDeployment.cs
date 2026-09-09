@@ -13,6 +13,8 @@ namespace UltraSim.Server.ConceptDemo;
 public sealed class ConceptDemoContentDeployment : IDisposable
 {
     private const string ArchiveRoute = "/content/concept-demo.uspkg";
+    private const string ActorArchiveRoute = "/content/concept-demo-actors.uspkg";
+    private const string ActorReplaceArchiveRoute = "/content/concept-demo-actor-replace.uspkg";
     private readonly StaticContentHttpHost _host;
 
     private ConceptDemoContentDeployment(
@@ -91,44 +93,88 @@ public sealed class ConceptDemoContentDeployment : IDisposable
             new ContentFilePayload(uiPath, uiBytes),
             new ContentFilePayload(monitorUiPath, monitorUiBytes),
         ];
+        VerifiedContentPackage bootstrap = ValidatePackage(manifest!, payloads);
+        byte[] actorX = ConceptDemoActorContent.LoadX();
+        byte[] actorY = ConceptDemoActorContent.LoadY();
+        _ = ConceptDemoActorContent.RequireConceptDemoProfile(actorY);
+        byte[] actorXReplacement = ConceptDemoActorContent.CreateXReplacement(actorX);
+        ContentPackageFixture actors = CreateActorPackage(
+            "server.concept-demo.actors", "actors",
+            [
+                new ActorPresentationPayload(
+                    ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+                    ContentDefinitionOperation.Add,
+                    "actors/human-x.glb", actorX),
+                new ActorPresentationPayload(
+                    ConceptDemoActorPresentationProfile.HumanYDefinitionId,
+                    ContentDefinitionOperation.Add,
+                    "actors/human-y.glb", actorY),
+            ]);
+        ContentPackageFixture actorReplacement = CreateActorPackage(
+            "server.concept-demo.actor-replace-x", "actor-replace",
+            [new ActorPresentationPayload(
+                ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+                ContentDefinitionOperation.Replace,
+                "actors/replacement-human-x.glb", actorXReplacement)]);
         string? planError = null;
         ContentCatalogResolutionError catalogError = ContentCatalogResolutionError.None;
-        if (!ContentPackageValidator.TryValidatePayloads(
-                manifest!, payloads, out VerifiedContentPackage? verified, out _) ||
-            !ContentActivationPlan.TryCreate(
+        if (!ContentActivationPlan.TryCreate(
                 realm,
                 new ContentActivationId(0x4130_2E38_2D4E_4154UL, 1),
                 ContentBaseCatalog.Empty.Fingerprint,
-                [new ContentActivationPackage(
-                    packageId, manifest!.ManifestHash, ContentRequirementPolicy.Required)],
+                [
+                    Required(manifest!),
+                    Required(actors.Manifest),
+                    Required(actorReplacement.Manifest),
+                ],
                 out ContentActivationPlan? plan, out planError) ||
             !ContentCatalogResolver.TryResolve(
-                ContentBaseCatalog.Empty, plan!, [verified!],
+                ContentBaseCatalog.Empty, plan!,
+                [bootstrap, actors.Verified, actorReplacement.Verified],
                 out ResolvedContentCatalog? catalog, out catalogError) ||
-            !ContentPackageArchive.TryEncodeCanonical(manifest!, payloads, out byte[] archive))
+            !ContentPackageArchive.TryEncodeCanonical(manifest!, payloads, out byte[] archive) ||
+            !ContentPackageArchive.TryEncodeCanonical(
+                actors.Manifest, actors.Payloads, out byte[] actorArchive) ||
+            !ContentPackageArchive.TryEncodeCanonical(
+                actorReplacement.Manifest, actorReplacement.Payloads, out byte[] actorReplaceArchive))
             throw new InvalidOperationException(
                 $"The Concept Demo content deployment is invalid: plan={planError}, catalog={catalogError}.");
 
+        ResolvedContentCatalog resolvedCatalog = catalog!;
+        RequireActorCatalogOwner(
+            resolvedCatalog, ConceptDemoActorPresentationProfile.HumanXDefinitionId,
+            actorReplacement.Manifest.PackageId);
+        RequireActorCatalogOwner(
+            resolvedCatalog, ConceptDemoActorPresentationProfile.HumanYDefinitionId,
+            actors.Manifest.PackageId);
+
         var host = new StaticContentHttpHost(
             endpoint,
-            [new StaticContentHttpResource(ArchiveRoute, archive)]);
+            [
+                new StaticContentHttpResource(ArchiveRoute, archive),
+                new StaticContentHttpResource(ActorArchiveRoute, actorArchive),
+                new StaticContentHttpResource(ActorReplaceArchiveRoute, actorReplaceArchive),
+            ]);
         try
         {
-            var acquisition = new ContentPackageAcquisition(
-                packageId,
-                manifest!.ManifestHash,
-                [new ContentSourceDescriptor(
-                    ContentSourceKind.ServerHostedStatic,
-                    host.GetUri(ArchiveRoute).ToString())]);
+            ContentPackageAcquisition[] acquisitions =
+            [
+                Acquisition(manifest!, host.GetUri(ArchiveRoute)),
+                Acquisition(actors.Manifest, host.GetUri(ActorArchiveRoute)),
+                Acquisition(actorReplacement.Manifest, host.GetUri(ActorReplaceArchiveRoute)),
+            ];
             RemoteContentAuthorization authorization = ProjectAuthorization(
-                plan!, catalog!.Fingerprint, [acquisition]);
+                plan!, resolvedCatalog.Fingerprint, acquisitions);
             return new ConceptDemoContentDeployment(
                 host,
                 authorization,
                 new ContentDeploymentSnapshot(
-                    host.GetUri(ArchiveRoute), archive.Length, worldBytes.Length,
+                    host.GetUri(ArchiveRoute),
+                    checked(archive.Length + actorArchive.Length + actorReplaceArchive.Length),
+                    worldBytes.Length,
                     checked(uiBytes.Length + monitorUiBytes.Length),
-                    manifest!.ManifestHash, plan!.PlanHash, catalog!.Fingerprint,
+                    checked(actorX.Length + actorY.Length + actorXReplacement.Length),
+                    manifest!.ManifestHash, plan!.PlanHash, resolvedCatalog.Fingerprint,
                     pack.Fingerprint, pack.ContentFingerprint, pack.ChunkCount));
         }
         catch
@@ -139,6 +185,80 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     }
 
     public void Dispose() => _host.Dispose();
+
+    private static ContentPackageFixture CreateActorPackage(
+        string packageValue,
+        string namespaceValue,
+        IReadOnlyList<ActorPresentationPayload> actors)
+    {
+        var files = new ContentFileDescriptor[actors.Count];
+        var definitions = new ContentDefinitionDescriptor[actors.Count];
+        var payloads = new ContentFilePayload[actors.Count];
+        for (int index = 0; index < actors.Count; index++)
+        {
+            ActorPresentationPayload actor = actors[index];
+            if (!ContentFilePath.TryCreate(actor.FilePath, out ContentFilePath path) ||
+                !ContentFileDescriptor.TryCreate(
+                    path, ContentFileKind.ActorGltfBinary, actor.Bytes.Length,
+                    ContentHash.Compute(actor.Bytes), default, out files[index]) ||
+                !LogicalContentId.TryCreate(actor.LogicalId, out LogicalContentId logicalId) ||
+                !ContentDefinitionDescriptor.TryCreateFileDefinition(
+                    logicalId, ContentDefinitionKind.ActorPresentation, actor.Operation,
+                    path, out ContentDefinitionDescriptor? definition))
+                throw new InvalidOperationException(
+                    $"The Concept Demo actor descriptor '{actor.LogicalId}' is invalid.");
+            definitions[index] = definition!;
+            payloads[index] = new ContentFilePayload(path, actor.Bytes);
+        }
+        if (!ContentPackageId.TryCreate(packageValue, out ContentPackageId packageId) ||
+            !ContentNamespaceId.TryCreate(namespaceValue, out ContentNamespaceId contentNamespace))
+            throw new InvalidOperationException(
+                $"The Concept Demo actor package identity '{packageValue}' is invalid.");
+        if (!ContentPackageManifest.TryCreate(
+                1, 1, packageId, contentNamespace,
+                packageValue, "1.0.0", ContentTrustClass.ServerAuthorizedPassive,
+                files, definitions, out ContentPackageManifest? manifest, out string? error))
+            throw new InvalidOperationException(
+                $"The Concept Demo actor manifest '{packageValue}' is invalid: {error}");
+        return new ContentPackageFixture(
+            manifest!, payloads, ValidatePackage(manifest!, payloads));
+    }
+
+    private static VerifiedContentPackage ValidatePackage(
+        ContentPackageManifest manifest,
+        IReadOnlyList<ContentFilePayload> payloads)
+    {
+        if (!ContentPackageValidator.TryValidatePayloads(
+                manifest, payloads, out VerifiedContentPackage? verified, out string? error))
+            throw new InvalidOperationException(
+                $"The Concept Demo package '{manifest.PackageId}' is invalid: {error}");
+        return verified!;
+    }
+
+    private static ContentActivationPackage Required(ContentPackageManifest manifest) =>
+        new(manifest.PackageId, manifest.ManifestHash, ContentRequirementPolicy.Required);
+
+    private static ContentPackageAcquisition Acquisition(
+        ContentPackageManifest manifest,
+        Uri uri) =>
+        new(
+            manifest.PackageId,
+            manifest.ManifestHash,
+            [new ContentSourceDescriptor(
+                ContentSourceKind.ServerHostedStatic, uri.ToString())]);
+
+    private static void RequireActorCatalogOwner(
+        ResolvedContentCatalog catalog,
+        string logicalValue,
+        ContentPackageId expectedOwner)
+    {
+        if (!LogicalContentId.TryCreate(logicalValue, out LogicalContentId logicalId) ||
+            !catalog.TryGet(logicalId, out ResolvedContentEntry? entry) ||
+            entry!.Kind != ContentDefinitionKind.ActorPresentation ||
+            entry.OwnerPackageId != expectedOwner)
+            throw new InvalidOperationException(
+                $"The resolved actor catalog owner for '{logicalValue}' is invalid.");
+    }
 
     private static RemoteContentAuthorization ProjectAuthorization(
         ContentActivationPlan plan,
@@ -171,11 +291,23 @@ public sealed class ConceptDemoContentDeployment : IDisposable
         new(hash.Part0, hash.Part1, hash.Part2, hash.Part3);
 }
 
+internal readonly record struct ActorPresentationPayload(
+    string LogicalId,
+    ContentDefinitionOperation Operation,
+    string FilePath,
+    byte[] Bytes);
+
+internal sealed record ContentPackageFixture(
+    ContentPackageManifest Manifest,
+    ContentFilePayload[] Payloads,
+    VerifiedContentPackage Verified);
+
 public readonly record struct ContentDeploymentSnapshot(
     Uri ArchiveUri,
     int ArchiveBytes,
     int WorldPackBytes,
     int UiBytes,
+    int ActorPresentationBytes,
     ContentHash ManifestHash,
     ContentHash PlanHash,
     ContentHash CatalogFingerprint,

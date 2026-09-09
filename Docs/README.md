@@ -90,13 +90,14 @@ acceptance narratives remain available through git history.
   layered settings, server-recommended profiles, and server-composed UI. F0.5 and M0.0
   are closed; F0.6 is closed by A0.2-A0.8, C0.2 closes Global/System Chat, D0.6 closes the
   read-only monitor, and D0.7a closes shared actor motion/equipment/action semantics plus the
-  bundled X/Y animation canary. Runtime model-content realization (D0.7b) precedes the explicit
-  lifecycle/final matrices.
+  bundled X/Y animation canary. D0.7b closes bounded actor-GLB content validation plus real
+  server Add/Replace, applied-catalog, lazy native X/Y realization. F0.7 lifecycle hardening is
+  next, followed by the final matrix.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
   source-independent byte delivery, immutable catalog generations, Cabin parity,
-  and complete-WorldPack streaming scope.
+  complete-WorldPack streaming, and the first bounded runtime actor-model consumer.
 - [Concept Demo / live-test plan](Plans/CONCEPT_DEMO.md) — the cross-cutting
   super-pre-alpha target: floating central terrain, Sky Island/cave/Far Island,
   signs and fallback lab, guest entry, render-distance Settings, minimal Inventory

@@ -49,8 +49,9 @@ sanitized read-only Server Monitor, direct local/remote ping indication, and the
 test-marker producer. D0.7a now closes shared public equipment/action state, semantic Main Hand
 attachment, position-derived horizontal motion plus Game-owned vertical phases, and safe bundled X/Y
 Idle/Walk/Jump playback.
-D0.7b runtime content-backed model/animation realization remains next; broad diagnostic capture and
-the explicit F0.7 lifecycle campaign remain open.
+D0.7b now closes applied-catalog-backed X/Y Add/Replace presentation, bounded passive actor-GLB
+validation, lazy native realization, and primitive-to-content visual replacement without replacing
+actor identity. Broad diagnostic capture and the explicit F0.7 lifecycle campaign remain open.
 
 The demo has two purposes:
 
@@ -932,13 +933,38 @@ skeleton to a separate model scene at runtime. Native acceptance opens both gene
 requires the finite clips, animation player, semantic hand socket, and committed-pose Walk change.
 
 No archived Attack or Interact clip exists, so those accepted actions use explicit bounded primitive
-cues. Online likewise keeps primitive actor presentation because `Assets/**` is excluded. This is
-correct fallback evidence, not content-backed model evidence.
+cues. At D0.7a, Online likewise kept primitive actor presentation because `Assets/**` was excluded.
+That was correct fallback evidence, not content-backed model evidence.
 
-**D0.7b remains open.** `ContentFileKind` currently supports PNG/WebP, WorldPack, and UI-definition
-artifacts, but no runtime GLB/model/animation kind or native resource-lifetime cache. The final
-multiplayer demo must add that production-shaped consumer before claiming local/server Add/Replace
-X/Y presentation origin parity. Bundled GLBs cannot satisfy required realm content proof.
+## D0.7b runtime content-backed actor presentation — CLOSED
+
+D0.7b carries the same consolidated X/Y authoring bytes through the production content substrate.
+The server deployment publishes an Add package for logical `actors:human/x` and
+`actors:human/y`, followed by a visibly recolored Replace package for X. The empty Online base
+catalog does not know a Godot path. Authentication, exact activation, acquisition/CAS installation,
+catalog publication, and fresh `ContentSetApplied` proof still complete before guest admission.
+
+Actor GLB is now a narrow passive content family, not generic engine resource loading. Admission
+requires a self-contained bounded binary glTF 2.0 artifact with no external references,
+images/textures, cameras, scenes, scripts, shader code, or unsupported extensions. It bounds the
+container and structural counts, validates buffer/accessor/mesh/animation references, and requires
+the Concept Demo's exact 65-bone fingerprint, right-hand socket, and Idle/Walk/Jump clips.
+
+Godot resolves only from the live applied catalog, pins the exact blob, imports and rechecks one
+inert native template lazily, and duplicates it for matching actors. When content becomes available,
+the existing presenter swaps only its visual child: public identity/root, nameplate, overhead text,
+controlled role, action sequence, and equipped Main Hand remain. A failed or unavailable optional
+realization leaves the humanoid primitive rather than changing gameplay truth.
+
+The actual exported Online artifact contains no bundled body GLB. Cold entry fetches six exact
+World/UI/actor payload files; warm restart fetches zero, sends a fresh application proof, and
+realizes the same animated server content. The shared Complete-hosted and dedicated journeys retain
+their normal authority and presentation paths. Woodland remains deliberately primitive, proving
+that content-backed and emergency presentations coexist.
+
+General GLB/audio import, textures, user resource-pack overrides, arbitrary skeleton retargeting,
+downloaded Godot scenes, runtime scripts, and generalized hot catalog activation remain outside
+D0.7b. Attack/Interact continue to use the bounded fallback cue.
 
 ---
 
@@ -1699,10 +1725,10 @@ then continue:
          packet-free Local parity; no administration
 
     D0.7a actor motion/equipment/action + bundled X/Y animation         CLOSED
-    D0.7b runtime content-backed model/animation realization            NEXT
+    D0.7b runtime content-backed model/animation realization            CLOSED
 
 then close:
-    F0.7 explicit mixed-session settings/debug/lifecycle torture pass
+    F0.7 explicit mixed-session settings/debug/lifecycle torture pass   NEXT
     F0.8 final composition/parity matrix
     external Concept Demo multiplayer/stress and pre-freeze campaign
 ```

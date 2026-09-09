@@ -12,11 +12,11 @@ superseded by this accepted A0 campaign; no duplicate F0.6 implementation remain
 Client F0.5 is also closed: one passive stock Inventory artifact, reopened CAS bytes, and newly
 acquired realm-content bytes converge on the same exact compiled definition and runtime while
 content authorization/application proof remains independent.
-D0.7a now supplies safe bundled X/Y GLBs and shared actor animation/equipment/action semantics, but
-does not add a model kind to Content. Runtime mesh/animation/audio import, package dependencies,
-executable extensions, mutable overlay artifacts, and independently streamed chunk artifacts remain
-deferred. D0.7b is the next concrete model/animation consumer and must reuse this cache/catalog
-authority rather than treating a Godot path as content identity.
+D0.7a supplies safe bundled X/Y GLBs and shared actor animation/equipment/action semantics. D0.7b
+now adds the first narrow runtime model consumer: bounded self-contained actor GLB, logical
+ActorPresentation Add/Replace definitions, applied-catalog-only resolution, retained CAS leases,
+and lazy Godot realization. General mesh/animation/audio import, package dependencies, executable
+extensions, mutable overlay artifacts, and independently streamed chunk artifacts remain deferred.
 
 **Purpose:** restore the useful V2 content-pack, resolver, cache, server-patch, and asset-streaming ideas without reviving old ownership mistakes. The first proof uses the same Cabin in the Woods world locally and remotely so a preinstalled Single Player composition can act as a deterministic oracle for Online content.
 
@@ -590,8 +590,9 @@ declarative materials using built-in trusted shader families
 existing canonical complete WorldPack artifacts
 ```
 
-X/Y human meshes remain bundled/build-time calibration assets initially. Downloaded GLB and audio
-are later separately reviewed importer checkpoints, not implicit A0 formats.
+X/Y human meshes began as bundled/build-time calibration assets. D0.7b later admits only a reviewed
+self-contained actor-GLB profile with explicit structural/resource bounds and exact skeleton/clip
+requirements; arbitrary downloaded GLB and audio remain unsupported.
 
 Future candidate families may include:
 
@@ -1441,11 +1442,30 @@ physical bounds remain unchanged. Its four fixture outcomes are local/preinstall
 not CAS/source/download evidence. A0.2+ must eventually drive the same renderer contract from
 verified catalog/blob availability without changing these semantics.
 
-D0.7a adds another deliberate split: locally bundled X/Y GLBs may realize exact Idle/Walk/Jump
-presentation, while the Contentless Online product uses the humanoid and attached-equipment
-primitives against the same semantic actor state. This proves missing-animation fallback but does
-not authorize or cache the bundled GLBs for a realm. D0.7b must define the bounded passive model /
-animation artifact and native resource lifetime before server Add/Replace presentation can win.
+D0.7a added a deliberate split: locally bundled X/Y GLBs could realize exact Idle/Walk/Jump while
+Contentless Online used the humanoid primitive against the same semantic actor state. D0.7b closes
+the runtime half without weakening required content. The server deployment Adds exact logical X/Y
+actor definitions and then visibly Replaces X; the exported Online product contains no body GLB,
+acquires the exact packages, and resolves only through its live applied realm catalog.
+
+The admitted actor profile is binary glTF 2.0 with exactly one embedded binary buffer and no URI,
+image, texture, camera, script, scene, arbitrary shader, or unsupported extension. Bounded passive
+inspection covers nodes, meshes, triangle primitives, vertex/index totals, materials, accessors,
+buffer views, bones, animations, tracks, keys, strings, and byte sizes before catalog publication.
+The Concept Demo resolver then requires its exact ordered 65-bone fingerprint, right-hand semantic
+socket, and Idle/Walk/Jump vocabulary. Godot imports the validated bytes lazily, rechecks the native
+scene shape, and retains the source catalog/blob lease for the native template lifetime.
+
+```text
+verified bytes
+    != applied catalog authorization
+    != native engine realization
+```
+
+A content refresh swaps only the actor's visual child. Actor identity, root, nameplate, overhead
+Chat, action fence, controlled role, and equipment state remain intact; realization failure falls
+back to the primitive without changing Game truth. Generalized live catalog hot-upgrade and user
+presentation-leaf overrides remain later work.
 
 ---
 
@@ -1509,8 +1529,9 @@ Document/test:
 - Local / ServerHostedStatic / ExternalHttps source vocabulary;
 - executable extensions explicitly outside normal content.
 
-Defer dependencies/filters, partial Patch, downloaded GLB/audio, mutable World artifacts,
-independent chunk artifacts, and executable-extension runtime implementation.
+At A0.0, defer dependencies/filters, partial Patch, downloaded GLB/audio, mutable World artifacts,
+independent chunk artifacts, and executable-extension runtime implementation. D0.7b later admits
+only the narrow actor-GLB profile described above; it does not make arbitrary GLB or audio valid.
 
 **Gate:** pure tests build/validate local packages and prove deterministic resolution with no Godot/Network.
 

@@ -30,6 +30,7 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     int TerrainTriangles,
     int OpenUiViews,
     GodotActorPresenterSnapshot Actors,
+    GodotContentActorVisualResolverSnapshot ActorResources,
     bool UsedPrimitiveSubstrate,
     bool SmokeComplete,
     string? Fault);
@@ -62,6 +63,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private GodotSlidingRenderWindow? _window;
     private ClientActorPresentationState? _actorState;
     private GodotActorPresenter? _actorPresenter;
+    private GodotContentActorVisualResolver? _actorVisuals;
     private ResolvedClientSettings? _settings;
     private Camera3D? _camera;
     private Control? _ownedHud;
@@ -252,6 +254,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             renderer.ActiveRenderChunks, _terrainTriangles,
             _session.UiClient.OpenViewCount,
             _actorPresenter?.GetSnapshot() ?? default,
+            _actorVisuals?.GetSnapshot() ?? default,
             true,
             _smokePhase == 8,
             _fault);
@@ -339,6 +342,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_disposed) return;
         _disposed = true;
         _actorPresenter?.Dispose();
+        _actorVisuals?.Dispose();
         _systemChatBanner?.Dispose();
         _renderer?.Dispose();
         _ = _session?.TryRequestDetach();
@@ -347,6 +351,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _cache?.Dispose();
         _renderer = null;
         _actorPresenter = null;
+        _actorVisuals = null;
         _systemChatBanner = null;
         _actorState = null;
         _session = null;
@@ -371,8 +376,11 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _session.PublicPresentationState.ResetServerGeneration(playable.ServerGenerationId);
         _actorState = new ClientActorPresentationState(
             ClientActorDefinitionCatalog.ConceptDemo, 64);
+        _actorVisuals = new GodotContentActorVisualResolver(
+            _session.Content ?? throw new InvalidOperationException(
+                "Remote actor presentation requires an applied content catalog."));
         _actorPresenter = new GodotActorPresenter(
-            this, ClientActorDefinitionCatalog.ConceptDemo, 64);
+            this, ClientActorDefinitionCatalog.ConceptDemo, 64, _actorVisuals);
         _actorPresenter.SetControlledActorPose(
             playable.PublicActor, playable.Position, playable.Orientation, Time.GetTicksMsec());
         _renderer = new GodotWorldRenderer(

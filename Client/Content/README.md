@@ -48,17 +48,24 @@ The current passive manifest permits only:
 - declarative `StandardLit` materials;
 - typed complete WorldPack definitions backed by World-owned canonical artifacts;
 - canonical `.usui` compiled UI-definition artifacts retaining UI-kernel key/version/hash identity;
+- typed ActorPresentation definitions backed by the reviewed self-contained binary glTF 2.0
+  humanoid profile;
 - `Add` and complete `Replace` operations.
 
 Raster admission performs exact path/size/SHA verification plus a bounded passive envelope check;
 it is classification before a later hardened decoder/engine realization and is not a claim that
 arbitrary image bytes are safe. WorldPack admission delegates to `Game.World`'s complete bounded
 container/hash/schema validator instead of defining a second WorldPack format here.
+Actor GLB admission bounds and validates its container, graph, meshes, accessors, embedded buffer,
+one skeleton, and finite animation vocabulary; the Concept Demo resolver additionally requires the
+exact 65-bone profile and Idle/Walk/Jump clips before an applied-catalog blob lease can reach Godot.
 
-Generic Godot resources, scenes, scripts, shaders, executable code, downloaded GLB/audio, partial
-Patch, dependencies/version solving, and executable extensions are outside A0.0. User resource
-packs and executable extensions have vocabulary values so they cannot be confused with normal
-server-passive trust, but the A0.0 manifest factory rejects both.
+Generic Godot resources, scenes, scripts, shaders, executable code, arbitrary GLB/audio, partial
+Patch, dependencies/version solving, and executable extensions remain unsupported. The one actor
+GLB family rejects URI/external resources, images/textures, cameras, and unsupported extensions; it
+is not permission to pass downloaded scenes or arbitrary resources to `ResourceLoader`. User
+resource packs and executable extensions have vocabulary values so they cannot be confused with
+normal server-passive trust, but the normal manifest factory still rejects both trust classes.
 
 ## A0.2 persistent cache
 

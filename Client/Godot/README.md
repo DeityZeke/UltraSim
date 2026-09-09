@@ -139,7 +139,7 @@ Godot auto-wrap labels carry an explicit maximum width; rows that already fit re
 each cached Show reasserts the top-level panel's current bound minimum. This prevents a deferred
 native wrap pass from leaving intermittent blank height after repeated sword hovers. An accepted
 Primary result drives a short primitive cue on the controlled actor. It is feedback, not Combat
-authority or the final content-backed animation path.
+authority; it remains the fallback because the current bodies have no Attack clip.
 
 F0.5 is closed. The application composes the passive `Client.StandardUi` Inventory artifact into
 the same local/remote `UiClientRuntime` path used by reopened cached and content-backed exact
@@ -182,10 +182,18 @@ without replaying the old cue. Dropped swords return to ordinary batched world p
 equipped swords remain attached, visible, and non-pickable.
 
 The archived source has no Attack or Interact clips. Those actions therefore retain short bounded
-primitive cues; a missing animation can never block accepted gameplay. Online also deliberately
-retains primitive actor presentation because `Assets/**` is excluded and runtime model/animation
-artifact realization is not implemented yet. D0.7a is local/default animation and local/remote
-semantic parity evidence, not a claim that model content has joined A0's PNG/UI/World consumers.
+primitive cues; a missing animation can never block accepted gameplay. D0.7b adds the runtime
+content path without adding another presenter. Online excludes `Assets/**`, resolves logical X/Y
+ActorPresentation definitions only through the live applied realm catalog, pins their verified CAS
+blobs, and lazily imports an UltraSim-controlled inert GLB scene. Passive and native validation both
+require the exact skeleton/socket/Idle-Walk-Jump profile. The server package Adds X/Y and an ordered
+package visibly Replaces X; equivalent loose files cannot bypass activation/application proof.
+
+`GodotActorPresenter.RefreshResolvedVisuals()` replaces only the visual child after a resource is
+realized. The actor root, generational public identity, controlled role, nameplate, overhead Chat,
+action fence, and equipped Main Hand survive. Import failure has a finite diagnostic and leaves the
+humanoid primitive. The actual cold/warm Online export canary contains no body GLB, downloads actor
+bytes only on cold entry, and reopens them from CAS with fresh session proof on warm entry.
 
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a

@@ -19,4 +19,10 @@
     <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
     <ProjectReference Include="../Hosting/UltraSim.Server.Hosting.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../Client/PresentationAssets/Avatars/x_bot/x_bot_animated.glb"
+                      LogicalName="UltraSim.ConceptDemo.ActorX.glb" />
+    <EmbeddedResource Include="../../Client/PresentationAssets/Avatars/y_bot/y_bot_animated.glb"
+                      LogicalName="UltraSim.ConceptDemo.ActorY.glb" />
+  </ItemGroup>
 </Project>

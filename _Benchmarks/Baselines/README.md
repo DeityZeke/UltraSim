@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-d0.7b-content-backed-actor-presentation-2026-09-09.json` — bounded passive
+  self-contained actor GLB, exact X/Y skeleton/clip profile, server Add plus visible X Replace,
+  applied-catalog-only resolution, retained blob/native-resource lifetime, actor-root-preserving
+  primitive-to-content refresh, and actual exported Online cold/warm plus shared-host journeys;
 - `ecs-v3-3.4.3-adversarial-correctness-hardening-2026-09-09.json` — independent
   reproduction and repair evidence for exact-row history leaking into later occupants,
   rejected-disposal scheduler teardown, expanded decode-scratch undercounting, persistence

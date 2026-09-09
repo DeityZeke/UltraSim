@@ -62,6 +62,9 @@ Console.WriteLine(
     $"WorldPack: {content.Snapshot.WorldPackFingerprint} " +
     $"({content.Snapshot.WorldChunks} chunks / {content.Snapshot.WorldPackBytes} bytes)");
 Console.WriteLine(
+    $"Actor presentation: {content.Snapshot.ActorPresentationBytes} verified GLB bytes " +
+    "(X/Y Add + X Replace)");
+Console.WriteLine(
     $"Client profile: {options.ClientProfile} revision={clientProfile.Revision} " +
     $"hash={ProfileHash(clientProfile.Hash)}");
 Console.WriteLine("This M0.0 endpoint admits up to eight independent guests into one shared Concept Demo authority.");
@@ -70,6 +73,7 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     host.LocalEndPoint.ToString(), realm.ToString(), fingerprint,
     content.Snapshot.ArchiveUri.ToString(), content.Snapshot.ArchiveBytes,
     content.Snapshot.WorldPackBytes, content.Snapshot.UiBytes,
+    content.Snapshot.ActorPresentationBytes,
     content.Snapshot.ManifestHash.ToString(), content.Snapshot.PlanHash.ToString(),
     content.Snapshot.CatalogFingerprint.ToString(),
     content.Snapshot.WorldPackFingerprint.ToString(), content.Snapshot.WorldChunks,
@@ -339,6 +343,7 @@ internal readonly record struct DirectConnectReady(
     int ArchiveBytes,
     int WorldPackBytes,
     int UiBytes,
+    int ActorPresentationBytes,
     string ManifestHash,
     string PlanHash,
     string CatalogFingerprint,

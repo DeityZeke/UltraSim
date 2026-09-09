@@ -823,6 +823,7 @@ static void VerifyContentlessOnlineNative(
                 changedReady.Fingerprint != coldReady.Fingerprint ||
                 changedReady.CatalogFingerprint != coldReady.CatalogFingerprint ||
                 changedReady.WorldPackFingerprint != coldReady.WorldPackFingerprint ||
+                changedReady.ActorPresentationBytes != coldReady.ActorPresentationBytes ||
                 changedReady.ClientProfileRevision != coldReady.ClientProfileRevision ||
                 changedReady.ClientProfileHash == coldReady.ClientProfileHash ||
                 changedReady.ClientProfile == coldReady.ClientProfile)
@@ -852,7 +853,8 @@ static void VerifyContentlessOnlineNative(
     Console.WriteLine(
         $"PASS A0.8_ContentlessOnlineNative coldWarm=true profileChange=true realm={coldReady.Realm} " +
         $"world={coldReady.WorldPackFingerprint} chunks={coldReady.WorldChunks} " +
-        $"archiveBytes={coldReady.ArchiveBytes} profileRevision={coldReady.ClientProfileRevision} " +
+        $"archiveBytes={coldReady.ArchiveBytes} actorBytes={coldReady.ActorPresentationBytes} " +
+        $"profileRevision={coldReady.ClientProfileRevision} " +
         $"thirdPersonHash={coldReady.ClientProfileHash} orbitHash={changedReady.ClientProfileHash}");
     Directory.Delete(scope, recursive: true);
 }
@@ -1050,6 +1052,7 @@ static Process StartNativeDeployment(
             RequiredString(value, "CatalogFingerprint"),
             RequiredString(value, "WorldPackFingerprint"),
             value.GetProperty("ArchiveBytes").GetInt64(),
+            value.GetProperty("ActorPresentationBytes").GetInt64(),
             value.GetProperty("WorldChunks").GetInt32(),
             RequiredString(value, "ClientProfile"),
             value.GetProperty("ClientProfileRevision").GetUInt64(),
@@ -1092,6 +1095,9 @@ static void RequireNativeA08Result(
         !output.Contains("proofs=1", StringComparison.Ordinal) ||
         !output.Contains("ui=1", StringComparison.Ordinal) ||
         !ContainsPositiveNamedCount(output, "chat=") ||
+        !ContainsPositiveNamedCount(output, "animatedActors=") ||
+        !ContainsPositiveNamedCount(output, "actorResources=") ||
+        !ContainsPositiveNamedCount(output, "actorResourceBytes=") ||
         expectedWarm && !output.Contains("filesFetched=0 bytesFetched=0", StringComparison.Ordinal) ||
         !expectedWarm && output.Contains("bytesFetched=0", StringComparison.Ordinal))
         throw new InvalidOperationException(
@@ -1418,6 +1424,7 @@ static void VerifyArchitecture(string root)
         ["Client/Godot/UltraSim.Client.Application.Godot.csproj"] =
         [
             "Client/BuiltInTestWorlds/UltraSim.Client.BuiltInTestWorlds.csproj",
+            "Client/Content/UltraSim.Client.Content.csproj",
             "Client/Core/UltraSim.Client.Core.csproj",
             "Client/Local/UltraSim.Client.Local.csproj",
             "Client/Network/UltraSim.Client.Network.csproj",
@@ -1872,6 +1879,7 @@ internal sealed record NativeDeploymentReady(
     string CatalogFingerprint,
     string WorldPackFingerprint,
     long ArchiveBytes,
+    long ActorPresentationBytes,
     int WorldChunks,
     string ClientProfile,
     ulong ClientProfileRevision,

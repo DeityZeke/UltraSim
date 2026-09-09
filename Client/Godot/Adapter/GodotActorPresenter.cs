@@ -30,7 +30,8 @@ public readonly record struct GodotActorPresenterSnapshot(
     ulong Removed,
     ulong PrimaryCuesPresented,
     ulong InteractCuesPresented,
-    ulong LandingCuesPresented);
+    ulong LandingCuesPresented,
+    ulong VisualReplacements);
 
 public enum GodotActorMotionPhase : byte
 {
@@ -43,6 +44,7 @@ public enum GodotActorMotionPhase : byte
 public readonly record struct GodotActorPresentationDiagnostics(
     GodotActorMotionPhase MotionPhase,
     bool HasAnimationPlayer,
+    bool UsesPrimitiveFallback,
     bool MainHandVisible,
     bool PrimaryCueActive,
     bool InteractCueActive);
@@ -82,6 +84,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
     private ulong _primaryCuesPresented;
     private ulong _interactCuesPresented;
     private ulong _landingCuesPresented;
+    private ulong _visualReplacements;
     private bool _disposed;
 
     public GodotActorPresenter(
@@ -184,6 +187,29 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         UpdateTransformsAndLifetimes(nowMilliseconds);
     }
 
+    /// <summary>
+    /// Re-resolves visual children without replacing actor roots or presentation lifetimes. This
+    /// is the only path by which a primitive/live visual can be upgraded after catalog realization.
+    /// </summary>
+    public int RefreshResolvedVisuals()
+    {
+        EnsureOperational();
+        if (_visuals is null) return 0;
+        int replaced = 0;
+        for (int index = 0; index < _slots.Length; index++)
+        {
+            ref ActorSlot slot = ref _slots[index];
+            if (!slot.Used) continue;
+            ClientActorDefinition definition = slot.Record.Definition;
+            Node3D? visual = _visuals.Instantiate(in definition);
+            if (visual is null) continue;
+            ReplaceVisual(index, ref slot, visual);
+            replaced++;
+            SaturatingIncrement(ref _visualReplacements);
+        }
+        return replaced;
+    }
+
     public bool TryPresentOverhead(
         in ClientChatOccurrence occurrence,
         ulong currentServerGenerationId,
@@ -243,6 +269,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         diagnostics = new GodotActorPresentationDiagnostics(
             slot.MotionPhase,
             slot.AnimationPlayer is not null,
+            slot.PrimitiveFallback,
             slot.MainHandPrefabId != 0 && slot.PrimaryCue?.Visible == true,
             slot.PrimaryCueStartedAtMilliseconds != 0,
             slot.InteractCue?.Visible == true);
@@ -268,7 +295,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             _active, _primitive, _animated, _equippedMainHands,
             nameplates, overhead, primaryCues, interactCues, _revealHeld,
             _added, _updated, _removed, _primaryCuesPresented,
-            _interactCuesPresented, _landingCuesPresented);
+            _interactCuesPresented, _landingCuesPresented, _visualReplacements);
     }
 
     public void Dispose()
@@ -348,6 +375,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
             Nameplate = nameplate,
             Overhead = overhead,
             PrimaryCue = primaryCue,
+            MainHandSocket = mainHandSocket,
             InteractCue = interactCue,
             AnimationPlayer = animations,
             PrimitiveFallback = primitive,
@@ -362,6 +390,49 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         PlayMotionAnimation(ref _slots[index], _slots[index].MotionPhase, force: true);
         SaturatingIncrement(ref _added);
         ApplySlot(index, nowMilliseconds: 0);
+    }
+
+    private void ReplaceVisual(int index, ref ActorSlot slot, Node3D visual)
+    {
+        Node3D root = slot.Root ?? throw new InvalidOperationException("The actor root is absent.");
+        if (slot.PrimitiveFallback) _primitive--;
+        if (slot.AnimationPlayer is not null) _animated--;
+
+        Node3D? oldVisual = slot.Visual;
+        Node3D? oldSocket = slot.MainHandSocket;
+        if (oldSocket is not null && oldSocket.GetParent() == root)
+        {
+            root.RemoveChild(oldSocket);
+            oldSocket.QueueFree();
+        }
+        if (oldVisual is not null && GodotObject.IsInstanceValid(oldVisual))
+        {
+            oldVisual.GetParent()?.RemoveChild(oldVisual);
+            oldVisual.QueueFree();
+        }
+
+        visual.Name = "Visual";
+        float scale = slot.Record.Definition.VisualScalePermille / 1_000f;
+        visual.Scale *= new Vector3(scale, scale, scale);
+        root.AddChild(visual);
+        AnimationPlayer? animations = FindFirst<AnimationPlayer>(visual);
+        if (animations is not null) ConfigureAnimationLoops(animations);
+        Node3D socket = CreateMainHandSocket(root, visual);
+        Node3D primaryCue = CreateMainHandPresentation();
+        socket.AddChild(primaryCue);
+
+        slot.Visual = visual;
+        slot.BaseVisualScale = visual.Scale;
+        slot.AnimationPlayer = animations;
+        slot.MainHandSocket = socket;
+        slot.PrimaryCue = primaryCue;
+        slot.PrimitiveFallback = false;
+        slot.PlayedMotionPhase = (GodotActorMotionPhase)byte.MaxValue;
+        if (animations is not null) _animated++;
+        primaryCue.Visible = slot.MainHandPrefabId != 0 ||
+            slot.PrimaryCueStartedAtMilliseconds != 0;
+        PlayMotionAnimation(ref slot, slot.MotionPhase, force: true);
+        ApplySlot(index, _currentTimeMilliseconds);
     }
 
     private void Update(in ClientActorPresentationRecord actor)
@@ -856,6 +927,7 @@ public sealed class GodotActorPresenter : IGodotWorldPublicBatchFilter, IDisposa
         internal Label3D? Nameplate;
         internal Label3D? Overhead;
         internal Node3D? PrimaryCue;
+        internal Node3D? MainHandSocket;
         internal Node3D? InteractCue;
         internal AnimationPlayer? AnimationPlayer;
         internal WorldPosition ObservedPosition;

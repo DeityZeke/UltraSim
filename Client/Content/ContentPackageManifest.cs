@@ -115,6 +115,8 @@ public sealed class ContentPackageManifest
                     ContentDefinitionKind.Texture or ContentDefinitionKind.Icon =>
                         file.Kind is ContentFileKind.PngTexture or ContentFileKind.WebpTexture,
                     ContentDefinitionKind.WorldPack => file.Kind == ContentFileKind.WorldPack,
+                    ContentDefinitionKind.ActorPresentation =>
+                        file.Kind == ContentFileKind.ActorGltfBinary,
                     _ => false,
                 };
                 if (!kindMatches)
@@ -236,6 +238,8 @@ public static class ContentPackageValidator
             BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..]) + 8UL == (ulong)bytes.Length,
         ContentFileKind.WorldPack => ValidateCompleteWorldPack(bytes),
         ContentFileKind.UiDefinition => ValidateUiDefinition(descriptor.Path, bytes),
+        ContentFileKind.ActorGltfBinary =>
+            ActorPresentationArtifact.TryInspect(bytes, out _, out _),
         _ => false,
     };
 

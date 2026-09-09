@@ -1,0 +1,127 @@
+{
+  "Checkpoint": "D0.7b runtime content-backed actor model and animation realization",
+  "CaptureDate": "2026-09-09",
+  "BaseCommit": "91989cfbe8b0bd5421d955b9459335b1c604a59e",
+  "ContentContract": {
+    "FileKind": "ActorGltfBinary",
+    "DefinitionKind": "ActorPresentation",
+    "LogicalDefinitions": [
+      "actors:human/x",
+      "actors:human/y"
+    ],
+    "OperationsExercised": [
+      "Add X",
+      "Add Y",
+      "Replace X"
+    ],
+    "ResolutionRequiresLiveAppliedRealmCatalog": true,
+    "LooseOrPreinstalledBytesSatisfyAuthorization": false,
+    "RequiredContentApplicationStillPrecedesAdmission": true,
+    "NewNetworkProtocolMessage": false
+  },
+  "PassiveActorProfile": {
+    "Container": "self-contained binary glTF 2.0 JSON plus BIN",
+    "MaximumArtifactBytes": 33554432,
+    "MaximumJsonBytes": 4194304,
+    "MaximumNodes": 256,
+    "MaximumMeshes": 32,
+    "MaximumPrimitives": 128,
+    "MaximumMeshVertices": 250000,
+    "MaximumMeshIndices": 1000000,
+    "MaximumAccessors": 4096,
+    "MaximumBufferViews": 4096,
+    "MaximumMaterials": 64,
+    "MaximumBones": 128,
+    "MaximumAnimations": 32,
+    "MaximumAnimationTracks": 1024,
+    "MaximumAnimationKeys": 1000000,
+    "MaximumStringCharacters": 256,
+    "RequiredConceptDemoBones": 65,
+    "OrderedSkeletonFingerprint": "b9830ad4b78df28556c6be2336a46ac9703063b5e07725d4cea98943d18626ee",
+    "RequiredSemanticClips": [
+      "Idle",
+      "Walk",
+      "Jump"
+    ],
+    "ExternalUrisAllowed": false,
+    "ImagesOrTexturesAllowed": false,
+    "CamerasAllowed": false,
+    "SceneGraphMustBeSingleRootedAcyclicAndSingleParent": true,
+    "GodotScenesOrScriptsAllowed": false,
+    "SupportedExtensions": [
+      "KHR_materials_specular"
+    ]
+  },
+  "ActorPayloads": {
+    "XSourceBytes": 2254704,
+    "XSourceSha256": "811c8a6c07692e353ff1a8364db142dd84b88b119e34c4747c51e1a2568db049",
+    "YSourceBytes": 2551864,
+    "YSourceSha256": "adeffa5fff32e0e8420107d0f25c11897f2141bd5ac817ad01d6298a484f25bc",
+    "VisibleXReplacementBytes": 2254592,
+    "ServerActorPresentationPayloadBytes": 7061160,
+    "ServerTotalArchiveBytes": 7795789,
+    "XReplaceRetainsSkeletonAndClips": true,
+    "XReplaceIsVisiblyMagenta": true
+  },
+  "NativeRealization": {
+    "LazyPerLogicalDefinition": true,
+    "RetainsCatalogAndBlobLease": true,
+    "RevalidatesNativeSkeletonSocketAndClips": true,
+    "UsesGenericResourceLoaderForDownloadedScene": false,
+    "ActorRootPreservedAcrossPrimitiveToContentRefresh": true,
+    "PublicIdentityPreserved": true,
+    "ControlledRolePreserved": true,
+    "NameplateAndOverheadStatePreserved": true,
+    "ActionSequenceFencePreserved": true,
+    "MainHandStatePreserved": true,
+    "LazyResourcesAfterFirstX": 1,
+    "ResourcesAfterXAndY": 2,
+    "RetainedBytesAfterXAndY": 4806568,
+    "FiniteFailureDiagnostic": true,
+    "FailureLeavesPrimitiveFallback": true
+  },
+  "ExportedOnlineColdWarm": {
+    "BundledBodyGlbs": 0,
+    "ColdWarmCatalogFingerprintMatchesExactly": true,
+    "ColdFilesFetched": 6,
+    "ColdBytesFetched": 7794352,
+    "ColdAnimatedActors": 1,
+    "ColdPrimitiveActors": 1,
+    "ColdActorResources": 1,
+    "ColdActorResourceBytes": 2254592,
+    "WarmFilesFetched": 0,
+    "WarmBytesFetched": 0,
+    "WarmFreshApplicationProofs": 1,
+    "WarmAnimatedActors": 1,
+    "WarmPrimitiveActors": 1,
+    "WoodlandActorIntentionallyPrimitive": true
+  },
+  "SharedAuthority": {
+    "CompletePacketFreeHostPlusTwoOnlineClients": true,
+    "OnlineActorsPerClient": 4,
+    "AnimatedActorsPerClient": 3,
+    "PrimitiveActorsPerClient": 1,
+    "ActorResourcesPerClient": 1,
+    "DedicatedPathUsesSameContentDeployment": true
+  },
+  "PermanentAcceptance": {
+    "ContentPureTests": 27,
+    "BothSourceGlbsMeetExactProfile": true,
+    "MalformedExternalCyclicAndWrongSkeletonCandidatesReject": true,
+    "AddReplaceCatalogOwnershipExact": true,
+    "AppliedCatalogLeaseRequired": true,
+    "NativeXAndYLazyCanary": true,
+    "PrimitiveToContentActorLifetimeCanary": true,
+    "ActualExportColdWarmCanary": true,
+    "RepositoryVerification": "PASS"
+  },
+  "DeliberateDeferrals": [
+    "arbitrary GLB, texture, and audio content families",
+    "user presentation-leaf resource-pack override",
+    "generalized live catalog hot-activation protocol",
+    "arbitrary skeleton retargeting",
+    "downloaded Godot scenes, scripts, shaders, and executable extensions",
+    "Attack and Interact clips, root motion, blend trees, IK, and animation notifications",
+    "Combat semantics and lossless public combat-event history"
+  ]
+}

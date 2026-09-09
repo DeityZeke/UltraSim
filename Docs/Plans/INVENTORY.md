@@ -1392,8 +1392,10 @@ presentation row. Already-present local and remote observers realize the cue onc
 not replay an older retained sequence. Godot attaches the sword to a semantic Main Hand socket, and
 authoritative Drop removes that attachment and restores ordinary GroundItem presentation. Exact
 rolls remain private. The archived bodies have no Attack clip, so the swing itself remains a bounded
-primitive cue; runtime content-backed X/Y/action animation is D0.7b. Combat, hit testing, durability
-loss, death, loot rarity/affixes, and account-owned character persistence are not implied.
+primitive cue. D0.7b now realizes the X/Y body and existing Idle/Walk/Jump clips through exact
+server-authorized actor content, but does not manufacture a missing Attack clip. Combat, hit
+testing, durability loss, death, loot rarity/affixes, and account-owned character persistence are
+not implied.
 
 The accepted shared-authority journey proves one exact item lifetime across public world,
 Alice's Inventory, Main Hand equipment, world drop, and Bob's Inventory. Pickup starts the

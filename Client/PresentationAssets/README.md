@@ -11,10 +11,12 @@ exact skeleton. This avoids Godot trying to associate an independently imported 
 with another scene's rest pose—the path which previously produced distorted/misaligned bodies.
 The authoring inputs and Blender build script live below `Client/PresentationSource/Avatars`.
 
-These remain optional bundled local/default presentation assets. They are not primitive/bootstrap
-fallbacks, are not A0 downloaded package payloads, and do not establish runtime model/animation
-artifact realization. Online therefore continues to render the same semantic actors through the
-humanoid primitive. Its required content/application proof is never satisfied by these files.
+These files remain optional bundled local/default presentation assets for products with local play;
+they are not primitive/bootstrap fallbacks. D0.7b also embeds the exact consolidated authoring bytes
+in the Concept Demo server build and publishes them as ordinary verified actor-content packages.
+The exported Online product still excludes `Assets/**`: it obtains X/Y from the authenticated
+activation/CAS and realizes them lazily. Merely finding equivalent preinstalled bytes never
+satisfies realm authorization or fresh application proof.
 
 The initial presentation anchors are camera 1.6 m, nameplate 2.0 m, and effects 0.9 m; those are
 presentation-definition evidence rather than Physics constants.

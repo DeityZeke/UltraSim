@@ -103,7 +103,8 @@ public static class RemoteContentAuthorizationProjection
 /// One application-session content consumer. Cache/source success is private client state until
 /// the exact immutable catalog publishes and its retained semantic proof crosses Control.
 /// </summary>
-public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor, IDisposable
+public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor,
+    IActorPresentationContentSource, IDisposable
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
@@ -214,6 +215,29 @@ public sealed class RemoteContentClient : IRemoteGameProtocolHandler, IRemoteGam
         return ContentWorldPackResolver.TryResolve(
             _catalog, definitionId, expectedPackFingerprint, binding,
             out world, out result, limits);
+    }
+
+    /// <summary>
+    /// Resolves one bounded passive actor model/animation artifact from this session's exact
+    /// applied catalog. Native engine realization is deliberately not performed here.
+    /// </summary>
+    public bool TryResolveActorPresentation(
+        LogicalContentId definitionId,
+        ActorPresentationResolutionRequirements requirements,
+        out ActorPresentationContentLease? lease,
+        out ContentActorPresentationResolutionError error,
+        ActorPresentationArtifactLimits limits = default)
+    {
+        EnsureOperational();
+        lease = null;
+        error = ContentActorPresentationResolutionError.None;
+        if (_state != RemoteContentClientState.Applied || _catalog is null)
+        {
+            error = ContentActorPresentationResolutionError.InvalidRequest;
+            return false;
+        }
+        return ContentActorPresentationResolver.TryResolve(
+            _catalog, definitionId, requirements, out lease, out error, limits);
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)

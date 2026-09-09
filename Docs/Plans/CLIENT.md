@@ -13,7 +13,9 @@ C0.2 now closes the first routed Global Chat mode plus explicit authority-origin
 broadcast/feed/banner convergence. D0.6 now closes direct ping indication plus the first sanitized,
 read-only, content-backed Server Monitor and trusted test-marker producer. D0.7a now closes shared
 actor motion/equipment/action presentation semantics and a safe bundled X/Y Idle/Walk/Jump canary.
-Runtime content-backed model/animation realization remains D0.7b; F0.7 and F0.8 remain open.
+D0.7b now closes bounded passive actor-GLB admission, applied-catalog resolution, lazy native
+resource realization, and real server Add/Replace X/Y presentation in the exported Contentless
+Online product. F0.7 and F0.8 remain open.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2130,10 +2132,47 @@ The archive contains no Attack or Interact clip. Accepted actions therefore reta
 primitive cues; missing animation never changes Game success. Online excludes bundled `Assets/**`
 and exercises the same semantic presenter through the humanoid/equipment primitive substrate.
 
-**D0.7b remains open:** introduce a bounded passive model/animation artifact kind, verified catalog
-resolution, native resource realization/lifetime, and real server Add/Replace presentation before
-claiming content-backed X/Y parity. Preinstalled GLBs may not substitute for realm authorization or
-application proof.
+---
+
+## D0.7b — Runtime content-backed actor model/animation realization
+
+**Status: CLOSED.** Content now admits one deliberately narrow `ActorPresentation` definition
+backed by a self-contained binary glTF 2.0 artifact. Admission checks the container and JSON before
+catalog publication and bounds nodes, meshes, primitives, vertices/indices, materials, accessors,
+buffer views, bones, animations, tracks, keys, strings, and total bytes. The first profile permits
+embedded binary data, triangle meshes, one skeleton, and only the reviewed material extension. It
+rejects external references, images/textures, cameras, unsupported extensions, Godot scenes,
+scripts, shaders, and generic executable resources. The Concept Demo then additionally requires its
+exact ordered 65-bone skeleton, semantic right-hand bone, and `Idle`/`Walk`/`Jump` clips.
+
+Actor semantics request stable logical definitions `actors:human/x` and `actors:human/y`, never a
+Godot path. The Direct Connect deployment authorizes a server actor package which Adds both bodies,
+then an unmistakably recolored package which Replaces X. Required content/application proof still
+precedes admission. Possessing the same bytes outside the live applied realm catalog cannot resolve
+the actor definition or satisfy that proof.
+
+The Godot adapter realizes an actor lazily when the existing presenter first needs its logical
+definition. It imports only the validated bytes into an UltraSim-owned inert scene structure,
+rechecks the skeleton/socket/clips, retains the exact catalog/blob lease with the native template,
+and duplicates that template for actor instances. It does not instantiate a downloaded `.tscn` or
+script. Failure remains a finite diagnostic and falls down to the humanoid primitive where fallback
+is permitted.
+
+Refreshing a newly available visual replaces only the presentation child. The existing actor root,
+`WorldPublicEntityId`, controlled/remote role, nameplate, overhead Chat, action-sequence fence, and
+Main Hand state survive. Content realization therefore cannot create a new actor lifetime. Native
+acceptance proves primitive-to-content replacement plus lazy X/Y realization through the same
+`GodotActorPresenter` used by bundled/local bodies.
+
+The inspected exported Online product still contains no bundled X/Y GLB. Its cold run acquires the
+World/UI/X/Y/Replace payloads, publishes the exact catalog, realizes an animated human beside the
+intentional primitive woodland actor, and enters gameplay. A fresh warm process transfers zero
+content bytes, produces a fresh application-session proof, and realizes the same actor content from
+CAS. Dedicated and Complete-hosted shared-authority journeys use the same remote path.
+
+This checkpoint does not add arbitrary GLB compatibility, textures/audio, user overrides, runtime
+retargeting, downloadable scenes, hot activation protocol, or Attack/Interact clips. The existing
+bounded primitive action cues remain the correct fallback for the absent clips.
 
 ---
 
@@ -2567,9 +2606,9 @@ D0.6  read-only Server Monitor / ping / trusted test markers                  CL
         |
 D0.7a shared actor motion/equipment/action + bundled X/Y animation             CLOSED
         |
-D0.7b runtime content-backed model/animation realization                       NEXT
+D0.7b runtime content-backed model/animation realization                       CLOSED
         |
-F0.7  explicit settings/debug/mixed-session lifecycle closure             OPEN
+F0.7  explicit settings/debug/mixed-session lifecycle closure             NEXT
         |
 F0.8  final local/remote/complete/contentless + different-feel matrix      OPEN
         |

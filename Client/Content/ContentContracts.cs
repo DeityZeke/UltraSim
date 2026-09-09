@@ -61,6 +61,8 @@ public enum ContentFileKind : byte
     WebpTexture = 2,
     WorldPack = 3,
     UiDefinition = 4,
+    /// <summary>Self-contained, bounded glTF 2.0 binary actor presentation data.</summary>
+    ActorGltfBinary = 5,
 }
 
 public enum ContentDefinitionKind : byte
@@ -69,6 +71,8 @@ public enum ContentDefinitionKind : byte
     Icon = 2,
     Material = 3,
     WorldPack = 4,
+    /// <summary>Passive actor model, skeleton, and finite animation presentation.</summary>
+    ActorPresentation = 5,
 }
 
 public enum ContentDefinitionOperation : byte
@@ -111,7 +115,7 @@ public readonly record struct ContentFileDescriptor(
     long SizeBytes,
     ContentHash Sha256)
 {
-    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.UiDefinition &&
+    public bool IsValid => Path.IsValid && Kind is >= ContentFileKind.PngTexture and <= ContentFileKind.ActorGltfBinary &&
         SizeBytes >= 0 && Sha256.IsValid && ExtensionMatches(Path, Kind);
 
     public static bool TryCreate(
@@ -135,6 +139,7 @@ public readonly record struct ContentFileDescriptor(
         ContentFileKind.WebpTexture => path.Value!.EndsWith(".webp", StringComparison.Ordinal),
         ContentFileKind.WorldPack => path.Value!.EndsWith(".usworldpack", StringComparison.Ordinal),
         ContentFileKind.UiDefinition => path.Value!.EndsWith(".usui", StringComparison.Ordinal),
+        ContentFileKind.ActorGltfBinary => path.Value!.EndsWith(".glb", StringComparison.Ordinal),
         _ => false,
     };
 }
@@ -202,7 +207,7 @@ public sealed class ContentDefinitionDescriptor
     {
         definition = null;
         if (!id.IsValid || kind is not (ContentDefinitionKind.Texture or ContentDefinitionKind.Icon or
-                ContentDefinitionKind.WorldPack) ||
+                ContentDefinitionKind.WorldPack or ContentDefinitionKind.ActorPresentation) ||
             operation is not (ContentDefinitionOperation.Add or ContentDefinitionOperation.Replace) ||
             !primaryFile.IsValid) return false;
         definition = new ContentDefinitionDescriptor(id, kind, operation, primaryFile, default);

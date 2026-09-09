@@ -212,8 +212,10 @@ Rising/Falling and exact airborne-to-grounded landing presentation. Game-owned I
 only the equipped Main Hand public prefab, and accepted Interact/Primary sequences produce bounded
 one-shot cues without replay on late actor entry. Single Player and Complete use
 reproducibly consolidated X/Y GLBs with one 65-bone skeleton and Idle/Walk/Jump clips. Contentless
-Online uses the same semantics with humanoid/equipment primitives. Runtime realm-content model and
-animation realization remains D0.7b and is not implied by the bundled asset canary.
+Online excludes those bundled assets. D0.7b now supplies X/Y through exact server Add/Replace
+ActorPresentation definitions, a bounded self-contained GLB profile, the applied realm catalog/CAS,
+and lazy native realization. Primitive actors and missing-clip cues remain downstream fallback;
+content realization never replaces the authoritative actor lifetime.
 The verifier continues to enforce the exact active production project inventory
 and dependency directions.
 
