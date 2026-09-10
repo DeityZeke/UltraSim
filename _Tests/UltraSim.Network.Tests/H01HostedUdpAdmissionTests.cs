@@ -272,6 +272,19 @@ internal static class H01HostedUdpAdmissionTests
         SharedUdpProtocolLimits.Default.Validate(UdpProtocolLimits.Default);
         HostedUdpAdmissionLimits.Default.Validate(UdpProtocolLimits.Default);
         HostedUdpOwnerShardingLimits.Default.Validate();
+        bool rejected = false;
+        try
+        {
+            (HostedUdpOwnerShardingLimits.Default with
+            {
+                TransportRetirementTimeoutMilliseconds = 0,
+            }).Validate();
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            rejected = true;
+        }
+        True(rejected, "A non-positive transport-retirement timeout was accepted.");
     }
 
     private static byte[] RequestCookie(

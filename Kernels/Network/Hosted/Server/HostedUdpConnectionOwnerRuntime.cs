@@ -194,16 +194,18 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         ArgumentNullException.ThrowIfNull(sessions);
         transport.RequestStop();
         transport.Worker.Wake();
-        if (!transport.WaitStopped(TimeSpan.FromSeconds(10)))
+        if (!transport.WaitStopped(TimeSpan.FromMilliseconds(
+                _ownerLimits.TransportRetirementTimeoutMilliseconds)))
             throw new InvalidOperationException(
                 "A retired hosted owner transport did not become quiescent.");
-        if (_stopped) return;
+        if (_stopped || transport.ListenerOwnershipReleased) return;
         DrainListenerEgress(listener, sessions);
         if (_handoff.TryUnbindConnection(
                 transport.Connection, transport.Worker.Owner) !=
             HostedPacketHandoffStatus.Accepted)
             throw new InvalidOperationException(
                 "A retired hosted owner transport could not release its binding.");
+        transport.PublishListenerOwnershipReleased();
     }
 
     internal HostedPacketHandoffStatus TryOfferSecure(
@@ -499,6 +501,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         private long _requestedDrainMilliseconds;
         private int _drainApplied;
         private int _stoppedOnOwner;
+        private int _listenerOwnershipReleased;
         private int _committed;
         private int _listenerCommitState;
         private uint _listenerCommitGeneration;
@@ -549,6 +552,8 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         internal bool IsCommitted => Volatile.Read(ref _committed) != 0;
         internal bool StopRequested => Volatile.Read(ref _stopRequested) != 0;
         internal bool StoppedOnOwner => Volatile.Read(ref _stoppedOnOwner) != 0;
+        internal bool ListenerOwnershipReleased =>
+            Volatile.Read(ref _listenerOwnershipReleased) != 0;
 
         internal void PublishSession(HostedUdpProtocolSession session)
         {
@@ -571,6 +576,9 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
             SpinWait.SpinUntil(() => StoppedOnOwner, timeout);
 
         internal void PublishStopped() => Volatile.Write(ref _stoppedOnOwner, 1);
+
+        internal void PublishListenerOwnershipReleased() =>
+            Volatile.Write(ref _listenerOwnershipReleased, 1);
 
         internal void CopyCachedSnapshots(
             out NetworkProtocolSnapshot protocol,

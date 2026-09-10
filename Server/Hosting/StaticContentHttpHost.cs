@@ -238,10 +238,24 @@ public sealed class StaticContentHttpHost : IDisposable
         int active = Interlocked.Increment(ref _activeResponses);
         PublishPeak(active);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-        timeout.CancelAfter(_responseTimeoutMilliseconds);
+        Task response = HandleAsync(context, timeout.Token);
         try
         {
-            await HandleAsync(context, timeout.Token).ConfigureAwait(false);
+            await response.WaitAsync(
+                TimeSpan.FromMilliseconds(_responseTimeoutMilliseconds),
+                _stopping.Token).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            timeout.Cancel();
+            AbortResponse(context);
+            await response.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
+        {
+            timeout.Cancel();
+            AbortResponse(context);
+            await response.ConfigureAwait(false);
         }
         finally
         {
@@ -267,6 +281,7 @@ public sealed class StaticContentHttpHost : IDisposable
             context.Response.ContentLength64 = bytes.Length;
             context.Response.Headers["Cache-Control"] = "public, immutable, max-age=31536000";
             await context.Response.OutputStream.WriteAsync(bytes, cancellation).ConfigureAwait(false);
+            cancellation.ThrowIfCancellationRequested();
             Interlocked.Increment(ref _served);
             Interlocked.Add(ref _bytesServed, bytes.Length);
         }
@@ -275,7 +290,8 @@ public sealed class StaticContentHttpHost : IDisposable
             if (!_stopping.IsCancellationRequested)
                 Interlocked.Increment(ref _rejected);
         }
-        catch (Exception exception) when (exception is IOException or HttpListenerException)
+        catch (Exception exception) when (exception is IOException or HttpListenerException or
+            ObjectDisposedException)
         {
             Interlocked.Increment(ref _rejected);
         }
@@ -283,6 +299,15 @@ public sealed class StaticContentHttpHost : IDisposable
         {
             try { context.Response.Close(); }
             catch (Exception exception) when (exception is HttpListenerException or ObjectDisposedException) { }
+        }
+    }
+
+    private static void AbortResponse(HttpListenerContext context)
+    {
+        try { context.Response.Abort(); }
+        catch (Exception exception) when (exception is HttpListenerException or
+            InvalidOperationException or ObjectDisposedException)
+        {
         }
     }
 

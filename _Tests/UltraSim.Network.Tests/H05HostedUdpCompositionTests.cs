@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using UltraSim.Network;
 
@@ -57,6 +58,10 @@ internal static class H05HostedUdpCompositionTests
     {
         Run("HostedShardedListenerCarriesSecureApplications", HostedShardedListenerCarriesSecureApplications);
         Run("HostedShardedSessionRetirementIsQuiescentAndReusable", HostedShardedSessionRetirementIsQuiescentAndReusable);
+        Run("HostedShardedRetirementTimeoutRetainsOwnershipUntilQuiescent",
+            HostedShardedRetirementTimeoutRetainsOwnershipUntilQuiescent);
+        Run("HostedLifetimeIgnoresActivityNewerThanOwnerSample",
+            HostedLifetimeIgnoresActivityNewerThanOwnerSample);
         Run("HostedShardedPathRebindCommitsThroughOwnerHandoff", HostedShardedPathRebindCommitsThroughOwnerHandoff);
         Run("HostedShardedLostCommitRecoversThroughOwnerHandoff", HostedShardedLostCommitRecoversThroughOwnerHandoff);
         Run("HostedShardedApplicationRetirementReclaimsAdmission", HostedShardedApplicationRetirementReclaimsAdmission);
@@ -127,6 +132,80 @@ internal static class H05HostedUdpCompositionTests
             out HostedUdpConnectionOwnerRuntimeSnapshot reused));
         Equal(1, reused.ActiveTransports);
         Equal(1, reused.Handoff.BoundConnections);
+    }
+
+    private static void HostedShardedRetirementTimeoutRetainsOwnershipUntilQuiescent()
+    {
+        using NetworkServerIdentity identity = NetworkServerIdentity.CreateEphemeral();
+        using var factory = new BlockingProgressFactory();
+        SharedUdpProtocolLimits oneSession = s_shared with { MaximumSessions = 1 };
+        HostedUdpOwnerShardingLimits oneOwner = s_sharding with
+        {
+            MaximumOwners = 1,
+            MaximumConnections = 1,
+            TransportRetirementTimeoutMilliseconds = 100,
+        };
+        using var host = new HostedUdpAdmissionHost(
+            new IPEndPoint(IPAddress.Loopback, 0), identity, s_protocol,
+            s_udp, oneSession, s_admission, oneOwner, factory, s_manifest);
+        using HostedUdpProtocolClient first = CreateClient(host, identity);
+        PumpUntil(host, [first], () =>
+            first.State == HostedUdpClientState.Established &&
+            factory.Latest is not null);
+        True(host.TryGetSession(first.Connection, out HostedUdpProtocolSession? session));
+        ConnectionId retired = first.Connection;
+
+        factory.BlockNextProgress();
+        try
+        {
+            True(factory.WaitUntilBlocked(TimeSpan.FromSeconds(2)),
+                "The owner application did not enter the controlled stalled callback.");
+            long started = Stopwatch.GetTimestamp();
+            Throws<AggregateException>(() => session!.Dispose());
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
+            True(elapsed >= TimeSpan.FromMilliseconds(75) &&
+                elapsed < TimeSpan.FromSeconds(2),
+                "The owner retirement timeout did not remain bounded.");
+            Equal(UdpProtocolSessionState.Draining, session!.State);
+            Equal(1, host.SessionCount);
+            Equal(1, host.GetSnapshot().Connections.Active);
+            True(host.TryGetConnectionOwnerSnapshot(
+                out HostedUdpConnectionOwnerRuntimeSnapshot retained));
+            Equal(1, retained.ActiveTransports);
+            Equal(1, retained.Handoff.BoundConnections);
+            Equal(0, factory.DisposalCount);
+        }
+        finally
+        {
+            factory.Release();
+        }
+
+        PumpUntil(host, [first], () => host.SessionCount == 0);
+        Equal(1, factory.DisposalCount);
+        Equal(0, host.GetSnapshot().Connections.Active);
+        True(host.TryGetConnectionOwnerSnapshot(
+            out HostedUdpConnectionOwnerRuntimeSnapshot released));
+        Equal(0, released.ActiveTransports);
+        Equal(0, released.Handoff.BoundConnections);
+
+        using HostedUdpProtocolClient replacement = CreateClient(host, identity);
+        PumpUntil(host, [replacement], () =>
+            replacement.State == HostedUdpClientState.Established);
+        True(replacement.Connection != retired);
+        Equal(1, host.GetSnapshot().Connections.Active);
+    }
+
+    private static void HostedLifetimeIgnoresActivityNewerThanOwnerSample()
+    {
+        Equal(HostedUdpSessionLifetimeDecision.Continue,
+            HostedUdpSessionLifetimePolicy.Evaluate(
+                UdpProtocolSessionState.Established,
+                applicationRetirementRequested: false,
+                now: 100,
+                lastActivity: 101,
+                drainDeadline: 0,
+                reliableQueued: 0,
+                s_udp));
     }
 
     private static void HostedShardedPathRebindCommitsThroughOwnerHandoff()
@@ -463,6 +542,78 @@ internal static class H05HostedUdpCompositionTests
         }
 
         internal void RecordDisposal() => Interlocked.Increment(ref _disposalCount);
+    }
+
+    private sealed class BlockingProgressFactory :
+        IHostedUdpSessionApplicationFactory,
+        IDisposable
+    {
+        private readonly ManualResetEventSlim _entered = new(false);
+        private readonly ManualResetEventSlim _release = new(false);
+        private BlockingProgressApplication? _latest;
+        private int _blockNext;
+        private int _disposalCount;
+
+        internal BlockingProgressApplication? Latest => Volatile.Read(ref _latest);
+        internal int DisposalCount => Volatile.Read(ref _disposalCount);
+
+        public IHostedUdpSessionApplication Create(
+            ConnectionId connection,
+            NetworkProtocolPeer peer)
+        {
+            var application = new BlockingProgressApplication(this);
+            Volatile.Write(ref _latest, application);
+            return application;
+        }
+
+        internal void BlockNextProgress()
+        {
+            _entered.Reset();
+            _release.Reset();
+            Volatile.Write(ref _blockNext, 1);
+        }
+
+        internal bool WaitUntilBlocked(TimeSpan timeout) => _entered.Wait(timeout);
+
+        internal void Progress()
+        {
+            if (Interlocked.Exchange(ref _blockNext, 0) == 0) return;
+            _entered.Set();
+            _release.Wait();
+        }
+
+        internal void RecordDisposal() => Interlocked.Increment(ref _disposalCount);
+
+        internal void Release() => _release.Set();
+
+        public void Dispose()
+        {
+            _release.Set();
+            _entered.Dispose();
+            _release.Dispose();
+        }
+    }
+
+    private sealed class BlockingProgressApplication(BlockingProgressFactory owner) :
+        IHostedUdpSessionApplication
+    {
+        private int _disposed;
+
+        public bool TryProcess(
+            in NetworkDeliveredMessage message,
+            ReadOnlySpan<byte> payload) => false;
+
+        public bool TryProgress()
+        {
+            owner.Progress();
+            return true;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                owner.RecordDisposal();
+        }
     }
 
     private sealed class LifetimeApplication(LifetimeFactory owner) :

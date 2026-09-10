@@ -94,7 +94,8 @@ public readonly record struct HostedUdpOwnerShardingLimits(
     int MaximumPacketSlots = 8_192,
     int MaximumQueuedPacketsPerOwner = 1_024,
     int MaximumDatagramBytes = 1_472,
-    int MaximumIngressTransfersPerPass = 256)
+    int MaximumIngressTransfersPerPass = 256,
+    int TransportRetirementTimeoutMilliseconds = 10_000)
 {
     public static HostedUdpOwnerShardingLimits Default => new(
         MaximumOwners: 4,
@@ -102,7 +103,8 @@ public readonly record struct HostedUdpOwnerShardingLimits(
         MaximumPacketSlots: 8_192,
         MaximumQueuedPacketsPerOwner: 1_024,
         MaximumDatagramBytes: 1_472,
-        MaximumIngressTransfersPerPass: 256);
+        MaximumIngressTransfersPerPass: 256,
+        TransportRetirementTimeoutMilliseconds: 10_000);
 
     internal void Validate()
     {
@@ -118,6 +120,8 @@ public readonly record struct HostedUdpOwnerShardingLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumDatagramBytes));
         if (MaximumIngressTransfersPerPass is <= 0 or > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumIngressTransfersPerPass));
+        if (TransportRetirementTimeoutMilliseconds is <= 0 or > 60_000)
+            throw new ArgumentOutOfRangeException(nameof(TransportRetirementTimeoutMilliseconds));
         _ = checked(MaximumOwners * MaximumQueuedPacketsPerOwner);
         _ = checked(MaximumPacketSlots * MaximumDatagramBytes);
     }

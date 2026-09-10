@@ -1682,7 +1682,11 @@ Game ticks, Network lanes, realm authorization, and content meaning. Its admitte
 set and total retained bytes are fixed at construction, it accepts GET for exact lowercase routes
 only, and copies configured bytes before serving them. A fixed response-worker set, bounded pending
 queue, and per-response deadline prevent one stalled consumer from blocking every independent
-download; excess work is rejected rather than creating unbounded tasks. The initial
+download; excess work is rejected rather than creating unbounded tasks. Deadline expiry
+actively aborts the response connection and awaits the blocked write's cleanup before
+the fixed worker is returned, because cancellation alone does not reliably interrupt an
+active `HttpListener` response write on every supported runtime. The same termination
+rule applies during host shutdown. The initial
 client source disables redirects and decompression, bounds response bytes and request time, and
 allows plaintext server-hosted HTTP or loopback/private targets only through explicit policy.
 External sources remain HTTPS-only. Literal private/loopback addresses are rejected by default;

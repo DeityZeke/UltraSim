@@ -19,6 +19,7 @@ internal static class HostedUdpSessionLifetimePolicy
         if (applicationRetirementRequested)
             return HostedUdpSessionLifetimeDecision.Retire;
         if (state == UdpProtocolSessionState.Established &&
+            now >= lastActivity &&
             now - lastActivity >= (ulong)limits.IdleTimeoutMilliseconds)
             return HostedUdpSessionLifetimeDecision.BeginDrain;
         if (state == UdpProtocolSessionState.Draining &&

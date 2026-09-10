@@ -318,7 +318,13 @@ execution shapes: application-requested retirement, idle transition, reliable dr
 deadline retirement, and terminal slot release are decided by one shared policy.
 Sharded peer mutation still occurs only on the connection-owner thread; a
 generation-matching listener-side reaper releases routing/admission state only after
-that owner reports quiescence. Each owner pass admits at most the configured
+that owner reports quiescence. `TransportRetirementTimeoutMilliseconds` bounds a direct
+retirement wait; expiry reports failure but retains the draining session, handoff
+binding, and connection/admission capacity until the owner actually stops, after which
+the ordinary reaper completes exactly-once cleanup and makes capacity reusable. A
+listener activity timestamp newer than the owner's current time sample is treated as
+fresh activity rather than unsigned elapsed time. Each
+owner pass admits at most the configured
 `MaximumIngressTransfersPerPass` before progressing applications/lifecycle work.
 
 Failure reporting is cleanup-last: all workers are asked to stop, every joined owner

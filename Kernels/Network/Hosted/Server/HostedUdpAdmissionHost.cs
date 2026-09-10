@@ -1062,8 +1062,13 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             try { BeginDrainCore(session, GetMonotonicMilliseconds()); }
             catch (Exception exception) { AddFailure(ref failures, exception); }
         if (session.OwnedTransport is HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+        {
             try { _ownerRuntime!.RetireTransport(owned, _listener, _sessions); }
             catch (Exception exception) { AddFailure(ref failures, exception); }
+            if (failures is not null)
+                throw new AggregateException(
+                    "A Hosted UDP owner did not become safe to retire.", failures);
+        }
         try { CloseTransport(session); }
         catch (Exception exception) { AddFailure(ref failures, exception); }
         if (session.OwnedTransport is null)

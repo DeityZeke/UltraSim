@@ -301,7 +301,12 @@ mechanisms summarized here:
 Scalar and sharded hosts share one application-retirement/idle/drain/deadline policy.
 Terminal sessions release their application, peer, route, connection-table row, and
 admission slot; the sharded owner applies peer transitions on its owner thread and the
-listener reaps only after quiescence. Owner ingress work per pass is explicitly bounded
+listener reaps only after quiescence. A bounded retirement wait that expires leaves the
+session draining, its generation-fenced handoff binding intact, and its admission
+capacity reserved; a later listener reap completes cleanup only after the owner reports
+that application/peer/endpoint disposal has finished. Idle-age evaluation also treats a
+newer listener-side activity publication as fresh when it races an earlier owner time
+sample; it never subtracts those samples out of order. Owner ingress work per pass is explicitly bounded
 so a continuously refilled fixed queue cannot postpone application progress or shutdown
 indefinitely. Shutdown joins/reclaims every quiescent owner and closes the listener
 before reporting collected callback/worker failures.

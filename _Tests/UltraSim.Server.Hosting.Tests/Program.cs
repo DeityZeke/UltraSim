@@ -22,6 +22,9 @@ var tests = new (string Name, Action Body)[]
     ("StaticContentHttpHostServesExactImmutableBytes", StaticContentHttpHostServesExactImmutableBytes),
     ("StaticContentHttpHostBoundsAndRejectsRequests", StaticContentHttpHostBoundsAndRejectsRequests),
     ("StalledContentResponseCannotBlockIndependentDownload", StalledContentResponseCannotBlockIndependentDownload),
+    ("ExpiredContentResponseReleasesItsWorker", ExpiredContentResponseReleasesItsWorker),
+    ("ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite",
+        ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite),
 };
 
 foreach ((string name, Action body) in tests)
@@ -176,6 +179,109 @@ static void StalledContentResponseCannotBlockIndependentDownload()
     long started = Stopwatch.GetTimestamp();
     host.Dispose();
     Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2));
+}
+
+static void ExpiredContentResponseReleasesItsWorker()
+{
+    byte[] large = GC.AllocateUninitializedArray<byte>(32 * 1024 * 1024);
+    Random.Shared.NextBytes(large);
+    var limits = new StaticContentHttpHostLimits(
+        maximumResources: 2,
+        maximumResourceBytes: large.Length + 16L,
+        maximumConcurrentResponses: 1,
+        maximumQueuedResponses: 1,
+        responseTimeoutMilliseconds: 100);
+    using var host = new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [
+            new StaticContentHttpResource("/content/large.uspkg", large),
+            new StaticContentHttpResource("/content/small.uspkg", "ok"u8.ToArray()),
+        ],
+        limits);
+    using var stalled = new TcpClient
+    {
+        ReceiveBufferSize = 1_024,
+        NoDelay = true,
+    };
+    stalled.Connect(IPAddress.Loopback, host.BaseUri.Port);
+    byte[] request = System.Text.Encoding.ASCII.GetBytes(
+        "GET /content/large.uspkg HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n");
+    stalled.GetStream().Write(request);
+    WaitUntil(() => host.GetSnapshot().ActiveResponses == 1,
+        TimeSpan.FromSeconds(2), "The stalled response did not occupy the only worker.");
+
+    using var client = new HttpClient(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        MaxConnectionsPerServer = 1,
+    });
+    Task<byte[]> independent = client.GetByteArrayAsync(
+        host.GetUri("/content/small.uspkg"));
+    if (!independent.Wait(TimeSpan.FromMilliseconds(1_500)))
+        throw new InvalidOperationException(
+            "The response deadline did not release the stalled worker.");
+    Assert.True(independent.Result.AsSpan().SequenceEqual("ok"u8));
+    WaitUntil(() => host.GetSnapshot().ActiveResponses == 0,
+        TimeSpan.FromSeconds(1), "Response worker accounting did not settle.");
+    StaticContentHttpHostSnapshot snapshot = host.GetSnapshot();
+    Assert.Equal(1UL, snapshot.Served);
+    Assert.True(snapshot.Rejected >= 1);
+}
+
+static void ContentResponseQueueRejectsOverflowAndShutdownTerminatesActiveWrite()
+{
+    byte[] large = GC.AllocateUninitializedArray<byte>(32 * 1024 * 1024);
+    Random.Shared.NextBytes(large);
+    var limits = new StaticContentHttpHostLimits(
+        maximumResources: 2,
+        maximumResourceBytes: large.Length + 16L,
+        maximumConcurrentResponses: 1,
+        maximumQueuedResponses: 1,
+        responseTimeoutMilliseconds: 10_000);
+    var host = new StaticContentHttpHost(
+        new IPEndPoint(IPAddress.Loopback, ReserveLoopbackPort()),
+        [
+            new StaticContentHttpResource("/content/large.uspkg", large),
+            new StaticContentHttpResource("/content/small.uspkg", "ok"u8.ToArray()),
+        ],
+        limits);
+    using var stalled = new TcpClient
+    {
+        ReceiveBufferSize = 1_024,
+        NoDelay = true,
+    };
+    try
+    {
+        stalled.Connect(IPAddress.Loopback, host.BaseUri.Port);
+        byte[] request = System.Text.Encoding.ASCII.GetBytes(
+            "GET /content/large.uspkg HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: keep-alive\r\n\r\n");
+        stalled.GetStream().Write(request);
+        WaitUntil(() => host.GetSnapshot().ActiveResponses == 1,
+            TimeSpan.FromSeconds(2), "The stalled response did not occupy the only worker.");
+
+        using var client = new HttpClient(new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            MaxConnectionsPerServer = 4,
+        });
+        Task<byte[]> queued = client.GetByteArrayAsync(host.GetUri("/content/small.uspkg"));
+        WaitUntil(() => host.GetSnapshot().Requests >= 2,
+            TimeSpan.FromSeconds(2), "The bounded pending response was not admitted.");
+        using HttpResponseMessage overflow = client.Send(
+            new HttpRequestMessage(HttpMethod.Get, host.GetUri("/content/small.uspkg")));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, overflow.StatusCode);
+        Assert.True(host.GetSnapshot().Rejected >= 1);
+
+        long started = Stopwatch.GetTimestamp();
+        host.Dispose();
+        Assert.True(Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(2));
+        try { _ = queued.Wait(TimeSpan.FromSeconds(2)); }
+        catch (AggregateException) { }
+    }
+    finally
+    {
+        host.Dispose();
+    }
 }
 
 static void WaitUntil(Func<bool> condition, TimeSpan timeout, string failure)
