@@ -167,7 +167,12 @@ public sealed class InformationalSignUiController : IDisposable
         if (!_openView.IsValid || request.Instance != _openView || _openModel is null ||
             !_openModel.TryValidateAction(request) || request.Action != InformationalSignUi.Close)
             return;
-        Close();
+        try { Close(); }
+        catch (UiSemanticPublicationException)
+        {
+            // Expected bounded publication pressure retains both the view identity and action
+            // endpoint, so a later Close intent or owner retry can discharge the obligation.
+        }
     }
 
     public bool Close()
@@ -176,10 +181,25 @@ public sealed class InformationalSignUiController : IDisposable
         if (!_openView.IsValid)
             return false;
         UiViewInstanceId view = _openView;
+        bool closed = _ui.CloseView(new UiCloseView(view));
+        Exception? unbindFailure = null;
+        try { _ui.UnbindActions(view); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            unbindFailure = exception;
+        }
+
+        // A false result means the port has already retired the projection. Either accepted
+        // outcome discharges this controller's cleanup obligation; an exception does not.
         _openView = default;
         _openModel = null;
-        _ui.UnbindActions(view);
-        return _ui.CloseView(new UiCloseView(view));
+        if (unbindFailure is not null)
+        {
+            throw new InvalidOperationException(
+                "The sign projection retired, but its action endpoint could not be unbound first.",
+                unbindFailure);
+        }
+        return closed;
     }
 
     public void Dispose()
@@ -187,14 +207,7 @@ public sealed class InformationalSignUiController : IDisposable
         EnsureOwner();
         if (_disposed)
             return;
-        if (_openView.IsValid)
-        {
-            UiViewInstanceId view = _openView;
-            _openView = default;
-            _openModel = null;
-            _ui.UnbindActions(view);
-            _ = _ui.CloseView(new UiCloseView(view));
-        }
+        if (_openView.IsValid) _ = Close();
         _disposed = true;
     }
 

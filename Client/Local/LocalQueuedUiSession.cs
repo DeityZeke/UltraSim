@@ -23,7 +23,7 @@ internal readonly record struct LocalUiAction(UiActionRequest Request);
 /// other InvalidOperationException instances still represent semantic/lifetime defects.
 /// </summary>
 internal sealed class LocalUiTransportBackpressureException(string message)
-    : InvalidOperationException(message);
+    : UiSemanticPublicationException(message);
 
 internal sealed class LocalUiOperationRow
 {
@@ -66,6 +66,7 @@ internal sealed class LocalQueuedUiChannel
     private ulong _rejected;
     private ulong _coldOpensApplied;
     private ulong _hotOpensApplied;
+    private bool _retired;
 
     internal LocalQueuedUiChannel(LocalPlayableSessionLimits limits)
     {
@@ -103,6 +104,8 @@ internal sealed class LocalQueuedUiChannel
     {
         lock (_gate)
         {
+            if (_retired)
+                throw new ObjectDisposedException(nameof(LocalQueuedUiChannel));
             if (_freeCount == 0 || _nextOperationId == 0)
                 throw new LocalUiTransportBackpressureException(
                     "The bounded local UI operation store is full.");
@@ -130,13 +133,19 @@ internal sealed class LocalQueuedUiChannel
 
     internal bool TryPeekClient(out int index, out LocalUiOperationRow? row)
     {
-        if (!_ready.TryPeek(out index))
-        {
-            row = null;
-            return false;
-        }
         lock (_gate)
         {
+            if (_retired)
+            {
+                index = -1;
+                row = null;
+                return false;
+            }
+            if (!_ready.TryPeek(out index))
+            {
+                row = null;
+                return false;
+            }
             row = (uint)index < (uint)_rows.Length && _queued[index] ? _rows[index] : null;
             return row is not null;
         }
@@ -146,6 +155,7 @@ internal sealed class LocalQueuedUiChannel
     {
         lock (_gate)
         {
+            if (_retired) return true;
             if ((uint)index >= (uint)_rows.Length || !_queued[index]) return false;
             LocalUiOperationRow row = _rows[index];
             if (!_proofs.TryEnqueue(new LocalUiProof(row.OperationId, row.Instance, status)))
@@ -193,6 +203,11 @@ internal sealed class LocalQueuedUiChannel
             }
         }
     }
+
+    internal void RetireAuthority()
+    {
+        lock (_gate) _retired = true;
+    }
 }
 
 /// <summary>Authority-owner-thread UI port over the bounded local semantic channel.</summary>
@@ -204,6 +219,7 @@ internal sealed class LocalQueuedUiSemanticPort : IUiSemanticPort, IDisposable
     private readonly int _maximumViews;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private ulong _nextView = 1;
+    private bool _terminalRetiring;
     private bool _disposed;
 
     internal LocalQueuedUiSemanticPort(LocalQueuedUiChannel channel, int maximumViews)
@@ -261,10 +277,14 @@ internal sealed class LocalQueuedUiSemanticPort : IUiSemanticPort, IDisposable
 
     public bool CloseView(UiCloseView operation)
     {
-        EnsureOperational();
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_openViews.Contains(operation.Instance)) return false;
-        _ = _channel.Publish(LocalUiOperationKind.Close, operation.Instance, default,
-            default, default, operation);
+        if (!_terminalRetiring)
+        {
+            _ = _channel.Publish(LocalUiOperationKind.Close, operation.Instance, default,
+                default, default, operation);
+        }
         _actions.Remove(operation.Instance);
         _openViews.Remove(operation.Instance);
         return true;
@@ -283,8 +303,17 @@ internal sealed class LocalQueuedUiSemanticPort : IUiSemanticPort, IDisposable
 
     public void UnbindActions(UiViewInstanceId instance)
     {
-        EnsureOperational();
+        EnsureOwner();
+        ObjectDisposedException.ThrowIf(_disposed, this);
         _actions.Remove(instance);
+    }
+
+    internal void BeginTerminalRetirement()
+    {
+        EnsureOwner();
+        if (_disposed || _terminalRetiring) return;
+        _terminalRetiring = true;
+        _channel.RetireAuthority();
     }
 
     internal void Pump()
@@ -313,6 +342,7 @@ internal sealed class LocalQueuedUiSemanticPort : IUiSemanticPort, IDisposable
     {
         EnsureOwner();
         if (_disposed) return;
+        BeginTerminalRetirement();
         _disposed = true;
         _openViews.Clear();
         _actions.Clear();
@@ -321,7 +351,7 @@ internal sealed class LocalQueuedUiSemanticPort : IUiSemanticPort, IDisposable
     private UiViewInstanceId Allocate(UiViewInstanceId requested)
     {
         if (_openViews.Count >= _maximumViews)
-            throw new InvalidOperationException("The local UI view capacity was reached.");
+            throw new UiSemanticCapacityException("The local UI view capacity was reached.");
         if (requested.IsValid)
         {
             if (_openViews.Contains(requested) || requested.Value < _nextView)
@@ -343,6 +373,8 @@ internal sealed class LocalQueuedUiSemanticPort : IUiSemanticPort, IDisposable
     {
         EnsureOwner();
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_terminalRetiring)
+            throw new InvalidOperationException("The local UI authority projection is retiring.");
     }
 
     private void EnsureOwner()
@@ -359,6 +391,9 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
     private readonly UiClientRuntime _client;
     private readonly Action _detached;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private bool _completionPending;
+    private int _pendingIndex;
+    private LocalSemanticProofStatus _pendingStatus;
     private bool _disposed;
 
     internal LocalQueuedUiClient(
@@ -377,6 +412,12 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
         EnsureOperational();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumOperations);
         int applied = 0;
+        if (_completionPending)
+        {
+            if (!_channel.TryCompleteClient(_pendingIndex, _pendingStatus)) return 0;
+            _completionPending = false;
+            applied++;
+        }
         while (applied < maximumOperations && _channel.TryPeekClient(out int index, out LocalUiOperationRow? row))
         {
             LocalSemanticProofStatus status = LocalSemanticProofStatus.Applied;
@@ -405,7 +446,11 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
             {
                 status = LocalSemanticProofStatus.Rejected;
             }
+            _pendingIndex = index;
+            _pendingStatus = status;
+            _completionPending = true;
             if (!_channel.TryCompleteClient(index, status)) break;
+            _completionPending = false;
             applied++;
         }
         return applied;

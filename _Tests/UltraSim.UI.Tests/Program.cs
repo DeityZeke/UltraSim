@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using UltraSim.UI;
 
 var tests = new (string Name, Action Body)[]
@@ -27,6 +28,8 @@ var tests = new (string Name, Action Body)[]
     ("SemanticWireCodecIsCanonicalBoundedAndTransactional", SemanticWireCodecIsCanonicalBoundedAndTransactional),
     ("DefinitionArtifactIsCanonicalBoundedAndExact", DefinitionArtifactIsCanonicalBoundedAndExact),
     ("HotOpenModelRebindRequiresExactCompiledIdentity", HotOpenModelRebindRequiresExactCompiledIdentity),
+    ("ActionReasonMustRespectCompiledTextLimit", ActionReasonMustRespectCompiledTextLimit),
+    ("TruncatedDeltaCountsMustNotCauseLargeAllocations", TruncatedDeltaCountsMustNotCauseLargeAllocations),
 };
 
 foreach ((string name, Action body) in tests)
@@ -36,6 +39,91 @@ foreach ((string name, Action body) in tests)
 }
 
 Console.WriteLine($"All {tests.Length} UI S0.3 tests passed.");
+
+static void ActionReasonMustRespectCompiledTextLimit()
+{
+    var limits = new UiCompileLimits(maximumTextCharacters: 64);
+    var builder = new UiDefinitionBuilder("action-reason-limit");
+    builder.DeclareAction("act");
+    builder.AddCanvas(_ => { });
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder, limits);
+    UiActionId action = definition.Bindings.RequireAction("act");
+    var model = new UiModel(definition);
+    string excessive = new('x', 65);
+
+    Assert.Throws<InvalidDataException>(() =>
+        model.SetActionState(action, new UiActionState(false, excessive)));
+
+    model.SetActionState(action, new UiActionState(false, new string('x', 64)));
+    var delta = new UiModelDelta(
+        definition.Handle,
+        sequence: 1,
+        actions: [new UiActionStatePatch(action, new UiActionState(false, excessive))]);
+    byte[] encoded = new byte[UiSemanticWireLimits.Default.MaximumOperationBytes];
+    Assert.True(UiSemanticWireCodec.TryWriteUpdate(
+        encoded,
+        new UiUpdateView(new UiViewInstanceId(1), delta),
+        UiSemanticWireLimits.Default,
+        out int written));
+    Assert.True(UiSemanticWireCodec.TryReadUpdate(
+        encoded.AsSpan(0, written), UiSemanticWireLimits.Default, out UiUpdateView decoded));
+    Assert.Throws<InvalidDataException>(() => decoded.Delta.ValidateAgainst(definition));
+    Assert.Equal(64, model.GetActionState(action).UnavailableReason!.Length);
+}
+
+static void TruncatedDeltaCountsMustNotCauseLargeAllocations()
+{
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(CreateFixture());
+    byte[] warmup = CreateTruncatedDelta(definition.Handle, scalarCount: 1);
+    Assert.False(UiSemanticWireCodec.TryReadUpdate(warmup, UiSemanticWireLimits.Default, out _));
+
+    AssertBounded(CreateTruncatedDelta(definition.Handle, scalarCount: ushort.MaxValue));
+    AssertBounded(CreateTruncatedDelta(definition.Handle, listCount: ushort.MaxValue));
+    AssertBounded(CreateTruncatedDelta(definition.Handle, actionCount: ushort.MaxValue));
+    AssertBounded(CreateTruncatedReplacement(definition.Handle, 65_536));
+
+    static void AssertBounded(byte[] payload)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool accepted = UiSemanticWireCodec.TryReadUpdate(
+            payload, UiSemanticWireLimits.Default, out UiUpdateView operation);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.False(accepted);
+        Assert.Equal(default(UiUpdateView), operation);
+        Assert.True(allocated < 16 * 1024);
+    }
+}
+
+static byte[] CreateTruncatedDelta(
+    UiDefinitionHandle handle,
+    int scalarCount = 0,
+    int listCount = 0,
+    int actionCount = 0)
+{
+    byte[] payload = new byte[44];
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(0), 1);
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(8), handle.Low);
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(16), handle.High);
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(24), 1);
+    BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(32), scalarCount);
+    BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(36), listCount);
+    BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(40), actionCount);
+    return payload;
+}
+
+static byte[] CreateTruncatedReplacement(UiDefinitionHandle handle, int rowCount)
+{
+    byte[] payload = new byte[59];
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(0), 1);
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(8), handle.Low);
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(16), handle.High);
+    BinaryPrimitives.WriteUInt64BigEndian(payload.AsSpan(24), 1);
+    BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(36), 1);
+    BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(44), 0);
+    payload[46] = (byte)UiListDeltaKind.Replace;
+    BinaryPrimitives.WriteInt32BigEndian(payload.AsSpan(55), rowCount);
+    return payload;
+}
 
 static void AuthoringCompilesToPreparedNumericSurface()
 {

@@ -226,6 +226,16 @@ public sealed class CompiledUiDefinition
 
     public UiSlotValueKind GetSlotValueKind(UiSlotId id) => GetSlot(id).ValueKind;
 
+    internal void ValidateActionState(in UiActionState state)
+    {
+        if (state.UnavailableReason is { } reason &&
+            reason.Length > Limits.MaximumTextCharacters)
+        {
+            throw new InvalidDataException(
+                "The UI action unavailability reason exceeds the compiled text limit.");
+        }
+    }
+
     /// <summary>Prepares a definition-local slot reference into its compact runtime ID.</summary>
     public UiSlotId Prepare(UiSlotReference reference)
     {

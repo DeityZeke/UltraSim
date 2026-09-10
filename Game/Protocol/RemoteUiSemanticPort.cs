@@ -28,7 +28,7 @@ public readonly record struct RemoteUiPortSnapshot(
     ulong HotOpens);
 
 /// <summary>Normal bounded transport backpressure while publishing a remote UI operation.</summary>
-public sealed class RemoteUiTransportBackpressureException : InvalidOperationException
+public sealed class RemoteUiTransportBackpressureException : UiSemanticPublicationException
 {
     public RemoteUiTransportBackpressureException(NetworkQueueStatus status)
         : base($"The remote UI operation was not queued: {status}.") => Status = status;
@@ -274,7 +274,7 @@ public sealed class RemoteUiSemanticPort : IUiSemanticPort, IDisposable
     private UiViewInstanceId AllocateView(UiViewInstanceId requested)
     {
         if (_views.Count >= _limits.MaximumOpenViews)
-            throw new InvalidOperationException("The remote UI open-view capacity was reached.");
+            throw new UiSemanticCapacityException("The remote UI open-view capacity was reached.");
         if (requested.IsValid)
         {
             if (_views.ContainsKey(requested) || requested.Value < _nextView)

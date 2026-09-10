@@ -279,7 +279,10 @@ public sealed class UiModelDelta
         }
 
         foreach (UiActionStatePatch patch in Actions)
+        {
             definition.GetAction(patch.Action);
+            definition.ValidateActionState(patch.State);
+        }
     }
 }
 
@@ -394,6 +397,22 @@ public interface IUiSemanticPort
     bool CloseView(UiCloseView operation);
     void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler);
     void UnbindActions(UiViewInstanceId instance);
+}
+
+/// <summary>
+/// Expected bounded publication rejection from a semantic UI projection, including retained-view
+/// capacity and temporary transport pressure. The authoritative operation that requested
+/// presentation may remain valid and must not be faulted solely because presentation cannot
+/// accept the operation at that boundary.
+/// </summary>
+public abstract class UiSemanticPublicationException : InvalidOperationException
+{
+    protected UiSemanticPublicationException(string message) : base(message) { }
+}
+
+public sealed class UiSemanticCapacityException : UiSemanticPublicationException
+{
+    public UiSemanticCapacityException(string message) : base(message) { }
 }
 
 /// <summary>Renderer-owned opaque lifetime handle; only its creating renderer may interpret it.</summary>

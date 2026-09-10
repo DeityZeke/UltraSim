@@ -31,6 +31,7 @@ public sealed class GodotUiRenderer : IUiRenderer
         UiModelView model,
         Action<UiActionRequest> submitAction)
     {
+        GodotUiDefinitionAdmission.Validate(definition);
         var handle = new GodotUiRenderHandle(instance, definition, model, submitAction, _assets);
         if (_host is not null)
         {
@@ -58,6 +59,33 @@ public sealed class GodotUiRenderer : IUiRenderer
         if (handle is not GodotUiRenderHandle godotHandle)
             throw new ArgumentException("The render handle was not created by GodotUiRenderer.", nameof(handle));
         godotHandle.Close();
+    }
+}
+
+internal static class GodotUiDefinitionAdmission
+{
+    internal static void Validate(CompiledUiDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        foreach (UiCompiledLayoutNode node in definition.LayoutNodes)
+        {
+            _ = ToThemeConstant(node.Flow.Spacing);
+            _ = ToThemeConstant(node.Flow.Padding.Left);
+            _ = ToThemeConstant(node.Flow.Padding.Top);
+            _ = ToThemeConstant(node.Flow.Padding.Right);
+            _ = ToThemeConstant(node.Flow.Padding.Bottom);
+        }
+    }
+
+    internal static int ToThemeConstant(float value)
+    {
+        try { return checked((int)MathF.Round(value)); }
+        catch (OverflowException exception)
+        {
+            throw new InvalidDataException(
+                "A compiled UI flow spacing or padding value cannot be represented by Godot.",
+                exception);
+        }
     }
 }
 
@@ -258,9 +286,9 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         };
         control.Name = $"Layout_{node.Key}";
         if (control is VBoxContainer vertical)
-            vertical.AddThemeConstantOverride("separation", checked((int)MathF.Round(node.Flow.Spacing)));
+            vertical.AddThemeConstantOverride("separation", GodotUiDefinitionAdmission.ToThemeConstant(node.Flow.Spacing));
         if (control is HBoxContainer horizontal)
-            horizontal.AddThemeConstantOverride("separation", checked((int)MathF.Round(node.Flow.Spacing)));
+            horizontal.AddThemeConstantOverride("separation", GodotUiDefinitionAdmission.ToThemeConstant(node.Flow.Spacing));
         if (control is ScrollContainer scroll)
         {
             var content = new VBoxContainer
@@ -268,7 +296,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
                 Name = $"ScrollContent_{node.Key}",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             };
-            content.AddThemeConstantOverride("separation", checked((int)MathF.Round(node.Flow.Spacing)));
+            content.AddThemeConstantOverride("separation", GodotUiDefinitionAdmission.ToThemeConstant(node.Flow.Spacing));
             UiPadding scrollPadding = node.Flow.Padding;
             if (scrollPadding.Left == 0 && scrollPadding.Top == 0 &&
                 scrollPadding.Right == 0 && scrollPadding.Bottom == 0)
@@ -298,10 +326,10 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     private static MarginContainer CreateMargin(string name, UiPadding padding)
     {
         var margin = new MarginContainer { Name = name };
-        margin.AddThemeConstantOverride("margin_left", checked((int)MathF.Round(padding.Left)));
-        margin.AddThemeConstantOverride("margin_top", checked((int)MathF.Round(padding.Top)));
-        margin.AddThemeConstantOverride("margin_right", checked((int)MathF.Round(padding.Right)));
-        margin.AddThemeConstantOverride("margin_bottom", checked((int)MathF.Round(padding.Bottom)));
+        margin.AddThemeConstantOverride("margin_left", GodotUiDefinitionAdmission.ToThemeConstant(padding.Left));
+        margin.AddThemeConstantOverride("margin_top", GodotUiDefinitionAdmission.ToThemeConstant(padding.Top));
+        margin.AddThemeConstantOverride("margin_right", GodotUiDefinitionAdmission.ToThemeConstant(padding.Right));
+        margin.AddThemeConstantOverride("margin_bottom", GodotUiDefinitionAdmission.ToThemeConstant(padding.Bottom));
         return margin;
     }
 
@@ -409,8 +437,10 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             case Label label:
                 label.Text = Format(value);
                 break;
-            case CheckBox toggle when value.Kind == UiValueKind.Boolean:
-                toggle.ButtonPressed = value.Boolean;
+            case CheckBox toggle:
+                // Unset has the same visual meaning as a fresh unset Boolean projection. Always
+                // assign the retained state so true -> Unset cannot leave a stale pressed toggle.
+                toggle.ButtonPressed = value.Kind == UiValueKind.Boolean && value.Boolean;
                 break;
             case Button button:
                 button.Text = Format(value);

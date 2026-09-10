@@ -21,7 +21,10 @@ and input focus. F0.8 now closes the final physical product and semantic parity 
 Single Player, Online, and Complete Godot exports are inspected and run, exported Complete hosts
 exported Online guests on its existing packet-free local authority, and the same exported Online
 executable proves materially different Third Person and Orbit recommendations without content or
-code replacement. The Concept Demo pre-freeze characterization campaign is next.
+code replacement. A post-F0.8 defensive UI correction now closes bounded publication/shutdown,
+apply-proof retry, cleanup-identity, definition-limit, malformed-delta allocation,
+renderer-callback, and native adapter state/range failures without changing UI authority or
+protocol identity. The Concept Demo pre-freeze characterization campaign is next.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2674,6 +2677,8 @@ D0.7b runtime content-backed model/animation realization                       C
 F0.7  explicit settings/debug/mixed-session lifecycle closure             CLOSED
         |
 F0.8  final local/remote/complete/contentless + different-feel matrix      CLOSED
+        |
+UI defensive assurance: publication/lifetime/parser/native boundaries      CLOSED
         |
 pre-freeze campaign: bots/bandwidth/tuning/ObjectScript/human testing      NEXT
         |

@@ -23,6 +23,7 @@ var tests = new (string Name, Action Body)[]
     ("CacheIdentityAndDefaultOperationsReject", CacheIdentityAndDefaultOperationsReject),
     ("ClosedInstanceIdsDoNotPermitActionAba", ClosedInstanceIdsDoNotPermitActionAba),
     ("ClientRetainedDefinitionsAndViewsAreBounded", ClientRetainedDefinitionsAndViewsAreBounded),
+    ("RendererCallbackCannotResurrectDisposedRuntime", RendererCallbackCannotResurrectDisposedRuntime),
     ("ClientPerformanceBaselinesAreCaptured", ClientPerformanceBaselinesAreCaptured),
     ("ClientWorldSemanticCacheProductionContracts", ClientWorldSemanticCacheTests.Run),
     ("ClientPresentationWindowIsEngineNeutralAndTransactional", ClientPresentationWindowTests.Run),
@@ -42,6 +43,64 @@ foreach ((string name, Action body) in tests)
 }
 
 Console.WriteLine($"All {tests.Length} Client Core tests passed.");
+
+static void RendererCallbackCannotResurrectDisposedRuntime()
+{
+    CompiledUiDefinition definition = CreateDefinition(800);
+    UiDefinitionCacheKey cacheKey = CreateCacheKey(definition);
+    UiSlotId title = definition.Bindings.RequireSlot("title");
+
+    {
+        var renderer = new DisposingRenderer { Phase = RendererCallbackPhase.Create };
+        var client = new UiClientRuntime(renderer);
+        renderer.Client = client;
+        Assert.Throws<UiClientRuntimeFaultedException>(() => client.OpenView(new UiOpenView(
+            cacheKey, definition, CreateModel(definition, "Dispose during create"))));
+        Assert.Equal(0, client.CachedDefinitionCount);
+        Assert.Equal(0, client.OpenViewCount);
+        Assert.Equal(1, renderer.Creates);
+        Assert.Equal(0, renderer.Closes);
+        renderer.Phase = RendererCallbackPhase.None;
+        client.Dispose();
+        client.Dispose();
+    }
+
+    {
+        var renderer = new DisposingRenderer();
+        var client = new UiClientRuntime(renderer);
+        renderer.Client = client;
+        UiViewInstanceId view = client.OpenView(new UiOpenView(
+            cacheKey, definition, CreateModel(definition, "Stable")));
+        renderer.Phase = RendererCallbackPhase.Apply;
+        Assert.Throws<UiClientRuntimeFaultedException>(() => client.UpdateView(new UiUpdateView(
+            view,
+            new UiModelDelta(definition.Handle, 1,
+                scalarSlots: [new UiScalarSlotPatch(title, UiValue.FromText("Candidate"))]))));
+        Assert.Equal("Stable", client.GetValue(view, title).Text);
+        Assert.Equal((ulong)0, client.GetView(view).LastSequence);
+        Assert.Equal(1, client.OpenViewCount);
+        renderer.Phase = RendererCallbackPhase.None;
+        client.Dispose();
+        Assert.Equal(1, renderer.Closes);
+        Assert.Equal(0, client.OpenViewCount);
+    }
+
+    {
+        var renderer = new DisposingRenderer();
+        var client = new UiClientRuntime(renderer);
+        renderer.Client = client;
+        UiViewInstanceId view = client.OpenView(new UiOpenView(
+            cacheKey, definition, CreateModel(definition, "Close")));
+        renderer.Phase = RendererCallbackPhase.Close;
+        Assert.Throws<UiClientRuntimeFaultedException>(() =>
+            client.CloseView(new UiCloseView(view)));
+        Assert.Equal(1, client.OpenViewCount);
+        renderer.Phase = RendererCallbackPhase.None;
+        client.Dispose();
+        Assert.Equal(2, renderer.Closes);
+        Assert.Equal(0, client.OpenViewCount);
+    }
+}
 
 static void CapabilityMenuMatchesComposition()
 {
@@ -858,6 +917,54 @@ sealed class ReentrantRenderer : IUiRenderer
     public void Close(IUiRenderHandle handle) { }
 
     private sealed record Handle(UiViewInstanceId Instance) : IUiRenderHandle;
+}
+
+sealed class DisposingRenderer : IUiRenderer
+{
+    public UiClientRuntime? Client { get; set; }
+    public RendererCallbackPhase Phase { get; set; }
+    public int Creates { get; private set; }
+    public int Closes { get; private set; }
+
+    public IUiRenderHandle Create(
+        UiViewInstanceId instance,
+        CompiledUiDefinition definition,
+        UiModelView model,
+        Action<UiActionRequest> submitAction)
+    {
+        Creates++;
+        Mutate(RendererCallbackPhase.Create);
+        return new Handle();
+    }
+
+    public void Apply(
+        IUiRenderHandle handle,
+        CompiledUiDefinition definition,
+        UiModelView previous,
+        UiModelView current,
+        UiModelDelta delta,
+        Action<UiActionRequest> submitAction) => Mutate(RendererCallbackPhase.Apply);
+
+    public void Close(IUiRenderHandle handle)
+    {
+        Closes++;
+        Mutate(RendererCallbackPhase.Close);
+    }
+
+    private void Mutate(RendererCallbackPhase phase)
+    {
+        if (Phase == phase) Client!.Dispose();
+    }
+
+    private sealed class Handle : IUiRenderHandle { }
+}
+
+enum RendererCallbackPhase : byte
+{
+    None = 0,
+    Create = 1,
+    Apply = 2,
+    Close = 3,
 }
 
 static class Assert

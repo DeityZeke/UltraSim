@@ -259,11 +259,24 @@ public sealed class ServerMonitorUiController : IDisposable
         EnsureOperational();
         if (!_openView.IsValid) return false;
         UiViewInstanceId view = _openView;
+        bool closed = _ui.CloseView(new UiCloseView(view));
+        Exception? unbindFailure = null;
+        try { _ui.UnbindActions(view); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            unbindFailure = exception;
+        }
+
         _openView = default;
         _model = null;
         _sequence = 0;
-        _ui.UnbindActions(view);
-        return _ui.CloseView(new UiCloseView(view));
+        if (unbindFailure is not null)
+        {
+            throw new InvalidOperationException(
+                "The Server Monitor projection retired, but its action endpoint could not be unbound first.",
+                unbindFailure);
+        }
+        return closed;
     }
 
     public void Dispose()
@@ -279,7 +292,13 @@ public sealed class ServerMonitorUiController : IDisposable
         EnsureOperational();
         if (_openView.IsValid && request.Instance == _openView && _model is not null &&
             _model.TryValidateAction(request) && request.Action == ServerMonitorUi.Close)
-            _ = Close();
+        {
+            try { _ = Close(); }
+            catch (UiSemanticPublicationException)
+            {
+                // Retain the view/action lifetime for a later bounded retry.
+            }
+        }
     }
 
     private static UiModel CreateModel(ServerMonitorSnapshot snapshot)

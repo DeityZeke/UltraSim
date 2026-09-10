@@ -238,6 +238,11 @@ public sealed class InventoryUiController : IDisposable
             return false;
         bool closed;
         try { closed = _ui.CloseView(new UiCloseView(instance)); }
+        catch (UiSemanticPublicationException exception)
+        {
+            NotifyObservers(PresentationFaulted, exception);
+            return false;
+        }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             _sessions.Remove(instance);

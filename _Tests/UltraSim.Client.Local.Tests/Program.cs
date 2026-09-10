@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UltraSim.Client.Core;
 using UltraSim.Client.Local;
 using UltraSim.Client.StandardUi;
@@ -10,6 +11,12 @@ using UltraSim.Game.World;
 using UltraSim.Spatial;
 using UltraSim.UI;
 
+if (args is ["--ui-shutdown-backpressure-child"])
+{
+    RunShutdownBackpressureChild();
+    return;
+}
+
 var tests = new (string Name, Action Body)[]
 {
     ("AuthorityTicksWhilePresentationIsStalled", AuthorityTicksWhilePresentationIsStalled),
@@ -20,6 +27,10 @@ var tests = new (string Name, Action Body)[]
     ("ChatIngressRejectsUnboundedText", ChatIngressRejectsUnboundedText),
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
+    ("ProofBackpressureMustNotReapplyUiOperation", ProofBackpressureMustNotReapplyUiOperation),
+    ("LocalUiCapacityMustNotFaultAuthority", LocalUiCapacityMustNotFaultAuthority),
+    ("ControllerCloseFailureMustRemainRecoverable", ControllerCloseFailureMustRemainRecoverable),
+    ("LocalShutdownMustContainUiCloseBackpressure", LocalShutdownMustContainUiCloseBackpressure),
     ("ServerMonitorIsReadOnlyLocalAndRefreshesSlowly", ServerMonitorIsReadOnlyLocalAndRefreshesSlowly),
     ("PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache", PreinstalledInventoryUsesExactHotOpenAndFreshSessionCache),
     ("ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath", ConceptDemoWeaponUsesPacketFreeWorldInventoryAndPrimaryPath),
@@ -30,10 +41,201 @@ var tests = new (string Name, Action Body)[]
 
 foreach ((string name, Action body) in tests)
 {
+    if (args is ["--test", string selected] &&
+        !string.Equals(name, selected, StringComparison.Ordinal))
+        continue;
     body();
     Console.WriteLine($"PASS {name}");
 }
 Console.WriteLine($"All {tests.Length} local client-session tests passed.");
+
+static void ProofBackpressureMustNotReapplyUiOperation()
+{
+    LocalPlayableSessionLimits limits = LocalPlayableSessionLimits.Default with
+    {
+        UiOperationCapacity = 2,
+        UiProofCapacity = 1,
+    };
+    using Fixture fixture = Fixture.Create(limits);
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(client);
+
+    True(fixture.Session.TryRequestOpenInventory(1));
+    True(fixture.Session.TryRequestOpenInventory(2));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 2);
+
+    _ = bridge.Pump(2);
+    Equal(2, renderer.Created);
+    DriveUntil(() =>
+    {
+        bridge.Pump(2);
+        LocalPlayableSessionSnapshot snapshot = fixture.Session.GetSnapshot();
+        return snapshot.UiOperationsApplied == 2;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+    Equal(0UL, fixture.Session.GetSnapshot().UiOperationsRejected);
+    Equal(2, client.OpenViewCount);
+    Equal(2, renderer.Created);
+
+    UiViewInstanceId second = renderer.Instances[1];
+    UiRowId firstRow = client.GetRows(second, InventoryUi.Items)[0].Id;
+    client.SubmitAction(second, InventoryUi.Select, firstRow);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return string.Equals(
+            client.GetValue(second, InventoryUi.Status).Text,
+            "Item selected.",
+            StringComparison.Ordinal);
+    });
+}
+
+static void LocalUiCapacityMustNotFaultAuthority()
+{
+    LocalPlayableSessionLimits limits = LocalPlayableSessionLimits.Default with
+    {
+        UiOperationCapacity = 2,
+        UiProofCapacity = 2,
+    };
+    using Fixture fixture = Fixture.CreateConcept(limits);
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(client);
+
+    for (ulong sequence = 1; sequence <= 2; sequence++)
+    {
+        True(fixture.Session.TryRequestOpenInventory(sequence));
+        ulong expected = sequence;
+        DriveUntil(() =>
+        {
+            bridge.Pump();
+            return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+                view.LastAdministrativeSequence == expected && client.OpenViewCount == (int)expected;
+        });
+    }
+
+    var input = new ClientWorldInputSequencer(fixture.Session.ControlSession);
+    True(input.TryCreateSemanticCommand(
+        new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop,
+            GamePlayerActions.Interact,
+            true),
+        out GamePlayerCommand use));
+    True(fixture.Session.TrySubmit(new LocalPlayableCommand(
+        use, LocalPlayableSelection.InformationalSign, false, default, false)));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastCommandSequence == use.Sequence);
+    LocalPlayableSessionSnapshot afterSign = fixture.Session.GetSnapshot();
+    True(afterSign.IsRunning, afterSign.Fault);
+    True(afterSign.Fault is null, afterSign.Fault);
+    Equal(2, client.OpenViewCount);
+
+    True(fixture.Session.TryRequestOpenServerMonitor(3));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 3);
+    True(fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView rejected));
+    True(!rejected.LastAdministrativeSucceeded);
+    True(fixture.Session.GetSnapshot().IsRunning, fixture.Session.GetSnapshot().Fault);
+
+    UiViewInstanceId first = renderer.Instances[0];
+    client.SubmitAction(first, InventoryUi.Close);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return client.OpenViewCount == 1;
+    });
+
+    True(fixture.Session.TryRequestOpenServerMonitor(4));
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastAdministrativeSequence == 4 && view.LastAdministrativeSucceeded &&
+            client.OpenViewCount == 2;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+}
+
+static void ControllerCloseFailureMustRemainRecoverable()
+{
+    {
+        var signPort = new RecoveringSemanticPort();
+        using var sign = new InformationalSignUiController(signPort);
+        _ = sign.Open(GameInformationalSigns.ConceptDemoWelcome);
+        signPort.FailNextClose = true;
+        Throws<InvalidOperationException>(() => sign.Close());
+        True(sign.HasOpenView);
+        True(sign.Close());
+        Equal(0, signPort.OpenViews);
+
+        var monitorPort = new RecoveringSemanticPort();
+        using var monitor = new ServerMonitorUiController(monitorPort);
+        _ = monitor.Open(CreateMonitorSnapshot());
+        monitorPort.FailNextUnbind = true;
+        Throws<InvalidOperationException>(() => monitor.Close());
+        True(!monitor.HasOpenView);
+        Equal(0, monitorPort.OpenViews);
+    }
+
+    static ServerMonitorSnapshot CreateMonitorSnapshot() => new(
+        revision: 1,
+        generationId: 1,
+        simulationTick: 1,
+        simulationFrequencyHz: 30,
+        generationUptimeSeconds: 1,
+        recentTickMicroseconds: 1,
+        p95TickMicroseconds: 1,
+        entityCount: 1,
+        maximumParticipants: 1,
+        joins: 1,
+        leaves: 0,
+        testMarker: null,
+        participants: []);
+}
+
+static void LocalShutdownMustContainUiCloseBackpressure()
+{
+    string executable = Environment.ProcessPath ??
+        throw new InvalidOperationException("The current test executable path is unavailable.");
+    using var process = Process.Start(new ProcessStartInfo(executable, "--ui-shutdown-backpressure-child")
+    {
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+    }) ?? throw new InvalidOperationException("The shutdown regression child did not start.");
+    if (!process.WaitForExit(15_000))
+    {
+        process.Kill(entireProcessTree: true);
+        throw new InvalidOperationException("The shutdown regression child did not exit.");
+    }
+    string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+    True(process.ExitCode == 0, $"Shutdown child exited {process.ExitCode}: {output}");
+}
+
+static void RunShutdownBackpressureChild()
+{
+    string saveRoot = Path.Combine(Path.GetTempPath(), $"ultrasim-ui-shutdown-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(saveRoot);
+    try
+    {
+        LocalPlayableSessionLimits limits = LocalPlayableSessionLimits.Default with
+        {
+            UiOperationCapacity = 2,
+            UiProofCapacity = 2,
+        };
+        var session = LocalPlayableSession.CreateCabin(saveRoot, limits);
+        session.WaitUntilReady(TimeSpan.FromSeconds(10));
+        True(session.TryRequestOpenInventory(1));
+        True(session.TryRequestOpenInventory(2));
+        DriveUntil(() => session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+            view.LastAdministrativeSequence == 2);
+        session.Dispose();
+    }
+    finally
+    {
+        if (Directory.Exists(saveRoot)) Directory.Delete(saveRoot, recursive: true);
+    }
+}
 
 static void AuthorityTicksWhilePresentationIsStalled()
 {
@@ -714,6 +916,13 @@ static void Equal<T>(T expected, T actual) where T : notnull
         throw new InvalidOperationException($"Expected '{expected}', got '{actual}'.");
 }
 
+static void Throws<TException>(Action action) where TException : Exception
+{
+    try { action(); }
+    catch (TException) { return; }
+    throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
+}
+
 sealed class Fixture : IDisposable
 {
     private readonly string _saveRoot;
@@ -727,19 +936,25 @@ sealed class Fixture : IDisposable
     internal LocalPlayableSession Session { get; }
 
     internal static Fixture Create()
+        => Create(LocalPlayableSessionLimits.Default);
+
+    internal static Fixture Create(LocalPlayableSessionLimits limits)
     {
         string saveRoot = Path.Combine(Path.GetTempPath(), $"ultrasim-local-{Guid.NewGuid():N}");
         Directory.CreateDirectory(saveRoot);
-        LocalPlayableSession session = LocalPlayableSession.CreateCabin(saveRoot);
+        LocalPlayableSession session = LocalPlayableSession.CreateCabin(saveRoot, limits);
         session.WaitUntilReady(TimeSpan.FromSeconds(10));
         return new Fixture(saveRoot, session);
     }
 
     internal static Fixture CreateConcept()
+        => CreateConcept(LocalPlayableSessionLimits.Default);
+
+    internal static Fixture CreateConcept(LocalPlayableSessionLimits limits)
     {
         string saveRoot = Path.Combine(Path.GetTempPath(), $"ultrasim-local-concept-{Guid.NewGuid():N}");
         Directory.CreateDirectory(saveRoot);
-        LocalPlayableSession session = LocalPlayableSession.CreateConceptDemo(saveRoot);
+        LocalPlayableSession session = LocalPlayableSession.CreateConceptDemo(saveRoot, limits: limits);
         session.WaitUntilReady(TimeSpan.FromSeconds(10));
         return new Fixture(saveRoot, session);
     }
@@ -805,6 +1020,7 @@ sealed class MemoryRenderer : IUiRenderer
 {
     internal int Created;
     internal UiViewInstanceId LastInstance;
+    internal List<UiViewInstanceId> Instances { get; } = [];
 
     public IUiRenderHandle Create(
         UiViewInstanceId instance,
@@ -814,6 +1030,7 @@ sealed class MemoryRenderer : IUiRenderer
     {
         Created++;
         LastInstance = instance;
+        Instances.Add(instance);
         return new Handle();
     }
 
@@ -828,4 +1045,53 @@ sealed class MemoryRenderer : IUiRenderer
     public void Close(IUiRenderHandle handle) { }
 
     private sealed class Handle : IUiRenderHandle { }
+}
+
+sealed class RecoveringSemanticPort : IUiSemanticPort
+{
+    private readonly HashSet<UiViewInstanceId> _views = [];
+    private readonly Dictionary<UiViewInstanceId, Action<UiActionRequest>> _actions = [];
+    private ulong _nextView = 1;
+
+    internal bool FailNextClose { get; set; }
+    internal bool FailNextUnbind { get; set; }
+    internal int OpenViews => _views.Count;
+
+    public UiViewInstanceId OpenView(UiOpenView operation) => Allocate(operation.Instance);
+    public UiViewInstanceId OpenHotView(UiHotOpenView operation) => Allocate(operation.Instance);
+    public void UpdateView(UiUpdateView operation)
+    {
+        if (!_views.Contains(operation.Instance))
+            throw new InvalidOperationException("View is not open.");
+    }
+    public bool CloseView(UiCloseView operation)
+    {
+        if (FailNextClose)
+        {
+            FailNextClose = false;
+            throw new InvalidOperationException("Injected close failure.");
+        }
+        _actions.Remove(operation.Instance);
+        return _views.Remove(operation.Instance);
+    }
+    public void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler) =>
+        _actions.Add(instance, handler);
+    public void UnbindActions(UiViewInstanceId instance)
+    {
+        if (FailNextUnbind)
+        {
+            FailNextUnbind = false;
+            throw new InvalidOperationException("Injected unbind failure.");
+        }
+        _actions.Remove(instance);
+    }
+
+    private UiViewInstanceId Allocate(UiViewInstanceId requested)
+    {
+        UiViewInstanceId instance = requested.IsValid
+            ? requested
+            : new UiViewInstanceId(_nextView++);
+        _views.Add(instance);
+        return instance;
+    }
 }

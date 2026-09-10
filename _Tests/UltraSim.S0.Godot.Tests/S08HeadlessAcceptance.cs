@@ -21,6 +21,7 @@ public partial class S08HeadlessAcceptance : Control
         try
         {
             RunAcceptance();
+            RunNativeAdapterBoundaryAcceptance();
             RunRemoteInventoryAcceptance();
             GD.Print("S0.8 / I0.11 GODOT ACCEPTANCE PASS");
             GetTree().Quit(0);
@@ -30,6 +31,72 @@ public partial class S08HeadlessAcceptance : Control
             GD.PushError($"S0.8 GODOT ACCEPTANCE FAIL: {exception}");
             GetTree().Quit(1);
         }
+    }
+
+    private void RunNativeAdapterBoundaryAcceptance()
+    {
+        var toggleSource = new UiDefinitionBuilder("native-toggle-reset");
+        toggleSource.DeclareSlot("enabled", UiSlotValueKind.Boolean);
+        toggleSource.DeclareAction("toggle", inputKind: UiValueKind.Boolean);
+        toggleSource.AddCanvas(canvas => canvas.AddToggle(
+            "toggle",
+            "enabled",
+            "toggle",
+            UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 120, 30))));
+        CompiledUiDefinition toggleDefinition = UiDefinitionCompiler.Compile(toggleSource);
+        UiSlotId enabled = toggleDefinition.Bindings.RequireSlot("enabled");
+        var initial = new UiModel(toggleDefinition);
+        initial.SetBoolean(enabled, true);
+        int submittedActions = 0;
+        using (var toggleClient = new UiClientRuntime(new GodotUiRenderer(this)))
+        {
+            var toggleLink = new LocalSemanticLink(toggleClient);
+            toggleLink.ActionSubmitted += _ => submittedActions++;
+            UiViewInstanceId view = toggleLink.OpenView(new UiOpenView(
+                CacheKey(toggleDefinition), toggleDefinition, initial));
+            CheckBox toggle = Find<CheckBox>(GetNode<Control>($"UiView_{view.Value}"), "Element_toggle");
+            Expect(toggle.ButtonPressed, "The native Boolean fixture did not begin pressed.");
+            toggleLink.UpdateView(new UiUpdateView(view, new UiModelDelta(
+                toggleDefinition.Handle,
+                sequence: 1,
+                scalarSlots: [new UiScalarSlotPatch(enabled, UiValue.Unset)])));
+            Expect(!toggle.ButtonPressed,
+                "A true-to-Unset Boolean update retained stale pressed state in Godot.");
+            Expect(submittedActions == 0,
+                "The programmatic Boolean reset emitted client action intent.");
+        }
+
+        var oversizedSource = new UiDefinitionBuilder("native-flow-range");
+        oversizedSource.AddCanvas(canvas => canvas.AddVertical(
+            "oversized",
+            _ => { },
+            UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100)),
+            new UiFlowOptions(spacing: float.MaxValue)));
+        CompiledUiDefinition oversized = UiDefinitionCompiler.Compile(oversizedSource);
+        var oversizedModel = new UiModel(oversized);
+        using var oversizedClient = new UiClientRuntime(new GodotUiRenderer(this));
+        UiClientRuntimeFaultedException rejected = ExpectThrows<UiClientRuntimeFaultedException>(() =>
+            oversizedClient.OpenView(new UiOpenView(
+                CacheKey(oversized), oversized, oversizedModel, new UiViewInstanceId(9_001))));
+        Expect(rejected.InnerException is InvalidDataException,
+            "Oversized native flow constants were not rejected by adapter admission.");
+        Expect(GetNodeOrNull<Control>("UiView_9001") is null,
+            "Rejected native UI admission retained a partial control root.");
+    }
+
+    private static UiDefinitionCacheKey CacheKey(CompiledUiDefinition definition) => new(
+        "native-test",
+        "adapter-boundary",
+        protocolVersion: 1,
+        definition.Key,
+        definition.Version,
+        definition.Hash);
+
+    private static TException ExpectThrows<TException>(Action action) where TException : Exception
+    {
+        try { action(); }
+        catch (TException exception) { return exception; }
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
 
     private void RunAcceptance()

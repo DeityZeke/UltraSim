@@ -141,6 +141,7 @@ public sealed class UiModel
     public void SetActionState(UiActionId action, UiActionState state)
     {
         _definition.GetAction(action);
+        _definition.ValidateActionState(state);
         _actionStates[action.Value] = state;
     }
 

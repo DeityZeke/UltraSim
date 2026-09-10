@@ -190,7 +190,8 @@ public static class UiSemanticWireCodec
     {
         UiUpdateView copy = operation;
         return TryWrite(destination, limits, out written, (ref WireWriter writer) =>
-            writer.TryWriteUInt64(copy.Instance.Value) && WriteDelta(ref writer, copy.Delta));
+            writer.TryWriteUInt64(copy.Instance.Value) &&
+            WriteDelta(ref writer, copy.Delta, limits.MaximumDefinitionLimits));
     }
 
     public static bool TryReadUpdate(
@@ -203,7 +204,8 @@ public static class UiSemanticWireCodec
         try
         {
             if (!reader.TryReadUInt64(out ulong instanceValue) || instanceValue == 0 ||
-                !ReadDelta(ref reader, out UiModelDelta? delta) || !reader.IsComplete)
+                !ReadDelta(ref reader, limits.MaximumDefinitionLimits, out UiModelDelta? delta) ||
+                !reader.IsComplete)
                 return false;
             operation = new UiUpdateView(new UiViewInstanceId(instanceValue), delta!);
             return true;
@@ -535,7 +537,10 @@ public static class UiSemanticWireCodec
         return true;
     }
 
-    private static bool WriteDelta(ref WireWriter writer, UiModelDelta delta)
+    private static bool WriteDelta(
+        ref WireWriter writer,
+        UiModelDelta delta,
+        UiCompileLimits limits)
     {
         if (!writer.TryWriteUInt64(delta.Definition.Low) ||
             !writer.TryWriteUInt64(delta.Definition.High) ||
@@ -563,18 +568,25 @@ public static class UiSemanticWireCodec
         }
         foreach (UiActionStatePatch patch in delta.Actions)
             if (!writer.TryWriteUInt16(patch.Action.Value) ||
-                !WriteActionState(ref writer, patch.State, UiCompileLimits.Default)) return false;
+                !WriteActionState(ref writer, patch.State, limits)) return false;
         return true;
     }
 
-    private static bool ReadDelta(ref WireReader reader, out UiModelDelta? delta)
+    private static bool ReadDelta(
+        ref WireReader reader,
+        UiCompileLimits limits,
+        out UiModelDelta? delta)
     {
         delta = null;
         if (!reader.TryReadUInt64(out ulong low) || !reader.TryReadUInt64(out ulong high) ||
             (low | high) == 0 || !reader.TryReadUInt64(out ulong sequence) ||
-            !reader.TryReadInt32(out int scalarCount) || scalarCount < 0 || scalarCount > ushort.MaxValue ||
-            !reader.TryReadInt32(out int listCount) || listCount < 0 || listCount > ushort.MaxValue ||
-            !reader.TryReadInt32(out int actionCount) || actionCount < 0 || actionCount > ushort.MaxValue)
+            !reader.TryReadInt32(out int scalarCount) || scalarCount < 0 ||
+                scalarCount > limits.MaximumSlots ||
+            !reader.TryReadInt32(out int listCount) || listCount < 0 ||
+            !reader.TryReadInt32(out int actionCount) || actionCount < 0 ||
+                actionCount > limits.MaximumActions ||
+            (long)scalarCount * 3L + (long)listCount * 11L + (long)actionCount * 4L >
+                reader.RemainingCount)
             return false;
         var scalar = new UiScalarSlotPatch[scalarCount];
         for (int index = 0; index < scalar.Length; index++)
@@ -593,16 +605,18 @@ public static class UiSemanticWireCodec
             switch ((UiListDeltaKind)kind)
             {
                 case UiListDeltaKind.Replace:
-                    if (rowId != 0 || !reader.TryReadInt32(out int count) || count < 0 || count > 65_536)
+                    if (rowId != 0 || !reader.TryReadInt32(out int count) || count < 0 ||
+                        count > limits.MaximumRowsPerList ||
+                        (long)count * 10L > reader.RemainingCount)
                         return false;
                     var replacement = new UiListRow[count];
                     for (int row = 0; row < count; row++)
-                        if (!ReadRow(ref reader, UiCompileLimits.Default, out replacement[row])) return false;
+                        if (!ReadRow(ref reader, limits, out replacement[row])) return false;
                     lists[index] = UiListPatch.Replace(slotId, replacement);
                     break;
                 case UiListDeltaKind.Add:
                 case UiListDeltaKind.Update:
-                    if (rowId == 0 || !ReadRow(ref reader, UiCompileLimits.Default, out UiListRow value) ||
+                    if (rowId == 0 || !ReadRow(ref reader, limits, out UiListRow value) ||
                         value.Id.Value != rowId) return false;
                     lists[index] = kind == (byte)UiListDeltaKind.Add
                         ? UiListPatch.Add(slotId, value)
@@ -618,7 +632,7 @@ public static class UiSemanticWireCodec
         for (int index = 0; index < actions.Length; index++)
         {
             if (!reader.TryReadUInt16(out ushort action) || action == ushort.MaxValue ||
-                !ReadActionState(ref reader, UiCompileLimits.Default, out UiActionState state)) return false;
+                !ReadActionState(ref reader, limits, out UiActionState state)) return false;
             actions[index] = new UiActionStatePatch(new UiActionId(action), state);
         }
         delta = new UiModelDelta(
@@ -642,7 +656,8 @@ public static class UiSemanticWireCodec
     {
         row = default;
         if (!reader.TryReadUInt64(out ulong id) || id == 0 ||
-            !reader.TryReadUInt16(out ushort count) || count > UiListRow.MaximumValues) return false;
+            !reader.TryReadUInt16(out ushort count) || count > UiListRow.MaximumValues ||
+            count > reader.RemainingCount) return false;
         var values = new UiValue[count];
         for (int index = 0; index < values.Length; index++)
             if (!ReadValue(ref reader, out values[index]) ||
@@ -876,6 +891,7 @@ public static class UiSemanticWireCodec
         private int _position;
         internal WireReader(ReadOnlySpan<byte> source) { _source = source; _position = 0; }
         internal readonly bool IsComplete => _position == _source.Length;
+        internal readonly int RemainingCount => _source.Length - _position;
         internal bool TryReadByte(out byte value)
         {
             if (_position >= _source.Length) { value = 0; return false; }

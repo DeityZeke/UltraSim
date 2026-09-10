@@ -49,9 +49,47 @@ callback remains a terminal authority failure and must not be converted to a
 normal UI rejection.
 
 Once an authoritative mutation commits, presentation delivery cannot roll it
-back. A failed open/update/close detaches or desynchronizes the session and
-requires a fresh snapshot. Observer event failures are isolated from committed
-authority.
+back. Expected capacity/transport rejection before publication is retained or
+reported for retry. A client rejection after delivery detaches or desynchronizes
+the affected session and requires a fresh snapshot. Observer event failures are
+isolated from committed authority.
+
+## Failure, capacity, and callback boundaries
+
+`IUiSemanticPort` has one explicit expected publication-failure family.
+`UiSemanticPublicationException` means that a valid semantic presentation operation could not be
+accepted at the current projection boundary: for example, retained-view capacity is exhausted or a
+bounded local/remote delivery queue is temporarily full. Game-domain rejection remains a result;
+unexpected exceptions remain implementation failures. Callers catch only this explicit family
+outside authoritative Runtime callbacks, so presentation capacity cannot fault or roll back an
+otherwise valid Game mutation.
+
+Open/close ownership is transactional at the port boundary:
+
+- an open view becomes controller-owned only after publication and action binding succeed;
+- a close exception retains the controller's view identity and action endpoint for retry;
+- an accepted close, or `false` when the port has already retired that projection, discharges the
+  cleanup obligation;
+- local terminal retirement closes authority-side projections without requiring a stopped client
+  to consume more queued close operations;
+- owner-thread shutdown attempts every independently owned resource and reports cleanup failure
+  through session fault state rather than throwing out of the background authority thread.
+
+The queued packet-free bridge applies each operation at most once. If its application-proof queue
+is full, it retains only the completed status and retries proof publication; it does not run the
+renderer/model operation again.
+
+`UiClientRuntime` treats renderer callbacks as a sealed mutation scope. `Create`, `Apply`, and
+`Close` callbacks cannot synchronously open/update/close views, alter the action sink, submit
+intent, or dispose their owning runtime. A rejected callback faults the runtime without publishing
+candidate model/cache state; disposal later closes any still-owned handle.
+
+Definition-specific limits remain authoritative after wire admission. Action-unavailability text
+is validated against the resolved compiled definition, not merely the wider wire default. Delta
+decoding proves declared counts feasible from remaining bytes and configured slot/action/row
+limits before allocating collections. The Godot adapter likewise preadmits every flow spacing and
+padding value against its native integer range before constructing controls. Boolean `Unset`
+always projects as an unpressed toggle, including a retained `true -> Unset` update.
 
 ## Local and remote paths
 

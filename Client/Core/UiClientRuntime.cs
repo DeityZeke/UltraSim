@@ -85,6 +85,7 @@ public sealed class UiClientRuntime : IDisposable
     public void AttachActionSink(IUiActionSink sink)
     {
         EnsureOperational();
+        EnsureMutationAllowed();
         ArgumentNullException.ThrowIfNull(sink);
         if (_actionSink is not null && !ReferenceEquals(_actionSink, sink))
             throw new InvalidOperationException("A client runtime can have only one semantic action sink.");
@@ -94,6 +95,7 @@ public sealed class UiClientRuntime : IDisposable
     public void DetachActionSink(IUiActionSink sink)
     {
         EnsureOwnerThread();
+        EnsureMutationAllowed();
         ArgumentNullException.ThrowIfNull(sink);
         if (ReferenceEquals(_actionSink, sink))
             _actionSink = null;
@@ -102,6 +104,7 @@ public sealed class UiClientRuntime : IDisposable
     public UiViewInstanceId OpenView(UiOpenView operation)
     {
         EnsureOperational();
+        EnsureMutationAllowed();
         operation.CacheKey.Validate(operation.Definition);
         UiModel model = operation.SnapshotModel();
         if (!ReferenceEquals(model.Definition, operation.Definition))
@@ -137,6 +140,7 @@ public sealed class UiClientRuntime : IDisposable
     public UiViewInstanceId OpenHotView(UiHotOpenView operation)
     {
         EnsureOperational();
+        EnsureMutationAllowed();
         if (!_definitions.TryGetValue(operation.CacheKey, out CompiledUiDefinition? definition))
         {
             if (_currentDefinitions.TryGetValue(operation.CacheKey.Family, out UiDefinitionCacheKey current) &&
@@ -167,6 +171,7 @@ public sealed class UiClientRuntime : IDisposable
     public void UpdateView(UiUpdateView operation)
     {
         EnsureOperational();
+        EnsureMutationAllowed();
         if (!_views.TryGetValue(operation.Instance, out UiViewState? view))
             throw new KeyNotFoundException("The UI view instance is not open.");
         UiModelDelta delta = operation.Delta;
@@ -186,6 +191,7 @@ public sealed class UiClientRuntime : IDisposable
     public bool CloseView(UiCloseView operation)
     {
         EnsureOperational();
+        EnsureMutationAllowed();
         if (!_views.TryGetValue(operation.Instance, out UiViewState? view))
             return false;
         CloseRenderer(view.RenderHandle);
@@ -234,6 +240,7 @@ public sealed class UiClientRuntime : IDisposable
         CompiledUiDefinition definition)
     {
         EnsureOperational();
+        EnsureMutationAllowed();
         cacheKey.Validate(definition);
         if (_definitions.ContainsKey(cacheKey)) return false;
 
@@ -488,6 +495,7 @@ public sealed class UiClientRuntime : IDisposable
     {
         EnsureOwnerThread();
         if (_disposed) return;
+        EnsureMutationAllowed();
         _disposed = true;
         _actionSink = null;
         Exception? firstFailure = null;
@@ -528,6 +536,15 @@ public sealed class UiClientRuntime : IDisposable
         finally
         {
             _rendererExecuting = false;
+        }
+    }
+
+    private void EnsureMutationAllowed()
+    {
+        if (_rendererExecuting)
+        {
+            throw new InvalidOperationException(
+                "A UI renderer callback cannot synchronously mutate or dispose its owning client runtime.");
         }
     }
 

@@ -1439,7 +1439,7 @@ public sealed class RemoteGuestPlayableApplication :
         }
         _lastProcessedCommand = command.Sequence;
         try { _lastCommandResult = ApplyPostCommandSemantic(outcome); }
-        catch (RemoteUiTransportBackpressureException)
+        catch (UiSemanticPublicationException)
         {
             SaturatingIncrement(ref _uiBackpressureRejections);
             _lastCommandResult = outcome.Result with

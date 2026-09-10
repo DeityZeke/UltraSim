@@ -606,14 +606,27 @@ public sealed class LocalPlayableSession : IDisposable
         finally
         {
             _running = false;
-            serverExtension?.Dispose();
-            signUi?.Dispose();
-            serverMonitorUi?.Dispose();
-            inventoryUi?.Dispose();
-            ui?.Dispose();
-            chat?.Dispose();
-            admission?.Dispose();
-            runtime?.Dispose();
+            Exception? cleanupFailure = null;
+            try { ui?.BeginTerminalRetirement(); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                cleanupFailure = exception;
+            }
+            TryDispose(serverExtension, ref cleanupFailure);
+            TryDispose(signUi, ref cleanupFailure);
+            TryDispose(serverMonitorUi, ref cleanupFailure);
+            TryDispose(inventoryUi, ref cleanupFailure);
+            TryDispose(ui, ref cleanupFailure);
+            TryDispose(chat, ref cleanupFailure);
+            TryDispose(admission, ref cleanupFailure);
+            TryDispose(runtime, ref cleanupFailure);
+            if (cleanupFailure is not null)
+            {
+                lock (_viewGate) _fault ??= new InvalidOperationException(
+                    "The local authoritative application encountered a cleanup failure.",
+                    cleanupFailure);
+                _ready.Set();
+            }
         }
     }
 
@@ -715,20 +728,46 @@ public sealed class LocalPlayableSession : IDisposable
                             chest = ToggleBreadContainer(world, game, entities);
                         else if (unsupported)
                             chest = GameWorldActionStatus.MissingTarget;
-                        if ((captured.Selection is LocalPlayableSelection.InformationalSign or
+                        LocalPlayableSelection sign =
+                            (captured.Selection is LocalPlayableSelection.InformationalSign or
                                 LocalPlayableSelection.FallbackLabSign) &&
-                            result.Interaction == GameWorldActionStatus.Accepted)
-                        {
-                            InformationalSignUiOpenResult opened = signUi.Open(
-                                captured.Selection == LocalPlayableSelection.FallbackLabSign
-                                    ? GameInformationalSigns.FallbackLab
-                                    : GameInformationalSigns.ConceptDemoWelcome);
-                            if (!opened.Succeeded)
-                                result = result with { Interaction = GameWorldActionStatus.InvariantViolation };
-                        }
-                        return new CommandOutcome(result, chest);
+                            result.Interaction == GameWorldActionStatus.Accepted
+                                ? captured.Selection
+                                : LocalPlayableSelection.None;
+                        return new CommandOutcome(result, chest, sign);
                     }, out CommandOutcome outcome))
                 throw new InvalidOperationException("The local command had no authoritative generation.");
+            if (outcome.Sign is LocalPlayableSelection.InformationalSign or
+                LocalPlayableSelection.FallbackLabSign)
+            {
+                try
+                {
+                    InformationalSignUiOpenResult opened = signUi.Open(
+                        outcome.Sign == LocalPlayableSelection.FallbackLabSign
+                            ? GameInformationalSigns.FallbackLab
+                            : GameInformationalSigns.ConceptDemoWelcome);
+                    if (!opened.Succeeded)
+                    {
+                        outcome = outcome with
+                        {
+                            Result = outcome.Result with
+                            {
+                                Interaction = GameWorldActionStatus.InvariantViolation,
+                            },
+                        };
+                    }
+                }
+                catch (Exception exception) when (IsExpectedUiPresentationRejection(exception))
+                {
+                    outcome = outcome with
+                    {
+                        Result = outcome.Result with
+                        {
+                            Interaction = GameWorldActionStatus.InvariantViolation,
+                        },
+                    };
+                }
+            }
             lastSequence = request.Command.Sequence;
             lastSelection = request.Selection;
             lastResult = outcome.Result;
@@ -811,13 +850,24 @@ public sealed class LocalPlayableSession : IDisposable
                             Resolve(world, entities.PlayerId),
                             Resolve(world, entities.CabinChestId)),
                         out InventoryOpenEntities openedEntities);
-                    InventoryUiOpenResult opened = ran
-                        ? Volatile.Read(ref _inventoryHotOpen) != 0
-                            ? inventoryUi.OpenOwnedHot(
-                                openedEntities.Backpack, openedEntities.Player)
-                            : inventoryUi.OpenOwned(
-                                openedEntities.Backpack, openedEntities.Player)
-                        : default;
+                    InventoryUiOpenResult opened = default;
+                    if (ran)
+                    {
+                        try
+                        {
+                            opened = Volatile.Read(ref _inventoryHotOpen) != 0
+                                ? inventoryUi.OpenOwnedHot(
+                                    openedEntities.Backpack, openedEntities.Player)
+                                : inventoryUi.OpenOwned(
+                                    openedEntities.Backpack, openedEntities.Player);
+                        }
+                        catch (Exception exception) when (IsExpectedUiPresentationRejection(exception))
+                        {
+                            lastSucceeded = false;
+                            lastMessage = exception.Message;
+                            break;
+                        }
+                    }
                     lastSucceeded = ran && opened.Succeeded;
                     lastMessage = opened.Message;
                     break;
@@ -828,7 +878,15 @@ public sealed class LocalPlayableSession : IDisposable
                         runtime, tickTimings, participant, guestIdentity, entities,
                         serverExtension, generationStartedTimestamp,
                         ref localMonitorRevision);
-                    ServerMonitorUiOpenResult opened = serverMonitorUi.Open(snapshot);
+                    ServerMonitorUiOpenResult opened;
+                    try { opened = serverMonitorUi.Open(snapshot); }
+                    catch (Exception exception) when (IsExpectedUiPresentationRejection(exception))
+                    {
+                        lastMonitorRefreshTick = runtime.SimulationTick;
+                        lastSucceeded = false;
+                        lastMessage = exception.Message;
+                        break;
+                    }
                     lastMonitorRefreshTick = runtime.SimulationTick;
                     lastSucceeded = opened.Succeeded;
                     lastMessage = opened.Message;
@@ -1336,6 +1394,19 @@ public sealed class LocalPlayableSession : IDisposable
             throw new InvalidOperationException("The local authoritative application faulted.", fault);
     }
 
+    private static bool IsExpectedUiPresentationRejection(Exception exception) =>
+        exception is UiSemanticPublicationException;
+
+    private static void TryDispose(IDisposable? resource, ref Exception? firstFailure)
+    {
+        if (resource is null) return;
+        try { resource.Dispose(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            firstFailure ??= exception;
+        }
+    }
+
     private void EnsureOperational()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -1344,7 +1415,8 @@ public sealed class LocalPlayableSession : IDisposable
 
     private readonly record struct CommandOutcome(
         GamePlayerCommandResult Result,
-        GameWorldActionStatus Chest);
+        GameWorldActionStatus Chest,
+        LocalPlayableSelection Sign);
 
     private readonly record struct LocalPopulation(
         GamePlayableWorldScene Scene,

@@ -58,7 +58,11 @@ with inspected and executed Single Player, Contentless Online, and Complete expo
 Complete host serving two exported Online guests; and one unchanged Online executable applying
 materially different Third Person and Orbit camera/control recommendations over the same
 authenticated realm/content identity. The pre-freeze load, bandwidth, cadence, soak, and
-external-human characterization campaign is next. Broad opt-in diagnostic capture remains future.
+external-human characterization campaign is next. A post-F0.8 defensive UI correction also makes
+local shutdown independent from a saturated presentation queue, contains expected view-capacity
+rejection outside Game callbacks, retries local apply proofs without replaying renderer work,
+retains failed-close identity, and hardens compiled/native limits. It changes no demo authority,
+content, or wire identity. Broad opt-in diagnostic capture remains future.
 
 The demo has two purposes:
 

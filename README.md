@@ -206,6 +206,13 @@ peer. The remotely opened monitor definition is an exact realm-authorized `.usui
 and sole Close action remain Game-owned. No endpoint/IP, credential/key, exact position,
 owner-private state, or administrative command is exposed.
 
+The post-F0.8 UI defensive-assurance pass makes bounded semantic publication an explicit expected
+failure family, keeps Game authority alive when presentation capacity is exhausted, prevents local
+proof backpressure from replaying already-rendered operations, and makes saturated local shutdown
+terminal without depending on further client pumping. Compiled action text and malformed delta
+counts are checked against resolved limits before retention/allocation; renderer callbacks cannot
+reenter runtime mutation; native Boolean-unset and Godot theme-constant range behavior are exact.
+
 Concept Demo D0.7a adds the first shared actor motion/equipment/action presentation vertical.
 Successive authoritative poses drive horizontal Idle/Walk, while Game's finite vertical phase drives
 Rising/Falling and exact airborne-to-grounded landing presentation. Game-owned Inventory exposes
