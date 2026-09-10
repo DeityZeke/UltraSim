@@ -24,16 +24,20 @@ public static class ConceptDemoClientProfiles
                 ? RemoteClientCameraProfile.IndependentMoveLook
                 : RemoteClientCameraProfile.ThirdPersonFollow;
         uint distance = orbit ? 14_000u : direct ? 8_500u : 12_000u;
+        ushort fov = direct ? (ushort)760 : (ushort)700;
+        string select = orbit ? "LEFT" : "MIDDLE";
+        string destination = orbit ? "LEFT_DOUBLE" : "MIDDLE_DOUBLE";
+        string primary = orbit ? "MIDDLE" : "LEFT";
         RemoteClientProfileBinding[] bindings =
         [
             Binding(RemoteClientSemanticAction.MoveLeft, RemoteClientPhysicalInputKind.Keyboard, "A"),
             Binding(RemoteClientSemanticAction.MoveRight, RemoteClientPhysicalInputKind.Keyboard, "D"),
             Binding(RemoteClientSemanticAction.MoveForward, RemoteClientPhysicalInputKind.Keyboard, "W"),
             Binding(RemoteClientSemanticAction.MoveBackward, RemoteClientPhysicalInputKind.Keyboard, "S"),
-            Binding(RemoteClientSemanticAction.Select, RemoteClientPhysicalInputKind.MouseButton, "LEFT"),
-            Binding(RemoteClientSemanticAction.Destination, RemoteClientPhysicalInputKind.MouseButton, "LEFT_DOUBLE"),
+            Binding(RemoteClientSemanticAction.Select, RemoteClientPhysicalInputKind.MouseButton, select),
+            Binding(RemoteClientSemanticAction.Destination, RemoteClientPhysicalInputKind.MouseButton, destination),
             Binding(RemoteClientSemanticAction.ContextMenu, RemoteClientPhysicalInputKind.MouseButton, "RIGHT"),
-            Binding(RemoteClientSemanticAction.Primary, RemoteClientPhysicalInputKind.MouseButton, "MIDDLE"),
+            Binding(RemoteClientSemanticAction.Primary, RemoteClientPhysicalInputKind.MouseButton, primary),
             Binding(RemoteClientSemanticAction.Interact, RemoteClientPhysicalInputKind.Keyboard, "E"),
             Binding(RemoteClientSemanticAction.OpenInventory, RemoteClientPhysicalInputKind.Keyboard, "I"),
             Binding(RemoteClientSemanticAction.Chat, RemoteClientPhysicalInputKind.Keyboard, "ENTER"),
@@ -44,7 +48,7 @@ public static class ConceptDemoClientProfiles
                 grammar,
                 camera,
                 distance,
-                cameraFovTenths: 700,
+                cameraFovTenths: fov,
                 bindings,
                 out RemoteClientProfileAdvertisement? profile))
             throw new InvalidOperationException("The built-in Concept Demo client profile is invalid.");

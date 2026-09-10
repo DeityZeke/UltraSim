@@ -1,7 +1,7 @@
 {
   "Checkpoint": "D0.7b finite actor-animation vocabulary closure",
   "CaptureDate": "2026-09-09",
-  "AcceptedCheckpointCommit": "f080ff2a2f20b45fc103a4cf833dc6707a05d862",
+  "AcceptedCheckpointCommit": "f080ff2a377585f27183840a359aa599f665926b",
   "CorrectionBaseCommit": "43d5184377e1a6da4be598a401d50ae9439c3b91",
   "AdmissionRule": {
     "SupportedSemanticClips": [

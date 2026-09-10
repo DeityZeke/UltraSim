@@ -53,7 +53,12 @@ D0.7b now closes applied-catalog-backed X/Y Add/Replace presentation, bounded pa
 validation, lazy native realization, and primitive-to-content visual replacement without replacing
 actor identity. F0.7 now closes the explicit same-process local/remote/multi-realm lifecycle
 campaign with populated UI, actor, nameplate, overhead Chat, structural, native-content, profile,
-and focus state retired at every menu boundary. Broad opt-in diagnostic capture remains future.
+and focus state retired at every menu boundary. F0.8 now closes the physical final-client matrix
+with inspected and executed Single Player, Contentless Online, and Complete exports; an exported
+Complete host serving two exported Online guests; and one unchanged Online executable applying
+materially different Third Person and Orbit camera/control recommendations over the same
+authenticated realm/content identity. The pre-freeze load, bandwidth, cadence, soak, and
+external-human characterization campaign is next. Broad opt-in diagnostic capture remains future.
 
 The demo has two purposes:
 
@@ -1734,8 +1739,8 @@ then continue:
 
 then close:
     F0.7 explicit mixed-session settings/debug/lifecycle torture pass   CLOSED
-    F0.8 final composition/parity matrix                                NEXT
-    external Concept Demo multiplayer/stress and pre-freeze campaign
+    F0.8 final composition/parity matrix                                CLOSED
+    external Concept Demo multiplayer/stress and pre-freeze campaign    NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

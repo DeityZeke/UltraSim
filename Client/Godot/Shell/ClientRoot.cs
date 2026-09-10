@@ -31,6 +31,9 @@ public readonly record struct GodotClientSessionBoundarySnapshot(
     bool ServerProfileActive,
     ClientControlGrammar ControlGrammar,
     ClientCameraProfile CameraProfile,
+    float CameraDistance,
+    float CameraFovDegrees,
+    string PhysicalBindingSignature,
     int RenderDistanceChunks,
     ClientShellSnapshot Shell);
 
@@ -127,9 +130,12 @@ public abstract partial class ClientRoot : Control
             HudLayer.GetChildCount(),
             _debugLayer?.GetChildCount() ?? 0,
             _activeSettingsScope.IsValid || _activeProfileRecommendation is not null ||
-                _activeProfileMode != ClientProfileApplicationMode.Ignore,
+            _activeProfileMode != ClientProfileApplicationMode.Ignore,
             _resolved.ControlGrammar,
             _resolved.CameraProfile,
+            _resolved.CameraDistance,
+            _resolved.CameraFovDegrees,
+            PhysicalBindingSignature(_resolved),
             _resolved.RenderDistanceChunks,
             ShellSnapshot());
     }
@@ -148,6 +154,10 @@ public abstract partial class ClientRoot : Control
             current.ServerProfileActive ||
             current.ControlGrammar != baseline.ControlGrammar ||
             current.CameraProfile != baseline.CameraProfile ||
+            !Mathf.IsEqualApprox(current.CameraDistance, baseline.CameraDistance) ||
+            !Mathf.IsEqualApprox(current.CameraFovDegrees, baseline.CameraFovDegrees) ||
+            !string.Equals(current.PhysicalBindingSignature, baseline.PhysicalBindingSignature,
+                StringComparison.Ordinal) ||
             current.RenderDistanceChunks != baseline.RenderDistanceChunks ||
             current.Shell.Screen != ClientShellScreen.MainMenu ||
             current.Shell.SessionActive ||
@@ -159,6 +169,15 @@ public abstract partial class ClientRoot : Control
             throw new InvalidOperationException(
                 $"The {stage} session boundary retained transient client state: " +
                 $"baseline={baseline}; current={current}.");
+    }
+
+    /// <summary>Exact canonical profile-owned binding surface used by lifecycle evidence.</summary>
+    protected static string PhysicalBindingSignature(ResolvedClientSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return string.Join(';', settings.Bindings.Select(static binding =>
+            $"{(byte)binding.Action}:{(byte)binding.Input.Kind}:" +
+            $"{(byte)binding.Input.Modifiers}:{binding.Input.Code}"));
     }
 
     protected void BeginSessionLoading(string status)

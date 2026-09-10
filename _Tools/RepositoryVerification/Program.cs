@@ -27,6 +27,8 @@ if (options.ArchitectureOnly)
 
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];
 bool contentlessOnlineVerified = false;
+bool finalClientExportsVerified = false;
+bool embeddedCompleteHostedVerified = false;
 bool mixedSessionLifecycleVerified = false;
 string[] testProjects =
 [
@@ -192,12 +194,15 @@ foreach (string configuration in configurations)
             ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
             try
             {
+                FinalClientProductExports finalProducts = VerifyFinalClientProductExports(
+                    root, godot, product.Scope);
+                finalClientExportsVerified = true;
                 VerifyContentlessOnlineNative(
                     root, configuration, product.Executable,
                     ["--headless", "--"]);
-                BuildClientApplication(root, configuration, "Complete");
                 VerifyEmbeddedCompleteHostedNative(
-                    root, product.Executable, godot);
+                    root, product.Executable, finalProducts.CompleteExecutable);
+                embeddedCompleteHostedVerified = true;
                 contentlessOnlineVerified = true;
             }
             finally
@@ -233,6 +238,19 @@ foreach (string configuration in configurations)
             mixedSessionLifecycleVerified = true;
         }
     }
+}
+
+if (!options.SkipGodot)
+{
+    if (!contentlessOnlineVerified || !finalClientExportsVerified ||
+        !embeddedCompleteHostedVerified || !mixedSessionLifecycleVerified)
+        throw new InvalidOperationException(
+            "The final client composition/parity matrix did not exercise every required native gate.");
+    Console.WriteLine(
+        "PASS F0.8_FinalCompositionParity " +
+        "exports=SinglePlayer/Online/Complete online=contentless " +
+        "completeHost=exported localPath=packet-free remoteClients=exported " +
+        "differentFeel=same-online-executable lifecycle=clean");
 }
 
 Run(root, "git", ["diff", "--check"]);
@@ -735,6 +753,162 @@ static ContentlessOnlineExport VerifyContentlessOnlineExport(string root, string
     return new ContentlessOnlineExport(scope, executable);
 }
 
+static FinalClientProductExports VerifyFinalClientProductExports(
+    string root,
+    string godot,
+    string exportScope)
+{
+    string singlePlayerDirectory = Path.Combine(exportScope, "single-player");
+    string singlePlayerExecutable = Path.Combine(
+        singlePlayerDirectory, "UltraSimSinglePlayer.x86_64");
+    string completeDirectory = Path.Combine(exportScope, "complete");
+    string completeExecutable = Path.Combine(completeDirectory, "UltraSimComplete.x86_64");
+
+    ExportClient(root, godot, "SinglePlayer", singlePlayerExecutable);
+    string[] singlePlayerAssemblies =
+    [
+        "UltraSim.Client.Application.Godot",
+        "UltraSim.Client.BuiltInTestWorlds",
+        "UltraSim.Client.Content",
+        "UltraSim.Client.Core",
+        "UltraSim.Client.Local",
+        "UltraSim.Client.StandardUi",
+        "UltraSim.ECS",
+        "UltraSim.Game.Accounting",
+        "UltraSim.Game.Admission",
+        "UltraSim.Game.Chat",
+        "UltraSim.Game.Composition",
+        "UltraSim.Game.Contracts",
+        "UltraSim.Game.Inventory",
+        "UltraSim.Game.Persistence",
+        "UltraSim.Game.Physics",
+        "UltraSim.Game.Replication",
+        "UltraSim.Game.UI",
+        "UltraSim.Game.World",
+        "UltraSim.Server.Persistence",
+        "UltraSim.Server.Runtime",
+        "UltraSim.Spatial",
+        "UltraSim.UI",
+    ];
+    RequireExactExportAssemblies(
+        singlePlayerDirectory, singlePlayerAssemblies, "Single Player");
+    if (File.Exists(Path.Combine(ExportDataDirectory(singlePlayerDirectory), "UltraSim.Network.dll")))
+        throw new InvalidOperationException(
+            "The actual Single Player export physically contains the Network kernel.");
+    Run(root, singlePlayerExecutable,
+    [
+        "--headless", "--", "--composition-smoke", "--expect-edition=SinglePlayer",
+    ]);
+    Run(root, singlePlayerExecutable,
+    [
+        "--headless", "--", "--f0-2-smoke", "--expect-edition=SinglePlayer",
+        "--cabin-content=default", "--human=x",
+    ]);
+
+    ExportClient(root, godot, "Complete", completeExecutable);
+    string[] completeAssemblies =
+    [
+        "UltraSim.Client.Application.Godot",
+        "UltraSim.Client.BuiltInTestWorlds",
+        "UltraSim.Client.Content",
+        "UltraSim.Client.Core",
+        "UltraSim.Client.Local",
+        "UltraSim.Client.Network",
+        "UltraSim.Client.StandardUi",
+        "UltraSim.ECS",
+        "UltraSim.Game.Accounting",
+        "UltraSim.Game.Admission",
+        "UltraSim.Game.Chat",
+        "UltraSim.Game.Composition",
+        "UltraSim.Game.Contracts",
+        "UltraSim.Game.Inventory",
+        "UltraSim.Game.Persistence",
+        "UltraSim.Game.Physics",
+        "UltraSim.Game.Protocol",
+        "UltraSim.Game.Replication",
+        "UltraSim.Game.Replication.Remote",
+        "UltraSim.Game.UI",
+        "UltraSim.Game.World",
+        "UltraSim.Network",
+        "UltraSim.Server.ConceptDemo",
+        "UltraSim.Server.ConceptDemo.LocalHost",
+        "UltraSim.Server.Hosting",
+        "UltraSim.Server.Persistence",
+        "UltraSim.Server.Runtime",
+        "UltraSim.Spatial",
+        "UltraSim.UI",
+    ];
+    RequireExactExportAssemblies(completeDirectory, completeAssemblies, "Complete");
+    HashSet<string> completeNetworkTypes = ReadDefinedTypeNames(
+        Path.Combine(ExportDataDirectory(completeDirectory), "UltraSim.Network.dll"));
+    RequireType(
+        completeNetworkTypes, "UltraSim.Network.HostedUdpProtocolClient", "exported Complete");
+    RequireType(
+        completeNetworkTypes, "UltraSim.Network.HostedUdpAdmissionHost", "exported Complete");
+    RequireType(
+        completeNetworkTypes, "UltraSim.Network.NetworkServerIdentity", "exported Complete");
+    Run(root, completeExecutable,
+    [
+        "--headless", "--", "--composition-smoke", "--expect-edition=Complete",
+    ]);
+    Run(root, completeExecutable,
+    [
+        "--headless", "--", "--f0-2-smoke", "--expect-edition=Complete",
+        "--cabin-content=default", "--human=x",
+    ]);
+
+    Console.WriteLine(
+        $"PASS F0.8_PhysicalClientExports " +
+        $"singlePlayerAssemblies={singlePlayerAssemblies.Length} singlePlayerNetwork=absent " +
+        $"onlineAssemblies=13 onlineNetwork=ClientOnly onlineAuthority=absent " +
+        $"completeAssemblies={completeAssemblies.Length} completeNetwork=Full " +
+        "singlePlayerNative=pass completeLocalNative=pass");
+    return new FinalClientProductExports(singlePlayerExecutable, completeExecutable);
+}
+
+static void ExportClient(
+    string root,
+    string godot,
+    string edition,
+    string executable)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+    Run(
+        root,
+        Path.Combine(root, "Client", "Godot", "export-client.sh"),
+        [edition, executable],
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["ULTRASIM_GODOT"] = godot,
+        });
+}
+
+static void RequireExactExportAssemblies(
+    string exportDirectory,
+    string[] expectedAssemblies,
+    string product)
+{
+    string data = ExportDataDirectory(exportDirectory);
+    string dependenciesPath = Path.Combine(
+        data, "UltraSim.Client.Application.Godot.deps.json");
+    if (!File.Exists(dependenciesPath))
+        throw new InvalidOperationException(
+            $"The actual {product} export omitted its managed dependency manifest.");
+    string[] actualAssemblies = Directory.EnumerateFiles(
+            data, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
+        .Select(static path => Path.GetFileNameWithoutExtension(path))
+        .OrderBy(static value => value, StringComparer.Ordinal)
+        .ToArray();
+    if (!actualAssemblies.SequenceEqual(expectedAssemblies, StringComparer.Ordinal))
+        throw new InvalidOperationException(
+            $"The actual {product} Godot export has an unexpected UltraSim assembly closure.\n" +
+            $"Expected: {string.Join(", ", expectedAssemblies)}\n" +
+            $"Actual: {string.Join(", ", actualAssemblies)}");
+}
+
+static string ExportDataDirectory(string exportDirectory) => Path.Combine(
+    exportDirectory, "data_UltraSim.Client.Application.Godot_linuxbsd_x86_64");
+
 static void VerifyContentlessOnlineNative(
     string root,
     string configuration,
@@ -774,7 +948,8 @@ static void VerifyContentlessOnlineNative(
             ]), 45_000);
             RequireNativeA08Result(cold, "cold", coldReady.WorldPackFingerprint,
                 expectedWarm: false, expectedRememberedProfile: false,
-                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow");
+                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
+                    "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
         }
         finally { StopOwnedProcess(coldServer); }
     }
@@ -811,7 +986,8 @@ static void VerifyContentlessOnlineNative(
             ]), 45_000);
             RequireNativeA08Result(warm, "warm", warmReady.WorldPackFingerprint,
                 expectedWarm: true, expectedRememberedProfile: true,
-                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow");
+                expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
+                    "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT");
         }
         finally { StopOwnedProcess(warmServer); }
     }
@@ -851,7 +1027,8 @@ static void VerifyContentlessOnlineNative(
             ]), 45_000);
             RequireNativeA08Result(changed, "warm", changedReady.WorldPackFingerprint,
                 expectedWarm: true, expectedRememberedProfile: false,
-                expectedProfile: "grammar=OrbitCommand camera=Orbit");
+                expectedProfile: "grammar=OrbitCommand camera=Orbit " +
+                    "distance=14.0 fov=70 select=MouseButton:LEFT primary=MouseButton:MIDDLE");
         }
         finally { StopOwnedProcess(changedServer); }
     }
@@ -862,13 +1039,18 @@ static void VerifyContentlessOnlineNative(
         $"archiveBytes={coldReady.ArchiveBytes} actorBytes={coldReady.ActorPresentationBytes} " +
         $"profileRevision={coldReady.ClientProfileRevision} " +
         $"thirdPersonHash={coldReady.ClientProfileHash} orbitHash={changedReady.ClientProfileHash}");
+    Console.WriteLine(
+        "PASS F0.8_DifferentServerFeel executable=same " +
+        "thirdPerson=ThirdPersonDirect/ThirdPersonFollow/8.5m/76deg/MIDDLE-select/LEFT-primary " +
+        "orbit=OrbitCommand/Orbit/14m/70deg/LEFT-select/MIDDLE-primary " +
+        "realm=same content=same warmRefetchBytes=0 newConsent=true");
     Directory.Delete(scope, recursive: true);
 }
 
 static void VerifyEmbeddedCompleteHostedNative(
     string root,
     string onlineExecutable,
-    string godot)
+    string completeExecutable)
 {
     string scope = Path.Combine(
         Path.GetTempPath(), "ultrasim-repository-verification",
@@ -878,7 +1060,7 @@ static void VerifyEmbeddedCompleteHostedNative(
     string readyFile = Path.Combine(scope, "host-ready.json");
     int gameplayPort = ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp);
     int contentPort = ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp);
-    var start = new ProcessStartInfo(godot)
+    var start = new ProcessStartInfo(completeExecutable)
     {
         WorkingDirectory = root,
         UseShellExecute = false,
@@ -887,13 +1069,14 @@ static void VerifyEmbeddedCompleteHostedNative(
     };
     foreach (string argument in new[]
     {
-        "--headless", "--path", "Client/Godot", "--",
+        "--headless", "--",
         "--m0-0-host-smoke", "--expect-edition=Complete",
         $"--m0-0-gameplay-port={gameplayPort}",
         $"--m0-0-content-port={contentPort}",
         $"--m0-0-ready={readyFile}",
     }) start.ArgumentList.Add(argument);
-    Console.WriteLine($"> {godot} {string.Join(' ', start.ArgumentList.Select(Quote))}");
+    Console.WriteLine(
+        $"> {completeExecutable} {string.Join(' ', start.ArgumentList.Select(Quote))}");
     using Process host = Process.Start(start) ??
         throw new InvalidOperationException("Unable to start the Complete embedded host.");
     Task<string> hostStandardOutput = host.StandardOutput.ReadToEndAsync();
@@ -950,12 +1133,14 @@ static void VerifyEmbeddedCompleteHostedNative(
         RequireNativeA08Result(
             bobOutput, "cold", worldPackFingerprint: string.Empty,
             expectedWarm: false, expectedRememberedProfile: false,
-            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow",
+            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
+                "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
             requireWorldFingerprint: false);
         RequireNativeA08Result(
             carolOutput, "cold", worldPackFingerprint: string.Empty,
             expectedWarm: false, expectedRememberedProfile: false,
-            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow",
+            expectedProfile: "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
+                "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT",
             requireWorldFingerprint: false);
         // Three humans plus the existing woodland animal must be concurrently presented.
         if (!bobOutput.Contains("actors=4", StringComparison.Ordinal) ||
@@ -977,7 +1162,8 @@ static void VerifyEmbeddedCompleteHostedNative(
                 $"The Complete hosted native evidence was incomplete:\n{Tail(hostOutput, 8_000)}");
         Console.WriteLine(
             $"PASS M0.0_CompleteHostedNative generation={generation} " +
-            "localPath=packet-free remoteClients=2 humansPerClient=3 actorsPerClient=4 detach=clean");
+            "hostProduct=exported localPath=packet-free remoteClients=2 " +
+            "remoteProducts=exported humansPerClient=3 actorsPerClient=4 detach=clean");
     }
     finally
     {
@@ -1975,6 +2161,10 @@ internal sealed record NativeDeploymentReady(
 internal sealed record ContentlessOnlineExport(
     string Scope,
     string Executable);
+
+internal sealed record FinalClientProductExports(
+    string SinglePlayerExecutable,
+    string CompleteExecutable);
 
 internal sealed record NetworkFlavorProbeEvidence(
     string AssemblyName,

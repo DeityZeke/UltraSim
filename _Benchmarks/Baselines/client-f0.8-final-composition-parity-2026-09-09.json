@@ -1,0 +1,74 @@
+{
+  "Checkpoint": "F0.8 final client composition and parity matrix",
+  "CaptureDate": "2026-09-09",
+  "BaseCommit": "b62fa6ce923e9b3c7ddcdd5c1d7d2da63ac8dacb",
+  "PhysicalProducts": {
+    "SinglePlayer": {
+      "ActualGodotExportInspectedAndRun": true,
+      "ExactUltraSimAssemblyCount": 22,
+      "NetworkAssemblyPresent": false,
+      "LocalAuthorityPresent": true,
+      "NativeCompositionAndLocalWorldJourney": "PASS"
+    },
+    "Online": {
+      "ActualGodotExportInspectedAndRun": true,
+      "ExactUltraSimAssemblyCount": 13,
+      "NetworkCapabilities": "ClientOnly",
+      "LocalAuthorityPresent": false,
+      "BundledWorldPackCount": 0,
+      "BundledPackageCount": 0,
+      "BundledActorGlbCount": 0,
+      "ColdAndWarmContentlessJourney": "PASS"
+    },
+    "Complete": {
+      "ActualGodotExportInspectedAndRun": true,
+      "ExactUltraSimAssemblyCount": 29,
+      "NetworkCapabilities": "Full",
+      "LocalAndRemoteCapabilitiesPresent": true,
+      "NativeCompositionAndLocalWorldJourney": "PASS",
+      "ExportedHostWithTwoExportedOnlineGuests": "PASS",
+      "HostLocalPath": "packet-free"
+    }
+  },
+  "DifferentFeelCanary": {
+    "SameExportedOnlineExecutable": true,
+    "SameDeploymentKey": true,
+    "SameApplicationRealmId": true,
+    "SameContentCatalog": true,
+    "SameWorldPack": true,
+    "ThirdPerson": {
+      "ControlGrammar": "ThirdPersonDirect",
+      "CameraProfile": "ThirdPersonFollow",
+      "CameraDistanceMeters": 8.5,
+      "CameraFovDegrees": 76,
+      "Select": "MouseButton:MIDDLE",
+      "Primary": "MouseButton:LEFT"
+    },
+    "Orbit": {
+      "ControlGrammar": "OrbitCommand",
+      "CameraProfile": "Orbit",
+      "CameraDistanceMeters": 14.0,
+      "CameraFovDegrees": 70,
+      "Select": "MouseButton:LEFT",
+      "Primary": "MouseButton:MIDDLE"
+    },
+    "ChangedProfileHashRequiresFreshConsent": true,
+    "ChangedProfileWarmContentBytesFetched": 0,
+    "ExecutableCodeChange": false
+  },
+  "LifecycleBoundary": {
+    "F0_7SequenceRetained": true,
+    "CameraDistanceRestored": true,
+    "CameraFovRestored": true,
+    "PhysicalBindingsRestored": true
+  },
+  "PermanentAcceptance": {
+    "ExactExportAssemblyClosure": "PASS",
+    "ForbiddenDependencyInspection": "PASS",
+    "ContentlessOnlineColdWarmNative": "PASS",
+    "ExportedCompleteSharedAuthorityNative": "PASS",
+    "DifferentFeelSameExecutableNative": "PASS",
+    "MixedSessionLifecycleNative": "PASS",
+    "RepositoryVerification": "PASS"
+  }
+}

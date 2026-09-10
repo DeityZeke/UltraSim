@@ -1,6 +1,8 @@
 # UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
-**Status:** future pre-freeze campaign. Begin only after the Concept Demo's required feature journey is complete and accepted. Complete this campaign before declaring the Concept Demo frozen and before beginning the broader post-demo extraction/genericization ecosystem roadmap.
+**Status:** next campaign. The Concept Demo's required Round-1 feature journey and Client F0.8
+product/parity matrix are accepted. Complete this campaign before declaring the Concept Demo frozen
+and before beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
 **Suggested repository path:** `Docs/Plans/CONCEPT_DEMO_PREFREEZE.md`
 
@@ -1708,8 +1710,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 4. Keep I0.13 typed Inspection Properties and content-sized shared tooltip closure closed.
 5. Keep C0.2 routed Global and authority System occurrence closure closed.
 6. Keep D0.6 read-only Server Monitor/ping/test-marker closure closed.
-7. Finish the remaining Concept Demo Round 1 feature journey and F0.7/F0.8 matrices.
-8. Select one exact feature-complete pre-freeze candidate.
+7. Keep the completed Concept Demo Round 1 feature journey and F0.7/F0.8 matrices closed.
+8. Select one exact feature-complete pre-freeze candidate. **NEXT**
 9. Build the real headless Network bot client.
 10. Add first-class wire/per-message accounting.
 11. Establish high-performance quiet/moving/crowd baselines.

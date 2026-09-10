@@ -513,13 +513,46 @@ public static class ClientSettingsResolver
             .Where(value => ClientReservedControls.IsReserved(value.Key))
             .Select(value => value.Value)
             .ToArray();
+        var candidates = new Dictionary<ClientSemanticAction, ClientPhysicalInput>();
         foreach (ClientPhysicalBinding binding in recommendations)
         {
             if (ClientReservedControls.IsReserved(binding.Action) || reserved.Contains(binding.Input))
                 continue;
-            bool occupied = current.Any(value => value.Key != binding.Action && value.Value == binding.Input);
-            if (!occupied) current[binding.Action] = binding.Input;
+            candidates.Add(binding.Action, binding.Input);
         }
+
+        // A recommendation is a set, not a sequence of individual rebinding operations. Admit
+        // swaps/cycles (for example LEFT Select <-> MIDDLE Primary) while preserving every
+        // unaffected and reserved binding. Ambiguous duplicate recommendations are ignored, then
+        // any candidate colliding with a retained binding is removed to a fixed point.
+        ClientPhysicalInput[] duplicates = candidates.Values
+            .GroupBy(static input => input)
+            .Where(static group => group.Count() > 1)
+            .Select(static group => group.Key)
+            .ToArray();
+        if (duplicates.Length != 0)
+            foreach (ClientSemanticAction action in candidates
+                         .Where(value => duplicates.Contains(value.Value))
+                         .Select(static value => value.Key)
+                         .ToArray())
+                candidates.Remove(action);
+
+        bool removed;
+        do
+        {
+            removed = false;
+            foreach ((ClientSemanticAction action, ClientPhysicalInput input) in candidates.ToArray())
+            {
+                bool occupiedByRetainedAction = current.Any(value =>
+                    value.Key != action && !candidates.ContainsKey(value.Key) && value.Value == input);
+                if (!occupiedByRetainedAction) continue;
+                candidates.Remove(action);
+                removed = true;
+            }
+        } while (removed);
+
+        foreach ((ClientSemanticAction action, ClientPhysicalInput input) in candidates)
+            current[action] = input;
     }
 
     private static void ValidateFinalBindings(Dictionary<ClientSemanticAction, ClientPhysicalInput> bindings)

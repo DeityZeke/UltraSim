@@ -36,6 +36,8 @@ static class ClientApplicationSettingsTests
                 Binding(ClientSemanticAction.Interact, ClientPhysicalInputKind.Keyboard, "F"),
                 Binding(ClientSemanticAction.OpenSettings, ClientPhysicalInputKind.Keyboard, "P"),
                 Binding(ClientSemanticAction.ContextMenu, ClientPhysicalInputKind.Keyboard, "ESCAPE"),
+                Binding(ClientSemanticAction.Select, ClientPhysicalInputKind.MouseButton, "MIDDLE"),
+                Binding(ClientSemanticAction.Primary, ClientPhysicalInputKind.MouseButton, "LEFT"),
             ]);
 
         ResolvedClientSettings accepted = ClientSettingsResolver.Resolve(
@@ -51,6 +53,8 @@ static class ClientApplicationSettingsTests
         Equal("R", RequireBinding(accepted, ClientSemanticAction.Interact).Code);
         Equal("F10", RequireBinding(accepted, ClientSemanticAction.OpenSettings).Code);
         Equal("RIGHT", RequireBinding(accepted, ClientSemanticAction.ContextMenu).Code);
+        Equal("MIDDLE", RequireBinding(accepted, ClientSemanticAction.Select).Code);
+        Equal("LEFT", RequireBinding(accepted, ClientSemanticAction.Primary).Code);
         Equal("SPACE", RequireBinding(accepted, ClientSemanticAction.Jump).Code);
 
         ResolvedClientSettings keepMine = ClientSettingsResolver.Resolve(
@@ -58,6 +62,23 @@ static class ClientApplicationSettingsTests
         Equal(ClientControlGrammar.ThirdPersonDirect, keepMine.ControlGrammar);
         Equal("Q", RequireBinding(keepMine, ClientSemanticAction.Interact).Code);
         Equal("F10", RequireBinding(keepMine, ClientSemanticAction.OpenSettings).Code);
+        Equal("LEFT", RequireBinding(keepMine, ClientSemanticAction.Select).Code);
+        Equal("MIDDLE", RequireBinding(keepMine, ClientSemanticAction.Primary).Code);
+
+        var ambiguousRecommendation = new ClientProfileRecommendation(
+            ClientControlGrammar.ThirdPersonDirect,
+            ClientCameraProfile.ThirdPersonFollow,
+            12f,
+            76f,
+            [
+                Binding(ClientSemanticAction.Interact, ClientPhysicalInputKind.Keyboard, "Q"),
+                Binding(ClientSemanticAction.Jump, ClientPhysicalInputKind.Keyboard, "Q"),
+            ]);
+        ResolvedClientSettings ambiguous = ClientSettingsResolver.Resolve(
+            ClientSettingsDocument.Empty, default, ambiguousRecommendation,
+            ClientProfileApplicationMode.UseServerDefaults);
+        Equal("E", RequireBinding(ambiguous, ClientSemanticAction.Interact).Code);
+        Equal("SPACE", RequireBinding(ambiguous, ClientSemanticAction.Jump).Code);
 
         string json = ClientSettingsJsonCodec.Write(document);
         True(json.Contains("\"uiScale\": 1.25", StringComparison.Ordinal));

@@ -17,7 +17,11 @@ D0.7b now closes bounded passive actor-GLB admission, applied-catalog resolution
 resource realization, and real server Add/Replace X/Y presentation in the exported Contentless
 Online product. F0.7 now closes the explicit same-process local/remote/multi-realm lifecycle
 campaign, including exact retirement of UI, actors, Chat, chunks, native content, server profile,
-and input focus. F0.8 is next.
+and input focus. F0.8 now closes the final physical product and semantic parity matrix: actual
+Single Player, Online, and Complete Godot exports are inspected and run, exported Complete hosts
+exported Online guests on its existing packet-free local authority, and the same exported Online
+executable proves materially different Third Person and Orbit recommendations without content or
+code replacement. The Concept Demo pre-freeze characterization campaign is next.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2223,8 +2227,8 @@ Before each retirement it deliberately leaves a real UI view open, multiple acto
 overhead Chat, rendered chunks, and focused Chat input. Remote lifetimes additionally retain lazy
 native actor resources. Every return to the main menu must reproduce the exact persistent Godot
 root shape captured before the first session, clear the active server profile, restore global
-controls/camera/render distance, release the Direct Connect transport and presentation consumers,
-and contain no local or remote session node.
+control grammar, camera profile/distance/FOV, physical bindings, and render distance, release the
+Direct Connect transport and presentation consumers, and contain no local or remote session node.
 
 The two remote deployments have distinct deployment keys, `ApplicationRealmId` values, and
 realm-bound catalog fingerprints, but serve the same World/actor/profile payload contract. First
@@ -2238,6 +2242,19 @@ state is not.
 ---
 
 ## F0.8 — Final composition/parity matrix
+
+**Status: CLOSED.** The final gate inspects and launches the actual exported Godot products rather
+than treating managed publish graphs or editor runs as product evidence. Single Player has an exact
+22-assembly UltraSim closure with no Network assembly; Online has an exact 13-assembly closure with
+the `ClientOnly` Network capability set, no local authority, no bundled WorldPack/package, and no
+bundled actor GLB; Complete has an exact 29-assembly closure with Full Network plus both local and
+remote capabilities.
+
+The exported Single Player and Complete binaries each run their native composition/local-world
+canary. The exported Complete binary then starts Single Player as host A, adds its listener to that
+same authoritative generation while A remains packet-free, and admits two separately running
+exported Online binaries. This proves physical product shape and local/remote semantic parity in
+one acceptance journey.
 
 ### Single Player
 
@@ -2292,11 +2309,20 @@ Profile B
 
 This demonstrates that server-authored declarative profiles can materially change feel without a client fork.
 
+The permanent canary uses one exported Online executable and one stable deployment/realm/content
+identity. Its Third Person recommendation resolves to `ThirdPersonDirect`, `ThirdPersonFollow`,
+8.5 m, 76 degrees, middle-click Select, and left-click Primary. The changed Orbit profile resolves
+to `OrbitCommand`, `Orbit`, 14 m, 70 degrees, left-click Select, and middle-click Primary. The
+profile hash change requires a fresh local decision, but the warm content path transfers zero
+bytes. No executable, WorldPack, catalog, realm, or deployment-key change is involved.
+
 ### Dependency matrix
 
 Mechanically verify forbidden dependencies absent.
 
-**Gate:** client composition clean enough for repository extraction.
+**Gate: CLOSED.** Client composition is clean enough to enter pre-freeze product characterization.
+Permanent evidence lives in
+[`client-f0.8-final-composition-parity-2026-09-09.json`](../../_Benchmarks/Baselines/client-f0.8-final-composition-parity-2026-09-09.json).
 
 ---
 
@@ -2647,9 +2673,9 @@ D0.7b runtime content-backed model/animation realization                       C
         |
 F0.7  explicit settings/debug/mixed-session lifecycle closure             CLOSED
         |
-F0.8  final local/remote/complete/contentless + different-feel matrix      NEXT
+F0.8  final local/remote/complete/contentless + different-feel matrix      CLOSED
         |
-pre-freeze campaign: bots/bandwidth/tuning/ObjectScript/human testing
+pre-freeze campaign: bots/bandwidth/tuning/ObjectScript/human testing      NEXT
         |
         v
 repository generalization / extraction readiness

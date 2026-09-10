@@ -102,6 +102,10 @@ decision is remembered in `user://settings/server-profiles.json`; recommendation
 user settings document. An exact reconnect does not prompt, while a changed revision or hash does.
 The server may be launched with `--client-profile=orbit|third-person|independent`, and the same
 Online executable applies the corresponding stock camera/control implementation.
+The shipped different-feel canary makes that difference concrete: Third Person recommends an
+8.5 m / 76-degree follow camera with middle-click Select and left-click Primary, while Orbit
+recommends a 14 m / 70-degree orbit camera with left-click Select and middle-click Primary.
+These remain local consented settings; neither profile supplies executable client behavior.
 
 Godot lifecycle overrides remain in the canonical scene script, `ClientHost.cs`; partial remote
 implementation files provide helpers but do not declare `_Process`/`_ExitTree`. This preserves
@@ -201,9 +205,18 @@ again, and a final local session. Each lifetime is populated with an open compil
 nameplates, overhead Chat, rendered chunks, focused Chat input, and—remotely—leased actor content
 before retirement. Every menu boundary must return to the exact persistent root shape, clear the
 active realm profile and transient transport/content consumers, and restore global input/camera
-settings. The deployments retain distinct realm-bound catalog identities over the same content
+settings, including camera distance/FOV and every physical binding. The deployments retain
+distinct realm-bound catalog identities over the same content
 payload contract. Realm A's exact durable profile decision is reused on its same-process reconnect
 while a fresh application-session epoch is still required.
+
+F0.8 exports, inspects, and executes all three physical Godot products. The actual Single Player
+export has no Network assembly, the actual Contentless Online export has ClientOnly Network and no
+local authority/playable content/body GLBs, and the actual Complete export has Full Network plus
+both capability families. That exported Complete binary hosts two separately running exported
+Online binaries while retaining its own packet-free local participant. The same Online executable
+also applies the materially different Third Person and Orbit profiles above over one unchanged
+deployment/realm/content identity; the changed profile needs fresh consent but no content refetch.
 
 The Fallback Lab sits south-west of the welcome area. Its four pedestals show, left to right, a
 complete model/material, a neutral category primitive for a missing model, the real model with a

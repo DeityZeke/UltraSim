@@ -170,7 +170,11 @@ public partial class ClientHost
                             $"F0.3c CLIENT PROFILE APPLIED realm={profile.Realm} " +
                             $"revision={profile.ProfileRevision} hash={profile.ProfileHash} " +
                             $"mode={profile.Mode} remembered={profile.RememberedDecision} " +
-                            $"grammar={EffectiveSettings.ControlGrammar} camera={EffectiveSettings.CameraProfile}");
+                            $"grammar={EffectiveSettings.ControlGrammar} camera={EffectiveSettings.CameraProfile} " +
+                            $"distance={EffectiveSettings.CameraDistance:0.0} " +
+                            $"fov={EffectiveSettings.CameraFovDegrees:0.#} " +
+                            $"select={PhysicalBindingEvidence(EffectiveSettings, ClientSemanticAction.Select)} " +
+                            $"primary={PhysicalBindingEvidence(EffectiveSettings, ClientSemanticAction.Primary)}");
                     }
                     if (ShellSnapshot().Screen == ClientShellScreen.Settings) return;
                     ClientDirectConnectSnapshot connected = _remoteSession.GetSnapshot();
@@ -810,6 +814,16 @@ public partial class ClientHost
         if (fingerprint.Length != 64) return fingerprint;
         return string.Join(':', Enumerable.Range(0, 32)
             .Select(index => fingerprint.Substring(index * 2, 2)));
+    }
+
+    private static string PhysicalBindingEvidence(
+        ResolvedClientSettings settings,
+        ClientSemanticAction action)
+    {
+        if (!settings.TryGetBinding(action, out ClientPhysicalInput input))
+            throw new InvalidOperationException(
+                $"The resolved client profile omitted required action '{action}'.");
+        return $"{input.Kind}:{input.Code}";
     }
 
 #if ULTRASIM_COMPLETE

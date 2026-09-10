@@ -63,6 +63,11 @@ content/admission on its exact application-session proof. Select the development
 `--client-profile=independent`. The deployment publishes only canonical grammar, camera parameters,
 and physical-binding recommendations; it never supplies client code. Profile revision/hash are
 printed and included in the verifier readiness record.
+The F0.8 canary intentionally makes the stock profiles visibly distinct: Third Person recommends
+an 8.5 m / 76-degree follow camera, middle-click Select, and left-click Primary; Orbit recommends
+a 14 m / 70-degree orbit camera, left-click Select, and middle-click Primary. Changing between
+them under the same deployment/realm/content identity changes the exact profile hash and requires
+fresh client consent without changing or redownloading Game/content state.
 
 The default content source is plain loopback HTTP for explicit local development. The stock client
 requires the corresponding private/insecure-source opt-in; production deployment is expected to
