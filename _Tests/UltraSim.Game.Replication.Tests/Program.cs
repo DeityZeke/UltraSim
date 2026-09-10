@@ -23,6 +23,7 @@ var tests = new (string Name, Action Body)[]
     ("P01DirtyEntityExistingAudienceAvoidsOldFootprintDiscovery", DirtyEntitySpatialFanoutTests.ExistingAudienceAvoidsOldFootprintDiscovery),
     ("P03EDirtyEntityCoarseSpatialEdgesPreserveExactSemantics", DirtyEntitySpatialFanoutTests.CoarseSpatialEdgesPreserveExactSemantics),
     ("P03EDirtyEntityRejectsUnboundedDiscoveryGeometry", DirtyEntitySpatialFanoutTests.RejectsUnboundedDiscoveryGeometry),
+    ("P03EDirtyEntityLargeCustomGridArithmeticUsesWideIntermediates", DirtyEntitySpatialFanoutTests.LargeCustomGridArithmeticUsesWideIntermediates),
     ("P03EDirtyEntityChunkBatchUsesPointDiscoveryForSingleton", DirtyEntitySpatialFanoutTests.ChunkBatchUsesPointDiscoveryForSingleton),
     ("P03EDirtyEntityStateOnlyMutationsAvoidSpatialDiscovery", DirtyEntitySpatialFanoutTests.StateOnlyMutationsAvoidSpatialDiscovery),
     ("P03KDirtyEntityImmediateCadenceCanBeDeferred", DirtyEntitySpatialFanoutTests.ImmediateCadenceCanBeDeferred),

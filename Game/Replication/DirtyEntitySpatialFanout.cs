@@ -1776,17 +1776,18 @@ public class DirtyEntitySpatialFanout
         return true;
     }
 
-    private int CellRadius(int radius) => checked(
-        (radius + _limits.SpatialRegionEdgeMillimeters - 1) /
-        _limits.SpatialRegionEdgeMillimeters);
+    private int CellRadius(int radius) => checked((int)CalculateCellRadius(
+        radius, _limits.SpatialRegionEdgeMillimeters));
+
+    private static long CalculateCellRadius(int radius, int edge) => checked(
+        ((long)radius + edge - 1L) / edge);
 
     private static void ValidateSpatialDiscoveryWork(
         in DirtyEntitySpatialFanoutLimits limits,
         in GameInterestProfile profile)
     {
-        long pointCellRadius = checked(
-            (profile.FarRadiusMillimeters + limits.SpatialRegionEdgeMillimeters - 1L) /
-            limits.SpatialRegionEdgeMillimeters);
+        long pointCellRadius = CalculateCellRadius(
+            profile.FarRadiusMillimeters, limits.SpatialRegionEdgeMillimeters);
         long pointCellsPerAxis = checked(pointCellRadius * 2L + 1L);
         long expandedEdge = checked(
             GameWorldSpatialProfile.WorldChunkEdgeUnits + 2L * profile.FarRadiusMillimeters);

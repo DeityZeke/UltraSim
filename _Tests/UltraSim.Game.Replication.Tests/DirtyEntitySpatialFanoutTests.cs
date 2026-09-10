@@ -238,6 +238,41 @@ internal static class DirtyEntitySpatialFanoutTests
                 new StateEpoch(1), pointDominatedLimits, pointDominatedProfile));
     }
 
+    internal static void LargeCustomGridArithmeticUsesWideIntermediates()
+    {
+        var limits = new DirtyEntitySpatialFanoutLimits(
+            MaximumEntities: 4,
+            MaximumRecipients: 1,
+            MaximumSpatialRegions: 4,
+            MaximumSemanticKnowledgeRows: 4,
+            MaximumOutstandingBundles: 1,
+            MaximumRecordsPerBundle: 1,
+            SpatialRegionEdgeMillimeters: int.MaxValue);
+        var profile = new GameInterestProfile(
+            RegionEdgeMillimeters: int.MaxValue,
+            ImmediateEnterRadiusMillimeters: 1,
+            ImmediateLeaveRadiusMillimeters: 1,
+            NearRadiusMillimeters: 1,
+            FarRadiusMillimeters: int.MaxValue,
+            NearIntervalMilliseconds: 10,
+            FarIntervalMilliseconds: 20,
+            ApplicationAckRetryMilliseconds: 5,
+            ApplicationAckTimeoutMilliseconds: 100);
+
+        Verify(new DirtyEntitySpatialFanout(new StateEpoch(1), limits, profile));
+        Verify(new DirtyEntityChunkBatchFanout(new StateEpoch(1), limits, profile));
+
+        static void Verify(DirtyEntitySpatialFanout service)
+        {
+            Check.Equal(DirtyEntityUpdateStatus.Success,
+                service.SetRecipientAnchor(new ParticipantId(1), Point(0, 0), 0));
+            DirtyEntitySpatialFanoutSnapshot snapshot = service.GetSnapshot();
+            Check.Equal(1, snapshot.RecipientCount);
+            Check.Equal(1UL, snapshot.SpatialEntityDiscoveryOperations);
+            Check.Equal(0, snapshot.SemanticKnowledgeRowCount);
+        }
+    }
+
     internal static void ChunkBatchUsesPointDiscoveryForSingleton()
     {
         var profile = new GameInterestProfile(

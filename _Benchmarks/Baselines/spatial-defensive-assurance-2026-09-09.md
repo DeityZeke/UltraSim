@@ -19,6 +19,20 @@
 | H-01 unbounded empty-cell discovery | Source-confirmed and hardened | dirty-entity and dirty-chunk over-budget construction rejection |
 | H-02 implicit movement headroom | Confirmed and hardened | saturated sole-region replacement, shared-source rejection/recovery, and existing-destination collapse |
 
+## 2026-09-10 wide-grid arithmetic follow-up
+
+A geometrically bounded custom dirty-entity grid using `int.MaxValue` for both the
+far radius and spatial-region edge independently reproduced two checked-arithmetic
+failures. Construction first overflowed in `ValidateSpatialDiscoveryWork` because
+the radius/edge addition occurred before promotion. Promoting only that expression
+then exposed the original `CellRadius` overflow during recipient admission.
+
+Both admission and runtime discovery now use one ceiling-division helper whose first
+operand is promoted to `long`. `P03EDirtyEntityLargeCustomGridArithmeticUsesWideIntermediates`
+constructs both entity and chunk-batched variants, admits a recipient, and verifies
+the bounded empty discovery without partial-state failure. Default geometry and the
+4,096-cell work ceiling are unchanged.
+
 ## Corrected contracts
 
 - Boolean/index error protocols explicitly test signed lower and upper bounds before
@@ -41,7 +55,7 @@
 
 - World: 89 checks passed.
 - Client Core: 29 checks passed.
-- Game Replication: 136 checks passed.
+- Game Replication: 137 checks passed, including the wide-grid arithmetic follow-up.
 - World map after 2,048 distinct one-entity chunk lifetimes: empty-cache miss = one
   lookup / one bucket probe.
 - Client semantic cache after 2,048 request/retire lifetimes: empty-cache miss = one
@@ -49,5 +63,5 @@
 - Existing warmed movement/publication/client churn allocation gates remain at zero
   managed bytes.
 
-The complete exact-tree repository verifier is the final merge gate for this
-correction.
+The complete exact-tree repository verifier passed for this correction and its
+arithmetic follow-up, including native/exported product and final composition gates.
