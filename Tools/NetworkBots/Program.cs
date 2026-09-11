@@ -94,17 +94,25 @@ internal static class BotFiles
 
 internal sealed class BotHarness : IDisposable
 {
-    private const int PumpTargetMilliseconds = 5;
     private readonly BotOptions _options;
     private readonly ContentCache _cache;
     private readonly HttpContentPackageSource _source;
     private readonly BotClient[] _bots;
-    private readonly Process _process = Process.GetCurrentProcess();
+    private readonly BotProcessTelemetrySampler _processMetrics = new(
+        new CurrentBotProcessSampleSource());
+    private readonly BotReconnectIdentityObservation[] _reconnectObservers =
+        [new(), new()];
     private readonly long _created = Stopwatch.GetTimestamp();
     private long _lastPump;
     private long _scenarioStarted;
-    private long _workingSetHighWater;
-    private long _pumpLagHighWaterTicks;
+    private long _admissionCompleted;
+    private long _scenarioCompleted;
+    private long _quiescenceStarted;
+    private long _quiescenceCompleted;
+    private long _completionBarrierStarted;
+    private long _completionBarrierCompleted;
+    private long _pumpStartIntervalHighWaterTicks;
+    private long _pumpDurationHighWaterTicks;
     private ulong _pumpIterations;
     private int _activeHighWater;
     private int _admittingHighWater;
@@ -123,14 +131,15 @@ internal sealed class BotHarness : IDisposable
         for (int index = 0; index < _bots.Length; index++)
             _bots[index] = new BotClient(
                 options, index, cache, source,
-                checked(_created + ToStopwatchTicks(index * options.AdmissionStaggerMilliseconds)));
+                BotMonotonicClock.AddMilliseconds(
+                    _created, checked((long)index * options.AdmissionStaggerMilliseconds)));
         _lastPump = Stopwatch.GetTimestamp();
     }
 
     internal BotRunSummary Run()
     {
-        long admissionDeadline = checked(
-            _created + ToStopwatchTicks(Math.Max(90_000, _options.BotCount * 1_000)));
+        long admissionDeadline = BotScenarioContract.AdmissionDeadline(
+            _created, _options.BotCount, _options.AdmissionStaggerMilliseconds);
         while (_scenarioStarted == 0)
         {
             PumpOnce();
@@ -144,8 +153,8 @@ internal sealed class BotHarness : IDisposable
                     if (_options.StartReleaseFile is null)
                         throw new InvalidOperationException(
                             "--start-ready-file requires --start-release-file.");
-                    long startDeadline = checked(
-                        Stopwatch.GetTimestamp() + ToStopwatchTicks(120_000));
+                    long startDeadline = BotMonotonicClock.AddMilliseconds(
+                        Stopwatch.GetTimestamp(), 120_000);
                     while (!File.Exists(_options.StartReleaseFile))
                     {
                         PumpOnce(allowNewChaos: false);
@@ -157,6 +166,7 @@ internal sealed class BotHarness : IDisposable
                     }
                 }
                 _scenarioStarted = Stopwatch.GetTimestamp();
+                _admissionCompleted = _scenarioStarted;
                 SelectSwordContenders();
                 foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
                 Console.WriteLine(
@@ -169,8 +179,8 @@ internal sealed class BotHarness : IDisposable
             Thread.Sleep(1);
         }
 
-        long scenarioDeadline = checked(
-            _scenarioStarted + ToStopwatchTicks(_options.DurationMilliseconds));
+        long scenarioDeadline = BotMonotonicClock.AddMilliseconds(
+            _scenarioStarted, _options.DurationMilliseconds);
         while (Stopwatch.GetTimestamp() < scenarioDeadline)
         {
             PumpOnce();
@@ -182,8 +192,10 @@ internal sealed class BotHarness : IDisposable
         // The wall-clock scenario boundary may bisect an ordinary reliable command or proof,
         // especially once many clients share the central pump. Stop creating work and give that
         // already-accepted debt one bounded opportunity to converge before judging cleanliness.
-        long quiescenceDeadline = checked(
-            Stopwatch.GetTimestamp() + ToStopwatchTicks(10_000));
+        _scenarioCompleted = Stopwatch.GetTimestamp();
+        _quiescenceStarted = _scenarioCompleted;
+        long quiescenceDeadline = BotMonotonicClock.AddMilliseconds(
+            _quiescenceStarted, 10_000);
         while (_bots.Any(static bot => bot.HasUnexpectedQueueDebt) &&
                Stopwatch.GetTimestamp() < quiescenceDeadline)
         {
@@ -192,17 +204,20 @@ internal sealed class BotHarness : IDisposable
                 return Finish(false, "A bot faulted while quiescing accepted session work.");
             Thread.Sleep(1);
         }
+        _quiescenceCompleted = Stopwatch.GetTimestamp();
 
         string? coverageFailure = ValidateCoverage();
         if (coverageFailure is not null)
             return Finish(false, coverageFailure);
 
+        _completionBarrierStarted = Stopwatch.GetTimestamp();
         if (_options.ReadyFile is not null)
         {
             BotFiles.WriteAtomic(_options.ReadyFile, "ready");
             if (_options.ReleaseFile is null)
                 throw new InvalidOperationException("--ready-file requires --release-file.");
-            long releaseDeadline = checked(Stopwatch.GetTimestamp() + ToStopwatchTicks(120_000));
+            long releaseDeadline = BotMonotonicClock.AddMilliseconds(
+                Stopwatch.GetTimestamp(), 120_000);
             while (!File.Exists(_options.ReleaseFile))
             {
                 PumpOnce(allowNewChaos: false);
@@ -213,6 +228,11 @@ internal sealed class BotHarness : IDisposable
                 Thread.Sleep(1);
             }
         }
+        _completionBarrierCompleted = Stopwatch.GetTimestamp();
+
+        string? finalHealthFailure = ValidateCurrentHealth();
+        if (finalHealthFailure is not null)
+            return Finish(false, finalHealthFailure);
 
         return Finish(true, null);
     }
@@ -221,10 +241,11 @@ internal sealed class BotHarness : IDisposable
     {
         long now = Stopwatch.GetTimestamp();
         long lag = now - _lastPump;
-        if (lag > _pumpLagHighWaterTicks) _pumpLagHighWaterTicks = lag;
+        if (lag > _pumpStartIntervalHighWaterTicks) _pumpStartIntervalHighWaterTicks = lag;
         _lastPump = now;
         for (int index = 0; index < _bots.Length; index++)
             _bots[index].Pump(now, allowNewChaos);
+        TrackReconnectIdentity();
         _activeHighWater = Math.Max(
             _activeHighWater, _bots.Count(static bot => bot.IsActive));
         _admittingHighWater = Math.Max(
@@ -232,12 +253,16 @@ internal sealed class BotHarness : IDisposable
         _reconnectingHighWater = Math.Max(
             _reconnectingHighWater, _bots.Count(static bot => bot.IsReconnecting));
         _pumpIterations++;
-        long workingSet = _process.WorkingSet64;
-        if (workingSet > _workingSetHighWater) _workingSetHighWater = workingSet;
+        long completed = Stopwatch.GetTimestamp();
+        _pumpDurationHighWaterTicks = Math.Max(
+            _pumpDurationHighWaterTicks, completed - now);
+        _processMetrics.Sample(completed);
     }
 
     private string? ValidateCoverage()
     {
+        string? healthFailure = ValidateCurrentHealth();
+        if (healthFailure is not null) return healthFailure;
         if (_bots.Any(static bot => !bot.IsActive)) return "Not every bot was active after churn.";
         ulong generation = _bots[0].ServerGenerationId;
         if (generation == 0 || _bots.Any(bot => bot.ServerGenerationId != generation))
@@ -266,16 +291,61 @@ internal sealed class BotHarness : IDisposable
             return "A reconnect with fresh profile/content application proof did not complete.";
         if (_bots.Any(static bot => bot.StaleActorObservedAfterReconnect))
             return "A retired public actor reappeared after reconnect.";
-        if (_bots.Sum(static bot => bot.ChunkTransitions) < 2 ||
+        if (_bots.Sum(static bot => bot.ChunkCrossings) < 2 ||
+            _bots.Sum(static bot => bot.DistinctChunksVisited) < 2 ||
             _bots.Sum(static bot => bot.VerticalTransitions) < 2 ||
             !_bots.Any(static bot => bot.SawAirborne) ||
             _bots.Sum(static bot => bot.EdgePressureAttempts) == 0 ||
+            _bots.Sum(static bot => bot.EdgeJumpCommandsQueued) == 0 ||
             _bots.Sum(static bot => bot.LandingRecoveries) == 0 ||
             _bots.Sum(static bot => bot.PostRecoveryMovementAccepted) == 0)
             return "Chunk/AOI and edge/fall transition pressure was incomplete.";
+        if (_bots.Any(static bot => bot.ChatObservationGaps != 0))
+            return "A bot fell behind its bounded Chat observation cursor.";
+        if (_bots.Sum(static bot => bot.CancelledCommands) != 0)
+            return "The correctness scenario cancelled an outstanding command outcome.";
+        if (_reconnectObservers.Any(static observer => !observer.Converged))
+            return "Observer clients did not retire the exact old actor identity and acquire its replacement.";
         if (_bots.Any(static bot => bot.HasUnexpectedQueueDebt))
             return "A bot retained unexpected session queue debt at the acceptance boundary.";
         return null;
+    }
+
+    private string? ValidateCurrentHealth()
+    {
+        foreach (BotClient bot in _bots)
+        {
+            string? failure = bot.GetCurrentHealthFailure();
+            if (failure is not null) return $"Bot {bot.Id:D4} is unhealthy: {failure}";
+        }
+        return null;
+    }
+
+    private void TrackReconnectIdentity()
+    {
+        BotClient subject = _bots[^1];
+        WorldPublicEntityId oldIdentity = subject.PriorPublicActor.IsValid
+            ? subject.PriorPublicActor
+            : subject.CurrentPublicActor;
+        if (!oldIdentity.IsValid) return;
+        for (int index = 0; index < _reconnectObservers.Length; index++)
+        {
+            BotClient observer = _bots[index];
+            if (subject.SuccessfulReconnects == 0)
+                _reconnectObservers[index].ObserveBefore(
+                    observer.ContainsPublic(oldIdentity) &&
+                    observer.ContainsPublicPresentation(
+                        oldIdentity, $"PF1 Bot {subject.Id:D4}"));
+            else
+                _reconnectObservers[index].ObserveAfter(
+                    observer.ContainsPublic(oldIdentity) ||
+                    observer.ContainsPublicPresentation(oldIdentity),
+                    subject.CurrentPublicActor.IsValid &&
+                    subject.CurrentPublicActor != oldIdentity &&
+                    observer.ContainsPublic(subject.CurrentPublicActor) &&
+                    observer.ContainsPublicPresentation(
+                        subject.CurrentPublicActor, $"PF1 Bot {subject.Id:D4}"));
+        }
     }
 
     private void SelectSwordContenders()
@@ -300,7 +370,7 @@ internal sealed class BotHarness : IDisposable
     {
         long retirementStarted = Stopwatch.GetTimestamp();
         foreach (BotClient bot in _bots) bot.BeginFinalRetirement(retirementStarted);
-        long deadline = checked(retirementStarted + ToStopwatchTicks(20_000));
+        long deadline = BotMonotonicClock.AddMilliseconds(retirementStarted, 20_000);
         while (_bots.Any(static bot => !bot.IsRetired) && Stopwatch.GetTimestamp() < deadline)
         {
             PumpOnce(allowNewChaos: false);
@@ -309,12 +379,17 @@ internal sealed class BotHarness : IDisposable
         bool clean = _bots.All(static bot => bot.IsRetired);
         bool pass = requestedPass && clean && _bots.All(static bot => !bot.IsFaulted);
         detail ??= clean ? null : "Not every bot retired cleanly.";
-        _process.Refresh();
+        long completed = Stopwatch.GetTimestamp();
+        _processMetrics.Sample(completed, force: true);
         return BotRunSummary.Create(
             _options, _bots, pass, clean, detail, _pumpIterations,
-            ToMilliseconds(_pumpLagHighWaterTicks), _workingSetHighWater,
-            _process.TotalProcessorTime.TotalMilliseconds,
-            _activeHighWater, _admittingHighWater, _reconnectingHighWater);
+            BotMonotonicClock.TicksToFloatingMilliseconds(_pumpStartIntervalHighWaterTicks),
+            BotMonotonicClock.TicksToFloatingMilliseconds(_pumpDurationHighWaterTicks),
+            _processMetrics.WorkingSetHighWaterBytes, _processMetrics.CpuMilliseconds,
+            _processMetrics.Samples,
+            _activeHighWater, _admittingHighWater, _reconnectingHighWater,
+            _reconnectObservers.Count(static observer => observer.Converged),
+            CreatePhaseDurations(retirementStarted, completed));
     }
 
     public void Dispose()
@@ -322,14 +397,29 @@ internal sealed class BotHarness : IDisposable
         if (_disposed) return;
         _disposed = true;
         foreach (BotClient bot in _bots) bot.Dispose();
+        _processMetrics.Dispose();
     }
 
-    private static long ToStopwatchTicks(long milliseconds) => checked(
-        milliseconds * Stopwatch.Frequency / 1_000);
+    private BotRunPhaseDurations CreatePhaseDurations(long retirementStarted, long completed) => new(
+        Elapsed(_created, _admissionCompleted),
+        Elapsed(_scenarioStarted, _scenarioCompleted),
+        Elapsed(_quiescenceStarted, _quiescenceCompleted),
+        Elapsed(_completionBarrierStarted, _completionBarrierCompleted),
+        Elapsed(retirementStarted, completed),
+        Elapsed(_created, completed));
 
-    private static double ToMilliseconds(long stopwatchTicks) =>
-        stopwatchTicks * 1_000d / Stopwatch.Frequency;
+    private static long Elapsed(long start, long end) => start == 0 || end < start
+        ? 0
+        : BotMonotonicClock.TicksToMilliseconds(end - start);
 }
+
+internal readonly record struct BotRunPhaseDurations(
+    long AdmissionMilliseconds,
+    long ScenarioMilliseconds,
+    long QuiescenceMilliseconds,
+    long CompletionBarrierMilliseconds,
+    long RetirementMilliseconds,
+    long TotalMilliseconds);
 
 internal enum BotLifetimeState : byte
 {
@@ -354,6 +444,13 @@ internal enum BotCommandKind : byte
     UiOpen,
 }
 
+internal enum BotEdgePressureState : byte
+{
+    None = 0,
+    MovementQueued = 1,
+    Complete = 2,
+}
+
 internal sealed class BotClient : IDisposable
 {
     private const int MaximumResidentChunks = 192;
@@ -365,10 +462,11 @@ internal sealed class BotClient : IDisposable
     private readonly ClientSemanticChunkInfo[] _chunkScratch =
         new ClientSemanticChunkInfo[MaximumResidentChunks];
     private readonly ClientChatOccurrence[] _chatScratch = new ClientChatOccurrence[256];
-    private readonly HashSet<ulong> _observedChatDeliveries = [];
-    private readonly HashSet<SpatialChunkCoord> _visitedChunks = [];
+    private readonly BotChunkObservation _chunkObservation = new(MaximumResidentChunks);
+    private readonly BotPendingCommandTracker _pendingCommand = new();
     private readonly BotControlDriver _controls = new();
     private DeterministicRandom _random;
+    private BotChatObservationCursor _chatObservation;
     private ClientDirectConnectSession? _connection;
     private RemoteClientProfileClient? _profile;
     private RemotePlayableSession? _session;
@@ -380,6 +478,8 @@ internal sealed class BotClient : IDisposable
     private long _nextNavigation;
     private long _nextSwordAttempt;
     private long _drainDeadline;
+    private long _lastPump;
+    private long _serviceIntervalHighWaterTicks;
     private bool _hasReachedActive;
     private bool _guestSubmitted;
     private bool _initialMovement;
@@ -401,10 +501,10 @@ internal sealed class BotClient : IDisposable
     private bool _sawAirborne;
     private bool _landedAfterAirborne;
     private bool _disposed;
+    private BotEdgePressureState _edgePressure;
     private ulong _priorApplicationEpoch;
     private WorldPublicEntityId _priorPublicActor;
-    private BotCommandKind _pendingCommand;
-    private ulong _pendingCommandSequence;
+    private WorldPublicEntityId _currentPublicActor;
     private ClientPublicActorVerticalPhase _lastVertical;
     private string? _fault;
 
@@ -433,8 +533,8 @@ internal sealed class BotClient : IDisposable
     internal bool IsAdmitting => State is BotLifetimeState.Pending or
         BotLifetimeState.Connecting or BotLifetimeState.Profile or BotLifetimeState.Content;
     internal bool IsReconnecting => !_finalRetirement && _reconnectRequested &&
-        SuccessfulReconnects == 0 && State is BotLifetimeState.Draining or
-            BotLifetimeState.ReconnectDelay;
+        SuccessfulReconnects == 0 && State is not (BotLifetimeState.Retired or
+            BotLifetimeState.Faulted);
     internal bool IsRetired => State == BotLifetimeState.Retired || State == BotLifetimeState.Faulted;
     internal bool HasReachedActive => _hasReachedActive;
     internal ulong ServerGenerationId { get; private set; }
@@ -460,17 +560,36 @@ internal sealed class BotClient : IDisposable
     internal int SwordDropObserved { get; private set; }
     internal int InteractionAccepted { get; private set; }
     internal int InteractionRejected { get; private set; }
-    internal int CommandsAttempted { get; private set; }
+    internal int InteractionAttempts { get; private set; }
+    internal int CommandSubmitCalls { get; private set; }
+    internal int CommandsQueued { get; private set; }
     internal int PrimaryAttempts { get; private set; }
     internal int PrimaryAccepted { get; private set; }
     internal int PrimaryRejected { get; private set; }
-    internal int ChunkTransitions { get; private set; }
+    internal int UiOpenAttempts { get; private set; }
+    internal int UiOpenAccepted { get; private set; }
+    internal int DistinctChunksVisited => _chunkObservation.DistinctChunks;
+    internal int ChunkCrossings => _chunkObservation.Crossings;
+    internal bool DistinctChunkCoverageSaturated => _chunkObservation.DistinctCoverageSaturated;
     internal int VerticalTransitions { get; private set; }
     internal int LandingRecoveries { get; private set; }
     internal int PostRecoveryMovementAccepted { get; private set; }
     internal int EdgePressureAttempts { get; private set; }
+    internal int EdgeJumpCommandsQueued { get; private set; }
+    internal int MovementCancelled { get; private set; }
+    internal int JumpCancelled { get; private set; }
+    internal int InteractionCancelled { get; private set; }
+    internal int PrimaryCancelled { get; private set; }
+    internal int UiOpenCancelled { get; private set; }
+    internal int CancelledCommands => MovementCancelled + JumpCancelled +
+        InteractionCancelled + PrimaryCancelled + UiOpenCancelled;
+    internal ulong ChatObservationGaps => _chatObservation.ObservationGaps;
+    internal double ServiceIntervalHighWaterMilliseconds =>
+        BotMonotonicClock.TicksToFloatingMilliseconds(_serviceIntervalHighWaterTicks);
     internal bool SawAirborne => _sawAirborne;
     internal bool StaleActorObservedAfterReconnect { get; private set; }
+    internal WorldPublicEntityId PriorPublicActor => _priorPublicActor;
+    internal WorldPublicEntityId CurrentPublicActor => _currentPublicActor;
     internal string? Fault => _fault;
 
     internal bool HasUnexpectedQueueDebt
@@ -479,7 +598,7 @@ internal sealed class BotClient : IDisposable
         {
             if (_session is null || State != BotLifetimeState.Active) return false;
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
-            return _pendingCommand != BotCommandKind.None ||
+            return _pendingCommand.Pending.IsPending ||
                 snapshot.Playable.CommandRetainedLocally ||
                 snapshot.Chat.HasPendingProof || snapshot.Content.ProofRetained;
         }
@@ -488,9 +607,10 @@ internal sealed class BotClient : IDisposable
     internal void StartScenario(long timestamp)
     {
         _scenarioStarted = timestamp;
-        _nextChaos = checked(timestamp + ToStopwatchTicks(6_000 + _random.NextInt(500)));
+        _nextChaos = BotMonotonicClock.AddMilliseconds(
+            timestamp, 6_000 + _random.NextInt(500));
         _nextNavigation = timestamp;
-        _nextSwordAttempt = checked(timestamp + ToStopwatchTicks(100));
+        _nextSwordAttempt = BotMonotonicClock.AddMilliseconds(timestamp, 100);
     }
 
     internal void SetSwordContender() => _swordContender = true;
@@ -511,10 +631,19 @@ internal sealed class BotClient : IDisposable
     internal void Pump(long now, bool allowNewChaos)
     {
         if (_disposed || State is BotLifetimeState.Retired or BotLifetimeState.Faulted) return;
+        if (_lastPump != 0)
+            _serviceIntervalHighWaterTicks = Math.Max(
+                _serviceIntervalHighWaterTicks, now - _lastPump);
+        _lastPump = now;
         try
         {
             if (State is BotLifetimeState.Pending or BotLifetimeState.ReconnectDelay)
             {
+                if (_finalRetirement)
+                {
+                    RetireWithoutConnection();
+                    return;
+                }
                 if (now < _startDue) return;
                 StartLifetime();
             }
@@ -531,6 +660,13 @@ internal sealed class BotClient : IDisposable
                     return;
                 }
                 Fail($"Direct Connect failed: {connection.Failure}: {connection.Detail}");
+                return;
+            }
+            if (BotLifecyclePolicy.IsUnexpectedTransportLoss(State, connection.State))
+            {
+                Fail(
+                    $"Direct Connect transport became {connection.State} outside intentional retirement: " +
+                    $"{connection.Failure}: {connection.Detail}");
                 return;
             }
             if (State == BotLifetimeState.Draining)
@@ -593,7 +729,15 @@ internal sealed class BotClient : IDisposable
                     "The remote playable session rejected the bot.");
                 return;
             }
-            if (!_guestSubmitted && snapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready)
+            if (BotLifecyclePolicy.IsApplicationUnhealthy(State, in snapshot))
+            {
+                Fail(
+                    $"The admitted client application became unhealthy: playable={snapshot.Playable.State}, " +
+                    $"ui={snapshot.Ui.State}.");
+                return;
+            }
+            if (!_finalRetirement && !_guestSubmitted &&
+                snapshot.StructuralWorld.State == RemoteStructuralWorldState.Ready)
             {
                 string name = $"PF1 Bot {Id:D4}";
                 if (_session.TrySubmitGuest(new GameGuestAdmissionRequest(Body, name)))
@@ -617,6 +761,7 @@ internal sealed class BotClient : IDisposable
                 }
             }
             ServerGenerationId = snapshot.Playable.ServerGenerationId;
+            _currentPublicActor = snapshot.Playable.PublicActor;
             Observe(snapshot);
             if (!_proofCounted && snapshot.Content.ProofsQueued > 0 &&
                 _profile.GetSnapshot().ProofsQueued > 0)
@@ -635,6 +780,12 @@ internal sealed class BotClient : IDisposable
 
     private void StartLifetime()
     {
+        if (_finalRetirement)
+        {
+            RetireWithoutConnection();
+            return;
+        }
+        _pendingCommand.RequireClearForNewLifetime();
         Directory.CreateDirectory(_stateRoot);
         ClientServerTrustFileStore store = TrustStore();
         ClientServerTrustLoadResult loaded = store.Load();
@@ -652,28 +803,39 @@ internal sealed class BotClient : IDisposable
         _settings = null;
         _guestSubmitted = false;
         _proofCounted = false;
-        _pendingCommand = BotCommandKind.None;
-        _pendingCommandSequence = 0;
+        _currentPublicActor = default;
         _lastVertical = ClientPublicActorVerticalPhase.None;
         _controls.Reset();
     }
 
     private void RetryInitialConnect(long now)
     {
+        if (_finalRetirement)
+        {
+            RetireWithoutConnection();
+            return;
+        }
         InitialConnectRetries++;
-        DisposeLifetime();
+        string? cleanupFailure = DisposeLifetime();
+        if (cleanupFailure is not null)
+        {
+            Fail(cleanupFailure);
+            return;
+        }
         State = BotLifetimeState.Pending;
         int delayMilliseconds = 500 + ((Id + InitialConnectRetries) & 7) * 100;
-        _startDue = checked(now + ToStopwatchTicks(delayMilliseconds));
+        _startDue = BotMonotonicClock.AddMilliseconds(now, delayMilliseconds);
     }
 
     private void Observe(in RemotePlayableSessionSnapshot snapshot)
     {
         RemotePlayableClientSnapshot playable = snapshot.Playable;
-        if (_pendingCommand != BotCommandKind.None &&
-            playable.LastProcessedCommandSequence >= _pendingCommandSequence)
+        if (_pendingCommand.TryComplete(
+                playable.ApplicationSessionEpoch,
+                playable.LastProcessedCommandSequence,
+                out BotPendingCommand completed))
         {
-            RemotePlayableActionStatus result = _pendingCommand switch
+            RemotePlayableActionStatus result = completed.Kind switch
             {
                 BotCommandKind.Movement => playable.Locomotion,
                 BotCommandKind.Jump => playable.Jump,
@@ -682,7 +844,7 @@ internal sealed class BotClient : IDisposable
                 _ => RemotePlayableActionStatus.Accepted,
             };
             bool accepted = result == RemotePlayableActionStatus.Accepted;
-            switch (_pendingCommand)
+            switch (completed.Kind)
             {
                 case BotCommandKind.Movement when accepted:
                     MovementAccepted++;
@@ -696,13 +858,11 @@ internal sealed class BotClient : IDisposable
                 case BotCommandKind.Interaction: InteractionRejected++; break;
                 case BotCommandKind.Primary when accepted: PrimaryAccepted++; break;
                 case BotCommandKind.Primary: PrimaryRejected++; break;
+                case BotCommandKind.UiOpen: UiOpenAccepted++; break;
             }
-            _pendingCommand = BotCommandKind.None;
-            _pendingCommandSequence = 0;
         }
 
-        if (_visitedChunks.Add(playable.Position.Chunk) && _visitedChunks.Count > 1)
-            ChunkTransitions++;
+        _chunkObservation.Observe(playable.Position.Chunk);
         if (_session!.PublicPresentationState.TryGet(
                 playable.PublicActor, out ClientPublicPresentationMetadata metadata))
         {
@@ -728,15 +888,14 @@ internal sealed class BotClient : IDisposable
         if (chat.RetainedOccurrences != 0)
         {
             int count = _session.ChatState.CopyRecent(_chatScratch);
-            for (int index = 0; index < count; index++)
-            {
-                ClientChatOccurrence occurrence = _chatScratch[index];
-                if (!_observedChatDeliveries.Add(occurrence.DeliveryId) ||
-                    !occurrence.Text.StartsWith($"PF1:{_options.Seed}:", StringComparison.Ordinal))
-                    continue;
-                if (occurrence.IsGlobal) GlobalChatObserved++;
-                else if (occurrence.IsSpatial) LocalChatObserved++;
-            }
+            _chatObservation.Observe(
+                playable.ApplicationSessionEpoch,
+                _chatScratch.AsSpan(0, count),
+                $"PF1:{_options.Seed}:",
+                out int local,
+                out int global);
+            LocalChatObserved += local;
+            GlobalChatObserved += global;
         }
 
         ObserveInventory();
@@ -747,7 +906,15 @@ internal sealed class BotClient : IDisposable
 
     private void RunScenario(long now, in RemotePlayableSessionSnapshot snapshot)
     {
-        long elapsed = ToMillisecondsTicks(now - _scenarioStarted);
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        if (Id == _options.BotCount - 1 && !_reconnectRequested && elapsed >= 4_500)
+            _reconnectRequested = true;
+        if (_reconnectRequested && SuccessfulReconnects == 0)
+        {
+            if (HasUnexpectedQueueDebt) return;
+            BeginRetirement(now, reconnect: true);
+            return;
+        }
         if (!_initialMovement && elapsed >= 100 + Id * 20L &&
             (!_swordContender || SwordPickupObserved != 0 || elapsed >= 6_000))
         {
@@ -797,7 +964,7 @@ internal sealed class BotClient : IDisposable
             TryInteraction(sword.Id))
         {
             SwordInteractionAttempts++;
-            _nextSwordAttempt = checked(now + ToStopwatchTicks(500));
+            _nextSwordAttempt = BotMonotonicClock.AddMilliseconds(now, 500);
         }
         if (!_inventoryRequested && elapsed >= 700 && _swordContender &&
             TryCommand(new ClientWorldCommandIntent(
@@ -820,32 +987,33 @@ internal sealed class BotClient : IDisposable
                 DriveTowardInteractable(
                     GameWorldPublicPrefabIds.FarGate, now, snapshot.Playable.Position);
             else if (Id == 6 && elapsed is >= 1_500 and < 6_000 &&
-                _pendingCommand == BotCommandKind.None)
+                !_pendingCommand.Pending.IsPending)
                 _ = TryMovement(1f, 0.2f, snapshot.Playable.Position, now);
-            _nextNavigation = checked(now + ToStopwatchTicks(250));
+            _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 250);
         }
 
-        if (Id == 4 && elapsed >= 5_000 && EdgePressureAttempts == 0)
+        if (Id == 4 && elapsed >= 5_000 && _edgePressure == BotEdgePressureState.None)
         {
             if (TryMovement(1f, 0.7f, snapshot.Playable.Position, now))
             {
                 EdgePressureAttempts++;
-                _ = TryPhysicalAction(
-                    ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump);
+                _edgePressure = BotEdgePressureState.MovementQueued;
             }
         }
-
-        if (Id == _options.BotCount - 1 && !_reconnectRequested && elapsed >= 4_500)
+        else if (_edgePressure == BotEdgePressureState.MovementQueued &&
+            !_pendingCommand.Pending.IsPending &&
+            TryPhysicalAction(
+                ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump))
         {
-            _reconnectRequested = true;
-            BeginRetirement(now, reconnect: true);
-            return;
+            EdgeJumpCommandsQueued++;
+            _edgePressure = BotEdgePressureState.Complete;
         }
 
-        if (elapsed >= 6_000 && now >= _nextChaos && _pendingCommand == BotCommandKind.None)
+        if (elapsed >= 6_000 && now >= _nextChaos && !_pendingCommand.Pending.IsPending)
         {
             RunRandomChaos(now, snapshot.Playable.Position);
-            _nextChaos = checked(now + ToStopwatchTicks(250 + _random.NextInt(750)));
+            _nextChaos = BotMonotonicClock.AddMilliseconds(
+                now, 250 + _random.NextInt(750));
         }
     }
 
@@ -892,9 +1060,12 @@ internal sealed class BotClient : IDisposable
 
     private bool TryMovement(float x, float z, in WorldPosition position, long now)
     {
-        if (_pendingCommand != BotCommandKind.None) return false;
+        if (_pendingCommand.Pending.IsPending) return false;
+        long relativeTimestamp = _scenarioStarted == 0
+            ? 0
+            : BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         GameLocomotionUpdate locomotion = _controls.EvaluateMovement(
-            _settings!.ControlGrammar, x, z, position, ToMillisecondsTicks(now));
+            _settings!.ControlGrammar, x, z, position, relativeTimestamp);
         return TryCommand(new ClientWorldCommandIntent(
             locomotion, GamePlayerActions.None, true), BotCommandKind.Movement);
     }
@@ -904,7 +1075,7 @@ internal sealed class BotClient : IDisposable
         GamePlayerActions gameAction,
         BotCommandKind kind)
     {
-        if (_pendingCommand != BotCommandKind.None ||
+        if (_pendingCommand.Pending.IsPending ||
             !_settings!.TryGetBinding(expected, out ClientPhysicalInput physical) ||
             !_settings.TryResolveInput(in physical, out ClientSemanticAction resolved) ||
             resolved != expected)
@@ -924,20 +1095,26 @@ internal sealed class BotClient : IDisposable
         WorldPublicEntityId target = default,
         RemotePlayableCommandFlags flags = RemotePlayableCommandFlags.None)
     {
-        if (_pendingCommand != BotCommandKind.None || _session is null ||
+        CommandSubmitCalls++;
+        if (_pendingCommand.Pending.IsPending || _session is null ||
             !_session.Playable.TrySubmitCommand(in intent, target, flags))
             return false;
-        CommandsAttempted++;
+        CommandsQueued++;
         switch (kind)
         {
             case BotCommandKind.Movement: MovementAttempts++; break;
             case BotCommandKind.Jump: JumpAttempts++; break;
+            case BotCommandKind.Interaction: InteractionAttempts++; break;
             case BotCommandKind.Primary: PrimaryAttempts++; break;
+            case BotCommandKind.UiOpen: UiOpenAttempts++; break;
         }
         if (kind != BotCommandKind.None)
         {
-            _pendingCommand = kind;
-            _pendingCommandSequence = _session.Playable.Input.Snapshot().LastSequence;
+            ulong sequence = _session.Playable.Input.Snapshot().LastSequence;
+            ulong epoch = _session.Playable.GetSnapshot().ApplicationSessionEpoch;
+            if (!_pendingCommand.TryStart(kind, sequence, epoch))
+                throw new InvalidOperationException(
+                    "The queued bot command could not enter outcome accounting.");
         }
         return true;
     }
@@ -950,7 +1127,7 @@ internal sealed class BotClient : IDisposable
         long distanceSquared = checked(dx * dx + dz * dz);
         if (distanceSquared <= 1_200L * 1_200L)
         {
-            if (_pendingCommand == BotCommandKind.None)
+            if (!_pendingCommand.Pending.IsPending)
                 _ = TryInteraction(target.Id);
             return;
         }
@@ -1078,7 +1255,7 @@ internal sealed class BotClient : IDisposable
         return false;
     }
 
-    private bool ContainsPublic(WorldPublicEntityId identity)
+    internal bool ContainsPublic(WorldPublicEntityId identity)
     {
         if (_session is null ||
             !_session.WorldCache.TryCopyResidentInfo(_chunkScratch, out int count, out _))
@@ -1094,16 +1271,84 @@ internal sealed class BotClient : IDisposable
         return false;
     }
 
+    internal bool ContainsPublicPresentation(
+        WorldPublicEntityId identity,
+        string? expectedDisplayLabel = null)
+    {
+        if (_session is null ||
+            !_session.PublicPresentationState.TryGet(
+                identity, out ClientPublicPresentationMetadata metadata))
+            return false;
+        return expectedDisplayLabel is null || string.Equals(
+            metadata.DisplayLabel, expectedDisplayLabel, StringComparison.Ordinal);
+    }
+
+    internal string? GetCurrentHealthFailure()
+    {
+        if (State != BotLifetimeState.Active) return null;
+        if (_connection is null || _session is null)
+            return "The active lifetime has no transport/application composition.";
+        ClientDirectConnectSnapshot connection;
+        RemotePlayableSessionSnapshot application;
+        try
+        {
+            connection = _connection.GetSnapshot();
+            application = _session.GetSnapshot();
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            return $"Current health could not be read: {exception.GetType().Name}: {exception.Message}";
+        }
+        if (connection.State != ClientDirectConnectState.Established)
+            return $"The active transport is {connection.State}: {connection.Detail}";
+        if (!application.SemanticConsumersActive ||
+            application.Playable.State != RemotePlayableClientState.Active ||
+            application.Ui.State != RemoteClientApplicationState.Active)
+            return $"The active application is unhealthy: semantic={application.SemanticConsumersActive}, " +
+                $"playable={application.Playable.State}, ui={application.Ui.State}.";
+        return null;
+    }
+
     internal void BeginFinalRetirement(long now)
     {
-        _finalRetirement = true;
-        if (State == BotLifetimeState.Active)
-            BeginRetirement(now, reconnect: false);
-        else if (State is BotLifetimeState.Pending or BotLifetimeState.ReconnectDelay)
+        if (_disposed || State is BotLifetimeState.Retired or BotLifetimeState.Faulted) return;
+        try
         {
-            DisposeLifetime();
-            State = BotLifetimeState.Retired;
+            BeginFinalRetirementCore(now);
         }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            Fail($"Final retirement failed: {exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private void BeginFinalRetirementCore(long now)
+    {
+        _finalRetirement = true;
+        _reconnectRequested = false;
+        switch (BotLifecyclePolicy.FinalRetirement(State))
+        {
+            case BotFinalRetirementAction.None:
+                return;
+            case BotFinalRetirementAction.RetireWithoutConnection:
+                RetireWithoutConnection();
+                return;
+            case BotFinalRetirementAction.BeginOrContinueDrain:
+                if (State == BotLifetimeState.Draining) return;
+                CancelPendingCommand();
+                BeginRetirement(now, reconnect: false);
+                return;
+            default:
+                throw new InvalidOperationException("Unknown final-retirement action.");
+        }
+    }
+
+    private void RetireWithoutConnection()
+    {
+        CancelPendingCommand();
+        string? cleanupFailure = DisposeLifetime();
+        if (cleanupFailure is not null) Fail(cleanupFailure);
+        else State = BotLifetimeState.Retired;
     }
 
     private void BeginRetirement(long now, bool reconnect)
@@ -1111,20 +1356,37 @@ internal sealed class BotClient : IDisposable
         if (_session is not null)
         {
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
-            _priorApplicationEpoch = snapshot.Playable.ApplicationSessionEpoch;
-            _priorPublicActor = snapshot.Playable.PublicActor;
-            _ = _session.TryRequestDetach();
+            if (reconnect)
+            {
+                _priorApplicationEpoch = snapshot.Playable.ApplicationSessionEpoch;
+                _priorPublicActor = snapshot.Playable.PublicActor;
+            }
+            if (_connection?.GetSnapshot().State == ClientDirectConnectState.Established &&
+                snapshot.Playable.State == RemotePlayableClientState.Active)
+                _ = _session.TryRequestDetach();
         }
-        _connection?.BeginDisconnect();
         _finalRetirement |= !reconnect;
         State = BotLifetimeState.Draining;
-        _drainDeadline = checked(now + ToStopwatchTicks(10_000));
+        _drainDeadline = BotMonotonicClock.AddMilliseconds(now, 10_000);
+        if (_connection is null)
+        {
+            CompleteDrain(now, cleanTransport: true);
+            return;
+        }
+        _connection.BeginDisconnect();
+        if (_connection.GetSnapshot().State == ClientDirectConnectState.Closed)
+            CompleteDrain(now, cleanTransport: true);
     }
 
     private void CompleteDrain(long now, bool cleanTransport)
     {
         bool reconnect = !_finalRetirement && _reconnectRequested && SuccessfulReconnects == 0;
-        DisposeLifetime();
+        string? cleanupFailure = DisposeLifetime();
+        if (cleanupFailure is not null)
+        {
+            Fail(cleanupFailure);
+            return;
+        }
         if (!cleanTransport)
         {
             Fail("The bot transport did not drain within its bounded deadline.");
@@ -1133,20 +1395,46 @@ internal sealed class BotClient : IDisposable
         if (reconnect)
         {
             State = BotLifetimeState.ReconnectDelay;
-            _startDue = checked(now + ToStopwatchTicks(250));
+            _startDue = BotMonotonicClock.AddMilliseconds(now, 250);
         }
         else State = BotLifetimeState.Retired;
     }
 
-    private void DisposeLifetime()
+    private string? DisposeLifetime()
     {
-        _session?.Dispose();
-        _connection?.Dispose();
+        string? failure = null;
+        try { _session?.Dispose(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            failure = $"Application cleanup failed: {exception.GetType().Name}: {exception.Message}";
+        }
+        try { _connection?.Dispose(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            string connectionFailure =
+                $"Transport cleanup failed: {exception.GetType().Name}: {exception.Message}";
+            failure = failure is null ? connectionFailure : $"{failure}; {connectionFailure}";
+        }
         _session = null;
         _connection = null;
         _profile = null;
         _renderer = null;
         _settings = null;
+        _currentPublicActor = default;
+        return failure;
+    }
+
+    private void CancelPendingCommand()
+    {
+        if (!_pendingCommand.TryCancel(out BotPendingCommand cancelled)) return;
+        switch (cancelled.Kind)
+        {
+            case BotCommandKind.Movement: MovementCancelled++; break;
+            case BotCommandKind.Jump: JumpCancelled++; break;
+            case BotCommandKind.Interaction: InteractionCancelled++; break;
+            case BotCommandKind.Primary: PrimaryCancelled++; break;
+            case BotCommandKind.UiOpen: UiOpenCancelled++; break;
+        }
     }
 
     private ClientServerTrustFileStore TrustStore() => new(
@@ -1158,27 +1446,24 @@ internal sealed class BotClient : IDisposable
     private void Fail(string detail)
     {
         const int maximumDiagnosticCharacters = 2_048;
-        _fault = detail.Length <= maximumDiagnosticCharacters
-            ? detail
-            : detail[..maximumDiagnosticCharacters];
         State = BotLifetimeState.Faulted;
+        CancelPendingCommand();
+        string? cleanupFailure = DisposeLifetime();
+        string combined = cleanupFailure is null ? detail : $"{detail}; {cleanupFailure}";
+        _fault = combined.Length <= maximumDiagnosticCharacters
+            ? combined
+            : combined[..maximumDiagnosticCharacters];
         if (_options.Verbose)
             Console.Error.WriteLine($"PF1 bot {Id:D4} fault: {_fault}");
-        DisposeLifetime();
     }
 
     public void Dispose()
     {
         if (_disposed) return;
-        DisposeLifetime();
+        CancelPendingCommand();
+        _ = DisposeLifetime();
         _disposed = true;
     }
-
-    private static long ToStopwatchTicks(long milliseconds) => checked(
-        milliseconds * Stopwatch.Frequency / 1_000);
-
-    private static long ToMillisecondsTicks(long stopwatchTicks) => checked(
-        stopwatchTicks * 1_000 / Stopwatch.Frequency);
 }
 
 internal sealed class BotControlDriver
@@ -1344,12 +1629,20 @@ internal struct DeterministicRandom
 
 internal sealed record BotRunSummary
 {
+    public required int SchemaVersion { get; init; }
     public required string Checkpoint { get; init; }
     public required bool Passed { get; init; }
     public required string? Detail { get; init; }
     public required string Endpoint { get; init; }
     public required string Scenario { get; init; }
     public required ulong Seed { get; init; }
+    public required string HarnessBuildModule { get; init; }
+    public required string Runtime { get; init; }
+    public required string OperatingSystem { get; init; }
+    public required string ProcessArchitecture { get; init; }
+    public required int ProcessorCount { get; init; }
+    public required string CacheMode { get; init; }
+    public required int RequestedDurationMilliseconds { get; init; }
     public required int BotCount { get; init; }
     public required int ActiveBots { get; init; }
     public required int AdmittingBots { get; init; }
@@ -1381,21 +1674,41 @@ internal sealed record BotRunSummary
     public required int SwordPickupObserved { get; init; }
     public required int SwordEquipObserved { get; init; }
     public required int SwordDropObserved { get; init; }
+    public required int InteractionCommandsQueued { get; init; }
     public required int InteractionAccepted { get; init; }
     public required int InteractionRejected { get; init; }
-    public required int CommandsAttempted { get; init; }
+    public required int CommandSubmitCalls { get; init; }
+    public required int CommandsQueued { get; init; }
     public required int PrimaryAttempts { get; init; }
     public required int PrimaryAccepted { get; init; }
     public required int PrimaryRejected { get; init; }
-    public required int ChunkTransitions { get; init; }
+    public required int UiOpenCommandsQueued { get; init; }
+    public required int UiOpenAccepted { get; init; }
+    public required int CancelledCommands { get; init; }
+    public required int MovementCancelled { get; init; }
+    public required int JumpCancelled { get; init; }
+    public required int InteractionCancelled { get; init; }
+    public required int PrimaryCancelled { get; init; }
+    public required int UiOpenCancelled { get; init; }
+    public required int DistinctChunksVisited { get; init; }
+    public required int ChunkCrossings { get; init; }
+    public required bool DistinctChunkCoverageSaturated { get; init; }
     public required int VerticalTransitions { get; init; }
     public required int LandingRecoveries { get; init; }
     public required int PostRecoveryMovementAccepted { get; init; }
     public required int EdgePressureAttempts { get; init; }
+    public required int EdgeJumpCommandsQueued { get; init; }
+    public required ulong ChatObservationGaps { get; init; }
+    public required int ReconnectIdentityObservers { get; init; }
+    public required int ReconnectIdentityObserversConverged { get; init; }
     public required ulong PumpIterations { get; init; }
-    public required double PumpLagHighWaterMilliseconds { get; init; }
+    public required double PumpStartIntervalHighWaterMilliseconds { get; init; }
+    public required double PumpDurationHighWaterMilliseconds { get; init; }
+    public required double BotServiceIntervalHighWaterMilliseconds { get; init; }
     public required long WorkingSetHighWaterBytes { get; init; }
+    public required int ProcessMetricSamples { get; init; }
     public required double CpuMilliseconds { get; init; }
+    public required BotRunPhaseDurations PhaseDurations { get; init; }
     public required bool CleanRetirement { get; init; }
     public required int FaultedBots { get; init; }
     public required string[] Faults { get; init; }
@@ -1407,19 +1720,31 @@ internal sealed record BotRunSummary
         bool cleanRetirement,
         string? detail,
         ulong pumpIterations,
-        double pumpLagHighWaterMilliseconds,
+        double pumpStartIntervalHighWaterMilliseconds,
+        double pumpDurationHighWaterMilliseconds,
         long workingSetHighWaterBytes,
         double cpuMilliseconds,
+        int processMetricSamples,
         int activeHighWater,
         int admittingHighWater,
-        int reconnectingHighWater) => new()
+        int reconnectingHighWater,
+        int reconnectIdentityObserversConverged,
+        BotRunPhaseDurations phaseDurations) => new()
     {
+        SchemaVersion = 2,
         Checkpoint = "PF1",
         Passed = passed,
         Detail = detail,
         Endpoint = options.Endpoint,
         Scenario = options.Scenario,
         Seed = options.Seed,
+        HarnessBuildModule = BotRuntimeIdentity.BuildModule,
+        Runtime = BotRuntimeIdentity.Runtime,
+        OperatingSystem = BotRuntimeIdentity.OperatingSystem,
+        ProcessArchitecture = BotRuntimeIdentity.Architecture,
+        ProcessorCount = Environment.ProcessorCount,
+        CacheMode = "shared-persistent-cas",
+        RequestedDurationMilliseconds = options.DurationMilliseconds,
         BotCount = bots.Length,
         ActiveBots = bots.Count(static bot => bot.IsActive),
         AdmittingBots = bots.Count(static bot => bot.IsAdmitting),
@@ -1451,21 +1776,46 @@ internal sealed record BotRunSummary
         SwordPickupObserved = bots.Sum(static bot => bot.SwordPickupObserved),
         SwordEquipObserved = bots.Sum(static bot => bot.SwordEquipObserved),
         SwordDropObserved = bots.Sum(static bot => bot.SwordDropObserved),
+        InteractionCommandsQueued = bots.Sum(static bot => bot.InteractionAttempts),
         InteractionAccepted = bots.Sum(static bot => bot.InteractionAccepted),
         InteractionRejected = bots.Sum(static bot => bot.InteractionRejected),
-        CommandsAttempted = bots.Sum(static bot => bot.CommandsAttempted),
+        CommandSubmitCalls = bots.Sum(static bot => bot.CommandSubmitCalls),
+        CommandsQueued = bots.Sum(static bot => bot.CommandsQueued),
         PrimaryAttempts = bots.Sum(static bot => bot.PrimaryAttempts),
         PrimaryAccepted = bots.Sum(static bot => bot.PrimaryAccepted),
         PrimaryRejected = bots.Sum(static bot => bot.PrimaryRejected),
-        ChunkTransitions = bots.Sum(static bot => bot.ChunkTransitions),
+        UiOpenCommandsQueued = bots.Sum(static bot => bot.UiOpenAttempts),
+        UiOpenAccepted = bots.Sum(static bot => bot.UiOpenAccepted),
+        CancelledCommands = bots.Sum(static bot => bot.CancelledCommands),
+        MovementCancelled = bots.Sum(static bot => bot.MovementCancelled),
+        JumpCancelled = bots.Sum(static bot => bot.JumpCancelled),
+        InteractionCancelled = bots.Sum(static bot => bot.InteractionCancelled),
+        PrimaryCancelled = bots.Sum(static bot => bot.PrimaryCancelled),
+        UiOpenCancelled = bots.Sum(static bot => bot.UiOpenCancelled),
+        DistinctChunksVisited = bots.Sum(static bot => bot.DistinctChunksVisited),
+        ChunkCrossings = bots.Sum(static bot => bot.ChunkCrossings),
+        DistinctChunkCoverageSaturated = bots.Any(static bot => bot.DistinctChunkCoverageSaturated),
         VerticalTransitions = bots.Sum(static bot => bot.VerticalTransitions),
         LandingRecoveries = bots.Sum(static bot => bot.LandingRecoveries),
         PostRecoveryMovementAccepted = bots.Sum(static bot => bot.PostRecoveryMovementAccepted),
         EdgePressureAttempts = bots.Sum(static bot => bot.EdgePressureAttempts),
+        EdgeJumpCommandsQueued = bots.Sum(static bot => bot.EdgeJumpCommandsQueued),
+        ChatObservationGaps = bots.Aggregate(
+            0UL,
+            static (total, bot) => ulong.MaxValue - total < bot.ChatObservationGaps
+                ? ulong.MaxValue
+                : total + bot.ChatObservationGaps),
+        ReconnectIdentityObservers = 2,
+        ReconnectIdentityObserversConverged = reconnectIdentityObserversConverged,
         PumpIterations = pumpIterations,
-        PumpLagHighWaterMilliseconds = pumpLagHighWaterMilliseconds,
+        PumpStartIntervalHighWaterMilliseconds = pumpStartIntervalHighWaterMilliseconds,
+        PumpDurationHighWaterMilliseconds = pumpDurationHighWaterMilliseconds,
+        BotServiceIntervalHighWaterMilliseconds = bots.Max(
+            static bot => bot.ServiceIntervalHighWaterMilliseconds),
         WorkingSetHighWaterBytes = workingSetHighWaterBytes,
+        ProcessMetricSamples = processMetricSamples,
         CpuMilliseconds = cpuMilliseconds,
+        PhaseDurations = phaseDurations,
         CleanRetirement = cleanRetirement,
         FaultedBots = bots.Count(static bot => bot.IsFaulted),
         Faults = bots.Where(static bot => bot.Fault is not null)
@@ -1473,7 +1823,8 @@ internal sealed record BotRunSummary
     };
 
     internal string ToEvidenceLine() =>
-        $"PF1 BOT HARNESS {(Passed ? "PASS" : "FAIL")} bots={BotCount} seed={Seed} " +
+        $"PF1 BOT HARNESS {(Passed ? "PASS" : "FAIL")} schema={SchemaVersion} " +
+        $"bots={BotCount} seed={Seed} requestedMs={RequestedDurationMilliseconds} " +
         $"states={ActiveBots}/{AdmittingBots}/{ReconnectingBots}/{RetiredBots} " +
         $"stateHighWater={ActiveHighWater}/{AdmittingHighWater}/{ReconnectingHighWater} " +
         $"generation={ServerGeneration} sessions={ApplicationSessions} reconnects={SuccessfulReconnects} " +
@@ -1482,12 +1833,17 @@ internal sealed record BotRunSummary
         $"{MovementAttempts} jumps={JumpsAccepted}/{JumpsRejected}/{JumpAttempts} " +
         $"primary={PrimaryAccepted}/{PrimaryRejected}/{PrimaryAttempts} " +
         $"chat={LocalChatSubmitted}+{GlobalChatSubmitted}/" +
-        $"observed={LocalChatObserved}+{GlobalChatObserved} commands={CommandsAttempted} " +
+        $"observed={LocalChatObserved}+{GlobalChatObserved} commands={CommandsQueued} " +
         $"nonsense={NonsenseInputs}/commands={NonsenseCommandsCreated} sword={SwordPickupObserved}/" +
         $"{SwordEquipObserved}/{SwordDropObserved} interactions={InteractionAccepted}/" +
-        $"{InteractionRejected} chunks={ChunkTransitions} vertical={VerticalTransitions} " +
+        $"{InteractionRejected} chunks={DistinctChunksVisited} crossings={ChunkCrossings} " +
+        $"vertical={VerticalTransitions} " +
         $"landings={LandingRecoveries} recoveryMoves={PostRecoveryMovementAccepted} " +
-        $"pump={PumpIterations} lagMs={PumpLagHighWaterMilliseconds:0.###} " +
+        $"edgeJumps={EdgeJumpCommandsQueued} reconnectObservers=" +
+        $"{ReconnectIdentityObserversConverged}/{ReconnectIdentityObservers} " +
+        $"pump={PumpIterations} pumpIntervalMs={PumpStartIntervalHighWaterMilliseconds:0.###} " +
+        $"pumpDurationMs={PumpDurationHighWaterMilliseconds:0.###} " +
+        $"botServiceMs={BotServiceIntervalHighWaterMilliseconds:0.###} " +
         $"workingSet={WorkingSetHighWaterBytes} cpuMs={CpuMilliseconds:0.###} " +
         $"retired={CleanRetirement} detail={Detail ?? "none"}";
 }
@@ -1561,6 +1917,7 @@ internal readonly record struct BotOptions(
             throw new ArgumentException("--ready-file and --release-file must be supplied together.");
         if (stagger is < 0 or > 5_000)
             throw new ArgumentException("--admission-stagger-ms must be between 0 and 5000.");
+        BotScenarioContract.ValidateMixedChaos(bots, duration);
         return new BotOptions(endpoint!, fingerprint!, bots, seed, duration, scenario,
             cache, startReady, startRelease, ready, release, summary, stagger, verbose);
     }

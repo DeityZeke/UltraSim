@@ -125,7 +125,10 @@ public partial class ClientHost
                     // population; the completion barrier now requires sustained product health.
                     if (!playable.SmokeComplete) return;
                     if (HasRemoteSmokeCompletionBarrier())
+                    {
                         ValidateRemoteSmokeSustainedHealth(playable);
+                        if (!RemoteSmokePresentationStable(playable)) return;
+                    }
                     else if (playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
                         return;
                     if (!SharedRemoteSmokeCompletionBarrierReleased()) return;
@@ -844,8 +847,6 @@ public partial class ClientHost
             snapshot.RenderedChunks == 0 || snapshot.TerrainTriangles == 0 ||
             snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
             snapshot.Actors.ActiveActors < 2 || snapshot.Actors.AnimatedActors == 0 ||
-            snapshot.Actors.ActiveActors >
-                snapshot.Session.PublicPresentation.Metadata.CurrentRecords ||
             snapshot.Actors.VisibleNameplates > snapshot.Actors.ActiveActors ||
             snapshot.Actors.VisibleOverheadLabels > snapshot.Actors.ActiveActors ||
             snapshot.ActorResources.RealizationFailures != 0 ||
@@ -853,6 +854,18 @@ public partial class ClientHost
             snapshot.Session.Playable.CommandRetainedLocally)
             throw new InvalidOperationException(
                 $"The PF1 native client did not remain semantically healthy: {snapshot}.");
+    }
+
+    private static bool RemoteSmokePresentationStable(
+        in RemoteConceptDemoClientSnapshot snapshot)
+    {
+        // Initial convergence above already proved the configured full population. During PF1,
+        // ordinary AOI movement and reconnect retirement may legitimately reduce this client's
+        // current population. Wait only for the independently delivered hot/cold projections to
+        // settle; exact reconnect identity retirement is asserted by two ordinary bot observers.
+        return snapshot.Actors.ActiveActors >= 2 &&
+            snapshot.Actors.ActiveActors <=
+                snapshot.Session.PublicPresentation.Metadata.CurrentRecords;
     }
 
     private static string? ReadArgument(string prefix) => OS.GetCmdlineUserArgs()

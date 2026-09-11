@@ -29,6 +29,13 @@ if (options.Pf1Only)
 {
     if (options.SkipGodot)
         throw new ArgumentException("--pf1-only requires the actual exported Online product.");
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
+        "-c", options.Configuration,
+        "-p:UltraSimNetworkFlavor=ClientOnly",
+    ]);
     string godot = ResolveGodot(options.GodotPath);
     ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
     try
@@ -74,6 +81,7 @@ string[] testProjects =
     "_Tests/UltraSim.Game.Chat.Tests/UltraSim.Game.Chat.Tests.csproj",
     "_Tests/UltraSim.Game.Inventory.Tests/UltraSim.Game.Inventory.Tests.csproj",
     "_Tests/UltraSim.Client.Local.Tests/UltraSim.Client.Local.Tests.csproj",
+    "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
     "_Tests/UltraSim.S0.Integration.Tests/UltraSim.S0.Integration.Tests.csproj",
 ];
 
@@ -84,6 +92,8 @@ foreach (string configuration in configurations)
     foreach (string project in testProjects)
     {
         var command = new List<string> { "run", "--project", project, "-c", configuration };
+        if (project.Contains("NetworkBots", StringComparison.Ordinal))
+            command.Add("-p:UltraSimNetworkFlavor=ClientOnly");
         if (options.NoRestore) command.Add("--no-restore");
         Run(root, "dotnet", command);
     }
@@ -1344,6 +1354,7 @@ static void VerifyPf1MixedExportedSwarm(
                 $"The PF1 bot harness omitted its accepted summary:\n{Tail(botOutput, 8_000)}");
         using JsonDocument botDocument = JsonDocument.Parse(File.ReadAllText(botSummary));
         JsonElement bots = botDocument.RootElement;
+        JsonElement botPhases = bots.GetProperty("phaseDurations");
         if (!bots.GetProperty("passed").GetBoolean() ||
             bots.GetProperty("botCount").GetInt32() != botCount ||
             bots.GetProperty("seed").GetUInt64() != seed ||
@@ -1359,16 +1370,39 @@ static void VerifyPf1MixedExportedSwarm(
             bots.GetProperty("successfulReconnects").GetInt32() < 1 ||
             bots.GetProperty("applicationSessions").GetInt32() < botCount + 1 ||
             bots.GetProperty("freshProofLifetimes").GetInt32() < botCount + 1 ||
-            bots.GetProperty("commandsAttempted").GetInt32() == 0 ||
+            bots.GetProperty("schemaVersion").GetInt32() != 2 ||
+            bots.GetProperty("commandsQueued").GetInt32() == 0 ||
             bots.GetProperty("movementAttempts").GetInt32() !=
                 bots.GetProperty("movementAccepted").GetInt32() +
-                bots.GetProperty("movementRejected").GetInt32() ||
+                bots.GetProperty("movementRejected").GetInt32() +
+                bots.GetProperty("movementCancelled").GetInt32() ||
             bots.GetProperty("jumpAttempts").GetInt32() !=
                 bots.GetProperty("jumpsAccepted").GetInt32() +
-                bots.GetProperty("jumpsRejected").GetInt32() ||
+                bots.GetProperty("jumpsRejected").GetInt32() +
+                bots.GetProperty("jumpCancelled").GetInt32() ||
             bots.GetProperty("primaryAttempts").GetInt32() !=
                 bots.GetProperty("primaryAccepted").GetInt32() +
-                bots.GetProperty("primaryRejected").GetInt32() ||
+                bots.GetProperty("primaryRejected").GetInt32() +
+                bots.GetProperty("primaryCancelled").GetInt32() ||
+            bots.GetProperty("interactionCommandsQueued").GetInt32() !=
+                bots.GetProperty("interactionAccepted").GetInt32() +
+                bots.GetProperty("interactionRejected").GetInt32() +
+                bots.GetProperty("interactionCancelled").GetInt32() ||
+            bots.GetProperty("uiOpenCommandsQueued").GetInt32() !=
+                bots.GetProperty("uiOpenAccepted").GetInt32() +
+                bots.GetProperty("uiOpenCancelled").GetInt32() ||
+            bots.GetProperty("cancelledCommands").GetInt32() != 0 ||
+            bots.GetProperty("chatObservationGaps").GetUInt64() != 0 ||
+            bots.GetProperty("chunkCrossings").GetInt32() < 2 ||
+            bots.GetProperty("distinctChunksVisited").GetInt32() < 2 ||
+            bots.GetProperty("edgeJumpCommandsQueued").GetInt32() == 0 ||
+            bots.GetProperty("reconnectIdentityObserversConverged").GetInt32() !=
+            bots.GetProperty("reconnectIdentityObservers").GetInt32() ||
+            bots.GetProperty("processMetricSamples").GetInt32() < 2 ||
+            bots.GetProperty("pumpDurationHighWaterMilliseconds").GetDouble() < 0 ||
+            botPhases.GetProperty("scenarioMilliseconds").GetInt64() < 14_000 ||
+            botPhases.GetProperty("totalMilliseconds").GetInt64() <
+                botPhases.GetProperty("scenarioMilliseconds").GetInt64() ||
             bots.GetProperty("landingRecoveries").GetInt32() == 0 ||
             bots.GetProperty("postRecoveryMovementAccepted").GetInt32() == 0 ||
             bots.GetProperty("nonsenseCommandsCreated").GetInt32() != 0 ||

@@ -1,0 +1,331 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using UltraSim.Client.Core;
+using UltraSim.Client.Network;
+using UltraSim.Game.World;
+using UltraSim.Spatial;
+
+internal static class BotMonotonicClock
+{
+    internal static long AddMilliseconds(long timestamp, long milliseconds) =>
+        checked(timestamp + MillisecondsToTicks(milliseconds));
+
+    internal static long MillisecondsToTicks(long milliseconds) =>
+        MillisecondsToTicks(milliseconds, Stopwatch.Frequency);
+
+    internal static long MillisecondsToTicks(long milliseconds, long frequency)
+    {
+        if (milliseconds < 0) throw new ArgumentOutOfRangeException(nameof(milliseconds));
+        if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency));
+        Int128 result = (Int128)milliseconds * frequency / 1_000;
+        return checked((long)result);
+    }
+
+    internal static long TicksToMilliseconds(long ticks) =>
+        TicksToMilliseconds(ticks, Stopwatch.Frequency);
+
+    internal static long TicksToMilliseconds(long ticks, long frequency)
+    {
+        if (ticks < 0) throw new ArgumentOutOfRangeException(nameof(ticks));
+        if (frequency <= 0) throw new ArgumentOutOfRangeException(nameof(frequency));
+        Int128 result = (Int128)ticks * 1_000 / frequency;
+        return checked((long)result);
+    }
+
+    internal static double TicksToFloatingMilliseconds(long ticks) =>
+        ticks * 1_000d / Stopwatch.Frequency;
+}
+
+internal static class BotScenarioContract
+{
+    internal const int MinimumMixedChaosBots = 8;
+    internal const int MinimumMixedChaosDurationMilliseconds = 10_000;
+    internal const int MaximumInitialAdmissionMilliseconds = 90_000;
+
+    internal static void ValidateMixedChaos(int botCount, int durationMilliseconds)
+    {
+        if (botCount < MinimumMixedChaosBots)
+            throw new ArgumentException(
+                $"mixed-chaos requires at least {MinimumMixedChaosBots} bots so every deterministic acceptance role exists.");
+        if (durationMilliseconds < MinimumMixedChaosDurationMilliseconds)
+            throw new ArgumentException(
+                $"mixed-chaos requires at least {MinimumMixedChaosDurationMilliseconds / 1_000} seconds for its reconnect and edge roles.");
+    }
+
+    internal static long AdmissionDeadline(
+        long created,
+        int botCount,
+        int admissionStaggerMilliseconds)
+    {
+        if (botCount <= 0) throw new ArgumentOutOfRangeException(nameof(botCount));
+        if (admissionStaggerMilliseconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(admissionStaggerMilliseconds));
+        long lastScheduledStart = checked((long)(botCount - 1) * admissionStaggerMilliseconds);
+        long perSwarmWindow = Math.Max(
+            MaximumInitialAdmissionMilliseconds,
+            checked((long)botCount * 1_000));
+        return BotMonotonicClock.AddMilliseconds(
+            created, checked(lastScheduledStart + perSwarmWindow));
+    }
+}
+
+internal enum BotFinalRetirementAction : byte
+{
+    None = 0,
+    RetireWithoutConnection = 1,
+    BeginOrContinueDrain = 2,
+}
+
+internal static class BotLifecyclePolicy
+{
+    internal static BotFinalRetirementAction FinalRetirement(BotLifetimeState state) => state switch
+    {
+        BotLifetimeState.Pending or BotLifetimeState.ReconnectDelay =>
+            BotFinalRetirementAction.RetireWithoutConnection,
+        BotLifetimeState.Connecting or BotLifetimeState.Profile or BotLifetimeState.Content or
+            BotLifetimeState.Active or BotLifetimeState.Draining =>
+            BotFinalRetirementAction.BeginOrContinueDrain,
+        BotLifetimeState.Retired or BotLifetimeState.Faulted => BotFinalRetirementAction.None,
+        _ => throw new ArgumentOutOfRangeException(nameof(state)),
+    };
+
+    internal static bool IsUnexpectedTransportLoss(
+        BotLifetimeState lifetime,
+        ClientDirectConnectState connection)
+    {
+        if (lifetime == BotLifetimeState.Draining)
+            return false;
+        if (connection is ClientDirectConnectState.Draining or ClientDirectConnectState.Closed)
+            return true;
+        return (lifetime is BotLifetimeState.Profile or BotLifetimeState.Content or
+                BotLifetimeState.Active) && connection != ClientDirectConnectState.Established;
+    }
+
+    internal static bool IsApplicationUnhealthy(
+        BotLifetimeState lifetime,
+        in RemotePlayableSessionSnapshot snapshot)
+    {
+        bool activeExpected = lifetime == BotLifetimeState.Active;
+        if (!activeExpected && !snapshot.SemanticConsumersActive) return false;
+        return !snapshot.SemanticConsumersActive ||
+            snapshot.Playable.State != RemotePlayableClientState.Active ||
+            snapshot.Ui.State != RemoteClientApplicationState.Active;
+    }
+}
+
+internal readonly record struct BotPendingCommand(
+    BotCommandKind Kind,
+    ulong Sequence,
+    ulong ApplicationSessionEpoch)
+{
+    internal bool IsPending => Kind != BotCommandKind.None;
+}
+
+internal sealed class BotPendingCommandTracker
+{
+    internal BotPendingCommand Pending { get; private set; }
+
+    internal bool TryStart(BotCommandKind kind, ulong sequence, ulong applicationSessionEpoch)
+    {
+        if (kind == BotCommandKind.None || sequence == 0 || applicationSessionEpoch == 0 ||
+            Pending.IsPending)
+            return false;
+        Pending = new BotPendingCommand(kind, sequence, applicationSessionEpoch);
+        return true;
+    }
+
+    internal bool TryComplete(
+        ulong applicationSessionEpoch,
+        ulong lastProcessedSequence,
+        out BotPendingCommand completed)
+    {
+        completed = default;
+        if (!Pending.IsPending || Pending.ApplicationSessionEpoch != applicationSessionEpoch ||
+            lastProcessedSequence < Pending.Sequence)
+            return false;
+        completed = Pending;
+        Pending = default;
+        return true;
+    }
+
+    internal bool TryCancel(out BotPendingCommand cancelled)
+    {
+        cancelled = Pending;
+        if (!Pending.IsPending) return false;
+        Pending = default;
+        return true;
+    }
+
+    internal void RequireClearForNewLifetime()
+    {
+        if (Pending.IsPending)
+            throw new InvalidOperationException(
+                "A new application lifetime cannot replace an unaccounted command outcome.");
+    }
+}
+
+internal struct BotChatObservationCursor
+{
+    private ulong _applicationSessionEpoch;
+    private ulong _nextRecipientSequence;
+
+    internal ulong ObservationGaps { get; private set; }
+    internal int RetainedCursorEntries => _applicationSessionEpoch == 0 ? 0 : 1;
+
+    internal void Observe(
+        ulong applicationSessionEpoch,
+        ReadOnlySpan<ClientChatOccurrence> occurrences,
+        string acceptedPrefix,
+        out int local,
+        out int global)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
+        ArgumentNullException.ThrowIfNull(acceptedPrefix);
+        if (_applicationSessionEpoch != applicationSessionEpoch)
+        {
+            _applicationSessionEpoch = applicationSessionEpoch;
+            _nextRecipientSequence = 1;
+        }
+        local = 0;
+        global = 0;
+        for (int index = 0; index < occurrences.Length; index++)
+        {
+            ref readonly ClientChatOccurrence occurrence = ref occurrences[index];
+            if (occurrence.RecipientSequence < _nextRecipientSequence) continue;
+            if (occurrence.RecipientSequence > _nextRecipientSequence)
+                ObservationGaps = SaturatingAdd(
+                    ObservationGaps, occurrence.RecipientSequence - _nextRecipientSequence);
+            _nextRecipientSequence = occurrence.RecipientSequence == ulong.MaxValue
+                ? ulong.MaxValue
+                : occurrence.RecipientSequence + 1;
+            if (!occurrence.Text.StartsWith(acceptedPrefix, StringComparison.Ordinal)) continue;
+            if (occurrence.IsGlobal) global++;
+            else if (occurrence.IsSpatial) local++;
+        }
+    }
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
+
+internal sealed class BotChunkObservation
+{
+    private readonly HashSet<SpatialChunkCoord> _distinct = [];
+    private readonly int _maximumDistinct;
+    private SpatialChunkCoord _last;
+    private bool _hasLast;
+
+    internal BotChunkObservation(int maximumDistinct)
+    {
+        if (maximumDistinct <= 0) throw new ArgumentOutOfRangeException(nameof(maximumDistinct));
+        _maximumDistinct = maximumDistinct;
+    }
+
+    internal int DistinctChunks => _distinct.Count;
+    internal int Crossings { get; private set; }
+    internal bool DistinctCoverageSaturated { get; private set; }
+
+    internal void Observe(SpatialChunkCoord chunk)
+    {
+        if (_hasLast && chunk != _last) Crossings++;
+        _last = chunk;
+        _hasLast = true;
+        if (_distinct.Contains(chunk)) return;
+        if (_distinct.Count < _maximumDistinct) _distinct.Add(chunk);
+        else DistinctCoverageSaturated = true;
+    }
+}
+
+internal sealed class BotReconnectIdentityObservation
+{
+    internal bool OldIdentityObservedBeforeReconnect { get; private set; }
+    internal bool OldIdentityRetiredAfterReconnect { get; private set; }
+    internal bool ReplacementIdentityObserved { get; private set; }
+    internal bool StaleOldIdentityObserved { get; private set; }
+    internal bool Converged => OldIdentityObservedBeforeReconnect &&
+        OldIdentityRetiredAfterReconnect && ReplacementIdentityObserved &&
+        !StaleOldIdentityObserved;
+
+    internal void ObserveBefore(bool oldPresent) =>
+        OldIdentityObservedBeforeReconnect |= oldPresent;
+
+    internal void ObserveAfter(bool oldPresent, bool replacementPresent)
+    {
+        StaleOldIdentityObserved |= oldPresent;
+        OldIdentityRetiredAfterReconnect |= !oldPresent;
+        ReplacementIdentityObserved |= replacementPresent;
+    }
+}
+
+internal readonly record struct BotProcessSample(
+    long WorkingSetBytes,
+    double CpuMilliseconds);
+
+internal interface IBotProcessSampleSource : IDisposable
+{
+    BotProcessSample ReadFresh();
+}
+
+internal sealed class CurrentBotProcessSampleSource : IBotProcessSampleSource
+{
+    private readonly Process _process = Process.GetCurrentProcess();
+
+    public BotProcessSample ReadFresh()
+    {
+        _process.Refresh();
+        return new BotProcessSample(
+            _process.WorkingSet64,
+            _process.TotalProcessorTime.TotalMilliseconds);
+    }
+
+    public void Dispose() => _process.Dispose();
+}
+
+internal sealed class BotProcessTelemetrySampler : IDisposable
+{
+    private readonly IBotProcessSampleSource _source;
+    private readonly long _intervalTicks;
+    private long _nextSample;
+    private bool _disposed;
+
+    internal BotProcessTelemetrySampler(
+        IBotProcessSampleSource source,
+        int intervalMilliseconds = 250)
+    {
+        _source = source ?? throw new ArgumentNullException(nameof(source));
+        if (intervalMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(intervalMilliseconds));
+        _intervalTicks = BotMonotonicClock.MillisecondsToTicks(intervalMilliseconds);
+    }
+
+    internal long WorkingSetHighWaterBytes { get; private set; }
+    internal double CpuMilliseconds { get; private set; }
+    internal int Samples { get; private set; }
+
+    internal void Sample(long now, bool force = false)
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(BotProcessTelemetrySampler));
+        if (!force && Samples != 0 && now < _nextSample) return;
+        BotProcessSample sample = _source.ReadFresh();
+        WorkingSetHighWaterBytes = Math.Max(WorkingSetHighWaterBytes, sample.WorkingSetBytes);
+        CpuMilliseconds = sample.CpuMilliseconds;
+        Samples++;
+        _nextSample = checked(now + _intervalTicks);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _source.Dispose();
+        _disposed = true;
+    }
+}
+
+internal static class BotRuntimeIdentity
+{
+    internal static string BuildModule =>
+        typeof(BotRuntimeIdentity).Assembly.ManifestModule.ModuleVersionId.ToString("D");
+    internal static string Runtime => RuntimeInformation.FrameworkDescription;
+    internal static string OperatingSystem => RuntimeInformation.OSDescription;
+    internal static string Architecture => RuntimeInformation.ProcessArchitecture.ToString();
+}

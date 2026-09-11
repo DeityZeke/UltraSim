@@ -17,6 +17,9 @@
   </Target>
 
   <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>UltraSim.NetworkBots.Tests</_Parameter1>
+    </AssemblyAttribute>
     <ProjectReference Include="../../Client/Content/UltraSim.Client.Content.csproj" />
     <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
     <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
