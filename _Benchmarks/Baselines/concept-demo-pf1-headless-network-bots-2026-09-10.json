@@ -1,0 +1,147 @@
+{
+  "checkpoint": "PF1",
+  "capturedUtc": "2026-09-10",
+  "candidate": {
+    "provisionalFeatureCompleteCommit": "b87065431c15900bfd5ebaeae93b20855158e90f",
+    "invalidatedByProductCorrectnessRepair": false,
+    "disposition": "PF1 found acceptance-order and scenario-selection assumptions, not a product correctness defect. The provisional feature-complete candidate remains the base under characterization."
+  },
+  "acceptedPf1ImplementationCommit": "98e0aa2a57dd7edc8131564d1ee1b82c69f82f55",
+  "botProduct": {
+    "project": "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+    "processModel": "one CLR process, one bounded central pump, no process or dedicated thread per bot",
+    "networkCapability": "ClientOnly",
+    "managedAssemblyCount": 13,
+    "directDependencies": [
+      "UltraSim.Client.Content",
+      "UltraSim.Client.Core",
+      "UltraSim.Client.Network",
+      "UltraSim.Client.StandardUi",
+      "UltraSim.Game.Contracts",
+      "UltraSim.Game.Protocol",
+      "UltraSim.Network",
+      "UltraSim.UI"
+    ],
+    "physicallyAbsent": [
+      "Godot",
+      "UltraSim.Client.Local",
+      "UltraSim.Game.Composition",
+      "UltraSim.Game.Persistence",
+      "UltraSim.Game.Physics",
+      "UltraSim.Game.Replication",
+      "UltraSim.Game.Replication.Remote",
+      "UltraSim.Game.UI",
+      "UltraSim.Network.Testing",
+      "UltraSim.Server.Hosting",
+      "UltraSim.Server.Persistence",
+      "UltraSim.Server.Runtime"
+    ],
+    "maximumAcceptedBotCount": 4096,
+    "currentConceptDemoAuthorityMaximumParticipants": 64
+  },
+  "canonicalSwarm": {
+    "scenario": "mixed-chaos",
+    "seed": 104729,
+    "durationMilliseconds": 14000,
+    "headlessBots": 8,
+    "exportedOnlineClients": 2,
+    "femaleBots": 4,
+    "maleBots": 4,
+    "nativeGuests": [
+      "PF1 Native Alice / HumanFemale",
+      "PF1 Native Bob / HumanMale"
+    ],
+    "authority": "one ordinary dedicated Direct Connect shared authority",
+    "configuredParticipantCapacity": 10,
+    "serverGeneration": 1,
+    "initialPresentedActorsRequiredPerNativeClient": 11,
+    "networkIdentity": "independent UDP transport/session/application/control identity per client"
+  },
+  "headlessBehavior": {
+    "applicationSessions": 9,
+    "successfulReconnects": 1,
+    "freshProfileAndContentProofLifetimes": 9,
+    "commandsAttempted": 226,
+    "movementAttempts": 123,
+    "movementAccepted": 123,
+    "movementRejected": 0,
+    "jumpAttempts": 17,
+    "jumpsAccepted": 17,
+    "jumpsRejected": 0,
+    "primaryAttempts": 5,
+    "primaryAccepted": 1,
+    "primaryRejected": 4,
+    "localChatSubmitted": 1,
+    "globalChatSubmitted": 9,
+    "localChatObserved": 8,
+    "globalChatObserved": 72,
+    "nonsensePhysicalInputs": 8,
+    "commandsCreatedByNonsenseInput": 0,
+    "swordPickupObserved": 1,
+    "swordEquipObserved": 1,
+    "swordDropObserved": 1,
+    "interactionAccepted": 4,
+    "interactionRejected": 67,
+    "chunkTransitions": 15,
+    "verticalTransitions": 56,
+    "landingRecoveries": 18,
+    "postRecoveryMovementAccepted": 8,
+    "oldPublicActorObservedAfterReconnect": false,
+    "unexpectedQueueDebtAtAcceptance": false
+  },
+  "lifetimeAndCapacity": {
+    "activeBotHighWater": 8,
+    "admittingBotHighWater": 8,
+    "reconnectingBotHighWater": 1,
+    "finalActiveBots": 0,
+    "finalAdmittingBots": 0,
+    "finalReconnectingBots": 0,
+    "finalRetiredBots": 8,
+    "authorityJoins": 11,
+    "authorityLeaves": 11,
+    "finalAuthorityParticipants": 0,
+    "finalEstablishedNetworkSessions": 0,
+    "capacityReusedByReconnect": true
+  },
+  "exportedOnline": {
+    "sameExportedExecutableForBothClients": true,
+    "separateClientLocalStateRoots": true,
+    "filesFetchedPerColdClient": 6,
+    "contentBytesFetchedPerColdClient": 7669828,
+    "freshContentProofsPerClient": 1,
+    "renderedChunksPerClient": 9,
+    "inventoryViewsPerClient": 1,
+    "chatOccurrencesPerClient": 12,
+    "initialExactActorPopulationObservedByBoth": true,
+    "remainedConnectedForEntireSwarmInterval": true,
+    "postChurnSemanticAndRenderHealthObservedByBoth": true,
+    "presenterActorsNeverExceededCurrentMetadataRecords": true,
+    "nameplateAndOverheadCountsNeverExceededLiveActorRoots": true
+  },
+  "botProcessTelemetry": {
+    "pumpIterations": 13401,
+    "pumpLagHighWaterMilliseconds": 123.767,
+    "workingSetHighWaterBytes": 56127488,
+    "cpuMilliseconds": 2200,
+    "interpretation": "Small correctness-swarm tool telemetry only; not a server performance, bandwidth, cadence, or CCU result."
+  },
+  "acceptanceInfrastructureCorrections": [
+    "The native smoke barrier now validates transient one-shot presentation before waiting, remains alive through legitimate bot retirement, and uses a two-client completion barrier before either exported client retires.",
+    "Post-chaos native health respects ordinary AOI changes while checking semantic/render health and actor-root versus retained-metadata consistency.",
+    "Sword contenders are selected deterministically by distance using only each bot's disclosed public-world state, rather than assuming admission order determines spawn proximity."
+  ],
+  "verification": {
+    "focusedPf1Command": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf1-only",
+    "focusedPf1Result": "PASS",
+    "completeCanonicalCommand": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release",
+    "completeCanonicalResult": "PASS"
+  },
+  "explicitlyNotClaimed": [
+    "production CCU limit",
+    "wire or per-message accounting",
+    "replication/cadence optimization",
+    "compression benefit",
+    "large-population stress or soak",
+    "authority support above the currently bounded 64-participant profile"
+  ]
+}
