@@ -731,13 +731,34 @@ public sealed class GameWorldActions
 
         bool complete = _collisionProjection.TryCapture(
             world, worldState, actor, out ReadOnlySpan<WorldStaticBounds> dynamicBounds);
+        var request = new SimpleAirborneMotionRequest(
+            current, nextX, checked((int)targetY), nextZ, s_actorBody);
         SimpleAirborneMotionResult physical = _physics.ResolveAirborneMotion(
-            new SimpleAirborneMotionRequest(
-                current, nextX, checked((int)targetY), nextZ, s_actorBody),
-            dynamicBounds,
-            complete);
+            request, dynamicBounds, complete);
+        // A captured takeoff trajectory may point beyond the prepared structural boundary while
+        // gravity remains valid at the actor's current X/Z. Preserve the vertical component just
+        // as wall contact does. Otherwise an outside horizontal probe can hold the position fixed
+        // while gravity accumulates indefinitely and eventually overflows its fixed-point state.
+        if (!physical.WasResolved &&
+            physical.Status == SimpleAirborneMotionStatus.OutsidePreparedWorld &&
+            (nextX != current.GlobalXMillimeters || nextZ != current.GlobalZMillimeters))
+        {
+            physical = _physics.ResolveAirborneMotion(
+                request with
+                {
+                    TargetXMillimeters = current.GlobalXMillimeters,
+                    TargetZMillimeters = current.GlobalZMillimeters,
+                },
+                dynamicBounds,
+                complete);
+        }
         if (!physical.WasResolved)
         {
+            if (physical.Status == SimpleAirborneMotionStatus.OutsidePreparedWorld)
+            {
+                _ = TryRecoverActor(world, worldState, actor, index);
+                return;
+            }
             if (_locomotionKinds[index] == RetainedLocomotionKind.Destination)
                 ClearLocomotion(index);
             if (physical.Status == SimpleAirborneMotionStatus.Blocked &&

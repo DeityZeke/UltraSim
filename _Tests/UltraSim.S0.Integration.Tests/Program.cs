@@ -51,6 +51,8 @@ Run("AuthoritativeJumpFallLandingAndRecovery",
     AuthoritativeJumpFallLandingAndRecovery, results);
 Run("AuthoritativeAirborneWallContactKeepsGravityProgress",
     AuthoritativeAirborneWallContactKeepsGravityProgress, results);
+Run("AuthoritativeAirbornePreparedBoundaryKeepsGravityProgress",
+    AuthoritativeAirbornePreparedBoundaryKeepsGravityProgress, results);
 Run("VerticalMomentumIsGenerationLocalAcrossRestore",
     VerticalMomentumIsGenerationLocalAcrossRestore, results);
 Run("VerticalStateFencesReusedEntitySlots",
@@ -2307,6 +2309,107 @@ static TestMetrics AuthoritativeAirborneWallContactKeepsGravityProgress()
     {
         if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
             throw new InvalidOperationException("An airborne-wall fixture point was invalid.");
+        return value;
+    }
+}
+
+static TestMetrics AuthoritativeAirbornePreparedBoundaryKeepsGravityProgress()
+{
+    WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_108D))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(108_013));
+    Expect(entered.IsEntered, "The prepared-boundary actor did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.PopulateConceptDemo(
+                world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The prepared-boundary fixture could not populate.");
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    // The synthetic pack owns only chunk (0,0), whose east edge is 16,000 mm. This start keeps
+    // the complete 600 mm body inside, while the first eastward airborne step asks for a footprint
+    // beyond prepared structure. Vertical motion at the retained X/Z remains fully valid.
+    WorldPosition edge = Position(15_650, 0, 8_000);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, _, game) => game.WorldActions.RelocateActor(
+                world,
+                game.WorldState,
+                ResolveInWorld(world, entities.PlayerId),
+                edge,
+                out WorldPosition _),
+            out GameWorldActionStatus relocated) &&
+        relocated == GameWorldActionStatus.Accepted,
+        "The prepared-boundary actor could not reach the exact edge fixture.");
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            1, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump) &&
+        link.ApplyCommand(jump).Jump == GameWorldActionStatus.Accepted,
+        "The prepared-boundary jump was not admitted.");
+
+    int maximumY = edge.YMillimeters;
+    bool observedAirborne = false;
+    bool landed = false;
+    for (int tick = 0; tick < 240; tick++)
+    {
+        host.Tick(TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 60));
+        WorldPosition current = link.ReadPosition();
+        maximumY = Math.Max(maximumY, current.YMillimeters);
+        Expect(current.GlobalXMillimeters <= edge.GlobalXMillimeters,
+            "An outside prepared horizontal target was committed.");
+        GameVerticalMotionSnapshot vertical = ReadVertical();
+        observedAirborne |= vertical.IsAirborne;
+        if (observedAirborne && vertical.IsGrounded)
+        {
+            landed = true;
+            break;
+        }
+    }
+
+    WorldPosition final = link.ReadPosition();
+    GameVerticalMotionSnapshot finalVertical = ReadVertical();
+    Expect(observedAirborne && maximumY > edge.YMillimeters && landed &&
+        finalVertical.IsGrounded && final == edge &&
+        finalVertical.CumulativeLandings == 1 && finalVertical.CumulativeRecoveries == 0,
+        "Prepared-boundary horizontal rejection suspended gravity, forced recovery, or changed " +
+        $"the accepted position: maxY={maximumY}, final={final}, vertical={finalVertical}.");
+
+    return new TestMetrics(
+        HashText($"{edge}|{maximumY}|{final}|{finalVertical.CumulativeLandings}"),
+        0, 0, 0, 0, 0, pack.Length, 0, 0, 0, 0, 0,
+        "An airborne trajectory aimed beyond prepared structure preserves its independently valid " +
+        "vertical component and lands without fixed-point accumulation or recovery.",
+        WorldPackBytes: pack.Length);
+
+    GameVerticalMotionSnapshot ReadVertical()
+    {
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameVerticalMotionSnapshot>(
+                (world, _, game) =>
+                {
+                    Expect(game.WorldActions.TryReadVerticalMotion(
+                            world,
+                            ResolveInWorld(world, entities.PlayerId),
+                            out GameVerticalMotionSnapshot state),
+                        "The prepared-boundary vertical state was unavailable.");
+                    return state;
+                },
+                out GameVerticalMotionSnapshot snapshot),
+            "The prepared-boundary vertical-state read did not run.");
+        return snapshot;
+    }
+
+    static WorldPosition Position(long x, int y, long z)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+            throw new InvalidOperationException("A prepared-boundary fixture point was invalid.");
         return value;
     }
 }
