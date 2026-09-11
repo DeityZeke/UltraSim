@@ -61,6 +61,16 @@ lifetime state/current and high-water counts, application/proof/reconnect counts
 accepted actions, categorized rejections, pump iterations/lag, process working-set high-water, CPU
 time, clean retirement, and bounded per-bot fault context.
 
+Initial discovery or handshake loss under a dense same-address admission wave is retried at most
+eight times per bot with deterministic bounded delay. Once the scenario duration ends, the harness
+stops creating new work and gives already-accepted reliable commands/proofs up to ten seconds to
+quiesce before it checks for queue debt. Neither rule retries rejected Game actions or weakens the
+clean-boundary assertion.
+
+The maintained 50-client exploratory check uses `--admission-stagger-ms=250`; it has completed all
+50 active clients plus one reconnect against a capacity-50 authority and cleanly retired every join.
+This is a configuration/tool canary, not a measured CCU or production-performance claim.
+
 Run the permanent mixed product gate with:
 
 ```bash

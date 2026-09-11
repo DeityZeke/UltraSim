@@ -1533,9 +1533,12 @@ The names below are local planning labels, not automatically subsystem milestone
 
 ## PF0 — feature-complete freeze candidate
 
-**Status: CLOSED.** The provisional feature-complete/pre-freeze candidate is
-`b87065431c15900bfd5ebaeae93b20855158e90f`. PF1 found acceptance-harness ordering assumptions but
-no product correctness defect requiring that candidate identity to be replaced.
+**Status: CLOSED.** The original provisional feature-complete/pre-freeze candidate
+`b87065431c15900bfd5ebaeae93b20855158e90f` was invalidated by PF1: a dedicated authority configured
+above 31 participants retained the earlier fixed ECS and Inventory reservations and could fail
+participant construction despite advertising additional capacity. The repaired candidate is
+`f003a8b5a2a8f97dac1074e5158ed01c875a83fb`; its participant-bound reservations and maintained
+50-participant regression make the configured `1..64` Direct Connect profile internally coherent.
 
 Entry:
 
@@ -1556,6 +1559,12 @@ content/CAS/application proof, WorldPack, guest, public-world, Chat, UI, and com
 permanent verifier inspects its ClientOnly closure and composes eight bots with two exported Online
 clients on one dedicated generation. Permanent evidence lives in
 `_Benchmarks/Baselines/concept-demo-pf1-headless-network-bots-2026-09-10.json`.
+
+An exploratory 50-bot run also completed 51 application lifetimes including one reconnect and
+cleanly retired all 51 server joins. It exposed and closed both the authority reservation defect
+above and two harness-boundary requirements: bounded retry of transient initial discovery/handshake
+loss under admission pressure, and a bounded no-new-work quiescence phase before asserting that
+ordinary reliable command/proof debt is empty. This is capability/tool evidence, not a CCU result.
 
 Close when:
 

@@ -2,11 +2,12 @@
   "checkpoint": "PF1",
   "capturedUtc": "2026-09-10",
   "candidate": {
-    "provisionalFeatureCompleteCommit": "b87065431c15900bfd5ebaeae93b20855158e90f",
-    "invalidatedByProductCorrectnessRepair": false,
-    "disposition": "PF1 found acceptance-order and scenario-selection assumptions, not a product correctness defect. The provisional feature-complete candidate remains the base under characterization."
+    "originalFeatureCompleteCommit": "b87065431c15900bfd5ebaeae93b20855158e90f",
+    "repairedFeatureCompleteCommit": "f003a8b5a2a8f97dac1074e5158ed01c875a83fb",
+    "invalidatedByProductCorrectnessRepair": true,
+    "disposition": "PF1 invalidated the original candidate after reproducing fixed ECS and Inventory reservations beneath a larger accepted participant configuration. The repaired candidate derives both reservations from the configured participant bound and passes a maintained 50-participant authority regression."
   },
-  "acceptedPf1ImplementationCommit": "98e0aa2a57dd7edc8131564d1ee1b82c69f82f55",
+  "acceptedPf1ImplementationCommit": "f003a8b5a2a8f97dac1074e5158ed01c875a83fb",
   "botProduct": {
     "project": "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
     "processModel": "one CLR process, one bounded central pump, no process or dedicated thread per bot",
@@ -58,12 +59,14 @@
     "networkIdentity": "independent UDP transport/session/application/control identity per client"
   },
   "headlessBehavior": {
+    "telemetrySample": "post-repair focused PF1 verification",
     "applicationSessions": 9,
+    "initialConnectRetries": 0,
     "successfulReconnects": 1,
     "freshProfileAndContentProofLifetimes": 9,
-    "commandsAttempted": 226,
-    "movementAttempts": 123,
-    "movementAccepted": 123,
+    "commandsAttempted": 214,
+    "movementAttempts": 125,
+    "movementAccepted": 125,
     "movementRejected": 0,
     "jumpAttempts": 17,
     "jumpsAccepted": 17,
@@ -80,11 +83,11 @@
     "swordPickupObserved": 1,
     "swordEquipObserved": 1,
     "swordDropObserved": 1,
-    "interactionAccepted": 4,
-    "interactionRejected": 67,
-    "chunkTransitions": 15,
-    "verticalTransitions": 56,
-    "landingRecoveries": 18,
+    "interactionAccepted": 6,
+    "interactionRejected": 51,
+    "chunkTransitions": 17,
+    "verticalTransitions": 52,
+    "landingRecoveries": 16,
     "postRecoveryMovementAccepted": 8,
     "oldPublicActorObservedAfterReconnect": false,
     "unexpectedQueueDebtAtAcceptance": false
@@ -119,17 +122,40 @@
     "nameplateAndOverheadCountsNeverExceededLiveActorRoots": true
   },
   "botProcessTelemetry": {
-    "pumpIterations": 13401,
-    "pumpLagHighWaterMilliseconds": 123.767,
-    "workingSetHighWaterBytes": 56127488,
-    "cpuMilliseconds": 2200,
+    "pumpIterations": 13496,
+    "pumpLagHighWaterMilliseconds": 143.093,
+    "workingSetHighWaterBytes": 56332288,
+    "cpuMilliseconds": 2240,
     "interpretation": "Small correctness-swarm tool telemetry only; not a server performance, bandwidth, cadence, or CCU result."
   },
   "acceptanceInfrastructureCorrections": [
     "The native smoke barrier now validates transient one-shot presentation before waiting, remains alive through legitimate bot retirement, and uses a two-client completion barrier before either exported client retires.",
     "Post-chaos native health respects ordinary AOI changes while checking semantic/render health and actor-root versus retained-metadata consistency.",
-    "Sword contenders are selected deterministically by distance using only each bot's disclosed public-world state, rather than assuming admission order determines spawn proximity."
+    "Sword contenders are selected deterministically by distance using only each bot's disclosed public-world state, rather than assuming admission order determines spawn proximity.",
+    "The harness retries only transient initial discovery/handshake failures at most eight times with deterministic bounded delay.",
+    "The scenario stops generating work and pumps a bounded ten-second quiescence phase before asserting that accepted reliable command/proof debt is empty."
   ],
+  "correctnessRepair": {
+    "trigger": "A capacity-50 dedicated authority exhausted the fixed Inventory container reservation at participant 32 and then faulted public-presentation progress.",
+    "repair": "SharedPlayableAuthorityLimits now derives ECS entity and Inventory container/item reservations from MaximumParticipants.",
+    "regression": "A maintained authority test admits 50 mixed-body participants, copies all 50 public presentations, rejects participant 51 at the advertised bound, and cleanly retires all 50."
+  },
+  "manualExploration": {
+    "headlessBots": 50,
+    "seed": 104729,
+    "durationMilliseconds": 14000,
+    "admissionStaggerMilliseconds": 250,
+    "applicationSessions": 51,
+    "initialConnectRetries": 8,
+    "successfulReconnects": 1,
+    "commandsAttempted": 774,
+    "workingSetHighWaterBytes": 58363904,
+    "cpuMilliseconds": 8190,
+    "allBotsActiveHighWater": 50,
+    "cleanAuthorityJoinsAndLeaves": "51/51",
+    "result": "PASS",
+    "interpretation": "Exploratory tool/configuration canary only; no CCU or performance claim."
+  },
   "verification": {
     "focusedPf1Command": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf1-only",
     "focusedPf1Result": "PASS",

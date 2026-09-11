@@ -14,6 +14,9 @@ select `--maximum-participants=<1..64>` and a loopback-appropriate
 `--same-address-admission-burst=<1..4096>` for a bounded local swarm. Neither option is a capacity
 bypass or production-capacity claim. Endpoint, Network connection, application session,
 participant, control session, and generational public entity remain separate identities.
+The shared authority derives its ECS entity and Inventory index reservations from the selected
+participant bound, so an accepted configuration does not retain the smaller default world's
+construction capacity.
 
 A0.3 adds an optional immutable content authorization to the same application factory. When
 configured, it publishes the bounded requirement after authenticated realm/session identity and

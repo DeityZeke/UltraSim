@@ -26,8 +26,8 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
-- `concept-demo-pf1-headless-network-bots-2026-09-10.json` — the provisional
-  feature-complete candidate, real ClientOnly headless bot product/physical dependency closure,
+- `concept-demo-pf1-headless-network-bots-2026-09-10.json` — the original and repaired
+  feature-complete candidate identities, real ClientOnly headless bot product/physical dependency closure,
   deterministic 8-bot mixed-chaos run beside two separately running actual exported Online
   clients, fresh reconnect/profile/content proof, ordinary movement/jump/Chat/sword/UI/AOI
   behavior, native presentation health, bounded bot-process telemetry, and exact clean
