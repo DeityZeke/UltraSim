@@ -179,6 +179,20 @@ internal sealed class BotHarness : IDisposable
             Thread.Sleep(1);
         }
 
+        // The wall-clock scenario boundary may bisect an ordinary reliable command or proof,
+        // especially once many clients share the central pump. Stop creating work and give that
+        // already-accepted debt one bounded opportunity to converge before judging cleanliness.
+        long quiescenceDeadline = checked(
+            Stopwatch.GetTimestamp() + ToStopwatchTicks(10_000));
+        while (_bots.Any(static bot => bot.HasUnexpectedQueueDebt) &&
+               Stopwatch.GetTimestamp() < quiescenceDeadline)
+        {
+            PumpOnce(allowNewChaos: false);
+            if (_bots.Any(static bot => bot.IsFaulted))
+                return Finish(false, "A bot faulted while quiescing accepted session work.");
+            Thread.Sleep(1);
+        }
+
         string? coverageFailure = ValidateCoverage();
         if (coverageFailure is not null)
             return Finish(false, coverageFailure);
@@ -343,6 +357,7 @@ internal enum BotCommandKind : byte
 internal sealed class BotClient : IDisposable
 {
     private const int MaximumResidentChunks = 192;
+    private const int MaximumInitialConnectRetries = 8;
     private readonly BotOptions _options;
     private readonly ContentCache _cache;
     private readonly HttpContentPackageSource _source;
@@ -424,6 +439,7 @@ internal sealed class BotClient : IDisposable
     internal bool HasReachedActive => _hasReachedActive;
     internal ulong ServerGenerationId { get; private set; }
     internal int SessionCount { get; private set; }
+    internal int InitialConnectRetries { get; private set; }
     internal int SuccessfulReconnects { get; private set; }
     internal int FreshProofLifetimes { get; private set; }
     internal int MovementAttempts { get; private set; }
@@ -507,6 +523,13 @@ internal sealed class BotClient : IDisposable
             ClientDirectConnectSnapshot connection = _connection.GetSnapshot();
             if (connection.State is ClientDirectConnectState.Failed)
             {
+                if (!_hasReachedActive && InitialConnectRetries < MaximumInitialConnectRetries &&
+                    connection.Failure is ClientDirectConnectFailure.DiscoveryFailed or
+                        ClientDirectConnectFailure.HandshakeFailed)
+                {
+                    RetryInitialConnect(now);
+                    return;
+                }
                 Fail($"Direct Connect failed: {connection.Failure}: {connection.Detail}");
                 return;
             }
@@ -633,6 +656,15 @@ internal sealed class BotClient : IDisposable
         _pendingCommandSequence = 0;
         _lastVertical = ClientPublicActorVerticalPhase.None;
         _controls.Reset();
+    }
+
+    private void RetryInitialConnect(long now)
+    {
+        InitialConnectRetries++;
+        DisposeLifetime();
+        State = BotLifetimeState.Pending;
+        int delayMilliseconds = 500 + ((Id + InitialConnectRetries) & 7) * 100;
+        _startDue = checked(now + ToStopwatchTicks(delayMilliseconds));
     }
 
     private void Observe(in RemotePlayableSessionSnapshot snapshot)
@@ -1330,6 +1362,7 @@ internal sealed record BotRunSummary
     public required int MaleBodies { get; init; }
     public required ulong ServerGeneration { get; init; }
     public required int ApplicationSessions { get; init; }
+    public required int InitialConnectRetries { get; init; }
     public required int SuccessfulReconnects { get; init; }
     public required int FreshProofLifetimes { get; init; }
     public required int MovementAttempts { get; init; }
@@ -1399,6 +1432,7 @@ internal sealed record BotRunSummary
         MaleBodies = bots.Count(static bot => bot.Body == GameGuestBody.HumanMale),
         ServerGeneration = bots.Select(static bot => bot.ServerGenerationId).FirstOrDefault(value => value != 0),
         ApplicationSessions = bots.Sum(static bot => bot.SessionCount),
+        InitialConnectRetries = bots.Sum(static bot => bot.InitialConnectRetries),
         SuccessfulReconnects = bots.Sum(static bot => bot.SuccessfulReconnects),
         FreshProofLifetimes = bots.Sum(static bot => bot.FreshProofLifetimes),
         MovementAttempts = bots.Sum(static bot => bot.MovementAttempts),
@@ -1443,7 +1477,8 @@ internal sealed record BotRunSummary
         $"states={ActiveBots}/{AdmittingBots}/{ReconnectingBots}/{RetiredBots} " +
         $"stateHighWater={ActiveHighWater}/{AdmittingHighWater}/{ReconnectingHighWater} " +
         $"generation={ServerGeneration} sessions={ApplicationSessions} reconnects={SuccessfulReconnects} " +
-        $"proofLifetimes={FreshProofLifetimes} movement={MovementAccepted}/{MovementRejected}/" +
+        $"initialRetries={InitialConnectRetries} proofLifetimes={FreshProofLifetimes} " +
+        $"movement={MovementAccepted}/{MovementRejected}/" +
         $"{MovementAttempts} jumps={JumpsAccepted}/{JumpsRejected}/{JumpAttempts} " +
         $"primary={PrimaryAccepted}/{PrimaryRejected}/{PrimaryAttempts} " +
         $"chat={LocalChatSubmitted}+{GlobalChatSubmitted}/" +

@@ -10,6 +10,48 @@ namespace UltraSim.Game.Replication.Tests;
 
 internal static class M00SharedPlayableAuthorityTests
 {
+    internal static void ConfiguredParticipantCapacityReservesParticipantEntities()
+    {
+        const int participantCapacity = 50;
+        var limits = new SharedPlayableAuthorityLimits(participantCapacity);
+        Check.Equal(406, limits.RequiredEntityCapacity);
+        Check.Equal(66, limits.RequiredInventoryLimits.MaximumContainers);
+        Check.Equal(128, limits.RequiredInventoryLimits.MaximumItems);
+        using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(limits);
+        var participants = new SharedPlayableParticipant[participantCapacity];
+        for (int index = 0; index < participants.Length; index++)
+        {
+            AdmissionResult entered = authority.Join(
+                new ParticipantId(checked((ulong)10_000 + (ulong)index)),
+                new GameGuestAdmissionRequest(
+                    (index & 1) == 0 ? GameGuestBody.HumanFemale : GameGuestBody.HumanMale,
+                    $"Capacity {index:D2}"),
+                out participants[index]);
+            Check.True(entered.IsEntered);
+            Check.True(participants[index].IsValid);
+        }
+
+        SharedPlayableAuthoritySnapshot full = authority.GetSnapshot();
+        Check.Equal(participantCapacity, full.ParticipantCount);
+        Check.Equal(participantCapacity, full.MaximumParticipants);
+        var presentations = new GamePublicActorPresentation[participantCapacity];
+        Check.Equal(participantCapacity, authority.CopyActorPresentations(presentations));
+
+        AdmissionResult excess = authority.Join(
+            new ParticipantId(20_000),
+            new GameGuestAdmissionRequest(GameGuestBody.HumanFemale, "Capacity Excess"),
+            out SharedPlayableParticipant rejected);
+        Check.False(excess.IsEntered);
+        Check.False(rejected.IsValid);
+
+        for (int index = participants.Length - 1; index >= 0; index--)
+            Check.True(authority.Leave(participants[index]));
+        SharedPlayableAuthoritySnapshot retired = authority.GetSnapshot();
+        Check.Equal(0, retired.ParticipantCount);
+        Check.Equal((ulong)participantCapacity, retired.Joins);
+        Check.Equal((ulong)participantCapacity, retired.Leaves);
+    }
+
     internal static void SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner()
     {
         using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(

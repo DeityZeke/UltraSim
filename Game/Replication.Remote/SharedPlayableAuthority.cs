@@ -19,7 +19,30 @@ namespace UltraSim.Game.Replication;
 /// <summary>Bounded ownership profile for one shared Concept Demo authority.</summary>
 public readonly record struct SharedPlayableAuthorityLimits(int MaximumParticipants = 8)
 {
+    private const int BaseWorldEntityCapacity = 256;
+    private const int EntitiesPerParticipant = 3;
+
     public static SharedPlayableAuthorityLimits Default => new(8);
+
+    /// <summary>
+    /// Reserves the fixed Concept Demo/content headroom plus the player, backpack, and starter
+    /// item owned by every admitted participant. This makes the advertised participant limit a
+    /// real construction bound instead of leaving the ECS world at the old eight-player size.
+    /// </summary>
+    public int RequiredEntityCapacity => checked(
+        BaseWorldEntityCapacity + MaximumParticipants * EntitiesPerParticipant);
+
+    internal InventoryLimits RequiredInventoryLimits
+    {
+        get
+        {
+            int participantHeadroom = checked(MaximumParticipants + 16);
+            return new InventoryLimits(
+                Math.Max(32, participantHeadroom),
+                Math.Max(128, participantHeadroom),
+                32);
+        }
+    }
 
     public void Validate()
     {
@@ -176,14 +199,14 @@ public sealed class SharedPlayableAuthority : IDisposable
         long generationStartedTimestamp = Stopwatch.GetTimestamp();
         WorldPack pack = GamePlayableWorld.CreateConceptDemoWorldPack();
         var composition = new UltraSimGameComposition(
-            new InventoryLimits(32, 128, 32),
+            limits.RequiredInventoryLimits,
             runtimeProfile: GameRuntimeProfile.Networked,
             baseWorldPack: pack);
         var runtime = new ServerRuntime(
             composition,
             new ServerRuntimeOptions(
                 UltraSimGameComposition.CreateWorldOptions(
-                    256,
+                    limits.RequiredEntityCapacity,
                     new PersistenceIdentityOptions(new PersistentWorldId(0x4D_0000UL)),
                     GameRuntimeProfile.Networked),
                 WorldClockOptions.Default));

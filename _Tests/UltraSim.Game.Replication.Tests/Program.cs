@@ -149,6 +149,7 @@ var tests = new (string Name, Action Body)[]
     ("N13SnapshotTimeoutAndHistoryAdvanceRemainBounded", N1OfflineDirectChunkTests.SnapshotTimeoutAndHistoryAdvanceRemainBounded),
     ("N13SnapshotImpairmentAndLostProofConverge", N1OfflineDirectChunkTests.SnapshotImpairmentAndLostProofConverge),
     ("N13BulkSnapshotDoesNotBlockOrdinaryWorldState", N1OfflineDirectChunkTests.BulkSnapshotDoesNotBlockOrdinaryWorldState),
+    ("PF1ConfiguredParticipantCapacityReservesParticipantEntities", M00SharedPlayableAuthorityTests.ConfiguredParticipantCapacityReservesParticipantEntities),
     ("M00OneGenerationOwnsIndependentParticipantsAndSurvivesLeave", M00SharedPlayableAuthorityTests.OneGenerationOwnsIndependentParticipantsAndSurvivesLeave),
     ("I012SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner", M00SharedPlayableAuthorityTests.SpawnedWeaponRetainsIdentityAcrossWorldInventoryEquipAndAnotherOwner),
 };
