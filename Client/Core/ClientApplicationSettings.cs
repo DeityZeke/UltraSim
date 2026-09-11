@@ -401,6 +401,30 @@ public sealed class ResolvedClientSettings
         input = default;
         return false;
     }
+
+    /// <summary>
+    /// Resolves one canonical physical observation through the effective client-owned binding
+    /// table. Engine adapters and headless clients use this same direction of lookup; an unmapped
+    /// observation is inert and never becomes a Game command.
+    /// </summary>
+    public bool TryResolveInput(
+        in ClientPhysicalInput input,
+        out ClientSemanticAction action)
+    {
+        if (!input.IsValid)
+        {
+            action = default;
+            return false;
+        }
+        foreach (ClientPhysicalBinding binding in _bindings)
+        {
+            if (binding.Input != input) continue;
+            action = binding.Action;
+            return true;
+        }
+        action = default;
+        return false;
+    }
 }
 
 public static class ClientSettingsResolver

@@ -73,6 +73,9 @@ acceptance narratives remain available through git history.
   remote UI HotOpen, A0.7 atomic initial structural publication, A0.8 native Godot composition,
   exact application-proof gating before guest admission, and F0.4 cold public-presentation
   metadata/application proof beside unchanged hot movement records.
+- [Headless Network bots](../Tools/NetworkBots/README.md) — PF1's real ClientOnly remote-client
+  swarm, deterministic mixed-chaos scenario, central pump, structured telemetry, and manual run
+  commands.
 - [Direct Connect Concept Demo server](../Server/DirectConnect/README.md) — external Hosted endpoint
   with durable deployment key/realm identity, authenticated Concept Demo World/UI content, and up
   to eight independent remote applications in one shared Game/World authority.
@@ -91,8 +94,9 @@ acceptance narratives remain available through git history.
   are closed; F0.6 is closed by A0.2-A0.8, C0.2 closes Global/System Chat, D0.6 closes the
   read-only monitor, and D0.7a closes shared actor motion/equipment/action semantics plus the
   bundled X/Y animation canary. D0.7b closes bounded actor-GLB content validation plus real
-  server Add/Replace, applied-catalog, lazy native X/Y realization. F0.7 lifecycle hardening is
-  next, followed by the final matrix.
+  server Add/Replace, applied-catalog, lazy native X/Y realization. F0.7/F0.8 are closed, and PF1
+  now closes the real headless bot plus two-exported-Online mixed correctness gate; PF2 wire
+  accounting is next.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,

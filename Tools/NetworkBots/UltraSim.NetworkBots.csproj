@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <AssemblyName>UltraSim.NetworkBots</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <UltraSimNetworkFlavor Condition="'$(UltraSimNetworkFlavor)' == ''">ClientOnly</UltraSimNetworkFlavor>
+  </PropertyGroup>
+
+  <Target Name="RequireClientOnlyNetwork" BeforeTargets="PrepareForBuild"
+          Condition="'$(UltraSimNetworkFlavor)' != 'ClientOnly'">
+    <Error Text="The headless bot product must be built with UltraSimNetworkFlavor=ClientOnly." />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Client/Content/UltraSim.Client.Content.csproj" />
+    <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
+    <ProjectReference Include="../../Client/StandardUi/UltraSim.Client.StandardUi.csproj" />
+    <ProjectReference Include="../../Game/Contracts/UltraSim.Game.Contracts.csproj" />
+    <ProjectReference Include="../../Game/Protocol/UltraSim.Game.Protocol.csproj" />
+    <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+  </ItemGroup>
+</Project>

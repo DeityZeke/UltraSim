@@ -28,6 +28,7 @@ public partial class ClientHost
     private bool _allowInsecurePrivateContent;
     private bool _remoteSmokeStarted;
     private bool _remoteSmokeDisconnectStarted;
+    private bool _remoteSmokeValidated;
     private bool _remoteSmokeBarrierReadyPublished;
     private bool _remoteProcessObserved;
     private string _remoteGuestName = string.Empty;
@@ -95,7 +96,9 @@ public partial class ClientHost
                     {
                         _ = _remotePlayable.TrySubmitGuest(new GameGuestAdmissionRequest(
                             _remoteGuestBody,
-                            IsF07LifecycleSmoke() ? _remoteGuestName : "A0.8 Native Guest"));
+                            string.IsNullOrWhiteSpace(_remoteGuestName)
+                                ? "A0.8 Native Guest"
+                                : _remoteGuestName));
                     }
                     else
                     {
@@ -105,17 +108,31 @@ public partial class ClientHost
                 if (playable.State == RemoteConceptDemoClientState.Active &&
                     ShellSnapshot().Screen != ClientShellScreen.InSession)
                     CommitSession("Remote Concept Demo active.");
-                if (IsRemoteSmoke() && playable.SmokeComplete &&
-                    playable.Actors.ActiveActors >= RemoteSmokeExpectedActors() &&
-                    !_remoteSmokeDisconnectStarted)
+                if (IsRemoteSmoke() && !_remoteSmokeDisconnectStarted &&
+                    (_remoteSmokeValidated ||
+                        playable.SmokeComplete &&
+                        playable.Actors.ActiveActors >= RemoteSmokeExpectedActors()))
                 {
+                    if (!_remoteSmokeValidated)
+                    {
+                        ValidateRemoteSmoke(playable);
+                        _remoteSmokeValidated = true;
+                    }
                     if (!SharedRemoteSmokeBarrierReleased()) return;
-                    ValidateRemoteSmoke(playable);
+                    // A PF1 bot may have retired while this native client was held at the
+                    // barrier. Do not repeat transient one-shot presentation assertions,
+                    // but do wait for the ordinary replacement lifetime to become visible.
+                    if (!playable.SmokeComplete ||
+                        playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
+                        return;
                     _remoteSmokeDisconnectStarted = true;
                     GD.Print(
                         $"A0.8 CONTENTLESS ONLINE PASS mode={ReadArgument("--a0-8-expect=") ?? "unspecified"} " +
                         $"catalog={playable.Session.Content.ResolvedCatalogFingerprint} " +
                         $"world={playable.Session.StructuralWorld.WorldPackFingerprint} " +
+                        $"generation={playable.Session.Playable.ServerGenerationId} " +
+                        $"guest={playable.Session.Playable.GuestIdentity.DisplayName} " +
+                        $"body={playable.Session.Playable.GuestIdentity.Body} " +
                         $"chunks={playable.RenderedChunks} triangles={playable.TerrainTriangles} " +
                         $"filesFetched={playable.Session.Content.Acquisition.FilesFetched} " +
                         $"bytesFetched={playable.Session.Content.Acquisition.BytesFetched} " +
@@ -701,6 +718,23 @@ public partial class ClientHost
             throw new InvalidOperationException("A0.8 smoke requires --a0-8-fingerprint.");
         _allowInsecurePrivateContent = OS.GetCmdlineUserArgs().Contains(
             "--a0-8-allow-private-content", StringComparer.Ordinal);
+        _remoteGuestName = ReadArgument("--a0-8-guest-name=") ?? string.Empty;
+        string? body = ReadArgument("--a0-8-guest-body=");
+        _remoteGuestBody = body?.ToLowerInvariant() switch
+        {
+            null or "x" or "female" => GameGuestBody.HumanFemale,
+            "y" or "male" => GameGuestBody.HumanMale,
+            _ => throw new InvalidOperationException(
+                "--a0-8-guest-body must be x/female or y/male."),
+        };
+        string admittedName = string.IsNullOrWhiteSpace(_remoteGuestName)
+            ? "A0.8 Native Guest"
+            : _remoteGuestName;
+        if (!GameGuestAdmissionPolicy.TryNormalize(
+                new GameGuestAdmissionRequest(_remoteGuestBody, admittedName),
+                out _, out _, out string? guestError))
+            throw new InvalidOperationException(
+                $"The automated remote guest identity is invalid: {guestError}");
         EnsureTrustStore();
         _remoteAdmission = true;
         SubmitDirectConnect(endpoint, fingerprint);

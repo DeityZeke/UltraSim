@@ -25,11 +25,31 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf1Only)
+{
+    if (options.SkipGodot)
+        throw new ArgumentException("--pf1-only requires the actual exported Online product.");
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        VerifyPf1MixedExportedSwarm(root, options.Configuration, product.Executable);
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope))
+            Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine("PASS PF1 focused verification");
+    return 0;
+}
+
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];
 bool contentlessOnlineVerified = false;
 bool finalClientExportsVerified = false;
 bool embeddedCompleteHostedVerified = false;
 bool mixedSessionLifecycleVerified = false;
+bool pf1MixedSwarmVerified = false;
 string[] testProjects =
 [
     "_Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj",
@@ -203,6 +223,9 @@ foreach (string configuration in configurations)
                 VerifyEmbeddedCompleteHostedNative(
                     root, product.Executable, finalProducts.CompleteExecutable);
                 embeddedCompleteHostedVerified = true;
+                VerifyPf1MixedExportedSwarm(
+                    root, configuration, product.Executable);
+                pf1MixedSwarmVerified = true;
                 contentlessOnlineVerified = true;
             }
             finally
@@ -243,7 +266,8 @@ foreach (string configuration in configurations)
 if (!options.SkipGodot)
 {
     if (!contentlessOnlineVerified || !finalClientExportsVerified ||
-        !embeddedCompleteHostedVerified || !mixedSessionLifecycleVerified)
+        !embeddedCompleteHostedVerified || !mixedSessionLifecycleVerified ||
+        !pf1MixedSwarmVerified)
         throw new InvalidOperationException(
             "The final client composition/parity matrix did not exercise every required native gate.");
     Console.WriteLine(
@@ -1172,6 +1196,293 @@ static void VerifyEmbeddedCompleteHostedNative(
     }
 }
 
+static void VerifyPf1MixedExportedSwarm(
+    string root,
+    string configuration,
+    string onlineExecutable)
+{
+    const int botCount = 8;
+    const int nativeClientCount = 2;
+    const int participantCapacity = botCount + nativeClientCount;
+    const int expectedPresentedActors = participantCapacity + 1; // Woodland animal.
+    const ulong seed = 104_729;
+    const string scenario = "mixed-chaos";
+    const string expectedProfile =
+        "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
+        "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT";
+
+    VerifyPf1BotArtifact(root, configuration);
+
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf1-mixed-swarm");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+
+    string serverStop = Path.Combine(scope, "server-stop");
+    string serverSummary = Path.Combine(scope, "server-summary.json");
+    string botStartReady = Path.Combine(scope, "bots-start-ready");
+    string botStartRelease = Path.Combine(scope, "bots-start-release");
+    string botReady = Path.Combine(scope, "bots-ready");
+    string botRelease = Path.Combine(scope, "bots-release");
+    string botSummary = Path.Combine(scope, "bots-summary.json");
+    string nativeRelease = Path.Combine(scope, "native-release");
+    string aliceReady = Path.Combine(scope, "alice", "ready");
+    string bobReady = Path.Combine(scope, "bob", "ready");
+
+    Process? server = null;
+    Task<string>? botTask = null;
+    Task<string>? aliceTask = null;
+    Task<string>? bobTask = null;
+    try
+    {
+        server = StartNativeDeployment(
+            root,
+            configuration,
+            Path.Combine(scope, "deployment"),
+            Path.Combine(scope, "server-ready.json"),
+            ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+            ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp),
+            out NativeDeploymentReady ready,
+            maximumParticipants: participantCapacity,
+            admissionBurstPerAddress: 128,
+            stopFile: serverStop,
+            summaryFile: serverSummary);
+        if (ready.MaximumParticipants != participantCapacity || ready.ServerGeneration == 0)
+            throw new InvalidOperationException(
+                "The PF1 authority did not publish its exact bounded capacity/generation.");
+
+        botTask = Task.Run(() => RunCaptured(root, "dotnet",
+        [
+            "run", "--project", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+            "-c", configuration, "-p:UltraSimNetworkFlavor=ClientOnly", "--no-build", "--",
+            $"--endpoint={ready.Endpoint}",
+            $"--fingerprint={ready.Fingerprint}",
+            $"--bots={botCount}",
+            $"--seed={seed}",
+            "--duration=14s",
+            $"--scenario={scenario}",
+            $"--cache={Path.Combine(scope, "bots")}",
+            $"--start-ready-file={botStartReady}",
+            $"--start-release-file={botStartRelease}",
+            $"--ready-file={botReady}",
+            $"--release-file={botRelease}",
+            $"--summary-file={botSummary}",
+            "--admission-stagger-ms=100",
+        ], 210_000));
+        aliceTask = Task.Run(() => RunCaptured(
+            root, onlineExecutable,
+            NativeSharedClientArguments(
+                scope, "alice", ready.Endpoint, ready.Fingerprint,
+                aliceReady, nativeRelease, expectedPresentedActors,
+                "PF1 Native Alice", "x"), 210_000));
+        bobTask = Task.Run(() => RunCaptured(
+            root, onlineExecutable,
+            NativeSharedClientArguments(
+                scope, "bob", ready.Endpoint, ready.Fingerprint,
+                bobReady, nativeRelease, expectedPresentedActors,
+                "PF1 Native Bob", "y"), 210_000));
+
+        WaitForPf1Files(
+            [botStartReady, aliceReady, bobReady],
+            120_000,
+            server,
+            [botTask, aliceTask, bobTask],
+            "all bots and both exported Online clients to share one active authority");
+        File.WriteAllText(botStartRelease, "start" + Environment.NewLine);
+
+        WaitForPf1Files(
+            [botReady],
+            90_000,
+            server,
+            [botTask, aliceTask, bobTask],
+            "the deterministic mixed-chaos interval to finish");
+        if (aliceTask.IsCompleted || bobTask.IsCompleted)
+            throw new InvalidOperationException(
+                "An exported Online client did not remain connected throughout the PF1 swarm interval.");
+
+        File.WriteAllText(nativeRelease, "release" + Environment.NewLine);
+        string aliceOutput = aliceTask.GetAwaiter().GetResult();
+        string bobOutput = bobTask.GetAwaiter().GetResult();
+        RequireNativeA08Result(
+            aliceOutput, "cold", ready.WorldPackFingerprint,
+            expectedWarm: false, expectedRememberedProfile: false,
+            expectedProfile: expectedProfile);
+        RequireNativeA08Result(
+            bobOutput, "cold", ready.WorldPackFingerprint,
+            expectedWarm: false, expectedRememberedProfile: false,
+            expectedProfile: expectedProfile);
+        if (!aliceOutput.Contains($"generation={ready.ServerGeneration}", StringComparison.Ordinal) ||
+            !bobOutput.Contains($"generation={ready.ServerGeneration}", StringComparison.Ordinal) ||
+            !aliceOutput.Contains("guest=PF1 Native Alice", StringComparison.Ordinal) ||
+            !aliceOutput.Contains("body=HumanFemale", StringComparison.Ordinal) ||
+            !bobOutput.Contains("guest=PF1 Native Bob", StringComparison.Ordinal) ||
+            !bobOutput.Contains("body=HumanMale", StringComparison.Ordinal) ||
+            !aliceOutput.Contains($"actors={expectedPresentedActors}", StringComparison.Ordinal) ||
+            !bobOutput.Contains($"actors={expectedPresentedActors}", StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "The exported Online clients did not preserve exact PF1 generation/body/actor presentation.");
+
+        File.WriteAllText(botRelease, "release" + Environment.NewLine);
+        string botOutput = botTask.GetAwaiter().GetResult();
+        if (!botOutput.Contains("PF1 BOT HARNESS PASS", StringComparison.Ordinal) ||
+            !File.Exists(botSummary))
+            throw new InvalidOperationException(
+                $"The PF1 bot harness omitted its accepted summary:\n{Tail(botOutput, 8_000)}");
+        using JsonDocument botDocument = JsonDocument.Parse(File.ReadAllText(botSummary));
+        JsonElement bots = botDocument.RootElement;
+        if (!bots.GetProperty("passed").GetBoolean() ||
+            bots.GetProperty("botCount").GetInt32() != botCount ||
+            bots.GetProperty("seed").GetUInt64() != seed ||
+            bots.GetProperty("serverGeneration").GetUInt64() != ready.ServerGeneration ||
+            bots.GetProperty("femaleBodies").GetInt32() != 4 ||
+            bots.GetProperty("maleBodies").GetInt32() != 4 ||
+            bots.GetProperty("activeHighWater").GetInt32() != botCount ||
+            bots.GetProperty("reconnectingHighWater").GetInt32() < 1 ||
+            bots.GetProperty("activeBots").GetInt32() != 0 ||
+            bots.GetProperty("admittingBots").GetInt32() != 0 ||
+            bots.GetProperty("reconnectingBots").GetInt32() != 0 ||
+            bots.GetProperty("retiredBots").GetInt32() != botCount ||
+            bots.GetProperty("successfulReconnects").GetInt32() < 1 ||
+            bots.GetProperty("applicationSessions").GetInt32() < botCount + 1 ||
+            bots.GetProperty("freshProofLifetimes").GetInt32() < botCount + 1 ||
+            bots.GetProperty("commandsAttempted").GetInt32() == 0 ||
+            bots.GetProperty("landingRecoveries").GetInt32() == 0 ||
+            bots.GetProperty("postRecoveryMovementAccepted").GetInt32() == 0 ||
+            bots.GetProperty("nonsenseCommandsCreated").GetInt32() != 0 ||
+            bots.GetProperty("faultedBots").GetInt32() != 0 ||
+            !bots.GetProperty("cleanRetirement").GetBoolean())
+            throw new InvalidOperationException(
+                "The PF1 structured bot result violated its identity/proof/retirement contract.");
+
+        File.WriteAllText(serverStop, "stop" + Environment.NewLine);
+        if (!server.WaitForExit(30_000) || server.ExitCode != 0 || !File.Exists(serverSummary))
+            throw new InvalidOperationException(
+                "The PF1 dedicated authority did not publish a clean bounded shutdown.");
+        using JsonDocument serverDocument = JsonDocument.Parse(File.ReadAllText(serverSummary));
+        JsonElement authority = serverDocument.RootElement;
+        ulong joins = authority.GetProperty("Joins").GetUInt64();
+        ulong leaves = authority.GetProperty("Leaves").GetUInt64();
+        if (authority.GetProperty("ServerGeneration").GetUInt64() != ready.ServerGeneration ||
+            joins < (ulong)(participantCapacity + 1) || leaves != joins ||
+            authority.GetProperty("Participants").GetInt32() != 0 ||
+            authority.GetProperty("EstablishedSessions").GetInt32() != 0 ||
+            !authority.GetProperty("CleanRetirement").GetBoolean())
+            throw new InvalidOperationException(
+                "The PF1 authority retained participant/admission capacity after swarm retirement.");
+
+        Console.WriteLine(
+            $"PASS PF1_MixedExportedClientSwarm generation={ready.ServerGeneration} " +
+            $"bots={botCount} nativeClients={nativeClientCount} seed={seed} scenario={scenario} " +
+            $"sessions={bots.GetProperty("applicationSessions").GetInt32()} " +
+            $"proofs={bots.GetProperty("freshProofLifetimes").GetInt32()} " +
+            $"reconnects={bots.GetProperty("successfulReconnects").GetInt32()} " +
+            $"movement={bots.GetProperty("movementAccepted").GetInt32()} " +
+            $"jumps={bots.GetProperty("jumpsAccepted").GetInt32()} " +
+            $"chat={bots.GetProperty("localChatSubmitted").GetInt32()}+" +
+            $"{bots.GetProperty("globalChatSubmitted").GetInt32()} " +
+            $"sword={bots.GetProperty("swordPickupObserved").GetInt32()}/" +
+            $"{bots.GetProperty("swordEquipObserved").GetInt32()}/" +
+            $"{bots.GetProperty("swordDropObserved").GetInt32()} " +
+            $"workingSet={bots.GetProperty("workingSetHighWaterBytes").GetInt64()} " +
+            $"cpuMs={bots.GetProperty("cpuMilliseconds").GetDouble():0.###} " +
+            $"joins={joins} leaves={leaves} nativeActors={expectedPresentedActors} clean=true");
+    }
+    finally
+    {
+        Directory.CreateDirectory(scope);
+        foreach (string marker in new[] { botStartRelease, nativeRelease, botRelease, serverStop })
+            if (!File.Exists(marker)) File.WriteAllText(marker, "release" + Environment.NewLine);
+        foreach (Task<string>? task in new[] { aliceTask, bobTask, botTask })
+        {
+            if (task is null) continue;
+            try { _ = task.Wait(15_000); }
+            catch (AggregateException) { }
+        }
+        if (server is not null)
+        {
+            StopOwnedProcess(server);
+            server.Dispose();
+        }
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
+static void VerifyPf1BotArtifact(string root, string configuration)
+{
+    const string project = "Tools/NetworkBots/UltraSim.NetworkBots.csproj";
+    Run(root, "dotnet",
+    [
+        "build", project, "-c", configuration,
+        "-p:UltraSimNetworkFlavor=ClientOnly",
+    ]);
+    string output = Path.Combine(root, "Tools", "NetworkBots", "bin", configuration, "net8.0");
+    string[] expected =
+    [
+        "UltraSim.Client.Content", "UltraSim.Client.Core", "UltraSim.Client.Network",
+        "UltraSim.Client.StandardUi", "UltraSim.ECS", "UltraSim.Game.Accounting",
+        "UltraSim.Game.Contracts", "UltraSim.Game.Protocol", "UltraSim.Game.World",
+        "UltraSim.Network", "UltraSim.NetworkBots", "UltraSim.Spatial", "UltraSim.UI",
+    ];
+    string[] actual = Directory.EnumerateFiles(output, "UltraSim*.dll", SearchOption.TopDirectoryOnly)
+        .Select(static path => Path.GetFileNameWithoutExtension(path))
+        .OrderBy(static name => name, StringComparer.Ordinal)
+        .ToArray();
+    if (!actual.SequenceEqual(expected.OrderBy(static name => name, StringComparer.Ordinal),
+            StringComparer.Ordinal))
+        throw new InvalidOperationException(
+            "The PF1 bot product has an unexpected managed dependency closure.\n" +
+            $"Expected: {string.Join(", ", expected)}\nActual: {string.Join(", ", actual)}");
+
+    using JsonDocument deps = JsonDocument.Parse(File.ReadAllText(
+        Path.Combine(output, "UltraSim.NetworkBots.deps.json")));
+    HashSet<string> dependencies = deps.RootElement.GetProperty("libraries").EnumerateObject()
+        .Select(static property => property.Name.Split('/')[0])
+        .ToHashSet(StringComparer.Ordinal);
+    string[] forbidden =
+    [
+        "GodotSharp", "UltraSim.Client.Local", "UltraSim.Client.BuiltInTestWorlds",
+        "UltraSim.Game.Composition", "UltraSim.Game.Persistence", "UltraSim.Game.Physics",
+        "UltraSim.Game.Replication", "UltraSim.Game.Replication.Remote", "UltraSim.Game.UI",
+        "UltraSim.Network.Testing", "UltraSim.Server.Hosting", "UltraSim.Server.Persistence",
+        "UltraSim.Server.Runtime",
+    ];
+    string[] leaked = forbidden.Where(dependencies.Contains).ToArray();
+    if (leaked.Length != 0)
+        throw new InvalidOperationException(
+            $"The PF1 bot product contains privileged/engine/testing dependencies: {string.Join(", ", leaked)}");
+    HashSet<string> networkTypes = ReadDefinedTypeNames(Path.Combine(output, "UltraSim.Network.dll"));
+    RequireType(networkTypes, "UltraSim.Network.HostedUdpProtocolClient", "PF1 bot product");
+    RejectType(networkTypes, "UltraSim.Network.HostedUdpAdmissionHost", "PF1 bot product");
+    RejectType(networkTypes, "UltraSim.Network.NetworkServerIdentity", "PF1 bot product");
+    Console.WriteLine(
+        $"PASS PF1_HeadlessBotProduct assemblies={actual.Length} network=ClientOnly " +
+        "godot=absent local=absent authority=absent networkTesting=absent");
+}
+
+static void WaitForPf1Files(
+    IReadOnlyList<string> paths,
+    int timeoutMilliseconds,
+    Process server,
+    IReadOnlyList<Task<string>> clients,
+    string purpose)
+{
+    long deadline = Environment.TickCount64 + timeoutMilliseconds;
+    while (paths.Any(path => !File.Exists(path)) && Environment.TickCount64 < deadline)
+    {
+        if (server.HasExited)
+            throw new InvalidOperationException(
+                $"The PF1 dedicated authority exited while waiting for {purpose}.");
+        Task<string>? failed = clients.FirstOrDefault(static task => task.IsFaulted);
+        if (failed is not null)
+            throw new InvalidOperationException(
+                $"A PF1 client failed while waiting for {purpose}.", failed.Exception);
+        Thread.Sleep(10);
+    }
+    if (paths.Any(path => !File.Exists(path)))
+        throw new TimeoutException($"PF1 timed out waiting for {purpose}.");
+}
+
 static void VerifyMixedSessionLifecycleNative(
     string root,
     string configuration,
@@ -1259,22 +1570,30 @@ static string[] NativeSharedClientArguments(
     string endpoint,
     string fingerprint,
     string ready,
-    string release) =>
-[
-    "--headless", "--", "--a0-8-smoke",
-    $"--a0-8-endpoint={endpoint}",
-    $"--a0-8-fingerprint={fingerprint}",
-    $"--a0-8-cache={Path.Combine(scope, name, "content-cache")}",
-    $"--a0-8-trust={Path.Combine(scope, name, "trusted-servers.json")}",
-    $"--f0-3c-profile-decisions={Path.Combine(scope, name, "server-profiles.json")}",
-    "--a0-8-allow-private-content",
-    "--a0-8-expect=cold",
-    // Existing woodland animal + local host + two remote humans.
-    "--m0-0-expect-actors=4",
-    $"--m0-0-client-ready={ready}",
-    $"--m0-0-client-release={release}",
-    "--expect-edition=Online",
-];
+    string release,
+    int expectedActors = 4,
+    string? guestName = null,
+    string? guestBody = null)
+{
+    var arguments = new List<string>
+    {
+        "--headless", "--", "--a0-8-smoke",
+        $"--a0-8-endpoint={endpoint}",
+        $"--a0-8-fingerprint={fingerprint}",
+        $"--a0-8-cache={Path.Combine(scope, name, "content-cache")}",
+        $"--a0-8-trust={Path.Combine(scope, name, "trusted-servers.json")}",
+        $"--f0-3c-profile-decisions={Path.Combine(scope, name, "server-profiles.json")}",
+        "--a0-8-allow-private-content",
+        "--a0-8-expect=cold",
+        $"--m0-0-expect-actors={expectedActors}",
+        $"--m0-0-client-ready={ready}",
+        $"--m0-0-client-release={release}",
+        "--expect-edition=Online",
+    };
+    if (guestName is not null) arguments.Add($"--a0-8-guest-name={guestName}");
+    if (guestBody is not null) arguments.Add($"--a0-8-guest-body={guestBody}");
+    return arguments.ToArray();
+}
 
 static Process StartNativeDeployment(
     string root,
@@ -1284,7 +1603,11 @@ static Process StartNativeDeployment(
     int applicationPort,
     int contentPort,
     out NativeDeploymentReady ready,
-    string clientProfile = "third-person")
+    string clientProfile = "third-person",
+    int maximumParticipants = 8,
+    int admissionBurstPerAddress = 4,
+    string? stopFile = null,
+    string? summaryFile = null)
 {
     var start = new ProcessStartInfo("dotnet")
     {
@@ -1300,7 +1623,11 @@ static Process StartNativeDeployment(
         $"--identity-dir={identityDirectory}",
         $"--ready-file={readyFile}",
         $"--client-profile={clientProfile}",
+        $"--maximum-participants={maximumParticipants}",
+        $"--same-address-admission-burst={admissionBurstPerAddress}",
     }) start.ArgumentList.Add(argument);
+    if (stopFile is not null) start.ArgumentList.Add($"--stop-file={stopFile}");
+    if (summaryFile is not null) start.ArgumentList.Add($"--summary-file={summaryFile}");
     Console.WriteLine($"> dotnet {string.Join(' ', start.ArgumentList.Select(Quote))}");
     Process process = Process.Start(start) ??
         throw new InvalidOperationException("Unable to start the A0.8 Direct Connect deployment.");
@@ -1329,7 +1656,9 @@ static Process StartNativeDeployment(
             value.GetProperty("WorldChunks").GetInt32(),
             RequiredString(value, "ClientProfile"),
             value.GetProperty("ClientProfileRevision").GetUInt64(),
-            RequiredString(value, "ClientProfileHash"));
+            RequiredString(value, "ClientProfileHash"),
+            value.GetProperty("MaximumParticipants").GetInt32(),
+            value.GetProperty("ServerGeneration").GetUInt64());
         return process;
     }
     catch
@@ -1794,9 +2123,20 @@ static void VerifyArchitecture(string root)
             "Kernels/UI/UltraSim.UI.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
+        ["Tools/NetworkBots/UltraSim.NetworkBots.csproj"] =
+        [
+            "Client/Content/UltraSim.Client.Content.csproj",
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Client/Network/UltraSim.Client.Network.csproj",
+            "Client/StandardUi/UltraSim.Client.StandardUi.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
+        ],
     };
 
-    string[] roots = ["Kernels", "Server", "Client", "Game"];
+    string[] roots = ["Kernels", "Server", "Client", "Game", "Tools"];
     string[] actualProjects = roots
         .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.csproj", SearchOption.AllDirectories))
         .Select(path => Relative(root, path))
@@ -2112,6 +2452,7 @@ static string Relative(string root, string path) => Path.GetRelativePath(root, p
 
 internal sealed record VerificationOptions(
     bool ArchitectureOnly,
+    bool Pf1Only,
     bool AllConfigurations,
     string Configuration,
     bool SkipGodot,
@@ -2120,12 +2461,14 @@ internal sealed record VerificationOptions(
 {
     internal static VerificationOptions Parse(string[] arguments)
     {
-        bool architectureOnly = false, allConfigurations = false, skipGodot = false, noRestore = false;
+        bool architectureOnly = false, pf1Only = false, allConfigurations = false;
+        bool skipGodot = false, noRestore = false;
         string configuration = "Release";
         string? godot = null;
         foreach (string argument in arguments)
         {
             if (argument == "--architecture-only") architectureOnly = true;
+            else if (argument == "--pf1-only") pf1Only = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
             else if (argument == "--no-restore") noRestore = true;
@@ -2136,7 +2479,7 @@ internal sealed record VerificationOptions(
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        return new(architectureOnly, allConfigurations, configuration, skipGodot, noRestore, godot);
+        return new(architectureOnly, pf1Only, allConfigurations, configuration, skipGodot, noRestore, godot);
     }
 }
 
@@ -2156,7 +2499,9 @@ internal sealed record NativeDeploymentReady(
     int WorldChunks,
     string ClientProfile,
     ulong ClientProfileRevision,
-    string ClientProfileHash);
+    string ClientProfileHash,
+    int MaximumParticipants,
+    ulong ServerGeneration);
 
 internal sealed record ContentlessOnlineExport(
     string Scope,

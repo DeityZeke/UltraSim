@@ -56,6 +56,19 @@ static class ClientApplicationSettingsTests
         Equal("MIDDLE", RequireBinding(accepted, ClientSemanticAction.Select).Code);
         Equal("LEFT", RequireBinding(accepted, ClientSemanticAction.Primary).Code);
         Equal("SPACE", RequireBinding(accepted, ClientSemanticAction.Jump).Code);
+        ClientPhysicalInput acceptedInteract = RequireBinding(
+            accepted, ClientSemanticAction.Interact);
+        True(accepted.TryResolveInput(in acceptedInteract, out ClientSemanticAction resolvedInteract));
+        Equal(ClientSemanticAction.Interact, resolvedInteract);
+        True(ClientPhysicalInput.TryCreate(
+            ClientPhysicalInputKind.Keyboard,
+            "PF1_UNMAPPED",
+            ClientInputModifiers.None,
+            out ClientPhysicalInput unmapped));
+        True(!accepted.TryResolveInput(in unmapped, out ClientSemanticAction unmappedAction));
+        Equal(default(ClientSemanticAction), unmappedAction);
+        ClientPhysicalInput invalid = default;
+        True(!accepted.TryResolveInput(in invalid, out _));
 
         ResolvedClientSettings keepMine = ClientSettingsResolver.Resolve(
             document, default, recommendation, ClientProfileApplicationMode.KeepMyControls);

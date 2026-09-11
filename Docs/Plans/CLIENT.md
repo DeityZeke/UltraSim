@@ -24,7 +24,9 @@ executable proves materially different Third Person and Orbit recommendations wi
 code replacement. A post-F0.8 defensive UI correction now closes bounded publication/shutdown,
 apply-proof retry, cleanup-identity, definition-limit, malformed-delta allocation,
 renderer-callback, and native adapter state/range failures without changing UI authority or
-protocol identity. The Concept Demo pre-freeze characterization campaign is next.
+protocol identity. Pre-freeze PF0/PF1 now record the exact feature-complete candidate and close a
+real ClientOnly headless bot harness plus an 8-bot/2-exported-Online shared-authority gate. PF2
+first-class wire accounting is next.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2680,7 +2682,8 @@ F0.8  final local/remote/complete/contentless + different-feel matrix      CLOSE
         |
 UI defensive assurance: publication/lifetime/parser/native boundaries      CLOSED
         |
-pre-freeze campaign: bots/bandwidth/tuning/ObjectScript/human testing      NEXT
+PF0/PF1 candidate + real headless/mixed exported-client swarm           CLOSED
+PF2+ wire accounting/tuning/ObjectScript/human testing                    NEXT
         |
         v
 repository generalization / extraction readiness

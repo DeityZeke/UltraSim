@@ -1,8 +1,9 @@
 # UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
-**Status:** next campaign. The Concept Demo's required Round-1 feature journey and Client F0.8
-product/parity matrix are accepted. Complete this campaign before declaring the Concept Demo frozen
-and before beginning the broader post-demo extraction/genericization ecosystem roadmap.
+**Status:** active campaign. PF0 records the exact feature-complete candidate and PF1 closes the
+real headless ClientOnly Network bot plus mixed exported-client correctness gate. PF2 first-class
+wire accounting is next. Complete this campaign before declaring the Concept Demo frozen and before
+beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
 **Suggested repository path:** `Docs/Plans/CONCEPT_DEMO_PREFREEZE.md`
 
@@ -151,15 +152,13 @@ this campaign, not a broad telemetry, load, process-memory, or bandwidth charact
 
 ## 5.1 Architectural boundary
 
-Create a dedicated headless client harness, with an eventual name such as:
+PF1 now supplies the dedicated headless client harness as:
 
 ```text
-Client.Bot
-Tools.NetworkBots
 UltraSim.NetworkBots
 ```
 
-The exact project name is not frozen here.
+The maintained project and operator notes live under `Tools/NetworkBots`.
 
 Its dependency shape should resemble:
 
@@ -210,6 +209,11 @@ Not:
 bot
     -> call Game movement method directly
 ```
+
+**PF1 closure:** one CLR process owns independent real UDP transports and client/application/control
+state for every bot, advanced by one bounded central pump. The verified 13-assembly product uses
+ClientOnly Network and physically excludes Godot, Client.Local, authoritative Game/server projects,
+Network.Testing, and direct ECS access.
 
 ## 5.2 Real session semantics
 
@@ -364,6 +368,12 @@ Purpose:
 - no hidden privileged server path.
 
 This should be suitable for permanent CI/acceptance where runtime permits.
+
+**PF1 closure:** seed `104729` runs eight mixed X/Y headless clients plus two separately running
+instances of the actual exported Online product against one dedicated authority with capacity
+explicitly set to ten. The scenario guarantees movement, jump/airborne pressure, Local and Global
+Chat, unmapped-input inertness, public sword contention/equip/drop, chunk transitions, and one
+fresh-session reconnect. Larger soak/stress populations remain PF5 characterization work.
 
 ## 6.2 Soak swarm
 
@@ -595,6 +605,11 @@ The native clients prove, under synthetic load:
 - primitive/content presentation still behaves correctly.
 
 The exact exported Online artifact should be the same product composition intended for testers.
+
+PF1 establishes the first bounded version of this proof with 8 headless clients plus 2 actual
+exported Online processes. Both native clients reach 11 presented actors (ten participants plus the
+woodland animal), remain connected throughout the chaos interval, and converge again across bot
+retirement/re-entry without ghost actors. The planned 20/50/100 mixed-load matrix remains PF5.
 
 ---
 
@@ -1518,6 +1533,10 @@ The names below are local planning labels, not automatically subsystem milestone
 
 ## PF0 — feature-complete freeze candidate
 
+**Status: CLOSED.** The provisional feature-complete/pre-freeze candidate is
+`b87065431c15900bfd5ebaeae93b20855158e90f`. PF1 found acceptance-harness ordering assumptions but
+no product correctness defect requiring that candidate identity to be replaced.
+
 Entry:
 
 - all required Concept Demo Round 1 features complete;
@@ -1531,6 +1550,12 @@ Output:
 - no new gameplay scope admitted during the campaign without explicit reopening.
 
 ## PF1 — synthetic client harness
+
+**Status: CLOSED.** `Tools/NetworkBots` uses the production Direct Connect, client profile,
+content/CAS/application proof, WorldPack, guest, public-world, Chat, UI, and command paths. The
+permanent verifier inspects its ClientOnly closure and composes eight bots with two exported Online
+clients on one dedicated generation. Permanent evidence lives in
+`_Benchmarks/Baselines/concept-demo-pf1-headless-network-bots-2026-09-10.json`.
 
 Close when:
 
@@ -1711,9 +1736,9 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 5. Keep C0.2 routed Global and authority System occurrence closure closed.
 6. Keep D0.6 read-only Server Monitor/ping/test-marker closure closed.
 7. Keep the completed Concept Demo Round 1 feature journey and F0.7/F0.8 matrices closed.
-8. Select one exact feature-complete pre-freeze candidate. **NEXT**
-9. Build the real headless Network bot client.
-10. Add first-class wire/per-message accounting.
+8. Select one exact feature-complete pre-freeze candidate. **CLOSED — PF0**
+9. Build the real headless Network bot client and mixed exported-client gate. **CLOSED — PF1**
+10. Add first-class wire/per-message accounting. **NEXT — PF2**
 11. Establish high-performance quiet/moving/crowd baselines.
 12. Decouple render FPS from input submission cadence.
 13. Define/advertise/enforce the bounded Server Performance Profile.

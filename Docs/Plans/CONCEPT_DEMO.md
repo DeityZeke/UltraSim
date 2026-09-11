@@ -57,8 +57,11 @@ and focus state retired at every menu boundary. F0.8 now closes the physical fin
 with inspected and executed Single Player, Contentless Online, and Complete exports; an exported
 Complete host serving two exported Online guests; and one unchanged Online executable applying
 materially different Third Person and Orbit camera/control recommendations over the same
-authenticated realm/content identity. The pre-freeze load, bandwidth, cadence, soak, and
-external-human characterization campaign is next. A post-F0.8 defensive UI correction also makes
+authenticated realm/content identity. Pre-freeze PF0 now records the exact feature-complete
+candidate, and PF1 closes one real ClientOnly headless bot process hosting eight independent remote
+clients alongside two actual exported Online processes on the same dedicated authority. PF2
+wire accounting is next; larger load, cadence, soak, and external-human characterization remains
+open. A post-F0.8 defensive UI correction also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
 rejection outside Game callbacks, retries local apply proofs without replaying renderer work,
 retains failed-close identity, and hardens compiled/native limits. It changes no demo authority,
@@ -1744,7 +1747,8 @@ then continue:
 then close:
     F0.7 explicit mixed-session settings/debug/lifecycle torture pass   CLOSED
     F0.8 final composition/parity matrix                                CLOSED
-    external Concept Demo multiplayer/stress and pre-freeze campaign    NEXT
+    PF0 feature-complete candidate / PF1 real bot + exported swarm      CLOSED
+    PF2 wire accounting and later pre-freeze characterization           NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

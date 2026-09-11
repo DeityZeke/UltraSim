@@ -41,7 +41,8 @@ if (options.EphemeralSmoke)
 Directory.CreateDirectory(options.IdentityDirectory);
 using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
-using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo();
+using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
+    new SharedPlayableAuthorityLimits(options.MaximumParticipants));
 using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
     realm, options.ContentEndPoint);
 RemoteClientProfileAdvertisement clientProfile =
@@ -51,7 +52,7 @@ using HostedUdpAdmissionHost host = CreateHost(
     [
         UiDefinitionIdentity.From(InventoryUi.Definition),
         UiDefinitionIdentity.From(ServerMonitorUi.Definition),
-    ], clientProfile);
+    ], clientProfile, options.MaximumParticipants, options.AdmissionBurstPerAddress);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
@@ -67,7 +68,9 @@ Console.WriteLine(
 Console.WriteLine(
     $"Client profile: {options.ClientProfile} revision={clientProfile.Revision} " +
     $"hash={ProfileHash(clientProfile.Hash)}");
-Console.WriteLine("This M0.0 endpoint admits up to eight independent guests into one shared Concept Demo authority.");
+Console.WriteLine(
+    $"This shared endpoint admits up to {options.MaximumParticipants} independent guests " +
+    "into one Concept Demo authority.");
 Console.WriteLine("Press Ctrl+C to stop.");
 WriteReady(options.ReadyFile, new DirectConnectReady(
     host.LocalEndPoint.ToString(), realm.ToString(), fingerprint,
@@ -77,7 +80,8 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     content.Snapshot.ManifestHash.ToString(), content.Snapshot.PlanHash.ToString(),
     content.Snapshot.CatalogFingerprint.ToString(),
     content.Snapshot.WorldPackFingerprint.ToString(), content.Snapshot.WorldChunks,
-    options.ClientProfile, clientProfile.Revision, ProfileHash(clientProfile.Hash)));
+    options.ClientProfile, clientProfile.Revision, ProfileHash(clientProfile.Hash),
+    options.MaximumParticipants, authority.GetSnapshot().GenerationId));
 
 using var stopping = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -87,11 +91,39 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 while (!stopping.IsCancellationRequested)
 {
+    if (options.StopFile is not null && File.Exists(options.StopFile))
+        break;
     host.Pump();
     _ = authority.TickDue();
     Thread.Sleep(1);
 }
-return 0;
+long retirementDeadline = Environment.TickCount64 + 10_000;
+while ((authority.GetSnapshot().ParticipantCount != 0 ||
+        host.GetSnapshot().EstablishedSessions != 0) &&
+       Environment.TickCount64 < retirementDeadline)
+{
+    host.Pump();
+    _ = authority.TickDue();
+    Thread.Sleep(1);
+}
+SharedPlayableAuthoritySnapshot finalAuthority = authority.GetSnapshot();
+HostedUdpAdmissionSnapshot finalHost = host.GetSnapshot();
+bool cleanRetirement = finalAuthority.ParticipantCount == 0 &&
+    finalHost.EstablishedSessions == 0;
+if (options.SummaryFile is not null)
+    WriteReady(options.SummaryFile, new DirectConnectSummary(
+        finalAuthority.GenerationId,
+        finalAuthority.SimulationTick,
+        finalAuthority.Joins,
+        finalAuthority.Leaves,
+        finalAuthority.ParticipantCount,
+        finalHost.EstablishedSessions,
+        cleanRetirement));
+Console.WriteLine(
+    $"UltraSim Direct Connect stopped generation={finalAuthority.GenerationId} " +
+    $"participants={finalAuthority.ParticipantCount} sessions={finalHost.EstablishedSessions} " +
+    $"joins={finalAuthority.Joins} leaves={finalAuthority.Leaves} clean={cleanRetirement}.");
+return cleanRetirement ? 0 : 3;
 
 static HostedUdpAdmissionHost CreateHost(
     IPEndPoint endpoint,
@@ -100,12 +132,14 @@ static HostedUdpAdmissionHost CreateHost(
     SharedPlayableAuthority authority,
     RemoteContentAuthorization? contentAuthorization = null,
     IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
-    RemoteClientProfileAdvertisement? clientProfile = null)
+    RemoteClientProfileAdvertisement? clientProfile = null,
+    int maximumParticipants = 8,
+    int admissionBurstPerAddress = 4)
 {
     UdpProtocolLimits udp = UdpProtocolLimits.Default;
     SharedUdpProtocolLimits shared = SharedUdpProtocolLimits.Default with
     {
-        MaximumSessions = 8,
+        MaximumSessions = maximumParticipants,
     };
     var applications = new SharedRemoteGuestPlayableApplicationFactory(
         authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile);
@@ -115,12 +149,21 @@ static HostedUdpAdmissionHost CreateHost(
         NetworkProtocolLimits.Default,
         udp,
         shared,
-        HostedUdpAdmissionLimits.Default,
+        HostedUdpAdmissionLimits.Default with
+        {
+            MaximumValidatedCandidates = Math.Max(
+                HostedUdpAdmissionLimits.Default.MaximumValidatedCandidates,
+                maximumParticipants),
+            MaximumChallengesPerAddressPerBucket = Math.Max(
+                HostedUdpAdmissionLimits.Default.MaximumChallengesPerAddressPerBucket,
+                admissionBurstPerAddress),
+            MaximumValidationsPerAddressPerBucket = admissionBurstPerAddress,
+        },
         applications,
         UltraSimGameProtocol.Manifest);
 }
 
-static void WriteReady(string? path, DirectConnectReady ready)
+static void WriteReady<T>(string? path, T ready)
 {
     if (string.IsNullOrEmpty(path)) return;
     string full = Path.GetFullPath(path);
@@ -253,8 +296,12 @@ internal readonly record struct DirectConnectOptions(
     IPEndPoint ContentEndPoint,
     string IdentityDirectory,
     string? ReadyFile,
+    string? StopFile,
+    string? SummaryFile,
     string ClientProfile,
-    bool EphemeralSmoke)
+    bool EphemeralSmoke,
+    int MaximumParticipants,
+    int AdmissionBurstPerAddress)
 {
     internal static DirectConnectOptions Parse(string[] arguments)
     {
@@ -265,7 +312,12 @@ internal readonly record struct DirectConnectOptions(
             "UltraSim", "Server", "DirectConnect");
         bool smoke = false;
         string? readyFile = null;
+        string? stopFile = null;
+        string? summaryFile = null;
         string clientProfile = "third-person";
+        int maximumParticipants = 8;
+        int admissionBurstPerAddress =
+            HostedUdpAdmissionLimits.Default.MaximumValidationsPerAddressPerBucket;
         foreach (string argument in arguments)
         {
             if (argument == "--ephemeral-smoke")
@@ -308,6 +360,22 @@ internal readonly record struct DirectConnectOptions(
                 readyFile = Path.GetFullPath(value);
                 continue;
             }
+            if (argument.StartsWith("--stop-file=", StringComparison.Ordinal))
+            {
+                string value = argument["--stop-file=".Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException("--stop-file cannot be empty.");
+                stopFile = Path.GetFullPath(value);
+                continue;
+            }
+            if (argument.StartsWith("--summary-file=", StringComparison.Ordinal))
+            {
+                string value = argument["--summary-file=".Length..];
+                if (string.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException("--summary-file cannot be empty.");
+                summaryFile = Path.GetFullPath(value);
+                continue;
+            }
             if (argument.StartsWith("--client-profile=", StringComparison.Ordinal))
             {
                 clientProfile = argument["--client-profile=".Length..].Trim().ToLowerInvariant();
@@ -316,10 +384,30 @@ internal readonly record struct DirectConnectOptions(
                         "--client-profile must be orbit, third-person, or independent.");
                 continue;
             }
+            if (argument.StartsWith("--maximum-participants=", StringComparison.Ordinal))
+            {
+                string value = argument["--maximum-participants=".Length..];
+                if (!int.TryParse(value, out maximumParticipants) ||
+                    maximumParticipants is <= 0 or > 64)
+                    throw new ArgumentException(
+                        "--maximum-participants must be between 1 and 64.");
+                continue;
+            }
+            if (argument.StartsWith("--same-address-admission-burst=", StringComparison.Ordinal))
+            {
+                string value = argument["--same-address-admission-burst=".Length..];
+                if (!int.TryParse(value, out admissionBurstPerAddress) ||
+                    admissionBurstPerAddress is <= 0 or > 4_096)
+                    throw new ArgumentException(
+                        "--same-address-admission-burst must be between 1 and 4096.");
+                continue;
+            }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
         return new DirectConnectOptions(
-            endpoint, contentEndpoint, identity, readyFile, clientProfile, smoke);
+            endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
+            clientProfile, smoke,
+            maximumParticipants, admissionBurstPerAddress);
 
         static IPEndPoint ParseEndpoint(string value, string option)
         {
@@ -351,4 +439,15 @@ internal readonly record struct DirectConnectReady(
     int WorldChunks,
     string ClientProfile,
     ulong ClientProfileRevision,
-    string ClientProfileHash);
+    string ClientProfileHash,
+    int MaximumParticipants,
+    ulong ServerGeneration);
+
+internal readonly record struct DirectConnectSummary(
+    ulong ServerGeneration,
+    ulong SimulationTick,
+    ulong Joins,
+    ulong Leaves,
+    int Participants,
+    int EstablishedSessions,
+    bool CleanRetirement);

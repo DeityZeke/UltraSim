@@ -9,9 +9,11 @@ authority and guests continue, and reconnect creates fresh participant/control/p
 C0.2's Global and explicit System occurrences therefore fan out over one shared authority rather
 than one isolated Chat service per connection; reconnect does not inherit prior occurrence history.
 
-The default development profile admits at most eight simultaneous participants. That is a bounded
-functional profile, not a production-capacity claim. Endpoint, Network connection, application
-session, participant, control session, and generational public entity remain separate identities.
+The default development profile admits at most eight simultaneous participants. PF1 may explicitly
+select `--maximum-participants=<1..64>` and a loopback-appropriate
+`--same-address-admission-burst=<1..4096>` for a bounded local swarm. Neither option is a capacity
+bypass or production-capacity claim. Endpoint, Network connection, application session,
+participant, control session, and generational public entity remain separate identities.
 
 A0.3 adds an optional immutable content authorization to the same application factory. When
 configured, it publishes the bounded requirement after authenticated realm/session identity and
@@ -51,7 +53,9 @@ role; switching this product to Full later requires no consumer-code change.
 
 The default protocol bind is `127.0.0.1:7777` and the content host defaults to
 `127.0.0.1:7778`. `--bind=<IPv4>:<port>`, `--content-bind=<IPv4>:<port>`,
-`--identity-dir=<path>`, and the verifier-oriented `--ready-file=<path>` are supported. The
+`--identity-dir=<path>`, and the verifier-oriented `--ready-file=<path>` are supported. Automated
+acceptance may also request graceful retirement through `--stop-file=<path>` and capture the final
+generation/tick/join/leave/participant/session state through `--summary-file=<path>`. The
 deployment P-256 key and independent
 `ApplicationRealmId` are generated once and persisted with owner-only permissions
 on Unix. The printed SHA-256 fingerprint is what a tester compares on the client's

@@ -22,6 +22,11 @@ ServerOnly are all named `UltraSim.Network.dll`. Repository build tooling verifi
 the embedded flavor metadata, while product/export gates inspect the physical role
 types. This layer must not acquire a dependency on `UltraSim.Network.Testing`.
 
+PF1's maintained [`UltraSim.NetworkBots`](../../Tools/NetworkBots/README.md) product composes this
+same client layer without Godot. Each bot is an independent Direct Connect/application/control
+lifetime driven by one process-wide bounded pump; it has no private Game/server/ECS route. The
+Online export and bot product both select ClientOnly, while Full remains API-compatible.
+
 ## Permanent boundary
 
 ```text
