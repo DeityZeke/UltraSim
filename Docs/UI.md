@@ -82,6 +82,12 @@ A replacement bridge must attach to the same `UiClientRuntime` projection. Repla
 projection requires retiring the containing local session rather than silently acknowledging views
 that belong to another runtime.
 
+The client bridge pump is owner-thread-bound and non-reentrant. A renderer callback that attempts
+to pump the bridge is rejected before it can observe or complete the outer operation. Bridge
+disposal is rejection-atomic: action-sink detachment must succeed before the bridge marks itself
+disposed or releases the session attachment, so a callback-time rejection leaves the installed
+bridge operational and ordinarily replaceable later.
+
 `UiClientRuntime` treats renderer callbacks as a sealed mutation scope. `Create`, `Apply`, and
 `Close` callbacks cannot synchronously open/update/close views, alter the action sink, submit
 intent, or dispose their owning runtime. A rejected callback faults the runtime without publishing

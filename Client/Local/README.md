@@ -51,6 +51,10 @@ UI operation completion debt belongs to the retained local channel, not to its d
 `UiClientRuntime` cannot replay an already-applied renderer/model operation while proof publication
 is backpressured. Attaching a different runtime to the live channel is rejected: a different client
 projection requires retirement of the containing local session and its authority-side views.
+Bridge pumping is non-reentrant, so a renderer callback cannot consume/reject the operation whose
+renderer application is still in progress. Disposal commits only after action-sink detachment is
+admitted; a callback-time disposal rejection therefore leaves both the bridge and session
+attachment live instead of stranding a disposed action sink in the client runtime.
 
 Public disclosure uses `GameChunkInterestProfile.Default` and the accepted
 `OfflineDirectChunkCadence.EvidenceProfile`. It consumes packet-free Game

@@ -432,6 +432,7 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
     private readonly UiClientRuntime _client;
     private readonly Action _detached;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private bool _pumping;
     private bool _disposed;
 
     internal LocalQueuedUiClient(
@@ -449,41 +450,49 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
     {
         EnsureOperational();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumOperations);
-        int applied = 0;
-        if (!_channel.TryFlushClientCompletion(out bool completionPublished)) return 0;
-        if (completionPublished) applied++;
-        while (applied < maximumOperations && _channel.TryPeekClient(out int index, out LocalUiOperationRow? row))
+        if (_pumping)
+            throw new InvalidOperationException("The local UI client bridge cannot be pumped reentrantly.");
+        _pumping = true;
+        try
         {
-            LocalSemanticProofStatus status = LocalSemanticProofStatus.Applied;
-            try
+            int applied = 0;
+            if (!_channel.TryFlushClientCompletion(out bool completionPublished)) return 0;
+            if (completionPublished) applied++;
+            while (applied < maximumOperations &&
+                   _channel.TryPeekClient(out int index, out LocalUiOperationRow? row))
             {
-                switch (row!.Kind)
+                LocalSemanticProofStatus status = LocalSemanticProofStatus.Applied;
+                try
                 {
-                    case LocalUiOperationKind.ColdOpen:
-                        _ = _client.OpenView(row.ColdOpen);
-                        break;
-                    case LocalUiOperationKind.HotOpen:
-                        _ = _client.OpenHotView(row.HotOpen);
-                        break;
-                    case LocalUiOperationKind.Update:
-                        _client.UpdateView(row.Update);
-                        break;
-                    case LocalUiOperationKind.Close:
-                        _ = _client.CloseView(row.Close);
-                        break;
-                    default:
-                        status = LocalSemanticProofStatus.Rejected;
-                        break;
+                    switch (row!.Kind)
+                    {
+                        case LocalUiOperationKind.ColdOpen:
+                            _ = _client.OpenView(row.ColdOpen);
+                            break;
+                        case LocalUiOperationKind.HotOpen:
+                            _ = _client.OpenHotView(row.HotOpen);
+                            break;
+                        case LocalUiOperationKind.Update:
+                            _client.UpdateView(row.Update);
+                            break;
+                        case LocalUiOperationKind.Close:
+                            _ = _client.CloseView(row.Close);
+                            break;
+                        default:
+                            status = LocalSemanticProofStatus.Rejected;
+                            break;
+                    }
                 }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    status = LocalSemanticProofStatus.Rejected;
+                }
+                if (!_channel.TryCompleteClient(index, status)) break;
+                applied++;
             }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
-            {
-                status = LocalSemanticProofStatus.Rejected;
-            }
-            if (!_channel.TryCompleteClient(index, status)) break;
-            applied++;
+            return applied;
         }
-        return applied;
+        finally { _pumping = false; }
     }
 
     public void SubmitAction(UiActionRequest request)
@@ -497,9 +506,9 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
     {
         EnsureOwner();
         if (_disposed) return;
+        _client.DetachActionSink(this);
         _disposed = true;
-        try { _client.DetachActionSink(this); }
-        finally { _detached(); }
+        _detached();
     }
 
     private void EnsureOperational()

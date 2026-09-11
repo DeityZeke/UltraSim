@@ -29,6 +29,8 @@ var tests = new (string Name, Action Body)[]
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
     ("ProofBackpressureMustNotReapplyUiOperation", ProofBackpressureMustNotReapplyUiOperation),
     ("ProofBackpressureMustSurviveUiBridgeReplacement", ProofBackpressureMustSurviveUiBridgeReplacement),
+    ("ReentrantBridgePumpCannotRejectSuccessfulOpen", ReentrantBridgePumpCannotRejectSuccessfulOpen),
+    ("RejectedCallbackBridgeDisposeIsAtomic", RejectedCallbackBridgeDisposeIsAtomic),
     ("LocalUiCapacityMustNotFaultAuthority", LocalUiCapacityMustNotFaultAuthority),
     ("ControllerCloseFailureMustRemainRecoverable", ControllerCloseFailureMustRemainRecoverable),
     ("LocalShutdownMustContainUiCloseBackpressure", LocalShutdownMustContainUiCloseBackpressure),
@@ -141,6 +143,96 @@ static void ProofBackpressureMustSurviveUiBridgeReplacement()
             client.GetValue(second, InventoryUi.Status).Text,
             "Item selected.",
             StringComparison.Ordinal);
+    });
+}
+
+static void ReentrantBridgePumpCannotRejectSuccessfulOpen()
+{
+    using Fixture fixture = Fixture.Create();
+    var renderer = new CallbackRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    using LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(client);
+    renderer.OnCreate = () =>
+    {
+        try { _ = bridge.Pump(); }
+        catch (InvalidOperationException) { renderer.CallbackRejected = true; }
+    };
+
+    True(fixture.Session.TryRequestOpenInventory(1));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 1);
+    _ = bridge.Pump();
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        LocalPlayableSessionSnapshot snapshot = fixture.Session.GetSnapshot();
+        return snapshot.UiOperationsApplied + snapshot.UiOperationsRejected == 1;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    True(renderer.CallbackRejected,
+        "The reentrant client pump was not rejected at the bridge boundary.");
+    Equal(1UL, fixture.Session.GetSnapshot().UiOperationsApplied);
+    Equal(0UL, fixture.Session.GetSnapshot().UiOperationsRejected);
+    Equal(1, client.OpenViewCount);
+    Equal(1, renderer.Created);
+
+    UiViewInstanceId view = renderer.Instances[0];
+    UiRowId firstRow = client.GetRows(view, InventoryUi.Items)[0].Id;
+    client.SubmitAction(view, InventoryUi.Select, firstRow);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return string.Equals(
+            client.GetValue(view, InventoryUi.Status).Text,
+            "Item selected.",
+            StringComparison.Ordinal);
+    });
+}
+
+static void RejectedCallbackBridgeDisposeIsAtomic()
+{
+    using Fixture fixture = Fixture.Create();
+    var renderer = new CallbackRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    LocalQueuedUiClient bridge = fixture.Session.AttachUiClient(client);
+    renderer.OnCreate = () =>
+    {
+        try { bridge.Dispose(); }
+        catch (InvalidOperationException) { renderer.CallbackRejected = true; }
+    };
+
+    True(fixture.Session.TryRequestOpenInventory(1));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 1);
+    _ = bridge.Pump();
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return fixture.Session.GetSnapshot().UiOperationsApplied == 1;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    True(renderer.CallbackRejected,
+        "Bridge disposal from the renderer callback was not rejected.");
+    UiViewInstanceId view = renderer.Instances[0];
+    UiRowId firstRow = client.GetRows(view, InventoryUi.Items)[0].Id;
+    client.SubmitAction(view, InventoryUi.Select, firstRow);
+    DriveUntil(() =>
+    {
+        bridge.Pump();
+        return string.Equals(
+            client.GetValue(view, InventoryUi.Status).Text,
+            "Item selected.",
+            StringComparison.Ordinal);
+    });
+
+    bridge.Dispose();
+    using LocalQueuedUiClient replacement = fixture.Session.AttachUiClient(client);
+    ulong priorSequence = client.GetView(view).LastSequence;
+    client.SubmitAction(view, InventoryUi.Select, firstRow);
+    DriveUntil(() =>
+    {
+        replacement.Pump();
+        return client.GetView(view).LastSequence > priorSequence;
     });
 }
 
@@ -1084,6 +1176,38 @@ sealed class MemoryRenderer : IUiRenderer
         Created++;
         LastInstance = instance;
         Instances.Add(instance);
+        return new Handle();
+    }
+
+    public void Apply(
+        IUiRenderHandle handle,
+        CompiledUiDefinition definition,
+        UiModelView previous,
+        UiModelView current,
+        UiModelDelta delta,
+        Action<UiActionRequest> submitAction) { }
+
+    public void Close(IUiRenderHandle handle) { }
+
+    private sealed class Handle : IUiRenderHandle { }
+}
+
+sealed class CallbackRenderer : IUiRenderer
+{
+    internal Action? OnCreate;
+    internal bool CallbackRejected;
+    internal int Created;
+    internal List<UiViewInstanceId> Instances { get; } = [];
+
+    public IUiRenderHandle Create(
+        UiViewInstanceId instance,
+        CompiledUiDefinition definition,
+        UiModelView model,
+        Action<UiActionRequest> submitAction)
+    {
+        Created++;
+        Instances.Add(instance);
+        OnCreate?.Invoke();
         return new Handle();
     }
 

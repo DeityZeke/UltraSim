@@ -20,6 +20,8 @@
 | UI-05 action reason bypasses definition limit | Confirmed and repaired | `ActionReasonMustRespectCompiledTextLimit` at 64/65 characters |
 | UI-06 truncated delta allocates from impossible counts | Confirmed and repaired | reviewed 44-byte payloads allocated 2,097,144 / 2,621,448 / 1,572,912 bytes; corrected rejection stays below 16 KiB |
 | UI-07 renderer callback disposes/repopulates runtime | Confirmed and repaired | `RendererCallbackCannotResurrectDisposedRuntime` covers Create, Apply, and Close callbacks |
+| UI-08 renderer callback reenters bridge pump | Confirmed and repaired | `ReentrantBridgePumpCannotRejectSuccessfulOpen`; nested pump rejects before channel mutation, outer open applies once, and its action endpoint remains live |
+| UI-09 rejected callback bridge disposal strands sink | Confirmed and repaired | `RejectedCallbackBridgeDisposeIsAtomic`; rejected disposal leaves the bridge operational, and later ordinary detach/reattach preserves actions |
 | NET-10 newer activity underflows idle time | Same adjacent race, already repaired | `HostedLifetimeIgnoresActivityNewerThanOwnerSample`; complete content-backed remote Inventory journey passes |
 | UI-L1 retained true toggle ignores Unset | Natively confirmed and repaired | reviewed Godot result remained pressed; corrected native true-to-Unset gate is unpressed with zero emitted actions |
 | UI-L2 finite flow value exceeds native integer range | Natively confirmed and hardened | reviewed adapter faulted during conversion; corrected adapter rejects before a view/control root is retained |
@@ -48,6 +50,9 @@ The retained local channel records a completed operation status when its proof q
 retries only proof publication before reading another operation, including after disposal and
 replacement of the client bridge. Reattachment is limited to the same `UiClientRuntime` projection;
 a different projection requires local-session retirement. Renderer and model effects happen once.
+The bridge pump itself is non-reentrant and rejects before observing channel debt. Disposal does not
+mark the bridge disposed or release its session registration until runtime action-sink detachment
+succeeds, making callback-time rejection side-effect-free.
 
 `UiClientRuntime` forbids synchronous mutation/disposal throughout renderer `Create`, `Apply`, and
 `Close`. A callback violation faults that operation before candidate state publication; existing
@@ -70,7 +75,7 @@ Focused Release gates passed during correction:
 
 - 27 UI kernel checks;
 - 30 Client Core checks;
-- 19 packet-free Client Local checks, including bridge-replacement and isolated process-survival gates;
+- 21 packet-free Client Local checks, including reentrant-callback, bridge-replacement, and isolated process-survival gates;
 - 33 Game Inventory and 18 Game Admission checks;
 - 136 Game Replication checks;
 - the complete Network application suite, including content-backed remote Inventory;
