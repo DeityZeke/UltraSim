@@ -64,6 +64,15 @@ deployment P-256 key and independent
 on Unix. The printed SHA-256 fingerprint is what a tester compares on the client's
 first-use trust screen.
 
+PF2 adds an explicitly coordinated cumulative-snapshot accounting window. Supply all four of
+`--accounting-start-file`, `--accounting-ready-file`, `--accounting-stop-file`, and
+`--accounting-summary-file` together. The report labels exact UDP datagram **payload** bytes at the
+listener boundary, established-connection Data/ACK/KeepAlive/retransmission counters, finite
+lane/Game-family logical traffic, any pre-connection or unattributed residual, authority ticks,
+and process CPU/RSS context. It reports HTTP response body bytes separately and does not claim
+IP/UDP/link or complete HTTP/TCP wire cost. These file barriers are verifier/baseline coordination,
+not a mutable player diagnostic or administrative protocol.
+
 F0.3c publishes one finite stock client profile after authenticated realm identity and gates
 content/admission on its exact application-session proof. Select the development profile with
 `--client-profile=orbit`, `--client-profile=third-person` (the default), or

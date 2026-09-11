@@ -1,8 +1,9 @@
 # UltraSim Concept Demo — Pre-Freeze Hardening, Load, and Deployment-Policy Plan
 
-**Status:** active campaign. PF0 records the exact feature-complete candidate and PF1 closes the
-real headless ClientOnly Network bot plus mixed exported-client correctness gate. PF2 first-class
-wire accounting is next. Complete this campaign before declaring the Concept Demo frozen and before
+**Status:** active campaign. PF0 records the exact feature-complete candidate, PF1 closes the
+real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes
+first-class wire accounting plus quiet/moving/crowd characterization. PF3 cadence policy is next.
+Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
 **Suggested repository path:** `Docs/Plans/CONCEPT_DEMO_PREFREEZE.md`
@@ -1549,6 +1550,11 @@ above 31 participants retained the earlier fixed ECS and Inventory reservations 
 participant construction despite advertising additional capacity. The repaired candidate is
 `f003a8b5a2a8f97dac1074e5158ed01c875a83fb`; its participant-bound reservations and maintained
 50-participant regression make the configured `1..64` Direct Connect profile internally coherent.
+PF2 later invalidated that candidate after sustained real-client movement reproduced an airborne
+fixed-point overflow behind rejected combined collision motion. The repaired pre-freeze candidate
+is `fdb468698d07ccafa17e1dcc51fc1546b26c9fee`: independently valid vertical motion survives an
+outside/blocked horizontal component, and unrepresentable vertical integration takes bounded Game
+recovery rather than escaping as an authority fault.
 
 Entry:
 
@@ -1591,6 +1597,24 @@ Close when:
 - no privileged server/Game shortcut is used.
 
 ## PF2 — wire accounting
+
+**Status: CLOSED.** Production Network now retains exact owner-local per-connection UDP-payload and
+datagram counters, secure Data/ACK/KeepAlive/retransmission categories, all seven lane families,
+and an exhaustive eleven-family Game protocol classification. Cold snapshots expose immutable
+finite arrays; the packet hot path adds no allocation, reflection, strings, dictionary lookup, or
+global counter lock. Real listener totals and established-connection totals preserve a separate
+pre-connection/unattributed bucket.
+
+`Tools/NetworkBots` now supplies explicit `quiet`, distributed `moving`, and dense `crowd`
+scenarios with separate warmup and cumulative-snapshot measurement windows, bounded one-second
+samples, per-client distributions, measured-window pump health, and HTTP body/cache accounting
+outside UDP. A dedicated measurement-complete barrier aligns server and client ending snapshots
+before command quiescence. Permanent evidence lives in
+`_Benchmarks/Baselines/concept-demo-pf2-wire-accounting-2026-09-11.json`.
+
+PF2 deliberately records the current high moving/crowd public-world cost without changing cadence,
+AOI, packet formats, aggregation, compression, or participant limits. Those decisions remain PF3
+and PF4 work.
 
 Close when:
 
@@ -1764,9 +1788,9 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 7. Keep the completed Concept Demo Round 1 feature journey and F0.7/F0.8 matrices closed.
 8. Select one exact feature-complete pre-freeze candidate. **CLOSED — PF0**
 9. Build the real headless Network bot client and mixed exported-client gate. **CLOSED — PF1**
-10. Add first-class wire/per-message accounting. **NEXT — PF2**
-11. Establish high-performance quiet/moving/crowd baselines.
-12. Decouple render FPS from input submission cadence.
+10. Add first-class wire/per-message accounting. **CLOSED — PF2**
+11. Establish high-performance quiet/moving/crowd baselines. **CLOSED — PF2**
+12. Decouple render FPS from input submission cadence. **NEXT — PF3**
 13. Define/advertise/enforce the bounded Server Performance Profile.
 14. Run mismatched-cadence correctness matrix.
 15. Evaluate input/owner/public cadence reductions.

@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf2-wire-accounting-2026-09-11.json` — first-class production
+  per-connection UDP-payload/datagram, secure transport, lane, and exhaustive Game-family
+  accounting; separate HTTP body/cache facts; exact-window quiet/moving/crowd baselines; a
+  50-client mixed-chaos accounting soak; actual exported Online accounting; Network benchmark
+  deltas; and the PF2-discovered airborne-motion correctness repair. It records current costs
+  without closing cadence, bandwidth optimization, large-scale failure characterization, or CCU;
 - `concept-demo-pf1-headless-network-bots-2026-09-10.json` — the original and repaired
   feature-complete candidate identities, real ClientOnly headless bot product/physical dependency closure,
   deterministic 8-bot mixed-chaos run beside two separately running actual exported Online

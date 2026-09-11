@@ -59,9 +59,10 @@ Complete host serving two exported Online guests; and one unchanged Online execu
 materially different Third Person and Orbit camera/control recommendations over the same
 authenticated realm/content identity. Pre-freeze PF0 now records the exact feature-complete
 candidate, and PF1 closes one real ClientOnly headless bot process hosting eight independent remote
-clients alongside two actual exported Online processes on the same dedicated authority. PF2
-wire accounting is next; larger load, cadence, soak, and external-human characterization remains
-open. A post-F0.8 defensive UI correction also makes
+clients alongside two actual exported Online processes on the same dedicated authority. PF2 now
+closes first-class production UDP accounting and long-window quiet/moving/crowd baselines while
+keeping HTTP content bytes separate. PF3 cadence policy is next; optimization, larger failure
+characterization, and external-human validation remain open. A post-F0.8 defensive UI correction also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
 rejection outside Game callbacks, retries local apply proofs without replaying renderer work,
 retains failed-close identity, and hardens compiled/native limits. It changes no demo authority,
@@ -1748,7 +1749,8 @@ then close:
     F0.7 explicit mixed-session settings/debug/lifecycle torture pass   CLOSED
     F0.8 final composition/parity matrix                                CLOSED
     PF0 feature-complete candidate / PF1 real bot + exported swarm      CLOSED
-    PF2 wire accounting and later pre-freeze characterization           NEXT
+    PF2 first-class wire accounting + explanatory baselines             CLOSED
+    PF3 cadence/performance policy                                      NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

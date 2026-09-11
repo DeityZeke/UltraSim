@@ -27,6 +27,13 @@ same client layer without Godot. Each bot is an independent Direct Connect/appli
 lifetime driven by one process-wide bounded pump; it has no private Game/server/ECS route. The
 Online export and bot product both select ClientOnly, while Full remains API-compatible.
 
+PF2 instruments this same production path. `ClientDirectConnectSession` exposes an immutable
+generational final/current traffic snapshot without resetting Network counters, so reconnects are
+distinct and a retired connection cannot continue changing. Exact UDP-payload/datagram totals come
+from the Hosted socket boundary; Data/ACK/KeepAlive/retransmission and per-lane/message accounting
+comes from the secure peer. Logical application/data-frame bytes are intentionally not presented
+as physical wire bytes. Client.Content HTTP body/cache metrics remain a separate accounting domain.
+
 ## Permanent boundary
 
 ```text
