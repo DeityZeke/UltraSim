@@ -1,0 +1,283 @@
+{
+  "checkpoint": "PF2.5 / P0.5A",
+  "capturedUtc": "2026-09-11",
+  "status": "CLOSED",
+  "commits": {
+    "measurementBase": "6f0fa93fac1d13d30aeacc9af712c03f982f01d6",
+    "acceptedImplementation": "5863c22cf92112281dfd4395b1fea7d8f1143b2e",
+    "priorRepairedCandidate": "fdb468698d07ccafa17e1dcc51fc1546b26c9fee",
+    "repairedCandidateAfterPf25": "5863c22cf92112281dfd4395b1fea7d8f1143b2e",
+    "candidateLineageChanged": true,
+    "candidateChangeReason": "A rejected client command submission cleared the Server Monitor one-shot request. The request is now retained until accepted, with a permanent queue-backpressure regression."
+  },
+  "machine": {
+    "operatingSystem": "Linux 7.1.5-1-cachyos x86_64",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.129",
+    "dotnetRuntime": "8.0.29",
+    "configuration": "Release",
+    "longRunNetworkCapabilities": "ServerOnly authority; ClientOnly bots and Online"
+  },
+  "decision": {
+    "recommendation": "A",
+    "productionOwner": "ChunkPublication remains the sole current dynamic-public owner through Concept Demo freeze.",
+    "unchangedPolicies": [
+      "public replication owner",
+      "AOI profile",
+      "authority cadence",
+      "Network cadence",
+      "input cadence",
+      "lanes",
+      "packet format",
+      "aggregation",
+      "compression",
+      "64-participant bound"
+    ],
+    "reopenWhen": "A real post-freeze consumer such as materially larger actor density, housing/mutable overlays, or a new independently addressable public class fails an explicit CPU, freshness, or wire budget and brings the required identity/convergence/proof design."
+  },
+  "p04Provenance": {
+    "commit": "df7d2ca2fbc8bc55f49aea185e137e6b98437492",
+    "preSelectionHypothesis": {
+      "immutableStructure": "WorldPack/static structural layers",
+      "stableAudienceDynamicEntities": "DirtyEntitySpatialFanout",
+      "mobileTopologyChurn": "MaintainedEntityRelation"
+    },
+    "conclusion": "The pre-P0.4 mapping was a benchmark-backed hypothesis, not an accepted product routing table. P0.4 selected the already composed ChunkPublication route because WorldPublicEntityId and ReplicationEntityId were separate, the live client/proof/order model was chunk-specific, no merged cross-owner convergence existed, runtime transfer did not exist, and there was no real multi-class consumer justifying that implementation scope. Later checkpoints supplied real consumers but did not supply the missing common identity, merge, proof, or duplicate-owner seam.",
+    "primaryBlockers": [
+      "identity lineage",
+      "Client Core convergence",
+      "cross-owner order and application proof",
+      "duplicate-owner prevention",
+      "implementation scope",
+      "then-absence of a real product consumer"
+    ],
+    "solvedSinceP04": [
+      "real multiplayer actors and Woodland actor",
+      "world/private/equipped Iron Sword lifecycles",
+      "interactive props and cold presentation metadata",
+      "content-backed actor realization",
+      "exported Online and Complete products",
+      "lifecycle gates, real bots, and PF2 production accounting"
+    ],
+    "stillMissing": [
+      "one Game-owned identity or explicit mapping shared across profile streams",
+      "one fixed owner table and duplicate-owner admission invariant",
+      "one Client Core merge/order/lifetime model",
+      "proof and recovery semantics across all fixed owners",
+      "packet-free local parity for the merged result"
+    ]
+  },
+  "semanticOwnership": [
+    {"semantic":"player and Woodland hot public state","authority":"Game ECS/Physics","domain":"public latest state","replication":"ChunkPublication","identity":"WorldPublicEntityId plus publication epoch/chunk/revision","consumer":"ClientWorldSemanticCache -> actor presentation"},
+    {"semantic":"actor public identity/visibility/prefab","authority":"GameWorldState","domain":"public latest state","replication":"ChunkPublication","identity":"WorldPublicEntityId","consumer":"ClientWorldSemanticCache -> ClientActorPresentationState"},
+    {"semantic":"nameplate/body/vertical phase/action sequence/Main Hand appearance","authority":"Game cold presentation read model","domain":"public cold metadata","replication":"reliable presentation delivery plus applied proof","identity":"delivery/revision attached to WorldPublicEntityId","consumer":"metadata state -> actor presenter"},
+    {"semantic":"actor model and animation bytes","authority":"authenticated Content catalog","domain":"passive presentation content","replication":"ContentSetApplied, not public AOI","identity":"logical definition plus package/file hash","consumer":"CAS lease -> Godot resolver without replacing actor lifetime"},
+    {"semantic":"Iron Sword ground presence/position","authority":"Game item/ECS","domain":"public latest state","replication":"ChunkPublication","identity":"current WorldPublicEntityId mapped from persistent item","consumer":"semantic cache -> ground item/hover/nomination"},
+    {"semantic":"Iron Sword interaction target","authority":"Game world-action validation","domain":"public nomination","replication":"ordinary command","identity":"RemotePublicEntityTarget/WorldPublicEntityId","consumer":"Game resolves; no private ECS handle disclosed"},
+    {"semantic":"Iron Sword backpack/equipped state","authority":"Inventory","domain":"owner private","replication":"typed UI/model semantics","identity":"persistent item plus placement/equipment slot","consumer":"UiClientRuntime/Inventory"},
+    {"semantic":"Inspection Properties","authority":"Game recipient disclosure","domain":"cold public or owner-private typed facts","replication":"metadata or Inventory UI","identity":"stable property IDs","consumer":"shared client formatter"},
+    {"semantic":"door/sign/telepad/gates/interactive props","authority":"Game ECS/world action","domain":"public latest plus separate cold/UI facts","replication":"ChunkPublication for public state","identity":"persistent entity mapped to WorldPublicEntityId","consumer":"semantic cache plus authoritative action validation"},
+    {"semantic":"terrain/base/detached terrain/frozen statics","authority":"World","domain":"immutable structure","replication":"WorldPack via Content","identity":"content hash, WorldPackFingerprint, WorldContentFingerprint, chunk key","consumer":"BoundWorldPack -> structural ClientWorldSemanticCache"},
+    {"semantic":"mutable structural overlay","authority":"not implemented","domain":"future","replication":"none","identity":"must be explicitly earned","consumer":"none"},
+    {"semantic":"playable OwnerState","authority":"Game control authority","domain":"owner private latest state","replication":"OwnerState lane","identity":"application/control epoch, command/state sequence, public actor ID","consumer":"RemotePlayableClient"},
+    {"semantic":"Inventory/private UI/Server Monitor","authority":"Game Inventory/UI/read model","domain":"owner private","replication":"typed UI operations","identity":"definition/view/model/element/action lineage","consumer":"UiClientRuntime/Godot renderer"},
+    {"semantic":"spatial/global Chat and System facts","authority":"Game Chat or authority producer","domain":"ordered fact","replication":"Event occurrence plus applied proof","identity":"application epoch and recipient sequence; optional public anchor","consumer":"Chat state -> feed/overhead/banner"},
+    {"semantic":"profile/content/application gates","authority":"deployment/application authority","domain":"authenticated session proof","replication":"Control/Event outside public AOI","identity":"realm/session epoch plus revision/hash/catalog","consumer":"Direct Connect activation gates"}
+  ],
+  "identityBoundaries": {
+    "PersistentEntityId": "durable Game identity where assigned",
+    "Entity": "one ECS-generation handle",
+    "WorldPublicEntityId": "current Game public presentation and interaction lifetime",
+    "ReplicationEntityId": "retained alternative-profile lifetime; not mapped into current product public identity",
+    "InventoryIdentity": "private persistent item plus placement/equipment state",
+    "PresentationDeliveryId": "proof lineage for cold metadata attached to WorldPublicEntityId"
+  },
+  "alternativeProfileReadiness": [
+    {
+      "profile": "MaintainedEntityRelation",
+      "productionCapable": ["Game source/AOI", "StateEpoch/ReplicationEntityId lifetime", "bounded knowledge/debt", "application proof", "snapshot/compaction recovery", "remote server/client adapters", "profile-local offline/conformance paths", "multi-recipient tests and benchmarks"],
+      "notCurrentProductReady": ["uses the older entity-state client", "does not target ClientWorldSemanticCache", "no WorldPublicEntityId mapping", "no current actor/interaction/cold-metadata linkage", "not composed into Online/Complete/DirectConnect"]
+    },
+    {
+      "profile": "DirtyEntitySpatialFanout",
+      "productionCapable": ["Game latest-state source", "dirty-time spatial discovery", "recipient topology reconciliation", "StateEpoch/ReplicationEntityId lifetime", "bounded proof/retry", "remote server/client adapters", "profile-local offline/conformance paths", "hostile tests and benchmarks"],
+      "notCurrentProductReady": ["uses the older entity-state client", "does not target ClientWorldSemanticCache", "no WorldPublicEntityId mapping", "no current actor/interaction/cold-metadata linkage", "not composed into Online/Complete/DirectConnect"]
+    }
+  ],
+  "compositionVersusTransfer": {
+    "fixedConcurrentOwnershipPossibleInPrinciple": true,
+    "fixedRequirements": ["shared Game-owned identity/mapping", "fixed class-to-owner table", "owner tag/epoch and one-owner invariant", "merged Client Core lifetime/order", "proof/reconnect/recovery per owner", "local and remote semantic parity"],
+    "runtimeTransferAdditionalRequirements": ["ownership epoch", "transactional remove/present boundary", "loss/reorder dedup", "partial-handoff rollback/recovery", "cross-source snapshot/generation replacement"],
+    "implementedByPf25": false
+  },
+  "telemetry": {
+    "levels": {"Off":"no detailed timestamp reads", "Basic":"bounded service/tick interval and duration", "Detailed":"Basic plus named Network, Game, replication, client, and native stages"},
+    "networkHistogram": "64 fixed logarithmic Stopwatch-tick buckets; count/total/exact maximum plus percentile upper bounds",
+    "gameClientNativeHistogram": "256-sample fixed rolling percentile window plus window-wide count/total/maximum",
+    "hotPath": "owner-local primitive counters and fixed arrays; no reflection, strings, dictionaries, global locks, or per-observation allocations",
+    "snapshotPath": "cold immutable subsystem-owned snapshots",
+    "clock": "monotonic Stopwatch",
+    "protocolTimestampsAdded": false,
+    "crossProcessSourceToClientLatencyClaimed": false,
+    "gcPauseClaimed": false,
+    "osQueueLengthClaimed": false,
+    "payloadSizePercentilesClaimed": false,
+    "datagramFact": "Current MaximumUnreliableFramesPerDatagram is one; exercised data datagrams therefore carry one frame and no aggregation histogram is active."
+  },
+  "metricVocabulary": {
+    "native": ["frame interval/duration", "input events/samples/resolutions", "commands considered/submitted/suppressed", "continuous/action-edge counts", "presentation duration", "actor/nameplate/overhead/chunk current and high-water", "actor create/update/retire/visual replacement"],
+    "client": ["Network pump interval/duration", "receive processing", "chunk decode/cache apply", "proof drain", "OwnerState receive/apply/interval/tick gaps", "command to semantic OwnerState completion", "presentation/Chat/UI apply"],
+    "server": ["authority interval/duration/lateness", "deadline misses/catch-up/skipped", "application receive/progress", "command/world-action/physics", "private UI/Inventory", "Chat processing/delivery", "proof processing", "public-world/OwnerState work"],
+    "replication": ["interest reconciliation", "encode/schedule", "queue drain", "proof", "stable/exact interest paths", "schedule attempts", "Immediate/Near/Far deliveries", "no-payload/cadence/transport/capacity deferrals", "outstanding high-water"],
+    "network": ["emit/select/frame encode/encrypt/send", "receive/decrypt/admit", "compaction", "reliable/independent/received/in-flight current and high-water", "ACK/retransmission/retained-byte debt", "listener socket calls and drain census"],
+    "process": ["CPU seconds per wall second", "RSS/managed heap high-water", "allocation delta", "Gen0/1/2 collections", "thread high-water"]
+  },
+  "instrumentationOverhead": {
+    "workload": "current semantic-shape comparison, 50 recipients, 64 entities, aggregation cap 1, 60 warmup plus 600 measured ticks",
+    "trafficIdenticalAcrossBaseOffDetailed": true,
+    "semanticConvergence": true,
+    "warmedObservationAllocationBytes": 0,
+    "p95WholeFlowMilliseconds": [
+      {"workload":"dense-50","profile":"MaintainedEntityRelation","baseOff":0.9651,"currentOff":0.9744,"currentDetailed":1.0838},
+      {"workload":"sparse-50","profile":"MaintainedEntityRelation","baseOff":0.6682,"currentOff":0.6793,"currentDetailed":0.7581},
+      {"workload":"dense-50","profile":"DirtyEntitySpatialFanout","baseOff":0.6759,"currentOff":0.6790,"currentDetailed":0.7606},
+      {"workload":"sparse-50","profile":"ChunkPublication","baseOff":2.7825,"currentOff":2.8123,"currentDetailed":2.6156},
+      {"workload":"dense-50","profile":"ChunkPublication","baseOff":0.9902,"currentOff":0.9992,"currentDetailed":1.0900},
+      {"workload":"sparse-50","profile":"DirtyEntitySpatialFanout","baseOff":0.5512,"currentOff":0.5579,"currentDetailed":0.6341}
+    ],
+    "interpretation": "Off is within ordinary run noise. Detailed costs roughly 0.08-0.12 ms in most shapes and is explicitly benchmark/admin-only. The sparse Chunk run varied downward, illustrating why one noisy timing must not be treated as optimization."
+  },
+  "profileComparison": [
+    {"workload":"dense-50","profile":"MaintainedEntityRelation","offP50P95P99MaxMs":[0.5399,0.9744,1.0608,2.0529],"serverP50P95P99MaxMs":[0.03671,0.235249,0.24289,0.870079],"datagrams":44290,"udpBytes":5334680,"applicationBytes":2367250,"reservedBytes":11267692,"converged":true},
+    {"workload":"sparse-50","profile":"MaintainedEntityRelation","offP50P95P99MaxMs":[0.6336,0.6793,0.7556,1.2622],"serverP50P95P99MaxMs":[0.06122,0.081899,0.09044,0.6684],"datagrams":56350,"udpBytes":7828352,"applicationBytes":4052902,"reservedBytes":5254012,"converged":true},
+    {"workload":"dense-50","profile":"DirtyEntitySpatialFanout","offP50P95P99MaxMs":[0.6269,0.6790,0.6970,0.8070],"serverP50P95P99MaxMs":[0.06916,0.080129,0.08906,0.20932],"datagrams":55704,"udpBytes":6384768,"applicationBytes":2652600,"reservedBytes":7731426,"converged":true},
+    {"workload":"sparse-50","profile":"DirtyEntitySpatialFanout","offP50P95P99MaxMs":[0.4981,0.5579,0.5751,0.6087],"serverP50P95P99MaxMs":[0.05787,0.08103,0.08849,0.09425],"datagrams":39650,"udpBytes":5727178,"applicationBytes":3070628,"reservedBytes":4953634,"converged":true},
+    {"workload":"dense-50","profile":"ChunkPublication","offP50P95P99MaxMs":[0.9207,0.9992,1.2493,1.2825],"serverP50P95P99MaxMs":[0.0647,0.08459,0.0926,0.115169],"datagrams":45660,"udpBytes":7434318,"applicationBytes":4375098,"reservedBytes":296444881,"converged":true},
+    {"workload":"sparse-50","profile":"ChunkPublication","offP50P95P99MaxMs":[1.6471,2.8123,3.2280,9.5890],"serverP50P95P99MaxMs":[0.22443,0.590519,0.658689,3.871788],"datagrams":84274,"udpBytes":16302141,"applicationBytes":10656059,"reservedBytes":55873260,"converged":true}
+  ],
+  "messageAttribution": {
+    "perspective": "dedicated server; sent is server-to-client, received is client-to-server",
+    "fields": ["id", "key", "lane", "sent", "received", "sentApplicationBytes", "receivedApplicationBytes", "sentFrameBytes", "receivedFrameBytes", "retransmittedUdpBytes"],
+    "moving50": [
+      [120,"chunk-delta","WorldState",10157956,0,1484050609,0,1717683597,0,0],
+      [123,"chunk-snapshot-begin","Bulk",700,0,57400,0,73500,0,7301],
+      [124,"chunk-snapshot-segment","Bulk",700,0,100760,0,116860,0,1266],
+      [125,"chunk-snapshot-commit","Bulk",700,0,39200,0,55300,0,2214],
+      [130,"chunk-applied-envelope","WorldState",0,1810924,0,376181066,0,417832318,0],
+      [138,"player-command","Event",0,17300,0,1280200,0,1678100,0],
+      [139,"playable-owner-state","OwnerState",512879,0,43081836,0,54878053,0,0],
+      [144,"public-presentation-metadata","Control",369738,0,25881660,0,34385634,0,3862304],
+      [145,"public-presentation-applied","Control",0,369688,0,9242200,0,17745024,0]
+    ],
+    "crowd50": [
+      [120,"chunk-delta","WorldState",6580118,0,1318014070,0,1469356784,0,0],
+      [123,"chunk-snapshot-begin","Bulk",100,0,8200,0,10500,0,2384],
+      [124,"chunk-snapshot-segment","Bulk",100,0,14400,0,16700,0,0],
+      [125,"chunk-snapshot-commit","Bulk",100,0,5600,0,7900,0,3198],
+      [130,"chunk-applied-envelope","WorldState",0,1802430,0,254368722,0,295824612,0],
+      [138,"player-command","Event",0,62200,0,4602800,0,6033400,0],
+      [139,"playable-owner-state","OwnerState",532658,0,44743272,0,56994406,0,0],
+      [144,"public-presentation-metadata","Control",343350,0,24034500,0,31931550,0,4075065],
+      [145,"public-presentation-applied","Control",0,343350,0,8583750,0,16480800,0]
+    ],
+    "mixedChaosAdditionalActiveIds": [102,103,104,105,121,131,132,133,134,135,136,137,140,141,142,143],
+    "mixedChaosMajorCounts": {"chunkDeltaSent":45839096,"chunkAppliedReceived":5863606,"ownerStateSent":3043627,"playerCommandReceived":127488,"chatSubmitReceived":17781,"chatOccurrenceSent":889038,"chatAppliedReceived":889038,"presentationSent":2196847,"presentationAppliedReceived":2196845},
+    "physicalRelationship": "Application and frame bytes are logical attribution. Secure UDP bytes additionally include datagram/security framing, ACK, KeepAlive, and retransmission and cannot be assigned uniquely to a logical message."
+  },
+  "movingVersusCrowd": {
+    "pf2AcceptedDistinctChunkVisitsMoving": 1635,
+    "pf2AcceptedDistinctChunkVisitsCrowd": 266,
+    "visitRatio": 6.15,
+    "pf2AcceptedMovementCommandsMoving": 16500,
+    "pf2AcceptedMovementCommandsCrowd": 65950,
+    "pf2AcceptedServerToClientUdpBytesMoving": 2342350464,
+    "pf2AcceptedServerToClientUdpBytesCrowd": 1911382410,
+    "egressRatio": 1.226,
+    "conclusion": "Distributed movement creates substantially more chunk entry/subscription/snapshot/delta/absence/proof churn. Command count is not the dominant egress predictor under current ChunkPublication."
+  },
+  "longRuns": [
+    {
+      "scenario":"quiet-50","seed":130363,"warmupSeconds":60,"durationMilliseconds":300374,"participantsStartEnd":[50,50],"connectionLifetimes":50,
+      "udpClientToServerBytes":132088,"udpServerToClientBytes":132088,"datagramsClientToServer":3002,"datagramsServerToClient":3002,
+      "authorityDurationP50P95P99MaxUs":[4,4,5,70],"authorityIntervalP50P95P99MaxUs":[16513,17998,18042,18218],"authorityLatenessP50P95P99MaxUs":[729,1438,1487,6085],"deadlineMisses":0,
+      "replicationWork":{"attempts":72993150,"deliveries":0,"noPayload":37622983,"cadenceDeferrals":35370167,"outstandingHighWater":0},
+      "botPumpIntervalP50P95P99MaxMs":[1.3,1.35,1.45,4.126504],"botPumpDurationP50P95P99MaxMs":[0.25,0.3,0.4,0.892193],
+      "serverCpuCores":0.353659,"serverRssHighWaterBytes":234291200,"botCpuMilliseconds":56510,"botRssHighWaterBytes":750047232,"cleanRetirement":true
+    },
+    {
+      "scenario":"moving-50","seed":130363,"warmupSeconds":60,"durationMilliseconds":600294,"participantsStartEnd":[50,50],"connectionLifetimes":50,
+      "udpClientToServerBytes":564651494,"udpServerToClientBytes":2323965273,"datagramsClientToServer":2649958,"datagramsServerToClient":11495026,"ackBytesClientToServer":24547008,"ackBytesServerToClient":26757632,"retransmittedUdpBytes":3873085,
+      "authorityDurationP50P95P99MaxUs":[911,1010,1067,1601],"authorityIntervalP50P95P99MaxUs":[16689,17592,18018,18595],"authorityLatenessP50P95P99MaxUs":[761,1435,1482,4718],"deadlineMisses":0,
+      "replicationWork":{"attempts":145870829,"deliveries":10158656,"immediate":2643876,"near":7506373,"far":8407,"noPayload":64538759,"cadenceDeferrals":71173314,"transportDeferrals":88,"capacityDeferrals":12,"outstandingHighWater":128},
+      "syntheticInputSamples":17300,"syntheticInputHz":28.833,"commandsSubmittedCompleted":[17300,17300],"commandLatencyP50P95P99MaxUs":[4800,8850,10412,33041],
+      "ownerStatesReceivedApplied":[512789,512789],"ownerStateSimulationTickGaps":1292122,"ownerStateIntervalP50P95P99MaxUs":[16748,20079,2000619,2014247],"worldApplyP50P95P99MaxUs":[5,10,10,376],
+      "queueHighWater":{"reliable":3,"independentUnreliable":4,"received":64,"inFlight":2,"retainedBytes":17059},
+      "botPumpIntervalP50P95P99MaxMs":[2.0,4.25,5.7,9.579365],"botPumpDurationP50P95P99MaxMs":[0.95,3.2,4.65,8.515934],
+      "serverCpuCores":0.470919,"serverRssHighWaterBytes":232763392,"serverManagedHeapHighWaterBytes":102116048,"serverAllocatedBytes":2152114792,"serverGc012":[43,3,1],"botCpuMilliseconds":321550,"botRssHighWaterBytes":669933568,"botManagedHeapHighWaterBytes":636725856,"cleanRetirement":true
+    },
+    {
+      "scenario":"crowd-50","seed":130363,"warmupSeconds":60,"durationMilliseconds":600288,"participantsStartEnd":[50,50],"connectionLifetimes":50,
+      "udpClientToServerBytes":441832966,"udpServerToClientBytes":1917817447,"datagramsClientToServer":2604076,"datagramsServerToClient":7915217,"ackBytesClientToServer":22886528,"ackBytesServerToClient":27072128,"retransmittedUdpBytes":4080647,
+      "authorityDurationP50P95P99MaxUs":[820,875,1040,1593],"authorityIntervalP50P95P99MaxUs":[16604,17755,18075,18540],"authorityLatenessP50P95P99MaxUs":[710,1445,1489,2386],"deadlineMisses":0,
+      "replicationWork":{"attempts":145872900,"deliveries":6580218,"immediate":4159487,"near":2420731,"far":0,"noPayload":68766624,"cadenceDeferrals":70526058,"transportDeferrals":0,"capacityDeferrals":0,"outstandingHighWater":11},
+      "syntheticInputSamples":62200,"syntheticInputHz":103.667,"commandsSubmittedCompleted":[62200,62200],"commandLatencyP50P95P99MaxUs":[4810,7941,8548,18419],
+      "ownerStatesReceivedApplied":[532455,532455],"ownerStateSimulationTickGaps":1281132,"ownerStateIntervalP50P95P99MaxUs":[16755,501721,504240,514767],"worldApplyP50P95P99MaxUs":[6,9,12,377],
+      "queueHighWater":{"reliable":3,"independentUnreliable":2,"received":10,"inFlight":2,"retainedBytes":9559},
+      "botPumpIntervalP50P95P99MaxMs":[2.05,3.6,4.15,6.713626],"botPumpDurationP50P95P99MaxMs":[1.0,2.55,3.1,5.652916],
+      "serverCpuCores":0.450784,"serverRssHighWaterBytes":235380736,"serverManagedHeapHighWaterBytes":102116264,"serverAllocatedBytes":2257562528,"serverGc012":[45,4,0],"botCpuMilliseconds":317530,"botRssHighWaterBytes":737726464,"botManagedHeapHighWaterBytes":651457088,"cleanRetirement":true
+    },
+    {
+      "scenario":"mixed-chaos-50","seed":130363,"warmupSeconds":60,"durationMilliseconds":1800378,"participantsStartEnd":[50,50],"connectionLifetimes":51,"successfulReconnects":1,"freshApplicationProofLifetimes":51,
+      "udpClientToServerBytes":2598494877,"udpServerToClientBytes":11840522134,"datagramsClientToServer":12598183,"datagramsServerToClient":55659190,"ackBytesClientToServer":199163648,"ackBytesServerToClient":219778880,"retransmittedUdpBytes":32768892,
+      "authorityDurationP50P95P99MaxUs":[708,781,923,1568],"authorityIntervalP50P95P99MaxUs":[16737,17801,17999,22633],"authorityLatenessP50P95P99MaxUs":[856,1512,1642,13057],"deadlineMisses":0,
+      "replicationWork":{"attempts":437455188,"deliveries":45841130,"immediate":11119283,"near":34715495,"far":6352,"noPayload":177598398,"cadenceDeferrals":214014952,"transportDeferrals":642,"capacityDeferrals":66,"outstandingHighWater":128},
+      "syntheticInputSamples":71926,"syntheticInputHz":39.959,"commandsSubmittedCompleted":[127485,127485],"commandLatencyP50P95P99MaxUs":[5246,10151,11750,42246],
+      "ownerStatesReceivedApplied":[3043173,3043173],"ownerStateSimulationTickGaps":2620865,"ownerStateIntervalP50P95P99MaxUs":[16690,19733,450274,5575331],"worldApplyP50P95P99MaxUs":[6,15,15,1192],
+      "queueHighWater":{"reliable":5,"independentUnreliable":6,"received":64,"inFlight":2,"retainedBytes":20846},
+      "behavior":{"movementAccepted":53899,"jumpsAcceptedRejected":[13951,3944],"globalChatSubmittedObserved":[17780,889000],"nonsenseInputsCommands":[50,0],"swordPickupEquipDrop":[1,1,1],"distinctChunks":2043,"chunkCrossings":16068},
+      "botPumpIntervalP50P95P99MaxMs":[2.4,6.35,7.3,16.381479],"botPumpDurationP50P95P99MaxMs":[1.35,5.3,6.25,15.326199],
+      "serverCpuCores":0.517252,"serverRssHighWaterBytes":239706112,"serverManagedHeapHighWaterBytes":102795080,"serverAllocatedBytes":5866669216,"serverGc012":[119,11,2],"botCpuMilliseconds":1156630,"botRssHighWaterBytes":800821248,"botManagedHeapHighWaterBytes":690642536,"botAllocatedBytes":2348885432,"botGc012":[47,8,1],"cleanRetirement":true
+    }
+  ],
+  "exportedOnlineCanary": {
+    "composition": "one dedicated authority + eight ClientOnly bots + two separately running freshly exported Online clients",
+    "seed": 130363,
+    "warmupSeconds": 60,
+    "durationMilliseconds": 300032,
+    "serverGeneration": 1,
+    "participantsStartEnd": [10,10],
+    "applicationLifetimes": 11,
+    "serverUdpClientToServerBytes": 32705299,
+    "serverUdpServerToClientBytes": 102936559,
+    "authorityDurationP50P95P99MaxUs": [104,132,138,1915],
+    "authorityLatenessP50P95P99MaxUs": [554,1071,1101,1257],
+    "alice": {"healthy":true,"applicationSessionEpoch":10187485331750190059,"frames":43506,"frameIntervalP50P95P99MaxUs":[6899,6920,6925,10539],"frameDurationP50P95P99MaxUs":[1119,2049,2338,5875],"inputSamplesResolutionsCommands":[2,2,2],"commandLatencyP50P95P99MaxUs":[13792,13814,13814,13814],"worldApplyP50P95P99MaxUs":[22,50,73,430],"uiApplyP50P95P99MaxUs":[733,931,1009,1047],"presentationP50P95P99MaxUs":[1081,1938,2090,5771],"actorRootsCurrentHighWater":[8,11],"nameplatesCurrentHighWater":[8,11],"overheadCurrentHighWater":[0,1],"chunksCurrentHighWater":[9,9],"actorCreatesUpdatesRetires":[122,36816,114],"rssHighWaterBytes":331141120,"managedHeapHighWaterBytes":51458576,"allocatedBytes":2706999744,"gc012":[55,40,1]},
+    "bob": {"healthy":true,"applicationSessionEpoch":15999111899626680837,"frames":43505,"frameIntervalP50P95P99MaxUs":[6899,6919,6929,11441],"frameDurationP50P95P99MaxUs":[1172,2206,2670,5082],"inputSamplesResolutionsCommands":[2,2,2],"commandLatencyP50P95P99MaxUs":[13801,13822,13822,13822],"worldApplyP50P95P99MaxUs":[22,51,77,279],"uiApplyP50P95P99MaxUs":[708,890,990,1007],"presentationP50P95P99MaxUs":[1137,2064,2357,5012],"actorRootsCurrentHighWater":[8,11],"nameplatesCurrentHighWater":[8,11],"overheadCurrentHighWater":[0,1],"chunksCurrentHighWater":[9,9],"actorCreatesUpdatesRetires":[117,36664,109],"rssHighWaterBytes":332107776,"managedHeapHighWaterBytes":51068000,"allocatedBytes":2699593576,"gc012":[55,35,1]},
+    "serverProcess": {"cpuCores":0.086257,"rssHighWaterBytes":228397056,"managedHeapHighWaterBytes":75725760,"allocatedBytes":386923608,"gc012":[9,2,1]},
+    "cleanFinalParticipantsAndSessions": [0,0],
+    "healthy": true
+  },
+  "serverPerformanceProfileV1": {
+    "authenticatedScope": "exact canonical revision/hash after deployment trust, fenced by application realm/session epoch",
+    "informational": ["SimulationFrequencyHz", "NetworkServiceCadenceHz", "expected OwnerState cadence", "expected Immediate/Near/Far delivery cadence"],
+    "hardServerEnforced": ["MaximumInputHz", "bounded burst/window rule"],
+    "stockClientRecommendations": ["RecommendedInputHz", "interpolation buffer hint"],
+    "negotiatedProtocolInstead": ["protocol/compression requirement where it is a wire capability"],
+    "neverInclude": ["executable policy", "arbitrary script", "render FPS requirement", "required key bindings", "private capacity", "exact-arrival promise"],
+    "consent": "Hard policy does not require user consent. Performance recommendations are not F0.3c control/camera preferences and must not silently override user-owned controls.",
+    "maximumInputEnforcement": "Server-owned per-control-session monotonic token bucket or exact fixed window with a small explicit burst, saturating counters, session/control-epoch fencing, and retirement reset.",
+    "implementedInPf25": false
+  },
+  "verification": {
+    "focusedPf25": "PASS: generation=1 bots=8 nativeClients=2 seed=130363 udp=1605897/5056640 lifetimes=11 reconciled=true retired=true",
+    "longExportedPf25": "PASS: generation=1 bots=8 nativeClients=2 seed=130363 udp=26226311/83525524 lifetimes=11 reconciled=true retired=true",
+    "networkTests": "PASS",
+    "replicationTests": "PASS",
+    "clientAndApplicationTests": "PASS",
+    "pf2AccountingReconciliation": true,
+    "fullCanonicalReleaseAtImplementationCommit": "PASS repository verification",
+    "exportsAndNativeComposition": "PASS SinglePlayer/Online/Complete and F0.7/F0.8 native gates",
+    "worktreeAtClosure": "clean after evidence commit"
+  }
+}

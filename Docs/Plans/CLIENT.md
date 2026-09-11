@@ -2687,8 +2687,9 @@ UI defensive assurance: publication/lifetime/parser/native boundaries      CLOSE
         |
 PF0/PF1 candidate + real headless/mixed exported-client swarm           CLOSED
 PF2 first-class wire accounting + explanatory baselines                 CLOSED
-PF2.5 replication ownership reconciliation + PF3 observability            NEXT
-PF3+ cadence/tuning/ObjectScript/human testing                             OPEN
+PF2.5 replication ownership reconciliation + PF3 observability          CLOSED
+PF3 cadence/performance policy                                             NEXT
+PF4+ tuning/ObjectScript/human testing                                     OPEN
         |
         v
 repository generalization / extraction readiness

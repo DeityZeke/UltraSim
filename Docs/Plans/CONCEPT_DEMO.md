@@ -1751,8 +1751,8 @@ then close:
     F0.8 final composition/parity matrix                                CLOSED
     PF0 feature-complete candidate / PF1 real bot + exported swarm      CLOSED
     PF2 first-class wire accounting + explanatory baselines             CLOSED
-    PF2.5 replication ownership reconciliation + PF3 observability      NEXT
-    PF3 cadence/performance policy                                      OPEN
+    PF2.5 replication ownership reconciliation + PF3 observability      CLOSED
+    PF3 cadence/performance policy                                      NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

@@ -1554,9 +1554,12 @@ participant construction despite advertising additional capacity. The repaired c
 50-participant regression make the configured `1..64` Direct Connect profile internally coherent.
 PF2 later invalidated that candidate after sustained real-client movement reproduced an airborne
 fixed-point overflow behind rejected combined collision motion. The repaired pre-freeze candidate
-is `fdb468698d07ccafa17e1dcc51fc1546b26c9fee`: independently valid vertical motion survives an
+was `fdb468698d07ccafa17e1dcc51fc1546b26c9fee`: independently valid vertical motion survives an
 outside/blocked horizontal component, and unrepresentable vertical integration takes bounded Game
-recovery rather than escaping as an authority fault.
+recovery rather than escaping as an authority fault. PF2.5 then found that a locally rejected
+Server Monitor request was cleared rather than retained for retry. The repaired current candidate
+is `5863c22cf92112281dfd4395b1fea7d8f1143b2e`; one-shot Inventory/Monitor requests now survive
+client queue pressure and the monitor case has a permanent regression.
 
 Entry:
 
@@ -1628,7 +1631,7 @@ Close when:
 
 ## PF2.5 / P0.5A — ownership reconciliation and PF3 observability
 
-**Status: implementation/evidence in progress.** This checkpoint keeps the selected production
+**Status: CLOSED** at `5863c22cf92112281dfd4395b1fea7d8f1143b2e`. This checkpoint keeps the selected production
 owner and all shipping policy unchanged while making the PF2 result explainable end to end. The
 accepted decision is Option A: retain the single composed `ChunkPublication` owner for all current
 mutable public state through Concept Demo freeze. Terrain/frozen structure remains WorldPack;
@@ -1640,6 +1643,12 @@ snapshots. `Off`, `Basic`, and `Detailed` are explicit; detailed recording intro
 message or timestamp. The full routing/provenance audit, timing vocabulary, alternative-profile
 readiness, and proposed PF3 `ServerPerformanceProfile/v1` contract are in
 [`PF2_5_REPLICATION_RECONCILIATION.md`](PF2_5_REPLICATION_RECONCILIATION.md).
+
+Permanent long-run evidence lives in
+`_Benchmarks/Baselines/concept-demo-pf2.5-replication-reconciliation-pf3-observability-2026-09-11.json`.
+It records unchanged-cadence 50-client quiet/moving/crowd measurements, a 30-minute mixed-chaos
+soak, a five-minute 8-bot + 2-exported-Online gate, exact PF2 message-ID attribution, the targeted
+three-profile semantic-shape comparison, telemetry overhead, and clean retirement.
 
 Close when:
 
@@ -1816,8 +1825,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 9. Build the real headless Network bot client and mixed exported-client gate. **CLOSED — PF1**
 10. Add first-class wire/per-message accounting. **CLOSED — PF2**
 11. Establish high-performance quiet/moving/crowd baselines. **CLOSED — PF2**
-12. Reconcile current-game replication ownership and complete PF3 observability. **NEXT — PF2.5**
-13. Decouple render FPS from input submission cadence. **PF3**
+12. Reconcile current-game replication ownership and complete PF3 observability. **CLOSED — PF2.5**
+13. Decouple render FPS from input submission cadence. **NEXT — PF3**
 14. Define/advertise/enforce the bounded Server Performance Profile.
 15. Run mismatched-cadence correctness matrix.
 16. Evaluate input/owner/public cadence reductions.

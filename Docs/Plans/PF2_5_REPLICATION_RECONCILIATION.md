@@ -1,10 +1,13 @@
 # PF2.5 / P0.5A — Replication Ownership Reconciliation and PF3 Observability
 
-**Status:** implementation and long-run evidence in progress on the accepted PF2 base
-`6f0fa93fac1d13d30aeacc9af712c03f982f01d6`. The repaired pre-freeze candidate remains
-`fdb468698d07ccafa17e1dcc51fc1546b26c9fee` unless this checkpoint finds a product-correctness
-defect. This checkpoint changes diagnostics only: no public owner, cadence, AOI, lane, wire format,
-aggregation, compression, or participant bound changes.
+**Status: CLOSED** at implementation commit
+`5863c22cf92112281dfd4395b1fea7d8f1143b2e`, from accepted PF2 base
+`6f0fa93fac1d13d30aeacc9af712c03f982f01d6`. PF2.5 found one product-correctness defect, so the
+repaired pre-freeze candidate advances from `fdb468698d07ccafa17e1dcc51fc1546b26c9fee` to the PF2.5
+implementation commit. A locally rejected Server Monitor command had incorrectly cleared the
+one-shot request; the request now survives client queue pressure and has a permanent regression.
+No public owner, cadence, AOI, lane, wire format, aggregation, compression, or participant bound
+changed.
 
 ## Decision
 
@@ -219,3 +222,66 @@ measurement seams but does not add this policy.
 Never place executable policy, arbitrary script, client render FPS, required user key bindings,
 private deployment capacity, or a promise of exact packet arrival time in this profile.
 
+## Accepted measured evidence
+
+Permanent machine-readable evidence is in
+`_Benchmarks/Baselines/concept-demo-pf2.5-replication-reconciliation-pf3-observability-2026-09-11.json`.
+All long runs used Release, one ServerOnly dedicated authority, 50 real ClientOnly clients, seed
+`130363`, a 60-second warmup, unchanged profile/cadence/AOI/packet policy, and exact synchronized
+measurement windows.
+
+| Scenario | Measured | Server authority duration p50/p95/p99/max | UDP payload client→server / server→client | Client command→semantic completion p50/p95/p99/max | Bot pump interval p50/p95/p99/max |
+| --- | ---: | --- | ---: | --- | --- |
+| Quiet | 300.374 s | 4/4/5/70 µs | 132,088 / 132,088 B | not applicable | 1.30/1.35/1.45/4.127 ms |
+| Moving | 600.294 s | 911/1,010/1,067/1,601 µs | 564,651,494 / 2,323,965,273 B | 4.800/8.850/10.412/33.041 ms | 2.00/4.25/5.70/9.579 ms |
+| Crowd | 600.288 s | 820/875/1,040/1,593 µs | 441,832,966 / 1,917,817,447 B | 4.810/7.941/8.548/18.419 ms | 2.05/3.60/4.15/6.714 ms |
+| Mixed chaos | 1,800.378 s | 708/781/923/1,568 µs | 2,598,494,877 / 11,840,522,134 B | 5.246/10.151/11.750/42.246 ms | 2.40/6.35/7.30/16.381 ms |
+
+The command latency rows are medians of the 50 independent per-client distributions; `max` is the
+maximum observed client value. They end only when an applied OwnerState proves
+`LastProcessedCommandSequence >= submitted`, never at transport ACK. Moving completed all 17,300
+timed commands; Crowd all 62,200; mixed chaos all 127,485. No timing-ring capacity drop occurred.
+
+The shared authority tick is the only simulation clock. Each remote application and its Network
+owner are progressed asynchronously between authority ticks; their per-application stage times
+therefore overlap and must not be added to authority-tick time as though they formed one sequential
+whole-tick breakdown. The snapshots expose both domains instead of publishing a false sum.
+
+Current unreliable framing permits one frame per data datagram. Consequently frames/datagram is
+exactly one in the exercised comparison path and no multi-frame aggregation metric is active.
+PF2.5 records exact payload totals/counts and listener maxima, but does not claim a payload-size
+p50/p95 histogram that was not measured. Listener timing snapshots are cumulative service facts;
+the top-level physical totals above are exact synchronized-window deltas.
+
+The 300-second exported Online gate used eight headless clients plus two separately running exported
+Online processes on one generation. Alice/Bob rendered 43,506/43,505 frames with frame intervals
+p50 6.899 ms and p99 6.925/6.929 ms. Presentation updates were p50 1.081/1.137 ms and p99
+2.090/2.357 ms. Both retained eight actor roots/nameplates at the end (high-water eleven), nine
+rendered chunks, real Chat and Inventory UI application, and cleanly retired all eleven application
+lifetimes. The headless native driver has no OS device events; it deliberately submitted one
+ordinary move and stop pair through the engine-neutral input path after the measurement reset, so
+physical-input samples, resolutions, commands and semantic completions are each two.
+
+The 30-minute soak retained 50 active participants, completed one reconnect with 51 fresh
+application/content proofs, processed 71,926 synthetic input samples and 127,485 semantic commands,
+and retired all sessions cleanly. Server CPU averaged 0.517 core with 239,706,112-byte RSS
+high-water; the bot process used 1,156.63 CPU-seconds and 800,821,248-byte measured RSS high-water.
+No authority deadline was missed and counters remained monotonic/reconciled.
+
+The targeted comparison is a semantic-shape comparison through the maintained profile adapters,
+not proof that the alternatives can replace the current product client. At aggregation cap one,
+all Off/Detailed variants converged and produced identical traffic. Off versus the pre-instrumented
+base remained within ordinary run noise. Detailed adds timestamp-read cost: representative p95
+whole-flow changes were 0.974→1.084 ms for dense Maintained, 0.679→0.758 ms for sparse Maintained,
+0.679→0.761 ms for dense Dirty Entity, 2.812→2.616 ms for sparse Chunk Publication, 0.999→1.090 ms
+for dense Chunk Publication, and 0.558→0.634 ms for sparse Dirty Entity. Detailed is therefore an
+explicit benchmark/admin mode; `Off` remains the product default. Focused warmed gates prove zero
+managed allocation for histogram recording, reset, and detailed Network/Game observations.
+
+## Closure decision
+
+Option A is reaffirmed. The alternatives still demonstrate useful workload-specific cost shapes,
+but changing the current product would require the shared public identity/convergence/proof seam
+described above. Current evidence does not justify taking that pre-freeze correctness and lifecycle
+risk. PF3 is next: implement authenticated finite performance policy and decouple render sampling
+from bounded input submission, using this evidence as the unchanged before-baseline.
