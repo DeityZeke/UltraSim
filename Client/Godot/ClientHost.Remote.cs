@@ -844,6 +844,10 @@ public partial class ClientHost
             snapshot.RenderedChunks == 0 || snapshot.TerrainTriangles == 0 ||
             snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
             snapshot.Actors.ActiveActors < 2 || snapshot.Actors.AnimatedActors == 0 ||
+            snapshot.Actors.ActiveActors >
+                snapshot.Session.PublicPresentation.Metadata.CurrentRecords ||
+            snapshot.Actors.VisibleNameplates > snapshot.Actors.ActiveActors ||
+            snapshot.Actors.VisibleOverheadLabels > snapshot.Actors.ActiveActors ||
             snapshot.ActorResources.RealizationFailures != 0 ||
             snapshot.Session.Content.ProofRetained ||
             snapshot.Session.Playable.CommandRetainedLocally)
