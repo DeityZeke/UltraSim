@@ -29,6 +29,7 @@ var tests = new (string Name, Action Body)[]
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
     ("ProofBackpressureMustNotReapplyUiOperation", ProofBackpressureMustNotReapplyUiOperation),
     ("ProofBackpressureMustSurviveUiBridgeReplacement", ProofBackpressureMustSurviveUiBridgeReplacement),
+    ("BridgeReplacementRetainsSessionProjectionAndActions", BridgeReplacementRetainsSessionProjectionAndActions),
     ("ReentrantBridgePumpCannotRejectSuccessfulOpen", ReentrantBridgePumpCannotRejectSuccessfulOpen),
     ("RejectedCallbackBridgeDisposeIsAtomic", RejectedCallbackBridgeDisposeIsAtomic),
     ("LocalUiCapacityMustNotFaultAuthority", LocalUiCapacityMustNotFaultAuthority),
@@ -95,6 +96,65 @@ static void ProofBackpressureMustNotReapplyUiOperation()
 }
 
 static void ProofBackpressureMustSurviveUiBridgeReplacement()
+{
+    LocalPlayableSessionLimits limits = LocalPlayableSessionLimits.Default with
+    {
+        UiOperationCapacity = 2,
+        UiProofCapacity = 1,
+    };
+    var channel = new LocalQueuedUiChannel(limits);
+    using var port = new LocalQueuedUiSemanticPort(channel, maximumViews: 2);
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    int detachments = 0;
+    var original = new LocalQueuedUiClient(channel, client, () => detachments++);
+
+    CompiledUiDefinition definition = InventoryUi.Definition;
+    var cacheKey = new UiDefinitionCacheKey(
+        "ui-proof-test",
+        "inventory",
+        1,
+        definition.Key,
+        definition.Version,
+        definition.Hash);
+    UiViewInstanceId first = port.OpenView(new UiOpenView(
+        cacheKey, definition, new UiModel(definition), sequence: 1));
+    UiViewInstanceId second = port.OpenView(new UiOpenView(
+        cacheKey, definition, new UiModel(definition), sequence: 1));
+    int actions = 0;
+    port.BindActions(second, _ => actions++);
+
+    // Nothing consumes authority proofs in this fixture until the test explicitly does so.
+    // Capacity one therefore guarantees that the second rendered open remains completion debt.
+    Equal(1, original.Pump(2));
+    Equal(2, renderer.Created);
+    Equal(2, channel.Pending);
+    original.Dispose();
+    Equal(1, detachments);
+
+    using var replacement = new LocalQueuedUiClient(channel, client, () => detachments++);
+    Equal(0, replacement.Pump(2));
+    Equal(2, renderer.Created);
+
+    True(channel.TryTakeProof(out LocalUiProof firstProof));
+    Equal(first, firstProof.Instance);
+    channel.ReleaseProof(firstProof);
+    Equal(1, replacement.Pump(2));
+    Equal(2, renderer.Created);
+    True(channel.TryTakeProof(out LocalUiProof secondProof));
+    Equal(second, secondProof.Instance);
+    channel.ReleaseProof(secondProof);
+
+    Equal(2UL, channel.Applied);
+    Equal(0UL, channel.Rejected);
+    Equal(0, channel.Pending);
+    Equal(2, client.OpenViewCount);
+    client.SubmitAction(second, InventoryUi.Close);
+    port.Pump();
+    Equal(1, actions);
+}
+
+static void BridgeReplacementRetainsSessionProjectionAndActions()
 {
     LocalPlayableSessionLimits limits = LocalPlayableSessionLimits.Default with
     {
