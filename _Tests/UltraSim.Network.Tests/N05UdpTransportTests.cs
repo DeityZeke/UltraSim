@@ -45,6 +45,20 @@ internal static class N05UdpTransportTests
         True(snapshot.ClientDatagrams.Received > 0 && snapshot.ServerDatagrams.Received > 0);
         True(snapshot.ClientDatagrams.SentBytes > 0 && snapshot.ServerDatagrams.SentBytes > 0);
         True(snapshot.ClientDatagrams.ReceivedBytes > 0 && snapshot.ServerDatagrams.ReceivedBytes > 0);
+        NetworkTrafficSnapshot clientTraffic = session.Client.GetTrafficSnapshot();
+        NetworkTrafficSnapshot serverTraffic = session.Server.GetTrafficSnapshot();
+        Equal(1UL, clientTraffic.SumMessages().MessagesSent);
+        Equal(1UL, serverTraffic.SumMessages().MessagesSent);
+        Equal(1UL, clientTraffic.SumMessages().MessagesReceived);
+        Equal(1UL, serverTraffic.SumMessages().MessagesReceived);
+        True(clientTraffic.Transport.AcknowledgementDatagramsSent > 0);
+        True(serverTraffic.Transport.AcknowledgementDatagramsSent > 0);
+        Equal(snapshot.ClientDatagrams.UdpPayload.PayloadBytesSent,
+            snapshot.ClientDatagrams.SentBytes);
+        True(snapshot.ClientDatagrams.UdpPayload.PayloadBytesSent >=
+            clientTraffic.Transport.SecureUdpPayloadBytesSent);
+        True(snapshot.ServerDatagrams.UdpPayload.PayloadBytesSent >=
+            serverTraffic.Transport.SecureUdpPayloadBytesSent);
         Equal(UdpProtocolSessionState.Established, snapshot.State);
     }
 
@@ -125,6 +139,16 @@ internal static class N05UdpTransportTests
         Equal(UdpProtocolSessionState.Established, alive.State);
         True(alive.Client.ReceivedPackets + alive.Server.ReceivedPackets > received,
             "Authenticated keepalive traffic did not refresh the idle lifetime.");
+        NetworkTransportTrafficSnapshot clientTraffic =
+            session.Client.GetTrafficSnapshot().Transport;
+        NetworkTransportTrafficSnapshot serverTraffic =
+            session.Server.GetTrafficSnapshot().Transport;
+        True(clientTraffic.KeepAliveDatagramsSent > 0);
+        True(serverTraffic.KeepAliveDatagramsSent > 0);
+        Equal(clientTraffic.KeepAliveDatagramsSent,
+            serverTraffic.KeepAliveDatagramsReceived);
+        Equal(serverTraffic.KeepAliveDatagramsSent,
+            clientTraffic.KeepAliveDatagramsReceived);
 
         session.SuppressOutboundDatagramsForTesting(true);
         clock.Advance(25);

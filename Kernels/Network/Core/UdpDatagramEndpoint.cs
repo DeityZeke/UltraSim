@@ -81,7 +81,43 @@ public readonly record struct UdpDatagramEndpointSnapshot(
     int MaximumSentDatagramBytes,
     int MaximumReceivedDatagramBytes,
     bool IsOpen,
-    SocketError LastSocketError);
+    SocketError LastSocketError)
+{
+    /// <summary>
+    /// Exact UDP datagram payload totals observed at the socket transport boundary.
+    /// These values exclude IP/UDP and link-layer headers.
+    /// </summary>
+    public UdpPayloadTrafficSnapshot UdpPayload => new(
+        Sent, Received, SentBytes, ReceivedBytes);
+}
+
+/// <summary>Unambiguous physical UDP payload accounting; no IP/UDP header estimate is included.</summary>
+public readonly record struct UdpPayloadTrafficSnapshot(
+    ulong DatagramsSent,
+    ulong DatagramsReceived,
+    ulong PayloadBytesSent,
+    ulong PayloadBytesReceived)
+{
+    public UdpPayloadTrafficSnapshot Add(in UdpPayloadTrafficSnapshot other) => new(
+        Add(DatagramsSent, other.DatagramsSent),
+        Add(DatagramsReceived, other.DatagramsReceived),
+        Add(PayloadBytesSent, other.PayloadBytesSent),
+        Add(PayloadBytesReceived, other.PayloadBytesReceived));
+
+    public static UdpPayloadTrafficSnapshot Delta(
+        in UdpPayloadTrafficSnapshot start,
+        in UdpPayloadTrafficSnapshot end) => new(
+        Difference(start.DatagramsSent, end.DatagramsSent),
+        Difference(start.DatagramsReceived, end.DatagramsReceived),
+        Difference(start.PayloadBytesSent, end.PayloadBytesSent),
+        Difference(start.PayloadBytesReceived, end.PayloadBytesReceived));
+
+    private static ulong Difference(ulong start, ulong end) => end >= start
+        ? end - start
+        : throw new InvalidOperationException("A cumulative UDP payload counter moved backwards.");
+    private static ulong Add(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
 
 internal interface IUdpKnownDatagramHandler
 {

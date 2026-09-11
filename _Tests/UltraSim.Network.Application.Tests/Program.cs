@@ -31,6 +31,7 @@ internal static class Program
         }
         var tests = new (string Name, Action Body)[]
         {
+            ("GameTrafficClassificationCoversEveryProductionMessage", GameTrafficClassificationCoversEveryProductionMessage),
             ("GameProtocolReservationEstimateMatchesConstructedPeers", GameProtocolReservationEstimateMatchesConstructedPeers),
             ("RemoteWorkflowMatchesOfflineDirect", RemoteWorkflowMatchesOfflineDirect),
             ("LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect", LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect),
@@ -163,6 +164,22 @@ static void GameProtocolReservationEstimateMatchesConstructedPeers()
             $"reliable_budget_per_peer={limits.ReliablePayloadByteCapacity}B " +
             $"received_budget_per_peer={limits.ReceivedPayloadByteCapacity}B");
     }
+}
+
+static void GameTrafficClassificationCoversEveryProductionMessage()
+{
+    True(GameProtocolTrafficClassification.IsComplete(UltraSimGameProtocol.Manifest));
+    var seen = new bool[GameProtocolTrafficClassification.FamilyCount];
+    foreach (NetworkMessageDescriptor descriptor in UltraSimGameProtocol.Manifest.Messages)
+    {
+        True(GameProtocolTrafficClassification.TryClassify(
+            descriptor.Id, out GameProtocolTrafficFamily family));
+        seen[(int)family] = true;
+    }
+    True(seen.All(static value => value));
+    False(GameProtocolTrafficClassification.TryClassify(
+        new NetworkMessageId(ushort.MaxValue), out _));
+    Equal(46, UltraSimGameProtocol.Manifest.Count);
 }
 
 static void RemoteWorkflowMatchesOfflineDirect()

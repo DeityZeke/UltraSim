@@ -86,8 +86,13 @@ internal static class F03aDirectConnectTests
         HostedUdpAdmissionSnapshot server = host.GetSnapshot();
         True(server.DeploymentDiscoveryRequests != 0);
         True(server.DeploymentAnnouncementsSent != 0);
+        True(client.TryGetTrafficSnapshot(out HostedUdpConnectionTrafficSnapshot liveTraffic));
         client.BeginDisconnect();
         PumpUntil(host, client, ClientDirectConnectState.Closed);
+        True(client.TryGetTrafficSnapshot(out HostedUdpConnectionTrafficSnapshot finalTraffic));
+        Equal(liveTraffic.Connection, finalTraffic.Connection);
+        True(finalTraffic.UdpPayload.PayloadBytesSent >= liveTraffic.UdpPayload.PayloadBytesSent);
+        True(finalTraffic.UdpPayload.PayloadBytesReceived >= liveTraffic.UdpPayload.PayloadBytesReceived);
     }
 
     private static void DirectConnectReconnectUsesPinAndFreshSessionEpoch()

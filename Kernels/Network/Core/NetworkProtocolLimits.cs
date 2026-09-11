@@ -102,6 +102,8 @@ public readonly record struct NetworkProtocolLimits(
             NetworkReadySelectionMetadata.EstimateBytes(
                 MaximumReliableMessages, MaximumIndependentUnreliableMessages) +
             (long)protocolMessageCount * NetworkUnreliableStreamMetadata.EstimatedBytes +
+            (long)(protocolMessageCount + NetworkLaneContracts.Count) *
+                NetworkTrafficCounterMetadata.EstimatedBytes +
             (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
                 sizeof(ulong) * 2 + sizeof(byte) + sizeof(int)) +
             (long)MaximumReceivedMessages * (NetworkDeliveredMessageMetadata.EstimatedBytes + sizeof(int) * 2) +
@@ -142,6 +144,8 @@ public readonly record struct NetworkProtocolLimits(
             NetworkReadySelectionMetadata.EstimateBytes(
                 MaximumReliableMessages, MaximumIndependentUnreliableMessages) +
             (long)manifest.Count * NetworkUnreliableStreamMetadata.EstimatedBytes +
+            (long)(manifest.Count + NetworkLaneContracts.Count) *
+                NetworkTrafficCounterMetadata.EstimatedBytes +
             (long)(manifest.Count + 1) * sizeof(int) +
             (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
                 sizeof(ulong) * 2 + sizeof(byte) + sizeof(int)) +
@@ -227,7 +231,9 @@ internal static class NetworkSentPacketIndexMetadata
 
 internal static class NetworkOutgoingMessageMetadata
 {
-    internal const int EstimatedBytes = 32;
+    // Includes the manifest slot retained for allocation-free per-message
+    // accounting. The runtime record is eight-byte aligned.
+    internal const int EstimatedBytes = 40;
 }
 
 internal static class NetworkReadySelectionMetadata
@@ -247,6 +253,11 @@ internal static class NetworkReadySelectionMetadata
 internal static class NetworkUnreliableStreamMetadata
 {
     internal const int EstimatedBytes = 56;
+}
+
+internal static class NetworkTrafficCounterMetadata
+{
+    internal const int EstimatedBytes = sizeof(ulong) * 8;
 }
 
 internal static class NetworkReassemblyMetadata

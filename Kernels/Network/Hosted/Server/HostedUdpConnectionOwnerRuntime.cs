@@ -540,6 +540,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                     "The hosted application factory returned no owner application.");
             CachedProtocolSnapshot = Peer.GetSnapshot();
             CachedDatagramSnapshot = Endpoint.GetSnapshot();
+            CachedTrafficSnapshot = Peer.GetTrafficSnapshot();
         }
 
         internal OwnerWorker Worker { get; }
@@ -549,6 +550,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         internal IHostedUdpSessionApplication Application { get; }
         internal NetworkProtocolSnapshot CachedProtocolSnapshot { get; private set; }
         internal UdpDatagramEndpointSnapshot CachedDatagramSnapshot { get; private set; }
+        internal NetworkTrafficSnapshot CachedTrafficSnapshot { get; private set; }
         internal bool IsCommitted => Volatile.Read(ref _committed) != 0;
         internal bool StopRequested => Volatile.Read(ref _stopRequested) != 0;
         internal bool StoppedOnOwner => Volatile.Read(ref _stoppedOnOwner) != 0;
@@ -589,6 +591,14 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                 protocol = CachedProtocolSnapshot;
                 datagrams = CachedDatagramSnapshot;
             }
+        }
+
+        internal NetworkTrafficSnapshot CopyTrafficSnapshot()
+        {
+            if (!StoppedOnOwner &&
+                Worker.TryCopyTraffic(this, out NetworkTrafficSnapshot? traffic))
+                return traffic!;
+            lock (this) return CachedTrafficSnapshot;
         }
 
         internal void PublishListenerCommitResult(
@@ -756,6 +766,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         internal void DisposeOnOwner()
         {
             List<Exception>? failures = null;
+            lock (this) CachedTrafficSnapshot = Peer.GetTrafficSnapshot();
             try { Application.Dispose(); }
             catch (Exception exception) { AddFailure(ref failures, exception); }
             try { Peer.Dispose(); }
@@ -955,6 +966,8 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         private SecurityEpoch _requestEpoch;
         private byte[]? _requestMaster;
         private HostedUdpOwnedTransport? _requestResult;
+        private HostedUdpOwnedTransport? _trafficRequest;
+        private NetworkTrafficSnapshot? _trafficResult;
         private int _requestState;
         private int _stop;
         private int _activeCount;
@@ -1027,6 +1040,37 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
 
         internal void Wake() => _wake.Set();
 
+        internal bool TryCopyTraffic(
+            HostedUdpOwnedTransport transport,
+            out NetworkTrafficSnapshot? traffic)
+        {
+            lock (_commandGate)
+            {
+                if (_requestState != 0 || Failure is not null || transport.StopRequested)
+                {
+                    traffic = null;
+                    return false;
+                }
+                _trafficRequest = transport;
+                _trafficResult = null;
+                _requestState = 3;
+                _wake.Set();
+                DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+                while (_requestState == 3 && Failure is null)
+                {
+                    TimeSpan remaining = deadline - DateTime.UtcNow;
+                    if (remaining <= TimeSpan.Zero || !Monitor.Wait(_commandGate, remaining))
+                        break;
+                }
+                traffic = _trafficResult;
+                bool copied = _requestState == 4 && traffic is not null;
+                _requestState = 0;
+                _trafficRequest = null;
+                _trafficResult = null;
+                return copied;
+            }
+        }
+
         internal void RequestStop()
         {
             Volatile.Write(ref _stop, 1);
@@ -1046,6 +1090,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                 while (Volatile.Read(ref _stop) == 0)
                 {
                     ProcessCreateRequest();
+                    ProcessTrafficRequest();
                     ulong now = _runtime._clock.Milliseconds;
                     int ingress = DrainIngress(now);
                     UpdateMaximum(ref _runtime._peakIngressTransfersPerPass, ingress);
@@ -1071,6 +1116,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                     _wake.WaitOne(1);
                 }
                 ProcessCreateRequest(cancel: true);
+                ProcessTrafficRequest(cancel: true);
             }
             catch (Exception exception)
             {
@@ -1129,6 +1175,33 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
             {
                 _requestResult = result;
                 _requestState = result is null ? -1 : 2;
+                Monitor.PulseAll(_commandGate);
+            }
+        }
+
+        private void ProcessTrafficRequest(bool cancel = false)
+        {
+            HostedUdpOwnedTransport? transport;
+            lock (_commandGate)
+            {
+                if (_requestState != 3) return;
+                transport = _trafficRequest;
+            }
+            NetworkTrafficSnapshot? result = null;
+            if (!cancel && transport is not null &&
+                transport.Connection.Slot < (uint)_transports.Length &&
+                ReferenceEquals(_transports[transport.Connection.Slot], transport))
+                result = transport.Peer.GetTrafficSnapshot();
+            lock (_commandGate)
+            {
+                // A cold diagnostic caller may time out and withdraw this
+                // request. A late snapshot must not publish into a later
+                // command lifetime that reused the shared command slot.
+                if (_requestState != 3 ||
+                    !ReferenceEquals(_trafficRequest, transport))
+                    return;
+                _trafficResult = result;
+                _requestState = result is null ? -1 : 4;
                 Monitor.PulseAll(_commandGate);
             }
         }

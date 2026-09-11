@@ -517,22 +517,42 @@ internal static class H02HostedUdpPromotionTests
         PumpUntilEstablished(host, client);
         ConnectionId retiredConnection = client.Connection;
         True(host.TryGetSession(retiredConnection, out HostedUdpProtocolSession? retained));
+        HostedUdpProtocolSession serverSession = retained!;
+        Equal(NetworkQueueStatus.Accepted,
+            client.Peer!.TryQueue(s_messageId, stackalloc byte[] { 1, 2, 3 }));
+        PumpUntilReceived(host, client, serverSession.Server);
+        HostedUdpServerConnectionTrafficSnapshot activeTraffic =
+            serverSession.GetTrafficSnapshot();
+        True(activeTraffic.UdpPayload.PayloadBytesReceived > 0);
+        True(activeTraffic.SecureProtocol.SumMessages().MessagesReceived > 0);
+        False(activeTraffic.IsFinalized);
         client.Dispose(); // Abrupt peer loss: no semantic detach reaches the host.
 
         clock.Milliseconds = 10_101;
         host.Pump();
-        Equal(UdpProtocolSessionState.Draining, retained!.State);
+        Equal(UdpProtocolSessionState.Draining, serverSession.State);
         host.Pump();
-        Equal(UdpProtocolSessionState.Closed, retained.State);
+        Equal(UdpProtocolSessionState.Closed, serverSession.State);
         Equal(0, host.SessionCount);
         HostedUdpAdmissionSnapshot retired = host.GetSnapshot();
         Equal(0, retired.Connections.Active);
         Equal(0, retired.Listener.RegisteredPaths);
+        True(host.TryGetRetiredTraffic(0,
+            out HostedUdpServerConnectionTrafficSnapshot finalizedTraffic));
+        Equal(retiredConnection, finalizedTraffic.Connection);
+        True(finalizedTraffic.IsFinalized);
+        True(finalizedTraffic.UdpPayload.PayloadBytesReceived >=
+            activeTraffic.UdpPayload.PayloadBytesReceived);
+        UdpPayloadTrafficSnapshot frozenPhysical = finalizedTraffic.UdpPayload;
+        NetworkTransportTrafficSnapshot frozenSecure = finalizedTraffic.SecureProtocol.Transport;
 
         using HostedUdpProtocolClient replacement = CreateClient(host, identity);
         PumpUntilEstablished(host, replacement);
         Equal(1, host.SessionCount);
         True(replacement.Connection != retiredConnection);
+        True(host.TryGetRetiredTraffic(0, out HostedUdpServerConnectionTrafficSnapshot stillFrozen));
+        Equal(frozenPhysical, stillFrozen.UdpPayload);
+        Equal(frozenSecure, stillFrozen.SecureProtocol.Transport);
     }
 
     private static HostedUdpAdmissionHost CreateHost(

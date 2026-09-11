@@ -30,6 +30,12 @@ public sealed class ConceptDemoContentDeployment : IDisposable
     public RemoteContentAuthorization Authorization { get; }
     public ContentDeploymentSnapshot Snapshot { get; }
 
+    /// <summary>
+    /// Returns cold HTTP response-body accounting. These bytes exclude HTTP/TCP/IP
+    /// framing and are deliberately separate from gameplay UDP accounting.
+    /// </summary>
+    public StaticContentHttpHostSnapshot GetHttpSnapshot() => _host.GetSnapshot();
+
     public static ConceptDemoContentDeployment Create(
         ApplicationRealmId realm,
         IPEndPoint endpoint)

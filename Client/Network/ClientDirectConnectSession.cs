@@ -99,6 +99,7 @@ public sealed class ClientDirectConnectSession : IDisposable
     private readonly byte[] _candidateKey = new byte[128];
     private HostedUdpDeploymentDiscoveryClient? _discovery;
     private HostedUdpProtocolClient? _transport;
+    private HostedUdpConnectionTrafficSnapshot? _finalTraffic;
     private ClientDirectConnectEndpoint _endpoint;
     private ClientTrustedDeployment? _priorTrust;
     private ClientDeploymentKeyFingerprint _candidateFingerprint;
@@ -129,6 +130,28 @@ public sealed class ClientDirectConnectSession : IDisposable
     public ClientDirectConnectState State
     {
         get { EnsureOperational(); return _state; }
+    }
+
+    /// <summary>
+    /// Copies the current real Hosted UDP connection accounting. This is a cold
+    /// diagnostic operation and is unavailable before a transport exists.
+    /// </summary>
+    public bool TryGetTrafficSnapshot(out HostedUdpConnectionTrafficSnapshot snapshot)
+    {
+        EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_transport is null)
+        {
+            if (_finalTraffic is HostedUdpConnectionTrafficSnapshot finalized)
+            {
+                snapshot = finalized;
+                return true;
+            }
+            snapshot = default;
+            return false;
+        }
+        snapshot = _transport.GetTrafficSnapshot();
+        return true;
     }
 
     public NetworkProtocolPeer? Peer
@@ -296,9 +319,8 @@ public sealed class ClientDirectConnectSession : IDisposable
         EnsureOwnerThread();
         if (_disposed) return;
         _discovery?.Dispose();
-        _transport?.Dispose();
+        DisposeTransport();
         _discovery = null;
-        _transport = null;
         CryptographicOperations.ZeroMemory(_candidateKey);
         _candidateKeyLength = 0;
         _state = ClientDirectConnectState.Closed;
@@ -442,9 +464,8 @@ public sealed class ClientDirectConnectSession : IDisposable
     private void Fail(ClientDirectConnectFailure failure, string detail)
     {
         _discovery?.Dispose();
-        _transport?.Dispose();
+        DisposeTransport();
         _discovery = null;
-        _transport = null;
         _failure = failure;
         _detail = detail;
         _state = ClientDirectConnectState.Failed;
@@ -452,17 +473,16 @@ public sealed class ClientDirectConnectSession : IDisposable
 
     private void CloseTransport()
     {
-        _transport?.Dispose();
-        _transport = null;
+        DisposeTransport();
         _state = ClientDirectConnectState.Closed;
     }
 
     private void ResetTransient()
     {
         _discovery?.Dispose();
-        _transport?.Dispose();
+        DisposeTransport();
         _discovery = null;
-        _transport = null;
+        _finalTraffic = null;
         CryptographicOperations.ZeroMemory(_candidateKey);
         _candidateKeyLength = 0;
         _endpoint = default;
@@ -475,6 +495,14 @@ public sealed class ClientDirectConnectSession : IDisposable
         _failure = ClientDirectConnectFailure.None;
         _detail = null;
         _state = ClientDirectConnectState.Idle;
+    }
+
+    private void DisposeTransport()
+    {
+        if (_transport is null) return;
+        _finalTraffic = _transport.GetTrafficSnapshot();
+        _transport.Dispose();
+        _transport = null;
     }
 
     private void EnsureOperational()

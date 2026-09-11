@@ -4,6 +4,7 @@ using UltraSim.Client.Core;
 using UltraSim.Client.Network;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
+using UltraSim.Network;
 
 internal static class BotMonotonicClock
 {
@@ -35,6 +36,13 @@ internal static class BotMonotonicClock
     internal static double TicksToFloatingMilliseconds(long ticks) =>
         ticks * 1_000d / Stopwatch.Frequency;
 }
+
+internal readonly record struct BotCumulativeTrafficSnapshot(
+    ConnectionId CurrentConnection,
+    ulong CurrentApplicationSessionEpoch,
+    int ApplicationLifetimes,
+    UdpPayloadTrafficSnapshot UdpPayload,
+    NetworkTrafficSnapshot? SecureProtocol);
 
 internal static class BotScenarioContract
 {
@@ -301,6 +309,31 @@ internal sealed class BotProcessTelemetrySampler : IDisposable
     internal long WorkingSetHighWaterBytes { get; private set; }
     internal double CpuMilliseconds { get; private set; }
     internal int Samples { get; private set; }
+    internal long WindowWorkingSetHighWaterBytes { get; private set; }
+    internal double WindowCpuMilliseconds { get; private set; }
+    internal int WindowSamples { get; private set; }
+    private double _windowCpuStart;
+    private bool _windowActive;
+
+    internal void BeginWindow(long now)
+    {
+        BotProcessSample sample = _source.ReadFresh();
+        _windowCpuStart = sample.CpuMilliseconds;
+        WindowCpuMilliseconds = 0;
+        WindowWorkingSetHighWaterBytes = sample.WorkingSetBytes;
+        WindowSamples = 1;
+        _windowActive = true;
+        WorkingSetHighWaterBytes = Math.Max(WorkingSetHighWaterBytes, sample.WorkingSetBytes);
+        CpuMilliseconds = sample.CpuMilliseconds;
+        Samples++;
+        _nextSample = checked(now + _intervalTicks);
+    }
+
+    internal void EndWindow(long now)
+    {
+        Sample(now, force: true);
+        _windowActive = false;
+    }
 
     internal void Sample(long now, bool force = false)
     {
@@ -310,6 +343,13 @@ internal sealed class BotProcessTelemetrySampler : IDisposable
         WorkingSetHighWaterBytes = Math.Max(WorkingSetHighWaterBytes, sample.WorkingSetBytes);
         CpuMilliseconds = sample.CpuMilliseconds;
         Samples++;
+        if (_windowActive)
+        {
+            WindowWorkingSetHighWaterBytes = Math.Max(
+                WindowWorkingSetHighWaterBytes, sample.WorkingSetBytes);
+            WindowCpuMilliseconds = Math.Max(0, sample.CpuMilliseconds - _windowCpuStart);
+            WindowSamples++;
+        }
         _nextSample = checked(now + _intervalTicks);
     }
 
@@ -318,6 +358,59 @@ internal sealed class BotProcessTelemetrySampler : IDisposable
         if (_disposed) return;
         _source.Dispose();
         _disposed = true;
+    }
+}
+
+/// <summary>
+/// Fixed owner-local latency histogram for one measured bot-pump window. The
+/// 0.05 ms buckets cover 204.8 ms and the separate maximum preserves outliers.
+/// </summary>
+internal sealed class BotLatencyHistogram
+{
+    private const int BucketCount = 4_096;
+    private const double BucketMilliseconds = 0.05d;
+    private readonly ulong[] _buckets = new ulong[BucketCount];
+
+    internal ulong Count { get; private set; }
+    internal double MaximumMilliseconds { get; private set; }
+
+    internal void Clear()
+    {
+        Array.Clear(_buckets);
+        Count = 0;
+        MaximumMilliseconds = 0;
+    }
+
+    internal void RecordTicks(long ticks)
+    {
+        double milliseconds = BotMonotonicClock.TicksToFloatingMilliseconds(
+            Math.Max(0, ticks));
+        double scaled = Math.Floor(milliseconds / BucketMilliseconds);
+        int bucket = scaled >= BucketCount - 1
+            ? BucketCount - 1
+            : scaled <= 0
+                ? 0
+                : (int)scaled;
+        if (_buckets[bucket] != ulong.MaxValue) _buckets[bucket]++;
+        if (Count != ulong.MaxValue) Count++;
+        MaximumMilliseconds = Math.Max(MaximumMilliseconds, milliseconds);
+    }
+
+    internal double Percentile(double percentile)
+    {
+        if (percentile is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(percentile));
+        if (Count == 0) return 0;
+        ulong target = Math.Max(1, checked((ulong)Math.Ceiling(Count * percentile)));
+        ulong cumulative = 0;
+        for (int index = 0; index < _buckets.Length; index++)
+        {
+            cumulative = ulong.MaxValue - cumulative < _buckets[index]
+                ? ulong.MaxValue
+                : cumulative + _buckets[index];
+            if (cumulative >= target)
+                return (index + 1) * BucketMilliseconds;
+        }
+        return MaximumMilliseconds;
     }
 }
 

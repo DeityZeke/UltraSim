@@ -65,6 +65,46 @@ The current architecture contract is [Network V3](../../Docs/Plans/NETWORK.md).
 The external listener/deployment lifecycle is
 [Hosted Network H0](../../Docs/Plans/HOSTED_NETWORK.md).
 
+## First-class traffic accounting
+
+Every established secure peer owns bounded cumulative traffic counters. Packet processing updates
+only fixed owner-local primitive storage: there is no global packet lock, per-packet allocation,
+reflection, string formatting, or process-wide atomic counter. Cold diagnostic snapshots copy the
+finite lane and manifest-message catalogs and may be aggregated outside the hot path.
+
+The physical metric is deliberately named **UDP payload bytes**. It is the exact datagram payload
+length successfully handed to, or received from, the UDP socket boundary. It excludes IP, UDP, and
+link-layer headers, and it never includes HTTP content acquisition or CAS/disk traffic. An optional
+IPv4+UDP estimate is reported separately as `28 * datagram count`; it is an estimate, not an
+observed NIC-wire value.
+
+Secure physical traffic is split into Data, acknowledgement, and keepalive datagrams. Reliable Data
+re-emission increases the physical retransmission counters without counting the logical message a
+second time. Hosted endpoints additionally retain an exact physical bucket for handshake, path,
+and other traffic that cannot honestly be attributed to authenticated secure framing. Pre-session
+listener traffic is not assigned a fabricated connection identity.
+
+Logical traffic is a separate coordinate system:
+
+```text
+logical application payload bytes
+logical encoded data-frame bytes
+logical messages
+        !=
+physical UDP payload bytes
+```
+
+Logical counters are available per finite Network lane and per manifest message. Several
+unreliable messages may share one physical datagram, and encryption/framing overhead therefore
+remains at the datagram/connection level rather than being apportioned speculatively. Game owns an
+exhaustive allocation-free mapping from every current production message to a stable semantic
+traffic family; a completeness gate fails when a new message lacks an intentional classification.
+
+Snapshots are cumulative and generation-fenced. Measurement tooling takes start/end snapshots and
+derives an explicit-window delta; production counters are not reset for benchmarks. Hosted server
+retirement freezes a bounded final snapshot before slot reuse, and a cleanly closed client retains
+its final snapshot so a reconnect becomes a distinct lifetime instead of moving old counters.
+
 ## Ownership boundary
 
 ```text

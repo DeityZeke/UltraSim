@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1 load-generation client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2 load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -39,9 +39,45 @@ dotnet run --project Tools/NetworkBots/UltraSim.NetworkBots.csproj \
 ```
 
 Required public options are `--endpoint`, `--fingerprint`, `--bots`, `--seed`, `--duration`,
-`--scenario`, and `--cache`. `--verbose` prints the bounded diagnostic context of a failed bot.
+`--scenario`, and `--cache`. `--warmup` selects a separate warmup/positioning interval; it defaults
+to 60 seconds for PF2 scenarios. `--verbose` prints the bounded diagnostic context of a failed bot.
 File barriers and JSON summary options are acceptance-coordination surfaces used by the repository
 verifier, not gameplay shortcuts.
+
+PF2 adds three deterministic explanatory scenarios:
+
+- `quiet` sends no intentional gameplay commands after ordinary admission and exposes the inherent
+  keepalive/ACK/background floor;
+- `moving` keeps a spatially distributed population moving through the normal profile/control path,
+  including bounded direction changes and jumps;
+- `crowd` converges clients into the Welcome Plaza/Cabin area during warmup, then keeps the dense
+  mutually relevant population moving during the measured window.
+
+`mixed-chaos` remains the correctness/soak workload. Warmup and crowd convergence are excluded from
+the measured-window counters. For example, a serious ten-minute warm-content crowd capture is:
+
+```bash
+dotnet run --project Tools/NetworkBots/UltraSim.NetworkBots.csproj \
+  -c Release -p:UltraSimNetworkFlavor=ClientOnly -- \
+  --endpoint=127.0.0.1:7777 \
+  --fingerprint=<64-hex-deployment-key-fingerprint> \
+  --bots=50 --seed=130363 --warmup=60s --duration=00:10:00 \
+  --scenario=crowd --cache=/tmp/ultrasim-pf2-cache \
+  --summary-file=/tmp/ultrasim-pf2-crowd.json
+```
+
+The schema-v3 PF2 report is a delta between cumulative snapshots taken around that explicit window.
+It records exact UDP payload bytes/datagrams in each direction; Data/ACK/keepalive and retransmission
+physical counters; logical message, application-payload, and data-frame bytes by lane and Game
+family; per-client average/p50/p95/max rates; bounded one-second peak/p95 samples; and measured-window
+bot CPU, current-RSS high-water, and pump interval/duration p50/p95/p99/max. Logical bytes are not
+physical bytes and must not be added to the UDP total.
+
+HTTP content counters are kept separately and mean response/archive/manifest/blob **body bytes**, not
+complete HTTP/TCP wire cost. The report includes both the steady measurement-window delta and the
+whole-run cold/warm cache facts so a one-time WorldPack download cannot be quoted as gameplay
+bandwidth. A warm cache may avoid transfer, but every connection still performs a fresh application
+session and content-application proof.
 
 The harness accepts 8–4,096 bots for the current `mixed-chaos` scenario and never starts a process
 or dedicated thread per bot. Eight clients and a ten-second duration are the minimum because the
@@ -96,3 +132,13 @@ Run the permanent mixed product gate with:
 dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
   -c Release -- --pf1-only
 ```
+
+Run the focused PF2 accounting gate with:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf2-only
+```
+
+That bounded gate uses real UDP plus two actual exported Online processes. The accepted long-window
+PF2 baselines are recorded separately and are intentionally not rerun by every repository verify.

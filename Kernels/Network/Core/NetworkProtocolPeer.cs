@@ -75,6 +75,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly int[] _receivedCompactOrder;
     private readonly int[] _receivedFree;
     private readonly int[] _receivedQueue;
+    private readonly NetworkLogicalTrafficCounter[] _trafficByLane;
+    private readonly NetworkLogicalTrafficCounter[] _trafficByMessage;
     private int _reliableFreeCount;
     private int _reliableCount;
     private int _independentFreeCount;
@@ -99,6 +101,16 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _dataPacketsSent;
     private ulong _acknowledgementPacketsSent;
     private ulong _keepAlivePacketsSent;
+    private ulong _dataUdpPayloadBytesSent;
+    private ulong _dataPacketsReceived;
+    private ulong _dataUdpPayloadBytesReceived;
+    private ulong _acknowledgementUdpPayloadBytesSent;
+    private ulong _acknowledgementPacketsReceived;
+    private ulong _acknowledgementUdpPayloadBytesReceived;
+    private ulong _keepAliveUdpPayloadBytesSent;
+    private ulong _keepAlivePacketsReceived;
+    private ulong _keepAliveUdpPayloadBytesReceived;
+    private ulong _retransmittedDataDatagrams;
     private ulong _encryptedPlaintextBytes;
     private ulong _decryptedPlaintextBytes;
     private ulong _reliableFragmentsSent;
@@ -287,6 +299,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         _receivedCompactOrder = new int[limits.MaximumReceivedMessages];
         _receivedFree = new int[limits.MaximumReceivedMessages];
         _receivedQueue = new int[limits.MaximumReceivedMessages];
+        _trafficByLane = new NetworkLogicalTrafficCounter[NetworkLaneContracts.Count];
+        _trafficByMessage = new NetworkLogicalTrafficCounter[manifest.Count];
         for (int index = 0; index < _receivedFree.Length; index++) _receivedFree[index] = _receivedFree.Length - 1 - index;
         _receivedFreeCount = _receivedFree.Length;
         _congestionWindow = limits.InitialCongestionWindowPackets;
@@ -326,6 +340,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             _lastSentSteps.AsSpan(slot * _limits.MaximumFragmentsPerMessage,
                 _limits.MaximumFragmentsPerMessage).Clear();
             _reliable[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
+                messageSlot,
                 new LaneSequence(sequence), payload.Length, (ushort)fragmentCount, 0);
             EnqueueReliable(slot, descriptor.Lane);
             _reliableCount++;
@@ -337,6 +352,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             int slot = _independentFree[--_independentFreeCount];
             payload.CopyTo(IndependentPayload(slot));
             _independent[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
+                messageSlot,
                 new LaneSequence(sequence), payload.Length, 1, 0);
             SetIndependentReady(slot, descriptor.Lane);
             _independentCount++;
@@ -349,6 +365,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             if (stream.Pending) _unreliableRetainedBytes -= stream.Message.Length;
             payload.CopyTo(UnreliablePayload(messageSlot));
             stream.Message = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
+                messageSlot,
                 new LaneSequence(sequence), payload.Length, 1, 0);
             if (!stream.Pending &&
                 (_unreliableHeads[laneIndex] < 0 || messageSlot < _unreliableHeads[laneIndex]))
@@ -767,6 +784,37 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _maximumUnreliableReceivedPlaintextBytes));
     }
 
+    /// <summary>
+    /// Creates a cold immutable traffic snapshot for this peer lifetime. Packet
+    /// processing updates fixed owner-local counters; only this diagnostic read
+    /// allocates the finite lane and manifest arrays.
+    /// </summary>
+    public NetworkTrafficSnapshot GetTrafficSnapshot()
+    {
+        EnsureOperational();
+        var lanes = new NetworkLogicalTrafficSnapshot[_trafficByLane.Length];
+        for (int index = 0; index < lanes.Length; index++)
+            lanes[index] = _trafficByLane[index].Snapshot();
+        var messages = new NetworkMessageTrafficSnapshot[_trafficByMessage.Length];
+        ReadOnlySpan<NetworkMessageDescriptor> descriptors = _manifest.Messages;
+        for (int index = 0; index < messages.Length; index++)
+            messages[index] = new(descriptors[index].Id, descriptors[index].Lane,
+                _trafficByMessage[index].Snapshot());
+        return new NetworkTrafficSnapshot(
+            _manifest.Version,
+            _manifest.Fingerprint,
+            new NetworkTransportTrafficSnapshot(
+                _dataPacketsSent, _dataUdpPayloadBytesSent,
+                _dataPacketsReceived, _dataUdpPayloadBytesReceived,
+                _acknowledgementPacketsSent, _acknowledgementUdpPayloadBytesSent,
+                _acknowledgementPacketsReceived, _acknowledgementUdpPayloadBytesReceived,
+                _keepAlivePacketsSent, _keepAliveUdpPayloadBytesSent,
+                _keepAlivePacketsReceived, _keepAliveUdpPayloadBytesReceived,
+                _retransmittedDataDatagrams, _reliableRetransmittedWireBytes),
+            lanes,
+            messages);
+    }
+
     public void Dispose()
     {
         EnsureOwnerThread();
@@ -1068,7 +1116,16 @@ public sealed class NetworkProtocolPeer : IDisposable
             return false;
 
         for (int index = 0; index < selections.Length; index++)
-            ConsumeUnreliableSelection(selections[index]);
+        {
+            UnreliableSelection selection = selections[index];
+            OutgoingMessage message = selection.IndependentSlot >= 0
+                ? _independent[selection.IndependentSlot]
+                : _unreliableStreams[selection.UnreliableSlot].Message;
+            RecordLogicalSent(in message,
+                checked(NetworkProtocolDataHeader.EncodedBytes + message.Length),
+                firstMessageFrame: true);
+            ConsumeUnreliableSelection(selection);
+        }
         _unreliableFramesSent = SaturatingAdd(
             _unreliableFramesSent, checked((ulong)selections.Length));
         _unreliableDatagramsSent = SaturatingIncrement(_unreliableDatagramsSent);
@@ -1196,10 +1253,22 @@ public sealed class NetworkProtocolPeer : IDisposable
             {
                 _reliableFragmentsSent = SaturatingIncrement(_reliableFragmentsSent);
                 if (retransmission)
+                {
+                    _retransmittedDataDatagrams = SaturatingIncrement(
+                        _retransmittedDataDatagrams);
                     _reliableRetransmittedWireBytes = SaturatingAdd(
                         _reliableRetransmittedWireBytes,
                         checked((ulong)(NetworkSecureDatagramFraming.HeaderBytes +
                             writer.WrittenCount + NetworkSecureDatagramFraming.TagBytes)));
+                    RecordRetransmission(in message,
+                        checked(NetworkSecureDatagramFraming.HeaderBytes +
+                            writer.WrittenCount + NetworkSecureDatagramFraming.TagBytes));
+                }
+                else
+                {
+                    RecordLogicalSent(in message, writer.WrittenCount,
+                        firstMessageFrame: fragmentIndex == 0);
+                }
                 _sentPackets[reservedSentRecord] = new(
                     packet.Value, step, reliableSlot, checked((uint)_rto), fragmentIndex, true);
                 _sentPacketFreeCount--;
@@ -1223,6 +1292,8 @@ public sealed class NetworkProtocolPeer : IDisposable
             }
             else
             {
+                RecordLogicalSent(in message, writer.WrittenCount,
+                    firstMessageFrame: true);
                 ConsumeUnreliableSelection(new(independentSlot, unreliableSlot));
                 if (_stageTimingEnabled)
                     _stageOutboundUnreliableFrames = SaturatingIncrement(
@@ -1287,6 +1358,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         RecordStageTiming(ref _endpointSendTicks, endpointStarted);
         if (status is DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment)
         {
+            ulong wireBytes = checked((ulong)(NetworkSecureDatagramFraming.HeaderBytes +
+                plaintext.Length + NetworkSecureDatagramFraming.TagBytes));
             _nextPacketNumber++;
             _sentPacketsCount = SaturatingIncrement(_sentPacketsCount);
             _encryptedPlaintextBytes = SaturatingAdd(
@@ -1295,12 +1368,18 @@ public sealed class NetworkProtocolPeer : IDisposable
             {
                 case NetworkSecureDatagramKind.Data:
                     _dataPacketsSent = SaturatingIncrement(_dataPacketsSent);
+                    _dataUdpPayloadBytesSent = SaturatingAdd(
+                        _dataUdpPayloadBytesSent, wireBytes);
                     break;
                 case NetworkSecureDatagramKind.Acknowledgement:
                     _acknowledgementPacketsSent = SaturatingIncrement(_acknowledgementPacketsSent);
+                    _acknowledgementUdpPayloadBytesSent = SaturatingAdd(
+                        _acknowledgementUdpPayloadBytesSent, wireBytes);
                     break;
                 case NetworkSecureDatagramKind.KeepAlive:
                     _keepAlivePacketsSent = SaturatingIncrement(_keepAlivePacketsSent);
+                    _keepAliveUdpPayloadBytesSent = SaturatingAdd(
+                        _keepAliveUdpPayloadBytesSent, wireBytes);
                     break;
             }
             return true;
@@ -1355,18 +1434,31 @@ public sealed class NetworkProtocolPeer : IDisposable
         _authenticatedPackets.Commit(authenticationTransition);
         RecordStageTiming(ref _secureReceiveTicks, secureStarted);
 
+        ulong authenticatedWireBytes = checked((ulong)datagram.Length);
+
         if (header.Kind == NetworkSecureDatagramKind.Acknowledgement)
         {
+            _acknowledgementPacketsReceived = SaturatingIncrement(
+                _acknowledgementPacketsReceived);
+            _acknowledgementUdpPayloadBytesReceived = SaturatingAdd(
+                _acknowledgementUdpPayloadBytesReceived, authenticatedWireBytes);
             if (ProcessAcknowledgement(plaintext, step)) _receivedPacketsCount++;
             return;
         }
 
         if (header.Kind == NetworkSecureDatagramKind.KeepAlive)
         {
+            _keepAlivePacketsReceived = SaturatingIncrement(_keepAlivePacketsReceived);
+            _keepAliveUdpPayloadBytesReceived = SaturatingAdd(
+                _keepAliveUdpPayloadBytesReceived, authenticatedWireBytes);
             if (!plaintext.IsEmpty) return;
             _receivedPacketsCount++;
             return;
         }
+
+        _dataPacketsReceived = SaturatingIncrement(_dataPacketsReceived);
+        _dataUdpPayloadBytesReceived = SaturatingAdd(
+            _dataUdpPayloadBytesReceived, authenticatedWireBytes);
 
         long admissionStarted = StartStageTiming();
         NetworkDeliveryAdmission admission = ProcessData(plaintext, out bool acknowledgementEliciting);
@@ -1427,6 +1519,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             ValidatedDataFrame frame = frames[0];
             NetworkDeliveryAdmission reliable = ProcessReliableFragment(
                 frame.Header,
+                frame.MessageSlot,
                 plaintext.Slice(frame.FragmentOffset, frame.Header.FragmentLength),
                 frame.MessageFragmentOffset);
             acknowledgementEliciting = reliable == NetworkDeliveryAdmission.Admitted;
@@ -1473,7 +1566,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (contract.Delivery == NetworkDeliveryGuarantee.Reliable)
         {
             NetworkDeliveryAdmission reliable = ProcessReliableFragment(
-                header, fragment, messageFragmentOffset);
+                header, messageSlot, fragment, messageFragmentOffset);
             acknowledgementEliciting = reliable == NetworkDeliveryAdmission.Admitted;
             return reliable;
         }
@@ -1544,11 +1637,15 @@ public sealed class NetworkProtocolPeer : IDisposable
             _capacityDrops++;
             return NetworkDeliveryAdmission.Admitted;
         }
+        RecordLogicalReceived(header.Lane, messageSlot, header.MessageLength,
+            checked(NetworkProtocolDataHeader.EncodedBytes + fragment.Length),
+            completedMessage: true);
         return NetworkDeliveryAdmission.Admitted;
     }
 
     private NetworkDeliveryAdmission ProcessReliableFragment(
         in NetworkDataFrameHeader header,
+        int messageSlot,
         ReadOnlySpan<byte> fragment,
         int offset)
     {
@@ -1572,6 +1669,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             state = state with { ReceivedMask = state.ReceivedMask | bit };
             AddRetainedBytes(ref _reassemblyRetainedBytes, ref _reassemblyRetainedHighWaterBytes,
                 fragment.Length);
+            RecordLogicalReceived(header.Lane, messageSlot, 0,
+                checked(NetworkProtocolDataHeader.EncodedBytes + fragment.Length),
+                completedMessage: false);
         }
         ulong completeMask = header.FragmentCount == 64 ? ulong.MaxValue : (1UL << header.FragmentCount) - 1;
         if (state.ReceivedMask != completeMask) return NetworkDeliveryAdmission.Admitted;
@@ -1590,6 +1690,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reassemblyRetainedBytes -= header.MessageLength;
         state = default;
         _nextReliableReceiveSequences[laneIndex] = expected + 1;
+        RecordLogicalReceived(header.Lane, messageSlot, header.MessageLength, 0,
+            completedMessage: true);
         return NetworkDeliveryAdmission.Admitted;
     }
 
@@ -1636,6 +1738,66 @@ public sealed class NetworkProtocolPeer : IDisposable
                 if (message.AcknowledgedMask == complete) FreeReliable(record.MessageSlot);
             }
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordLogicalSent(
+        in OutgoingMessage message,
+        int dataFrameBytes,
+        bool firstMessageFrame)
+    {
+        ref NetworkLogicalTrafficCounter lane = ref _trafficByLane[(int)message.Lane];
+        ref NetworkLogicalTrafficCounter item = ref _trafficByMessage[message.MessageSlot];
+        lane.DataFrameBytesSent = SaturatingAdd(
+            lane.DataFrameBytesSent, checked((ulong)dataFrameBytes));
+        item.DataFrameBytesSent = SaturatingAdd(
+            item.DataFrameBytesSent, checked((ulong)dataFrameBytes));
+        if (!firstMessageFrame) return;
+        lane.MessagesSent = SaturatingIncrement(lane.MessagesSent);
+        item.MessagesSent = SaturatingIncrement(item.MessagesSent);
+        lane.ApplicationPayloadBytesSent = SaturatingAdd(
+            lane.ApplicationPayloadBytesSent, checked((ulong)message.Length));
+        item.ApplicationPayloadBytesSent = SaturatingAdd(
+            item.ApplicationPayloadBytesSent, checked((ulong)message.Length));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordLogicalReceived(
+        NetworkLane messageLane,
+        int messageSlot,
+        int completedPayloadBytes,
+        int admittedDataFrameBytes,
+        bool completedMessage)
+    {
+        ref NetworkLogicalTrafficCounter lane = ref _trafficByLane[(int)messageLane];
+        ref NetworkLogicalTrafficCounter item = ref _trafficByMessage[messageSlot];
+        if (admittedDataFrameBytes != 0)
+        {
+            lane.DataFrameBytesReceived = SaturatingAdd(
+                lane.DataFrameBytesReceived, checked((ulong)admittedDataFrameBytes));
+            item.DataFrameBytesReceived = SaturatingAdd(
+                item.DataFrameBytesReceived, checked((ulong)admittedDataFrameBytes));
+        }
+        if (!completedMessage) return;
+        lane.MessagesReceived = SaturatingIncrement(lane.MessagesReceived);
+        item.MessagesReceived = SaturatingIncrement(item.MessagesReceived);
+        lane.ApplicationPayloadBytesReceived = SaturatingAdd(
+            lane.ApplicationPayloadBytesReceived, checked((ulong)completedPayloadBytes));
+        item.ApplicationPayloadBytesReceived = SaturatingAdd(
+            item.ApplicationPayloadBytesReceived, checked((ulong)completedPayloadBytes));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RecordRetransmission(in OutgoingMessage message, int udpPayloadBytes)
+    {
+        ref NetworkLogicalTrafficCounter lane = ref _trafficByLane[(int)message.Lane];
+        ref NetworkLogicalTrafficCounter item = ref _trafficByMessage[message.MessageSlot];
+        lane.RetransmittedDatagrams = SaturatingIncrement(lane.RetransmittedDatagrams);
+        item.RetransmittedDatagrams = SaturatingIncrement(item.RetransmittedDatagrams);
+        lane.RetransmittedUdpPayloadBytes = SaturatingAdd(
+            lane.RetransmittedUdpPayloadBytes, checked((ulong)udpPayloadBytes));
+        item.RetransmittedUdpPayloadBytes = SaturatingAdd(
+            item.RetransmittedUdpPayloadBytes, checked((ulong)udpPayloadBytes));
     }
 
     private void UpdateRtt(ulong sample)
@@ -2009,6 +2171,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         (long)_unreliableHeads.Length * sizeof(int) +
         (long)_unreliablePayloadOffsets.Length * sizeof(int) +
         _unreliablePayloads.Length +
+        (long)(_trafficByLane.Length + _trafficByMessage.Length) *
+            Unsafe.SizeOf<NetworkLogicalTrafficCounter>() +
         (long)_nextReliableSendSequences.Length * sizeof(ulong) +
         (long)_nextReliableReceiveSequences.Length * sizeof(ulong) +
         (long)_reassembly.Length * Unsafe.SizeOf<ReassemblyState>() +
@@ -2121,6 +2285,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         NetworkLane Lane,
         NetworkMessageId MessageId,
         ushort MessageVersion,
+        int MessageSlot,
         LaneSequence Sequence,
         int Length,
         ushort FragmentCount,

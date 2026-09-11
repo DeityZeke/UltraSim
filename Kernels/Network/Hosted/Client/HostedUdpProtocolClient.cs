@@ -35,6 +35,34 @@ public readonly record struct HostedUdpClientSnapshot(
     NetworkProtocolSnapshot Protocol);
 
 /// <summary>
+/// Cold traffic view for one hosted connection lifetime. UDP payload totals are
+/// physical socket-boundary values. Secure protocol totals are a classified subset;
+/// the residual includes handshake, path-control, and rejected/unattributed traffic.
+/// </summary>
+public readonly record struct HostedUdpConnectionTrafficSnapshot(
+    HostedUdpClientState State,
+    ConnectionId Connection,
+    UdpPayloadTrafficSnapshot UdpPayload,
+    NetworkTrafficSnapshot? SecureProtocol)
+{
+    public ulong NonSecureOrUnattributedUdpPayloadBytesSent => Difference(
+        SecureProtocol?.Transport.SecureUdpPayloadBytesSent ?? 0,
+        UdpPayload.PayloadBytesSent);
+    public ulong NonSecureOrUnattributedUdpPayloadBytesReceived => Difference(
+        SecureProtocol?.Transport.SecureUdpPayloadBytesReceived ?? 0,
+        UdpPayload.PayloadBytesReceived);
+    public ulong NonSecureOrUnattributedDatagramsSent => Difference(
+        SecureProtocol?.Transport.SecureDatagramsSent ?? 0,
+        UdpPayload.DatagramsSent);
+    public ulong NonSecureOrUnattributedDatagramsReceived => Difference(
+        SecureProtocol?.Transport.SecureDatagramsReceived ?? 0,
+        UdpPayload.DatagramsReceived);
+
+    private static ulong Difference(ulong classified, ulong physical) =>
+        physical >= classified ? physical - classified : 0;
+}
+
+/// <summary>
 /// Owner-thread remote client for the hosted UDP handshake and secure protocol.
 /// </summary>
 /// <remarks>
@@ -101,6 +129,10 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     private ulong _pathRebindCommits;
     private ulong _duplicatePathCommits;
     private ulong _pathRebindTimeouts;
+    private ulong _priorUdpDatagramsSent;
+    private ulong _priorUdpDatagramsReceived;
+    private ulong _priorUdpPayloadBytesSent;
+    private ulong _priorUdpPayloadBytesReceived;
     private bool _disposed;
 
     private HostedUdpProtocolClient(
@@ -372,6 +404,22 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             _peer?.GetSnapshot() ?? default);
     }
 
+    /// <summary>Creates a cold immutable traffic snapshot for this transport lifetime.</summary>
+    public HostedUdpConnectionTrafficSnapshot GetTrafficSnapshot()
+    {
+        EnsureOperational();
+        UdpPayloadTrafficSnapshot current = _endpoint.GetSnapshot().UdpPayload;
+        return new(
+            _state,
+            _connection,
+            new UdpPayloadTrafficSnapshot(
+                SaturatingAdd(_priorUdpDatagramsSent, current.DatagramsSent),
+                SaturatingAdd(_priorUdpDatagramsReceived, current.DatagramsReceived),
+                SaturatingAdd(_priorUdpPayloadBytesSent, current.PayloadBytesSent),
+                SaturatingAdd(_priorUdpPayloadBytesReceived, current.PayloadBytesReceived)),
+            _peer?.GetTrafficSnapshot());
+    }
+
     public void Dispose()
     {
         EnsureOwnerThread();
@@ -567,6 +615,15 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
                 pending.BindKnownDatagramHandler(this);
                 _peer!.ReplaceEndpoint(_endpoint, pending);
                 UdpDatagramEndpoint prior = _endpoint;
+                UdpPayloadTrafficSnapshot priorTraffic = prior.GetSnapshot().UdpPayload;
+                _priorUdpDatagramsSent = SaturatingAdd(
+                    _priorUdpDatagramsSent, priorTraffic.DatagramsSent);
+                _priorUdpDatagramsReceived = SaturatingAdd(
+                    _priorUdpDatagramsReceived, priorTraffic.DatagramsReceived);
+                _priorUdpPayloadBytesSent = SaturatingAdd(
+                    _priorUdpPayloadBytesSent, priorTraffic.PayloadBytesSent);
+                _priorUdpPayloadBytesReceived = SaturatingAdd(
+                    _priorUdpPayloadBytesReceived, priorTraffic.PayloadBytesReceived);
                 _endpoint = pending;
                 _pendingPathEndpoint = null;
                 _pathGeneration = generation;
@@ -746,6 +803,9 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
 
     private static ulong SaturatingIncrement(ulong value) =>
         value == ulong.MaxValue ? value : value + 1;
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 
     private void EnsureOperational()
     {

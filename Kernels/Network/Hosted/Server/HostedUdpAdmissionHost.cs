@@ -161,6 +161,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private readonly NetworkServerIdentity _serverIdentity;
     private readonly NetworkConnectionTable? _connections;
     private readonly HostedUdpProtocolSession?[] _sessions;
+    private readonly HostedUdpServerConnectionTrafficSnapshot[] _retiredTraffic;
     private readonly HostedUdpConnectionOwnerRuntime? _ownerRuntime;
     private readonly IHostedUdpSessionApplicationFactory? _callerApplicationFactory;
     private readonly byte[] _serverPublicKey;
@@ -191,6 +192,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private int _candidateCount;
     private int _promotingCandidateCount;
     private int _sessionCount;
+    private int _retiredTrafficHead;
+    private int _retiredTrafficCount;
     private int _candidateFreeCount;
     private ulong _unknownDatagrams;
     private ulong _unknownBytes;
@@ -398,6 +401,11 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         {
             _connections = new NetworkConnectionTable(sharedLimits.MaximumSessions);
             _sessions = new HostedUdpProtocolSession[sharedLimits.MaximumSessions];
+            // Cold diagnostic retention is deliberately finite but spans several
+            // complete waves so reconnect/accounting gates do not alias a reused
+            // live-session slot. It is evidence retention, not delivery debt.
+            _retiredTraffic = new HostedUdpServerConnectionTrafficSnapshot[
+                checked(sharedLimits.MaximumSessions * 4)];
             _candidateCookies = new byte[checked(
                 candidates * ProtocolLoopbackHandshake.CookieBytes)];
             _candidateConnections = new ConnectionId[candidates];
@@ -419,6 +427,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         {
             _connections = null;
             _sessions = Array.Empty<HostedUdpProtocolSession>();
+            _retiredTraffic = Array.Empty<HostedUdpServerConnectionTrafficSnapshot>();
             _candidateCookies = Array.Empty<byte>();
             _candidateConnections = Array.Empty<ConnectionId>();
             _candidateSecurityEpochs = Array.Empty<SecurityEpoch>();
@@ -537,6 +546,48 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             return false;
         }
         session = current;
+        return true;
+    }
+
+    /// <summary>Returns an active session by cold diagnostic ordinal.</summary>
+    public bool TryGetSession(
+        int ordinal,
+        out HostedUdpProtocolSession? session)
+    {
+        EnsureOperational();
+        if (ordinal < 0)
+        {
+            session = null;
+            return false;
+        }
+        for (int slot = 0; slot < _sessions.Length; slot++)
+        {
+            if (_sessions[slot] is not HostedUdpProtocolSession current) continue;
+            if (ordinal-- != 0) continue;
+            session = current;
+            return true;
+        }
+        session = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Returns one bounded finalized connection snapshot, oldest retained first.
+    /// Retired accounting never aliases a later reused connection slot.
+    /// </summary>
+    public bool TryGetRetiredTraffic(
+        int ordinal,
+        out HostedUdpServerConnectionTrafficSnapshot snapshot)
+    {
+        EnsureOperational();
+        if ((uint)ordinal >= (uint)_retiredTrafficCount)
+        {
+            snapshot = default;
+            return false;
+        }
+        int oldest = (_retiredTrafficHead - _retiredTrafficCount +
+            _retiredTraffic.Length) % _retiredTraffic.Length;
+        snapshot = _retiredTraffic[(oldest + ordinal) % _retiredTraffic.Length];
         return true;
     }
 
@@ -986,6 +1037,38 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             datagrams);
     }
 
+    internal HostedUdpServerConnectionTrafficSnapshot GetSessionTrafficSnapshot(
+        HostedUdpProtocolSession session)
+    {
+        EnsureSession(session);
+        return CreateSessionTrafficSnapshot(session, finalized: false);
+    }
+
+    private HostedUdpServerConnectionTrafficSnapshot CreateSessionTrafficSnapshot(
+        HostedUdpProtocolSession session,
+        bool finalized)
+    {
+        NetworkTrafficSnapshot traffic = session.OwnedTransport is
+            HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned
+            ? owned.CopyTrafficSnapshot()
+            : session.Server.GetTrafficSnapshot();
+        return new(
+            session.RawState,
+            session.Connection,
+            session.Endpoint.GetSnapshot().UdpPayload,
+            traffic,
+            finalized);
+    }
+
+    private void RetainFinalTraffic(HostedUdpProtocolSession session)
+    {
+        if (_retiredTraffic.Length == 0) return;
+        _retiredTraffic[_retiredTrafficHead] = CreateSessionTrafficSnapshot(
+            session, finalized: true);
+        _retiredTrafficHead = (_retiredTrafficHead + 1) % _retiredTraffic.Length;
+        if (_retiredTrafficCount != _retiredTraffic.Length) _retiredTrafficCount++;
+    }
+
     internal void Retire(HostedUdpProtocolSession session)
     {
         EnsureSession(session);
@@ -1069,6 +1152,8 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                 throw new AggregateException(
                     "A Hosted UDP owner did not become safe to retire.", failures);
         }
+        try { RetainFinalTraffic(session); }
+        catch (Exception exception) { AddFailure(ref failures, exception); }
         try { CloseTransport(session); }
         catch (Exception exception) { AddFailure(ref failures, exception); }
         if (session.OwnedTransport is null)
@@ -1930,6 +2015,35 @@ public readonly record struct HostedUdpProtocolSessionSnapshot(
     UdpDatagramEndpointSnapshot Datagrams);
 
 /// <summary>
+/// Cold first-class wire accounting for one externally authenticated server
+/// connection. The physical UDP payload total includes handshake/path/unclassified
+/// traffic; <see cref="SecureProtocol"/> classifies only authenticated protocol data.
+/// </summary>
+public readonly record struct HostedUdpServerConnectionTrafficSnapshot(
+    UdpProtocolSessionState State,
+    ConnectionId Connection,
+    UdpPayloadTrafficSnapshot UdpPayload,
+    NetworkTrafficSnapshot SecureProtocol,
+    bool IsFinalized)
+{
+    public ulong NonSecureOrUnattributedUdpPayloadBytesSent => Difference(
+        SecureProtocol.Transport.SecureUdpPayloadBytesSent,
+        UdpPayload.PayloadBytesSent);
+    public ulong NonSecureOrUnattributedUdpPayloadBytesReceived => Difference(
+        SecureProtocol.Transport.SecureUdpPayloadBytesReceived,
+        UdpPayload.PayloadBytesReceived);
+    public ulong NonSecureOrUnattributedDatagramsSent => Difference(
+        SecureProtocol.Transport.SecureDatagramsSent,
+        UdpPayload.DatagramsSent);
+    public ulong NonSecureOrUnattributedDatagramsReceived => Difference(
+        SecureProtocol.Transport.SecureDatagramsReceived,
+        UdpPayload.DatagramsReceived);
+
+    private static ulong Difference(ulong classified, ulong physical) =>
+        physical >= classified ? physical - classified : 0;
+}
+
+/// <summary>
 /// One externally authenticated connection realized on the hosted shared socket.
 /// </summary>
 public sealed class HostedUdpProtocolSession : IDisposable
@@ -2059,6 +2173,13 @@ public sealed class HostedUdpProtocolSession : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         return Owner.GetSessionSnapshot(this);
+    }
+
+    /// <summary>Creates a cold immutable physical/logical traffic snapshot.</summary>
+    public HostedUdpServerConnectionTrafficSnapshot GetTrafficSnapshot()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Owner.GetSessionTrafficSnapshot(this);
     }
 
     public void Dispose()

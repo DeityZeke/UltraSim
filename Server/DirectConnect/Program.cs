@@ -84,6 +84,8 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     options.MaximumParticipants, authority.GetSnapshot().GenerationId));
 
 using var stopping = new CancellationTokenSource();
+DirectConnectWireAccounting? wireAccounting = null;
+bool wireAccountingWritten = false;
 Console.CancelKeyPress += (_, eventArgs) =>
 {
     eventArgs.Cancel = true;
@@ -95,6 +97,22 @@ while (!stopping.IsCancellationRequested)
         break;
     host.Pump();
     _ = authority.TickDue();
+    if (wireAccounting is null && options.AccountingStartFile is not null &&
+        File.Exists(options.AccountingStartFile))
+    {
+        wireAccounting = new DirectConnectWireAccounting(host, authority, content);
+        WriteReady(options.AccountingReadyFile, new { Ready = true });
+        Console.WriteLine("PF2 Direct Connect wire-accounting window started.");
+    }
+    wireAccounting?.Sample();
+    if (!wireAccountingWritten && wireAccounting is not null &&
+        options.AccountingStopFile is not null && File.Exists(options.AccountingStopFile))
+    {
+        WriteReady(options.AccountingSummaryFile,
+            wireAccounting.Complete(host, authority, content));
+        wireAccountingWritten = true;
+        Console.WriteLine("PF2 Direct Connect wire-accounting window completed.");
+    }
     Thread.Sleep(1);
 }
 long retirementDeadline = Environment.TickCount64 + 10_000;
@@ -108,6 +126,12 @@ while ((authority.GetSnapshot().ParticipantCount != 0 ||
 }
 SharedPlayableAuthoritySnapshot finalAuthority = authority.GetSnapshot();
 HostedUdpAdmissionSnapshot finalHost = host.GetSnapshot();
+if (!wireAccountingWritten && wireAccounting is not null)
+{
+    WriteReady(options.AccountingSummaryFile,
+        wireAccounting.Complete(host, authority, content));
+    wireAccountingWritten = true;
+}
 bool cleanRetirement = finalAuthority.ParticipantCount == 0 &&
     finalHost.EstablishedSessions == 0;
 if (options.SummaryFile is not null)
@@ -298,6 +322,10 @@ internal readonly record struct DirectConnectOptions(
     string? ReadyFile,
     string? StopFile,
     string? SummaryFile,
+    string? AccountingStartFile,
+    string? AccountingReadyFile,
+    string? AccountingStopFile,
+    string? AccountingSummaryFile,
     string ClientProfile,
     bool EphemeralSmoke,
     int MaximumParticipants,
@@ -314,6 +342,10 @@ internal readonly record struct DirectConnectOptions(
         string? readyFile = null;
         string? stopFile = null;
         string? summaryFile = null;
+        string? accountingStartFile = null;
+        string? accountingReadyFile = null;
+        string? accountingStopFile = null;
+        string? accountingSummaryFile = null;
         string clientProfile = "third-person";
         int maximumParticipants = 8;
         int admissionBurstPerAddress =
@@ -376,6 +408,26 @@ internal readonly record struct DirectConnectOptions(
                 summaryFile = Path.GetFullPath(value);
                 continue;
             }
+            if (argument.StartsWith("--accounting-start-file=", StringComparison.Ordinal))
+            {
+                accountingStartFile = RequiredPath(argument, "--accounting-start-file=");
+                continue;
+            }
+            if (argument.StartsWith("--accounting-stop-file=", StringComparison.Ordinal))
+            {
+                accountingStopFile = RequiredPath(argument, "--accounting-stop-file=");
+                continue;
+            }
+            if (argument.StartsWith("--accounting-ready-file=", StringComparison.Ordinal))
+            {
+                accountingReadyFile = RequiredPath(argument, "--accounting-ready-file=");
+                continue;
+            }
+            if (argument.StartsWith("--accounting-summary-file=", StringComparison.Ordinal))
+            {
+                accountingSummaryFile = RequiredPath(argument, "--accounting-summary-file=");
+                continue;
+            }
             if (argument.StartsWith("--client-profile=", StringComparison.Ordinal))
             {
                 clientProfile = argument["--client-profile=".Length..].Trim().ToLowerInvariant();
@@ -404,10 +456,25 @@ internal readonly record struct DirectConnectOptions(
             }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
+        bool anyAccounting = accountingStartFile is not null || accountingReadyFile is not null ||
+            accountingStopFile is not null || accountingSummaryFile is not null;
+        if (anyAccounting && (accountingStartFile is null || accountingReadyFile is null ||
+            accountingStopFile is null || accountingSummaryFile is null))
+            throw new ArgumentException(
+                "PF2 accounting start, stop, and summary files must be supplied together.");
         return new DirectConnectOptions(
             endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
-            clientProfile, smoke,
+            accountingStartFile, accountingReadyFile, accountingStopFile,
+            accountingSummaryFile, clientProfile, smoke,
             maximumParticipants, admissionBurstPerAddress);
+
+        static string RequiredPath(string argument, string prefix)
+        {
+            string value = argument[prefix.Length..];
+            if (string.IsNullOrWhiteSpace(value))
+                throw new ArgumentException($"{prefix[..^1]} cannot be empty.");
+            return Path.GetFullPath(value);
+        }
 
         static IPEndPoint ParseEndpoint(string value, string option)
         {

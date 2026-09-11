@@ -13,6 +13,10 @@ internal static class N03ProtocolTests
     {
         Run("HandshakeUsesCookiePinnedIdentityAndProtocolAgreement", HandshakeUsesCookiePinnedIdentityAndProtocolAgreement);
         Run("SecureOuterFramingIsCanonicalAndExact", SecureOuterFramingIsCanonicalAndExact);
+        Run("WireAccountingSeparatesPhysicalLogicalAndRetransmittedTraffic",
+            WireAccountingSeparatesPhysicalLogicalAndRetransmittedTraffic);
+        Run("WireAccountingCountsAggregatedDatagramOnce",
+            WireAccountingCountsAggregatedDatagramOnce);
         Run("ReliableLanesSurviveLossDuplicationCorruptionAndReorder", ReliableLanesSurviveImpairment);
         Run("ReliableDeliveryRecoversAfterWholeWindowLoss", ReliableDeliveryRecoversAfterWholeWindowLoss);
         Run("ReliableDeliveryRecoversAfterWholeWindowAckLoss", ReliableDeliveryRecoversAfterWholeWindowAckLoss);
@@ -75,6 +79,68 @@ internal static class N03ProtocolTests
         False(NetworkSecureDatagramFraming.TryReadExact(trailing, out _, out _, out _, out _));
         datagram[25] = 1;
         False(NetworkSecureDatagramFraming.TryReadExact(datagram, out _, out _, out _, out _));
+    }
+
+    private static void WireAccountingSeparatesPhysicalLogicalAndRetransmittedTraffic()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            InitialCongestionWindowPackets = 1,
+            MaximumCongestionWindowPackets = 1,
+            MinimumRetransmissionSteps = 2,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        NetworkTrafficSnapshot start = pair.Sender.GetTrafficSnapshot();
+        byte[] payload = [1, 2, 3, 4, 5];
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Control), payload));
+        pair.Sender.Emit(0);
+        Equal(1, Drain(pair.Link.B)); // Deliberately lose the first physical datagram.
+        pair.Sender.Emit(1);
+        pair.Sender.Emit(2);
+
+        NetworkTrafficSnapshot delta = NetworkTrafficSnapshot.Delta(
+            start, pair.Sender.GetTrafficSnapshot());
+        Equal(1UL, delta.GetLane(NetworkLane.Control).MessagesSent);
+        Equal(5UL, delta.GetLane(NetworkLane.Control).ApplicationPayloadBytesSent);
+        True(delta.Transport.DataDatagramsSent >= 2);
+        True(delta.Transport.RetransmittedDataDatagrams >= 1);
+        True(delta.Transport.RetransmittedDataUdpPayloadBytes > 0);
+        Equal(delta.Transport.SecureUdpPayloadBytesSent,
+            delta.Transport.DataUdpPayloadBytesSent +
+            delta.Transport.AcknowledgementUdpPayloadBytesSent +
+            delta.Transport.KeepAliveUdpPayloadBytesSent);
+        True(delta.TryGetMessage(Id(NetworkLane.Control), out NetworkMessageTrafficSnapshot message));
+        Equal(1UL, message.Traffic.MessagesSent);
+        Equal(delta.SumMessages(), delta.GetLane(NetworkLane.Control));
+    }
+
+    private static void WireAccountingCountsAggregatedDatagramOnce()
+    {
+        NetworkProtocolLimits limits = s_limits with
+            { MaximumUnreliableFramesPerDatagram = 7 };
+        using RawPeerPair pair = new(s_aggregatedManifest, limits, s_datagrams);
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2, 3 }));
+        Equal(NetworkQueueStatus.Accepted,
+            pair.Sender.TryQueue(Id(NetworkLane.Disposable), stackalloc byte[] { 4, 5, 6 }));
+        pair.Sender.Emit(0);
+        pair.Receiver.ProcessInbound(0);
+
+        NetworkTrafficSnapshot sent = pair.Sender.GetTrafficSnapshot();
+        NetworkTrafficSnapshot received = pair.Receiver.GetTrafficSnapshot();
+        Equal(1UL, sent.Transport.DataDatagramsSent);
+        Equal(1UL, received.Transport.DataDatagramsReceived);
+        Equal(3UL, sent.SumMessages().MessagesSent);
+        Equal(3UL, received.SumMessages().MessagesReceived);
+        Equal(6UL, sent.SumMessages().ApplicationPayloadBytesSent);
+        Equal(6UL, received.SumMessages().ApplicationPayloadBytesReceived);
+        Equal(sent.Transport.DataUdpPayloadBytesSent,
+            received.Transport.DataUdpPayloadBytesReceived);
+        True(sent.SumMessages().DataFrameBytesSent <
+            sent.Transport.DataUdpPayloadBytesSent);
     }
 
     private static void HandshakeUsesCookiePinnedIdentityAndProtocolAgreement()

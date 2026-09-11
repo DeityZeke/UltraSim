@@ -806,6 +806,7 @@ internal sealed class SharedUdpServerListener : IDisposable
             _sent = SaturatingIncrement(_sent);
             _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
             _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
+            endpoint.RecordPhysicalSent(datagram.Length);
             return DatagramSendStatus.Accepted;
         }
         catch (SocketException exception) when (IsTransient(exception.SocketErrorCode))
@@ -831,6 +832,7 @@ internal sealed class SharedUdpServerListener : IDisposable
             if (sentSuccessfully)
             {
                 int length = _outboundLengths[slot];
+                _outboundEndpoints[slot]?.RecordPhysicalSent(length);
                 _sent = SaturatingIncrement(_sent);
                 _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)length));
                 _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, length);
@@ -1286,17 +1288,21 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         DatagramSendStatus status = _connection.IsValid
             ? _listener.TrySend(Slot, datagram)
             : _listener.TrySendImmediate(Slot, datagram);
-        if (status == DatagramSendStatus.Accepted)
-        {
-            _sent = SaturatingIncrement(_sent);
-            _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
-            _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
-        }
-        else if (status == DatagramSendStatus.CapacityExceeded)
+        if (status == DatagramSendStatus.CapacityExceeded)
             _capacityDrops = SaturatingIncrement(_capacityDrops);
         else if (status == DatagramSendStatus.DatagramTooLarge)
             _rejected = SaturatingIncrement(_rejected);
         return status;
+    }
+
+    internal void RecordPhysicalSent(int datagramBytes)
+    {
+        EnsureOperational();
+        if (datagramBytes < 0 || datagramBytes > _maximumDatagramBytes)
+            throw new ArgumentOutOfRangeException(nameof(datagramBytes));
+        _sent = SaturatingIncrement(_sent);
+        _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagramBytes));
+        _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagramBytes);
     }
 
     public bool TryReceive(Span<byte> destination, out int length)

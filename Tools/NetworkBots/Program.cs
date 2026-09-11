@@ -26,8 +26,8 @@ catch (Exception exception) when (exception is ArgumentException or FormatExcept
 }
 
 Console.WriteLine(
-    $"PF1 BOT RUN endpoint={options.Endpoint} bots={options.BotCount} seed={options.Seed} " +
-    $"durationMs={options.DurationMilliseconds} scenario={options.Scenario} " +
+    $"{options.Checkpoint} BOT RUN endpoint={options.Endpoint} bots={options.BotCount} seed={options.Seed} " +
+    $"warmupMs={options.WarmupMilliseconds} durationMs={options.DurationMilliseconds} scenario={options.Scenario} " +
     $"cache={options.CacheRoot} network=ClientOnly");
 
 Directory.CreateDirectory(options.CacheRoot);
@@ -97,6 +97,8 @@ internal sealed class BotHarness : IDisposable
     private readonly BotOptions _options;
     private readonly ContentCache _cache;
     private readonly HttpContentPackageSource _source;
+    private readonly ContentPackageSourceSnapshot _lifetimeSourceStart;
+    private readonly ContentCacheSnapshot _lifetimeCacheStart;
     private readonly BotClient[] _bots;
     private readonly BotProcessTelemetrySampler _processMetrics = new(
         new CurrentBotProcessSampleSource());
@@ -107,6 +109,7 @@ internal sealed class BotHarness : IDisposable
     private long _scenarioStarted;
     private long _admissionCompleted;
     private long _scenarioCompleted;
+    private long _measurementStarted;
     private long _quiescenceStarted;
     private long _quiescenceCompleted;
     private long _completionBarrierStarted;
@@ -114,6 +117,11 @@ internal sealed class BotHarness : IDisposable
     private long _pumpStartIntervalHighWaterTicks;
     private long _pumpDurationHighWaterTicks;
     private ulong _pumpIterations;
+    private readonly BotLatencyHistogram _measuredPumpIntervals = new();
+    private readonly BotLatencyHistogram _measuredPumpDurations = new();
+    private BotWireMeasurement? _wireMeasurement;
+    private BotWireMeasurementSummary? _wireSummary;
+    private bool _measurementActive;
     private int _activeHighWater;
     private int _admittingHighWater;
     private int _reconnectingHighWater;
@@ -127,6 +135,8 @@ internal sealed class BotHarness : IDisposable
         _options = options;
         _cache = cache;
         _source = source;
+        _lifetimeSourceStart = source.GetSnapshot();
+        _lifetimeCacheStart = cache.GetSnapshot();
         _bots = new BotClient[options.BotCount];
         for (int index = 0; index < _bots.Length; index++)
             _bots[index] = new BotClient(
@@ -165,12 +175,12 @@ internal sealed class BotHarness : IDisposable
                         Thread.Sleep(1);
                     }
                 }
-                _scenarioStarted = Stopwatch.GetTimestamp();
-                _admissionCompleted = _scenarioStarted;
-                SelectSwordContenders();
+                _admissionCompleted = Stopwatch.GetTimestamp();
+                _scenarioStarted = _admissionCompleted;
+                if (_options.IsMixedChaos) SelectSwordContenders();
                 foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
                 Console.WriteLine(
-                    $"PF1 BOT SWARM ACTIVE bots={_bots.Length} generation=" +
+                    $"{_options.Checkpoint} BOT SWARM ACTIVE bots={_bots.Length} generation=" +
                     $"{_bots[0].ServerGenerationId} sessions={_bots.Sum(static bot => bot.SessionCount)}");
                 break;
             }
@@ -179,13 +189,54 @@ internal sealed class BotHarness : IDisposable
             Thread.Sleep(1);
         }
 
+        if (_options.WarmupMilliseconds != 0)
+        {
+            long warmupDeadline = BotMonotonicClock.AddMilliseconds(
+                _scenarioStarted, _options.WarmupMilliseconds);
+            while (Stopwatch.GetTimestamp() < warmupDeadline)
+            {
+                PumpOnce(allowNewChaos: !_options.IsMixedChaos);
+                if (_bots.Any(static bot => bot.IsFaulted))
+                    return Finish(false, "A bot faulted during PF2 warmup/positioning.");
+                Thread.Sleep(1);
+            }
+            _scenarioStarted = Stopwatch.GetTimestamp();
+            foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
+        }
+
+        if (_options.MeasurementReadyFile is not null)
+        {
+            BotFiles.WriteAtomic(_options.MeasurementReadyFile, "ready");
+            long measurementReleaseDeadline = BotMonotonicClock.AddMilliseconds(
+                Stopwatch.GetTimestamp(), 120_000);
+            while (!File.Exists(_options.MeasurementReleaseFile))
+            {
+                PumpOnce(allowNewChaos: false);
+                if (_bots.Any(static bot => bot.IsFaulted))
+                    return Finish(false, "A bot faulted at the PF2 measurement barrier.");
+                if (Stopwatch.GetTimestamp() >= measurementReleaseDeadline)
+                    return Finish(false, "The PF2 measurement release marker did not arrive.");
+                Thread.Sleep(1);
+            }
+            _scenarioStarted = Stopwatch.GetTimestamp();
+            foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
+        }
+
+        _measurementStarted = Stopwatch.GetTimestamp();
+        _wireMeasurement = new BotWireMeasurement(
+            _bots, _source, _cache, _options.DurationMilliseconds, _measurementStarted);
+        _processMetrics.BeginWindow(_measurementStarted);
+        _measuredPumpIntervals.Clear();
+        _measuredPumpDurations.Clear();
+        _measurementActive = true;
+
         long scenarioDeadline = BotMonotonicClock.AddMilliseconds(
-            _scenarioStarted, _options.DurationMilliseconds);
+            _measurementStarted, _options.DurationMilliseconds);
         while (Stopwatch.GetTimestamp() < scenarioDeadline)
         {
             PumpOnce();
             if (_bots.Any(static bot => bot.IsFaulted))
-                return Finish(false, "A bot faulted during mixed-chaos.");
+                return Finish(false, $"A bot faulted during {_options.Scenario}.");
             Thread.Sleep(1);
         }
 
@@ -193,6 +244,10 @@ internal sealed class BotHarness : IDisposable
         // especially once many clients share the central pump. Stop creating work and give that
         // already-accepted debt one bounded opportunity to converge before judging cleanliness.
         _scenarioCompleted = Stopwatch.GetTimestamp();
+        _measurementActive = false;
+        _processMetrics.EndWindow(_scenarioCompleted);
+        _wireSummary = _wireMeasurement.Complete(
+            _bots, _source, _cache, _scenarioCompleted);
         _quiescenceStarted = _scenarioCompleted;
         long quiescenceDeadline = BotMonotonicClock.AddMilliseconds(
             _quiescenceStarted, 10_000);
@@ -243,6 +298,7 @@ internal sealed class BotHarness : IDisposable
         long lag = now - _lastPump;
         if (lag > _pumpStartIntervalHighWaterTicks) _pumpStartIntervalHighWaterTicks = lag;
         _lastPump = now;
+        if (_measurementActive) _measuredPumpIntervals.RecordTicks(lag);
         for (int index = 0; index < _bots.Length; index++)
             _bots[index].Pump(now, allowNewChaos);
         TrackReconnectIdentity();
@@ -256,6 +312,8 @@ internal sealed class BotHarness : IDisposable
         long completed = Stopwatch.GetTimestamp();
         _pumpDurationHighWaterTicks = Math.Max(
             _pumpDurationHighWaterTicks, completed - now);
+        if (_measurementActive) _measuredPumpDurations.RecordTicks(completed - now);
+        if (_measurementActive) _wireMeasurement?.Sample(_bots, completed);
         _processMetrics.Sample(completed);
     }
 
@@ -267,9 +325,19 @@ internal sealed class BotHarness : IDisposable
         ulong generation = _bots[0].ServerGenerationId;
         if (generation == 0 || _bots.Any(bot => bot.ServerGenerationId != generation))
             return "Bots did not converge on one authoritative server generation.";
-        if (!_bots.Any(static bot => bot.Body == GameGuestBody.HumanFemale) ||
-            !_bots.Any(static bot => bot.Body == GameGuestBody.HumanMale))
+        if (_bots.Length > 1 && (!_bots.Any(static bot => bot.Body == GameGuestBody.HumanFemale) ||
+            !_bots.Any(static bot => bot.Body == GameGuestBody.HumanMale)))
             return "The swarm did not exercise mixed X/Y bodies.";
+        if (_wireSummary is null || !_wireSummary.PhysicalTransportReconciled ||
+            !_wireSummary.LogicalMessageReconciled)
+            return "PF2 physical/logical traffic accounting did not reconcile.";
+        if (!_options.IsMixedChaos)
+        {
+            if (_options.Scenario is "moving" or "crowd" &&
+                _bots.Sum(static bot => bot.MovementAccepted) == 0)
+                return $"The {_options.Scenario} scenario produced no authoritative movement.";
+            return null;
+        }
         if (_bots.Sum(static bot => bot.MovementAccepted) == 0 ||
             _bots.Sum(static bot => bot.JumpsAccepted) == 0)
             return "Authoritative movement/jump acceptance was not observed.";
@@ -323,6 +391,7 @@ internal sealed class BotHarness : IDisposable
 
     private void TrackReconnectIdentity()
     {
+        if (!_options.IsMixedChaos) return;
         BotClient subject = _bots[^1];
         WorldPublicEntityId oldIdentity = subject.PriorPublicActor.IsValid
             ? subject.PriorPublicActor
@@ -389,7 +458,23 @@ internal sealed class BotHarness : IDisposable
             _processMetrics.Samples,
             _activeHighWater, _admittingHighWater, _reconnectingHighWater,
             _reconnectObservers.Count(static observer => observer.Converged),
-            CreatePhaseDurations(retirementStarted, completed));
+            CreatePhaseDurations(retirementStarted, completed),
+            _wireSummary,
+            BotHttpBodyTrafficReport.Delta(_lifetimeSourceStart, _source.GetSnapshot()),
+            BotCacheTrafficReport.Delta(_lifetimeCacheStart, _cache.GetSnapshot()),
+            new BotPumpWindowSummary(
+                _measuredPumpIntervals.Count,
+                _measuredPumpIntervals.Percentile(0.50),
+                _measuredPumpIntervals.Percentile(0.95),
+                _measuredPumpIntervals.Percentile(0.99),
+                _measuredPumpIntervals.MaximumMilliseconds,
+                _measuredPumpDurations.Percentile(0.50),
+                _measuredPumpDurations.Percentile(0.95),
+                _measuredPumpDurations.Percentile(0.99),
+                _measuredPumpDurations.MaximumMilliseconds,
+                _processMetrics.WindowWorkingSetHighWaterBytes,
+                _processMetrics.WindowCpuMilliseconds,
+                _processMetrics.WindowSamples));
     }
 
     public void Dispose()
@@ -402,6 +487,7 @@ internal sealed class BotHarness : IDisposable
 
     private BotRunPhaseDurations CreatePhaseDurations(long retirementStarted, long completed) => new(
         Elapsed(_created, _admissionCompleted),
+        _options.WarmupMilliseconds,
         Elapsed(_scenarioStarted, _scenarioCompleted),
         Elapsed(_quiescenceStarted, _quiescenceCompleted),
         Elapsed(_completionBarrierStarted, _completionBarrierCompleted),
@@ -415,11 +501,26 @@ internal sealed class BotHarness : IDisposable
 
 internal readonly record struct BotRunPhaseDurations(
     long AdmissionMilliseconds,
+    long WarmupMilliseconds,
     long ScenarioMilliseconds,
     long QuiescenceMilliseconds,
     long CompletionBarrierMilliseconds,
     long RetirementMilliseconds,
     long TotalMilliseconds);
+
+internal readonly record struct BotPumpWindowSummary(
+    ulong Samples,
+    double IntervalP50Milliseconds,
+    double IntervalP95Milliseconds,
+    double IntervalP99Milliseconds,
+    double IntervalMaximumMilliseconds,
+    double DurationP50Milliseconds,
+    double DurationP95Milliseconds,
+    double DurationP99Milliseconds,
+    double DurationMaximumMilliseconds,
+    long WorkingSetHighWaterBytes,
+    double CpuMilliseconds,
+    int ProcessSamples);
 
 internal enum BotLifetimeState : byte
 {
@@ -507,6 +608,13 @@ internal sealed class BotClient : IDisposable
     private WorldPublicEntityId _currentPublicActor;
     private ClientPublicActorVerticalPhase _lastVertical;
     private string? _fault;
+    private bool _measurementOriginSet;
+    private long _measurementOriginX;
+    private long _measurementOriginZ;
+    private long _lastMeasurementJumpSecond = -1;
+    private UdpPayloadTrafficSnapshot _retiredUdpTraffic;
+    private NetworkTrafficSnapshot? _retiredSecureTraffic;
+    private bool _trafficCapturedForCurrentLifetime;
 
     internal BotClient(
         BotOptions options,
@@ -591,6 +699,26 @@ internal sealed class BotClient : IDisposable
     internal WorldPublicEntityId PriorPublicActor => _priorPublicActor;
     internal WorldPublicEntityId CurrentPublicActor => _currentPublicActor;
     internal string? Fault => _fault;
+
+    internal BotCumulativeTrafficSnapshot GetCumulativeTrafficSnapshot()
+    {
+        UdpPayloadTrafficSnapshot physical = _retiredUdpTraffic;
+        NetworkTrafficSnapshot? secure = _retiredSecureTraffic;
+        ConnectionId current = default;
+        ulong applicationEpoch = 0;
+        if (_connection is not null &&
+            _connection.TryGetTrafficSnapshot(out HostedUdpConnectionTrafficSnapshot traffic))
+        {
+            current = traffic.Connection;
+            physical = physical.Add(traffic.UdpPayload);
+            if (traffic.SecureProtocol is not null)
+                secure = secure is null
+                    ? traffic.SecureProtocol
+                    : NetworkTrafficSnapshot.Add(secure, traffic.SecureProtocol);
+            applicationEpoch = _connection.GetSnapshot().ApplicationSessionEpoch;
+        }
+        return new(current, applicationEpoch, SessionCount, physical, secure);
+    }
 
     internal bool HasUnexpectedQueueDebt
     {
@@ -805,6 +933,7 @@ internal sealed class BotClient : IDisposable
         _proofCounted = false;
         _currentPublicActor = default;
         _lastVertical = ClientPublicActorVerticalPhase.None;
+        _trafficCapturedForCurrentLifetime = false;
         _controls.Reset();
     }
 
@@ -905,6 +1034,70 @@ internal sealed class BotClient : IDisposable
     }
 
     private void RunScenario(long now, in RemotePlayableSessionSnapshot snapshot)
+    {
+        switch (_options.Scenario)
+        {
+            case "quiet":
+                return;
+            case "moving":
+                RunMovingMeasurement(now, snapshot.Playable.Position, crowd: false);
+                return;
+            case "crowd":
+                RunMovingMeasurement(now, snapshot.Playable.Position, crowd: true);
+                return;
+            case "mixed-chaos":
+                RunMixedChaos(now, snapshot);
+                return;
+            default:
+                throw new InvalidOperationException($"Unknown bot scenario '{_options.Scenario}'.");
+        }
+    }
+
+    private void RunMovingMeasurement(long now, in WorldPosition position, bool crowd)
+    {
+        if (!_measurementOriginSet)
+        {
+            _measurementOriginSet = true;
+            _measurementOriginX = position.GlobalXMillimeters;
+            _measurementOriginZ = position.GlobalZMillimeters;
+        }
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        long second = elapsed / 1_000;
+        if (second != _lastMeasurementJumpSecond &&
+            second > 0 && second % (11 + Id % 5) == 0 &&
+            !_pendingCommand.Pending.IsPending)
+        {
+            _lastMeasurementJumpSecond = second;
+            _ = TryPhysicalAction(
+                ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump);
+            return;
+        }
+        if (now < _nextNavigation || _pendingCommand.Pending.IsPending) return;
+
+        double angle;
+        if (crowd)
+        {
+            long dx = _measurementOriginX - position.GlobalXMillimeters;
+            long dz = _measurementOriginZ - position.GlobalZMillimeters;
+            long distanceSquared = checked(dx * dx + dz * dz);
+            if (distanceSquared > 4_000L * 4_000L)
+                angle = Math.Atan2(dz, dx);
+            else
+                angle = ((Id * 37 + second * 73) % 360) * Math.PI / 180d;
+            _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 500);
+        }
+        else
+        {
+            // Independent radial streams spread clients before/during the measured
+            // window while retaining bounded ordinary direction changes.
+            angle = ((Id * 137 + (second / 8) * 29) % 360) * Math.PI / 180d;
+            _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 2_000);
+        }
+        _ = TryMovement(
+            (float)Math.Cos(angle), (float)Math.Sin(angle), position, now);
+    }
+
+    private void RunMixedChaos(long now, in RemotePlayableSessionSnapshot snapshot)
     {
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         if (Id == _options.BotCount - 1 && !_reconnectRequested && elapsed >= 4_500)
@@ -1403,6 +1596,7 @@ internal sealed class BotClient : IDisposable
     private string? DisposeLifetime()
     {
         string? failure = null;
+        CaptureRetiredTraffic();
         try { _session?.Dispose(); }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -1422,6 +1616,20 @@ internal sealed class BotClient : IDisposable
         _settings = null;
         _currentPublicActor = default;
         return failure;
+    }
+
+    private void CaptureRetiredTraffic()
+    {
+        if (_trafficCapturedForCurrentLifetime || _connection is null) return;
+        if (_connection.TryGetTrafficSnapshot(out HostedUdpConnectionTrafficSnapshot traffic))
+        {
+            _retiredUdpTraffic = _retiredUdpTraffic.Add(traffic.UdpPayload);
+            if (traffic.SecureProtocol is not null)
+                _retiredSecureTraffic = _retiredSecureTraffic is null
+                    ? traffic.SecureProtocol
+                    : NetworkTrafficSnapshot.Add(_retiredSecureTraffic, traffic.SecureProtocol);
+        }
+        _trafficCapturedForCurrentLifetime = true;
     }
 
     private void CancelPendingCommand()
@@ -1642,6 +1850,7 @@ internal sealed record BotRunSummary
     public required string ProcessArchitecture { get; init; }
     public required int ProcessorCount { get; init; }
     public required string CacheMode { get; init; }
+    public required int WarmupMilliseconds { get; init; }
     public required int RequestedDurationMilliseconds { get; init; }
     public required int BotCount { get; init; }
     public required int ActiveBots { get; init; }
@@ -1709,6 +1918,10 @@ internal sealed record BotRunSummary
     public required int ProcessMetricSamples { get; init; }
     public required double CpuMilliseconds { get; init; }
     public required BotRunPhaseDurations PhaseDurations { get; init; }
+    public required BotWireMeasurementSummary? Wire { get; init; }
+    public required BotHttpBodyTrafficReport LifetimeHttpBody { get; init; }
+    public required BotCacheTrafficReport LifetimeContentCache { get; init; }
+    public required BotPumpWindowSummary MeasuredPump { get; init; }
     public required bool CleanRetirement { get; init; }
     public required int FaultedBots { get; init; }
     public required string[] Faults { get; init; }
@@ -1729,10 +1942,16 @@ internal sealed record BotRunSummary
         int admittingHighWater,
         int reconnectingHighWater,
         int reconnectIdentityObserversConverged,
-        BotRunPhaseDurations phaseDurations) => new()
+        BotRunPhaseDurations phaseDurations,
+        BotWireMeasurementSummary? wire,
+        BotHttpBodyTrafficReport lifetimeHttpBody,
+        BotCacheTrafficReport lifetimeContentCache,
+        BotPumpWindowSummary measuredPump) => new()
     {
-        SchemaVersion = 2,
-        Checkpoint = "PF1",
+        // Preserve the already accepted PF1 evidence schema. PF2 adds the
+        // synchronized warmup/measurement window and first-class wire report.
+        SchemaVersion = options.Checkpoint == "PF1" ? 2 : 3,
+        Checkpoint = options.Checkpoint,
         Passed = passed,
         Detail = detail,
         Endpoint = options.Endpoint,
@@ -1744,6 +1963,7 @@ internal sealed record BotRunSummary
         ProcessArchitecture = BotRuntimeIdentity.Architecture,
         ProcessorCount = Environment.ProcessorCount,
         CacheMode = "shared-persistent-cas",
+        WarmupMilliseconds = options.WarmupMilliseconds,
         RequestedDurationMilliseconds = options.DurationMilliseconds,
         BotCount = bots.Length,
         ActiveBots = bots.Count(static bot => bot.IsActive),
@@ -1816,6 +2036,10 @@ internal sealed record BotRunSummary
         ProcessMetricSamples = processMetricSamples,
         CpuMilliseconds = cpuMilliseconds,
         PhaseDurations = phaseDurations,
+        Wire = wire,
+        LifetimeHttpBody = lifetimeHttpBody,
+        LifetimeContentCache = lifetimeContentCache,
+        MeasuredPump = measuredPump,
         CleanRetirement = cleanRetirement,
         FaultedBots = bots.Count(static bot => bot.IsFaulted),
         Faults = bots.Where(static bot => bot.Fault is not null)
@@ -1823,7 +2047,7 @@ internal sealed record BotRunSummary
     };
 
     internal string ToEvidenceLine() =>
-        $"PF1 BOT HARNESS {(Passed ? "PASS" : "FAIL")} schema={SchemaVersion} " +
+        $"{Checkpoint} BOT HARNESS {(Passed ? "PASS" : "FAIL")} schema={SchemaVersion} " +
         $"bots={BotCount} seed={Seed} requestedMs={RequestedDurationMilliseconds} " +
         $"states={ActiveBots}/{AdmittingBots}/{ReconnectingBots}/{RetiredBots} " +
         $"stateHighWater={ActiveHighWater}/{AdmittingHighWater}/{ReconnectingHighWater} " +
@@ -1845,6 +2069,8 @@ internal sealed record BotRunSummary
         $"pumpDurationMs={PumpDurationHighWaterMilliseconds:0.###} " +
         $"botServiceMs={BotServiceIntervalHighWaterMilliseconds:0.###} " +
         $"workingSet={WorkingSetHighWaterBytes} cpuMs={CpuMilliseconds:0.###} " +
+        $"udp={Wire?.ClientToServerUdpPayloadBytes ?? 0}/" +
+        $"{Wire?.ServerToClientUdpPayloadBytes ?? 0} " +
         $"retired={CleanRetirement} detail={Detail ?? "none"}";
 }
 
@@ -1861,9 +2087,15 @@ internal readonly record struct BotOptions(
     string? ReadyFile,
     string? ReleaseFile,
     string? SummaryFile,
+    string? MeasurementReadyFile,
+    string? MeasurementReleaseFile,
     int AdmissionStaggerMilliseconds,
-    bool Verbose)
+    bool Verbose,
+    int WarmupMilliseconds)
 {
+    internal bool IsMixedChaos => string.Equals(Scenario, "mixed-chaos", StringComparison.Ordinal);
+    internal string Checkpoint => IsMixedChaos && WarmupMilliseconds == 0 ? "PF1" : "PF2";
+
     internal static BotOptions Parse(string[] arguments)
     {
         string? endpoint = null;
@@ -1874,10 +2106,13 @@ internal readonly record struct BotOptions(
         string? ready = null;
         string? release = null;
         string? summary = null;
+        string? measurementReady = null;
+        string? measurementRelease = null;
         int bots = 0;
         ulong seed = 0;
         int duration = 0;
         int stagger = 100;
+        int warmup = -1;
         bool verbose = false;
         string scenario = "mixed-chaos";
         foreach (string argument in arguments)
@@ -1888,6 +2123,7 @@ internal readonly record struct BotOptions(
             else if (TryValue(argument, "--bots=", out value) && int.TryParse(value, out int parsedBots)) bots = parsedBots;
             else if (TryValue(argument, "--seed=", out value) && ulong.TryParse(value, out ulong parsedSeed)) seed = parsedSeed;
             else if (TryValue(argument, "--duration=", out value)) duration = ParseDuration(value!);
+            else if (TryValue(argument, "--warmup=", out value)) warmup = ParseDuration(value!);
             else if (TryValue(argument, "--scenario=", out value)) scenario = value!;
             else if (TryValue(argument, "--cache=", out value)) cache = Path.GetFullPath(value!);
             else if (TryValue(argument, "--start-ready-file=", out value)) startReady = Path.GetFullPath(value!);
@@ -1895,6 +2131,8 @@ internal readonly record struct BotOptions(
             else if (TryValue(argument, "--ready-file=", out value)) ready = Path.GetFullPath(value!);
             else if (TryValue(argument, "--release-file=", out value)) release = Path.GetFullPath(value!);
             else if (TryValue(argument, "--summary-file=", out value)) summary = Path.GetFullPath(value!);
+            else if (TryValue(argument, "--measurement-ready-file=", out value)) measurementReady = Path.GetFullPath(value!);
+            else if (TryValue(argument, "--measurement-release-file=", out value)) measurementRelease = Path.GetFullPath(value!);
             else if (TryValue(argument, "--admission-stagger-ms=", out value) && int.TryParse(value, out int parsedStagger)) stagger = parsedStagger;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
@@ -1907,19 +2145,26 @@ internal readonly record struct BotOptions(
         if (seed == 0) throw new ArgumentException("--seed must be a nonzero UInt64.");
         if (duration is < 2_000 or > 86_400_000)
             throw new ArgumentException("--duration must be between 2 seconds and 24 hours.");
-        if (!string.Equals(scenario, "mixed-chaos", StringComparison.Ordinal))
-            throw new ArgumentException("--scenario currently supports only mixed-chaos.");
+        if (scenario is not ("mixed-chaos" or "quiet" or "moving" or "crowd"))
+            throw new ArgumentException("--scenario must be mixed-chaos, quiet, moving, or crowd.");
         if (cache is null) throw new ArgumentException("--cache is required.");
         if ((startReady is null) != (startRelease is null))
             throw new ArgumentException(
                 "--start-ready-file and --start-release-file must be supplied together.");
         if ((ready is null) != (release is null))
             throw new ArgumentException("--ready-file and --release-file must be supplied together.");
+        if ((measurementReady is null) != (measurementRelease is null))
+            throw new ArgumentException(
+                "--measurement-ready-file and --measurement-release-file must be supplied together.");
         if (stagger is < 0 or > 5_000)
             throw new ArgumentException("--admission-stagger-ms must be between 0 and 5000.");
-        BotScenarioContract.ValidateMixedChaos(bots, duration);
+        warmup = warmup < 0 ? (scenario == "mixed-chaos" ? 0 : 60_000) : warmup;
+        if (warmup is < 0 or > 3_600_000)
+            throw new ArgumentException("--warmup must be between zero and one hour.");
+        if (scenario == "mixed-chaos") BotScenarioContract.ValidateMixedChaos(bots, duration);
         return new BotOptions(endpoint!, fingerprint!, bots, seed, duration, scenario,
-            cache, startReady, startRelease, ready, release, summary, stagger, verbose);
+            cache, startReady, startRelease, ready, release, summary,
+            measurementReady, measurementRelease, stagger, verbose, warmup);
     }
 
     private static bool TryValue(string argument, string prefix, out string? value)
