@@ -121,6 +121,7 @@ internal sealed class BotHarness : IDisposable
     private readonly BotLatencyHistogram _measuredPumpDurations = new();
     private BotWireMeasurement? _wireMeasurement;
     private BotWireMeasurementSummary? _wireSummary;
+    private BotClientTelemetryReport[] _clientTelemetry = [];
     private bool _measurementActive;
     private int _activeHighWater;
     private int _admittingHighWater;
@@ -223,6 +224,7 @@ internal sealed class BotHarness : IDisposable
         }
 
         _measurementStarted = Stopwatch.GetTimestamp();
+        foreach (BotClient bot in _bots) bot.ResetTelemetryWindow();
         _wireMeasurement = new BotWireMeasurement(
             _bots, _source, _cache, _options.DurationMilliseconds, _measurementStarted);
         _processMetrics.BeginWindow(_measurementStarted);
@@ -248,6 +250,7 @@ internal sealed class BotHarness : IDisposable
         _processMetrics.EndWindow(_scenarioCompleted);
         _wireSummary = _wireMeasurement.Complete(
             _bots, _source, _cache, _scenarioCompleted);
+        _clientTelemetry = _bots.Select(static bot => bot.GetTelemetryReport()).ToArray();
         if (_options.MeasurementCompleteFile is not null)
             BotFiles.WriteAtomic(_options.MeasurementCompleteFile, "complete");
         _quiescenceStarted = _scenarioCompleted;
@@ -462,6 +465,7 @@ internal sealed class BotHarness : IDisposable
             _reconnectObservers.Count(static observer => observer.Converged),
             CreatePhaseDurations(retirementStarted, completed),
             _wireSummary,
+            _clientTelemetry,
             BotHttpBodyTrafficReport.Delta(_lifetimeSourceStart, _source.GetSnapshot()),
             BotCacheTrafficReport.Delta(_lifetimeCacheStart, _cache.GetSnapshot()),
             new BotPumpWindowSummary(
@@ -476,7 +480,13 @@ internal sealed class BotHarness : IDisposable
                 _measuredPumpDurations.MaximumMilliseconds,
                 _processMetrics.WindowWorkingSetHighWaterBytes,
                 _processMetrics.WindowCpuMilliseconds,
-                _processMetrics.WindowSamples));
+                _processMetrics.WindowSamples,
+                _processMetrics.WindowManagedHeapHighWaterBytes,
+                _processMetrics.WindowAllocatedBytes,
+                _processMetrics.WindowGen0Collections,
+                _processMetrics.WindowGen1Collections,
+                _processMetrics.WindowGen2Collections,
+                _processMetrics.WindowThreadHighWater));
     }
 
     public void Dispose()
@@ -522,7 +532,13 @@ internal readonly record struct BotPumpWindowSummary(
     double DurationMaximumMilliseconds,
     long WorkingSetHighWaterBytes,
     double CpuMilliseconds,
-    int ProcessSamples);
+    int ProcessSamples,
+    long ManagedHeapHighWaterBytes,
+    long AllocatedBytes,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections,
+    int ThreadHighWater);
 
 internal enum BotLifetimeState : byte
 {
@@ -664,6 +680,7 @@ internal sealed class BotClient : IDisposable
     internal int GlobalChatObserved { get; private set; }
     internal int NonsenseInputs { get; private set; }
     internal int NonsenseCommandsCreated { get; private set; }
+    internal int SyntheticInputSamples { get; private set; }
     internal int SwordInteractionAttempts { get; private set; }
     internal int SwordPickupObserved { get; private set; }
     internal int SwordEquipObserved { get; private set; }
@@ -720,6 +737,34 @@ internal sealed class BotClient : IDisposable
             applicationEpoch = _connection.GetSnapshot().ApplicationSessionEpoch;
         }
         return new(current, applicationEpoch, SessionCount, physical, secure);
+    }
+
+    internal BotClientTelemetryReport GetTelemetryReport()
+    {
+        NetworkServiceTimingSnapshot network = default;
+        NetworkProtocolSnapshot protocol = default;
+        if (_connection is not null) _ = _connection.TryGetTelemetrySnapshot(out network);
+        if (_connection is not null) _ = _connection.TryGetProtocolSnapshot(out protocol);
+        return new BotClientTelemetryReport(
+            Id,
+            _connection?.GetSnapshot().Connection ?? default,
+            network,
+            protocol,
+            _session?.GetTimingSnapshot() ?? default);
+    }
+
+    internal void ResetTelemetryWindow()
+    {
+        if (_connection is null || _session is null || State != BotLifetimeState.Active)
+            throw new InvalidOperationException(
+                "A bot telemetry window requires one active application lifetime.");
+        _connection.ConfigureTelemetry(_options.TelemetryLevel);
+        _session.ConfigureTelemetry(_options.TelemetryLevel);
+        // This counter intentionally describes the synchronized measurement
+        // window, not admission or scenario-positioning work. It is distinct
+        // from commands submitted because an input sample may be unmapped or
+        // suppressed before it becomes an application command.
+        SyntheticInputSamples = 0;
     }
 
     internal bool HasUnexpectedQueueDebt
@@ -845,6 +890,7 @@ internal sealed class BotClient : IDisposable
                     _renderer,
                     new ClientChatLimits(256, 256, 128),
                     standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
+                _session.ConfigureTelemetry(_options.TelemetryLevel);
                 State = BotLifetimeState.Content;
             }
 
@@ -920,6 +966,7 @@ internal sealed class BotClient : IDisposable
         ClientServerTrustFileStore store = TrustStore();
         ClientServerTrustLoadResult loaded = store.Load();
         _connection = new ClientDirectConnectSession(loaded.Registry, store);
+        _connection.ConfigureTelemetry(_options.TelemetryLevel);
         if (!_connection.TryStart(_options.Endpoint, _options.Fingerprint))
         {
             ClientDirectConnectSnapshot failed = _connection.GetSnapshot();
@@ -1146,6 +1193,7 @@ internal sealed class BotClient : IDisposable
                     out ClientPhysicalInput nonsense))
                 throw new InvalidOperationException("The PF1 inert input was not canonical.");
             ulong before = _session!.Playable.Input.Snapshot().CommandsProduced;
+            SyntheticInputSamples++;
             bool mapped = _settings!.TryResolveInput(in nonsense, out _);
             ulong after = _session.Playable.Input.Snapshot().CommandsProduced;
             NonsenseInputs++;
@@ -1256,6 +1304,7 @@ internal sealed class BotClient : IDisposable
     private bool TryMovement(float x, float z, in WorldPosition position, long now)
     {
         if (_pendingCommand.Pending.IsPending) return false;
+        SyntheticInputSamples++;
         long relativeTimestamp = _scenarioStarted == 0
             ? 0
             : BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
@@ -1271,8 +1320,10 @@ internal sealed class BotClient : IDisposable
         BotCommandKind kind)
     {
         if (_pendingCommand.Pending.IsPending ||
-            !_settings!.TryGetBinding(expected, out ClientPhysicalInput physical) ||
-            !_settings.TryResolveInput(in physical, out ClientSemanticAction resolved) ||
+            !_settings!.TryGetBinding(expected, out ClientPhysicalInput physical))
+            return false;
+        SyntheticInputSamples++;
+        if (!_settings.TryResolveInput(in physical, out ClientSemanticAction resolved) ||
             resolved != expected)
             return false;
         return TryCommand(new ClientWorldCommandIntent(
@@ -1837,6 +1888,13 @@ internal struct DeterministicRandom
     }
 }
 
+internal sealed record BotClientTelemetryReport(
+    int BotId,
+    ConnectionId Connection,
+    NetworkServiceTimingSnapshot Network,
+    NetworkProtocolSnapshot Protocol,
+    RemotePlayableSessionTimingSnapshot Client);
+
 internal sealed record BotRunSummary
 {
     public required int SchemaVersion { get; init; }
@@ -1881,6 +1939,8 @@ internal sealed record BotRunSummary
     public required int GlobalChatObserved { get; init; }
     public required int NonsenseInputs { get; init; }
     public required int NonsenseCommandsCreated { get; init; }
+    public required int SyntheticInputSamples { get; init; }
+    public required double SyntheticInputSamplesPerSecond { get; init; }
     public required int SwordInteractionAttempts { get; init; }
     public required int SwordPickupObserved { get; init; }
     public required int SwordEquipObserved { get; init; }
@@ -1919,8 +1979,16 @@ internal sealed record BotRunSummary
     public required long WorkingSetHighWaterBytes { get; init; }
     public required int ProcessMetricSamples { get; init; }
     public required double CpuMilliseconds { get; init; }
+    public required long MeasuredManagedHeapHighWaterBytes { get; init; }
+    public required long MeasuredAllocatedBytes { get; init; }
+    public required int MeasuredGen0Collections { get; init; }
+    public required int MeasuredGen1Collections { get; init; }
+    public required int MeasuredGen2Collections { get; init; }
+    public required int MeasuredThreadHighWater { get; init; }
     public required BotRunPhaseDurations PhaseDurations { get; init; }
     public required BotWireMeasurementSummary? Wire { get; init; }
+    public required string TelemetryLevel { get; init; }
+    public required BotClientTelemetryReport[] ClientTelemetry { get; init; }
     public required BotHttpBodyTrafficReport LifetimeHttpBody { get; init; }
     public required BotCacheTrafficReport LifetimeContentCache { get; init; }
     public required BotPumpWindowSummary MeasuredPump { get; init; }
@@ -1946,13 +2014,14 @@ internal sealed record BotRunSummary
         int reconnectIdentityObserversConverged,
         BotRunPhaseDurations phaseDurations,
         BotWireMeasurementSummary? wire,
+        BotClientTelemetryReport[] clientTelemetry,
         BotHttpBodyTrafficReport lifetimeHttpBody,
         BotCacheTrafficReport lifetimeContentCache,
         BotPumpWindowSummary measuredPump) => new()
     {
         // Preserve the already accepted PF1 evidence schema. PF2 adds the
         // synchronized warmup/measurement window and first-class wire report.
-        SchemaVersion = options.Checkpoint == "PF1" ? 2 : 3,
+        SchemaVersion = options.Checkpoint == "PF1" ? 2 : options.Checkpoint == "PF2" ? 3 : 4,
         Checkpoint = options.Checkpoint,
         Passed = passed,
         Detail = detail,
@@ -1994,6 +2063,11 @@ internal sealed record BotRunSummary
         GlobalChatObserved = bots.Sum(static bot => bot.GlobalChatObserved),
         NonsenseInputs = bots.Sum(static bot => bot.NonsenseInputs),
         NonsenseCommandsCreated = bots.Sum(static bot => bot.NonsenseCommandsCreated),
+        SyntheticInputSamples = bots.Sum(static bot => bot.SyntheticInputSamples),
+        SyntheticInputSamplesPerSecond = options.DurationMilliseconds <= 0
+            ? 0d
+            : bots.Sum(static bot => bot.SyntheticInputSamples) * 1_000d /
+                options.DurationMilliseconds,
         SwordInteractionAttempts = bots.Sum(static bot => bot.SwordInteractionAttempts),
         SwordPickupObserved = bots.Sum(static bot => bot.SwordPickupObserved),
         SwordEquipObserved = bots.Sum(static bot => bot.SwordEquipObserved),
@@ -2037,8 +2111,16 @@ internal sealed record BotRunSummary
         WorkingSetHighWaterBytes = workingSetHighWaterBytes,
         ProcessMetricSamples = processMetricSamples,
         CpuMilliseconds = cpuMilliseconds,
+        MeasuredManagedHeapHighWaterBytes = measuredPump.ManagedHeapHighWaterBytes,
+        MeasuredAllocatedBytes = measuredPump.AllocatedBytes,
+        MeasuredGen0Collections = measuredPump.Gen0Collections,
+        MeasuredGen1Collections = measuredPump.Gen1Collections,
+        MeasuredGen2Collections = measuredPump.Gen2Collections,
+        MeasuredThreadHighWater = measuredPump.ThreadHighWater,
         PhaseDurations = phaseDurations,
         Wire = wire,
+        TelemetryLevel = options.TelemetryLevel.ToString(),
+        ClientTelemetry = clientTelemetry,
         LifetimeHttpBody = lifetimeHttpBody,
         LifetimeContentCache = lifetimeContentCache,
         MeasuredPump = measuredPump,
@@ -2094,10 +2176,13 @@ internal readonly record struct BotOptions(
     string? MeasurementCompleteFile,
     int AdmissionStaggerMilliseconds,
     bool Verbose,
-    int WarmupMilliseconds)
+    int WarmupMilliseconds,
+    NetworkTelemetryLevel TelemetryLevel = NetworkTelemetryLevel.Off)
 {
     internal bool IsMixedChaos => string.Equals(Scenario, "mixed-chaos", StringComparison.Ordinal);
-    internal string Checkpoint => IsMixedChaos && WarmupMilliseconds == 0 ? "PF1" : "PF2";
+    internal string Checkpoint => TelemetryLevel == NetworkTelemetryLevel.Detailed
+        ? "PF2.5"
+        : IsMixedChaos && WarmupMilliseconds == 0 ? "PF1" : "PF2";
 
     internal static BotOptions Parse(string[] arguments)
     {
@@ -2119,6 +2204,7 @@ internal readonly record struct BotOptions(
         int warmup = -1;
         bool verbose = false;
         string scenario = "mixed-chaos";
+        NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off;
         foreach (string argument in arguments)
         {
             if (argument == "--verbose") { verbose = true; continue; }
@@ -2139,6 +2225,9 @@ internal readonly record struct BotOptions(
             else if (TryValue(argument, "--measurement-release-file=", out value)) measurementRelease = Path.GetFullPath(value!);
             else if (TryValue(argument, "--measurement-complete-file=", out value)) measurementComplete = Path.GetFullPath(value!);
             else if (TryValue(argument, "--admission-stagger-ms=", out value) && int.TryParse(value, out int parsedStagger)) stagger = parsedStagger;
+            else if (TryValue(argument, "--telemetry=", out value) &&
+                Enum.TryParse(value, ignoreCase: true, out NetworkTelemetryLevel parsedTelemetry))
+                telemetryLevel = parsedTelemetry;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
         if (!ClientDirectConnectEndpoint.TryParse(endpoint, out _))
@@ -2173,7 +2262,7 @@ internal readonly record struct BotOptions(
         return new BotOptions(endpoint!, fingerprint!, bots, seed, duration, scenario,
             cache, startReady, startRelease, ready, release, summary,
             measurementReady, measurementRelease, measurementComplete,
-            stagger, verbose, warmup);
+            stagger, verbose, warmup, telemetryLevel);
     }
 
     private static bool TryValue(string argument, string prefix, out string? value)

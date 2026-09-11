@@ -84,6 +84,29 @@ whole-run cold/warm cache facts so a one-time WorldPack download cannot be quote
 bandwidth. A warm cache may avoid transfer, but every connection still performs a fresh application
 session and content-application proof.
 
+PF2.5 adds opt-in `Off`, `Basic`, and `Detailed` timing modes without changing the scenario,
+protocol, cadence, or traffic definitions. `Off` takes no detailed stage timestamps. `Basic`
+records bounded service intervals/durations. `Detailed` additionally records fixed-histogram
+Network protocol stages, client semantic-apply/owner-state timings, authority/application/
+ChunkPublication stages, exact per-message traffic, queue high-water, and process/GC context.
+Schema-v4 reports use `checkpoint=PF2.5`. Distribution `Count`/`TotalStopwatchTicks` values are
+cumulative for the measurement window; client/Game/native percentiles are computed over the last
+256 bounded samples and retain a window-wide maximum. Network percentiles use 64 fixed
+power-of-two Stopwatch-tick buckets and are conservative bucket upper bounds.
+
+The maintained synchronized long-run helper starts one ordinary dedicated authority and one real
+ClientOnly bot process, excludes admission/warmup from both measurement windows, and preserves the
+raw bot/server summaries and logs:
+
+```bash
+Tools/NetworkBots/run-pf25-baseline.sh moving 600s \
+  /tmp/ultrasim-pf25-moving-50 50 130363 60s \
+  /tmp/ultrasim-pf25-shared-cache
+```
+
+The output directory must not already exist. The helper never changes the authority limit, AOI,
+cadence, aggregation, compression, or wire schema; it selects `Detailed` diagnostics only.
+
 The harness accepts 8–4,096 bots for the current `mixed-chaos` scenario and never starts a process
 or dedicated thread per bot. Eight clients and a ten-second duration are the minimum because the
 scenario assigns fixed reconnect, edge, telepad, gate, sword, mixed-body, and observer roles. The
@@ -147,3 +170,28 @@ dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerificati
 
 That bounded gate uses real UDP plus two actual exported Online processes. The accepted long-window
 PF2 baselines are recorded separately and are intentionally not rerun by every repository verify.
+
+Run the focused PF2.5 timing/attribution gate with:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf2.5-only
+```
+
+It retains the same mixed 8-bot + 2-exported-Online product shape while requiring Detailed
+authority, Network, client semantic-apply, native render/presentation, exact message, and resource
+telemetry. The exported headless smoke submits one ordinary bounded movement/stop pair after the
+measurement reset so its input-to-owner-state path is observed inside the synchronized window.
+
+The accepted five-minute native measurement uses the same verifier path with a 60-second warmup
+and preserves its cold summaries outside the temporary export scope:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf2.5-only --pf2.5-long-native \
+  --pf2.5-evidence-output=/tmp/ultrasim-pf25-native-8-plus-2
+```
+
+The evidence output directory must not already exist. Neither long option changes the native
+product, authority, scenario, cadence, or accounting path; it only extends the synchronized window
+and copies the immutable final reports.

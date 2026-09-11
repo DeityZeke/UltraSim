@@ -2,7 +2,9 @@
 
 **Status:** active campaign. PF0 records the exact feature-complete candidate, PF1 closes the
 real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes
-first-class wire accounting plus quiet/moving/crowd characterization. PF3 cadence policy is next.
+first-class wire accounting plus quiet/moving/crowd characterization. PF2.5 now reconciles the
+current product's replication ownership and completes PF3 observability without changing policy;
+PF3 cadence policy follows.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1624,6 +1626,30 @@ Close when:
 - aggregate + p50/p95/max per-client reporting exists;
 - permanent baseline artifact records quiet/moving/crowd cases.
 
+## PF2.5 / P0.5A — ownership reconciliation and PF3 observability
+
+**Status: implementation/evidence in progress.** This checkpoint keeps the selected production
+owner and all shipping policy unchanged while making the PF2 result explainable end to end. The
+accepted decision is Option A: retain the single composed `ChunkPublication` owner for all current
+mutable public state through Concept Demo freeze. Terrain/frozen structure remains WorldPack;
+owner-private state, ordered Chat facts, cold presentation metadata, UI, and Content retain their
+separate owners and proof lineages.
+
+Detailed observability is opt-in and uses owner-local fixed counters/histograms plus cold immutable
+snapshots. `Off`, `Basic`, and `Detailed` are explicit; detailed recording introduces no protocol
+message or timestamp. The full routing/provenance audit, timing vocabulary, alternative-profile
+readiness, and proposed PF3 `ServerPerformanceProfile/v1` contract are in
+[`PF2_5_REPLICATION_RECONCILIATION.md`](PF2_5_REPLICATION_RECONCILIATION.md).
+
+Close when:
+
+- current production ownership and every real consumer are recorded precisely;
+- PF2 exact message contributors and Moving-versus-Crowd behavior are explained;
+- Network/Game/client/native timing and queue/debt observability pass real UDP and exported-client
+  gates with bounded cost;
+- focused profile comparison separates semantic profile work from full shared-UDP path cost;
+- unchanged-cadence 50-client quiet/moving/crowd and 30-minute mixed-chaos evidence is recorded.
+
 ## PF3 — cadence/performance policy
 
 Close when:
@@ -1790,22 +1816,23 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 9. Build the real headless Network bot client and mixed exported-client gate. **CLOSED — PF1**
 10. Add first-class wire/per-message accounting. **CLOSED — PF2**
 11. Establish high-performance quiet/moving/crowd baselines. **CLOSED — PF2**
-12. Decouple render FPS from input submission cadence. **NEXT — PF3**
-13. Define/advertise/enforce the bounded Server Performance Profile.
-14. Run mismatched-cadence correctness matrix.
-15. Evaluate input/owner/public cadence reductions.
-16. Evaluate unreliable frame aggregation.
-17. Measure dense vs distributed AOI/fanout.
-18. Evaluate selective compression only where payload shape justifies it.
-19. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-20. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-21. Run mixed headless + exported Godot clients.
-22. Run external human Concept Demo validation.
-23. Choose/document the default deployment-performance policy.
-24. Record decisive performance/bandwidth/failure evidence.
-25. Full exact-tree verifier and export closure.
-26. Freeze/tag the Concept Demo baseline.
-27. Begin the separate extraction/genericization/ecosystem roadmap.
+12. Reconcile current-game replication ownership and complete PF3 observability. **NEXT — PF2.5**
+13. Decouple render FPS from input submission cadence. **PF3**
+14. Define/advertise/enforce the bounded Server Performance Profile.
+15. Run mismatched-cadence correctness matrix.
+16. Evaluate input/owner/public cadence reductions.
+17. Evaluate unreliable frame aggregation.
+18. Measure dense vs distributed AOI/fanout.
+19. Evaluate selective compression only where payload shape justifies it.
+20. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+21. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+22. Run mixed headless + exported Godot clients.
+23. Run external human Concept Demo validation.
+24. Choose/document the default deployment-performance policy.
+25. Record decisive performance/bandwidth/failure evidence.
+26. Full exact-tree verifier and export closure.
+27. Freeze/tag the Concept Demo baseline.
+28. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

@@ -79,13 +79,16 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly NetworkLogicalTrafficCounter[] _trafficByMessage;
     private int _reliableFreeCount;
     private int _reliableCount;
+    private int _reliableQueuedHighWater;
     private int _independentFreeCount;
     private int _independentCount;
+    private int _independentQueuedHighWater;
     private int _sentPacketFreeCount;
     private int _nextIndependentSchedule;
     private int _receivedFreeCount;
     private int _receivedHead;
     private int _receivedCount;
+    private int _receivedQueuedHighWater;
     private int _reliablePayloadTail;
     private int _receivedPayloadTail;
     private uint _readyPriorityMask;
@@ -165,6 +168,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private NetworkPacketWindow _transportDeliveries;
     private bool _ackPending;
     private int _inFlight;
+    private int _inFlightHighWater;
     private int _congestionWindow;
     private int _congestionAckCredit;
     private ulong _smoothedRtt;
@@ -202,6 +206,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _stageReadySelections;
     private bool _acceptsNewSends = true;
     private bool _disposed;
+    private NetworkTelemetryLevel _telemetryLevel;
 
     internal NetworkProtocolPeer(
         INetworkDatagramEndpoint endpoint,
@@ -344,6 +349,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 new LaneSequence(sequence), payload.Length, (ushort)fragmentCount, 0);
             EnqueueReliable(slot, descriptor.Lane);
             _reliableCount++;
+            _reliableQueuedHighWater = Math.Max(_reliableQueuedHighWater, _reliableCount);
             AddRetainedBytes(ref _reliableRetainedBytes, ref _reliableRetainedHighWaterBytes, payload.Length);
         }
         else if (lane.Retention == NetworkRetentionPolicy.IndependentState)
@@ -356,6 +362,8 @@ public sealed class NetworkProtocolPeer : IDisposable
                 new LaneSequence(sequence), payload.Length, 1, 0);
             SetIndependentReady(slot, descriptor.Lane);
             _independentCount++;
+            _independentQueuedHighWater = Math.Max(
+                _independentQueuedHighWater, _independentCount);
             AddRetainedBytes(ref _independentRetainedBytes, ref _independentRetainedHighWaterBytes, payload.Length);
             _unreliableStreams[messageSlot].NextSendSequence = sequence + 1;
         }
@@ -527,9 +535,14 @@ public sealed class NetworkProtocolPeer : IDisposable
         }
     }
 
-    internal void ResetStageTiming(bool enabled)
+    internal void ResetStageTiming(bool enabled) =>
+        ConfigureTelemetry(enabled ? NetworkTelemetryLevel.Detailed : NetworkTelemetryLevel.Off);
+
+    /// <summary>Changes diagnostic cost without changing protocol state or wire behavior.</summary>
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
     {
         EnsureOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
         _emitTicks = 0;
         _emitCalls = 0;
         _idleEmitCalls = 0;
@@ -555,13 +568,19 @@ public sealed class NetworkProtocolPeer : IDisposable
         _stageExcludedSelectionProbes = 0;
         _stageEmptySelectionAttempts = 0;
         _stageReadySelections = 0;
-        _stageTimingEnabled = enabled;
+        _reliableQueuedHighWater = _reliableCount;
+        _independentQueuedHighWater = _independentCount;
+        _receivedQueuedHighWater = _receivedCount;
+        _inFlightHighWater = _inFlight;
+        _telemetryLevel = level;
+        _stageTimingEnabled = level == NetworkTelemetryLevel.Detailed;
     }
 
-    internal NetworkProtocolStageTiming GetStageTiming()
+    public NetworkProtocolStageTiming GetStageTiming()
     {
         EnsureOperational();
         return new(
+            _telemetryLevel,
             _emitTicks,
             _emitCalls,
             _idleEmitCalls,
@@ -750,8 +769,10 @@ public sealed class NetworkProtocolPeer : IDisposable
             _dataPacketsSent, _acknowledgementPacketsSent, _keepAlivePacketsSent,
             _encryptedPlaintextBytes, _decryptedPlaintextBytes, _reliableFragmentsSent,
             _reliableRetransmittedWireBytes,
-            _reliableCount, _independentCount, _receivedCount, _congestionWindow,
-            _inFlight, _smoothedRtt, _rto, reserved,
+            _reliableCount, _reliableQueuedHighWater,
+            _independentCount, _independentQueuedHighWater,
+            _receivedCount, _receivedQueuedHighWater, _ackPending, _congestionWindow,
+            _inFlight, _inFlightHighWater, _smoothedRtt, _rto, reserved,
             new NetworkRetainedPayloadSnapshot(
                 _reliableRetainedBytes, _reliableRetainedHighWaterBytes, _reliablePayloads.Length,
                 _independentRetainedBytes, _independentRetainedHighWaterBytes, _independentPayloads.Length,
@@ -812,7 +833,8 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _keepAlivePacketsReceived, _keepAliveUdpPayloadBytesReceived,
                 _retransmittedDataDatagrams, _reliableRetransmittedWireBytes),
             lanes,
-            messages);
+            messages,
+            GetStageTiming());
     }
 
     public void Dispose()
@@ -1289,6 +1311,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 }
                 _lastSentSteps[reliableSlot * _limits.MaximumFragmentsPerMessage + fragmentIndex] = step + 1;
                 _inFlight++;
+                _inFlightHighWater = Math.Max(_inFlightHighWater, _inFlight);
             }
             else
             {
@@ -2035,6 +2058,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         int tail = (_receivedHead + _receivedCount) % _receivedQueue.Length;
         _receivedQueue[tail] = slot;
         _receivedCount++;
+        _receivedQueuedHighWater = Math.Max(_receivedQueuedHighWater, _receivedCount);
         AddRetainedBytes(ref _receivedRetainedBytes, ref _receivedRetainedHighWaterBytes, payload.Length);
         return true;
     }

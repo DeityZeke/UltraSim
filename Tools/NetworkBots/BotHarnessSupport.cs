@@ -267,7 +267,13 @@ internal sealed class BotReconnectIdentityObservation
 
 internal readonly record struct BotProcessSample(
     long WorkingSetBytes,
-    double CpuMilliseconds);
+    double CpuMilliseconds,
+    long ManagedHeapBytes = 0,
+    long TotalAllocatedBytes = 0,
+    int Gen0Collections = 0,
+    int Gen1Collections = 0,
+    int Gen2Collections = 0,
+    int ThreadCount = 0);
 
 internal interface IBotProcessSampleSource : IDisposable
 {
@@ -281,9 +287,16 @@ internal sealed class CurrentBotProcessSampleSource : IBotProcessSampleSource
     public BotProcessSample ReadFresh()
     {
         _process.Refresh();
+        GCMemoryInfo memory = GC.GetGCMemoryInfo();
         return new BotProcessSample(
             _process.WorkingSet64,
-            _process.TotalProcessorTime.TotalMilliseconds);
+            _process.TotalProcessorTime.TotalMilliseconds,
+            memory.HeapSizeBytes,
+            GC.GetTotalAllocatedBytes(precise: false),
+            GC.CollectionCount(0),
+            GC.CollectionCount(1),
+            GC.CollectionCount(2),
+            _process.Threads.Count);
     }
 
     public void Dispose() => _process.Dispose();
@@ -312,15 +325,33 @@ internal sealed class BotProcessTelemetrySampler : IDisposable
     internal long WindowWorkingSetHighWaterBytes { get; private set; }
     internal double WindowCpuMilliseconds { get; private set; }
     internal int WindowSamples { get; private set; }
+    internal long WindowManagedHeapHighWaterBytes { get; private set; }
+    internal long WindowAllocatedBytes { get; private set; }
+    internal int WindowGen0Collections { get; private set; }
+    internal int WindowGen1Collections { get; private set; }
+    internal int WindowGen2Collections { get; private set; }
+    internal int WindowThreadHighWater { get; private set; }
     private double _windowCpuStart;
+    private long _windowAllocatedStart;
+    private int _windowGen0Start;
+    private int _windowGen1Start;
+    private int _windowGen2Start;
     private bool _windowActive;
 
     internal void BeginWindow(long now)
     {
         BotProcessSample sample = _source.ReadFresh();
         _windowCpuStart = sample.CpuMilliseconds;
+        _windowAllocatedStart = sample.TotalAllocatedBytes;
+        _windowGen0Start = sample.Gen0Collections;
+        _windowGen1Start = sample.Gen1Collections;
+        _windowGen2Start = sample.Gen2Collections;
         WindowCpuMilliseconds = 0;
         WindowWorkingSetHighWaterBytes = sample.WorkingSetBytes;
+        WindowManagedHeapHighWaterBytes = sample.ManagedHeapBytes;
+        WindowAllocatedBytes = 0;
+        WindowGen0Collections = WindowGen1Collections = WindowGen2Collections = 0;
+        WindowThreadHighWater = sample.ThreadCount;
         WindowSamples = 1;
         _windowActive = true;
         WorkingSetHighWaterBytes = Math.Max(WorkingSetHighWaterBytes, sample.WorkingSetBytes);
@@ -347,6 +378,13 @@ internal sealed class BotProcessTelemetrySampler : IDisposable
         {
             WindowWorkingSetHighWaterBytes = Math.Max(
                 WindowWorkingSetHighWaterBytes, sample.WorkingSetBytes);
+            WindowManagedHeapHighWaterBytes = Math.Max(
+                WindowManagedHeapHighWaterBytes, sample.ManagedHeapBytes);
+            WindowAllocatedBytes = Math.Max(0, sample.TotalAllocatedBytes - _windowAllocatedStart);
+            WindowGen0Collections = Math.Max(0, sample.Gen0Collections - _windowGen0Start);
+            WindowGen1Collections = Math.Max(0, sample.Gen1Collections - _windowGen1Start);
+            WindowGen2Collections = Math.Max(0, sample.Gen2Collections - _windowGen2Start);
+            WindowThreadHighWater = Math.Max(WindowThreadHighWater, sample.ThreadCount);
             WindowCpuMilliseconds = Math.Max(0, sample.CpuMilliseconds - _windowCpuStart);
             WindowSamples++;
         }

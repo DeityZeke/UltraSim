@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Diagnostics;
 
 namespace UltraSim.Network;
 
@@ -131,6 +132,14 @@ public readonly record struct HostedUdpAdmissionSnapshot(
     SharedUdpListenerSnapshot Listener,
     NetworkConnectionSnapshot Connections);
 
+/// <summary>Cold bounded service timing for one hosted-listener lifetime.</summary>
+public readonly record struct HostedUdpHostTelemetrySnapshot(
+    NetworkTelemetryLevel Level,
+    NetworkTimingDistribution PumpIntervals,
+    NetworkTimingDistribution PumpDurations,
+    SharedUdpListenerSnapshot Listener,
+    HostedUdpConnectionOwnerRuntimeSnapshot Owners);
+
 /// <summary>
 /// Owner-thread server endpoint for H0.0-H0.3 external UDP admission, promotion,
 /// and authenticated path ownership.
@@ -227,6 +236,10 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     private ulong _deploymentDiscoveryRequests;
     private ulong _deploymentAnnouncementsSent;
     private ulong _lastMilliseconds;
+    private readonly NetworkTimingHistogram _pumpIntervals = new();
+    private readonly NetworkTimingHistogram _pumpDurations = new();
+    private NetworkTelemetryLevel _telemetryLevel;
+    private long _lastPumpTimestamp;
     private bool _disposed;
 
     /// <summary>
@@ -618,6 +631,27 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
     public void Pump()
     {
         EnsureOperational();
+        long started = 0;
+        if (_telemetryLevel != NetworkTelemetryLevel.Off)
+        {
+            started = Stopwatch.GetTimestamp();
+            if (_lastPumpTimestamp != 0)
+                _pumpIntervals.Record(started - _lastPumpTimestamp);
+            _lastPumpTimestamp = started;
+        }
+        try
+        {
+            PumpCore();
+        }
+        finally
+        {
+            if (_telemetryLevel != NetworkTelemetryLevel.Off)
+                _pumpDurations.Record(Stopwatch.GetTimestamp() - started);
+        }
+    }
+
+    private void PumpCore()
+    {
         ulong now = GetMonotonicMilliseconds();
         SweepExpiredCandidates(now);
         if (_ownerRuntime is null) SweepExpiredPathRebinds(now);
@@ -687,6 +721,56 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
             else if (lifetime == HostedUdpSessionLifetimeDecision.Retire)
                 RetireCore(current);
         }
+    }
+
+    /// <summary>
+    /// Selects bounded diagnostics before admission begins. This restriction keeps
+    /// per-connection owner state coherent without cross-thread diagnostic mutation.
+    /// </summary>
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        if (_sessionCount != 0 || _candidateCount != 0)
+            throw new InvalidOperationException(
+                "Hosted telemetry must be selected before candidates or sessions exist.");
+        _telemetryLevel = level;
+        _lastPumpTimestamp = 0;
+        _pumpIntervals.Clear();
+        _pumpDurations.Clear();
+        _listener.ResetStageTiming(level == NetworkTelemetryLevel.Detailed);
+        _ownerRuntime?.ConfigureTelemetry(level);
+    }
+
+    public HostedUdpHostTelemetrySnapshot GetTelemetrySnapshot()
+    {
+        EnsureOperational();
+        return new HostedUdpHostTelemetrySnapshot(
+            _telemetryLevel,
+            _pumpIntervals.Snapshot(),
+            _pumpDurations.Snapshot(),
+            _listener.GetSnapshot(),
+            _ownerRuntime?.GetSnapshot() ?? default);
+    }
+
+    /// <summary>
+    /// Starts a new diagnostic window without resetting any protocol, traffic,
+    /// queue, or connection state. The current scalar owner shape can reset its
+    /// owner-local histograms exactly; sharded owners require snapshot-delta
+    /// collection on their owning workers and are intentionally rejected here.
+    /// </summary>
+    public void ResetTelemetryWindow()
+    {
+        EnsureOperational();
+        if (_ownerRuntime is not null)
+            throw new InvalidOperationException(
+                "A sharded Hosted runtime cannot be reset from the listener thread.");
+        _lastPumpTimestamp = 0;
+        _pumpIntervals.Clear();
+        _pumpDurations.Clear();
+        _listener.ResetStageTiming(_telemetryLevel == NetworkTelemetryLevel.Detailed);
+        for (int index = 0; index < _sessions.Length; index++)
+            _sessions[index]?.Server.ConfigureTelemetry(_telemetryLevel);
     }
 
     public HostedUdpAdmissionSnapshot GetSnapshot()
@@ -1048,15 +1132,25 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
         HostedUdpProtocolSession session,
         bool finalized)
     {
-        NetworkTrafficSnapshot traffic = session.OwnedTransport is
-            HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned
-            ? owned.CopyTrafficSnapshot()
-            : session.Server.GetTrafficSnapshot();
+        NetworkTrafficSnapshot traffic;
+        NetworkProtocolSnapshot protocol;
+        if (session.OwnedTransport is
+            HostedUdpConnectionOwnerRuntime.HostedUdpOwnedTransport owned)
+        {
+            traffic = owned.CopyTrafficSnapshot();
+            owned.CopyCachedSnapshots(out protocol, out _);
+        }
+        else
+        {
+            traffic = session.Server.GetTrafficSnapshot();
+            protocol = session.Server.GetSnapshot();
+        }
         return new(
             session.RawState,
             session.Connection,
             session.Endpoint.GetSnapshot().UdpPayload,
             traffic,
+            protocol,
             finalized);
     }
 
@@ -1515,6 +1609,7 @@ public sealed class HostedUdpAdmissionHost : IDisposable,
                     master,
                     sendsClientToServer: false,
                     usesMonotonicPacing: true);
+                server.ConfigureTelemetry(_telemetryLevel);
             }
             else if (!_ownerRuntime.TryCreateTransport(
                     connection, epoch, master, out ownedTransport) ||
@@ -2024,6 +2119,7 @@ public readonly record struct HostedUdpServerConnectionTrafficSnapshot(
     ConnectionId Connection,
     UdpPayloadTrafficSnapshot UdpPayload,
     NetworkTrafficSnapshot SecureProtocol,
+    NetworkProtocolSnapshot Protocol,
     bool IsFinalized)
 {
     public ulong NonSecureOrUnattributedUdpPayloadBytesSent => Difference(

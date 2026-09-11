@@ -20,6 +20,17 @@ internal sealed record BotFamilyTrafficReport(
     string Family,
     NetworkLogicalTrafficSnapshot Traffic);
 
+internal sealed record BotMessageTrafficReport(
+    ushort MessageId,
+    string CanonicalKey,
+    ushort Version,
+    string Lane,
+    string Delivery,
+    string Retention,
+    NetworkLogicalTrafficSnapshot Traffic,
+    double AverageSentApplicationBytes,
+    double AverageReceivedApplicationBytes);
+
 internal sealed record BotHttpBodyTrafficReport(
     ulong Requests,
     ulong Completed,
@@ -90,6 +101,7 @@ internal sealed record BotWireMeasurementSummary
     public required ulong NonSecureOrUnattributedUdpPayloadBytesReceived { get; init; }
     public required BotLaneTrafficReport[] Lanes { get; init; }
     public required BotFamilyTrafficReport[] Families { get; init; }
+    public required BotMessageTrafficReport[] Messages { get; init; }
     public required BotHttpBodyTrafficReport HttpBody { get; init; }
     public required BotCacheTrafficReport ContentCache { get; init; }
     public required int ApplicationLifetimesAtStart { get; init; }
@@ -243,6 +255,27 @@ internal sealed class BotWireMeasurement
         }
         logicalReconciled &= familySum == messageSum;
 
+        ReadOnlySpan<NetworkMessageDescriptor> descriptors = UltraSimGameProtocol.Manifest.Messages;
+        var messages = new BotMessageTrafficReport[descriptors.Length];
+        for (int index = 0; index < messages.Length; index++)
+        {
+            NetworkMessageDescriptor descriptor = descriptors[index];
+            NetworkLogicalTrafficSnapshot traffic = aggregate.GetMessage(index).Traffic;
+            NetworkLaneContract lane = NetworkLaneContracts.Get(descriptor.Lane);
+            messages[index] = new BotMessageTrafficReport(
+                descriptor.Id.Value,
+                descriptor.CanonicalKey,
+                descriptor.Version,
+                descriptor.Lane.ToString(),
+                lane.Delivery.ToString(),
+                lane.Retention.ToString(),
+                traffic,
+                traffic.MessagesSent == 0 ? 0 :
+                    (double)traffic.ApplicationPayloadBytesSent / traffic.MessagesSent,
+                traffic.MessagesReceived == 0 ? 0 :
+                    (double)traffic.ApplicationPayloadBytesReceived / traffic.MessagesReceived);
+        }
+
         return new BotWireMeasurementSummary
         {
             DurationMilliseconds = durationMilliseconds,
@@ -273,6 +306,7 @@ internal sealed class BotWireMeasurement
                 totalReceivedBytes - transport.SecureUdpPayloadBytesReceived,
             Lanes = lanes,
             Families = families,
+            Messages = messages,
             HttpBody = BotHttpBodyTrafficReport.Delta(_sourceStart, source.GetSnapshot()),
             ContentCache = BotCacheTrafficReport.Delta(_cacheStart, cache.GetSnapshot()),
             ApplicationLifetimesAtStart = startLifetimes,

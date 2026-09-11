@@ -33,6 +33,9 @@ public sealed class RemoteChatClient : IRemoteGameProtocolHandler, IRemoteGamePr
     private ulong _duplicates;
     private ulong _rejected;
     private ulong _proofsQueued;
+    private readonly ClientTimingWindow _applyTiming = new();
+    private readonly ClientTimingWindow _proofTiming = new();
+    private NetworkTelemetryLevel _telemetryLevel;
 
     public RemoteChatClient(
         NetworkProtocolPeer peer,
@@ -71,6 +74,19 @@ public sealed class RemoteChatClient : IRemoteGameProtocolHandler, IRemoteGamePr
     {
         EnsureOwnerThread();
         if (message.MessageId != RemoteChatOccurrenceHeaderCodec.Descriptor.Id) return false;
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { return TryProcessOccurrence(payload); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _applyTiming.RecordElapsed(timing);
+        }
+    }
+
+    private bool TryProcessOccurrence(ReadOnlySpan<byte> payload)
+    {
         if (!UltraSimGameProtocol.TryReadChatOccurrence(
                 payload, out RemoteChatOccurrenceHeader header,
                 out string displayLabel, out string text) ||
@@ -113,11 +129,37 @@ public sealed class RemoteChatClient : IRemoteGameProtocolHandler, IRemoteGamePr
     public bool TryProgress()
     {
         EnsureOwnerThread();
-        if (!_hasPendingProof) return true;
-        if (!TryQueueProof(in _pendingProof)) return false;
-        _pendingProof = default;
-        _hasPendingProof = false;
-        return true;
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try
+        {
+            if (!_hasPendingProof) return true;
+            if (!TryQueueProof(in _pendingProof)) return false;
+            _pendingProof = default;
+            _hasPendingProof = false;
+            return true;
+        }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _proofTiming.RecordElapsed(timing);
+        }
+    }
+
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOwnerThread();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _applyTiming.Clear();
+        _proofTiming.Clear();
+    }
+
+    public RemoteChatClientTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOwnerThread();
+        return new(_telemetryLevel, _applyTiming.Capture(), _proofTiming.Capture());
     }
 
     bool IRemoteGameProtocolProgressor.TryProgress() => TryProgress();

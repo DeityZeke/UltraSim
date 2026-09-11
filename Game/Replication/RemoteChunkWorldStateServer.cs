@@ -57,7 +57,31 @@ public readonly record struct RemoteChunkWorldStateServerSnapshot(
     ulong SnapshotsQueued,
     ulong SnapshotCancels,
     ulong SnapshotTimeouts,
-    long ReservedBytes);
+    long ReservedBytes,
+    OfflineDirectChunkRecipientSnapshot Recipient,
+    RemoteChunkReplicationTimingSnapshot Timing);
+
+public readonly record struct RemoteChunkReplicationTimingSnapshot(
+    GameTelemetryLevel Level,
+    GameTimingDistribution InterestReconciliation,
+    GameTimingDistribution EncodingAndScheduling,
+    GameTimingDistribution QueueDrain,
+    GameTimingDistribution ApplicationProof,
+    OfflineDirectChunkReconcileAttribution ReconcileAttribution,
+    RemoteChunkReplicationWorkSnapshot Work);
+
+/// <summary>Measurement-window work/debt attribution for the selected chunk adapter.</summary>
+public readonly record struct RemoteChunkReplicationWorkSnapshot(
+    ulong ScheduleAttempts,
+    ulong DeliveriesQueued,
+    ulong ImmediateDeliveriesQueued,
+    ulong NearDeliveriesQueued,
+    ulong FarDeliveriesQueued,
+    ulong NoPayload,
+    ulong CadenceDeferrals,
+    ulong TransportDeferrals,
+    ulong CapacityDeferrals,
+    int OutstandingHighWater);
 
 /// <summary>
 /// N1.2/N1.3 connection-owned delivery lifecycle for ordinary chunk state and exceptional atomic
@@ -101,6 +125,21 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private ulong _snapshotsQueued;
     private ulong _snapshotCancels;
     private ulong _snapshotTimeouts;
+    private GameTelemetryLevel _telemetryLevel;
+    private readonly GameOperationTimingWindow _reconcileTiming = new();
+    private readonly GameOperationTimingWindow _scheduleTiming = new();
+    private readonly GameOperationTimingWindow _progressTiming = new();
+    private readonly GameOperationTimingWindow _proofTiming = new();
+    private ulong _timedScheduleAttempts;
+    private ulong _timedDeliveriesQueued;
+    private ulong _timedImmediateQueued;
+    private ulong _timedNearQueued;
+    private ulong _timedFarQueued;
+    private ulong _timedNoPayload;
+    private ulong _timedCadenceDeferrals;
+    private ulong _timedTransportDeferrals;
+    private ulong _timedCapacityDeferrals;
+    private int _timedOutstandingHighWater;
 
     public RemoteChunkWorldStateServer(
         NetworkProtocolPeer peer,
@@ -140,6 +179,39 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     public OfflineDirectChunkRecipient Recipient => _recipient;
 
+    public void ConfigureTelemetry(GameTelemetryLevel level)
+    {
+        EnsureOwner();
+        _telemetryLevel = level;
+        _reconcileTiming.Configure(level);
+        _scheduleTiming.Configure(level);
+        _progressTiming.Configure(level);
+        _proofTiming.Configure(level);
+        _recipient.ResetReconcileAttribution(level == GameTelemetryLevel.Detailed);
+        _timedScheduleAttempts = _timedDeliveriesQueued = 0;
+        _timedImmediateQueued = _timedNearQueued = _timedFarQueued = 0;
+        _timedNoPayload = _timedCadenceDeferrals = 0;
+        _timedTransportDeferrals = _timedCapacityDeferrals = 0;
+        _timedOutstandingHighWater = _outstandingCount;
+    }
+
+    public RemoteChunkReplicationTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOwner();
+        return new RemoteChunkReplicationTimingSnapshot(
+            _telemetryLevel,
+            _reconcileTiming.Capture(),
+            _scheduleTiming.Capture(),
+            _progressTiming.Capture(),
+            _proofTiming.Capture(),
+            _recipient.GetReconcileAttribution(),
+            new RemoteChunkReplicationWorkSnapshot(
+                _timedScheduleAttempts, _timedDeliveriesQueued,
+                _timedImmediateQueued, _timedNearQueued, _timedFarQueued,
+                _timedNoPayload, _timedCadenceDeferrals, _timedTransportDeferrals,
+                _timedCapacityDeferrals, _timedOutstandingHighWater));
+    }
+
     /// <summary>
     /// Rebinds a surviving connection adapter to a replacement generation's publication source.
     /// Every outstanding delivery belongs to the prior publication epoch and is invalidated before
@@ -175,8 +247,13 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         out OfflineDirectChunkReconcileResult result)
     {
         EnsureOwner();
-        OfflineDirectChunkReconcileStatus status =
-            _recipient.Reconcile(_source, space, anchor, changes, out result);
+        long timing = _reconcileTiming.StartDetailed();
+        OfflineDirectChunkReconcileStatus status;
+        try
+        {
+            status = _recipient.Reconcile(_source, space, anchor, changes, out result);
+        }
+        finally { _reconcileTiming.RecordDetailed(timing); }
         if (status != OfflineDirectChunkReconcileStatus.Reconciled) return status;
         if (result.SourceReset)
         {
@@ -192,6 +269,21 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     public RemoteChunkWorldStateScheduleStatus TrySchedule(int subscriptionIndex, ulong cadenceStep)
     {
         EnsureOwner();
+        long timing = _scheduleTiming.StartDetailed();
+        RemoteChunkWorldStateScheduleStatus status;
+        try
+        {
+            status = TryScheduleCore(subscriptionIndex, cadenceStep);
+        }
+        finally { _scheduleTiming.RecordDetailed(timing); }
+        RecordScheduleResult(subscriptionIndex, status);
+        return status;
+    }
+
+    private RemoteChunkWorldStateScheduleStatus TryScheduleCore(
+        int subscriptionIndex,
+        ulong cadenceStep)
+    {
         if (_nextDeliveryId == 0)
             return RemoteChunkWorldStateScheduleStatus.DeliverySequenceExhausted;
         ulong deliveryId = _nextDeliveryId;
@@ -251,6 +343,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             return RemoteChunkWorldStateScheduleStatus.TransportNotAccepting;
 
         _outstanding[_outstandingCount++] = new OutstandingDelivery(result.Ticket, cadenceStep);
+        _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         _nextDeliveryId = _nextDeliveryId == ulong.MaxValue ? 0 : _nextDeliveryId + 1;
         if (result.Kind == RemoteChunkPublicationKind.Delta)
         {
@@ -341,6 +434,16 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     public bool TryProgress()
     {
         EnsureOwner();
+        long timing = _progressTiming.StartDetailed();
+        try
+        {
+            return TryProgressCore();
+        }
+        finally { _progressTiming.RecordDetailed(timing); }
+    }
+
+    private bool TryProgressCore()
+    {
         if (_pendingCancel.DeliveryId != 0)
         {
             if (!UltraSimGameProtocol.TryWriteChunkSnapshotCancel(
@@ -427,6 +530,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             return false;
         _outstanding[_outstandingCount++] =
             new OutstandingDelivery(_snapshotTicket, _snapshotStartedStep);
+        _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         ClearActiveSnapshot();
         SaturatingIncrement(ref _snapshotsQueued);
         return true;
@@ -435,6 +539,16 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwner();
+        long timing = _proofTiming.StartDetailed();
+        try
+        {
+            return TryProcessCore(in message, payload);
+        }
+        finally { _proofTiming.RecordDetailed(timing); }
+    }
+
+    private bool TryProcessCore(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
+    {
         if (message.MessageId == RemoteChunkAppliedMessageCodec.Descriptor.Id)
         {
             if (!UltraSimGameProtocol.TryReadChunkApplied(
@@ -521,7 +635,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             _snapshotCancels,
             _snapshotTimeouts,
             checked((long)_outstanding.Length * Unsafe.SizeOf<OutstandingDelivery>() +
-                _messageScratch.Length + _snapshotPayload.Length));
+                _messageScratch.Length + _snapshotPayload.Length),
+            _recipient.GetSnapshot(),
+            GetTimingSnapshot());
     }
 
     private RemoteChunkWorldStateScheduleStatus StartSnapshotTransfer(
@@ -579,9 +695,55 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 _messageScratch.AsSpan(0, result.Written)) != NetworkQueueStatus.Accepted)
             return RemoteChunkWorldStateScheduleStatus.TransportNotAccepting;
         _outstanding[_outstandingCount++] = new OutstandingDelivery(result.Ticket, serviceStep);
+        _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         _nextDeliveryId = _nextDeliveryId == ulong.MaxValue ? 0 : _nextDeliveryId + 1;
         SaturatingIncrement(ref _absencesQueued);
         return RemoteChunkWorldStateScheduleStatus.QueuedAbsence;
+    }
+
+    private void RecordScheduleResult(
+        int subscriptionIndex,
+        RemoteChunkWorldStateScheduleStatus status)
+    {
+        if (_telemetryLevel == GameTelemetryLevel.Off) return;
+        SaturatingIncrement(ref _timedScheduleAttempts);
+        switch (status)
+        {
+            case RemoteChunkWorldStateScheduleStatus.QueuedDelta:
+            case RemoteChunkWorldStateScheduleStatus.QueuedAbsence:
+            case RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted:
+                SaturatingIncrement(ref _timedDeliveriesQueued);
+                OfflineDirectChunkSubscriptionView subscriptions = _recipient.Subscriptions;
+                if ((uint)subscriptionIndex < (uint)subscriptions.Length)
+                {
+                    switch (subscriptions[subscriptionIndex].Interest.Tier)
+                    {
+                        case ChunkInterestTier.Immediate:
+                            SaturatingIncrement(ref _timedImmediateQueued);
+                            break;
+                        case ChunkInterestTier.Near:
+                            SaturatingIncrement(ref _timedNearQueued);
+                            break;
+                        case ChunkInterestTier.Far:
+                            SaturatingIncrement(ref _timedFarQueued);
+                            break;
+                    }
+                }
+                break;
+            case RemoteChunkWorldStateScheduleStatus.NoPayload:
+                SaturatingIncrement(ref _timedNoPayload);
+                break;
+            case RemoteChunkWorldStateScheduleStatus.NotDue:
+                SaturatingIncrement(ref _timedCadenceDeferrals);
+                break;
+            case RemoteChunkWorldStateScheduleStatus.TransportNotAccepting:
+            case RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy:
+                SaturatingIncrement(ref _timedTransportDeferrals);
+                break;
+            case RemoteChunkWorldStateScheduleStatus.CapacityExceeded:
+                SaturatingIncrement(ref _timedCapacityDeferrals);
+                break;
+        }
     }
 
     private bool HasOutstandingCapacity() =>

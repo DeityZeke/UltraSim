@@ -741,6 +741,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private static NetworkProtocolStageTiming Add(
         NetworkProtocolStageTiming left, NetworkProtocolStageTiming right) => new(
+        left.Level,
         Add(left.EmitTicks, right.EmitTicks), Add(left.EmitCalls, right.EmitCalls),
         Add(left.IdleEmitCalls, right.IdleEmitCalls), Add(left.SelectionTicks, right.SelectionTicks),
         Add(left.FrameEncodeTicks, right.FrameEncodeTicks), Add(left.SecureSendTicks, right.SecureSendTicks),

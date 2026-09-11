@@ -140,18 +140,21 @@ public sealed class NetworkTrafficSnapshot
         ulong protocolFingerprint,
         NetworkTransportTrafficSnapshot transport,
         NetworkLogicalTrafficSnapshot[] lanes,
-        NetworkMessageTrafficSnapshot[] messages)
+        NetworkMessageTrafficSnapshot[] messages,
+        NetworkProtocolStageTiming protocolTiming = default)
     {
         ProtocolVersion = protocolVersion;
         ProtocolFingerprint = protocolFingerprint;
         Transport = transport;
         _lanes = lanes;
         _messages = messages;
+        ProtocolTiming = protocolTiming;
     }
 
     public ushort ProtocolVersion { get; }
     public ulong ProtocolFingerprint { get; }
     public NetworkTransportTrafficSnapshot Transport { get; }
+    public NetworkProtocolStageTiming ProtocolTiming { get; }
     public int LaneCount => _lanes.Length;
     public int MessageCount => _messages.Length;
 
@@ -223,7 +226,8 @@ public sealed class NetworkTrafficSnapshot
         }
         return new(end.ProtocolVersion, end.ProtocolFingerprint,
             NetworkTransportTrafficSnapshot.Delta(start.Transport, end.Transport),
-            lanes, messages);
+            lanes, messages,
+            NetworkProtocolStageTiming.Delta(start.ProtocolTiming, end.ProtocolTiming));
     }
 
     public static NetworkTrafficSnapshot Add(
@@ -250,7 +254,8 @@ public sealed class NetworkTrafficSnapshot
             messages[index] = a with { Traffic = a.Traffic.Add(b.Traffic) };
         }
         return new(left.ProtocolVersion, left.ProtocolFingerprint,
-            left.Transport.Add(right.Transport), lanes, messages);
+            left.Transport.Add(right.Transport), lanes, messages,
+            left.ProtocolTiming.Add(right.ProtocolTiming));
     }
 }
 

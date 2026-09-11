@@ -90,6 +90,48 @@ if (options.Pf2Only)
     return 0;
 }
 
+if (options.Pf25Only)
+{
+    if (options.SkipGodot)
+        throw new ArgumentException("--pf2.5-only requires the actual exported Online product.");
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
+        "-c", options.Configuration,
+    ]);
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+        "-c", options.Configuration,
+    ]);
+    Run(root, "dotnet",
+    [
+        "run", "--project",
+        "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
+        "-c", options.Configuration,
+        "-p:UltraSimNetworkFlavor=ClientOnly",
+    ]);
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        VerifyPf2MixedExportedAccountingSwarm(
+            root, options.Configuration, product.Executable, detailedTelemetry: true,
+            warmupSeconds: options.Pf25LongNative ? 60 : 5,
+            measurementSeconds: options.Pf25LongNative ? 300 : 20,
+            evidenceOutputDirectory: options.Pf25EvidenceOutputDirectory);
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope))
+            Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine("PASS PF2.5 focused observability verification");
+    return 0;
+}
+
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];
 bool contentlessOnlineVerified = false;
 bool finalClientExportsVerified = false;
@@ -1252,7 +1294,11 @@ static void VerifyEmbeddedCompleteHostedNative(
 static void VerifyPf2MixedExportedAccountingSwarm(
     string root,
     string configuration,
-    string onlineExecutable)
+    string onlineExecutable,
+    bool detailedTelemetry = false,
+    int warmupSeconds = 5,
+    int measurementSeconds = 20,
+    string? evidenceOutputDirectory = null)
 {
     const int botCount = 8;
     const int nativeClientCount = 2;
@@ -1262,13 +1308,15 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     const string expectedProfile =
         "grammar=ThirdPersonDirect camera=ThirdPersonFollow " +
         "distance=8.5 fov=76 select=MouseButton:MIDDLE primary=MouseButton:LEFT";
+    int clientTimeoutMilliseconds = checked(Math.Max(
+        300_000, (warmupSeconds + measurementSeconds + 300) * 1_000));
 
     VerifyPf1BotArtifact(root, configuration);
     Run(root, "dotnet",
     [
         "build", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
         "-c", configuration,
-        "-p:UltraSimNetworkFlavor=Full",
+        "-p:UltraSimNetworkFlavor=ServerOnly",
     ]);
 
     string scope = Path.Combine(
@@ -1282,6 +1330,10 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     string accountingReady = Path.Combine(scope, "accounting-ready.json");
     string accountingStop = Path.Combine(scope, "accounting-stop");
     string accountingSummary = Path.Combine(scope, "accounting-summary.json");
+    string aliceTelemetryReady = Path.Combine(scope, "alice", "telemetry-ready");
+    string bobTelemetryReady = Path.Combine(scope, "bob", "telemetry-ready");
+    string aliceTelemetrySummary = Path.Combine(scope, "alice", "telemetry-summary.json");
+    string bobTelemetrySummary = Path.Combine(scope, "bob", "telemetry-summary.json");
     string botStartReady = Path.Combine(scope, "bots-start-ready");
     string botStartRelease = Path.Combine(scope, "bots-start-release");
     string measurementReady = Path.Combine(scope, "measurement-ready");
@@ -1316,14 +1368,16 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             accountingStartFile: accountingStart,
             accountingReadyFile: accountingReady,
             accountingStopFile: accountingStop,
-            accountingSummaryFile: accountingSummary);
+            accountingSummaryFile: accountingSummary,
+            telemetryLevel: detailedTelemetry ? "Detailed" : "Off");
 
         botsTask = Task.Run(() => RunCaptured(root, "dotnet",
         [
             "run", "--project", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
             "-c", configuration, "-p:UltraSimNetworkFlavor=ClientOnly", "--no-build", "--",
             $"--endpoint={ready.Endpoint}", $"--fingerprint={ready.Fingerprint}",
-            $"--bots={botCount}", $"--seed={seed}", "--duration=20s", "--warmup=5s",
+            $"--bots={botCount}", $"--seed={seed}", $"--duration={measurementSeconds}s",
+            $"--warmup={warmupSeconds}s",
             "--scenario=mixed-chaos", $"--cache={Path.Combine(scope, "bots")}",
             $"--start-ready-file={botStartReady}",
             $"--start-release-file={botStartRelease}",
@@ -1332,31 +1386,43 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"--measurement-complete-file={measurementComplete}",
             $"--ready-file={botReady}", $"--release-file={botRelease}",
             $"--summary-file={botSummary}", "--admission-stagger-ms=100",
-        ], 300_000));
+            $"--telemetry={(detailedTelemetry ? "Detailed" : "Off")}",
+        ], clientTimeoutMilliseconds));
         aliceTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
             NativeSharedClientArguments(
                 scope, "alice", ready.Endpoint, ready.Fingerprint,
                 aliceReady, nativeRelease, expectedPresentedActors,
-                "PF2 Native Alice", "x", aliceComplete, nativeRetireRelease), 300_000));
+                "PF2 Native Alice", "x", aliceComplete, nativeRetireRelease,
+                detailedTelemetry ? "Detailed" : null,
+                detailedTelemetry ? accountingStart : null,
+                detailedTelemetry ? aliceTelemetryReady : null,
+                detailedTelemetry ? aliceTelemetrySummary : null), clientTimeoutMilliseconds));
         bobTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
             NativeSharedClientArguments(
                 scope, "bob", ready.Endpoint, ready.Fingerprint,
                 bobReady, nativeRelease, expectedPresentedActors,
-                "PF2 Native Bob", "y", bobComplete, nativeRetireRelease), 300_000));
+                "PF2 Native Bob", "y", bobComplete, nativeRetireRelease,
+                detailedTelemetry ? "Detailed" : null,
+                detailedTelemetry ? accountingStart : null,
+                detailedTelemetry ? bobTelemetryReady : null,
+                detailedTelemetry ? bobTelemetrySummary : null), clientTimeoutMilliseconds));
 
         WaitForPf1Files([botStartReady, aliceReady, bobReady], 120_000, server,
             [botsTask, aliceTask, bobTask], "PF2 clients to complete admission");
         File.WriteAllText(botStartRelease, "start\n");
-        WaitForPf1Files([measurementReady], 30_000, server,
+        WaitForPf1Files([measurementReady], checked((warmupSeconds + 60) * 1_000), server,
             [botsTask, aliceTask, bobTask], "PF2 bot warmup to complete");
         File.WriteAllText(accountingStart, "start\n");
-        WaitForPf1Files([accountingReady], 10_000, server,
+        string[] telemetryReady = detailedTelemetry
+            ? [accountingReady, aliceTelemetryReady, bobTelemetryReady]
+            : [accountingReady];
+        WaitForPf1Files(telemetryReady, 10_000, server,
             [botsTask, aliceTask, bobTask], "PF2 server accounting to start");
         File.WriteAllText(measurementRelease, "measure\n");
 
-        WaitForPf1Files([measurementComplete], 60_000, server,
+        WaitForPf1Files([measurementComplete], checked((measurementSeconds + 60) * 1_000), server,
             [botsTask, aliceTask, bobTask], "PF2 measured window to complete");
         if (aliceTask.IsCompleted || bobTask.IsCompleted)
             throw new InvalidOperationException(
@@ -1382,7 +1448,9 @@ static void VerifyPf2MixedExportedAccountingSwarm(
 
         File.WriteAllText(botRelease, "release\n");
         string botOutput = botsTask.GetAwaiter().GetResult();
-        if (!botOutput.Contains("PF2 BOT HARNESS PASS", StringComparison.Ordinal) ||
+        if (!botOutput.Contains(
+                detailedTelemetry ? "PF2.5 BOT HARNESS PASS" : "PF2 BOT HARNESS PASS",
+                StringComparison.Ordinal) ||
             !File.Exists(botSummary))
             throw new InvalidOperationException(
                 $"The PF2 bot harness omitted its accepted accounting summary:\n{Tail(botOutput, 8_000)}");
@@ -1391,10 +1459,13 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         JsonElement wire = bot.GetProperty("wire");
         JsonElement measuredPump = bot.GetProperty("measuredPump");
         if (!bot.GetProperty("passed").GetBoolean() ||
-            bot.GetProperty("schemaVersion").GetInt32() != 3 ||
-            bot.GetProperty("checkpoint").GetString() != "PF2" ||
+            bot.GetProperty("schemaVersion").GetInt32() != (detailedTelemetry ? 4 : 3) ||
+            bot.GetProperty("checkpoint").GetString() != (detailedTelemetry ? "PF2.5" : "PF2") ||
             bot.GetProperty("successfulReconnects").GetInt32() < 1 ||
             bot.GetProperty("freshProofLifetimes").GetInt32() <= botCount ||
+            (detailedTelemetry &&
+                (bot.GetProperty("syntheticInputSamples").GetInt32() == 0 ||
+                 bot.GetProperty("syntheticInputSamplesPerSecond").GetDouble() <= 0)) ||
             wire.GetProperty("clientToServerUdpPayloadBytes").GetUInt64() == 0 ||
             wire.GetProperty("serverToClientUdpPayloadBytes").GetUInt64() == 0 ||
             !wire.GetProperty("physicalTransportReconciled").GetBoolean() ||
@@ -1423,11 +1494,88 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             throw new InvalidOperationException(
                 "The dedicated authority did not reconcile ordinary bot/native PF2 traffic.");
 
+        if (detailedTelemetry)
+        {
+            RequireNativeTelemetry(aliceTelemetrySummary);
+            RequireNativeTelemetry(bobTelemetrySummary);
+            if (accounting.GetProperty("NetworkTiming").GetProperty("Level").GetByte() != 2 ||
+                accounting.GetProperty("AuthorityTiming").GetProperty("Level").GetByte() != 2 ||
+                accounting.GetProperty("AuthorityTiming").GetProperty("SampleCount").GetUInt64() == 0 ||
+                accounting.GetProperty("RemoteApplications").GetArrayLength() != participantCapacity)
+                throw new InvalidOperationException(
+                    "The PF2.5 authority timing projection was absent or incomplete.");
+
+            ulong serverWorldActions = 0;
+            ulong serverScheduleAttempts = 0;
+            ulong serverDeliveries = 0;
+            foreach (JsonElement application in
+                     accounting.GetProperty("RemoteApplications").EnumerateArray())
+            {
+                JsonElement timing = application.GetProperty("Timing");
+                JsonElement replication = timing.GetProperty("Replication");
+                JsonElement work = replication.GetProperty("Work");
+                if (timing.GetProperty("Level").GetByte() != 2 ||
+                    replication.GetProperty("Level").GetByte() != 2)
+                    throw new InvalidOperationException(
+                        "A PF2.5 application lifetime omitted Detailed Game/replication timing.");
+                serverWorldActions += timing.GetProperty("WorldActionAndPhysics")
+                    .GetProperty("Count").GetUInt64();
+                serverScheduleAttempts += work.GetProperty("ScheduleAttempts").GetUInt64();
+                serverDeliveries += work.GetProperty("DeliveriesQueued").GetUInt64();
+            }
+            if (serverWorldActions == 0 || serverScheduleAttempts == 0 || serverDeliveries == 0)
+                throw new InvalidOperationException(
+                    "PF2.5 did not observe authoritative world actions and public delivery work.");
+
+            ulong ownerStates = 0;
+            ulong worldApplies = 0;
+            ulong clientProcesses = 0;
+            JsonElement clients = bot.GetProperty("clientTelemetry");
+            if (clients.GetArrayLength() != botCount)
+                throw new InvalidOperationException(
+                    "PF2.5 omitted per-client timing for a headless client.");
+            foreach (JsonElement clientTelemetry in clients.EnumerateArray())
+            {
+                JsonElement client = clientTelemetry.GetProperty("client");
+                if (client.GetProperty("level").GetByte() != 2 ||
+                    clientTelemetry.GetProperty("network").GetProperty("level").GetByte() != 2)
+                    throw new InvalidOperationException(
+                        "A PF2.5 bot lifetime omitted Detailed client/Network timing.");
+                clientProcesses += client.GetProperty("processReceived")
+                    .GetProperty("count").GetUInt64();
+                ownerStates += client.GetProperty("playable")
+                    .GetProperty("ownerStatesApplied").GetUInt64();
+                worldApplies += client.GetProperty("world")
+                    .GetProperty("decodeAndApply").GetProperty("count").GetUInt64();
+            }
+            if (clientProcesses == 0 || ownerStates == 0 || worldApplies == 0)
+                throw new InvalidOperationException(
+                    "PF2.5 did not observe client receive, OwnerState, and public-world apply work.");
+        }
+
         File.WriteAllText(serverStop, "stop\n");
         if (!server.WaitForExit(30_000) || server.ExitCode != 0 || !File.Exists(serverSummary))
             throw new InvalidOperationException("The PF2 authority did not retire cleanly.");
+        if (!string.IsNullOrWhiteSpace(evidenceOutputDirectory))
+        {
+            string output = Path.GetFullPath(evidenceOutputDirectory);
+            if (Directory.Exists(output))
+                throw new InvalidOperationException(
+                    $"PF2.5 evidence output already exists: '{output}'.");
+            Directory.CreateDirectory(output);
+            foreach ((string Source, string Name) file in new[]
+                     {
+                         (serverSummary, "server-summary.json"),
+                         (accountingSummary, "accounting-summary.json"),
+                         (botSummary, "bot-summary.json"),
+                         (aliceTelemetrySummary, "native-alice-telemetry.json"),
+                         (bobTelemetrySummary, "native-bob-telemetry.json"),
+                     })
+                if (File.Exists(file.Source)) File.Copy(file.Source, Path.Combine(output, file.Name));
+        }
         Console.WriteLine(
-            $"PASS PF2_MixedExportedClientAccounting generation={ready.ServerGeneration} " +
+            $"PASS {(detailedTelemetry ? "PF2.5_Observability" : "PF2_MixedExportedClientAccounting")} " +
+            $"generation={ready.ServerGeneration} " +
             $"bots={botCount} nativeClients={nativeClientCount} seed={seed} " +
             $"udp={wire.GetProperty("clientToServerUdpPayloadBytes").GetUInt64()}/" +
             $"{wire.GetProperty("serverToClientUdpPayloadBytes").GetUInt64()} " +
@@ -1454,6 +1602,40 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         }
         if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
     }
+}
+
+static void RequireNativeTelemetry(string path)
+{
+    if (!File.Exists(path))
+        throw new InvalidOperationException("An exported Online client omitted its PF2.5 telemetry summary.");
+    using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+    JsonElement root = document.RootElement;
+    JsonElement native = root.GetProperty("Native");
+    JsonElement client = root.GetProperty("Client");
+    JsonElement network = root.GetProperty("Network");
+    bool healthy = root.GetProperty("Healthy").GetBoolean();
+    string? checkpoint = root.GetProperty("Checkpoint").GetString();
+    byte nativeLevel = native.GetProperty("Level").GetByte();
+    ulong frames = native.GetProperty("RenderFrames").GetUInt64();
+    ulong commands = native.GetProperty("CommandsSubmitted").GetUInt64();
+    ulong inputSamples = native.GetProperty("PhysicalInputSamples").GetUInt64();
+    ulong semanticResolutions = native.GetProperty("SemanticInputResolutions").GetUInt64();
+    ulong frameSamples = native.GetProperty("FrameDurations").GetProperty("Samples").GetUInt64();
+    ulong presentationSamples = native.GetProperty("PresentationUpdates").GetProperty("Samples").GetUInt64();
+    byte clientLevel = client.GetProperty("Level").GetByte();
+    ulong receivedSamples = client.GetProperty("ProcessReceived").GetProperty("Count").GetUInt64();
+    byte networkLevel = network.GetProperty("Level").GetByte();
+    ulong pumpSamples = network.GetProperty("PumpDurations").GetProperty("Count").GetUInt64();
+    if (!healthy || checkpoint != "PF2.5" || nativeLevel != 2 || frames == 0 ||
+        commands == 0 || inputSamples == 0 || semanticResolutions == 0 ||
+        frameSamples == 0 || presentationSamples == 0 ||
+        clientLevel != 2 || receivedSamples == 0 || networkLevel != 2 || pumpSamples == 0)
+        throw new InvalidOperationException(
+            "An exported Online client did not expose the required PF2.5 native/client/Network " +
+            $"timing: healthy={healthy} checkpoint={checkpoint} native={nativeLevel} " +
+            $"frames={frames}/{frameSamples} input={inputSamples}/{semanticResolutions} " +
+            $"commands={commands} presentation={presentationSamples} " +
+            $"client={clientLevel}/{receivedSamples} network={networkLevel}/{pumpSamples}.");
 }
 
 static void VerifyPf1MixedExportedSwarm(
@@ -1882,7 +2064,11 @@ static string[] NativeSharedClientArguments(
     string? guestName = null,
     string? guestBody = null,
     string? completionReady = null,
-    string? retirementRelease = null)
+    string? retirementRelease = null,
+    string? telemetry = null,
+    string? telemetryStart = null,
+    string? telemetryReady = null,
+    string? telemetrySummary = null)
 {
     var arguments = new List<string>
     {
@@ -1905,6 +2091,13 @@ static string[] NativeSharedClientArguments(
         arguments.Add($"--pf1-client-complete-ready={completionReady}");
     if (retirementRelease is not null)
         arguments.Add($"--pf1-client-retire-release={retirementRelease}");
+    if (telemetry is not null) arguments.Add($"--telemetry={telemetry}");
+    if (telemetryStart is not null)
+        arguments.Add($"--telemetry-start-file={telemetryStart}");
+    if (telemetryReady is not null)
+        arguments.Add($"--telemetry-ready-file={telemetryReady}");
+    if (telemetrySummary is not null)
+        arguments.Add($"--telemetry-summary={telemetrySummary}");
     return arguments.ToArray();
 }
 
@@ -1924,7 +2117,8 @@ static Process StartNativeDeployment(
     string? accountingStartFile = null,
     string? accountingReadyFile = null,
     string? accountingStopFile = null,
-    string? accountingSummaryFile = null)
+    string? accountingSummaryFile = null,
+    string telemetryLevel = "Off")
 {
     var start = new ProcessStartInfo("dotnet")
     {
@@ -1953,6 +2147,7 @@ static Process StartNativeDeployment(
         start.ArgumentList.Add($"--accounting-stop-file={accountingStopFile}");
     if (accountingSummaryFile is not null)
         start.ArgumentList.Add($"--accounting-summary-file={accountingSummaryFile}");
+    start.ArgumentList.Add($"--telemetry={telemetryLevel}");
     Console.WriteLine($"> dotnet {string.Join(' ', start.ArgumentList.Select(Quote))}");
     Process process = Process.Start(start) ??
         throw new InvalidOperationException("Unable to start the A0.8 Direct Connect deployment.");
@@ -2779,40 +2974,52 @@ internal sealed record VerificationOptions(
     bool ArchitectureOnly,
     bool Pf1Only,
     bool Pf2Only,
+    bool Pf25Only,
+    bool Pf25LongNative,
     bool AllConfigurations,
     string Configuration,
     bool SkipGodot,
     bool NoRestore,
-    string? GodotPath)
+    string? GodotPath,
+    string? Pf25EvidenceOutputDirectory)
 {
     internal static VerificationOptions Parse(string[] arguments)
     {
-        bool architectureOnly = false, pf1Only = false, pf2Only = false,
+        bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
+            pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
         string configuration = "Release";
-        string? godot = null;
+        string? godot = null, pf25EvidenceOutputDirectory = null;
         foreach (string argument in arguments)
         {
             if (argument == "--architecture-only") architectureOnly = true;
             else if (argument == "--pf1-only") pf1Only = true;
             else if (argument == "--pf2-only") pf2Only = true;
+            else if (argument == "--pf2.5-only") pf25Only = true;
+            else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
             else if (argument == "--no-restore") noRestore = true;
             else if (argument.StartsWith("--configuration=", StringComparison.Ordinal))
                 configuration = argument["--configuration=".Length..];
             else if (argument.StartsWith("--godot=", StringComparison.Ordinal)) godot = argument["--godot=".Length..];
+            else if (argument.StartsWith("--pf2.5-evidence-output=", StringComparison.Ordinal))
+                pf25EvidenceOutputDirectory = argument["--pf2.5-evidence-output=".Length..];
             else throw new ArgumentException($"Unknown verification option '{argument}'.");
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        if ((pf1Only || pf2Only) && architectureOnly)
+        if ((pf1Only || pf2Only || pf25Only) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
-        if (pf1Only && pf2Only)
-            throw new ArgumentException("Choose either --pf1-only or --pf2-only.");
-        return new(architectureOnly, pf1Only, pf2Only, allConfigurations,
-            configuration, skipGodot, noRestore, godot);
+        if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) > 1)
+            throw new ArgumentException("Choose one focused PF verification mode.");
+        if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
+            throw new ArgumentException(
+                "PF2.5 long-native/evidence options require --pf2.5-only.");
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf25LongNative,
+            allConfigurations, configuration, skipGodot, noRestore, godot,
+            pf25EvidenceOutputDirectory);
     }
 }
 

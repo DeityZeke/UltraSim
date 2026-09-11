@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Diagnostics;
 
 namespace UltraSim.Network;
 
@@ -133,6 +134,10 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     private ulong _priorUdpDatagramsReceived;
     private ulong _priorUdpPayloadBytesSent;
     private ulong _priorUdpPayloadBytesReceived;
+    private readonly NetworkTimingHistogram _pumpIntervals = new();
+    private readonly NetworkTimingHistogram _pumpDurations = new();
+    private NetworkTelemetryLevel _telemetryLevel;
+    private long _lastPumpTimestamp;
     private bool _disposed;
 
     private HostedUdpProtocolClient(
@@ -178,6 +183,32 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     public NetworkProtocolPeer? Peer
     {
         get { EnsureOperational(); return _peer; }
+    }
+
+    /// <summary>
+    /// Selects bounded transport diagnostics. This may be changed for an active
+    /// connection and resets diagnostic observations only; protocol state is untouched.
+    /// </summary>
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _lastPumpTimestamp = 0;
+        _pumpIntervals.Clear();
+        _pumpDurations.Clear();
+        _peer?.ConfigureTelemetry(level);
+    }
+
+    /// <summary>Captures cold immutable service timing for this transport lifetime.</summary>
+    public NetworkServiceTimingSnapshot GetTelemetrySnapshot()
+    {
+        EnsureOperational();
+        return new NetworkServiceTimingSnapshot(
+            _telemetryLevel,
+            _pumpIntervals.Snapshot(),
+            _pumpDurations.Snapshot(),
+            _peer?.GetStageTiming() ?? default);
     }
 
     public HostedPathGeneration PathGeneration
@@ -292,6 +323,27 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
     public void Pump()
     {
         EnsureOperational();
+        long started = 0;
+        if (_telemetryLevel != NetworkTelemetryLevel.Off)
+        {
+            started = Stopwatch.GetTimestamp();
+            if (_lastPumpTimestamp != 0)
+                _pumpIntervals.Record(started - _lastPumpTimestamp);
+            _lastPumpTimestamp = started;
+        }
+        try
+        {
+            PumpCore();
+        }
+        finally
+        {
+            if (_telemetryLevel != NetworkTelemetryLevel.Off)
+                _pumpDurations.Record(Stopwatch.GetTimestamp() - started);
+        }
+    }
+
+    private void PumpCore()
+    {
         if (_state is HostedUdpClientState.Closed or HostedUdpClientState.Failed) return;
         ulong now = _clock.Milliseconds;
         if (_state == HostedUdpClientState.Connecting)
@@ -704,6 +756,7 @@ public sealed class HostedUdpProtocolClient : IDisposable, IUdpKnownDatagramHand
             _master!,
             sendsClientToServer: true,
             usesMonotonicPacing: true);
+        _peer.ConfigureTelemetry(_telemetryLevel);
         HostedUdpPathRebindCodec.DeriveKey(
             _master!, _manifest, _connection, _securityEpoch, _pathKey);
         _endpoint.BindKnownDatagramHandler(this);

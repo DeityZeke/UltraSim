@@ -32,6 +32,8 @@ internal static class N03ProtocolTests
         Run("UnreliableMultiframeSurvivesDeterministicImpairment", UnreliableMultiframeSurvivesDeterministicImpairment);
         Run("WarmedUnreliableMultiframeAggregationAllocatesZero", WarmedUnreliableMultiframeAggregationAllocatesZero);
         Run("ProtocolStageTimingIsOptInAndResettable", ProtocolStageTimingIsOptInAndResettable);
+        Run("TelemetryHistogramIsBoundedMonotonicAndResettable",
+            TelemetryHistogramIsBoundedMonotonicAndResettable);
         Run("ReadySelectionAvoidsInactiveCapacityScans", ReadySelectionAvoidsInactiveCapacityScans);
         Run("ReadySelectionPreservesLanePriorityAndIndependentFairness", ReadySelectionPreservesLanePriorityAndIndependentFairness);
         Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
@@ -621,10 +623,38 @@ internal static class N03ProtocolTests
         True(receiver.SecureReceiveTicks > 0);
         True(receiver.FrameAdmissionTicks > 0);
 
+        // A new diagnostic window resets high-water observations to current
+        // queue debt without mutating that debt or any protocol lifetime.
+        loopback.Client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+        NetworkProtocolSnapshot reset = loopback.Client.GetSnapshot();
+        Equal(reset.ReliableQueued, reset.ReliableQueuedHighWater);
+        Equal(reset.IndependentUnreliableQueued,
+            reset.IndependentUnreliableQueuedHighWater);
+        Equal(reset.InFlightPackets, reset.InFlightPacketsHighWater);
+
         loopback.Client.ResetStageTiming(enabled: false);
         loopback.Server.ResetStageTiming(enabled: false);
         Equal(default, loopback.Client.GetStageTiming());
         Equal(default, loopback.Server.GetStageTiming());
+    }
+
+    private static void TelemetryHistogramIsBoundedMonotonicAndResettable()
+    {
+        var histogram = new NetworkTimingHistogram();
+        for (int index = 0; index < 10_000; index++) histogram.Record(index & 255);
+        NetworkTimingDistribution first = histogram.Snapshot();
+        Equal(10_000UL, first.Count);
+        True(first.TotalStopwatchTicks > 0);
+        True(first.P50StopwatchTicks <= first.P95StopwatchTicks);
+        True(first.P95StopwatchTicks <= first.P99StopwatchTicks);
+        True(first.P99StopwatchTicks <= first.MaximumStopwatchTicks);
+        histogram.Record(1_024);
+        NetworkTimingDistribution second = histogram.Snapshot();
+        Equal(10_001UL, second.Count);
+        True(second.TotalStopwatchTicks >= first.TotalStopwatchTicks);
+        True(second.MaximumStopwatchTicks >= first.MaximumStopwatchTicks);
+        histogram.Clear();
+        Equal(default, histogram.Snapshot());
     }
 
     private static void ReadySelectionAvoidsInactiveCapacityScans()
@@ -1363,6 +1393,8 @@ internal static class N03ProtocolTests
     private static void WarmedSecureDeliveryAllocatesZero()
     {
         using ProtocolLoopback loopback = Create();
+        loopback.Client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+        loopback.Server.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
         Span<byte> payload = stackalloc byte[8];
         WriteUInt64(payload, 1);
         Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.OwnerState), payload));
@@ -1401,6 +1433,10 @@ internal static class N03ProtocolTests
         allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Equal(0L, allocated);
         Equal(499_500UL, checksum);
+        NetworkProtocolSnapshot client = loopback.Client.GetSnapshot();
+        NetworkProtocolSnapshot server = loopback.Server.GetSnapshot();
+        True(client.IndependentUnreliableQueuedHighWater > 0);
+        True(server.ReceivedQueuedHighWater > 0);
     }
 
     private static void AbortiveShutdownIsBalancedAndIdempotent()

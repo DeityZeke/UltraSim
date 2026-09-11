@@ -92,7 +92,8 @@ public readonly record struct RemotePlayableSessionSnapshot(
     RemoteChatClientSnapshot Chat,
     RemotePublicPresentationMetadataClientSnapshot PublicPresentation,
     RemoteUiClientSnapshot Ui,
-    RemoteStructuralWorldSnapshot StructuralWorld);
+    RemoteStructuralWorldSnapshot StructuralWorld,
+    RemotePlayableSessionTimingSnapshot Timing);
 
 /// <summary>
 /// One bounded engine-neutral remote client composition over an already authenticated Direct
@@ -121,6 +122,8 @@ public sealed class RemotePlayableSession : IDisposable
     private ulong _messagesBeforeAdmission;
     private ulong _rejectedBeforeAdmission;
     private bool _disposed;
+    private NetworkTelemetryLevel _telemetryLevel;
+    private readonly ClientTimingWindow _processReceivedTiming = new();
 
     public RemotePlayableSession(
         NetworkProtocolPeer peer,
@@ -262,6 +265,19 @@ public sealed class RemotePlayableSession : IDisposable
     public int ProcessReceived()
     {
         EnsureOperational();
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { return ProcessReceivedCore(); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _processReceivedTiming.RecordElapsed(timing);
+        }
+    }
+
+    private int ProcessReceivedCore()
+    {
         if (_semanticConsumersActive)
             return _ui.ProcessReceived();
 
@@ -314,7 +330,30 @@ public sealed class RemotePlayableSession : IDisposable
             Chat.GetSnapshot(),
             PublicPresentation.GetSnapshot(),
             _ui.GetSnapshot(),
-            _structuralWorld);
+            _structuralWorld,
+            GetTimingSnapshot());
+    }
+
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _processReceivedTiming.Clear();
+        Playable.ConfigureTelemetry(level);
+        _world?.ConfigureTelemetry(level);
+        PublicPresentation.ConfigureTelemetry(level);
+        Chat.ConfigureTelemetry(level);
+        _ui.ConfigureTelemetry(level);
+    }
+
+    public RemotePlayableSessionTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOperational();
+        return new(_telemetryLevel, _processReceivedTiming.Capture(),
+            Playable.GetTimingSnapshot(), _world?.GetTimingSnapshot() ?? default,
+            PublicPresentation.GetTimingSnapshot(), Chat.GetTimingSnapshot(),
+            _ui.GetTimingSnapshot());
     }
 
     /// <summary>
@@ -396,6 +435,7 @@ public sealed class RemotePlayableSession : IDisposable
             _peer, cache, _applicationSessionEpoch,
             cache.Limits.MaximumPublicRecordsPerChunk,
             _maximumPendingWorldProofs);
+        _world.ConfigureTelemetry(_telemetryLevel);
         _protocol.Add(_world);
     }
 

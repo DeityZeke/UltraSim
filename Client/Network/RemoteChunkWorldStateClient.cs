@@ -24,7 +24,8 @@ public readonly record struct RemoteChunkWorldStateClientSnapshot(
     ulong AppliedSnapshots,
     ulong RejectedSnapshots,
     ulong SupersededDeliveries,
-    long ReservedBytes);
+    long ReservedBytes,
+    RemoteChunkWorldStateClientTimingSnapshot Timing);
 
 /// <summary>
 /// N1.2/N1.3 client bridge for ordinary unfragmented deltas/absences and exceptional atomic Bulk
@@ -66,6 +67,9 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private ulong _appliedSnapshots;
     private ulong _rejectedSnapshots;
     private ulong _supersededDeliveries;
+    private NetworkTelemetryLevel _telemetryLevel;
+    private readonly ClientTimingWindow _decodeAndApplyTiming = new();
+    private readonly ClientTimingWindow _proofDrainTiming = new();
 
     public RemoteChunkWorldStateClient(
         NetworkProtocolPeer peer,
@@ -117,6 +121,19 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwner();
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { return TryProcessCore(in message, payload); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _decodeAndApplyTiming.RecordElapsed(timing);
+        }
+    }
+
+    private bool TryProcessCore(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
+    {
         if (message.MessageId == RemoteChunkDeltaHeaderCodec.Descriptor.Id)
         {
             ProcessDelta(payload);
@@ -158,6 +175,19 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     public bool TryProgress()
     {
         EnsureOwner();
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { return TryProgressCore(); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _proofDrainTiming.RecordElapsed(timing);
+        }
+    }
+
+    private bool TryProgressCore()
+    {
         if (!FlushProofs()) return false;
         TryCommitSnapshotCandidate();
         return FlushProofs();
@@ -234,7 +264,23 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 (long)_proofs.Length * Unsafe.SizeOf<RemoteChunkAppliedMessage>() +
                 (long)_proofEnvelopeEntries.Length *
                     Unsafe.SizeOf<RemoteChunkAppliedEnvelopeEntry>() +
-                _proofScratch.Length));
+                _proofScratch.Length),
+            GetTimingSnapshot());
+    }
+
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOwner();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _decodeAndApplyTiming.Clear();
+        _proofDrainTiming.Clear();
+    }
+
+    public RemoteChunkWorldStateClientTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOwner();
+        return new(_telemetryLevel, _decodeAndApplyTiming.Capture(), _proofDrainTiming.Capture());
     }
 
     private void ProcessDirtyChunkBundle(ReadOnlySpan<byte> payload)

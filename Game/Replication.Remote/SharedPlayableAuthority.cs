@@ -108,7 +108,8 @@ public readonly record struct SharedPlayableAuthoritySnapshot(
     ulong Joins,
     ulong Leaves,
     ulong Ticks,
-    bool OwnsRuntime);
+    bool OwnsRuntime,
+    GameTickTimingSnapshot Timing);
 
 public enum GameTestMarkerPhase : byte
 {
@@ -311,6 +312,7 @@ public sealed class SharedPlayableAuthority : IDisposable
     internal AdmissionService Admission { get; }
     internal GameChatService Chat { get; }
     internal RemoteChatDeliveryService ChatDelivery { get; }
+    public GameTelemetryLevel TelemetryLevel => _tickTimings.Level;
 
     /// <summary>
     /// Publishes one authority-originated routed Chat occurrence to the exact currently entered
@@ -325,6 +327,25 @@ public sealed class SharedPlayableAuthority : IDisposable
         if (result.Accepted)
             _ = ChatDelivery.TryHandoffPendingOccurrences();
         return result;
+    }
+
+    /// <summary>Configures bounded timing diagnostics without changing authority cadence.</summary>
+    public void ConfigureTelemetry(GameTelemetryLevel level)
+    {
+        EnsureOperational();
+        if (_remoteApplications.Any(static application => application is not null))
+            throw new InvalidOperationException(
+                "Authority telemetry must be selected before remote applications exist.");
+        _tickTimings.Configure(level);
+    }
+
+    /// <summary>Resets only bounded diagnostics at an explicit measurement barrier.</summary>
+    public void ResetTelemetryWindow()
+    {
+        EnsureOperational();
+        _tickTimings.Configure(_tickTimings.Level);
+        for (int index = 0; index < _remoteApplications.Length; index++)
+            _remoteApplications[index]?.ResetTelemetryWindow();
     }
 
     /// <summary>
@@ -440,7 +461,10 @@ public sealed class SharedPlayableAuthority : IDisposable
         int steps = 0;
         while (now >= _nextTickTimestamp && steps < 4)
         {
-            long started = Stopwatch.GetTimestamp();
+            long started = _tickTimings.Start();
+            long actual = started == 0 ? now : started;
+            _tickTimings.RecordScheduledStart(
+                _nextTickTimestamp, actual, _tickInterval, catchUp: steps != 0);
             Runtime.Tick();
             _tickTimings.RecordElapsed(started);
             _ticks++;
@@ -448,7 +472,10 @@ public sealed class SharedPlayableAuthority : IDisposable
             steps++;
         }
         if (steps == 4 && now >= _nextTickTimestamp)
+        {
+            _tickTimings.RecordSkippedOpportunity();
             _nextTickTimestamp = checked(now + _tickInterval);
+        }
         _ = ChatDelivery.TryHandoffPendingOccurrences();
         return steps;
     }
@@ -717,7 +744,8 @@ public sealed class SharedPlayableAuthority : IDisposable
             _joins,
             _leaves,
             _ticks,
-            _ownsRuntime);
+            _ownsRuntime,
+            _tickTimings.Capture());
     }
 
     public void Dispose()

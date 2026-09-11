@@ -146,6 +146,10 @@ acceptance narratives remain available through git history.
   rules, cadence independence, the five-profile dispositions, P0.4 conservative
   selection, `ChunkPublication` semantics, rating-versus-stress distinctions, and
   the current consumption-ready stop.
+- [PF2.5 replication reconciliation](Plans/PF2_5_REPLICATION_RECONCILIATION.md) —
+  exact current-game state routing, P0.4 provenance, alternative-profile readiness,
+  fixed-owner versus runtime-transfer requirements, PF3 observability, and the proposed
+  `ServerPerformanceProfile/v1` policy boundary.
 - [Hosted Network H0](Plans/HOSTED_NETWORK.md) — accepted H0.0-H0.5 external UDP
   lifecycle: deployment pinning, stateless bounded cookies/rates, authenticated
   promotion, explicit IPv4 path ownership/rebinding, exclusive connection-owner

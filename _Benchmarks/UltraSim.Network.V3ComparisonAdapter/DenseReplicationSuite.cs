@@ -1268,6 +1268,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private static NetworkProtocolStageTiming Add(
         NetworkProtocolStageTiming left,
         NetworkProtocolStageTiming right) => new(
+            left.Level,
             SaturatingAdd(left.EmitTicks, right.EmitTicks),
             SaturatingAdd(left.EmitCalls, right.EmitCalls),
             SaturatingAdd(left.IdleEmitCalls, right.IdleEmitCalls),

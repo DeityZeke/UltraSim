@@ -28,6 +28,10 @@ N0 implementation is retained and explicitly identified as the
 conservatively freezes this as a dynamic-public profile selection rather than a
 per-object composition system: immutable terrain/frozen structures remain WorldPack/static
 content, and runtime transfer between profile identity lineages is unsupported.
+PF2.5 later audits that decision against every real current-game consumer and retains the same
+single `ChunkPublication` owner through Concept Demo freeze. The complete current routing and the
+separate requirements for fixed multi-owner composition versus runtime transfer live in
+[`PF2_5_REPLICATION_RECONCILIATION.md`](../../Docs/Plans/PF2_5_REPLICATION_RECONCILIATION.md).
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -250,6 +254,11 @@ The ownership boundary is:
 | Dirty entity fanout | retained alternative profile |
 | Dirty entity/chunk-batched discovery | experimental reference |
 | Dirty chunk fanout without reverse membership | experimental reference |
+
+This table is the accepted **current product composition**, not a universal fastest-profile table.
+PF2.5 confirms that `MaintainedEntityRelation` and `DirtyEntitySpatialFanout` remain maintained,
+tested alternatives with profile-local server/client/proof machinery, but neither is wired into
+the actual `WorldPublicEntityId`/`ClientWorldSemanticCache`/interaction/presentation lifetime.
 
 One logical public identity must not be simultaneously published through multiple
 mechanisms. Runtime transfer between profile lineages is deliberately unsupported:

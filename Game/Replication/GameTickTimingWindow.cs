@@ -2,11 +2,35 @@ using System.Diagnostics;
 
 namespace UltraSim.Game.Replication;
 
+public enum GameTelemetryLevel : byte
+{
+    Off = 0,
+    Basic = 1,
+    Detailed = 2,
+}
+
 /// <summary>Cold snapshot of one bounded authoritative fixed-step timing window.</summary>
 public readonly record struct GameTickTimingSnapshot(
-    int SampleCount,
+    GameTelemetryLevel Level,
+    ulong SampleCount,
     long RecentMicroseconds,
-    long P95Microseconds);
+    long P50Microseconds,
+    long P95Microseconds,
+    long P99Microseconds,
+    long MaximumMicroseconds,
+    ulong IntervalSampleCount,
+    long IntervalP50Microseconds,
+    long IntervalP95Microseconds,
+    long IntervalP99Microseconds,
+    long IntervalMaximumMicroseconds,
+    ulong LatenessSampleCount,
+    long LatenessP50Microseconds,
+    long LatenessP95Microseconds,
+    long LatenessP99Microseconds,
+    long LatenessMaximumMicroseconds,
+    ulong DeadlineMisses,
+    ulong CatchUpTicks,
+    ulong SkippedOpportunities);
 
 /// <summary>
 /// Owner-thread bounded timing window for authoritative fixed steps. Recording is allocation-free;
@@ -14,38 +38,134 @@ public readonly record struct GameTickTimingSnapshot(
 /// </summary>
 public sealed class GameTickTimingWindow
 {
-    public const int MaximumSamples = 128;
+    public const int MaximumSamples = 256;
     private readonly long[] _microseconds = new long[MaximumSamples];
+    private readonly long[] _intervalMicroseconds = new long[MaximumSamples];
+    private readonly long[] _latenessMicroseconds = new long[MaximumSamples];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private GameTelemetryLevel _level = GameTelemetryLevel.Basic;
     private int _next;
     private int _count;
+    private ulong _observations;
+    private long _durationMaximum;
+    private int _intervalNext;
+    private int _intervalCount;
+    private ulong _intervalObservations;
+    private long _intervalMaximum;
+    private int _latenessNext;
+    private int _latenessCount;
+    private ulong _latenessObservations;
+    private long _latenessMaximum;
+    private long _lastTickStarted;
+    private ulong _deadlineMisses;
+    private ulong _catchUpTicks;
+    private ulong _skippedOpportunities;
+
+    public GameTelemetryLevel Level => _level;
+
+    public void Configure(GameTelemetryLevel level)
+    {
+        EnsureOwner();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _level = level;
+        Array.Clear(_microseconds);
+        Array.Clear(_intervalMicroseconds);
+        Array.Clear(_latenessMicroseconds);
+        _next = _count = _intervalNext = _intervalCount = _latenessNext = _latenessCount = 0;
+        _observations = _intervalObservations = _latenessObservations = 0;
+        _durationMaximum = _intervalMaximum = _latenessMaximum = 0;
+        _lastTickStarted = 0;
+        _deadlineMisses = _catchUpTicks = _skippedOpportunities = 0;
+    }
+
+    public long Start() => _level == GameTelemetryLevel.Off ? 0 : Stopwatch.GetTimestamp();
+
+    public void RecordScheduledStart(
+        long scheduledTimestamp,
+        long actualTimestamp,
+        long targetIntervalTicks,
+        bool catchUp)
+    {
+        EnsureOwner();
+        if (_level == GameTelemetryLevel.Off) return;
+        if (targetIntervalTicks <= 0) throw new ArgumentOutOfRangeException(nameof(targetIntervalTicks));
+        if (_lastTickStarted != 0)
+            Record(_intervalMicroseconds, ref _intervalNext, ref _intervalCount,
+                ref _intervalObservations, ref _intervalMaximum,
+                ToMicroseconds(Math.Max(0, actualTimestamp - _lastTickStarted)));
+        _lastTickStarted = actualTimestamp;
+        long lateness = Math.Max(0, actualTimestamp - scheduledTimestamp);
+        Record(_latenessMicroseconds, ref _latenessNext, ref _latenessCount,
+            ref _latenessObservations, ref _latenessMaximum,
+            ToMicroseconds(lateness));
+        if (lateness >= targetIntervalTicks) SaturatingIncrement(ref _deadlineMisses);
+        if (catchUp) SaturatingIncrement(ref _catchUpTicks);
+    }
+
+    public void RecordSkippedOpportunity()
+    {
+        EnsureOwner();
+        if (_level != GameTelemetryLevel.Off) SaturatingIncrement(ref _skippedOpportunities);
+    }
 
     public void RecordElapsed(long startTimestamp)
     {
         EnsureOwner();
+        if (_level == GameTelemetryLevel.Off) return;
         long elapsed = Math.Max(0, Stopwatch.GetTimestamp() - startTimestamp);
-        long seconds = elapsed / Stopwatch.Frequency;
-        long remainder = elapsed % Stopwatch.Frequency;
-        long microseconds = checked(
-            seconds * 1_000_000L + remainder * 1_000_000L / Stopwatch.Frequency);
-        _microseconds[_next] = microseconds;
-        _next = (_next + 1) % _microseconds.Length;
-        if (_count < _microseconds.Length) _count++;
+        Record(_microseconds, ref _next, ref _count, ref _observations, ref _durationMaximum,
+            ToMicroseconds(elapsed));
     }
 
     public GameTickTimingSnapshot Capture()
     {
         EnsureOwner();
-        if (_count == 0) return default;
-        Span<long> ordered = stackalloc long[MaximumSamples];
-        _microseconds.AsSpan(0, _count).CopyTo(ordered);
-        ordered[.._count].Sort();
-        int p95 = Math.Clamp((int)Math.Ceiling(_count * 0.95d) - 1, 0, _count - 1);
-        int recent = (_next - 1 + _microseconds.Length) % _microseconds.Length;
+        TimingValues duration = Values(_microseconds, _next, _count);
+        TimingValues interval = Values(_intervalMicroseconds, _intervalNext, _intervalCount);
+        TimingValues lateness = Values(_latenessMicroseconds, _latenessNext, _latenessCount);
         return new GameTickTimingSnapshot(
-            _count,
-            _microseconds[recent],
-            ordered[p95]);
+            _level, _observations, duration.Recent, duration.P50, duration.P95, duration.P99,
+            _durationMaximum, _intervalObservations, interval.P50, interval.P95, interval.P99,
+            _intervalMaximum, _latenessObservations, lateness.P50, lateness.P95, lateness.P99,
+            _latenessMaximum, _deadlineMisses, _catchUpTicks, _skippedOpportunities);
+    }
+
+    private static TimingValues Values(long[] source, int next, int count)
+    {
+        if (count == 0) return default;
+        Span<long> ordered = stackalloc long[MaximumSamples];
+        source.AsSpan(0, count).CopyTo(ordered);
+        ordered[..count].Sort();
+        int recent = (next - 1 + source.Length) % source.Length;
+        return new TimingValues(source[recent],
+            ordered[Index(count, 0.50)], ordered[Index(count, 0.95)],
+            ordered[Index(count, 0.99)], ordered[count - 1]);
+    }
+
+    private static int Index(int count, double percentile) => Math.Clamp(
+        (int)Math.Ceiling(count * percentile) - 1, 0, count - 1);
+
+    private static long ToMicroseconds(long ticks) => checked((long)(
+        (Int128)ticks * 1_000_000 / Stopwatch.Frequency));
+
+    private static void Record(
+        long[] values,
+        ref int next,
+        ref int count,
+        ref ulong observations,
+        ref long maximum,
+        long value)
+    {
+        values[next] = value;
+        next = (next + 1) % values.Length;
+        if (count < values.Length) count++;
+        if (observations != ulong.MaxValue) observations++;
+        maximum = Math.Max(maximum, value);
+    }
+
+    private static void SaturatingIncrement(ref ulong value)
+    {
+        if (value != ulong.MaxValue) value++;
     }
 
     private void EnsureOwner()
@@ -53,4 +173,7 @@ public sealed class GameTickTimingWindow
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("The tick timing window belongs to another thread.");
     }
+
+    private readonly record struct TimingValues(
+        long Recent, long P50, long P95, long P99, long Maximum);
 }

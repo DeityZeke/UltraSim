@@ -61,6 +61,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
     private long _listenerCapacityDrops;
     private long _ownerProtocolStopwatchTicks;
     private int _peakIngressTransfersPerPass;
+    private NetworkTelemetryLevel _telemetryLevel;
     private bool _stopped;
     private bool _joinCleanupComplete;
     private bool _disposed;
@@ -127,6 +128,17 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
         _listenerPathScratch.Length +
         (long)_workers.Length * IntPtr.Size +
         (long)_workerByOwnerSlot.Length * IntPtr.Size);
+
+    internal void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureListenerOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        for (int index = 0; index < _workers.Length; index++)
+            if (_workers[index].ActiveCount != 0)
+                throw new InvalidOperationException(
+                    "Owner telemetry must be selected before transports exist.");
+        _telemetryLevel = level;
+    }
 
     internal bool IsQuiescent => _joinCleanupComplete;
 
@@ -535,6 +547,7 @@ internal sealed class HostedUdpConnectionOwnerRuntime : IDisposable
                 master,
                 sendsClientToServer: false,
                 usesMonotonicPacing: true);
+            Peer.ConfigureTelemetry(runtime._telemetryLevel);
             Application = runtime._applicationFactory.Create(connection, Peer) ??
                 throw new InvalidOperationException(
                     "The hosted application factory returned no owner application.");

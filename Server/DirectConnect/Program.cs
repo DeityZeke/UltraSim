@@ -53,6 +53,12 @@ using HostedUdpAdmissionHost host = CreateHost(
         UiDefinitionIdentity.From(InventoryUi.Definition),
         UiDefinitionIdentity.From(ServerMonitorUi.Definition),
     ], clientProfile, options.MaximumParticipants, options.AdmissionBurstPerAddress);
+host.ConfigureTelemetry(options.TelemetryLevel);
+authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
+    ? GameTelemetryLevel.Off
+    : options.TelemetryLevel == NetworkTelemetryLevel.Detailed
+        ? GameTelemetryLevel.Detailed
+        : GameTelemetryLevel.Basic);
 string fingerprint = Fingerprint(identity.PublicKey);
 Console.WriteLine("UltraSim Direct Connect Concept Demo server ready.");
 Console.WriteLine($"Endpoint: {host.LocalEndPoint}");
@@ -329,7 +335,8 @@ internal readonly record struct DirectConnectOptions(
     string ClientProfile,
     bool EphemeralSmoke,
     int MaximumParticipants,
-    int AdmissionBurstPerAddress)
+    int AdmissionBurstPerAddress,
+    NetworkTelemetryLevel TelemetryLevel)
 {
     internal static DirectConnectOptions Parse(string[] arguments)
     {
@@ -350,6 +357,7 @@ internal readonly record struct DirectConnectOptions(
         int maximumParticipants = 8;
         int admissionBurstPerAddress =
             HostedUdpAdmissionLimits.Default.MaximumValidationsPerAddressPerBucket;
+        NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off;
         foreach (string argument in arguments)
         {
             if (argument == "--ephemeral-smoke")
@@ -454,6 +462,13 @@ internal readonly record struct DirectConnectOptions(
                         "--same-address-admission-burst must be between 1 and 4096.");
                 continue;
             }
+            if (argument.StartsWith("--telemetry=", StringComparison.Ordinal))
+            {
+                string value = argument["--telemetry=".Length..];
+                if (!Enum.TryParse(value, ignoreCase: true, out telemetryLevel))
+                    throw new ArgumentException("--telemetry must be Off, Basic, or Detailed.");
+                continue;
+            }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
         bool anyAccounting = accountingStartFile is not null || accountingReadyFile is not null ||
@@ -466,7 +481,7 @@ internal readonly record struct DirectConnectOptions(
             endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
             accountingSummaryFile, clientProfile, smoke,
-            maximumParticipants, admissionBurstPerAddress);
+            maximumParticipants, admissionBurstPerAddress, telemetryLevel);
 
         static string RequiredPath(string argument, string prefix)
         {

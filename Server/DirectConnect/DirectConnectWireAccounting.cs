@@ -20,7 +20,8 @@ internal sealed record DirectConnectConnectionTrafficReport(
     uint ConnectionGeneration,
     bool Finalized,
     UdpPayloadTrafficSnapshot UdpPayload,
-    NetworkTransportTrafficSnapshot SecureProtocol);
+    NetworkTransportTrafficSnapshot SecureProtocol,
+    NetworkProtocolSnapshot Protocol);
 
 internal sealed record DirectConnectLaneTrafficReport(
     string Lane,
@@ -28,6 +29,15 @@ internal sealed record DirectConnectLaneTrafficReport(
 
 internal sealed record DirectConnectFamilyTrafficReport(
     string Family,
+    NetworkLogicalTrafficSnapshot Traffic);
+
+internal sealed record DirectConnectMessageTrafficReport(
+    ushort MessageId,
+    string CanonicalKey,
+    ushort Version,
+    string Lane,
+    string Delivery,
+    string Retention,
     NetworkLogicalTrafficSnapshot Traffic);
 
 internal sealed record DirectConnectHttpBodyTrafficReport(
@@ -55,9 +65,20 @@ internal sealed record DirectConnectWireAccountingSummary(
     DirectConnectConnectionTrafficReport[] Connections,
     DirectConnectLaneTrafficReport[] Lanes,
     DirectConnectFamilyTrafficReport[] Families,
+    DirectConnectMessageTrafficReport[] Messages,
     DirectConnectHttpBodyTrafficReport HttpBody,
+    HostedUdpHostTelemetrySnapshot NetworkTiming,
+    GameTickTimingSnapshot AuthorityTiming,
+    RemoteGuestPlayableServerSnapshot[] RemoteApplications,
     double ProcessCpuMilliseconds,
+    double CpuSecondsPerWallSecond,
     long ProcessWorkingSetHighWaterBytes,
+    long ManagedHeapHighWaterBytes,
+    long AllocatedBytes,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections,
+    int ThreadHighWater,
     bool PhysicalTransportReconciled,
     bool LogicalMessageReconciled);
 
@@ -78,7 +99,14 @@ internal sealed class DirectConnectWireAccounting
     private readonly long _started;
     private readonly Process _process;
     private readonly double _cpuStart;
+    private readonly long _allocatedStart;
+    private readonly int _gen0Start;
+    private readonly int _gen1Start;
+    private readonly int _gen2Start;
     private long _workingSetHighWater;
+    private long _managedHeapHighWater;
+    private int _threadHighWater;
+    private long _nextResourceSample;
 
     internal DirectConnectWireAccounting(
         HostedUdpAdmissionHost host,
@@ -88,6 +116,8 @@ internal sealed class DirectConnectWireAccounting
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(authority);
         ArgumentNullException.ThrowIfNull(content);
+        host.ResetTelemetryWindow();
+        authority.ResetTelemetryWindow();
         HostedUdpAdmissionSnapshot hostSnapshot = host.GetSnapshot();
         SharedPlayableAuthoritySnapshot authoritySnapshot = authority.GetSnapshot();
         _listenerStart = ListenerTraffic(hostSnapshot.Listener);
@@ -101,14 +131,27 @@ internal sealed class DirectConnectWireAccounting
         _process = Process.GetCurrentProcess();
         _process.Refresh();
         _cpuStart = _process.TotalProcessorTime.TotalMilliseconds;
+        _allocatedStart = GC.GetTotalAllocatedBytes(precise: false);
+        _gen0Start = GC.CollectionCount(0);
+        _gen1Start = GC.CollectionCount(1);
+        _gen2Start = GC.CollectionCount(2);
         _workingSetHighWater = _process.WorkingSet64;
+        _managedHeapHighWater = GC.GetGCMemoryInfo().HeapSizeBytes;
+        _threadHighWater = _process.Threads.Count;
         _started = Stopwatch.GetTimestamp();
+        _nextResourceSample = _started;
     }
 
-    internal void Sample()
+    internal void Sample(bool force = false)
     {
+        long now = Stopwatch.GetTimestamp();
+        if (!force && now < _nextResourceSample) return;
         _process.Refresh();
         _workingSetHighWater = Math.Max(_workingSetHighWater, _process.WorkingSet64);
+        _managedHeapHighWater = Math.Max(
+            _managedHeapHighWater, GC.GetGCMemoryInfo().HeapSizeBytes);
+        _threadHighWater = Math.Max(_threadHighWater, _process.Threads.Count);
+        _nextResourceSample = checked(now + Math.Max(1, Stopwatch.Frequency / 4));
     }
 
     internal DirectConnectWireAccountingSummary Complete(
@@ -116,7 +159,7 @@ internal sealed class DirectConnectWireAccounting
         SharedPlayableAuthority authority,
         ConceptDemoContentDeployment content)
     {
-        Sample();
+        Sample(force: true);
         long completed = Stopwatch.GetTimestamp();
         long durationMilliseconds = Math.Max(1,
             checked((long)((Int128)(completed - _started) * 1_000 / Stopwatch.Frequency)));
@@ -156,7 +199,7 @@ internal sealed class DirectConnectWireAccounting
                 ? secure
                 : NetworkTrafficSnapshot.Add(secureAggregate, secure);
             reports.Add(new(id.Slot, id.Generation, after.IsFinalized,
-                physical, secure.Transport));
+                physical, secure.Transport, after.Protocol));
             sentBytes.Add(physical.PayloadBytesSent / seconds);
             receivedBytes.Add(physical.PayloadBytesReceived / seconds);
             sentDatagrams.Add(physical.DatagramsSent / seconds);
@@ -204,8 +247,33 @@ internal sealed class DirectConnectWireAccounting
                 families[index] = new(((GameProtocolTrafficFamily)index).ToString(), default);
         }
 
+        ReadOnlySpan<NetworkMessageDescriptor> descriptors = UltraSimGameProtocol.Manifest.Messages;
+        var messages = new DirectConnectMessageTrafficReport[descriptors.Length];
+        for (int index = 0; index < messages.Length; index++)
+        {
+            NetworkMessageDescriptor descriptor = descriptors[index];
+            NetworkLaneContract lane = NetworkLaneContracts.Get(descriptor.Lane);
+            messages[index] = new DirectConnectMessageTrafficReport(
+                descriptor.Id.Value,
+                descriptor.CanonicalKey,
+                descriptor.Version,
+                descriptor.Lane.ToString(),
+                lane.Delivery.ToString(),
+                lane.Retention.ToString(),
+                secureAggregate?.GetMessage(index).Traffic ?? default);
+        }
+
         StaticContentHttpHostSnapshot httpEnd = content.GetHttpSnapshot();
+        var applicationSnapshots = new RemoteGuestPlayableServerSnapshot[
+            authorityEnd.MaximumParticipants];
+        int applicationCount = authority.CopyRemoteSessionSnapshots(applicationSnapshots);
+        if (applicationCount < 0)
+            throw new InvalidOperationException(
+                "The bounded remote-application diagnostic destination was too small.");
+        Array.Resize(ref applicationSnapshots, applicationCount);
         _process.Refresh();
+        double cpuMilliseconds = Math.Max(
+            0, _process.TotalProcessorTime.TotalMilliseconds - _cpuStart);
         return new(
             "Exact UDP datagram payload bytes at the socket boundary; excludes IP/UDP/link framing",
             "HTTP response body bytes; excludes HTTP/TCP/IP framing",
@@ -225,13 +293,24 @@ internal sealed class DirectConnectWireAccounting
             reports.ToArray(),
             lanes,
             families,
+            messages,
             new(
                 Difference(_httpStart.Requests, httpEnd.Requests),
                 Difference(_httpStart.Served, httpEnd.Served),
                 Difference(_httpStart.Rejected, httpEnd.Rejected),
                 Difference(_httpStart.BytesServed, httpEnd.BytesServed)),
-            Math.Max(0, _process.TotalProcessorTime.TotalMilliseconds - _cpuStart),
+            host.GetTelemetrySnapshot(),
+            authorityEnd.Timing,
+            applicationSnapshots,
+            cpuMilliseconds,
+            cpuMilliseconds / durationMilliseconds,
             _workingSetHighWater,
+            _managedHeapHighWater,
+            Math.Max(0, GC.GetTotalAllocatedBytes(precise: false) - _allocatedStart),
+            Math.Max(0, GC.CollectionCount(0) - _gen0Start),
+            Math.Max(0, GC.CollectionCount(1) - _gen1Start),
+            Math.Max(0, GC.CollectionCount(2) - _gen2Start),
+            _threadHighWater,
             physicalReconciled,
             laneSum == messageSum && familySum == messageSum);
     }

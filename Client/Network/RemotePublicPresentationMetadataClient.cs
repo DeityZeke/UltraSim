@@ -41,6 +41,9 @@ public sealed class RemotePublicPresentationMetadataClient :
     private ulong _rejected;
     private ulong _capacityFailures;
     private ulong _proofsQueued;
+    private readonly ClientTimingWindow _applyTiming = new();
+    private readonly ClientTimingWindow _proofTiming = new();
+    private NetworkTelemetryLevel _telemetryLevel;
 
     public RemotePublicPresentationMetadataClient(
         NetworkProtocolPeer peer,
@@ -64,6 +67,19 @@ public sealed class RemotePublicPresentationMetadataClient :
         EnsureOwner();
         if (message.MessageId != RemotePublicPresentationMetadataHeaderCodec.Descriptor.Id)
             return false;
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { return TryProcessMetadata(payload); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _applyTiming.RecordElapsed(timing);
+        }
+    }
+
+    private bool TryProcessMetadata(ReadOnlySpan<byte> payload)
+    {
         if (_proofCount == _proofs.Length)
         {
             SaturatingIncrement(ref _capacityFailures);
@@ -143,7 +159,30 @@ public sealed class RemotePublicPresentationMetadataClient :
     public bool TryProgress()
     {
         EnsureOwner();
-        return FlushProofs();
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { return FlushProofs(); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _proofTiming.RecordElapsed(timing);
+        }
+    }
+
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOwner();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _applyTiming.Clear();
+        _proofTiming.Clear();
+    }
+
+    public RemotePublicPresentationClientTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOwner();
+        return new(_telemetryLevel, _applyTiming.Capture(), _proofTiming.Capture());
     }
 
     public RemotePublicPresentationMetadataClientSnapshot GetSnapshot()

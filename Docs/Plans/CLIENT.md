@@ -27,7 +27,9 @@ renderer-callback, and native adapter state/range failures without changing UI a
 protocol identity. Pre-freeze PF0/PF1 now record the exact feature-complete candidate and close a
 real ClientOnly headless bot harness plus an 8-bot/2-exported-Online shared-authority gate. PF2 now
 closes first-class production UDP accounting, separate HTTP body accounting, and long-window
-quiet/moving/crowd characterization. PF3 cadence/performance policy is next.
+quiet/moving/crowd characterization. PF2.5 now reconciles the selected real-game replication owner
+and completes opt-in PF3 timing/queue/debt observability without changing policy; PF3 cadence and
+performance-profile implementation follows.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2685,7 +2687,8 @@ UI defensive assurance: publication/lifetime/parser/native boundaries      CLOSE
         |
 PF0/PF1 candidate + real headless/mixed exported-client swarm           CLOSED
 PF2 first-class wire accounting + explanatory baselines                 CLOSED
-PF3+ cadence/tuning/ObjectScript/human testing                            NEXT
+PF2.5 replication ownership reconciliation + PF3 observability            NEXT
+PF3+ cadence/tuning/ObjectScript/human testing                             OPEN
         |
         v
 repository generalization / extraction readiness

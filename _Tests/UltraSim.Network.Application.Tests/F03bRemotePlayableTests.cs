@@ -20,7 +20,7 @@ using UltraSim.UI;
 
 internal static class F03bRemotePlayableTests
 {
-    internal const int F03bTestCount = 4;
+    internal const int F03bTestCount = 5;
     internal const int A03TestCount = 7;
     internal const int A04TestCount = 5;
     internal const int A05TestCount = 1;
@@ -41,6 +41,8 @@ internal static class F03bRemotePlayableTests
             RemoteGuestControlsConceptDemoAndAppliesPublicChatAndUi);
         Run("RemotePlayableReconnectRejectsPriorApplicationLineage",
             RemotePlayableReconnectRejectsPriorApplicationLineage);
+        Run("OneShotUiRequestSurvivesClientQueueBackpressure",
+            OneShotUiRequestSurvivesClientQueueBackpressure);
         Run("RequiredContentProtocolIsCanonicalAndBounded",
             RequiredContentProtocolIsCanonicalAndBounded);
         Run("ColdCacheContentProofGatesAdmissionAndMatchesCabinOracle",
@@ -81,6 +83,24 @@ internal static class F03bRemotePlayableTests
             RemoteGuestPublishesColdPresentationMetadataSeparatelyFromMovement);
         Run("PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction",
             PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction);
+    }
+
+    private static void OneShotUiRequestSurvivesClientQueueBackpressure()
+    {
+        var requests = new RemotePlayableOneShotRequests();
+
+        requests.RequestServerMonitor();
+        Equal(RemotePlayableCommandFlags.OpenServerMonitorRequested, requests.Pending);
+        requests.ObserveSubmission(submitted: false);
+        Equal(RemotePlayableCommandFlags.OpenServerMonitorRequested, requests.Pending);
+        requests.ObserveSubmission(submitted: true);
+        Equal(RemotePlayableCommandFlags.None, requests.Pending);
+
+        requests.RequestServerMonitor();
+        requests.RequestInventory();
+        Equal(RemotePlayableCommandFlags.OpenInventoryRequested, requests.Pending);
+        requests.RequestServerMonitor();
+        Equal(RemotePlayableCommandFlags.OpenServerMonitorRequested, requests.Pending);
     }
 
     private static void PreinstalledStandardInventoryConvergesOnRemoteHotOpenAndGameAction()

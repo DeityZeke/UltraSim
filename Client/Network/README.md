@@ -34,6 +34,13 @@ from the Hosted socket boundary; Data/ACK/KeepAlive/retransmission and per-lane/
 comes from the secure peer. Logical application/data-frame bytes are intentionally not presented
 as physical wire bytes. Client.Content HTTP body/cache metrics remain a separate accounting domain.
 
+PF2.5 optionally observes the same client path at `Basic` or `Detailed` level. It separates Hosted
+pump time, protocol stages, receive processing, chunk decode/cache application/proof drain,
+OwnerState receive/apply cadence, and command-submit-to-authoritative-semantic-completion time.
+Completion means a later OwnerState carries the command sequence; a transport ACK is never relabeled
+as Game completion. The stock `Off` path remains timestamp-dormant, and all hot observations use
+fixed bounded storage with cold immutable snapshots.
+
 ## Permanent boundary
 
 ```text

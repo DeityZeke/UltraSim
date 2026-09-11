@@ -48,7 +48,27 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     ulong DuplicatePublicPresentationProofs,
     ulong RejectedPublicPresentationProofs,
     RemoteChunkWorldStateServerSnapshot World,
-    RemoteChatDeliveryServiceSnapshot Chat);
+    RemoteChatDeliveryServiceSnapshot Chat,
+    RemoteGuestApplicationTimingSnapshot Timing);
+
+/// <summary>
+/// Cold, bounded attribution for one remote Game/application lifetime. These
+/// observations never participate in admission, ordering, scheduling, or
+/// protocol truth.
+/// </summary>
+public readonly record struct RemoteGuestApplicationTimingSnapshot(
+    GameTelemetryLevel Level,
+    GameTimingDistribution MessageProcessing,
+    GameTimingDistribution Progress,
+    GameTimingDistribution CommandApply,
+    GameTimingDistribution WorldActionAndPhysics,
+    GameTimingDistribution PrivateUiAndInventory,
+    GameTimingDistribution ChatProcessing,
+    GameTimingDistribution ChatDelivery,
+    GameTimingDistribution ProofProcessing,
+    GameTimingDistribution PublicWorld,
+    GameTimingDistribution OwnerState,
+    RemoteChunkReplicationTimingSnapshot Replication);
 
 /// <summary>
 /// F0.3b external guest/application factory. Each admitted transport owns one authoritative
@@ -245,6 +265,17 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _uiBackpressureRejections;
     private ulong _ownerStatesQueued;
     private readonly GameTickTimingWindow _tickTimings = new();
+    private readonly GameOperationTimingWindow _messageTiming = new();
+    private readonly GameOperationTimingWindow _progressTiming = new();
+    private readonly GameOperationTimingWindow _commandTiming = new();
+    private readonly GameOperationTimingWindow _worldActionTiming = new();
+    private readonly GameOperationTimingWindow _privateSemanticTiming = new();
+    private readonly GameOperationTimingWindow _chatProcessingTiming = new();
+    private readonly GameOperationTimingWindow _chatDeliveryTiming = new();
+    private readonly GameOperationTimingWindow _proofTiming = new();
+    private readonly GameOperationTimingWindow _publicWorldTiming = new();
+    private readonly GameOperationTimingWindow _ownerStateTiming = new();
+    private GameTelemetryLevel _telemetryLevel;
     private long _generationStartedTimestamp;
     private ulong _lastServerMonitorRefreshTick;
     private ulong _serverMonitorRevision;
@@ -315,11 +346,25 @@ public sealed class RemoteGuestPlayableApplication :
                 nameof(standardUiDefinitions));
         _contentApplied = contentAuthorization is null;
         _clientProfileApplied = clientProfile is null;
+        if (sharedAuthority is not null)
+            ConfigureTelemetry(sharedAuthority.TelemetryLevel);
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();
+        long started = _messageTiming.StartDetailed();
+        bool proof = IsApplicationProof(message.MessageId);
+        try { return TryProcessCore(in message, payload); }
+        finally
+        {
+            _messageTiming.RecordDetailed(started);
+            if (proof) _proofTiming.RecordDetailed(started);
+        }
+    }
+
+    private bool TryProcessCore(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
+    {
         if (message.MessageId == RemoteSessionDetachMessageCodec.Descriptor.Id)
         {
             if (RemoteSessionDetachMessageCodec.TryReadExact(
@@ -367,21 +412,38 @@ public sealed class RemoteGuestPlayableApplication :
         }
         if (message.MessageId == RemoteUiActionHeaderCodec.Descriptor.Id)
         {
-            _ = _ui!.TryProcessAction(payload);
+            long uiStarted = _privateSemanticTiming.StartDetailed();
+            try { _ = _ui!.TryProcessAction(payload); }
+            finally { _privateSemanticTiming.RecordDetailed(uiStarted); }
             return true;
         }
         if (message.MessageId == RemoteUiApplyResultMessageCodec.Descriptor.Id)
         {
-            _ = _ui!.TryProcessApplyResult(payload);
+            long uiStarted = _privateSemanticTiming.StartDetailed();
+            try { _ = _ui!.TryProcessApplyResult(payload); }
+            finally { _privateSemanticTiming.RecordDetailed(uiStarted); }
             return true;
         }
-        if (_chatSession!.TryProcess(in message, payload)) return true;
+        if (message.MessageId == RemoteChatSubmitHeaderCodec.Descriptor.Id ||
+            message.MessageId == RemoteChatAppliedMessageCodec.Descriptor.Id)
+        {
+            long chatStarted = _chatProcessingTiming.StartDetailed();
+            try { return _chatSession!.TryProcess(in message, payload); }
+            finally { _chatProcessingTiming.RecordDetailed(chatStarted); }
+        }
         return _worldDelivery!.TryProcess(in message, payload);
     }
 
     public bool TryProgress()
     {
         EnsureOperational();
+        long started = _progressTiming.StartDetailed();
+        try { return TryProgressCore(); }
+        finally { _progressTiming.RecordDetailed(started); }
+    }
+
+    private bool TryProgressCore()
+    {
         if (_retirementRequested) return true;
         bool complete = QueueIdentity();
         if (!_identityQueued) return complete;
@@ -409,7 +471,10 @@ public sealed class RemoteGuestPlayableApplication :
             int steps = 0;
             while (now >= _nextTickTimestamp && steps < 4)
             {
-                long started = Stopwatch.GetTimestamp();
+                long started = _tickTimings.Start();
+                long actual = started == 0 ? now : started;
+                _tickTimings.RecordScheduledStart(
+                    _nextTickTimestamp, actual, _tickInterval, catchUp: steps != 0);
                 _runtime!.Tick();
                 _tickTimings.RecordElapsed(started);
                 _authorityTicks++;
@@ -420,7 +485,10 @@ public sealed class RemoteGuestPlayableApplication :
                 _ = QueueOwnerState();
             }
             if (steps == 4 && now >= _nextTickTimestamp)
+            {
+                _tickTimings.RecordSkippedOpportunity();
                 _nextTickTimestamp = checked(now + _tickInterval);
+            }
         }
         else
         {
@@ -433,9 +501,15 @@ public sealed class RemoteGuestPlayableApplication :
                 _ = QueueOwnerState();
             }
         }
-        _ = _chatDelivery!.TryHandoffPendingOccurrences();
-        RefreshServerMonitorIfDue();
-        complete &= _chatSession!.TryProgress();
+        long chatStarted = _chatDeliveryTiming.StartDetailed();
+        try { _ = _chatDelivery!.TryHandoffPendingOccurrences(); }
+        finally { _chatDeliveryTiming.RecordDetailed(chatStarted); }
+        long privateStarted = _privateSemanticTiming.StartDetailed();
+        try { RefreshServerMonitorIfDue(); }
+        finally { _privateSemanticTiming.RecordDetailed(privateStarted); }
+        chatStarted = _chatDeliveryTiming.StartDetailed();
+        try { complete &= _chatSession!.TryProgress(); }
+        finally { _chatDeliveryTiming.RecordDetailed(chatStarted); }
         complete &= _worldDelivery!.TryProgress();
         return complete;
     }
@@ -458,8 +532,49 @@ public sealed class RemoteGuestPlayableApplication :
             _publicPresentationApplied, _publicPresentationDeliveriesQueued,
             _duplicatePublicPresentationProofs, _rejectedPublicPresentationProofs,
             _worldDelivery?.GetSnapshot() ?? default,
-            _chatDelivery?.GetSnapshot() ?? default);
+            _chatDelivery?.GetSnapshot() ?? default,
+            GetTimingSnapshot());
     }
+
+    /// <summary>Selects bounded diagnostics without changing application semantics.</summary>
+    public void ConfigureTelemetry(GameTelemetryLevel level)
+    {
+        EnsureOwner();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _tickTimings.Configure(level);
+        _messageTiming.Configure(level);
+        _progressTiming.Configure(level);
+        _commandTiming.Configure(level);
+        _worldActionTiming.Configure(level);
+        _privateSemanticTiming.Configure(level);
+        _chatProcessingTiming.Configure(level);
+        _chatDeliveryTiming.Configure(level);
+        _proofTiming.Configure(level);
+        _publicWorldTiming.Configure(level);
+        _ownerStateTiming.Configure(level);
+        _worldDelivery?.ConfigureTelemetry(level);
+    }
+
+    public RemoteGuestApplicationTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOwner();
+        return new RemoteGuestApplicationTimingSnapshot(
+            _telemetryLevel,
+            _messageTiming.Capture(),
+            _progressTiming.Capture(),
+            _commandTiming.Capture(),
+            _worldActionTiming.Capture(),
+            _privateSemanticTiming.Capture(),
+            _chatProcessingTiming.Capture(),
+            _chatDeliveryTiming.Capture(),
+            _proofTiming.Capture(),
+            _publicWorldTiming.Capture(),
+            _ownerStateTiming.Capture(),
+            _worldDelivery?.GetTimingSnapshot() ?? default);
+    }
+
+    internal void ResetTelemetryWindow() => ConfigureTelemetry(_telemetryLevel);
 
     public void Dispose()
     {
@@ -749,7 +864,7 @@ public sealed class RemoteGuestPlayableApplication :
             throw new InvalidOperationException("The remote Concept Demo could not populate.");
         _controlSession = GameControlSessionEpoch.Create();
         BindControl();
-        long started = Stopwatch.GetTimestamp();
+        long started = _tickTimings.Start();
         _runtime.Tick();
         _tickTimings.RecordElapsed(started);
         _authorityTicks++;
@@ -779,6 +894,7 @@ public sealed class RemoteGuestPlayableApplication :
         _worldDelivery = new RemoteChunkWorldStateServer(
             _peer, _recipient, publications, _applicationSessionEpoch,
             new RemoteChunkWorldStateTransportLimits(128, 64));
+        _worldDelivery.ConfigureTelemetry(_telemetryLevel);
         if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPublicEntityId>(
                 (world, _, game) =>
                 {
@@ -854,6 +970,7 @@ public sealed class RemoteGuestPlayableApplication :
         _worldDelivery = new RemoteChunkWorldStateServer(
             _peer, _recipient, publications, _applicationSessionEpoch,
             new RemoteChunkWorldStateTransportLimits(128, 64));
+        _worldDelivery.ConfigureTelemetry(_telemetryLevel);
         _authorityTicks = _runtime.SimulationTick;
         return entered;
     }
@@ -1407,6 +1524,13 @@ public sealed class RemoteGuestPlayableApplication :
 
     private void ProcessPlayerCommand(ReadOnlySpan<byte> payload)
     {
+        long started = _commandTiming.StartDetailed();
+        try { ProcessPlayerCommandCore(payload); }
+        finally { _commandTiming.RecordDetailed(started); }
+    }
+
+    private void ProcessPlayerCommandCore(ReadOnlySpan<byte> payload)
+    {
         if (!RemotePlayableCommandMessageCodec.TryReadExact(
                 payload, out RemotePlayableCommandMessage remote) ||
             remote.ApplicationSessionEpoch != _applicationSessionEpoch ||
@@ -1430,14 +1554,23 @@ public sealed class RemoteGuestPlayableApplication :
             SaturatingIncrement(ref _rejectedCommands);
             return;
         }
-        if (!_runtime!.Game.TryUseActiveGeneration<IGameGenerationStateProvider, CommandOutcome>(
+        long worldActionStarted = _worldActionTiming.StartDetailed();
+        bool applied;
+        CommandOutcome outcome;
+        try
+        {
+            applied = _runtime!.Game.TryUseActiveGeneration<IGameGenerationStateProvider, CommandOutcome>(
                 (world, _, game) => ApplyCommand(world, game, in remote, in command, in target),
-                out CommandOutcome outcome))
+                out outcome);
+        }
+        finally { _worldActionTiming.RecordDetailed(worldActionStarted); }
+        if (!applied)
         {
             SaturatingIncrement(ref _rejectedCommands);
             return;
         }
         _lastProcessedCommand = command.Sequence;
+        long privateStarted = _privateSemanticTiming.StartDetailed();
         try { _lastCommandResult = ApplyPostCommandSemantic(outcome); }
         catch (UiSemanticPublicationException)
         {
@@ -1447,6 +1580,7 @@ public sealed class RemoteGuestPlayableApplication :
                 Interaction = GameWorldActionStatus.InvariantViolation,
             };
         }
+        finally { _privateSemanticTiming.RecordDetailed(privateStarted); }
         if (_sharedAuthority is not null)
         {
             GamePublicActorActionKind presentationAction =
@@ -1697,6 +1831,13 @@ public sealed class RemoteGuestPlayableApplication :
 
     private void DrivePublicWorld()
     {
+        long started = _publicWorldTiming.StartDetailed();
+        try { DrivePublicWorldCore(); }
+        finally { _publicWorldTiming.RecordDetailed(started); }
+    }
+
+    private void DrivePublicWorldCore()
+    {
         if (!_runtime!.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
                 (world, _, game) =>
                 {
@@ -1744,6 +1885,13 @@ public sealed class RemoteGuestPlayableApplication :
     }
 
     private bool QueueOwnerState()
+    {
+        long started = _ownerStateTiming.StartDetailed();
+        try { return QueueOwnerStateCore(); }
+        finally { _ownerStateTiming.RecordDetailed(started); }
+    }
+
+    private bool QueueOwnerStateCore()
     {
         if (!_guestAdmitted || !_admissionResultApplied || _runtime is null ||
             _ownerStateSequence == ulong.MaxValue)
@@ -1805,6 +1953,14 @@ public sealed class RemoteGuestPlayableApplication :
         SaturatingIncrement(ref _ownerStatesQueued);
         return true;
     }
+
+    private static bool IsApplicationProof(NetworkMessageId messageId) =>
+        messageId == RemoteClientProfileAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemoteContentSetAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemoteGuestAdmissionAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemotePublicPresentationAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemoteChunkAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id;
 
     private void BindControl()
     {

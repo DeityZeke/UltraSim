@@ -16,6 +16,7 @@ var tests = new (string Name, Action Body)[]
 {
     ("ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth", ReplicationIdentityIsGameOwnedGenerationalAndFixedWidth),
     ("GameSemanticTraceIsBoundedDeterministicAndAllocationFree", GameSemanticTraceIsBoundedDeterministicAndAllocationFree),
+    ("PF25TimingWindowsAreBoundedAndTelemetryOffIsDormant", TimingWindowsAreBoundedAndTelemetryOffIsDormant),
     ("PublicReplicationProfilesAreExplicitAndMeetSharedSemanticContract", ReplicationProfileConformanceTests.ExplicitProfilesMeetSharedSemanticContract),
     ("P04ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers", ReplicationProfileConformanceTests.ConservativeSelectionKeepsDynamicProfilesSeparateFromStaticLayers),
     ("P01DirtyEntityWorkShapeAndCleanSteadyState", DirtyEntitySpatialFanoutTests.WorkShapeAndCleanSteadyState),
@@ -209,6 +210,47 @@ static void GameSemanticTraceIsBoundedDeterministicAndAllocationFree()
     }
     _ = warm.ComputeDigest();
     Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
+
+static void TimingWindowsAreBoundedAndTelemetryOffIsDormant()
+{
+    var operations = new GameOperationTimingWindow(GameTelemetryLevel.Off);
+    for (int index = 0; index < 32; index++)
+        operations.RecordDetailed(operations.StartDetailed());
+    Check.Equal(default, operations.Capture());
+
+    operations.Configure(GameTelemetryLevel.Detailed);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 1_024; index++)
+        operations.RecordDetailed(operations.StartDetailed());
+    Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+    GameTimingDistribution operationSnapshot = operations.Capture();
+    Check.Equal(1_024UL, operationSnapshot.Count);
+    Check.True(operationSnapshot.P50Microseconds <= operationSnapshot.P95Microseconds);
+    Check.True(operationSnapshot.P95Microseconds <= operationSnapshot.P99Microseconds);
+    Check.True(operationSnapshot.P99Microseconds <= operationSnapshot.MaximumMicroseconds);
+
+    var ticks = new GameTickTimingWindow();
+    ticks.Configure(GameTelemetryLevel.Basic);
+    long interval = Math.Max(1, System.Diagnostics.Stopwatch.Frequency / 60);
+    long scheduled = System.Diagnostics.Stopwatch.GetTimestamp();
+    for (int index = 0; index < 1_024; index++)
+    {
+        long actual = checked(scheduled + (index % 7));
+        ticks.RecordScheduledStart(scheduled, actual, interval, catchUp: index % 97 == 0);
+        ticks.RecordElapsed(ticks.Start());
+        scheduled = checked(scheduled + interval);
+    }
+    GameTickTimingSnapshot tickSnapshot = ticks.Capture();
+    Check.Equal(1_024UL, tickSnapshot.SampleCount);
+    Check.Equal(1_023UL, tickSnapshot.IntervalSampleCount);
+    Check.Equal(1_024UL, tickSnapshot.LatenessSampleCount);
+    Check.True(tickSnapshot.CatchUpTicks > 0);
+
+    ticks.Configure(GameTelemetryLevel.Off);
+    ticks.RecordScheduledStart(scheduled, scheduled, interval, catchUp: false);
+    ticks.RecordElapsed(ticks.Start());
+    Check.Equal(default(GameTickTimingSnapshot), ticks.Capture());
 }
 
 foreach ((string name, Action body) in tests)

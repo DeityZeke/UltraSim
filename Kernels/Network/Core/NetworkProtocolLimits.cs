@@ -285,7 +285,8 @@ internal readonly record struct NetworkUnreliableBatchOpportunity(
 /// Opt-in protocol-stage timing. Values are raw <see cref="System.Diagnostics.Stopwatch"/>
 /// ticks and deliberately remain outside normal snapshot/hot-path accounting.
 /// </summary>
-internal readonly record struct NetworkProtocolStageTiming(
+public readonly record struct NetworkProtocolStageTiming(
+    NetworkTelemetryLevel Level,
     ulong EmitTicks,
     ulong EmitCalls,
     ulong IdleEmitCalls,
@@ -310,7 +311,73 @@ internal readonly record struct NetworkProtocolStageTiming(
     ulong UnreliableSlotProbes,
     ulong ExcludedSelectionProbes,
     ulong EmptySelectionAttempts,
-    ulong ReadySelections);
+    ulong ReadySelections)
+{
+    public static NetworkProtocolStageTiming Delta(
+        in NetworkProtocolStageTiming start,
+        in NetworkProtocolStageTiming end)
+    {
+        if (start.Level != end.Level)
+            throw new ArgumentException("Protocol timing snapshots use different telemetry levels.");
+        return new(end.Level,
+            Difference(start.EmitTicks, end.EmitTicks),
+            Difference(start.EmitCalls, end.EmitCalls),
+            Difference(start.IdleEmitCalls, end.IdleEmitCalls),
+            Difference(start.SelectionTicks, end.SelectionTicks),
+            Difference(start.FrameEncodeTicks, end.FrameEncodeTicks),
+            Difference(start.SecureSendTicks, end.SecureSendTicks),
+            Difference(start.EndpointSendTicks, end.EndpointSendTicks),
+            Difference(start.InboundTicks, end.InboundTicks),
+            Difference(start.InboundCalls, end.InboundCalls),
+            Difference(start.EmptyInboundCalls, end.EmptyInboundCalls),
+            Difference(start.InboundDatagrams, end.InboundDatagrams),
+            Difference(start.EndpointReceiveTicks, end.EndpointReceiveTicks),
+            Difference(start.SecureReceiveTicks, end.SecureReceiveTicks),
+            Difference(start.FrameAdmissionTicks, end.FrameAdmissionTicks),
+            Difference(start.ReliableCompactionTicks, end.ReliableCompactionTicks),
+            Difference(start.ReceivedCompactionTicks, end.ReceivedCompactionTicks),
+            Difference(start.OutboundUnreliableFrames, end.OutboundUnreliableFrames),
+            Difference(start.InboundUnreliableFrames, end.InboundUnreliableFrames),
+            Difference(start.LaneSelectionPasses, end.LaneSelectionPasses),
+            Difference(start.ReliableSlotProbes, end.ReliableSlotProbes),
+            Difference(start.IndependentSlotProbes, end.IndependentSlotProbes),
+            Difference(start.UnreliableSlotProbes, end.UnreliableSlotProbes),
+            Difference(start.ExcludedSelectionProbes, end.ExcludedSelectionProbes),
+            Difference(start.EmptySelectionAttempts, end.EmptySelectionAttempts),
+            Difference(start.ReadySelections, end.ReadySelections));
+    }
+
+    public NetworkProtocolStageTiming Add(in NetworkProtocolStageTiming other)
+    {
+        if (Level != other.Level)
+            throw new ArgumentException("Protocol timing snapshots use different telemetry levels.");
+        return new(Level,
+            Add(EmitTicks, other.EmitTicks), Add(EmitCalls, other.EmitCalls),
+            Add(IdleEmitCalls, other.IdleEmitCalls), Add(SelectionTicks, other.SelectionTicks),
+            Add(FrameEncodeTicks, other.FrameEncodeTicks), Add(SecureSendTicks, other.SecureSendTicks),
+            Add(EndpointSendTicks, other.EndpointSendTicks), Add(InboundTicks, other.InboundTicks),
+            Add(InboundCalls, other.InboundCalls), Add(EmptyInboundCalls, other.EmptyInboundCalls),
+            Add(InboundDatagrams, other.InboundDatagrams), Add(EndpointReceiveTicks, other.EndpointReceiveTicks),
+            Add(SecureReceiveTicks, other.SecureReceiveTicks), Add(FrameAdmissionTicks, other.FrameAdmissionTicks),
+            Add(ReliableCompactionTicks, other.ReliableCompactionTicks),
+            Add(ReceivedCompactionTicks, other.ReceivedCompactionTicks),
+            Add(OutboundUnreliableFrames, other.OutboundUnreliableFrames),
+            Add(InboundUnreliableFrames, other.InboundUnreliableFrames),
+            Add(LaneSelectionPasses, other.LaneSelectionPasses),
+            Add(ReliableSlotProbes, other.ReliableSlotProbes),
+            Add(IndependentSlotProbes, other.IndependentSlotProbes),
+            Add(UnreliableSlotProbes, other.UnreliableSlotProbes),
+            Add(ExcludedSelectionProbes, other.ExcludedSelectionProbes),
+            Add(EmptySelectionAttempts, other.EmptySelectionAttempts),
+            Add(ReadySelections, other.ReadySelections));
+    }
+
+    private static ulong Difference(ulong start, ulong end) => end >= start
+        ? end - start
+        : throw new InvalidOperationException("A cumulative protocol timing counter moved backwards.");
+    private static ulong Add(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
 
 /// <summary>
 /// Cold lifetime counters for the opt-in same-peer unreliable Data aggregate.
@@ -373,10 +440,15 @@ public readonly record struct NetworkProtocolSnapshot(
     ulong ReliableFragmentsSent,
     ulong ReliableRetransmittedWireBytes,
     int ReliableQueued,
+    int ReliableQueuedHighWater,
     int IndependentUnreliableQueued,
+    int IndependentUnreliableQueuedHighWater,
     int ReceivedQueued,
+    int ReceivedQueuedHighWater,
+    bool AcknowledgementPending,
     int CongestionWindowPackets,
     int InFlightPackets,
+    int InFlightPacketsHighWater,
     ulong SmoothedRoundTripSteps,
     ulong RetransmissionTimeoutSteps,
     long ReservedBytes,

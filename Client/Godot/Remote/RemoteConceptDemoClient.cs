@@ -33,7 +33,8 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     GodotContentActorVisualResolverSnapshot ActorResources,
     bool UsedPrimitiveSubstrate,
     bool SmokeComplete,
-    string? Fault);
+    string? Fault,
+    GodotNativeTelemetrySnapshot NativeTelemetry);
 
 public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
     ulong ApplicationSessionEpoch,
@@ -66,6 +67,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private readonly ClientActorPresentationChange[] _actorChanges =
         new ClientActorPresentationChange[128];
     private readonly ClientChatOccurrence[] _chatRows = new ClientChatOccurrence[64];
+    private readonly GodotNativeTelemetry _nativeTelemetry = new();
     private ContentCache? _cache;
     private HttpContentPackageSource? _source;
     private RemotePlayableSession? _session;
@@ -91,13 +93,13 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private ulong _lastOwnerState;
     private ulong _lastPrimaryCommandSequence;
     private ulong _lastChatApplied;
-    private bool _inventoryRequested;
-    private bool _serverMonitorRequested;
+    private RemotePlayableOneShotRequests _oneShotRequests;
     private bool _primaryDown;
     private bool _primaryPressed;
     private bool _primaryReleased;
     private bool _secondaryPressed;
     private bool _pointerPointValid;
+    private int _telemetryProbePhase;
     private ClientControlWorldPoint _pointerPoint;
     private WorldPublicEntityId _pointerTarget;
     private WorldPublicEntityId _selectedTarget;
@@ -113,6 +115,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private bool _configured;
     private bool _disposed;
     private RemoteConceptDemoClientState _state = RemoteConceptDemoClientState.AwaitingContent;
+    private NetworkTelemetryLevel _telemetryLevel;
     private string? _fault;
 
     public void Configure(
@@ -123,7 +126,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         CanvasLayer hudLayer,
         ResolvedClientSettings settings,
         bool allowInsecurePrivateContent,
-        bool smoke)
+        bool smoke,
+        NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off)
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -157,6 +161,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 new GodotUiRenderer(_uiHost),
                 new ClientChatLimits(64, 256, 128),
                 standardUiDefinitionResolver: ClientStandardUiLibrary.Resolve);
+            _session.ConfigureTelemetry(telemetryLevel);
+            _nativeTelemetry.Configure(telemetryLevel);
+            _telemetryLevel = telemetryLevel;
             _networkPeer = peer;
             _settings = settings;
             _smoke = smoke;
@@ -203,6 +210,13 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     public void Pump(bool gameplayInputAllowed)
     {
         EnsureOperational();
+        long frameStarted = _nativeTelemetry.BeginFrame();
+        try { PumpCore(gameplayInputAllowed); }
+        finally { _nativeTelemetry.EndFrame(frameStarted); }
+    }
+
+    private void PumpCore(bool gameplayInputAllowed)
+    {
         _gameplayInputAllowed = gameplayInputAllowed &&
             _state == RemoteConceptDemoClientState.Active;
         if (_state == RemoteConceptDemoClientState.Faulted) return;
@@ -237,6 +251,24 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             }
             if (_state != RemoteConceptDemoClientState.Active) return;
 
+            // The headless exported-product gate has no physical device events while held at
+            // its synchronization barrier. Drive one ordinary bounded movement/stop pair after
+            // a diagnostic reset so the measured window proves the native input-to-semantic-
+            // command and owner-state-completion path. This is acceptance-client behavior only;
+            // it does not manufacture an authoritative result.
+            if (_telemetryProbePhase != 0 && !snapshot.Playable.CommandRetainedLocally)
+            {
+                ClientWorldCommandIntent probe = _telemetryProbePhase == 1
+                    ? new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.CreateDirect(
+                            GamePlayerCommand.MaximumAxisMagnitude, 0),
+                        GamePlayerActions.None, true)
+                    : new ClientWorldCommandIntent(
+                        GameLocomotionUpdate.Stop, GamePlayerActions.None, true);
+                if (TrySubmitObservedCommand(in probe))
+                    _telemetryProbePhase = _telemetryProbePhase == 1 ? 2 : 0;
+            }
+
             if (!gameplayInputAllowed) _actorPresenter?.SetRevealHeld(false);
 
             SynchronizePresentation(snapshot.Playable);
@@ -260,15 +292,26 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         EnsureOperational();
         GodotWorldRendererSnapshot renderer = _renderer?.GetSnapshot() ?? default;
+        GodotActorPresenterSnapshot actors = _actorPresenter?.GetSnapshot() ?? default;
         return new RemoteConceptDemoClientSnapshot(
             _state, _session!.GetSnapshot(), renderer, _player,
             renderer.ActiveRenderChunks, _terrainTriangles,
             _session.UiClient.OpenViewCount,
-            _actorPresenter?.GetSnapshot() ?? default,
+            actors,
             _actorVisuals?.GetSnapshot() ?? default,
             true,
             _smokePhase == 8,
-            _fault);
+            _fault,
+            _nativeTelemetry.Capture(in actors, in renderer));
+    }
+
+    /// <summary>Starts a fresh native/client diagnostic window only.</summary>
+    public void ResetTelemetryWindow()
+    {
+        EnsureOperational();
+        _session!.ConfigureTelemetry(_telemetryLevel);
+        _nativeTelemetry.Configure(_telemetryLevel);
+        _telemetryProbePhase = _telemetryLevel == NetworkTelemetryLevel.Off ? 0 : 1;
     }
 
     /// <summary>
@@ -310,6 +353,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     public override void _Input(InputEvent inputEvent)
     {
+        _nativeTelemetry.RecordInputEvent();
         if (_state != RemoteConceptDemoClientState.Active || _settings is null) return;
         if (TryHandleFocusedChatInput(inputEvent)) return;
         if (!_gameplayInputAllowed) return;
@@ -331,8 +375,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         {
             if (!TryRequestCloseOpenInventory() && _session!.UiClient.OpenViewCount == 0)
             {
-                _inventoryRequested = true;
-                _serverMonitorRequested = false;
+                _oneShotRequests.RequestInventory();
             }
             GetViewport().SetInputAsHandled();
             return;
@@ -342,8 +385,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         {
             if (!TryRequestCloseOpenServerMonitor() && _session!.UiClient.OpenViewCount == 0)
             {
-                _serverMonitorRequested = true;
-                _inventoryRequested = false;
+                _oneShotRequests.RequestServerMonitor();
             }
             GetViewport().SetInputAsHandled();
             return;
@@ -390,6 +432,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         if (_disposed) return;
         _disposed = true;
         _actorPresenter?.Dispose();
+        _nativeTelemetry.Dispose();
         _actorVisuals?.Dispose();
         _systemChatBanner?.Dispose();
         _renderer?.Dispose();
@@ -483,6 +526,13 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private void SynchronizePresentation(in RemotePlayableClientSnapshot playable)
     {
+        long presentationStarted = _nativeTelemetry.BeginPresentation();
+        try { SynchronizePresentationCore(in playable); }
+        finally { _nativeTelemetry.EndPresentation(presentationStarted); }
+    }
+
+    private void SynchronizePresentationCore(in RemotePlayableClientSnapshot playable)
+    {
         _player = playable.Position;
         if (!_window!.TryTrackPlayer(
                 _player, _presentationChanges, out _, out _,
@@ -513,11 +563,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ClientControlProfileDecision decision = EvaluateProfile(in sample, in basis);
         if (decision.SelectionRequested)
             _selectedTarget = _pointerTarget;
-        RemotePlayableCommandFlags flags = _inventoryRequested
-            ? RemotePlayableCommandFlags.OpenInventoryRequested
-            : RemotePlayableCommandFlags.None;
-        if (_serverMonitorRequested)
-            flags |= RemotePlayableCommandFlags.OpenServerMonitorRequested;
+        RemotePlayableCommandFlags flags = _oneShotRequests.Pending;
         long faceX = 0;
         long faceZ = 0;
         if (TryResolveFacing(in decision, out ClientControlWorldPoint facing,
@@ -529,17 +575,29 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             faceX = facing.XMillimeters;
             faceZ = facing.ZMillimeters;
         }
-        if (_session!.Playable.TrySubmitCommand(
-                decision.Command,
-                target: _selectedTarget,
-                flags: flags,
-                faceXMillimeters: faceX,
-                faceZMillimeters: faceZ))
-            _inventoryRequested = false;
-            _serverMonitorRequested = false;
+        bool submitted = TrySubmitObservedCommand(
+            decision.Command, _selectedTarget, flags, faceX, faceZ);
+        _oneShotRequests.ObserveSubmission(submitted);
         _primaryPressed = false;
         _primaryReleased = false;
         _secondaryPressed = false;
+    }
+
+    private bool TrySubmitObservedCommand(
+        in ClientWorldCommandIntent command,
+        WorldPublicEntityId target = default,
+        RemotePlayableCommandFlags flags = RemotePlayableCommandFlags.None,
+        long faceXMillimeters = 0,
+        long faceZMillimeters = 0)
+    {
+        bool submitted = _session!.Playable.TrySubmitCommand(
+            command, target, flags, faceXMillimeters, faceZMillimeters);
+        _nativeTelemetry.RecordCommandSample(
+            command.Locomotion.Kind != GameLocomotionUpdateKind.Unchanged,
+            command.HeldActions != GamePlayerActions.None ||
+                flags != RemotePlayableCommandFlags.None,
+            submitted);
+        return submitted;
     }
 
     private ClientControlProfileDecision EvaluateProfile(
@@ -616,7 +674,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 snapshot.PublicPresentation.Metadata.CurrentRecords != 0:
                 _actorPresenter.SetRevealHeld(true);
                 _smokeStart = snapshot.Playable.Position;
-                if (!_session!.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                if (!TrySubmitObservedCommand(new ClientWorldCommandIntent(
                         GameLocomotionUpdate.CreateDirect(0, -GamePlayerCommand.MaximumAxisMagnitude),
                         GamePlayerActions.None, true)))
                     return;
@@ -624,13 +682,13 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 break;
             case 1 when snapshot.Playable.Position != _smokeStart &&
                 snapshot.Playable.LastProcessedCommandSequence != 0:
-                if (!_session!.Playable.TrySubmitCommand(new ClientWorldCommandIntent(
+                if (!TrySubmitObservedCommand(new ClientWorldCommandIntent(
                         GameLocomotionUpdate.Stop, GamePlayerActions.None, true)))
                     return;
                 _smokePhase = 2;
                 break;
             case 2 when !snapshot.Playable.CommandRetainedLocally:
-                if (!_session!.Playable.TrySubmitCommand(
+                if (!TrySubmitObservedCommand(
                         new ClientWorldCommandIntent(
                             GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true),
                         flags: RemotePlayableCommandFlags.OpenInventoryRequested))
@@ -643,7 +701,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 break;
             case 4 when _session!.UiClient.OpenViewCount == 0 &&
                 !snapshot.Playable.CommandRetainedLocally:
-                if (!_session.Playable.TrySubmitCommand(
+                if (!TrySubmitObservedCommand(
                         new ClientWorldCommandIntent(
                             GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true),
                         flags: RemotePlayableCommandFlags.OpenServerMonitorRequested))

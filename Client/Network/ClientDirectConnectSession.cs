@@ -100,6 +100,8 @@ public sealed class ClientDirectConnectSession : IDisposable
     private HostedUdpDeploymentDiscoveryClient? _discovery;
     private HostedUdpProtocolClient? _transport;
     private HostedUdpConnectionTrafficSnapshot? _finalTraffic;
+    private NetworkServiceTimingSnapshot? _finalTelemetry;
+    private NetworkTelemetryLevel _telemetryLevel;
     private ClientDirectConnectEndpoint _endpoint;
     private ClientTrustedDeployment? _priorTrust;
     private ClientDeploymentKeyFingerprint _candidateFingerprint;
@@ -152,6 +154,34 @@ public sealed class ClientDirectConnectSession : IDisposable
         }
         snapshot = _transport.GetTrafficSnapshot();
         return true;
+    }
+
+    /// <summary>Configures bounded diagnostics for the current and future transport lifetime.</summary>
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _finalTelemetry = null;
+        _transport?.ConfigureTelemetry(level);
+    }
+
+    public bool TryGetTelemetrySnapshot(out NetworkServiceTimingSnapshot snapshot)
+    {
+        EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_transport is not null)
+        {
+            snapshot = _transport.GetTelemetrySnapshot();
+            return true;
+        }
+        if (_finalTelemetry is NetworkServiceTimingSnapshot finalized)
+        {
+            snapshot = finalized;
+            return true;
+        }
+        snapshot = default;
+        return false;
     }
 
     public NetworkProtocolPeer? Peer
@@ -314,6 +344,25 @@ public sealed class ClientDirectConnectSession : IDisposable
             _settingsScope, _detail);
     }
 
+    /// <summary>Copies cold bounded queue/debt diagnostics for the active secure peer.</summary>
+    public bool TryGetProtocolSnapshot(out NetworkProtocolSnapshot snapshot)
+    {
+        EnsureOperational();
+        if (_transport is null || _transport.State != HostedUdpClientState.Established)
+        {
+            snapshot = default;
+            return false;
+        }
+        NetworkProtocolPeer? peer = _transport.Peer;
+        if (peer is null)
+        {
+            snapshot = default;
+            return false;
+        }
+        snapshot = peer.GetSnapshot();
+        return true;
+    }
+
     public void Dispose()
     {
         EnsureOwnerThread();
@@ -376,6 +425,7 @@ public sealed class ClientDirectConnectSession : IDisposable
                 "The pinned Hosted transport could not be created.");
             return false;
         }
+        _transport!.ConfigureTelemetry(_telemetryLevel);
         _state = ClientDirectConnectState.Connecting;
         return true;
     }
@@ -483,6 +533,7 @@ public sealed class ClientDirectConnectSession : IDisposable
         DisposeTransport();
         _discovery = null;
         _finalTraffic = null;
+        _finalTelemetry = null;
         CryptographicOperations.ZeroMemory(_candidateKey);
         _candidateKeyLength = 0;
         _endpoint = default;
@@ -501,6 +552,7 @@ public sealed class ClientDirectConnectSession : IDisposable
     {
         if (_transport is null) return;
         _finalTraffic = _transport.GetTrafficSnapshot();
+        _finalTelemetry = _transport.GetTelemetrySnapshot();
         _transport.Dispose();
         _transport = null;
     }

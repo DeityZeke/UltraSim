@@ -4,6 +4,7 @@ using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Network;
+using System.Diagnostics;
 
 namespace UltraSim.Client.Network;
 
@@ -49,6 +50,7 @@ public readonly record struct RemotePlayableClientSnapshot(
 /// </summary>
 public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor
 {
+    private const int MaximumCommandTimingEntries = 256;
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumGuestAdmissionMessageBytes];
@@ -82,6 +84,20 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
     private ulong _duplicateOwnerStates;
     private ulong _rejectedMessages;
     private string? _detail;
+    private readonly CommandTimingEntry[] _commandTimings = new CommandTimingEntry[MaximumCommandTimingEntries];
+    private readonly ClientTimingWindow _commandLatency = new();
+    private readonly ClientTimingWindow _ownerStateIntervals = new();
+    private readonly ClientTimingWindow _ownerStateApply = new();
+    private NetworkTelemetryLevel _telemetryLevel;
+    private int _commandTimingHead;
+    private int _commandTimingCount;
+    private long _lastOwnerStateTimestamp;
+    private ulong _timedCommandsSubmitted;
+    private ulong _timedCommandsCompleted;
+    private ulong _commandTimingCapacityDrops;
+    private ulong _ownerStatesReceived;
+    private ulong _ownerStatesApplied;
+    private ulong _ownerStateTickGaps;
 
     public RemotePlayableClient(NetworkProtocolPeer peer, ulong applicationSessionEpoch)
     {
@@ -92,6 +108,31 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
 
     public ClientWorldInputSequencer Input => _sequencer ??
         throw new InvalidOperationException("Remote guest admission has not established control.");
+
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOwner();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _commandTimings.AsSpan().Clear();
+        _commandTimingHead = _commandTimingCount = 0;
+        _lastOwnerStateTimestamp = 0;
+        _timedCommandsSubmitted = _timedCommandsCompleted = 0;
+        _commandTimingCapacityDrops = _ownerStatesReceived = _ownerStatesApplied = 0;
+        _ownerStateTickGaps = 0;
+        _commandLatency.Clear();
+        _ownerStateIntervals.Clear();
+        _ownerStateApply.Clear();
+    }
+
+    public RemotePlayableClientTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOwner();
+        return new(_telemetryLevel, _timedCommandsSubmitted, _timedCommandsCompleted,
+            _commandTimingCapacityDrops, _ownerStatesReceived, _ownerStatesApplied,
+            _ownerStateTickGaps, _commandLatency.Capture(), _ownerStateIntervals.Capture(),
+            _ownerStateApply.Capture());
+    }
 
     public bool TrySubmitGuest(in GameGuestAdmissionRequest request)
     {
@@ -245,6 +286,12 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
 
     private void ProcessOwnerState(ReadOnlySpan<byte> payload)
     {
+        if (_telemetryLevel != NetworkTelemetryLevel.Off)
+            SaturatingIncrement(ref _ownerStatesReceived);
+        long applyStarted = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? Stopwatch.GetTimestamp()
+            : 0;
+        ulong previousTick = _simulationTick;
         if (_state != RemotePlayableClientState.Active ||
             !RemotePlayableOwnerStateMessageCodec.TryReadExact(
                 payload, out RemotePlayableOwnerStateMessage state) ||
@@ -282,6 +329,20 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
         _jump = state.Jump;
         _primary = state.Primary;
         _interaction = state.Interaction;
+        if (_telemetryLevel != NetworkTelemetryLevel.Off)
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (_lastOwnerStateTimestamp != 0)
+                _ownerStateIntervals.RecordElapsedAt(_lastOwnerStateTimestamp, now);
+            _lastOwnerStateTimestamp = now;
+            SaturatingIncrement(ref _ownerStatesApplied);
+            if (previousTick != 0 && state.SimulationTick > previousTick + 1)
+                _ownerStateTickGaps = SaturatingAdd(
+                    _ownerStateTickGaps, state.SimulationTick - previousTick - 1);
+            CompleteCommandTimings(state.LastProcessedCommandSequence, now);
+        }
+        if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+            _ownerStateApply.RecordElapsed(applyStarted);
     }
 
     private void RejectAdmissionApplication(ulong attempt, string detail)
@@ -341,6 +402,8 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
         _pendingCommand = default;
         _hasPendingCommand = false;
         SaturatingIncrement(ref _commandsQueued);
+        if (_telemetryLevel != NetworkTelemetryLevel.Off)
+            RetainCommandTiming(_lastSubmittedCommand, Stopwatch.GetTimestamp());
         return true;
     }
 
@@ -351,6 +414,40 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
     {
         if (value != ulong.MaxValue) value++;
     }
+
+    private void RetainCommandTiming(ulong sequence, long submitted)
+    {
+        SaturatingIncrement(ref _timedCommandsSubmitted);
+        if (_commandTimingCount == _commandTimings.Length)
+        {
+            _commandTimings[_commandTimingHead] = default;
+            _commandTimingHead = (_commandTimingHead + 1) % _commandTimings.Length;
+            _commandTimingCount--;
+            SaturatingIncrement(ref _commandTimingCapacityDrops);
+        }
+        int tail = (_commandTimingHead + _commandTimingCount) % _commandTimings.Length;
+        _commandTimings[tail] = new CommandTimingEntry(sequence, submitted);
+        _commandTimingCount++;
+    }
+
+    private void CompleteCommandTimings(ulong processed, long now)
+    {
+        while (_commandTimingCount != 0)
+        {
+            CommandTimingEntry entry = _commandTimings[_commandTimingHead];
+            if (entry.Sequence > processed) break;
+            _commandLatency.RecordElapsedAt(entry.SubmittedTimestamp, now);
+            SaturatingIncrement(ref _timedCommandsCompleted);
+            _commandTimings[_commandTimingHead] = default;
+            _commandTimingHead = (_commandTimingHead + 1) % _commandTimings.Length;
+            _commandTimingCount--;
+        }
+    }
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+
+    private readonly record struct CommandTimingEntry(ulong Sequence, long SubmittedTimestamp);
 
     private void EnsureOwner()
     {

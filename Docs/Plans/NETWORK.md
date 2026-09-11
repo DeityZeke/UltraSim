@@ -1,7 +1,7 @@
 # Network V3: current architecture and accepted replication policy
 
-Status: **accepted / consumption-ready**, including physical Network capability
-packaging, as of 2026-09-08.
+Status: **accepted / consumption-ready**, including physical Network capability packaging and the
+PF2.5 replication-ownership/observability reconciliation, as of 2026-09-11.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -10,6 +10,13 @@ public** replication profile. `MaintainedEntityRelation` and
 `DirtyEntitySpatialFanout` are retained alternatives;
 `DirtyEntityChunkBatchFanout` and `DirtyChunkSpatialFanout` are retained
 experimental/reference controls.
+
+PF2.5 independently reconciles the historical benchmark conclusions with the real post-P0.4
+product graph and retains **Option A** through Concept Demo freeze: all current mutable public state
+continues through the one composed `ChunkPublication` owner. This is not a claim that it is the
+fastest mechanism for every future semantic class. The exact routing, identities, alternative
+readiness, and future fixed-owner/transfer requirements are recorded in
+[PF2.5 replication reconciliation](PF2_5_REPLICATION_RECONCILIATION.md).
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.
@@ -388,6 +395,14 @@ ownership should switch at runtime.
 `ChunkPublication` remains selected for the current game's dynamic-public architecture
 because that is the accepted concrete composition. This is not a claim that it is the
 best representation for every future dynamic semantic class.
+
+PF2.5 confirms why that decision remains correct after the real actor, item, interaction, metadata,
+content, multiplayer, exported-client, and bot consumers landed. The two entity profiles still use
+their own `ReplicationEntityId` lineage and old entity-state client, while the product uses
+`WorldPublicEntityId`, chunk proof/order, and `ClientWorldSemanticCache`. A fixed per-class split is
+not logically forbidden by `RuntimeOwnershipTransitionsSupported == false`, but it is not ready
+until a shared public identity, explicit one-owner table, merged client lifetime/order, proof, and
+local-parity seam exist. Runtime transfer additionally requires a transactional ownership epoch.
 
 ### Runtime cross-profile transfer is unsupported
 

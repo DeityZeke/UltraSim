@@ -73,6 +73,13 @@ and process CPU/RSS context. It reports HTTP response body bytes separately and 
 IP/UDP/link or complete HTTP/TCP wire cost. These file barriers are verifier/baseline coordination,
 not a mutable player diagnostic or administrative protocol.
 
+PF2.5 accepts `--telemetry=Off|Basic|Detailed`. Detailed accounting snapshots add bounded Network
+service/protocol histograms, authority tick interval/duration/lateness and catch-up state,
+per-application Game/replication stage timings, queue high-waters, exact manifest-indexed message
+counters, and process CPU/RSS/heap/GC/thread context. These are owner-local observations aggregated
+only at the cold report boundary. They do not change cadence, public-state ownership, AOI,
+packetization, protocol bytes, or authority policy.
+
 F0.3c publishes one finite stock client profile after authenticated realm identity and gates
 content/admission on its exact application-session proof. Select the development profile with
 `--client-profile=orbit`, `--client-profile=third-person` (the default), or

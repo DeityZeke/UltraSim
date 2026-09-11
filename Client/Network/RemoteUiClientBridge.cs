@@ -59,6 +59,8 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private ulong _rejectedOperations;
     private ulong _standardDefinitionsResolved;
     private ulong _contentDefinitionsResolved;
+    private readonly ClientTimingWindow _applyTiming = new();
+    private NetworkTelemetryLevel _telemetryLevel;
     private IRemoteGameProtocolHandler? _additionalHandler;
     private bool _disposed;
 
@@ -190,6 +192,20 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
             _standardDefinitionsResolved, _contentDefinitionsResolved);
     }
 
+    public void ConfigureTelemetry(NetworkTelemetryLevel level)
+    {
+        EnsureOperational();
+        if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
+        _telemetryLevel = level;
+        _applyTiming.Clear();
+    }
+
+    public RemoteUiClientTimingSnapshot GetTimingSnapshot()
+    {
+        EnsureOperational();
+        return new(_telemetryLevel, _applyTiming.Capture());
+    }
+
     public void Dispose()
     {
         EnsureOwnerThread();
@@ -252,6 +268,19 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     }
 
     private void ProcessUiOperation(ReadOnlySpan<byte> payload)
+    {
+        long timing = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        try { ProcessUiOperationCore(payload); }
+        finally
+        {
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                _applyTiming.RecordElapsed(timing);
+        }
+    }
+
+    private void ProcessUiOperationCore(ReadOnlySpan<byte> payload)
     {
         if (!UltraSimGameProtocol.TryReadUiOperation(
                 payload, out RemoteUiOperationHeader header, out ReadOnlySpan<byte> semantic) ||

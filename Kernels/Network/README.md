@@ -72,6 +72,14 @@ only fixed owner-local primitive storage: there is no global packet lock, per-pa
 reflection, string formatting, or process-wide atomic counter. Cold diagnostic snapshots copy the
 finite lane and manifest-message catalogs and may be aggregated outside the hot path.
 
+PF2.5 adds explicit `Off`, `Basic`, and `Detailed` timing levels without changing traffic semantics.
+The peer and Hosted pumps record into fixed owner-local logarithmic histograms; queue/debt current
+and high-water values are primitive connection state. `Off` performs no timestamp capture,
+`Basic` observes service interval/duration, and `Detailed` also observes named protocol stages.
+The observation count/total/max cover the complete configured measurement window; percentiles are
+bounded rolling estimates where the owning subsystem uses a fixed recent-sample window. Diagnostic
+snapshots are read-only and do not reset connection counters or create a protocol timestamp.
+
 The physical metric is deliberately named **UDP payload bytes**. It is the exact datagram payload
 length successfully handed to, or received from, the UDP socket boundary. It excludes IP, UDP, and
 link-layer headers, and it never includes HTTP content acquisition or CAS/disk traffic. An optional

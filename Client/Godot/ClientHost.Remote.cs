@@ -32,6 +32,7 @@ public partial class ClientHost
     private bool _remoteSmokeBarrierReadyPublished;
     private bool _remoteSmokeCompletionReadyPublished;
     private bool _remoteProcessObserved;
+    private bool _remoteTelemetryWindowStarted;
     private string _remoteGuestName = string.Empty;
     private GameGuestBody _remoteGuestBody = GameGuestBody.HumanFemale;
     private string? _remoteGuestError;
@@ -82,6 +83,7 @@ public partial class ClientHost
             if (_remotePlayable is not null)
             {
                 RemoteConceptDemoClientSnapshot playable = _remotePlayable.GetSnapshot();
+                TryStartRemoteTelemetryWindow();
                 if (playable.State == RemoteConceptDemoClientState.Faulted)
                 {
                     string fault = playable.Fault ?? "Remote playable session failed.";
@@ -133,6 +135,7 @@ public partial class ClientHost
                         return;
                     if (!SharedRemoteSmokeCompletionBarrierReleased()) return;
                     _remoteSmokeDisconnectStarted = true;
+                    WriteRemoteTelemetrySummary(playable);
                     GD.Print(
                         $"A0.8 CONTENTLESS ONLINE PASS mode={ReadArgument("--a0-8-expect=") ?? "unspecified"} " +
                         $"catalog={playable.Session.Content.ResolvedCatalogFingerprint} " +
@@ -152,7 +155,9 @@ public partial class ClientHost
                         $"{playable.ActorResources.RetainedArtifactBytes} nameplates=" +
                         $"{playable.Actors.VisibleNameplates} overhead=" +
                         $"{playable.Actors.VisibleOverheadLabels} publicMetadataProofs=" +
-                        $"{playable.Session.PublicPresentation.ProofsQueued}");
+                        $"{playable.Session.PublicPresentation.ProofsQueued} telemetry=" +
+                        $"{playable.NativeTelemetry.Level} frames={playable.NativeTelemetry.RenderFrames} " +
+                        $"frameP95us={playable.NativeTelemetry.FrameDurations.P95Microseconds}");
                     RetireCurrentSession();
                     return;
                 }
@@ -607,8 +612,10 @@ public partial class ClientHost
     {
         _directEndpoint = endpoint.Trim();
         _directFingerprint = fingerprint.Trim();
+        _remoteTelemetryWindowStarted = false;
         _remoteSession?.Dispose();
         _remoteSession = new ClientDirectConnectSession(_serverTrust!, _serverTrustStore!);
+        _remoteSession.ConfigureTelemetry(RemoteTelemetryLevel());
         if (!_remoteSession.TryStart(_directEndpoint, _directFingerprint))
         {
             ClientDirectConnectSnapshot failed = _remoteSession.GetSnapshot();
@@ -635,7 +642,8 @@ public partial class ClientHost
             HudLayer,
             EffectiveSettings,
             _allowInsecurePrivateContent,
-            IsAutomatedRemoteSmoke());
+            IsAutomatedRemoteSmoke(),
+            RemoteTelemetryLevel());
         WorldRoot.AddChild(playable);
         _remotePlayable = playable;
     }
@@ -782,6 +790,80 @@ public partial class ClientHost
 
     private static bool IsAutomatedRemoteSmoke() =>
         IsRemoteSmoke() || IsF07LifecycleSmoke();
+
+    private static NetworkTelemetryLevel RemoteTelemetryLevel()
+    {
+        string? value = ReadArgument("--telemetry=");
+        return value is null
+            ? NetworkTelemetryLevel.Off
+            : Enum.TryParse(value, ignoreCase: true, out NetworkTelemetryLevel level)
+                ? level
+                : throw new InvalidOperationException(
+                    "--telemetry must be Off, Basic, or Detailed.");
+    }
+
+    private void TryStartRemoteTelemetryWindow()
+    {
+        if (_remoteTelemetryWindowStarted || _remotePlayable is null || _remoteSession is null)
+            return;
+        string? start = ReadArgument("--telemetry-start-file=");
+        if (start is null || !File.Exists(start)) return;
+        _remoteSession.ConfigureTelemetry(RemoteTelemetryLevel());
+        _remotePlayable.ResetTelemetryWindow();
+        _remoteTelemetryWindowStarted = true;
+        string? ready = ReadArgument("--telemetry-ready-file=");
+        if (ready is not null) WriteMarker(ready, "ready");
+    }
+
+    private void WriteRemoteTelemetrySummary(in RemoteConceptDemoClientSnapshot playable)
+    {
+        string? path = ReadArgument("--telemetry-summary=");
+        if (path is null) return;
+        _remoteSession!.TryGetTelemetrySnapshot(out NetworkServiceTimingSnapshot network);
+        var summary = new
+        {
+            SchemaVersion = 1,
+            Checkpoint = "PF2.5",
+            Product = CompiledEdition,
+            Guest = playable.Session.Playable.GuestIdentity.DisplayName,
+            ApplicationSessionEpoch = playable.Session.Playable.ApplicationSessionEpoch,
+            ServerGeneration = playable.Session.Playable.ServerGenerationId,
+            Network = network,
+            Client = playable.Session.Timing,
+            Native = playable.NativeTelemetry,
+            Healthy = playable.State == RemoteConceptDemoClientState.Active &&
+                playable.Session.SemanticConsumersActive && playable.RenderedChunks != 0 &&
+                playable.Actors.ActiveActors >= 2,
+        };
+        string full = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(full);
+        if (string.IsNullOrEmpty(directory))
+            throw new InvalidOperationException("The native telemetry summary has no parent directory.");
+        Directory.CreateDirectory(directory);
+        string temporary = full + $".{System.Environment.ProcessId}.tmp";
+        try
+        {
+            File.WriteAllText(temporary,
+                System.Text.Json.JsonSerializer.Serialize(summary,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) +
+                global::System.Environment.NewLine);
+            File.Move(temporary, full, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    private static void WriteMarker(string path, string value)
+    {
+        string full = Path.GetFullPath(path);
+        string? directory = Path.GetDirectoryName(full);
+        if (string.IsNullOrEmpty(directory))
+            throw new InvalidOperationException("The telemetry marker has no parent directory.");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(full, value + global::System.Environment.NewLine);
+    }
 
     private static int RemoteSmokeExpectedActors()
     {
