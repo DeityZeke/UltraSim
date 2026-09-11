@@ -248,6 +248,8 @@ internal sealed class BotHarness : IDisposable
         _processMetrics.EndWindow(_scenarioCompleted);
         _wireSummary = _wireMeasurement.Complete(
             _bots, _source, _cache, _scenarioCompleted);
+        if (_options.MeasurementCompleteFile is not null)
+            BotFiles.WriteAtomic(_options.MeasurementCompleteFile, "complete");
         _quiescenceStarted = _scenarioCompleted;
         long quiescenceDeadline = BotMonotonicClock.AddMilliseconds(
             _quiescenceStarted, 10_000);
@@ -2089,6 +2091,7 @@ internal readonly record struct BotOptions(
     string? SummaryFile,
     string? MeasurementReadyFile,
     string? MeasurementReleaseFile,
+    string? MeasurementCompleteFile,
     int AdmissionStaggerMilliseconds,
     bool Verbose,
     int WarmupMilliseconds)
@@ -2108,6 +2111,7 @@ internal readonly record struct BotOptions(
         string? summary = null;
         string? measurementReady = null;
         string? measurementRelease = null;
+        string? measurementComplete = null;
         int bots = 0;
         ulong seed = 0;
         int duration = 0;
@@ -2133,6 +2137,7 @@ internal readonly record struct BotOptions(
             else if (TryValue(argument, "--summary-file=", out value)) summary = Path.GetFullPath(value!);
             else if (TryValue(argument, "--measurement-ready-file=", out value)) measurementReady = Path.GetFullPath(value!);
             else if (TryValue(argument, "--measurement-release-file=", out value)) measurementRelease = Path.GetFullPath(value!);
+            else if (TryValue(argument, "--measurement-complete-file=", out value)) measurementComplete = Path.GetFullPath(value!);
             else if (TryValue(argument, "--admission-stagger-ms=", out value) && int.TryParse(value, out int parsedStagger)) stagger = parsedStagger;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
@@ -2156,6 +2161,9 @@ internal readonly record struct BotOptions(
         if ((measurementReady is null) != (measurementRelease is null))
             throw new ArgumentException(
                 "--measurement-ready-file and --measurement-release-file must be supplied together.");
+        if (measurementComplete is not null && measurementReady is null)
+            throw new ArgumentException(
+                "--measurement-complete-file requires the measurement ready/release pair.");
         if (stagger is < 0 or > 5_000)
             throw new ArgumentException("--admission-stagger-ms must be between 0 and 5000.");
         warmup = warmup < 0 ? (scenario == "mixed-chaos" ? 0 : 60_000) : warmup;
@@ -2164,7 +2172,8 @@ internal readonly record struct BotOptions(
         if (scenario == "mixed-chaos") BotScenarioContract.ValidateMixedChaos(bots, duration);
         return new BotOptions(endpoint!, fingerprint!, bots, seed, duration, scenario,
             cache, startReady, startRelease, ready, release, summary,
-            measurementReady, measurementRelease, stagger, verbose, warmup);
+            measurementReady, measurementRelease, measurementComplete,
+            stagger, verbose, warmup);
     }
 
     private static bool TryValue(string argument, string prefix, out string? value)

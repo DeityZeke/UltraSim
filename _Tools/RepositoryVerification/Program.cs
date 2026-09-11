@@ -1286,6 +1286,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     string botStartRelease = Path.Combine(scope, "bots-start-release");
     string measurementReady = Path.Combine(scope, "measurement-ready");
     string measurementRelease = Path.Combine(scope, "measurement-release");
+    string measurementComplete = Path.Combine(scope, "measurement-complete");
     string botReady = Path.Combine(scope, "bots-ready");
     string botRelease = Path.Combine(scope, "bots-release");
     string botSummary = Path.Combine(scope, "bots-summary.json");
@@ -1328,6 +1329,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"--start-release-file={botStartRelease}",
             $"--measurement-ready-file={measurementReady}",
             $"--measurement-release-file={measurementRelease}",
+            $"--measurement-complete-file={measurementComplete}",
             $"--ready-file={botReady}", $"--release-file={botRelease}",
             $"--summary-file={botSummary}", "--admission-stagger-ms=100",
         ], 300_000));
@@ -1354,7 +1356,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             [botsTask, aliceTask, bobTask], "PF2 server accounting to start");
         File.WriteAllText(measurementRelease, "measure\n");
 
-        WaitForPf1Files([botReady], 60_000, server,
+        WaitForPf1Files([measurementComplete], 60_000, server,
             [botsTask, aliceTask, bobTask], "PF2 measured window to complete");
         if (aliceTask.IsCompleted || bobTask.IsCompleted)
             throw new InvalidOperationException(
@@ -1362,6 +1364,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         File.WriteAllText(accountingStop, "stop\n");
         WaitForPf1Files([accountingSummary], 10_000, server,
             [botsTask, aliceTask, bobTask], "PF2 server accounting to finalize");
+        WaitForPf1Files([botReady], 30_000, server,
+            [botsTask, aliceTask, bobTask], "PF2 accepted work to quiesce");
 
         File.WriteAllText(nativeRelease, "release\n");
         WaitForPf1Files([aliceComplete, bobComplete], 30_000, server,

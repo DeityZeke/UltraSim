@@ -18,6 +18,7 @@ var tests = new (string Name, Action Body)[]
     ("ChatObserverUsesOneBoundedSequenceCursor", ChatObserverUsesOneBoundedSequenceCursor),
     ("ChunkCoverageDistinguishesCrossingsFromDistinctChunks", ChunkCoverageDistinguishesCrossingsFromDistinctChunks),
     ("ReconnectObserverRejectsEqualCountGhostIdentity", ReconnectObserverRejectsEqualCountGhostIdentity),
+    ("MeasurementCompleteBarrierRequiresSynchronizedWindow", MeasurementCompleteBarrierRequiresSynchronizedWindow),
 };
 
 foreach ((string name, Action body) in tests)
@@ -60,6 +61,30 @@ static void UnexpectedTransportAndUiLossFailActiveLifetime()
     };
     True(BotLifecyclePolicy.IsApplicationUnhealthy(BotLifetimeState.Active, in fullyDetached));
     False(BotLifecyclePolicy.IsApplicationUnhealthy(BotLifetimeState.Content, in fullyDetached));
+}
+
+static void MeasurementCompleteBarrierRequiresSynchronizedWindow()
+{
+    string[] common =
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=1",
+        "--seed=1",
+        "--duration=2s",
+        "--scenario=quiet",
+        "--cache=/tmp/ultrasim-bot-measurement-barrier",
+    ];
+    Throws<ArgumentException>(() => BotOptions.Parse(
+        [.. common, "--measurement-complete-file=/tmp/complete"]));
+    BotOptions accepted = BotOptions.Parse(
+    [
+        .. common,
+        "--measurement-ready-file=/tmp/ready",
+        "--measurement-release-file=/tmp/release",
+        "--measurement-complete-file=/tmp/complete",
+    ]);
+    Equal(Path.GetFullPath("/tmp/complete"), accepted.MeasurementCompleteFile);
 }
 
 static void FinalRetirementCoversEveryLifecycleState()
@@ -110,7 +135,7 @@ static void JoiningBotRetiresWithoutLateAdmission()
                        10_000,
                        "mixed-chaos",
                        scope,
-                       null, null, null, null, null, null, null,
+                       null, null, null, null, null, null, null, null,
                        0,
                        false,
                        0),

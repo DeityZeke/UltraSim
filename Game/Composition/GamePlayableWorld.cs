@@ -739,10 +739,10 @@ public sealed class GameWorldActions
             current, nextX, checked((int)targetY), nextZ, s_actorBody);
         SimpleAirborneMotionResult physical = _physics.ResolveAirborneMotion(
             request, dynamicBounds, complete);
-        // A captured takeoff trajectory may point beyond the prepared structural boundary while
-        // gravity remains valid at the actor's current X/Z. Preserve the vertical component just
-        // as wall contact does. Otherwise an outside horizontal probe can hold the position fixed
-        // while gravity accumulates indefinitely and eventually overflows its fixed-point state.
+        // A captured takeoff trajectory may hit a structural edge or leave prepared structure
+        // horizontally while gravity remains valid at the actor's current X/Z. Preserve that
+        // independently valid vertical component. Otherwise an early combined-motion rejection
+        // can hold position fixed while gravity accumulates indefinitely.
         if (!physical.WasResolved &&
             (physical.Status is SimpleAirborneMotionStatus.OutsidePreparedWorld or
                 SimpleAirborneMotionStatus.Blocked) &&

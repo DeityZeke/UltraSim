@@ -44,6 +44,11 @@ to 60 seconds for PF2 scenarios. `--verbose` prints the bounded diagnostic conte
 File barriers and JSON summary options are acceptance-coordination surfaces used by the repository
 verifier, not gameplay shortcuts.
 
+For synchronized external/server captures, `--measurement-complete-file` is published immediately
+after the bot process takes its ending cumulative snapshots and before accepted work is quiesced.
+It requires the measurement ready/release pair. This is the server/accounting stop boundary;
+`--ready-file` remains the later correctness/quiescence boundary.
+
 PF2 adds three deterministic explanatory scenarios:
 
 - `quiet` sends no intentional gameplay commands after ordinary admission and exposes the inherent
