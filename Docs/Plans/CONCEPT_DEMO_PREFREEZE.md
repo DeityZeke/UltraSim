@@ -215,6 +215,16 @@ state for every bot, advanced by one bounded central pump. The verified 13-assem
 ClientOnly Network and physically excludes Godot, Client.Local, authoritative Game/server projects,
 Network.Testing, and direct ECS access.
 
+**PF1 adversarial hardening:** the maintained harness now faults unexpected transport or admitted
+application/UI loss at every pump and completion boundary, retires every joining/active/draining
+state without late admission, keeps command outcomes fenced to their originating application epoch,
+uses bounded Chat/chunk observation, and verifies exact reconnect actor plus name metadata through
+two ordinary observer clients. `mixed-chaos` explicitly requires its eight roles and ten-second
+minimum. Its deadline includes the last staggered start. Schema-v2 telemetry separates queued
+commands from submit calls, distinct chunks from crossings, pump execution from start/service
+intervals, refreshed current-RSS sampling, and the admission/scenario/quiescence/barrier/retirement
+phase scopes.
+
 ## 5.2 Real session semantics
 
 At least one correctness mode should exercise the complete ordinary session journey:
@@ -1559,6 +1569,13 @@ content/CAS/application proof, WorldPack, guest, public-world, Chat, UI, and com
 permanent verifier inspects its ClientOnly closure and composes eight bots with two exported Online
 clients on one dedicated generation. Permanent evidence lives in
 `_Benchmarks/Baselines/concept-demo-pf1-headless-network-bots-2026-09-10.json`.
+
+The post-closure adversarial repair at `a6450c953f20378e6bfab67037996156a68d0ac3`
+independently confirmed and repaired the bot lifecycle, admission-budget, command-accounting,
+bounded-observation, edge-role, and telemetry findings. Native PF1 health now distinguishes a
+temporary skew between independently delivered hot actor and cold presentation projections from a
+fault; initial full-population convergence is still mandatory, and exact reconnect retirement is
+proved by ordinary identity-aware observer clients rather than counts.
 
 An exploratory 50-bot run also completed 51 application lifetimes including one reconnect and
 cleanly retired all 51 server joins. It exposed and closed both the authority reservation defect

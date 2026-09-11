@@ -43,10 +43,13 @@ Required public options are `--endpoint`, `--fingerprint`, `--bots`, `--seed`, `
 File barriers and JSON summary options are acceptance-coordination surfaces used by the repository
 verifier, not gameplay shortcuts.
 
-The harness accepts 1–4,096 bots and never starts a process or dedicated thread per bot. The current
-Concept Demo shared-authority profile separately admits at most 64 participants. Counts above that
-are intentionally future characterization work: raising the authority's bounded capacity requires
-its own measured checkpoint and is not hidden inside PF1.
+The harness accepts 8–4,096 bots for the current `mixed-chaos` scenario and never starts a process
+or dedicated thread per bot. Eight clients and a ten-second duration are the minimum because the
+scenario assigns fixed reconnect, edge, telepad, gate, sword, mixed-body, and observer roles. The
+current Concept Demo shared-authority profile separately admits at most 64 participants. Counts
+above that are intentionally future characterization work: raising the authority's bounded
+capacity requires its own measured checkpoint and is not hidden inside PF1. The admission deadline
+includes the last configured staggered start plus the complete bounded admission window.
 
 ## `mixed-chaos`
 
@@ -56,16 +59,32 @@ unmapped physical input, public sword contention and Inventory equip/drop, edge/
 chunk/AOI transitions, and one clean reconnect. Later activity is bounded seeded chaos using only
 ordinary client control, public-world, Chat, and UI contracts.
 
-The process emits one compact evidence line plus optional structured JSON. Telemetry includes
-lifetime state/current and high-water counts, application/proof/reconnect counts, attempted and
-accepted actions, categorized rejections, pump iterations/lag, process working-set high-water, CPU
-time, clean retirement, and bounded per-bot fault context.
+The process emits one compact evidence line plus optional schema-versioned JSON. `*Attempts` are
+commands actually accepted into the client send path; `commandSubmitCalls` separately counts calls
+which may meet local backpressure. Every queued movement/jump/interaction/Primary/UI-open command
+ends Accepted, Rejected, or explicitly Cancelled under its original application epoch. A clean PF1
+correctness run permits no cancellation.
+
+Telemetry separately reports distinct chunks visited and all A→B→A crossings. Reconnect state spans
+drain, delay, and the complete replacement connection/profile/content lifetime. Pump timing names
+their actual scopes: start-to-start interval, central-pump execution duration, and maximum service
+interval observed by any bot. Phase durations cover admission, scenario, quiescence, external
+completion barrier, retirement, and total process work. CPU time and current-RSS high-water cover
+that whole lifetime; current RSS is refreshed at a bounded 250 ms cadence rather than read from one
+cached `Process` sample. These are load-generator diagnostics, not server execution or wire latency.
 
 Initial discovery or handshake loss under a dense same-address admission wave is retried at most
 eight times per bot with deterministic bounded delay. Once the scenario duration ends, the harness
 stops creating new work and gives already-accepted reliable commands/proofs up to ten seconds to
 quiesce before it checks for queue debt. Neither rule retries rejected Game actions or weakens the
 clean-boundary assertion.
+
+Unexpected transport/application/UI retirement faults an active bot immediately, including while
+an external completion barrier is held. Final retirement covers every joining/active/draining state
+and prevents late admission or reconnect. Chat observation uses one bounded recipient-sequence
+cursor per bot and reports retention gaps instead of retaining delivery history. Two ordinary bot
+observers also require the reconnect subject's exact old public identity and display metadata to
+retire and its fresh named replacement to arrive; count equality alone is not accepted.
 
 The maintained 50-client exploratory check uses `--admission-stagger-ms=250`; it has completed all
 50 active clients plus one reconnect against a capacity-50 authority and cleanly retired every join.

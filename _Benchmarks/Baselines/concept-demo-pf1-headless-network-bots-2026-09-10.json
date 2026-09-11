@@ -1,13 +1,13 @@
 {
   "checkpoint": "PF1",
-  "capturedUtc": "2026-09-10",
+  "capturedUtc": "2026-09-11",
   "candidate": {
     "originalFeatureCompleteCommit": "b87065431c15900bfd5ebaeae93b20855158e90f",
     "repairedFeatureCompleteCommit": "f003a8b5a2a8f97dac1074e5158ed01c875a83fb",
     "invalidatedByProductCorrectnessRepair": true,
     "disposition": "PF1 invalidated the original candidate after reproducing fixed ECS and Inventory reservations beneath a larger accepted participant configuration. The repaired candidate derives both reservations from the configured participant bound and passes a maintained 50-participant authority regression."
   },
-  "acceptedPf1ImplementationCommit": "f003a8b5a2a8f97dac1074e5158ed01c875a83fb",
+  "acceptedPf1ImplementationCommit": "a6450c953f20378e6bfab67037996156a68d0ac3",
   "botProduct": {
     "project": "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
     "processModel": "one CLR process, one bounded central pump, no process or dedicated thread per bot",
@@ -37,6 +37,8 @@
       "UltraSim.Server.Persistence",
       "UltraSim.Server.Runtime"
     ],
+    "minimumMixedChaosBotCount": 8,
+    "minimumMixedChaosDurationMilliseconds": 10000,
     "maximumAcceptedBotCount": 4096,
     "currentConceptDemoAuthorityMaximumParticipants": 64
   },
@@ -59,17 +61,18 @@
     "networkIdentity": "independent UDP transport/session/application/control identity per client"
   },
   "headlessBehavior": {
-    "telemetrySample": "post-repair focused PF1 verification",
+    "telemetrySchema": 2,
+    "telemetrySample": "post-adversarial-repair focused PF1 verification",
     "applicationSessions": 9,
     "initialConnectRetries": 0,
     "successfulReconnects": 1,
     "freshProfileAndContentProofLifetimes": 9,
-    "commandsAttempted": 214,
-    "movementAttempts": 125,
-    "movementAccepted": 125,
+    "commandsQueued": 215,
+    "movementAttempts": 124,
+    "movementAccepted": 124,
     "movementRejected": 0,
-    "jumpAttempts": 17,
-    "jumpsAccepted": 17,
+    "jumpAttempts": 18,
+    "jumpsAccepted": 18,
     "jumpsRejected": 0,
     "primaryAttempts": 5,
     "primaryAccepted": 1,
@@ -83,12 +86,18 @@
     "swordPickupObserved": 1,
     "swordEquipObserved": 1,
     "swordDropObserved": 1,
-    "interactionAccepted": 6,
-    "interactionRejected": 51,
-    "chunkTransitions": 17,
-    "verticalTransitions": 52,
-    "landingRecoveries": 16,
+    "interactionCommandsQueued": 58,
+    "interactionAccepted": 5,
+    "interactionRejected": 53,
+    "distinctChunksVisited": 25,
+    "chunkCrossings": 33,
+    "verticalTransitions": 57,
+    "landingRecoveries": 18,
     "postRecoveryMovementAccepted": 8,
+    "edgeJumpCommandsQueued": 1,
+    "cancelledCommands": 0,
+    "chatObservationGaps": 0,
+    "reconnectIdentityObserversConverged": "2/2",
     "oldPublicActorObservedAfterReconnect": false,
     "unexpectedQueueDebtAtAcceptance": false
   },
@@ -118,23 +127,41 @@
     "initialExactActorPopulationObservedByBoth": true,
     "remainedConnectedForEntireSwarmInterval": true,
     "postChurnSemanticAndRenderHealthObservedByBoth": true,
-    "presenterActorsNeverExceededCurrentMetadataRecords": true,
+    "postChurnProjectionStabilityObservedByBoth": true,
+    "transientHotColdProjectionSkewIsAllowed": true,
+    "exactReconnectIdentityRetirementObservedByTwoBots": true,
     "nameplateAndOverheadCountsNeverExceededLiveActorRoots": true
   },
   "botProcessTelemetry": {
-    "pumpIterations": 13496,
-    "pumpLagHighWaterMilliseconds": 143.093,
-    "workingSetHighWaterBytes": 56332288,
-    "cpuMilliseconds": 2240,
-    "interpretation": "Small correctness-swarm tool telemetry only; not a server performance, bandwidth, cadence, or CCU result."
+    "pumpIterations": 13084,
+    "pumpStartIntervalHighWaterMilliseconds": 141.801,
+    "pumpDurationHighWaterMilliseconds": 140.462,
+    "botServiceIntervalHighWaterMilliseconds": 141.801,
+    "workingSetHighWaterBytes": 190394368,
+    "workingSetSampling": "fresh current RSS sampled at most every 250 ms across admission through retirement",
+    "cpuMilliseconds": 2630,
+    "interpretation": "Small correctness-swarm load-generator telemetry only; includes startup/content/admission/barriers/retirement and is not server performance, bandwidth, cadence, command latency, or a CCU result."
   },
   "acceptanceInfrastructureCorrections": [
     "The native smoke barrier now validates transient one-shot presentation before waiting, remains alive through legitimate bot retirement, and uses a two-client completion barrier before either exported client retires.",
-    "Post-chaos native health respects ordinary AOI changes while checking semantic/render health and actor-root versus retained-metadata consistency.",
+    "Post-chaos native health respects ordinary AOI changes and waits for independently delivered hot actor and cold metadata projections to stabilize; exact old/replacement reconnect identity is verified separately by two ordinary bot observers.",
     "Sword contenders are selected deterministically by distance using only each bot's disclosed public-world state, rather than assuming admission order determines spawn proximity.",
     "The harness retries only transient initial discovery/handshake failures at most eight times with deterministic bounded delay.",
-    "The scenario stops generating work and pumps a bounded ten-second quiescence phase before asserting that accepted reliable command/proof debt is empty."
+    "The scenario stops generating work and pumps a bounded ten-second quiescence phase before asserting that accepted reliable command/proof debt is empty.",
+    "Unexpected transport/application/UI loss faults the bot at every pump and at the completion boundary; cleanup preserves a structured failure result.",
+    "Final retirement covers Pending, Connecting, Profile, Content, Active, Draining, and ReconnectDelay and prohibits late admission or reconnect.",
+    "A pending command is keyed by application epoch and sequence and must complete or be explicitly cancelled before a replacement lifetime can start.",
+    "Chat observation uses one bounded recipient-sequence cursor; chunk coverage distinguishes bounded distinct membership from every crossing.",
+    "Run-relative time plus Int128 conversion avoids absolute Stopwatch multiplication overflow.",
+    "mixed-chaos rejects fewer than eight bots or less than ten seconds, and admission budgeting includes the final staggered start."
   ],
+  "adversarialReview": {
+    "reviewedRevision": "a0499f9af7891305ef2f43153c0cce852955e77a",
+    "implementationCandidate": "f003a8b5a2a8f97dac1074e5158ed01c875a83fb",
+    "repairCommit": "a6450c953f20378e6bfab67037996156a68d0ac3",
+    "disposition": "NB-01 through NB-05, NB-06, H-01, H-02, M-01, and M-02 were independently confirmed from the source boundary and repaired. NB-06 was confirmed structurally and is covered by an application-epoch pending-command regression plus the real reconnect gate. Eleven maintained focused regressions and the complete exported mixed swarm pass.",
+    "candidateIdentity": "The PF0 repaired product candidate remains f003a8b5a2a8f97dac1074e5158ed01c875a83fb because these are PF1 harness/verifier correctness repairs, not a newly discovered product-authority defect."
+  },
   "correctnessRepair": {
     "trigger": "A capacity-50 dedicated authority exhausted the fixed Inventory container reservation at participant 32 and then faulted public-presentation progress.",
     "repair": "SharedPlayableAuthorityLimits now derives ECS entity and Inventory container/item reservations from MaximumParticipants.",
@@ -148,13 +175,13 @@
     "applicationSessions": 51,
     "initialConnectRetries": 8,
     "successfulReconnects": 1,
-    "commandsAttempted": 774,
-    "workingSetHighWaterBytes": 58363904,
+    "commandsQueuedUnderOriginalSchema": 774,
+    "previousCachedWorkingSetSampleBytes": 58363904,
     "cpuMilliseconds": 8190,
     "allBotsActiveHighWater": 50,
     "cleanAuthorityJoinsAndLeaves": "51/51",
     "result": "PASS",
-    "interpretation": "Exploratory tool/configuration canary only; no CCU or performance claim."
+    "interpretation": "Exploratory tool/configuration canary only; no CCU or performance claim. The original working-set value used a cached Process sample and is retained only as superseded historical metadata, not a verified peak."
   },
   "verification": {
     "focusedPf1Command": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf1-only",

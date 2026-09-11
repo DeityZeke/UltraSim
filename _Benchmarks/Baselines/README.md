@@ -30,9 +30,10 @@ Useful current anchors can be located by their embedded workload or filename:
   feature-complete candidate identities, real ClientOnly headless bot product/physical dependency closure,
   deterministic 8-bot mixed-chaos run beside two separately running actual exported Online
   clients, fresh reconnect/profile/content proof, ordinary movement/jump/Chat/sword/UI/AOI
-  behavior, native presentation health, bounded bot-process telemetry, and exact clean
-  participant/session retirement. It is deliberately not a bandwidth, cadence, CCU, or stress
-  result;
+  behavior, exact observer-side old/replacement actor retirement, native presentation health,
+  hardened lifecycle/command/observation gates, refreshed bounded bot-process telemetry, and exact
+  clean participant/session retirement. It is deliberately not a bandwidth, cadence, CCU, or
+  stress result;
 - `concept-demo-d0.7b-content-backed-actor-presentation-2026-09-09.json` — bounded passive
   self-contained actor GLB, exact X/Y skeleton/clip profile, server Add plus visible X Replace,
   applied-catalog-only resolution, retained blob/native-resource lifetime, actor-root-preserving
