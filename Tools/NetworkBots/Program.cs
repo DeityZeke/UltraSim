@@ -428,8 +428,10 @@ internal sealed class BotClient : IDisposable
     internal int FreshProofLifetimes { get; private set; }
     internal int MovementAttempts { get; private set; }
     internal int MovementAccepted { get; private set; }
+    internal int MovementRejected { get; private set; }
     internal int JumpAttempts { get; private set; }
     internal int JumpsAccepted { get; private set; }
+    internal int JumpsRejected { get; private set; }
     internal int LocalChatSubmitted { get; private set; }
     internal int GlobalChatSubmitted { get; private set; }
     internal int LocalChatObserved { get; private set; }
@@ -445,6 +447,7 @@ internal sealed class BotClient : IDisposable
     internal int CommandsAttempted { get; private set; }
     internal int PrimaryAttempts { get; private set; }
     internal int PrimaryAccepted { get; private set; }
+    internal int PrimaryRejected { get; private set; }
     internal int ChunkTransitions { get; private set; }
     internal int VerticalTransitions { get; private set; }
     internal int LandingRecoveries { get; private set; }
@@ -654,10 +657,13 @@ internal sealed class BotClient : IDisposable
                     if (_landedAfterAirborne && PostRecoveryMovementAccepted == 0)
                         PostRecoveryMovementAccepted++;
                     break;
+                case BotCommandKind.Movement: MovementRejected++; break;
                 case BotCommandKind.Jump when accepted: JumpsAccepted++; break;
+                case BotCommandKind.Jump: JumpsRejected++; break;
                 case BotCommandKind.Interaction when accepted: InteractionAccepted++; break;
                 case BotCommandKind.Interaction: InteractionRejected++; break;
                 case BotCommandKind.Primary when accepted: PrimaryAccepted++; break;
+                case BotCommandKind.Primary: PrimaryRejected++; break;
             }
             _pendingCommand = BotCommandKind.None;
             _pendingCommandSequence = 0;
@@ -721,10 +727,7 @@ internal sealed class BotClient : IDisposable
         if (!_jumpPressed && elapsed >= 500 && TryPhysicalAction(
                 ClientSemanticAction.Jump, GamePlayerActions.Jump,
                 BotCommandKind.Jump))
-        {
             _jumpPressed = true;
-            JumpAttempts++;
-        }
         if (_jumpPressed && !_jumpReleased && elapsed >= 750 &&
             TryCommand(new ClientWorldCommandIntent(
                 GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true),
@@ -829,9 +832,8 @@ internal sealed class BotClient : IDisposable
                     BotCommandKind.Movement);
                 break;
             case 3:
-                if (TryPhysicalAction(
-                        ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump))
-                    JumpAttempts++;
+                _ = TryPhysicalAction(
+                    ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump);
                 break;
             case 4:
                 if (_session!.Chat.TrySubmit(
@@ -861,10 +863,8 @@ internal sealed class BotClient : IDisposable
         if (_pendingCommand != BotCommandKind.None) return false;
         GameLocomotionUpdate locomotion = _controls.EvaluateMovement(
             _settings!.ControlGrammar, x, z, position, ToMillisecondsTicks(now));
-        bool submitted = TryCommand(new ClientWorldCommandIntent(
+        return TryCommand(new ClientWorldCommandIntent(
             locomotion, GamePlayerActions.None, true), BotCommandKind.Movement);
-        if (submitted) MovementAttempts++;
-        return submitted;
     }
 
     private bool TryPhysicalAction(
@@ -877,10 +877,8 @@ internal sealed class BotClient : IDisposable
             !_settings.TryResolveInput(in physical, out ClientSemanticAction resolved) ||
             resolved != expected)
             return false;
-        bool submitted = TryCommand(new ClientWorldCommandIntent(
+        return TryCommand(new ClientWorldCommandIntent(
             GameLocomotionUpdate.Unchanged, gameAction, true), kind);
-        if (submitted && kind == BotCommandKind.Primary) PrimaryAttempts++;
-        return submitted;
     }
 
     private bool TryInteraction(WorldPublicEntityId target) =>
@@ -898,6 +896,12 @@ internal sealed class BotClient : IDisposable
             !_session.Playable.TrySubmitCommand(in intent, target, flags))
             return false;
         CommandsAttempted++;
+        switch (kind)
+        {
+            case BotCommandKind.Movement: MovementAttempts++; break;
+            case BotCommandKind.Jump: JumpAttempts++; break;
+            case BotCommandKind.Primary: PrimaryAttempts++; break;
+        }
         if (kind != BotCommandKind.None)
         {
             _pendingCommand = kind;
@@ -1330,8 +1334,10 @@ internal sealed record BotRunSummary
     public required int FreshProofLifetimes { get; init; }
     public required int MovementAttempts { get; init; }
     public required int MovementAccepted { get; init; }
+    public required int MovementRejected { get; init; }
     public required int JumpAttempts { get; init; }
     public required int JumpsAccepted { get; init; }
+    public required int JumpsRejected { get; init; }
     public required int LocalChatSubmitted { get; init; }
     public required int GlobalChatSubmitted { get; init; }
     public required int LocalChatObserved { get; init; }
@@ -1347,6 +1353,7 @@ internal sealed record BotRunSummary
     public required int CommandsAttempted { get; init; }
     public required int PrimaryAttempts { get; init; }
     public required int PrimaryAccepted { get; init; }
+    public required int PrimaryRejected { get; init; }
     public required int ChunkTransitions { get; init; }
     public required int VerticalTransitions { get; init; }
     public required int LandingRecoveries { get; init; }
@@ -1396,8 +1403,10 @@ internal sealed record BotRunSummary
         FreshProofLifetimes = bots.Sum(static bot => bot.FreshProofLifetimes),
         MovementAttempts = bots.Sum(static bot => bot.MovementAttempts),
         MovementAccepted = bots.Sum(static bot => bot.MovementAccepted),
+        MovementRejected = bots.Sum(static bot => bot.MovementRejected),
         JumpAttempts = bots.Sum(static bot => bot.JumpAttempts),
         JumpsAccepted = bots.Sum(static bot => bot.JumpsAccepted),
+        JumpsRejected = bots.Sum(static bot => bot.JumpsRejected),
         LocalChatSubmitted = bots.Sum(static bot => bot.LocalChatSubmitted),
         GlobalChatSubmitted = bots.Sum(static bot => bot.GlobalChatSubmitted),
         LocalChatObserved = bots.Sum(static bot => bot.LocalChatObserved),
@@ -1413,6 +1422,7 @@ internal sealed record BotRunSummary
         CommandsAttempted = bots.Sum(static bot => bot.CommandsAttempted),
         PrimaryAttempts = bots.Sum(static bot => bot.PrimaryAttempts),
         PrimaryAccepted = bots.Sum(static bot => bot.PrimaryAccepted),
+        PrimaryRejected = bots.Sum(static bot => bot.PrimaryRejected),
         ChunkTransitions = bots.Sum(static bot => bot.ChunkTransitions),
         VerticalTransitions = bots.Sum(static bot => bot.VerticalTransitions),
         LandingRecoveries = bots.Sum(static bot => bot.LandingRecoveries),
@@ -1433,8 +1443,10 @@ internal sealed record BotRunSummary
         $"states={ActiveBots}/{AdmittingBots}/{ReconnectingBots}/{RetiredBots} " +
         $"stateHighWater={ActiveHighWater}/{AdmittingHighWater}/{ReconnectingHighWater} " +
         $"generation={ServerGeneration} sessions={ApplicationSessions} reconnects={SuccessfulReconnects} " +
-        $"proofLifetimes={FreshProofLifetimes} movement={MovementAccepted}/{MovementAttempts} " +
-        $"jumps={JumpsAccepted}/{JumpAttempts} chat={LocalChatSubmitted}+{GlobalChatSubmitted}/" +
+        $"proofLifetimes={FreshProofLifetimes} movement={MovementAccepted}/{MovementRejected}/" +
+        $"{MovementAttempts} jumps={JumpsAccepted}/{JumpsRejected}/{JumpAttempts} " +
+        $"primary={PrimaryAccepted}/{PrimaryRejected}/{PrimaryAttempts} " +
+        $"chat={LocalChatSubmitted}+{GlobalChatSubmitted}/" +
         $"observed={LocalChatObserved}+{GlobalChatObserved} commands={CommandsAttempted} " +
         $"nonsense={NonsenseInputs}/commands={NonsenseCommandsCreated} sword={SwordPickupObserved}/" +
         $"{SwordEquipObserved}/{SwordDropObserved} interactions={InteractionAccepted}/" +

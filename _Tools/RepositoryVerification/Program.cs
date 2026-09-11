@@ -1229,6 +1229,9 @@ static void VerifyPf1MixedExportedSwarm(
     string nativeRelease = Path.Combine(scope, "native-release");
     string aliceReady = Path.Combine(scope, "alice", "ready");
     string bobReady = Path.Combine(scope, "bob", "ready");
+    string aliceComplete = Path.Combine(scope, "alice", "complete");
+    string bobComplete = Path.Combine(scope, "bob", "complete");
+    string nativeRetireRelease = Path.Combine(scope, "native-retire-release");
 
     Process? server = null;
     Task<string>? botTask = null;
@@ -1275,13 +1278,13 @@ static void VerifyPf1MixedExportedSwarm(
             NativeSharedClientArguments(
                 scope, "alice", ready.Endpoint, ready.Fingerprint,
                 aliceReady, nativeRelease, expectedPresentedActors,
-                "PF1 Native Alice", "x"), 210_000));
+                "PF1 Native Alice", "x", aliceComplete, nativeRetireRelease), 210_000));
         bobTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
             NativeSharedClientArguments(
                 scope, "bob", ready.Endpoint, ready.Fingerprint,
                 bobReady, nativeRelease, expectedPresentedActors,
-                "PF1 Native Bob", "y"), 210_000));
+                "PF1 Native Bob", "y", bobComplete, nativeRetireRelease), 210_000));
 
         WaitForPf1Files(
             [botStartReady, aliceReady, bobReady],
@@ -1302,6 +1305,16 @@ static void VerifyPf1MixedExportedSwarm(
                 "An exported Online client did not remain connected throughout the PF1 swarm interval.");
 
         File.WriteAllText(nativeRelease, "release" + Environment.NewLine);
+        WaitForPf1Files(
+            [aliceComplete, bobComplete],
+            30_000,
+            server,
+            [aliceTask, bobTask],
+            "both exported Online clients to observe post-churn actor convergence");
+        if (aliceTask.IsCompleted || bobTask.IsCompleted)
+            throw new InvalidOperationException(
+                "An exported Online client retired before the PF1 post-churn barrier completed.");
+        File.WriteAllText(nativeRetireRelease, "release" + Environment.NewLine);
         string aliceOutput = aliceTask.GetAwaiter().GetResult();
         string bobOutput = bobTask.GetAwaiter().GetResult();
         RequireNativeA08Result(
@@ -1318,10 +1331,10 @@ static void VerifyPf1MixedExportedSwarm(
             !aliceOutput.Contains("body=HumanFemale", StringComparison.Ordinal) ||
             !bobOutput.Contains("guest=PF1 Native Bob", StringComparison.Ordinal) ||
             !bobOutput.Contains("body=HumanMale", StringComparison.Ordinal) ||
-            !aliceOutput.Contains($"actors={expectedPresentedActors}", StringComparison.Ordinal) ||
-            !bobOutput.Contains($"actors={expectedPresentedActors}", StringComparison.Ordinal))
+            !ContainsPositiveNamedCount(aliceOutput, "actors=") ||
+            !ContainsPositiveNamedCount(bobOutput, "actors="))
             throw new InvalidOperationException(
-                "The exported Online clients did not preserve exact PF1 generation/body/actor presentation.");
+                "The exported Online clients did not preserve PF1 generation/body/actor presentation.");
 
         File.WriteAllText(botRelease, "release" + Environment.NewLine);
         string botOutput = botTask.GetAwaiter().GetResult();
@@ -1347,6 +1360,15 @@ static void VerifyPf1MixedExportedSwarm(
             bots.GetProperty("applicationSessions").GetInt32() < botCount + 1 ||
             bots.GetProperty("freshProofLifetimes").GetInt32() < botCount + 1 ||
             bots.GetProperty("commandsAttempted").GetInt32() == 0 ||
+            bots.GetProperty("movementAttempts").GetInt32() !=
+                bots.GetProperty("movementAccepted").GetInt32() +
+                bots.GetProperty("movementRejected").GetInt32() ||
+            bots.GetProperty("jumpAttempts").GetInt32() !=
+                bots.GetProperty("jumpsAccepted").GetInt32() +
+                bots.GetProperty("jumpsRejected").GetInt32() ||
+            bots.GetProperty("primaryAttempts").GetInt32() !=
+                bots.GetProperty("primaryAccepted").GetInt32() +
+                bots.GetProperty("primaryRejected").GetInt32() ||
             bots.GetProperty("landingRecoveries").GetInt32() == 0 ||
             bots.GetProperty("postRecoveryMovementAccepted").GetInt32() == 0 ||
             bots.GetProperty("nonsenseCommandsCreated").GetInt32() != 0 ||
@@ -1391,7 +1413,8 @@ static void VerifyPf1MixedExportedSwarm(
     finally
     {
         Directory.CreateDirectory(scope);
-        foreach (string marker in new[] { botStartRelease, nativeRelease, botRelease, serverStop })
+        foreach (string marker in new[]
+                 { botStartRelease, nativeRelease, nativeRetireRelease, botRelease, serverStop })
             if (!File.Exists(marker)) File.WriteAllText(marker, "release" + Environment.NewLine);
         foreach (Task<string>? task in new[] { aliceTask, bobTask, botTask })
         {
@@ -1573,7 +1596,9 @@ static string[] NativeSharedClientArguments(
     string release,
     int expectedActors = 4,
     string? guestName = null,
-    string? guestBody = null)
+    string? guestBody = null,
+    string? completionReady = null,
+    string? retirementRelease = null)
 {
     var arguments = new List<string>
     {
@@ -1592,6 +1617,10 @@ static string[] NativeSharedClientArguments(
     };
     if (guestName is not null) arguments.Add($"--a0-8-guest-name={guestName}");
     if (guestBody is not null) arguments.Add($"--a0-8-guest-body={guestBody}");
+    if (completionReady is not null)
+        arguments.Add($"--pf1-client-complete-ready={completionReady}");
+    if (retirementRelease is not null)
+        arguments.Add($"--pf1-client-retire-release={retirementRelease}");
     return arguments.ToArray();
 }
 

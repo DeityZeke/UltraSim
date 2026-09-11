@@ -30,6 +30,7 @@ public partial class ClientHost
     private bool _remoteSmokeDisconnectStarted;
     private bool _remoteSmokeValidated;
     private bool _remoteSmokeBarrierReadyPublished;
+    private bool _remoteSmokeCompletionReadyPublished;
     private bool _remoteProcessObserved;
     private string _remoteGuestName = string.Empty;
     private GameGuestBody _remoteGuestBody = GameGuestBody.HumanFemale;
@@ -119,12 +120,15 @@ public partial class ClientHost
                         _remoteSmokeValidated = true;
                     }
                     if (!SharedRemoteSmokeBarrierReleased()) return;
-                    // A PF1 bot may have retired while this native client was held at the
-                    // barrier. Do not repeat transient one-shot presentation assertions,
-                    // but do wait for the ordinary replacement lifetime to become visible.
-                    if (!playable.SmokeComplete ||
-                        playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
+                    // A PF1 bot may retire, re-enter, or leave this client's AOI while the
+                    // native process is held. Initial convergence already proved the exact
+                    // population; the completion barrier now requires sustained product health.
+                    if (!playable.SmokeComplete) return;
+                    if (HasRemoteSmokeCompletionBarrier())
+                        ValidateRemoteSmokeSustainedHealth(playable);
+                    else if (playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
                         return;
+                    if (!SharedRemoteSmokeCompletionBarrierReleased()) return;
                     _remoteSmokeDisconnectStarted = true;
                     GD.Print(
                         $"A0.8 CONTENTLESS ONLINE PASS mode={ReadArgument("--a0-8-expect=") ?? "unspecified"} " +
@@ -806,6 +810,45 @@ public partial class ClientHost
             _remoteSmokeBarrierReadyPublished = true;
         }
         return File.Exists(release);
+    }
+
+    private bool SharedRemoteSmokeCompletionBarrierReleased()
+    {
+        string? ready = ReadArgument("--pf1-client-complete-ready=");
+        if (ready is null) return true;
+        string release = ReadArgument("--pf1-client-retire-release=") ??
+            throw new InvalidOperationException(
+                "The PF1 client-completion barrier requires a retirement-release path.");
+        if (!_remoteSmokeCompletionReadyPublished)
+        {
+            string full = Path.GetFullPath(ready);
+            string? directory = Path.GetDirectoryName(full);
+            if (string.IsNullOrEmpty(directory))
+                throw new InvalidOperationException(
+                    "The PF1 client-completion marker has no parent directory.");
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(full, "ready" + global::System.Environment.NewLine);
+            _remoteSmokeCompletionReadyPublished = true;
+        }
+        return File.Exists(release);
+    }
+
+    private static bool HasRemoteSmokeCompletionBarrier() =>
+        ReadArgument("--pf1-client-complete-ready=") is not null;
+
+    private static void ValidateRemoteSmokeSustainedHealth(
+        in RemoteConceptDemoClientSnapshot snapshot)
+    {
+        if (snapshot.State != RemoteConceptDemoClientState.Active ||
+            !snapshot.Session.SemanticConsumersActive ||
+            snapshot.RenderedChunks == 0 || snapshot.TerrainTriangles == 0 ||
+            snapshot.OpenUiViews != 1 || snapshot.Session.Chat.OccurrencesApplied == 0 ||
+            snapshot.Actors.ActiveActors < 2 || snapshot.Actors.AnimatedActors == 0 ||
+            snapshot.ActorResources.RealizationFailures != 0 ||
+            snapshot.Session.Content.ProofRetained ||
+            snapshot.Session.Playable.CommandRetainedLocally)
+            throw new InvalidOperationException(
+                $"The PF1 native client did not remain semantically healthy: {snapshot}.");
     }
 
     private static string? ReadArgument(string prefix) => OS.GetCmdlineUserArgs()
