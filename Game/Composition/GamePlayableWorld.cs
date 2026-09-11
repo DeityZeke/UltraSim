@@ -720,7 +720,11 @@ public sealed class GameWorldActions
         long? destinationProgress,
         bool destinationReached)
     {
-        int deltaY = IntegrateVertical(index, stepQuanta);
+        if (!TryIntegrateVertical(index, stepQuanta, out int deltaY))
+        {
+            _ = TryRecoverActor(world, worldState, actor, index);
+            return;
+        }
         long targetY = checked((long)current.YMillimeters + deltaY);
         if (targetY < int.MinValue || targetY > int.MaxValue ||
             targetY <= _verticalOptions.RecoveryMinimumYMillimeters)
@@ -740,7 +744,8 @@ public sealed class GameWorldActions
         // as wall contact does. Otherwise an outside horizontal probe can hold the position fixed
         // while gravity accumulates indefinitely and eventually overflows its fixed-point state.
         if (!physical.WasResolved &&
-            physical.Status == SimpleAirborneMotionStatus.OutsidePreparedWorld &&
+            (physical.Status is SimpleAirborneMotionStatus.OutsidePreparedWorld or
+                SimpleAirborneMotionStatus.Blocked) &&
             (nextX != current.GlobalXMillimeters || nextZ != current.GlobalZMillimeters))
         {
             physical = _physics.ResolveAirborneMotion(
@@ -1326,19 +1331,26 @@ public sealed class GameWorldActions
         _activeActorPositions[index] = 0;
     }
 
-    private int IntegrateVertical(int index, long stepQuanta)
+    private bool TryIntegrateVertical(int index, long stepQuanta, out int displacement)
     {
         long oldVelocity = _verticalVelocityNumerators[index];
-        long nextVelocity = checked(oldVelocity +
-            (long)_verticalOptions.GravityMillimetersPerSecondSquared * stepQuanta);
+        Int128 nextVelocity = (Int128)oldVelocity +
+            (Int128)_verticalOptions.GravityMillimetersPerSecondSquared * stepQuanta;
         Int128 denominator = 2 * (Int128)WorldClockOptions.WorldTimeQuantaPerSecond *
             WorldClockOptions.WorldTimeQuantaPerSecond;
-        Int128 numerator = (Int128)(oldVelocity + nextVelocity) * stepQuanta +
+        Int128 numerator = ((Int128)oldVelocity + nextVelocity) * stepQuanta +
             _verticalDisplacementRemainders[index];
-        int displacement = checked((int)(numerator / denominator));
+        Int128 integrated = numerator / denominator;
+        if (nextVelocity < long.MinValue || nextVelocity > long.MaxValue ||
+            integrated < int.MinValue || integrated > int.MaxValue)
+        {
+            displacement = 0;
+            return false;
+        }
+        displacement = (int)integrated;
         _verticalDisplacementRemainders[index] = numerator % denominator;
-        _verticalVelocityNumerators[index] = nextVelocity;
-        return displacement;
+        _verticalVelocityNumerators[index] = (long)nextVelocity;
+        return true;
     }
 
     private void ReconcileVerticalState(EcsWorld world, Entity actor)

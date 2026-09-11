@@ -53,6 +53,8 @@ Run("AuthoritativeAirborneWallContactKeepsGravityProgress",
     AuthoritativeAirborneWallContactKeepsGravityProgress, results);
 Run("AuthoritativeAirbornePreparedBoundaryKeepsGravityProgress",
     AuthoritativeAirbornePreparedBoundaryKeepsGravityProgress, results);
+Run("AuthoritativeVerticalArithmeticOverflowRecovers",
+    AuthoritativeVerticalArithmeticOverflowRecovers, results);
 Run("VerticalMomentumIsGenerationLocalAcrossRestore",
     VerticalMomentumIsGenerationLocalAcrossRestore, results);
 Run("VerticalStateFencesReusedEntitySlots",
@@ -2410,6 +2412,101 @@ static TestMetrics AuthoritativeAirbornePreparedBoundaryKeepsGravityProgress()
     {
         if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
             throw new InvalidOperationException("A prepared-boundary fixture point was invalid.");
+        return value;
+    }
+}
+
+static TestMetrics AuthoritativeVerticalArithmeticOverflowRecovers()
+{
+    WorldPack pack = CreatePhysicsTerrainShellWorldPack();
+    var extreme = new GameVerticalMotionOptions(
+        JumpSpeedMillimetersPerSecond: 11_000,
+        GravityMillimetersPerSecondSquared: int.MinValue,
+        RecoveryMinimumYMillimeters: -50_000,
+        RecoveryPosition: GamePlayableWorld.PlayerStart);
+    var composition = new UltraSimGameComposition(
+        new InventoryLimits(32, 128, 32),
+        baseWorldPack: pack,
+        verticalMotionOptions: extreme);
+    using var host = new InternalHost(
+        composition,
+        RuntimeOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x80_108E))));
+    host.Start();
+    ServerRuntime runtime = host.RuntimeForTesting;
+    using var admission = new AdmissionService(runtime.Game, composition);
+    AdmissionResult entered = admission.JoinAccountless(new ParticipantId(108_014));
+    Expect(entered.IsEntered, "The vertical-overflow actor did not enter.");
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GamePlayableWorldEntities>(
+            (world, _, game) => GamePlayableWorld.PopulateConceptDemo(
+                world, game, entered.Entity),
+            out GamePlayableWorldEntities entities),
+        "The vertical-overflow fixture could not populate.");
+
+    var input = new ClientWorldInputSequencer();
+    var link = new PlayableOfflineDirectLink(
+        runtime.Game, entities.PlayerId, input.ControlSession);
+    WorldPosition start = Position(2_000, 0, 2_000);
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameWorldActionStatus>(
+            (world, _, game) => game.WorldActions.RelocateActor(
+                world, game.WorldState, ResolveInWorld(world, entities.PlayerId), start,
+                out WorldPosition _), out GameWorldActionStatus relocated) &&
+        relocated == GameWorldActionStatus.Accepted,
+        "The vertical-overflow actor could not enter the flat fixture.");
+    Expect(input.TryCreateCommand(new ClientWorldInputSample(
+            0, 0, GamePlayerActions.Jump, true), out GamePlayerCommand jump) &&
+        link.ApplyCommand(jump).Jump == GameWorldActionStatus.Accepted,
+        "The vertical-overflow jump was not admitted.");
+
+    for (int tick = 0; tick < 120; tick++)
+    {
+        host.Tick(TimeSpan.FromTicks(TimeSpan.TicksPerSecond / 60));
+        if (ReadVertical().CumulativeRecoveries != 0)
+            break;
+    }
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameVerticalMotionSnapshot>(
+            (world, _, game) =>
+            {
+                Expect(game.WorldActions.TryReadVerticalMotion(
+                        world, ResolveInWorld(world, entities.PlayerId),
+                        out GameVerticalMotionSnapshot state),
+                    "The recovered vertical state was unavailable.");
+                return state;
+            }, out GameVerticalMotionSnapshot vertical),
+        "The recovered vertical state could not be read.");
+    WorldPosition final = link.ReadPosition();
+    Expect(final.GlobalXMillimeters == GamePlayableWorld.PlayerStart.GlobalXMillimeters &&
+        final.GlobalZMillimeters == GamePlayableWorld.PlayerStart.GlobalZMillimeters &&
+        vertical.IsGrounded &&
+        vertical.CumulativeRecoveries == 1,
+        "Unrepresentable vertical integration did not use the bounded recovery path: " +
+        $"position={final}, vertical={vertical}.");
+
+    return new TestMetrics(
+        HashText($"{final}|{vertical.CumulativeRecoveries}"),
+        0, 0, 0, 0, 0, pack.Length, 0, 0, 0, 0, 0,
+        "Unrepresentable fixed-point velocity/displacement is admitted with Int128 arithmetic and " +
+        "uses authoritative safe recovery instead of escaping as OverflowException.",
+        WorldPackBytes: pack.Length);
+
+    GameVerticalMotionSnapshot ReadVertical()
+    {
+        Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameVerticalMotionSnapshot>(
+                (world, _, game) =>
+                {
+                    Expect(game.WorldActions.TryReadVerticalMotion(
+                            world, ResolveInWorld(world, entities.PlayerId),
+                            out GameVerticalMotionSnapshot state),
+                        "The recovered vertical state was unavailable.");
+                    return state;
+                }, out GameVerticalMotionSnapshot state),
+            "The recovered vertical state could not be read.");
+        return state;
+    }
+
+    static WorldPosition Position(long x, int y, long z)
+    {
+        if (!WorldPosition.TryFromGlobalMillimeters(x, y, z, out WorldPosition value))
+            throw new InvalidOperationException("A vertical-overflow fixture point was invalid.");
         return value;
     }
 }
