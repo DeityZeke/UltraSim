@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | UI-01 local shutdown escapes owner thread | Confirmed and repaired | pre-correction child exited 134; `LocalShutdownMustContainUiCloseBackpressure` exits normally |
 | UI-02 view capacity faults authority | Confirmed and repaired | `LocalUiCapacityMustNotFaultAuthority`; subsequent monitor open succeeds after capacity returns |
-| UI-03 proof pressure replays operation | Confirmed and repaired | `ProofBackpressureMustNotReapplyUiOperation`; two opens apply once and the second action endpoint remains live |
+| UI-03 proof pressure replays operation | Confirmed and repaired, including bridge replacement | `ProofBackpressureMustNotReapplyUiOperation` and `ProofBackpressureMustSurviveUiBridgeReplacement`; two opens apply once and the second action endpoint remains live |
 | UI-04 failed close loses cleanup identity | Confirmed and repaired | `ControllerCloseFailureMustRemainRecoverable`; close-first ordering also covers unbind failure |
 | UI-05 action reason bypasses definition limit | Confirmed and repaired | `ActionReasonMustRespectCompiledTextLimit` at 64/65 characters |
 | UI-06 truncated delta allocates from impossible counts | Confirmed and repaired | reviewed 44-byte payloads allocated 2,097,144 / 2,621,448 / 1,572,912 bytes; corrected rejection stays below 16 KiB |
@@ -44,9 +44,10 @@ first failure rather than allowing a `finally` exception to terminate the proces
 
 ### Exactly-once application and client callback lifetime
 
-The local client bridge records a completed operation status when its proof queue is full. It
-retries only proof publication before reading another operation. Renderer and model effects happen
-once.
+The retained local channel records a completed operation status when its proof queue is full. It
+retries only proof publication before reading another operation, including after disposal and
+replacement of the client bridge. Reattachment is limited to the same `UiClientRuntime` projection;
+a different projection requires local-session retirement. Renderer and model effects happen once.
 
 `UiClientRuntime` forbids synchronous mutation/disposal throughout renderer `Create`, `Apply`, and
 `Close`. A callback violation faults that operation before candidate state publication; existing
@@ -69,7 +70,7 @@ Focused Release gates passed during correction:
 
 - 27 UI kernel checks;
 - 30 Client Core checks;
-- 18 packet-free Client Local checks, including the isolated process-survival gate;
+- 19 packet-free Client Local checks, including bridge-replacement and isolated process-survival gates;
 - 33 Game Inventory and 18 Game Admission checks;
 - 136 Game Replication checks;
 - the complete Network application suite, including content-backed remote Inventory;

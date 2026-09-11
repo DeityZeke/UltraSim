@@ -28,6 +28,7 @@ var tests = new (string Name, Action Body)[]
     ("RejectedClientApplicationRetainsChatDebt", RejectedClientApplicationRetainsChatDebt),
     ("UiOperationsAndActionsUseBoundedLocalBridge", UiOperationsAndActionsUseBoundedLocalBridge),
     ("ProofBackpressureMustNotReapplyUiOperation", ProofBackpressureMustNotReapplyUiOperation),
+    ("ProofBackpressureMustSurviveUiBridgeReplacement", ProofBackpressureMustSurviveUiBridgeReplacement),
     ("LocalUiCapacityMustNotFaultAuthority", LocalUiCapacityMustNotFaultAuthority),
     ("ControllerCloseFailureMustRemainRecoverable", ControllerCloseFailureMustRemainRecoverable),
     ("LocalShutdownMustContainUiCloseBackpressure", LocalShutdownMustContainUiCloseBackpressure),
@@ -84,6 +85,58 @@ static void ProofBackpressureMustNotReapplyUiOperation()
     DriveUntil(() =>
     {
         bridge.Pump();
+        return string.Equals(
+            client.GetValue(second, InventoryUi.Status).Text,
+            "Item selected.",
+            StringComparison.Ordinal);
+    });
+}
+
+static void ProofBackpressureMustSurviveUiBridgeReplacement()
+{
+    LocalPlayableSessionLimits limits = LocalPlayableSessionLimits.Default with
+    {
+        UiOperationCapacity = 2,
+        UiProofCapacity = 1,
+    };
+    using Fixture fixture = Fixture.Create(limits);
+    var renderer = new MemoryRenderer();
+    using var client = new UiClientRuntime(renderer, new UiClientLimits(8, 8));
+    LocalQueuedUiClient original = fixture.Session.AttachUiClient(client);
+
+    True(fixture.Session.TryRequestOpenInventory(1));
+    True(fixture.Session.TryRequestOpenInventory(2));
+    DriveUntil(() => fixture.Session.TryGetLatestView(out LocalPlayableAuthorityView view) &&
+        view.LastAdministrativeSequence == 2);
+
+    _ = original.Pump(2);
+    Equal(2, renderer.Created);
+    original.Dispose();
+
+    using var unrelatedProjection = new UiClientRuntime(
+        new MemoryRenderer(), new UiClientLimits(8, 8));
+    Throws<InvalidOperationException>(() =>
+        fixture.Session.AttachUiClient(unrelatedProjection));
+
+    using LocalQueuedUiClient replacement = fixture.Session.AttachUiClient(client);
+    DriveUntil(() =>
+    {
+        replacement.Pump(2);
+        LocalPlayableSessionSnapshot snapshot = fixture.Session.GetSnapshot();
+        return snapshot.UiOperationsApplied + snapshot.UiOperationsRejected == 2;
+    }, failure: () => fixture.Session.GetSnapshot().ToString());
+
+    Equal(2UL, fixture.Session.GetSnapshot().UiOperationsApplied);
+    Equal(0UL, fixture.Session.GetSnapshot().UiOperationsRejected);
+    Equal(2, client.OpenViewCount);
+    Equal(2, renderer.Created);
+
+    UiViewInstanceId second = renderer.Instances[1];
+    UiRowId firstRow = client.GetRows(second, InventoryUi.Items)[0].Id;
+    client.SubmitAction(second, InventoryUi.Select, firstRow);
+    DriveUntil(() =>
+    {
+        replacement.Pump();
         return string.Equals(
             client.GetValue(second, InventoryUi.Status).Text,
             "Item selected.",

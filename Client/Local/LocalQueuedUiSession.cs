@@ -66,6 +66,9 @@ internal sealed class LocalQueuedUiChannel
     private ulong _rejected;
     private ulong _coldOpensApplied;
     private ulong _hotOpensApplied;
+    private bool _clientCompletionPending;
+    private int _clientCompletionIndex = -1;
+    private LocalSemanticProofStatus _clientCompletionStatus;
     private bool _retired;
 
     internal LocalQueuedUiChannel(LocalPlayableSessionLimits limits)
@@ -135,7 +138,7 @@ internal sealed class LocalQueuedUiChannel
     {
         lock (_gate)
         {
-            if (_retired)
+            if (_retired || _clientCompletionPending)
             {
                 index = -1;
                 row = null;
@@ -157,14 +160,25 @@ internal sealed class LocalQueuedUiChannel
         {
             if (_retired) return true;
             if ((uint)index >= (uint)_rows.Length || !_queued[index]) return false;
-            LocalUiOperationRow row = _rows[index];
-            if (!_proofs.TryEnqueue(new LocalUiProof(row.OperationId, row.Instance, status)))
-                return false;
-            if (!_ready.TryDequeue(out int actual) || actual != index)
-                throw new InvalidOperationException("The local UI ready queue lost FIFO ownership.");
-            _queued[index] = false;
-            return true;
+            if (_clientCompletionPending)
+            {
+                if (_clientCompletionIndex != index || _clientCompletionStatus != status)
+                    throw new InvalidOperationException(
+                        "The local UI client attempted to replace retained completion debt.");
+            }
+            else
+            {
+                _clientCompletionPending = true;
+                _clientCompletionIndex = index;
+                _clientCompletionStatus = status;
+            }
+            return TryFlushClientCompletionLocked(out _);
         }
+    }
+
+    internal bool TryFlushClientCompletion(out bool published)
+    {
+        lock (_gate) return TryFlushClientCompletionLocked(out published);
     }
 
     internal bool TryTakeProof(out LocalUiProof proof) => _proofs.TryDequeue(out proof);
@@ -206,7 +220,34 @@ internal sealed class LocalQueuedUiChannel
 
     internal void RetireAuthority()
     {
-        lock (_gate) _retired = true;
+        lock (_gate)
+        {
+            _retired = true;
+            _clientCompletionPending = false;
+            _clientCompletionIndex = -1;
+            _clientCompletionStatus = default;
+        }
+    }
+
+    private bool TryFlushClientCompletionLocked(out bool published)
+    {
+        published = false;
+        if (_retired || !_clientCompletionPending) return true;
+        int index = _clientCompletionIndex;
+        if ((uint)index >= (uint)_rows.Length || !_queued[index])
+            throw new InvalidOperationException("The retained local UI completion lost its operation.");
+        LocalUiOperationRow row = _rows[index];
+        if (!_proofs.TryEnqueue(new LocalUiProof(
+                row.OperationId, row.Instance, _clientCompletionStatus)))
+            return false;
+        if (!_ready.TryDequeue(out int actual) || actual != index)
+            throw new InvalidOperationException("The local UI ready queue lost FIFO ownership.");
+        _queued[index] = false;
+        _clientCompletionPending = false;
+        _clientCompletionIndex = -1;
+        _clientCompletionStatus = default;
+        published = true;
+        return true;
     }
 }
 
@@ -391,9 +432,6 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
     private readonly UiClientRuntime _client;
     private readonly Action _detached;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
-    private bool _completionPending;
-    private int _pendingIndex;
-    private LocalSemanticProofStatus _pendingStatus;
     private bool _disposed;
 
     internal LocalQueuedUiClient(
@@ -412,12 +450,8 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
         EnsureOperational();
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumOperations);
         int applied = 0;
-        if (_completionPending)
-        {
-            if (!_channel.TryCompleteClient(_pendingIndex, _pendingStatus)) return 0;
-            _completionPending = false;
-            applied++;
-        }
+        if (!_channel.TryFlushClientCompletion(out bool completionPublished)) return 0;
+        if (completionPublished) applied++;
         while (applied < maximumOperations && _channel.TryPeekClient(out int index, out LocalUiOperationRow? row))
         {
             LocalSemanticProofStatus status = LocalSemanticProofStatus.Applied;
@@ -446,11 +480,7 @@ public sealed class LocalQueuedUiClient : IUiActionSink, IDisposable
             {
                 status = LocalSemanticProofStatus.Rejected;
             }
-            _pendingIndex = index;
-            _pendingStatus = status;
-            _completionPending = true;
             if (!_channel.TryCompleteClient(index, status)) break;
-            _completionPending = false;
             applied++;
         }
         return applied;

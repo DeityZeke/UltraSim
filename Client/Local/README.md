@@ -46,6 +46,12 @@ subscription after distant leave/re-entry. A rejected UI operation instead retir
 and desynchronizes its view, matching the remote UI contract; later operations do not continue
 against unknown client UI state.
 
+UI operation completion debt belongs to the retained local channel, not to its disposable
+`LocalQueuedUiClient` action-sink bridge. Detaching and reattaching that bridge to the same
+`UiClientRuntime` cannot replay an already-applied renderer/model operation while proof publication
+is backpressured. Attaching a different runtime to the live channel is rejected: a different client
+projection requires retirement of the containing local session and its authority-side views.
+
 Public disclosure uses `GameChunkInterestProfile.Default` and the accepted
 `OfflineDirectChunkCadence.EvidenceProfile`. It consumes packet-free Game
 replication semantics directly; it does not scan/copy the complete publication

@@ -59,6 +59,7 @@ public sealed class LocalPlayableSession : IDisposable
     private volatile bool _disposed;
     private volatile bool _running;
     private int _uiAttached;
+    private UiClientRuntime? _uiClientProjection;
     private int _inventoryHotOpen;
     private long _authorityTicks;
 
@@ -286,8 +287,22 @@ public sealed class LocalPlayableSession : IDisposable
         ArgumentNullException.ThrowIfNull(client);
         if (Interlocked.CompareExchange(ref _uiAttached, 1, 0) != 0)
             throw new InvalidOperationException("The local session already has a UI client attached.");
+        bool adoptedProjection = false;
         try
         {
+            UiClientRuntime? projection = Volatile.Read(ref _uiClientProjection);
+            if (projection is null)
+            {
+                projection = Interlocked.CompareExchange(ref _uiClientProjection, client, null);
+                if (projection is null)
+                {
+                    projection = client;
+                    adoptedProjection = true;
+                }
+            }
+            if (!ReferenceEquals(projection, client))
+                throw new InvalidOperationException(
+                    "A local UI bridge replacement must retain the session's Client UI projection.");
             if (standardDefinitionResolver?.Invoke(InventoryDefinitionCacheKey) is
                 CompiledUiDefinition inventory)
             {
@@ -299,6 +314,8 @@ public sealed class LocalPlayableSession : IDisposable
         catch
         {
             ReleaseUiClient();
+            if (adoptedProjection)
+                _ = Interlocked.CompareExchange(ref _uiClientProjection, null, client);
             throw;
         }
     }

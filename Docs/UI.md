@@ -75,9 +75,12 @@ Open/close ownership is transactional at the port boundary:
 - owner-thread shutdown attempts every independently owned resource and reports cleanup failure
   through session fault state rather than throwing out of the background authority thread.
 
-The queued packet-free bridge applies each operation at most once. If its application-proof queue
-is full, it retains only the completed status and retries proof publication; it does not run the
-renderer/model operation again.
+The queued packet-free channel applies each operation at most once. If its application-proof queue
+is full, the channel—not the disposable client bridge—retains the completed status and retries
+proof publication; bridge replacement therefore cannot run the renderer/model operation again.
+A replacement bridge must attach to the same `UiClientRuntime` projection. Replacing that retained
+projection requires retiring the containing local session rather than silently acknowledging views
+that belong to another runtime.
 
 `UiClientRuntime` treats renderer callbacks as a sealed mutation scope. `Create`, `Apply`, and
 `Close` callbacks cannot synchronously open/update/close views, alter the action sink, submit
