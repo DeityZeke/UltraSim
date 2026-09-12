@@ -40,6 +40,28 @@ cadence-due work, history gaps, recovery, and source replacement wake the existi
 machinery. Permanent matched measurements and wake/conservation evidence are recorded in the
 PF4A baseline under `_Benchmarks/Baselines`.
 
+PF4B adds a bounded detailed census around that unchanged path. The server reports delta records,
+revision spans, interest tiers, exact and identity/field overlap with outstanding same-chunk
+deliveries, proof-envelope occupancy, knowledge-advancing versus non-advancing Applied entries,
+proof-negative outcomes, delivery age, and explicit invalidation causes. The client reports proof
+generation, envelope packing/latency, bounded pending depth, potential same-lifetime positive-proof
+subsumption, and received delivery outcomes. Fixed rolling samples and whole-window histograms do
+not retain per-message history. Telemetry Off retains the existing protocol behavior and does not
+decode a queued delta a second time for census work.
+
+The four states remain distinct:
+
+```text
+authoritative current
+delivered/in flight
+client locally applied
+server known applied
+```
+
+A later exact Applied proof for the same application, publication epoch, chunk, and live
+subscription can advance through its own exact ticket and retire older positive delivery debt
+whose truth it covers. Negative proofs remain independent. No optimistic sent cursor is introduced.
+
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
 replication identity, and invalidates old generation-local application facts.

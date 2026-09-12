@@ -26,6 +26,11 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4b-delta-proof-knowledge-efficiency-2026-09-12.json` — bounded
+  Delta-120/Applied-Proof-130 census, exact later-proof knowledge advancement, proof-envelope
+  occupancy, same-chunk outstanding/recovery overlap, matched Moving/Crowd runs, single-hot and
+  multi-hot controls, mixed-chaos soak, actual exported Online canary, and the evidence-backed PF4B
+  optimization disposition without changing wire identity, AOI, or public cadence;
 - `concept-demo-pf4a-quiet-replication-work-2026-09-12.json` — matched repeated and
   ten-minute Quiet-50 before/after evidence for the bounded per-recipient readiness gate,
   Moving/Crowd active controls, a 30-minute mixed-chaos soak, an actual 8-bot + 2-exported-Online

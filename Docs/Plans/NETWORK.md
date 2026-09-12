@@ -2,7 +2,7 @@
 
 Status: **accepted / consumption-ready**, including physical Network capability packaging,
 PF2.5 replication-ownership/observability reconciliation, PF3 authenticated performance policy,
-and PF4A quiet publication-work suppression, as of 2026-09-12.
+PF4A quiet publication-work suppression, and PF4B chunk-knowledge census, as of 2026-09-12.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -25,6 +25,15 @@ in O(1) and skips per-chunk scheduling. Dirty source commits, recipient-interest
 delivery/proof debt, transport/capacity deferral, cadence deadlines, history gaps, recovery, and
 source/epoch replacement remain explicit wake conditions. This is Game replication scheduling;
 the Network kernel and wire protocol are unchanged.
+
+PF4B also leaves that architecture and every wire identity unchanged. Detailed, owner-local
+telemetry now distinguishes message-120 delta production, proof-envelope occupancy, exact
+application-knowledge advancement, outstanding delivery debt, and recovery-enabling overlap. The
+client separately records proof generation/packing and applied/duplicate/superseded outcomes.
+These counters are bounded diagnostics, not another knowledge source: only an exact authenticated
+Applied proof may advance the recipient cursor. The ordinary production path still flushes proofs
+at the next client progress opportunity and bases independently repairable deltas on proven applied
+knowledge.
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.

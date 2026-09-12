@@ -1759,7 +1759,8 @@ then close:
     PF2.5 replication ownership reconciliation + PF3 observability      CLOSED
     PF3 cadence/performance policy                                    CLOSED
     PF4A PF3 evidence integrity + quiet publication-work suppression   CLOSED
-    PF4B Delta 120 / Applied Proof 130 analysis                         NEXT
+    PF4B Delta 120 / Applied Proof 130 analysis                         CLOSED (outcome C)
+    PF4C selected Game bundling / public-tier cadence                   NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

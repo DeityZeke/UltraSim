@@ -80,6 +80,13 @@ counters, and process CPU/RSS/heap/GC/thread context. These are owner-local obse
 only at the cold report boundary. They do not change cadence, public-state ownership, AOI,
 packetization, protocol bytes, or authority policy.
 
+PF4B extends the same synchronized Detailed window with the authoritative publication-source delta
+and each live application's bounded ChunkPublication knowledge census. Reports distinguish
+Delta-120 records/application bytes from Network frame/UDP bytes, Proof-130 entries from envelopes,
+knowledge-advancing Applied entries from non-advancing/negative results, and current/high-water
+delivery debt. Unique-chunk saturation is explicit. These fields are diagnostic snapshots; they do
+not reset or advance application knowledge and do not include HTTP content bytes.
+
 PF3 adds `--authority-hz=20|30|60`, `--maximum-input-hz`, `--recommended-input-hz`,
 `--input-burst`, `--input-burst-window-ms`, and `--network-service-delay-ms`. The authority publishes
 those finite semantics as an exact authenticated `ServerPerformanceProfile/v1` and waits for a fresh

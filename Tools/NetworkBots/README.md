@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -291,3 +291,34 @@ dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerificati
 
 The long matched runs and 30-minute soak are permanent evidence and intentionally are not repeated
 by every repository verification.
+
+## PF4B chunk-knowledge census
+
+Schema v7 (`--checkpoint=PF4B`) preserves PF4A action conservation and adds bounded per-client
+ChunkPublication delivery/proof diagnostics. `proofCensus` records exact generated/queued entries,
+envelopes, status/kind, occupancy, pending depth, queue deferrals, and generation-to-queue latency.
+`deliveryCensus` records applied Delta/Snapshot/Absence and duplicate, superseded, rejected,
+capacity, contradictory, and malformed outcomes. Server accounting records the matching
+per-application Delta-120, Proof-130, knowledge-advancement, and outstanding-ledger census.
+
+Two explicit diagnostic workloads separate temporal and spatial churn:
+
+```bash
+Tools/NetworkBots/run-pf4b-baseline.sh single-hot 300s \
+  /tmp/ultrasim-pf4b-single-hot 50 400504 60s /tmp/ultrasim-pf4b-cache
+
+Tools/NetworkBots/run-pf4b-baseline.sh multi-hot 300s \
+  /tmp/ultrasim-pf4b-multi-hot 50 400505 60s /tmp/ultrasim-pf4b-cache
+```
+
+`single-hot` holds 49 recipient anchors still and keeps one ordinary mover inside the authored flat
+chunk `(0,1)`; every recipient retains that same actor/chunk lifetime. The maintained scenario uses
+50 participants because its selected middle spawn is deliberately inside that authored control
+chunk. `multi-hot` retains distributed ordinary movement. Neither scenario changes AOI, cadence,
+protocol, or authority policy. The focused verifier runs a shorter real-UDP census plus the
+8-bot + 2-actual-exported-Online headless main-loop canary:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4b-only
+```

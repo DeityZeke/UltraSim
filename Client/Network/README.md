@@ -41,6 +41,14 @@ Completion means a later OwnerState carries the command sequence; a transport AC
 as Game completion. The stock `Off` path remains timestamp-dormant, and all hot observations use
 fixed bounded storage with cold immutable snapshots.
 
+PF4B adds window-local `RemoteChunkProofCensusSnapshot` and
+`RemoteChunkDeliveryCensusSnapshot` values at this same boundary. A pending proof retains its exact
+message, live semantic-cache handle, and diagnostic creation timestamp in the existing bounded
+queue. Detailed mode records occupancy, status/kind, queue latency, and potential same-handle
+positive subsumption; it does not compact or delay proofs. Client delivery counters distinguish
+new application from duplicate/superseded/rejected outcomes. Transport accounting remains owned by
+Network and HTTP body/cache accounting remains owned by Content.
+
 PF3 inserts `RemoteServerPerformanceClient` after the authenticated application realm/profile gate
 and before content or guest admission. The finite policy is canonicalized by exact revision/hash,
 automatically applied without user consent, and proved within the fresh application epoch. It owns

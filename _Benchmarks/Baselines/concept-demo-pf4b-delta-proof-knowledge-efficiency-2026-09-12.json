@@ -1,0 +1,258 @@
+{
+  "checkpoint": "PF4B",
+  "capturedUtc": "2026-09-12",
+  "status": "CLOSED — outcome C",
+  "commits": {
+    "exactStartingAndMeasurementBase": "1c7658c1cfd7427a1ea18c693101efc37b1ce4e3",
+    "acceptedCensusImplementation": "34511c3b338da9176a2c874b8c48525e3265f6e1",
+    "acceptedHotWorkloadCorrections": [
+      "ef044a8abe1ce0a5598ed6cbe24cdc1867bd7599",
+      "cb3df7701aeba4408f54369f42bbe4c9dcc32a6c",
+      "0b8218d10f309b3102672158668bb65943ddab83"
+    ],
+    "acceptedPf4bClosure": null,
+    "closureIdentityNote": "The evidence-only follow-up will record the exact preceding closure commit without claiming an impossible self-referential Git identity.",
+    "repairedFeatureCompleteCandidate": "5eec694692df8f85be2d7db215b2642a9ec9061b",
+    "candidateLineageChanged": false,
+    "candidateReason": "PF4B found measurement-harness defects and characterized an optimization tradeoff; it found no product correctness defect and changed no product replication policy. Earlier feature checkpoints remain closed."
+  },
+  "machine": {
+    "operatingSystem": "Linux 7.1.5-1-cachyos x86_64",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.129",
+    "dotnetRuntime": "8.0.29",
+    "godot": "4.7.1.stable.mono",
+    "configuration": "Release",
+    "networkFlavor": "ClientOnly bots/Online; ServerOnly dedicated authority",
+    "stopwatchFrequency": 1000000000
+  },
+  "frozenPolicy": {
+    "dynamicPublicOwner": "ChunkPublication only",
+    "authorityHz": 60,
+    "maximumNetworkServiceIntervalMicroseconds": 2000,
+    "maximumInputHz": 60,
+    "recommendedInputHz": 30,
+    "inputBurstCapacity": 10,
+    "inputBurstWindowMilliseconds": 100,
+    "aoi": "GameChunkInterestProfile.Default",
+    "publicCadence": "OfflineDirectChunkCadence.EvidenceProfile",
+    "content": "same shared warm valid CAS",
+    "unchanged": [
+      "replication ownership",
+      "AOI semantics",
+      "Immediate/Near/Far cadence",
+      "OwnerState cadence",
+      "authority and Network defaults",
+      "message formats and IDs",
+      "delta recovery base",
+      "packet aggregation and compression",
+      "64-participant bound"
+    ]
+  },
+  "measurementSemantics": {
+    "window": "All run counters are deltas across the synchronized post-admission, post-content, post-warmup measurement window.",
+    "delta120": "One independently repairable Game ChunkPublication delta. Application payload bytes exclude Network framing and UDP overhead.",
+    "proof130": "One Game envelope sharing application/publication lineage and carrying 1..40 independently meaningful exact proof entries.",
+    "beforeProofEntryDerivation": "The exact base did not expose the new semantic census. Entry count is decoded algebraically from the canonical message-130 application byte identity: bytes = 17 * envelopes + 34 * entries. No advancement/status value is fabricated for the base.",
+    "physical": "UDP payload and datagram values are the existing PF2 transport counters; HTTP body bytes remain separate.",
+    "timing": "Whole-window percentiles are fixed power-of-two bucket upper bounds; exact maximums are reported separately. Same-host end-to-end proof time is diagnostic monotonic correlation, not cross-machine clock truth.",
+    "detailedScope": "The server's RemoteApplications array describes the live end-window application lifetimes. In the reconnect soak, transport message totals also include the retired old lifetime; both scopes are kept distinct."
+  },
+  "knowledgeModel": [
+    "authoritative current source revision",
+    "exact delivered/in-flight delivery identities",
+    "client locally applied semantic-cache truth",
+    "server-known applied truth advanced only by exact authenticated Applied proof"
+  ],
+  "implementation": {
+    "server": "Owner-local fixed-capacity census on each RemoteChunkWorldStateServer plus cold snapshot aggregation. It measures Delta encoding, outstanding debt, proof processing, status/kind, exact retirement, later-positive retirement, age, interest tier, and bounded unique chunks.",
+    "client": "Existing fixed proof queue retains its exact message, live semantic handle, and optional diagnostic timestamp. Fixed rolling/histogram counters measure generation, queueing, envelope occupancy, queue latency, status/kind, possible positive subsumption, and delivery outcomes.",
+    "source": "The publication store exposes only cumulative commit/revision/history/read/fallback counters; diagnostic reads do not mutate truth or cursor state.",
+    "offMode": "Detailed census work remains dormant at telemetry Off. No per-packet object, dictionary, string formatting, global lock, or global atomic was added.",
+    "productionBehavior": "Immediate proof flushing and deltas based on proven applied knowledge are retained. A later exact same-lineage positive proof may advance knowledge and retire older positive same-chunk debt covered by that truth; negative obligations remain exact and independent."
+  },
+  "exactBaseRuns": {
+    "moving50": {
+      "seed": 400501, "warmupSeconds": 60, "durationMilliseconds": 600296, "authorityTicks": 36018,
+      "participantsStartEnd": [50,50],
+      "delta120": {"messages":10331195,"applicationBytes":1506912494,"frameBytes":1744529979},
+      "proof130": {"envelopes":1796621,"derivedEntries":10331845,"averageEntriesPerEnvelope":5.750707,"fillPercent":14.3768,"applicationBytes":381825287,"frameBytes":423147570},
+      "udp": {"sentBytes":2361225426,"receivedBytes":567217981,"sentDatagrams":11680758,"receivedDatagrams":2614140},
+      "server": {"cpuMilliseconds":250710,"cpuSecondsPerWallSecond":0.4176439623,"workingSetHighWaterBytes":240803840,"managedHeapHighWaterBytes":107460176,"allocatedBytes":2353291816,"gcGen0Gen1Gen2":[47,4,0]},
+      "bot": {"movementAccepted":16500,"chunkCrossings":4361,"distinctChunksVisited":1636,"pumpIntervalMilliseconds":{"p50":2.05,"p95":4.9,"p99":6.2,"max":8.205},"pumpDurationMilliseconds":{"p50":1.0,"p95":3.85,"p99":5.15,"max":7.150},"workingSetHighWaterBytes":775495680,"cpuMilliseconds":325920,"cleanRetirement":true}
+    },
+    "crowd50": {
+      "seed": 400502, "warmupSeconds": 60, "durationMilliseconds": 600321, "authorityTicks": 36020,
+      "participantsStartEnd": [50,50],
+      "delta120": {"messages":7425910,"applicationBytes":1579017477,"frameBytes":1749813407},
+      "proof130": {"envelopes":1800320,"derivedEntries":7425884,"averageEntriesPerEnvelope":4.124758,"fillPercent":10.3119,"applicationBytes":283085496,"frameBytes":324492856},
+      "udp": {"sentBytes":2257943626,"receivedBytes":468961761,"sentDatagrams":8905301,"receivedDatagrams":2591896},
+      "server": {"cpuMilliseconds":242090,"cpuSecondsPerWallSecond":0.4032675852,"workingSetHighWaterBytes":239435776,"managedHeapHighWaterBytes":105380952,"allocatedBytes":2431242368,"gcGen0Gen1Gen2":[49,4,1]},
+      "bot": {"movementAccepted":65900,"chunkCrossings":6684,"distinctChunksVisited":263,"pumpIntervalMilliseconds":{"p50":2.05,"p95":4.1,"p99":4.5,"max":6.672},"pumpDurationMilliseconds":{"p50":1.0,"p95":3.05,"p99":3.45,"max":5.616},"workingSetHighWaterBytes":842158080,"cpuMilliseconds":325100,"cleanRetirement":true}
+    },
+    "mixedChaos50": {
+      "seed": 400503, "warmupSeconds": 60, "durationMilliseconds": 1800327, "authorityTicks": 108022,
+      "participantsStartEnd": [50,50], "applicationLifetimes": 51, "successfulReconnects": 1,
+      "delta120": {"messages":45659596,"applicationBytes":7626333788,"frameBytes":8676504496},
+      "proof130": {"envelopes":5475150,"derivedEntries":45662432,"averageEntriesPerEnvelope":8.339944,"fillPercent":20.8499,"applicationBytes":1645600238,"frameBytes":1771528688},
+      "udp": {"sentBytes":11897077776,"receivedBytes":2567548461,"sentDatagrams":55842006,"receivedDatagrams":12290954},
+      "server": {"cpuMilliseconds":853600,"cpuSecondsPerWallSecond":0.4741360875,"workingSetHighWaterBytes":246697984,"managedHeapHighWaterBytes":100470224,"allocatedBytes":6377477184,"gcGen0Gen1Gen2":[128,12,1]},
+      "bot": {"movementAccepted":54061,"jumpAttemptsAcceptedRejected":[17714,13969,3745],"localChatSubmittedObserved":[1,38],"globalChatSubmittedObserved":[18016,900800],"swordPickupEquipDrop":[1,1,1],"chunkCrossings":16224,"distinctChunksVisited":2051,"nonsenseInputsCommands":[50,0],"faults":0,"pumpIntervalMilliseconds":{"p50":2.35,"p95":6.55,"p99":7.3,"max":14.997},"pumpDurationMilliseconds":{"p50":1.3,"p95":5.45,"p99":6.25,"max":13.942},"workingSetHighWaterBytes":710967296,"cpuMilliseconds":1149430,"cleanRetirement":true}
+    }
+  },
+  "currentCensusRuns": {
+    "moving50": {
+      "seed":400501,"warmupSeconds":60,"durationMilliseconds":600346,"authorityTicks":36021,"participantsStartEnd":[50,50],
+      "publicationSource":{"commits":36021,"publishedChunkRevisions":357024,"snapshotReads":853,"deltaReads":10340154,"snapshotFallbacks":0},
+      "delta120":{"messages":10340147,"records":15497888,"recordsPerDeltaAverage":1.498807,"recordsPerDeltaMaximum":18,"applicationBytes":1514301238,"frameBytes":1752124619,"revisionSpanAverage":108.462851,"revisionSpanMaximum":207855,"tiers":{"immediate":2678786,"near":7652369,"far":8992},"uniqueChunksPerClient":69,"overlappingSameChunkMessages":7722,"overlapApplicationBytesUpperBound":1213016,"exactRepeatedRecords":544,"exactRepeatedRecordBytes":23392,"repeatedEntityIdentities":13388,"repeatedEntityRecordBytes":575684,"repeatedFieldBits":13787,"overlappedRevisionSpan":1170060},
+      "proof130":{"envelopes":1809050,"entries":10341009,"applicationBytes":382348156,"frameBytes":423956306,"averageEntriesPerEnvelope":5.716795,"fillPercent":14.29199,"perClientAverageOccupancyP50P95Max":[5.727786,5.824216,5.928082],"wholeWindowEntryUpperBoundP50P95P99":[7,15,15],"maximumEntries":40,"singleEnvelopesClientObserved":49743,"fullEnvelopesClientObserved":25,"knowledgeAdvancingApplied":10339592,"nonAdvancingApplied":0,"contradictory":93,"rejected":0,"capacityExceeded":0,"lateUnknownAfterLaterRetirement":1324,"exactOutstandingRetired":10339685,"olderPositiveDebtRetiredByLaterTruth":1324},
+      "outstanding":{"sameChunkBeforeQueueAverage":0.001332,"sameChunkBeforeQueueMaximum":13,"ledgerHighWaterP50P95Max":[20,91,108],"proofAgeAuthorityStepsP50P95Max":[2,11,16]},
+      "perClientRates":{"deltaMessagesPerSecondAverageP50P95Max":[344.4729,344.5646,350.5662,355.8581],"deltaApplicationBytesPerSecondAverageP50P95Max":[50447.62,50436.37,51852.91,52675.92],"proofEntriesPerSecondAverageP50P95Max":[344.5016,344.5946,350.5945,355.8848],"proofEnvelopesPerSecondAverageP50P95Max":[60.2669,60.0171,61.6611,62.8121],"worstDeltaClient":33,"worstEnvelopeClient":50},
+      "latency":{"clientDecodeApplyWholeWindowP95MaximumMicroseconds":15,"clientAppliedToProofQueueWholeWindowP95MaximumMicroseconds":63,"clientAppliedToProofQueueExactMaximumMicroseconds":476,"serverDeliveryQueueToProofProcessWholeWindowP95UpperBoundMicroseconds":16383},
+      "clientDelivery":{"appliedDeltas":10335459,"appliedSnapshots":850,"duplicates":1154,"superseded":0,"contradictory":93,"positiveSubsumptionOpportunities":2338,"proofQueueHighWater":64,"networkQueueDeferrals":0},
+      "udp":{"sentBytes":2372107827,"receivedBytes":568287935,"sentDatagrams":11713637,"receivedDatagrams":2624099},
+      "server":{"cpuMilliseconds":253940,"cpuSecondsPerWallSecond":0.4229894094,"workingSetHighWaterBytes":267128832,"managedHeapHighWaterBytes":127761488,"allocatedBytes":2334888336,"gcGen0Gen1Gen2":[47,4,1]},
+      "bot":{"pumpIntervalMilliseconds":{"p50":2.5,"p95":5.55,"p99":6.65,"max":9.532},"pumpDurationMilliseconds":{"p50":1.45,"p95":4.5,"p99":5.6,"max":8.475},"workingSetHighWaterBytes":855863296,"cpuMilliseconds":377730,"cleanRetirement":true}
+    },
+    "crowd50": {
+      "seed":400502,"warmupSeconds":60,"durationMilliseconds":600334,"authorityTicks":36021,"participantsStartEnd":[50,50],
+      "publicationSource":{"commits":36021,"publishedChunkRevisions":204985,"snapshotReads":100,"deltaReads":7390858,"snapshotFallbacks":0},
+      "delta120":{"messages":7390858,"records":20637260,"recordsPerDeltaAverage":2.792269,"recordsPerDeltaMaximum":11,"applicationBytes":1493452536,"frameBytes":1663442270,"revisionSpanAverage":17.730612,"revisionSpanMaximum":147276,"tiers":{"immediate":4495225,"near":2895633,"far":0},"uniqueChunksPerClient":16,"overlappingSameChunkMessages":292,"overlapApplicationBytesUpperBound":77651,"exactRepeatedRecords":30,"exactRepeatedRecordBytes":1290,"repeatedEntityIdentities":1184,"repeatedEntityRecordBytes":50912,"repeatedFieldBits":1241,"overlappedRevisionSpan":8974},
+      "proof130":{"envelopes":1801960,"entries":7390742,"applicationBytes":281918548,"frameBytes":323363628,"averageEntriesPerEnvelope":4.101397,"fillPercent":10.25349,"perClientAverageOccupancyP50P95Max":[4.065357,4.737219,4.751790],"wholeWindowEntryUpperBoundP50P95P99":[7,7,7],"maximumEntries":7,"singleEnvelopesClientObserved":11167,"fullEnvelopesClientObserved":0,"knowledgeAdvancingApplied":7390140,"nonAdvancingApplied":0,"contradictory":581,"rejected":0,"capacityExceeded":0,"lateUnknownAfterLaterRetirement":21,"exactOutstandingRetired":7390721,"olderPositiveDebtRetiredByLaterTruth":21},
+      "outstanding":{"sameChunkBeforeQueueAverage":0.0000395,"sameChunkBeforeQueueMaximum":1,"ledgerHighWaterP50P95Max":[10,11,11],"proofAgeAuthorityStepsP50P95Max":[1,1,1]},
+      "perClientRates":{"deltaMessagesPerSecondAverageP50P95Max":[246.2249,243.1980,285.2545,285.2545],"deltaApplicationBytesPerSecondAverageP50P95Max":[49754.05,49327.02,58614.92,58614.92],"proofEntriesPerSecondAverageP50P95Max":[246.2210,243.1946,285.2495,285.2495],"proofEnvelopesPerSecondAverageP50P95Max":[60.0319,60.0216,60.1299,60.1715],"worstDeltaClient":37,"worstEnvelopeClient":36},
+      "latency":{"clientDecodeApplyWholeWindowP95MaximumMicroseconds":15,"clientAppliedToProofQueueWholeWindowP95MaximumMicroseconds":31,"clientAppliedToProofQueueExactMaximumMicroseconds":311,"serverDeliveryQueueToProofProcessWholeWindowP95UpperBoundMicroseconds":16383},
+      "clientDelivery":{"appliedDeltas":7385840,"appliedSnapshots":100,"duplicates":0,"superseded":0,"contradictory":581,"positiveSubsumptionOpportunities":0,"proofQueueHighWater":7,"networkQueueDeferrals":0},
+      "udp":{"sentBytes":2166437149,"receivedBytes":469928876,"sentDatagrams":8858930,"receivedDatagrams":2611974},
+      "server":{"cpuMilliseconds":247250,"cpuSecondsPerWallSecond":0.4118540679,"workingSetHighWaterBytes":263196672,"managedHeapHighWaterBytes":129855088,"allocatedBytes":2401708312,"gcGen0Gen1Gen2":[48,4,0]},
+      "bot":{"pumpIntervalMilliseconds":{"p50":2.45,"p95":4.45,"p99":4.9,"max":8.0718},"pumpDurationMilliseconds":{"p50":1.4,"p95":3.4,"p99":3.85,"max":5.6927},"workingSetHighWaterBytes":685010944,"cpuMilliseconds":367150,"cleanRetirement":true}
+    },
+    "mixedChaos50": {
+      "seed":400503,"warmupSeconds":60,"durationMilliseconds":1800255,"authorityTicks":108018,"participantsStartEnd":[50,50],"applicationLifetimes":51,"successfulReconnects":1,"freshApplicationAndContentProofLifetimes":51,
+      "publicationSource":{"commits":108018,"publishedChunkRevisions":1571471,"snapshotReads":3153,"deltaReads":45121577,"snapshotFallbacks":0},
+      "delta120":{"liveEndWindowApplications":50,"messages":45119598,"records":89168822,"recordsPerDeltaAverage":1.976277,"recordsPerDeltaMaximum":20,"applicationBytes":7534066382,"transportAllLifetimesMessages":45120635,"transportAllLifetimesApplicationBytes":7534444934,"frameBytes":8572219539,"revisionSpanAverage":114.312026,"revisionSpanMaximum":1261758,"tiers":{"immediate":11085156,"near":34028641,"far":5801},"uniqueChunksPerClient":69,"overlappingSameChunkMessages":404321,"overlapApplicationBytesUpperBound":68768341,"exactRepeatedRecords":31238,"exactRepeatedRecordBytes":1343234,"repeatedEntityIdentities":816776,"repeatedEntityRecordBytes":35121368,"repeatedFieldBits":840321,"overlappedRevisionSpan":109805430},
+      "proof130":{"liveEndWindowEnvelopes":5613351,"liveEndWindowEntries":45122381,"transportAllLifetimesEnvelopes":5613626,"transportAllLifetimesDerivedEntries":45123422,"applicationBytesAllLifetimes":1629627990,"frameBytes":1758741388,"averageEntriesPerEnvelopePerLiveClient":8.050612,"fillPercent":20.12653,"perClientAverageOccupancyP50P95Max":[8.201165,8.361454,8.398153],"wholeWindowEntryUpperBoundP50P95P99":[15,15,15],"maximumEntries":40,"singleEnvelopesClientObserved":116594,"fullEnvelopesClientObserved":2312,"knowledgeAdvancingApplied":45004291,"nonAdvancingApplied":0,"contradictory":1638,"rejected":0,"capacityExceeded":0,"lateUnknownAfterLaterRetirement":116452,"exactOutstandingRetired":45005929,"olderPositiveDebtRetiredByLaterTruth":116452},
+      "outstanding":{"sameChunkBeforeQueueAverage":0.017834,"sameChunkBeforeQueueMaximum":18,"ledgerHighWaterP50P95Max":[98,128,128],"proofAgeAuthorityStepsP50P95Max":[13,25,26]},
+      "perClientRates":{"deltaMessagesPerSecondAverageP50P95Max":[501.2579,501.2962,505.9850,507.0576],"deltaApplicationBytesPerSecondAverageP50P95Max":[83699.99,83639.35,84773.16,85192.56],"proofEntriesPerSecondAverageP50P95Max":[501.2888,501.3262,506.0150,507.0871],"proofEnvelopesPerSecondAverageP50P95Max":[62.3617,60.7703,67.7054,68.5914],"worstDeltaClient":30,"worstEnvelopeLifetime":51},
+      "latency":{"clientDecodeApplyWholeWindowP95MaximumMicroseconds":15,"clientAppliedToProofQueueWholeWindowP95MaximumMicroseconds":63,"clientAppliedToProofQueueExactMaximumMicroseconds":9059,"serverDeliveryQueueToProofProcessWholeWindowP95UpperBoundMicroseconds":16383},
+      "clientDelivery":{"appliedDeltas":45023677,"appliedSnapshots":3107,"appliedAbsences":70,"duplicates":93188,"superseded":0,"contradictory":1638,"positiveSubsumptionOpportunities":202536,"proofQueueHighWater":64,"networkQueueDeferrals":0},
+      "udp":{"sentBytes":11757469523,"receivedBytes":2540969266,"sentDatagrams":55154783,"receivedDatagrams":12205948},
+      "server":{"cpuMilliseconds":870400,"cpuSecondsPerWallSecond":0.4834870616,"workingSetHighWaterBytes":273620992,"managedHeapHighWaterBytes":130022568,"allocatedBytes":6285010944,"gcGen0Gen1Gen2":[127,12,2]},
+      "bot":{"movementAttemptsAccepted":[54025,54025],"jumpAttemptsAcceptedRejected":[17706,13792,3914],"localChatSubmittedObserved":[1,38],"globalChatSubmittedObserved":[18013,900650],"swordPickupEquipDrop":[1,1,1],"chunkCrossings":16009,"distinctChunksVisited":2013,"nonsenseInputsCommands":[50,0],"faults":0,"pumpIntervalMilliseconds":{"p50":2.9,"p95":7.0,"p99":7.7,"max":18.147},"pumpDurationMilliseconds":{"p50":1.85,"p95":5.95,"p99":6.65,"max":17.091},"workingSetHighWaterBytes":864161792,"cpuMilliseconds":1263350,"cleanRetirement":true}
+    }
+  },
+  "matchedComparison": {
+    "policyChange": "none; AFTER adds detailed observation and safe later-positive debt retirement but preserves immediate proof flush and Delta production",
+    "movingPercent":{"deltaMessages":0.0867,"deltaApplicationBytes":0.4903,"proofEnvelopes":0.6918,"proofApplicationBytes":0.1369,"combinedApplicationBytes":0.4189,"combinedUdpPayload":0.4081,"datagrams":0.2997},
+    "crowdPercent":{"deltaMessages":-0.4720,"deltaApplicationBytes":-5.4189,"proofEnvelopes":0.0911,"proofApplicationBytes":-0.4122,"combinedApplicationBytes":-4.6577,"combinedUdpPayload":-3.3202,"datagrams":-0.2287},
+    "chaosPercent":{"deltaMessages":-1.1804,"deltaApplicationBytes":-1.2049,"proofEnvelopes":2.5292,"proofApplicationBytes":-0.9706,"combinedApplicationBytes":-1.1633,"combinedUdpPayload":-1.1489,"datagrams":-1.1334},
+    "interpretation": "Real-time movement/fanout paths are not byte deterministic. With no accepted transmission-policy change, these small differences are workload variation, not claimed savings."
+  },
+  "recoveryEnablingOverlap": {
+    "classification": "An overlapping independently repairable delta remains based on server-known applied truth. OverlapApplicationBytes is a conservative whole-message upper bound; RepeatedEntityRecordBytes is the narrower repeated-record estimate. Neither is called removable waste.",
+    "moving":{"wholeDeltaApplicationPercentUpperBound":0.080104,"repeatedEntityRecordPercent":0.038016,"exactRecordPercent":0.001545},
+    "crowd":{"wholeDeltaApplicationPercentUpperBound":0.005199,"repeatedEntityRecordPercent":0.003409,"exactRecordPercent":0.000086},
+    "chaos":{"wholeDeltaApplicationPercentUpperBound":0.912765,"repeatedEntityRecordPercent":0.466167,"exactRecordPercent":0.017829}
+  },
+  "hotFixtures": {
+    "singleHot50": {
+      "seed":400504,"warmupSeconds":60,"durationMilliseconds":300273,"authorityTicks":18016,"participantsStartEnd":[50,50],
+      "shape":"one bounded ordinary mover in authored flat chunk (0,1), 49 stationary interested recipients; exact actor/chunk/lifetime retained",
+      "publicationSource":{"commits":18016,"publishedChunkRevisions":1802,"snapshotReads":0,"deltaReads":69550,"snapshotFallbacks":0},
+      "delta120":{"messages":69550,"records":69550,"applicationBytes":8693750,"uniqueChunksPerClientMinP50Max":[1,1,1],"overlapMessages":0,"exactRepeatedRecords":0},
+      "proof130":{"envelopes":69550,"entries":69550,"applicationBytes":3547050,"averageEntries":1.0,"fillPercent":2.5,"advancing":69550,"nonAdvancing":0,"maximumEntries":1},
+      "outstandingHighWater":1,"clientProofQueueHighWater":1,"clientQueueDeferrals":0,
+      "udp":{"sentBytes":13822214,"receivedBytes":8384011,"sentDatagrams":74964,"receivedDatagrams":72872},
+      "cleanRetirement":true
+    },
+    "multiHot50": {
+      "seed":400505,"warmupSeconds":60,"durationMilliseconds":300294,"authorityTicks":18018,"participantsStartEnd":[50,50],
+      "shape":"distributed ordinary movers; comparable temporal work spread over independently dirty chunks",
+      "publicationSource":{"commits":18018,"publishedChunkRevisions":175943,"snapshotReads":851,"deltaReads":5088568,"snapshotFallbacks":0},
+      "delta120":{"messages":5088568,"records":7609937,"applicationBytes":744489867,"uniqueChunksPerClientMinP50Max":[66,66,66],"overlapMessages":1370,"exactRepeatedRecords":124},
+      "proof130":{"envelopes":900965,"entries":5089084,"applicationBytes":188345261,"averageEntries":5.64848,"fillPercent":14.1212,"advancing":5088752,"nonAdvancing":0,"maximumEntries":40},
+      "outstandingHighWater":97,"clientProofQueueHighWater":64,"clientQueueDeferrals":0,
+      "udp":{"sentBytes":1166862577,"receivedBytes":280986230,"sentDatagrams":5766580,"receivedDatagrams":1307399},
+      "cleanRetirement":true
+    }
+  },
+  "proofFrequencyFinding": {
+    "answer": "Message 130 remains near 60 envelopes/client/second because the authority normally publishes at 60 Hz, each wave yields at least one locally applied chunk proof, and the client immediately flushes all currently pending same-lineage entries during that same TryProgress wave. The envelope already packs spatial siblings from the wave; it does not wait across authority waves.",
+    "notCausedBy": ["Network queue backpressure (zero observed deferrals)","a one-proof wire format (capacity is 40)","a missing envelope implementation"],
+    "evidence": "Moving averaged 60.267 envelopes/client/s with 5.717 entries/envelope; Crowd 60.032 with 4.101; Chaos 62.362 with 8.051. The single-hot control was one proof per changed-wave/recipient by construction."
+  },
+  "boundedDelayExperiment": {
+    "scope": "Throwaway detached worktree only; no delay code entered main.",
+    "configuration": "single-hot 50, seed 400506, 60 s warmup, nominal 120 s measured, same cache/profile/machine",
+    "zeroDelay": {"durationMilliseconds":120233,"deltaMessages":27825,"deltaApplicationBytes":3478125,"deltaFrameBytes":4118100,"proofEnvelopes":27825,"proofEntries":27825,"proofApplicationBytes":1419075,"proofFrameBytes":2059050,"udpSentReceivedBytes":[5530149,3354330],"udpSentReceivedDatagrams":[29994,29156],"outstandingHighWater":1,"maximumProofAgeAuthoritySteps":0,"cleanRetirement":true},
+    "oneAuthorityInterval17ms": {"durationMilliseconds":120227,"deltaMessages":31731,"deltaApplicationBytes":3966375,"deltaFrameBytes":4696188,"overlapMessages":10356,"exactRepeatedRecords":156,"proofEnvelopes":21406,"proofEntries":31731,"proofApplicationBytes":1442756,"proofFrameBytes":1935094,"udpSentReceivedBytes":[6295631,2948035],"udpSentReceivedDatagrams":[34004,22737],"outstandingHighWater":2,"maximumProofAgeAuthoritySteps":1,"maximumClientProofQueueLatencyMicroseconds":19261,"cleanRetirement":true},
+    "oneIntervalPercentEffect":{"proofEnvelopes":-23.068,"deltaMessages":14.038,"combinedDeltaProofApplicationBytes":10.46,"combinedDeltaProofFrameBytes":7.35,"combinedUdpPayloadBytes":4.05},
+    "twoAuthorityIntervals34ms": {"synchronizedWindowRan":true,"measurementAccepted":false,"reason":"Delayed knowledge created a debt/service feedback spiral during the run: maximum bot service interval reached 338.97 ms and the designated source failed the retained chunk/lifetime invariant at validation. The resulting counters are not admitted as a matched one-hot measurement. All 50 bots nevertheless retired cleanly."},
+    "disposition": "REJECTED. Fewer proof envelopes do not compensate for older server-known truth, larger/more Delta-120 repair coverage, increased combined traffic, debt, and latency. Immediate flush remains production policy."
+  },
+  "optimizationLadder": {
+    "pf4b0Census": "accepted",
+    "laterExactPositiveServerRetirement": "accepted after hostile timeline tests; advances only through its own validated ticket and retires only older covered positive same-lineage debt",
+    "unsentClientPositiveCompaction": "skipped: Moving had 2,338 opportunities across 10,337,556 generated entries, Crowd zero across 7,386,521, Chaos 202,536 across 45,121,680; immediate queueing leaves no material client-local stage, and negatives are not eligible",
+    "proofDelay": "17 ms and 34 ms evaluated in a throwaway worktree and rejected",
+    "preTransportDeltaCompaction": "skipped: the selected adapter materializes one self-repairing delta from the proven cursor and immediately calls Network TryQueue; no replaceable unsent Game stage exists",
+    "acceptedWireOptimization": false,
+    "outcome": "C"
+  },
+  "timelineAndSafety": {
+    "timeline":"known revision 1; source A revision 2; source B revision 3; exact deliveries 1/2; client applies A/B; proof B arrives; server advances to 3; retires exact B plus covered positive A",
+    "negativeControl":"a later negative proof retires only its exact delivery and leaves the earlier positive obligation intact",
+    "hostileFences":["application session","publication epoch","live subscription handle/chunk","exact delivery ID","kind/status/revision","future/stale/malformed proof rejection"],
+    "maintainedMatrix":["lost/duplicate/reordered Delta","lost/duplicate/delayed whole Proof envelope","temporary transport backpressure","proof queue and outstanding capacity pressure","AOI leave/re-entry","source/publication replacement","server generation/reconnect epoch replacement","history-floor overtake","oversize delta","contradictory/rejected delivery","snapshot loss/reorder/duplication/timeout/cancel"],
+    "focusedResult":"141 Game Replication tests, 71 Network application tests plus accepted dependent suites, 30 Client tests, and 17 bot harness tests passed; warmed allocation gates remained zero."
+  },
+  "snapshotAndHistory": {
+    "baseMovingBeginSegmentCommitCancel":[650,650,650,0],
+    "currentMovingBeginSegmentCommitCancel":[850,850,850,0],
+    "baseCrowdBeginSegmentCommitCancel":[200,200,200,0],
+    "currentCrowdBeginSegmentCommitCancel":[100,100,100,0],
+    "baseChaosBeginSegmentCommitCancel":[3161,3161,3161,0],
+    "currentChaosBeginSegmentCommitCancel":[3111,3111,3111,0],
+    "interpretation":"Matched path variation changed initial/current subscription snapshot count; no run had cancel, timeout, source history invalidation, or snapshot fallback. Maintained forced history-loss and impaired snapshot tests converged."
+  },
+  "benchmark": {
+    "command":"N1 benchmark, Release, warmups=4 samples=15 rounds=64 diagnosticRecipients=64 mixedCadenceRecipients=32 roamingSteps=1024 populations=1,32",
+    "baseWorktreeNote":"The benchmark-only Network.Testing reference already accepted by PF4B was applied locally to the detached base benchmark project so the exact base source could build after the earlier testing split; production code was unchanged.",
+    "before":{"cadencePassP95Nanoseconds":38612.891,"deltaEncodeP95Nanoseconds":17582.209,"deltaDecodeP95Nanoseconds":18021.852,"singleProofDecodeP95Nanoseconds":59.961,"maximumAllocatedBytes":0},
+    "after":{"cadencePassP95Nanoseconds":37666.969,"deltaEncodeP95Nanoseconds":17868.416,"deltaDecodeP95Nanoseconds":18109.840,"singleProofDecodeP95Nanoseconds":57.049,"proofEnvelope40EntriesBytes":1377,"proofEnvelopeEncodeP95Nanoseconds":1525.885,"proofEnvelopeDecodeP95Nanoseconds":2609.875,"maximumAllocatedBytes":0},
+    "commonPercent":{"cadencePass":-2.449,"deltaEncode":1.628,"deltaDecode":0.488,"singleProofDecode":-4.858},
+    "interpretation":"Common warmed measurements remained within ordinary run noise and allocation-free. The new exact full-envelope codec probes are also allocation-free. Network secure transport/recovery evidence remains present in the same N1 benchmark report; PF4B changed no Network framing code."
+  },
+  "message129Audit": {
+    "answer":"Yes, message 129 can already envelope independently fenced Snapshot/Delta/Absence chunk publications and the current client can apply it. It is not a drop-in transport aggregation switch: the selected ChunkPublication owner must schedule bounded recipient-specific Game bundles, respect MTU/record limits and Immediate/Near/Far eligibility, and retain each entry's independent delivery/proof/recovery identity.",
+    "recommendation":"Evaluate message 129 as PF4C together with selected-profile public-tier cadence. Keep it distinct from generic Network multi-frame aggregation."
+  },
+  "nativeExportedCanary": {
+    "status": "PASS",
+    "composition": "one ServerOnly dedicated authority + 8 ClientOnly bots + two separate actual exported Online headless main loops, X and Y",
+    "warmupSeconds": 60,
+    "measurementMilliseconds": 300031,
+    "serverGeneration": 1,
+    "connectionsAndParticipantsStartEnd": [10,10,10,10],
+    "connectionLifetimes": 11,
+    "joinsLeaves": [11,11],
+    "bots": {"applicationSessions":9,"successfulReconnects":1,"freshProofLifetimes":9,"movementAccepted":1530,"jumpsAcceptedRejected":[378,100],"globalChatSubmittedObserved":[461,3688],"swordPickupEquipDrop":[1,1,1],"chunkCrossings":414,"distinctChunksVisited":126,"nonsenseInputsCommands":[8,0],"faults":0,"cleanRetirement":true},
+    "nativeAlice": {"applicationSessionEpoch":8811327321747973807,"body":"HumanFemale","healthy":true,"headlessExport":true,"renderFrames":43511,"frameDurationP95Microseconds":2145,"actorRootsHighWater":11,"nameplatesHighWater":11,"overheadHighWater":1,"renderedChunksHighWater":9,"chatOccurrencesApplied":462,"uiApplies":300,"proofEntriesEnvelopes":[42768,17506],"proofQueueHighWater":6,"contentFilesBodyBytes":[6,7669828]},
+    "nativeBob": {"applicationSessionEpoch":16869477353451014107,"body":"HumanMale","healthy":true,"headlessExport":true,"renderFrames":43510,"frameDurationP95Microseconds":2170,"actorRootsHighWater":11,"nameplatesHighWater":11,"overheadHighWater":1,"renderedChunksHighWater":9,"chatOccurrencesApplied":462,"uiApplies":300,"proofEntriesEnvelopes":[42767,17503],"proofQueueHighWater":6,"contentFilesBodyBytes":[6,7669828]},
+    "wire": {"delta120MessagesApplicationFrameBytes":[424155,56759644,66515209],"proof130EnvelopesApplicationFrameBytes":[175102,17413508,21440854],"udpSentReceivedBytes":[103619362,33020744],"udpSentReceivedDatagrams":[553612,219502],"httpBodyBytesDuringMeasuredWindow":0,"physicalAndLogicalReconciled":true},
+    "server": {"authorityTicks":18004,"cpuMilliseconds":21610,"cpuSecondsPerWallSecond":0.0720258907,"workingSetHighWaterBytes":226295808,"managedHeapHighWaterBytes":70873016,"allocatedBytes":394466568,"gcGen0Gen1Gen2":[9,2,1],"participantsAfterShutdown":0,"sessionsAfterShutdown":0,"cleanRetirement":true},
+    "botHost": {"cpuMilliseconds":56200,"workingSetHighWaterBytes":239038464,"measuredPumpIntervalMilliseconds":{"p50":1.25,"p95":1.5,"p99":1.6,"max":16.91481},"measuredPumpDurationMilliseconds":{"p50":0.2,"p95":0.4,"p99":0.55,"max":15.859661}},
+    "productInspection": "Actual exported Online artifact retained its accepted ClientOnly/no-local-authority/no-bundled-playable-content closure; both native clients used the same production accounting path as bots."
+  },
+  "verification": {
+    "pf4bFocused": "PASS: 50-client real-UDP single-hot census plus 8 bots + 2 actual exported Online headless main loops for 60 s warmup and 300 s measurement",
+    "canonicalRelease": "PENDING",
+    "worktree": "PENDING final evidence commit"
+  },
+  "closure": {
+    "outcome":"C — no safe local knowledge optimization was worth its complexity",
+    "why":"Proof 130 already packs each publication wave. Immediate exact proof keeps the proven cursor current; intentional delay reduced envelopes but increased independently repairable Delta work and combined wire cost. Repeated recovery coverage was small in ordinary Moving/Crowd and bounded/meaningful under Chaos.",
+    "next":"PF4C — characterize/experiment with selected-profile Game message-129 bundling and public Immediate/Near/Far cadence. Do not change ownership, AOI, authority cadence, Network aggregation, compression, or the 64-participant bound without its own evidence."
+  }
+}

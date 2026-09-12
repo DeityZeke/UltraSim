@@ -7,7 +7,8 @@ current product's replication ownership and completes PF3 observability without 
 PF3 now closes render/input/submission/authority/Network clock separation, authenticated bounded
 performance policy, and real authority-side input-rate enforcement. PF4 measured optimization is
 now active: PF4A closes evidence-conserving bot action outcomes and quiet
-`ChunkPublication` work suppression; PF4B Delta/Applied-Proof analysis is next.
+`ChunkPublication` work suppression; PF4B closes the bounded Delta/Applied-Proof knowledge census
+without accepting a speculative local knowledge optimization.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1725,11 +1726,31 @@ PF4A measurements are recorded separately under `_Benchmarks/Baselines`.
 
 ## PF4B — Delta 120 / Applied Proof 130 optimization
 
-**Status: NEXT.** Jointly measure new truth versus redundant resend, latest-state coalescing, and
-compact proof acknowledgement without weakening `SENT != KNOWN`. Loss, reordering, reconnect,
-history recovery, and Immediate/Near/Far cadence behavior are mandatory controls. Do not infer
-permission to change AOI, ownership, public cadence, aggregation, compression, or wire identity
-from PF4A.
+**Status: CLOSED — outcome C.** PF4B adds an exact bounded census of message-120 delta records,
+revision spans, tier, outstanding same-chunk overlap, proof-envelope packing, proof status/kind,
+knowledge advancement, client supersession, and delivery-debt age/retirement. The four concepts
+remain distinct: authoritative current, delivered/in-flight, client locally applied, and server
+known applied.
+
+The focused timeline proves that a later exact positive proof for the same application,
+publication epoch, live subscription handle, and chunk can advance knowledge and retire older
+subsumed positive delivery debt. It also proves a later negative proof retires only its exact debt
+and cannot erase an older positive obligation. Production census found no material unsent positive
+proof queue to compact: the client normally queues a proof in the same progress wave which applies
+the delta. Proof 130 is already a bounded 40-entry envelope, but ordinary waves contain only the
+currently applied chunks; deliberately delaying proof would age the proven cursor and manufacture
+more independently repairable Delta-120 overlap. No delay was accepted.
+
+There is likewise no replaceable pre-transport Game delta stage: the selected adapter materializes
+one self-repairing delta from the proven cursor and immediately offers it to Network. Message 129
+can envelope independently fenced chunk publications, but composing that codec with the selected
+`ChunkPublication` owner requires an explicit bounded Game scheduling/MTU experiment. That is a
+clean PF4C candidate, alongside public-tier cadence characterization; it is not a PF4B wire change.
+
+PF4B changes no AOI, ownership, cadence, aggregation, compression, packet format, or participant
+bound. Loss, reordering, reconnect, history recovery, and negative-proof behavior remain covered by
+the maintained N1.2/N1.3 matrix and the new later-proof test. Exact long-window and exported-product
+results are recorded in the PF4B baseline.
 
 ## PF4 — measured bandwidth/CPU optimization campaign
 
@@ -1893,8 +1914,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 14. Define/advertise/enforce the bounded Server Performance Profile. **CLOSED — PF3**
 15. Run mismatched-cadence correctness matrix. **CLOSED — PF3**
 16. Reconcile PF3 action accounting and suppress provably quiet publication work. **CLOSED — PF4A**
-17. Jointly evaluate Chunk Delta 120 and Chunk Applied Proof 130. **NEXT — PF4B**
-18. Evaluate input/owner/public cadence reductions only from matched evidence.
+17. Jointly evaluate Chunk Delta 120 and Chunk Applied Proof 130. **CLOSED — PF4B outcome C**
+18. Evaluate selected-profile Game bundling and public-tier cadence only from matched evidence. **NEXT — PF4C**
 19. Evaluate unreliable frame aggregation.
 20. Measure dense vs distributed AOI/fanout.
 21. Evaluate selective compression only where payload shape justifies it.
