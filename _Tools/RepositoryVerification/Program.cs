@@ -222,6 +222,143 @@ if (options.Pf4aOnly)
     return 0;
 }
 
+if (options.Pf4bOnly)
+{
+    if (options.SkipGodot)
+        throw new ArgumentException("--pf4b-only requires the actual exported Online product.");
+    foreach (string project in new[]
+             {
+                 "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
+                 "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+                 "_Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj",
+                 "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
+             })
+    {
+        var command = new List<string>
+        {
+            "run", "--project", project, "-c", options.Configuration,
+        };
+        if (project.Contains("NetworkBots", StringComparison.Ordinal))
+            command.Add("-p:UltraSimNetworkFlavor=ClientOnly");
+        Run(root, "dotnet", command);
+    }
+    VerifyPf4bKnowledgeCensus(root, options.Configuration);
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        VerifyPf2MixedExportedAccountingSwarm(
+            root, options.Configuration, product.Executable,
+            detailedTelemetry: true,
+            warmupSeconds: options.Pf3NativeWarmupSeconds,
+            measurementSeconds: options.Pf3NativeMeasurementSeconds,
+            evidenceOutputDirectory: options.Pf3NativeEvidenceOutputDirectory,
+            telemetryCheckpoint: "PF4B");
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope))
+            Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine("PASS PF4B focused verification");
+    return 0;
+}
+
+static void VerifyPf4bKnowledgeCensus(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "build", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ServerOnly",
+    ]);
+    Run(root, "dotnet",
+    [
+        "build", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ClientOnly",
+    ]);
+    string parent = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf4b-knowledge-census");
+    if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+    Directory.CreateDirectory(parent);
+    string output = Path.Combine(parent, "run");
+    string cache = Path.Combine(parent, "cache");
+    try
+    {
+        _ = RunCaptured(
+            root,
+            Path.Combine(root, "Tools", "NetworkBots", "run-pf4b-baseline.sh"),
+            ["single-hot", "15s", output, "8", "400504", "5s", cache],
+            240_000);
+        using JsonDocument botDocument = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(output, "bot-summary.json")));
+        JsonElement bot = botDocument.RootElement;
+        if (!bot.GetProperty("passed").GetBoolean() ||
+            bot.GetProperty("checkpoint").GetString() != "PF4B" ||
+            bot.GetProperty("schemaVersion").GetInt32() != 7 ||
+            !bot.GetProperty("cleanRetirement").GetBoolean())
+            throw new InvalidOperationException("The PF4B client census did not retire cleanly.");
+
+        ulong generated = 0, queued = 0, envelopes = 0;
+        foreach (JsonElement client in bot.GetProperty("clientTelemetry").EnumerateArray())
+        {
+            JsonElement proof = client.GetProperty("client").GetProperty("world")
+                .GetProperty("proofCensus");
+            generated += proof.GetProperty("entriesGenerated").GetUInt64();
+            queued += proof.GetProperty("entriesQueued").GetUInt64();
+            envelopes += proof.GetProperty("envelopesQueued").GetUInt64();
+            if (proof.GetProperty("queueCurrent").GetInt32() != 0 ||
+                proof.GetProperty("queueHighWater").GetInt32() >
+                    proof.GetProperty("queueCapacity").GetInt32())
+                throw new InvalidOperationException("A PF4B proof queue did not remain bounded.");
+        }
+        if (generated == 0 || generated != queued || envelopes == 0 || envelopes > queued)
+            throw new InvalidOperationException("PF4B client proof conservation failed.");
+
+        using JsonDocument accountingDocument = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(output, "accounting-summary.json")));
+        JsonElement accounting = accountingDocument.RootElement;
+        ulong serverEntries = 0, advancements = 0, deltaMessages = 0;
+        foreach (JsonElement application in
+                 accounting.GetProperty("RemoteApplications").EnumerateArray())
+        {
+            JsonElement knowledge = application.GetProperty("Timing")
+                .GetProperty("Replication").GetProperty("Knowledge");
+            JsonElement proof = knowledge.GetProperty("Proof");
+            JsonElement delta = knowledge.GetProperty("Delta");
+            ulong entries = proof.GetProperty("EntriesReceived").GetUInt64();
+            ulong applied = proof.GetProperty("AppliedEntries").GetUInt64();
+            ulong nonApplied = proof.GetProperty("RejectedEntries").GetUInt64() +
+                proof.GetProperty("CapacityExceededEntries").GetUInt64() +
+                proof.GetProperty("ContradictoryEntries").GetUInt64();
+            ulong malformed = proof.GetProperty("MalformedOrUnknownEntries").GetUInt64();
+            ulong advancing = proof.GetProperty("KnowledgeAdvancingEntries").GetUInt64();
+            ulong nonAdvancing = proof.GetProperty("NonAdvancingAppliedEntries").GetUInt64();
+            if (entries != applied + nonApplied + malformed ||
+                applied != advancing + nonAdvancing)
+                throw new InvalidOperationException("PF4B server proof census did not reconcile.");
+            serverEntries += entries;
+            advancements += advancing;
+            deltaMessages += delta.GetProperty("Messages").GetUInt64();
+            if (delta.GetProperty("UniqueChunkCensusOverflowed").GetBoolean())
+                throw new InvalidOperationException("The PF4B unique-chunk census saturated.");
+            if (knowledge.GetProperty("Outstanding").GetProperty("HighWater").GetInt32() > 128)
+                throw new InvalidOperationException("The PF4B delivery ledger exceeded its bound.");
+        }
+        if (serverEntries == 0 || advancements != serverEntries ||
+            accounting.GetProperty("AuthoritativePublications")
+                .GetProperty("PublishedChunkRevisions").GetUInt64() == 0)
+            throw new InvalidOperationException("PF4B server knowledge telemetry was incomplete.");
+        Console.WriteLine(
+            $"PASS PF4B_KnowledgeCensus clients=8 generated={generated} " +
+            $"envelopes={envelopes} advancements={advancements} deltas={deltaMessages}");
+    }
+    finally
+    {
+        if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+    }
+}
+
 static void VerifyPf4aQuietReadiness(string root, string configuration)
 {
     Run(root, "dotnet",
@@ -1569,7 +1706,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"--ready-file={botReady}", $"--release-file={botRelease}",
             $"--summary-file={botSummary}", "--admission-stagger-ms=100",
             $"--telemetry={(detailedTelemetry ? "Detailed" : "Off")}",
-            telemetryCheckpoint is "PF3" or "PF4A" ? $"--checkpoint={telemetryCheckpoint}" :
+            telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" ? $"--checkpoint={telemetryCheckpoint}" :
                 detailedTelemetry ? "--checkpoint=PF2.5" : "--checkpoint=PF2",
         ], clientTimeoutMilliseconds));
         aliceTask = Task.Run(() => RunCaptured(
@@ -1636,13 +1773,14 @@ static void VerifyPf2MixedExportedAccountingSwarm(
 
         File.WriteAllText(botRelease, "release\n");
         string botOutput = botsTask.GetAwaiter().GetResult();
-        string expectedBotCheckpoint = telemetryCheckpoint is "PF3" or "PF4A"
+        string expectedBotCheckpoint = telemetryCheckpoint is "PF3" or "PF4A" or "PF4B"
             ? telemetryCheckpoint
             : detailedTelemetry ? "PF2.5" : "PF2";
         int expectedBotSchema = expectedBotCheckpoint switch
         {
             "PF3" => 5,
             "PF4A" => 6,
+            "PF4B" => 7,
             "PF2.5" => 4,
             _ => 3,
         };
@@ -1676,7 +1814,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             !bot.GetProperty("cleanRetirement").GetBoolean())
             throw new InvalidOperationException(
                 "The PF2 client accounting/reconnect/retirement contract did not hold.");
-        if (expectedBotCheckpoint == "PF4A" &&
+        if (expectedBotCheckpoint is "PF4A" or "PF4B" &&
             bot.GetProperty("actionOutcomes").EnumerateArray().Any(static outcome =>
                 !outcome.GetProperty("conserved").GetBoolean() ||
                 !outcome.GetProperty("terminal").GetBoolean() ||
@@ -3453,6 +3591,7 @@ internal sealed record VerificationOptions(
     bool Pf2Only,
     bool Pf25Only,
     bool Pf4aOnly,
+    bool Pf4bOnly,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -3471,7 +3610,7 @@ internal sealed record VerificationOptions(
     internal static VerificationOptions Parse(string[] arguments)
     {
         bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
-            pf3Only = false, pf3NativeOnly = false, pf4aOnly = false,
+            pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -3489,6 +3628,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf3-only") pf3Only = true;
             else if (argument == "--pf3-native-only") pf3NativeOnly = true;
             else if (argument == "--pf4a-only") pf4aOnly = true;
+            else if (argument == "--pf4b-only") pf4bOnly = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -3506,6 +3646,10 @@ internal sealed record VerificationOptions(
                 pf3NativeWarmupSeconds = int.Parse(
                     argument["--pf4a-native-warmup-seconds=".Length..],
                     System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf4b-native-warmup-seconds=", StringComparison.Ordinal))
+                pf3NativeWarmupSeconds = int.Parse(
+                    argument["--pf4b-native-warmup-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
             else if (argument.StartsWith("--pf3-native-measurement-seconds=", StringComparison.Ordinal))
                 pf3NativeMeasurementSeconds = int.Parse(
                     argument["--pf3-native-measurement-seconds=".Length..],
@@ -3514,12 +3658,19 @@ internal sealed record VerificationOptions(
                 pf3NativeMeasurementSeconds = int.Parse(
                     argument["--pf4a-native-measurement-seconds=".Length..],
                     System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf4b-native-measurement-seconds=", StringComparison.Ordinal))
+                pf3NativeMeasurementSeconds = int.Parse(
+                    argument["--pf4b-native-measurement-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
             else if (argument.StartsWith("--pf3-native-evidence-output=", StringComparison.Ordinal))
                 pf3NativeEvidenceOutputDirectory =
                     argument["--pf3-native-evidence-output=".Length..];
             else if (argument.StartsWith("--pf4a-native-evidence-output=", StringComparison.Ordinal))
                 pf3NativeEvidenceOutputDirectory =
                     argument["--pf4a-native-evidence-output=".Length..];
+            else if (argument.StartsWith("--pf4b-native-evidence-output=", StringComparison.Ordinal))
+                pf3NativeEvidenceOutputDirectory =
+                    argument["--pf4b-native-evidence-output=".Length..];
             else if (argument.StartsWith("--pf3-native-a=", StringComparison.Ordinal))
                 pf3NativeAliceRenderMode = argument["--pf3-native-a=".Length..];
             else if (argument.StartsWith("--pf3-native-b=", StringComparison.Ordinal))
@@ -3528,10 +3679,11 @@ internal sealed record VerificationOptions(
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly) && architectureOnly)
+        if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly || pf4bOnly) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
-            (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) > 1)
+            (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
+            (pf4bOnly ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -3552,9 +3704,10 @@ internal sealed record VerificationOptions(
         bool hasPf3NativeOption = pf3NativeWarmupSeconds != 5 ||
             pf3NativeMeasurementSeconds != 20 || pf3NativeEvidenceOutputDirectory is not null ||
             pf3NativeAliceRenderMode != "headless" || pf3NativeBobRenderMode != "headless";
-        if (hasPf3NativeOption && !pf3Only && !pf3NativeOnly && !pf4aOnly)
-            throw new ArgumentException("Native PF options require --pf3-only, --pf3-native-only, or --pf4a-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf3Only, pf3NativeOnly,
+        if (hasPf3NativeOption && !pf3Only && !pf3NativeOnly && !pf4aOnly && !pf4bOnly)
+            throw new ArgumentException(
+                "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, or --pf4b-only.");
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,
             pf25EvidenceOutputDirectory, pf3NativeWarmupSeconds,

@@ -838,12 +838,18 @@ public partial class ClientHost
         if (path is null) return;
         _remoteSession!.TryGetTelemetrySnapshot(out NetworkServiceTimingSnapshot network);
         string checkpoint = ReadArgument("--telemetry-checkpoint=") ?? "PF2.5";
-        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A"))
+        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B"))
             throw new InvalidOperationException(
-                "--telemetry-checkpoint must be PF2.5, PF3, or PF4A.");
+                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, or PF4B.");
         var summary = new
         {
-            SchemaVersion = checkpoint switch { "PF3" => 2, "PF4A" => 3, _ => 1 },
+            SchemaVersion = checkpoint switch
+            {
+                "PF3" => 2,
+                "PF4A" => 3,
+                "PF4B" => 4,
+                _ => 1,
+            },
             Checkpoint = checkpoint,
             Product = CompiledEdition,
             Guest = playable.Session.Playable.GuestIdentity.DisplayName,

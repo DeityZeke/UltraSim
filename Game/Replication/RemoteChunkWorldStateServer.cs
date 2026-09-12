@@ -68,7 +68,74 @@ public readonly record struct RemoteChunkReplicationTimingSnapshot(
     GameTimingDistribution QueueDrain,
     GameTimingDistribution ApplicationProof,
     OfflineDirectChunkReconcileAttribution ReconcileAttribution,
-    RemoteChunkReplicationWorkSnapshot Work);
+    RemoteChunkReplicationWorkSnapshot Work,
+    RemoteChunkKnowledgeCensusSnapshot Knowledge);
+
+/// <summary>PF4B bounded census of Delta-120 production for one recipient lifetime/window.</summary>
+public readonly record struct RemoteChunkDeltaCensusSnapshot(
+    ulong Messages,
+    ulong ApplicationPayloadBytes,
+    ulong Records,
+    ulong ImmediateMessages,
+    ulong NearMessages,
+    ulong FarMessages,
+    int UniqueChunks,
+    bool UniqueChunkCensusOverflowed,
+    ulong OverlappingSameChunkMessages,
+    ulong OverlappingApplicationPayloadBytes,
+    ulong SameChunkMessagesInOneAuthorityStep,
+    ulong ExactRepeatedRecords,
+    ulong ExactRepeatedRecordBytes,
+    ulong RepeatedEntityIdentities,
+    ulong RepeatedEntityRecordBytes,
+    ulong RepeatedFieldBits,
+    ulong OverlappedRevisionSpan,
+    GameValueDistribution RecordsPerDelta,
+    GameValueDistribution RevisionSpan,
+    GameValueDistribution SameChunkOutstandingBeforeQueue);
+
+/// <summary>PF4B bounded census of Proof-130 processing and actual knowledge advancement.</summary>
+public readonly record struct RemoteChunkProofCensusSnapshot(
+    ulong EnvelopesReceived,
+    ulong LegacyProofMessagesReceived,
+    ulong EnvelopeApplicationPayloadBytes,
+    ulong EntriesReceived,
+    ulong AppliedEntries,
+    ulong RejectedEntries,
+    ulong CapacityExceededEntries,
+    ulong ContradictoryEntries,
+    ulong DeltaEntries,
+    ulong SnapshotEntries,
+    ulong AbsenceEntries,
+    ulong KnowledgeAdvancingEntries,
+    ulong NonAdvancingAppliedEntries,
+    ulong ExactOutstandingRetired,
+    ulong SupersededOutstandingRetired,
+    ulong MalformedOrUnknownEntries,
+    GameValueDistribution EntriesPerEnvelope,
+    GameValueDistribution DeliveryAgeAuthoritySteps,
+    GameTimingDistribution DeliveryQueuedToProofProcessed);
+
+/// <summary>PF4B bounded current and window ledger observations.</summary>
+public readonly record struct RemoteChunkOutstandingCensusSnapshot(
+    int Current,
+    int HighWater,
+    int CurrentChunksWithMultipleDeliveries,
+    int CurrentMaximumPerChunk,
+    ulong CurrentOldestAgeAuthoritySteps,
+    ulong InvalidatedByAoiLeave,
+    ulong InvalidatedBySourceReplacement,
+    ulong InvalidatedByRecovery,
+    ulong InvalidatedByLaterAppliedTruth);
+
+/// <summary>
+/// Read-only knowledge census. Physical UDP/frame accounting remains owned by Network; these are
+/// Game-level messages, records, exact delivery debt, and application-proof effects.
+/// </summary>
+public readonly record struct RemoteChunkKnowledgeCensusSnapshot(
+    RemoteChunkDeltaCensusSnapshot Delta,
+    RemoteChunkProofCensusSnapshot Proof,
+    RemoteChunkOutstandingCensusSnapshot Outstanding);
 
 /// <summary>Measurement-window work/debt attribution for the selected chunk adapter.</summary>
 public readonly record struct RemoteChunkReplicationWorkSnapshot(
@@ -130,6 +197,17 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private readonly GameOperationTimingWindow _scheduleTiming = new();
     private readonly GameOperationTimingWindow _progressTiming = new();
     private readonly GameOperationTimingWindow _proofTiming = new();
+    private readonly GameOperationTimingWindow _deliveryProofLatency = new();
+    private readonly GameValueDistributionWindow _deltaRecords = new();
+    private readonly GameValueDistributionWindow _deltaRevisionSpan = new();
+    private readonly GameValueDistributionWindow _sameChunkOutstanding = new();
+    private readonly GameValueDistributionWindow _proofEnvelopeOccupancy = new();
+    private readonly GameValueDistributionWindow _deliveryAgeSteps = new();
+    private readonly SpatialChunkKey[] _timedUniqueDeltaChunks;
+    private readonly bool[] _timedUniqueDeltaChunkOccupied;
+    private RemoteChunkDeltaRecord[]? _timedDeltaScratch;
+    private RemoteChunkDeltaRecord[]? _timedOutstandingDeltaRecords;
+    private ushort[]? _timedOutstandingDeltaRecordCounts;
     private ulong _timedScheduleAttempts;
     private ulong _timedDeliveriesQueued;
     private ulong _timedImmediateQueued;
@@ -140,6 +218,42 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private ulong _timedTransportDeferrals;
     private ulong _timedCapacityDeferrals;
     private int _timedOutstandingHighWater;
+    private int _timedUniqueDeltaChunkCount;
+    private bool _timedUniqueDeltaChunkOverflowed;
+    private ulong _lastServiceStep;
+    private ulong _timedDeltaMessages;
+    private ulong _timedDeltaBytes;
+    private ulong _timedDeltaRecordCount;
+    private ulong _timedDeltaImmediate;
+    private ulong _timedDeltaNear;
+    private ulong _timedDeltaFar;
+    private ulong _timedOverlappingDeltaMessages;
+    private ulong _timedOverlappingDeltaBytes;
+    private ulong _timedSameStepDeltaMessages;
+    private ulong _timedExactRepeatedRecords;
+    private ulong _timedExactRepeatedRecordBytes;
+    private ulong _timedRepeatedEntityIdentities;
+    private ulong _timedRepeatedFieldBits;
+    private ulong _timedOverlappedRevisionSpan;
+    private ulong _timedProofEnvelopes;
+    private ulong _timedLegacyProofMessages;
+    private ulong _timedProofEnvelopeBytes;
+    private ulong _timedProofEntries;
+    private ulong _timedProofApplied;
+    private ulong _timedProofRejected;
+    private ulong _timedProofCapacity;
+    private ulong _timedProofContradictory;
+    private ulong _timedProofDelta;
+    private ulong _timedProofSnapshot;
+    private ulong _timedProofAbsence;
+    private ulong _timedKnowledgeAdvancements;
+    private ulong _timedNonAdvancingApplied;
+    private ulong _timedExactDebtRetired;
+    private ulong _timedSupersededDebtRetired;
+    private ulong _timedMalformedProofEntries;
+    private ulong _timedInvalidatedAoi;
+    private ulong _timedInvalidatedSource;
+    private ulong _timedInvalidatedRecovery;
 
     public RemoteChunkWorldStateServer(
         NetworkProtocolPeer peer,
@@ -175,6 +289,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 "The transport cannot carry the configured snapshot within the bounded segment count.");
         _outstanding = new OutstandingDelivery[limits.MaximumOutstandingDeliveries];
         _maximumSnapshotTransferSteps = limits.MaximumSnapshotTransferSteps;
+        // Window-unique chunks are not bounded by the current subscription count. Size this cold
+        // census to the source's bounded resident-key capacity and surface saturation explicitly
+        // rather than faulting a healthy application if a long diagnostic window sees churn.
+        int chunkSetCapacity = 1;
+        long targetChunkSetCapacity = checked((long)source.Limits.MaximumResidentChunks * 2);
+        while (chunkSetCapacity < targetChunkSetCapacity)
+            chunkSetCapacity = checked(chunkSetCapacity * 2);
+        _timedUniqueDeltaChunks = new SpatialChunkKey[chunkSetCapacity];
+        _timedUniqueDeltaChunkOccupied = new bool[chunkSetCapacity];
     }
 
     public OfflineDirectChunkRecipient Recipient => _recipient;
@@ -187,12 +310,50 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _scheduleTiming.Configure(level);
         _progressTiming.Configure(level);
         _proofTiming.Configure(level);
+        _deliveryProofLatency.Configure(level);
+        _deltaRecords.Clear();
+        _deltaRevisionSpan.Clear();
+        _sameChunkOutstanding.Clear();
+        _proofEnvelopeOccupancy.Clear();
+        _deliveryAgeSteps.Clear();
         _recipient.ResetReconcileAttribution(level == GameTelemetryLevel.Detailed);
         _timedScheduleAttempts = _timedDeliveriesQueued = 0;
         _timedImmediateQueued = _timedNearQueued = _timedFarQueued = 0;
         _timedNoPayload = _timedCadenceDeferrals = 0;
         _timedTransportDeferrals = _timedCapacityDeferrals = 0;
         _timedOutstandingHighWater = _outstandingCount;
+        _timedUniqueDeltaChunkCount = 0;
+        _timedUniqueDeltaChunkOverflowed = false;
+        Array.Clear(_timedUniqueDeltaChunks);
+        Array.Clear(_timedUniqueDeltaChunkOccupied);
+        _timedDeltaMessages = _timedDeltaBytes = _timedDeltaRecordCount = 0;
+        _timedDeltaImmediate = _timedDeltaNear = _timedDeltaFar = 0;
+        _timedOverlappingDeltaMessages = _timedOverlappingDeltaBytes = 0;
+        _timedSameStepDeltaMessages = 0;
+        _timedExactRepeatedRecords = _timedExactRepeatedRecordBytes = 0;
+        _timedRepeatedEntityIdentities = _timedRepeatedFieldBits = 0;
+        _timedOverlappedRevisionSpan = 0;
+        _timedProofEnvelopes = _timedLegacyProofMessages = 0;
+        _timedProofEnvelopeBytes = _timedProofEntries = 0;
+        _timedProofApplied = _timedProofRejected = 0;
+        _timedProofCapacity = _timedProofContradictory = 0;
+        _timedProofDelta = _timedProofSnapshot = _timedProofAbsence = 0;
+        _timedKnowledgeAdvancements = _timedNonAdvancingApplied = 0;
+        _timedExactDebtRetired = _timedSupersededDebtRetired = 0;
+        _timedMalformedProofEntries = 0;
+        _timedInvalidatedAoi = _timedInvalidatedSource = _timedInvalidatedRecovery = 0;
+        if (level == GameTelemetryLevel.Detailed)
+        {
+            _timedDeltaScratch ??= new RemoteChunkDeltaRecord[
+                _recipient.Limits.MaximumDeltaRecords];
+            _timedOutstandingDeltaRecords ??= new RemoteChunkDeltaRecord[checked(
+                _outstanding.Length * _recipient.Limits.MaximumDeltaRecords)];
+            _timedOutstandingDeltaRecordCounts ??= new ushort[_outstanding.Length];
+        }
+        if (_timedOutstandingDeltaRecordCounts is not null)
+            Array.Clear(_timedOutstandingDeltaRecordCounts);
+        if (_timedOutstandingDeltaRecords is not null)
+            Array.Clear(_timedOutstandingDeltaRecords);
     }
 
     public RemoteChunkReplicationTimingSnapshot GetTimingSnapshot()
@@ -209,7 +370,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 _timedScheduleAttempts, _timedDeliveriesQueued,
                 _timedImmediateQueued, _timedNearQueued, _timedFarQueued,
                 _timedNoPayload, _timedCadenceDeferrals, _timedTransportDeferrals,
-                _timedCapacityDeferrals, _timedOutstandingHighWater));
+                _timedCapacityDeferrals, _timedOutstandingHighWater),
+            CaptureKnowledgeCensus());
     }
 
     /// <summary>
@@ -225,7 +387,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (source.Epoch == _source.Epoch)
             throw new ArgumentException(
                 "A replacement publication source must own a distinct epoch.", nameof(source));
-        InvalidateAll();
+        InvalidateAll(OutstandingInvalidationReason.SourceReplacement);
         _source = source;
     }
 
@@ -257,18 +419,19 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (status != OfflineDirectChunkReconcileStatus.Reconciled) return status;
         if (result.SourceReset)
         {
-            InvalidateAll();
+            InvalidateAll(OutstandingInvalidationReason.SourceReplacement);
             return status;
         }
         for (int index = 0; index < result.ChangeCount; index++)
             if (changes[index].Kind == OfflineDirectChunkSubscriptionChangeKind.Left)
-                Invalidate(changes[index].Key);
+                Invalidate(changes[index].Key, OutstandingInvalidationReason.AoiLeave);
         return status;
     }
 
     public RemoteChunkWorldStateScheduleStatus TrySchedule(int subscriptionIndex, ulong cadenceStep)
     {
         EnsureOwner();
+        _lastServiceStep = Math.Max(_lastServiceStep, cadenceStep);
         long timing = _scheduleTiming.StartDetailed();
         RemoteChunkWorldStateScheduleStatus status;
         try
@@ -342,7 +505,16 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             NetworkQueueStatus.Accepted)
             return RemoteChunkWorldStateScheduleStatus.TransportNotAccepting;
 
-        _outstanding[_outstandingCount++] = new OutstandingDelivery(result.Ticket, cadenceStep);
+        int retainedIndex = _outstandingCount;
+        _outstanding[retainedIndex] = new OutstandingDelivery(
+            result.Ticket,
+            cadenceStep,
+            _telemetryLevel == GameTelemetryLevel.Detailed
+                ? System.Diagnostics.Stopwatch.GetTimestamp()
+                : 0);
+        if (result.Kind == RemoteChunkPublicationKind.Delta)
+            RecordQueuedDelta(in result, subscriptionIndex, cadenceStep, retainedIndex);
+        _outstandingCount++;
         _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         _nextDeliveryId = _nextDeliveryId == ulong.MaxValue ? 0 : _nextDeliveryId + 1;
         if (result.Kind == RemoteChunkPublicationKind.Delta)
@@ -376,6 +548,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         ulong serviceStep)
     {
         EnsureOwner();
+        _lastServiceStep = Math.Max(_lastServiceStep, serviceStep);
         if (_nextDeliveryId == 0)
             return RemoteChunkWorldStateScheduleStatus.DeliverySequenceExhausted;
         if (HasOutstandingSnapshot())
@@ -408,11 +581,13 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     public bool ExpireSnapshotTransfer(ulong serviceStep)
     {
         EnsureOwner();
+        _lastServiceStep = Math.Max(_lastServiceStep, serviceStep);
         if (_snapshotTicket.IsValid &&
             serviceStep >= _snapshotStartedStep &&
             serviceStep - _snapshotStartedStep >= _maximumSnapshotTransferSteps)
         {
             CancelActiveSnapshot();
+            RecordInvalidation(OutstandingInvalidationReason.Recovery);
             SaturatingIncrement(ref _snapshotTimeouts);
             return true;
         }
@@ -425,6 +600,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 continue;
             QueueCancel(delivery.Ticket);
             RemoveAt(index);
+            RecordInvalidation(OutstandingInvalidationReason.Recovery);
             SaturatingIncrement(ref _snapshotTimeouts);
             return true;
         }
@@ -528,8 +704,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (_peer.TryQueue(RemoteChunkSnapshotCommitMessageCodec.Descriptor.Id,
                 _messageScratch.AsSpan(0, commitBytes)) != NetworkQueueStatus.Accepted)
             return false;
-        _outstanding[_outstandingCount++] =
-            new OutstandingDelivery(_snapshotTicket, _snapshotStartedStep);
+        _outstanding[_outstandingCount++] = new OutstandingDelivery(
+            _snapshotTicket,
+            _snapshotStartedStep,
+            _telemetryLevel == GameTelemetryLevel.Detailed
+                ? System.Diagnostics.Stopwatch.GetTimestamp()
+                : 0);
         _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         ClearActiveSnapshot();
         SaturatingIncrement(ref _snapshotsQueued);
@@ -553,9 +733,19 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         {
             if (!UltraSimGameProtocol.TryReadChunkApplied(
                     payload, out RemoteChunkAppliedMessage proof))
+            {
                 SaturatingIncrement(ref _malformedProofs);
+                RecordMalformedProof();
+            }
             else
+            {
+                if (_telemetryLevel == GameTelemetryLevel.Detailed)
+                {
+                    SaturatingIncrement(ref _timedLegacyProofMessages);
+                    SaturatingIncrement(ref _timedProofEntries);
+                }
                 ProcessProof(in proof);
+            }
             return true;
         }
         if (message.MessageId != RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id) return false;
@@ -567,7 +757,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             header.ApplicationSessionEpoch != _applicationSessionEpoch)
         {
             SaturatingIncrement(ref _malformedProofs);
+            RecordMalformedProof();
             return true;
+        }
+        if (_telemetryLevel == GameTelemetryLevel.Detailed)
+        {
+            SaturatingIncrement(ref _timedProofEnvelopes);
+            SaturatingAdd(ref _timedProofEnvelopeBytes, checked((ulong)payload.Length));
+            SaturatingAdd(ref _timedProofEntries, checked((ulong)count));
+            _proofEnvelopeOccupancy.Record(checked((ulong)count));
         }
         for (int entry = 0; entry < count; entry++)
         {
@@ -584,13 +782,19 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (index < 0 || !Matches(_outstanding[index].Ticket, proof))
         {
             SaturatingIncrement(ref _malformedProofs);
+            RecordMalformedProof();
             return;
         }
 
-        OfflineDirectChunkDeliveryTicket ticket = _outstanding[index].Ticket;
+        OutstandingDelivery retained = _outstanding[index];
+        OfflineDirectChunkDeliveryTicket ticket = retained.Ticket;
+        RecordProofEntry(in proof);
+        RecordDeliveryLatency(in retained);
         if (proof.Status != RemoteChunkPublicationApplyStatus.Applied)
         {
             RemoveAt(index);
+            if (_telemetryLevel == GameTelemetryLevel.Detailed)
+                SaturatingIncrement(ref _timedExactDebtRetired);
             SaturatingIncrement(ref _rejectedProofs);
             return;
         }
@@ -598,14 +802,28 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 _recipient, ticket, proof, out OfflineDirectChunkAppliedProofStatus status))
         {
             RemoveAt(index);
+            if (_telemetryLevel == GameTelemetryLevel.Detailed)
+            {
+                SaturatingIncrement(ref _timedExactDebtRetired);
+                SaturatingIncrement(ref _timedMalformedProofEntries);
+            }
             SaturatingIncrement(ref _malformedProofs);
             return;
         }
         RemoveAt(index);
+        if (_telemetryLevel == GameTelemetryLevel.Detailed)
+            SaturatingIncrement(ref _timedExactDebtRetired);
         if (status is OfflineDirectChunkAppliedProofStatus.Applied or
             OfflineDirectChunkAppliedProofStatus.Duplicate or
             OfflineDirectChunkAppliedProofStatus.Stale)
         {
+            if (_telemetryLevel == GameTelemetryLevel.Detailed)
+            {
+                if (status == OfflineDirectChunkAppliedProofStatus.Applied)
+                    SaturatingIncrement(ref _timedKnowledgeAdvancements);
+                else
+                    SaturatingIncrement(ref _timedNonAdvancingApplied);
+            }
             InvalidateObsolete(in ticket);
             SaturatingIncrement(ref _appliedProofs);
         }
@@ -635,7 +853,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             _snapshotCancels,
             _snapshotTimeouts,
             checked((long)_outstanding.Length * Unsafe.SizeOf<OutstandingDelivery>() +
-                _messageScratch.Length + _snapshotPayload.Length),
+                _messageScratch.Length + _snapshotPayload.Length +
+                (long)_timedUniqueDeltaChunks.Length * Unsafe.SizeOf<SpatialChunkKey>() +
+                _timedUniqueDeltaChunkOccupied.Length +
+                (_timedDeltaScratch is null ? 0L :
+                    (long)_timedDeltaScratch.Length * Unsafe.SizeOf<RemoteChunkDeltaRecord>()) +
+                (_timedOutstandingDeltaRecords is null ? 0L :
+                    (long)_timedOutstandingDeltaRecords.Length *
+                        Unsafe.SizeOf<RemoteChunkDeltaRecord>()) +
+                (_timedOutstandingDeltaRecordCounts?.LongLength ?? 0L) * sizeof(ushort)),
             _recipient.GetSnapshot(),
             GetTimingSnapshot());
     }
@@ -654,6 +880,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 return RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy;
             QueueCancel(retained);
             RemoveAt(index);
+            RecordInvalidation(OutstandingInvalidationReason.Recovery);
             SaturatingIncrement(ref _invalidatedDeliveries);
             break;
         }
@@ -694,7 +921,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (_peer.TryQueue(RemoteChunkAbsenceMessageCodec.Descriptor.Id,
                 _messageScratch.AsSpan(0, result.Written)) != NetworkQueueStatus.Accepted)
             return RemoteChunkWorldStateScheduleStatus.TransportNotAccepting;
-        _outstanding[_outstandingCount++] = new OutstandingDelivery(result.Ticket, serviceStep);
+        _outstanding[_outstandingCount++] = new OutstandingDelivery(
+            result.Ticket,
+            serviceStep,
+            _telemetryLevel == GameTelemetryLevel.Detailed
+                ? System.Diagnostics.Stopwatch.GetTimestamp()
+                : 0);
         _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         _nextDeliveryId = _nextDeliveryId == ulong.MaxValue ? 0 : _nextDeliveryId + 1;
         SaturatingIncrement(ref _absencesQueued);
@@ -801,24 +1033,37 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         };
     }
 
-    private void InvalidateAll()
+    private void InvalidateAll(OutstandingInvalidationReason reason)
     {
+        bool activeSnapshot = _snapshotTicket.IsValid;
         CancelActiveSnapshot();
+        if (activeSnapshot) RecordInvalidation(reason);
         for (int index = 0; index < _outstandingCount; index++)
             QueueCancel(_outstanding[index].Ticket);
+        for (int index = 0; index < _outstandingCount; index++) RecordInvalidation(reason);
         SaturatingAdd(ref _invalidatedDeliveries, checked((ulong)_outstandingCount));
         _outstanding.AsSpan(0, _outstandingCount).Clear();
+        if (_timedOutstandingDeltaRecordCounts is not null)
+            _timedOutstandingDeltaRecordCounts.AsSpan(0, _outstandingCount).Clear();
+        if (_timedOutstandingDeltaRecords is not null)
+            _timedOutstandingDeltaRecords.AsSpan(
+                0, checked(_outstandingCount * _recipient.Limits.MaximumDeltaRecords)).Clear();
         _outstandingCount = 0;
     }
 
-    private void Invalidate(SpatialChunkKey key)
+    private void Invalidate(SpatialChunkKey key, OutstandingInvalidationReason reason)
     {
-        if (_snapshotTicket.IsValid && _snapshotTicket.Key == key) CancelActiveSnapshot();
+        if (_snapshotTicket.IsValid && _snapshotTicket.Key == key)
+        {
+            CancelActiveSnapshot();
+            RecordInvalidation(reason);
+        }
         for (int index = _outstandingCount - 1; index >= 0; index--)
         {
             if (_outstanding[index].Ticket.Key != key) continue;
             QueueCancel(_outstanding[index].Ticket);
             RemoveAt(index);
+            RecordInvalidation(reason);
             SaturatingIncrement(ref _invalidatedDeliveries);
         }
     }
@@ -828,11 +1073,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         SpatialChunkKey key = appliedTicket.Key;
         if (_snapshotTicket.IsValid && _snapshotTicket.Key == key &&
             _snapshotTicket.DeliveryId < appliedTicket.DeliveryId)
+        {
             CancelActiveSnapshot();
+            if (_telemetryLevel == GameTelemetryLevel.Detailed)
+                SaturatingIncrement(ref _timedSupersededDebtRetired);
+        }
         int subscription = FindSubscription(key);
         if (subscription < 0)
         {
-            Invalidate(key);
+            Invalidate(key, OutstandingInvalidationReason.AoiLeave);
             return;
         }
         OfflineDirectChunkSubscription applied = _recipient.Subscriptions[subscription];
@@ -847,6 +1096,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             if (!obsolete) continue;
             QueueCancel(candidate);
             RemoveAt(index);
+            if (_telemetryLevel == GameTelemetryLevel.Detailed)
+                SaturatingIncrement(ref _timedSupersededDebtRetired);
             SaturatingIncrement(ref _invalidatedDeliveries);
         }
     }
@@ -879,6 +1130,22 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _outstandingCount--;
         _outstanding[index] = _outstanding[_outstandingCount];
         _outstanding[_outstandingCount] = default;
+        if (_timedOutstandingDeltaRecordCounts is null ||
+            _timedOutstandingDeltaRecords is null)
+            return;
+        int recordsPerDelivery = _recipient.Limits.MaximumDeltaRecords;
+        if (index != _outstandingCount)
+        {
+            _timedOutstandingDeltaRecords.AsSpan(
+                    _outstandingCount * recordsPerDelivery, recordsPerDelivery)
+                .CopyTo(_timedOutstandingDeltaRecords.AsSpan(
+                    index * recordsPerDelivery, recordsPerDelivery));
+            _timedOutstandingDeltaRecordCounts[index] =
+                _timedOutstandingDeltaRecordCounts[_outstandingCount];
+        }
+        _timedOutstandingDeltaRecords.AsSpan(
+            _outstandingCount * recordsPerDelivery, recordsPerDelivery).Clear();
+        _timedOutstandingDeltaRecordCounts[_outstandingCount] = 0;
     }
 
     private bool Matches(
@@ -892,6 +1159,299 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         proof.ChunkX == ticket.Key.Coord.X && proof.ChunkZ == ticket.Key.Coord.Z &&
         proof.Kind == Kind(ticket.Status) &&
         proof.Revision == (ticket.Cursor.IsValid ? ticket.Cursor.Revision.Value : 0);
+
+    private void RecordQueuedDelta(
+        in OfflineDirectChunkWireEncodeResult result,
+        int subscriptionIndex,
+        ulong cadenceStep,
+        int retainedIndex)
+    {
+        if (_telemetryLevel != GameTelemetryLevel.Detailed ||
+            _timedDeltaScratch is null || _timedOutstandingDeltaRecords is null ||
+            _timedOutstandingDeltaRecordCounts is null)
+            return;
+        if (!UltraSimGameProtocol.TryReadChunkDelta(
+                _messageScratch.AsSpan(0, result.Written), out RemoteChunkDeltaHeader header,
+                _timedDeltaScratch, out int recordCount) ||
+            recordCount != result.RecordCount || header.DeliveryId != result.Ticket.DeliveryId ||
+            header.BaseRevision != result.BaseRevision ||
+            header.CurrentRevision != result.CurrentRevision)
+            throw new InvalidOperationException("A queued canonical delta diverged from its census.");
+
+        int sameChunk = 0;
+        int sameStep = 0;
+        int latestIndex = -1;
+        ulong latestRevision = 0;
+        for (int index = 0; index < _outstandingCount; index++)
+        {
+            ref readonly OutstandingDelivery outstanding = ref _outstanding[index];
+            if (outstanding.Ticket.Key != result.Ticket.Key) continue;
+            sameChunk++;
+            if (outstanding.StartedStep == cadenceStep) sameStep++;
+            ulong revision = outstanding.Ticket.Cursor.IsValid
+                ? outstanding.Ticket.Cursor.Revision.Value
+                : 0;
+            if (latestIndex < 0 || revision > latestRevision ||
+                revision == latestRevision &&
+                outstanding.Ticket.DeliveryId > _outstanding[latestIndex].Ticket.DeliveryId)
+            {
+                latestIndex = index;
+                latestRevision = revision;
+            }
+        }
+
+        int exactRepeated = 0;
+        int repeatedIdentities = 0;
+        int repeatedFieldBits = 0;
+        if (latestIndex >= 0)
+        {
+            int maximumRecords = _recipient.Limits.MaximumDeltaRecords;
+            ReadOnlySpan<RemoteChunkDeltaRecord> previous =
+                _timedOutstandingDeltaRecords.AsSpan(
+                    latestIndex * maximumRecords,
+                    _timedOutstandingDeltaRecordCounts[latestIndex]);
+            for (int currentIndex = 0; currentIndex < recordCount; currentIndex++)
+            {
+                ref readonly RemoteChunkDeltaRecord current =
+                    ref _timedDeltaScratch[currentIndex];
+                for (int priorIndex = 0; priorIndex < previous.Length; priorIndex++)
+                {
+                    ref readonly RemoteChunkDeltaRecord prior = ref previous[priorIndex];
+                    if (prior.EntityIndex != current.EntityIndex ||
+                        prior.EntityGeneration != current.EntityGeneration)
+                        continue;
+                    repeatedIdentities++;
+                    repeatedFieldBits += System.Numerics.BitOperations.PopCount(
+                        (uint)(prior.Fields & current.Fields));
+                    if (prior == current) exactRepeated++;
+                    break;
+                }
+            }
+        }
+
+        SaturatingIncrement(ref _timedDeltaMessages);
+        SaturatingAdd(ref _timedDeltaBytes, checked((ulong)result.Written));
+        SaturatingAdd(ref _timedDeltaRecordCount, checked((ulong)recordCount));
+        _deltaRecords.Record(checked((ulong)recordCount));
+        ulong revisionSpan = result.CurrentRevision >= result.BaseRevision
+            ? result.CurrentRevision - result.BaseRevision
+            : 0;
+        _deltaRevisionSpan.Record(revisionSpan);
+        _sameChunkOutstanding.Record(checked((ulong)sameChunk));
+        if (sameChunk != 0)
+        {
+            SaturatingIncrement(ref _timedOverlappingDeltaMessages);
+            // This is an explicit upper bound on recovery-overlap cost. The fixed record codec
+            // cannot attribute shared header/value bytes to individual historical operations.
+            SaturatingAdd(ref _timedOverlappingDeltaBytes, checked((ulong)result.Written));
+        }
+        if (sameStep != 0) SaturatingIncrement(ref _timedSameStepDeltaMessages);
+        SaturatingAdd(ref _timedExactRepeatedRecords, checked((ulong)exactRepeated));
+        SaturatingAdd(ref _timedExactRepeatedRecordBytes,
+            checked((ulong)exactRepeated * RemoteChunkDeltaRecord.EncodedSize));
+        SaturatingAdd(ref _timedRepeatedEntityIdentities, checked((ulong)repeatedIdentities));
+        SaturatingAdd(ref _timedRepeatedFieldBits, checked((ulong)repeatedFieldBits));
+        if (latestRevision > result.BaseRevision)
+            SaturatingAdd(ref _timedOverlappedRevisionSpan,
+                Math.Min(latestRevision, result.CurrentRevision) - result.BaseRevision);
+
+        OfflineDirectChunkSubscriptionView subscriptions = _recipient.Subscriptions;
+        if ((uint)subscriptionIndex < (uint)subscriptions.Length)
+        {
+            switch (subscriptions[subscriptionIndex].Interest.Tier)
+            {
+                case ChunkInterestTier.Immediate:
+                    SaturatingIncrement(ref _timedDeltaImmediate);
+                    break;
+                case ChunkInterestTier.Near:
+                    SaturatingIncrement(ref _timedDeltaNear);
+                    break;
+                case ChunkInterestTier.Far:
+                    SaturatingIncrement(ref _timedDeltaFar);
+                    break;
+            }
+        }
+        AddUniqueDeltaChunk(result.Ticket.Key);
+
+        int offset = checked(retainedIndex * _recipient.Limits.MaximumDeltaRecords);
+        _timedDeltaScratch.AsSpan(0, recordCount)
+            .CopyTo(_timedOutstandingDeltaRecords.AsSpan(offset, recordCount));
+        _timedOutstandingDeltaRecordCounts[retainedIndex] = checked((ushort)recordCount);
+        _timedDeltaScratch.AsSpan(0, recordCount).Clear();
+    }
+
+    private void AddUniqueDeltaChunk(SpatialChunkKey key)
+    {
+        int mask = _timedUniqueDeltaChunks.Length - 1;
+        ulong hash = key.Space.Value;
+        unchecked
+        {
+            hash ^= (uint)key.Coord.X * 0x9E37_79B1U;
+            hash ^= (uint)key.Coord.Z * 0x85EB_CA77U;
+            hash ^= hash >> 33;
+            hash *= 0xFF51_AFD7_ED55_8CCDUL;
+            hash ^= hash >> 33;
+        }
+        int slot = checked((int)(hash & (uint)mask));
+        for (int probe = 0; probe < _timedUniqueDeltaChunks.Length; probe++)
+        {
+            if (!_timedUniqueDeltaChunkOccupied[slot])
+            {
+                _timedUniqueDeltaChunkOccupied[slot] = true;
+                _timedUniqueDeltaChunks[slot] = key;
+                _timedUniqueDeltaChunkCount++;
+                return;
+            }
+            if (_timedUniqueDeltaChunks[slot] == key) return;
+            slot = (slot + 1) & mask;
+        }
+        _timedUniqueDeltaChunkOverflowed = true;
+    }
+
+    private void RecordProofEntry(in RemoteChunkAppliedMessage proof)
+    {
+        if (_telemetryLevel != GameTelemetryLevel.Detailed) return;
+        switch (proof.Status)
+        {
+            case RemoteChunkPublicationApplyStatus.Applied:
+                SaturatingIncrement(ref _timedProofApplied);
+                break;
+            case RemoteChunkPublicationApplyStatus.Rejected:
+                SaturatingIncrement(ref _timedProofRejected);
+                break;
+            case RemoteChunkPublicationApplyStatus.CapacityExceeded:
+                SaturatingIncrement(ref _timedProofCapacity);
+                break;
+            case RemoteChunkPublicationApplyStatus.Contradictory:
+                SaturatingIncrement(ref _timedProofContradictory);
+                break;
+        }
+        switch (proof.Kind)
+        {
+            case RemoteChunkPublicationKind.Delta:
+                SaturatingIncrement(ref _timedProofDelta);
+                break;
+            case RemoteChunkPublicationKind.Snapshot:
+                SaturatingIncrement(ref _timedProofSnapshot);
+                break;
+            case RemoteChunkPublicationKind.Absence:
+                SaturatingIncrement(ref _timedProofAbsence);
+                break;
+        }
+    }
+
+    private void RecordDeliveryLatency(in OutstandingDelivery delivery)
+    {
+        if (_telemetryLevel != GameTelemetryLevel.Detailed) return;
+        ulong age = _lastServiceStep >= delivery.StartedStep
+            ? _lastServiceStep - delivery.StartedStep
+            : 0;
+        _deliveryAgeSteps.Record(age);
+        if (delivery.QueuedTimestamp != 0)
+            _deliveryProofLatency.RecordDetailed(delivery.QueuedTimestamp);
+    }
+
+    private void RecordMalformedProof()
+    {
+        if (_telemetryLevel == GameTelemetryLevel.Detailed)
+            SaturatingIncrement(ref _timedMalformedProofEntries);
+    }
+
+    private void RecordInvalidation(OutstandingInvalidationReason reason)
+    {
+        if (_telemetryLevel != GameTelemetryLevel.Detailed) return;
+        switch (reason)
+        {
+            case OutstandingInvalidationReason.AoiLeave:
+                SaturatingIncrement(ref _timedInvalidatedAoi);
+                break;
+            case OutstandingInvalidationReason.SourceReplacement:
+                SaturatingIncrement(ref _timedInvalidatedSource);
+                break;
+            case OutstandingInvalidationReason.Recovery:
+                SaturatingIncrement(ref _timedInvalidatedRecovery);
+                break;
+        }
+    }
+
+    private RemoteChunkKnowledgeCensusSnapshot CaptureKnowledgeCensus()
+    {
+        int multipleChunks = 0;
+        int maximumPerChunk = 0;
+        ulong oldestAge = 0;
+        for (int index = 0; index < _outstandingCount; index++)
+        {
+            ref readonly OutstandingDelivery delivery = ref _outstanding[index];
+            if (_lastServiceStep >= delivery.StartedStep)
+                oldestAge = Math.Max(oldestAge, _lastServiceStep - delivery.StartedStep);
+            bool seen = false;
+            for (int prior = 0; prior < index; prior++)
+                if (_outstanding[prior].Ticket.Key == delivery.Ticket.Key)
+                {
+                    seen = true;
+                    break;
+                }
+            if (seen) continue;
+            int depth = 1;
+            for (int later = index + 1; later < _outstandingCount; later++)
+                if (_outstanding[later].Ticket.Key == delivery.Ticket.Key) depth++;
+            maximumPerChunk = Math.Max(maximumPerChunk, depth);
+            if (depth > 1) multipleChunks++;
+        }
+        return new RemoteChunkKnowledgeCensusSnapshot(
+            new RemoteChunkDeltaCensusSnapshot(
+                _timedDeltaMessages,
+                _timedDeltaBytes,
+                _timedDeltaRecordCount,
+                _timedDeltaImmediate,
+                _timedDeltaNear,
+                _timedDeltaFar,
+                _timedUniqueDeltaChunkCount,
+                _timedUniqueDeltaChunkOverflowed,
+                _timedOverlappingDeltaMessages,
+                _timedOverlappingDeltaBytes,
+                _timedSameStepDeltaMessages,
+                _timedExactRepeatedRecords,
+                _timedExactRepeatedRecordBytes,
+                _timedRepeatedEntityIdentities,
+                checked(_timedRepeatedEntityIdentities *
+                    (ulong)RemoteChunkDeltaRecord.EncodedSize),
+                _timedRepeatedFieldBits,
+                _timedOverlappedRevisionSpan,
+                _deltaRecords.Capture(),
+                _deltaRevisionSpan.Capture(),
+                _sameChunkOutstanding.Capture()),
+            new RemoteChunkProofCensusSnapshot(
+                _timedProofEnvelopes,
+                _timedLegacyProofMessages,
+                _timedProofEnvelopeBytes,
+                _timedProofEntries,
+                _timedProofApplied,
+                _timedProofRejected,
+                _timedProofCapacity,
+                _timedProofContradictory,
+                _timedProofDelta,
+                _timedProofSnapshot,
+                _timedProofAbsence,
+                _timedKnowledgeAdvancements,
+                _timedNonAdvancingApplied,
+                _timedExactDebtRetired,
+                _timedSupersededDebtRetired,
+                _timedMalformedProofEntries,
+                _proofEnvelopeOccupancy.Capture(),
+                _deliveryAgeSteps.Capture(),
+                _deliveryProofLatency.Capture()),
+            new RemoteChunkOutstandingCensusSnapshot(
+                _outstandingCount,
+                _timedOutstandingHighWater,
+                multipleChunks,
+                maximumPerChunk,
+                oldestAge,
+                _timedInvalidatedAoi,
+                _timedInvalidatedSource,
+                _timedInvalidatedRecovery,
+                _timedSupersededDebtRetired));
+    }
 
     private static RemoteChunkPublicationKind Kind(OfflineDirectChunkReadStatus status) => status switch
     {
@@ -917,12 +1477,24 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private readonly struct OutstandingDelivery
     {
-        internal OutstandingDelivery(OfflineDirectChunkDeliveryTicket ticket, ulong startedStep)
+        internal OutstandingDelivery(
+            OfflineDirectChunkDeliveryTicket ticket,
+            ulong startedStep,
+            long queuedTimestamp)
         {
             Ticket = ticket;
             StartedStep = startedStep;
+            QueuedTimestamp = queuedTimestamp;
         }
         internal OfflineDirectChunkDeliveryTicket Ticket { get; }
         internal ulong StartedStep { get; }
+        internal long QueuedTimestamp { get; }
+    }
+
+    private enum OutstandingInvalidationReason : byte
+    {
+        AoiLeave = 1,
+        SourceReplacement = 2,
+        Recovery = 3,
     }
 }

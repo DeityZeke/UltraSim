@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 3 || $# -gt 16 ]]; then
-    echo "usage: $0 <quiet|sustained-input|moving|crowd|mixed-chaos> <duration> <output-dir> [bots=50] [seed=300301] [warmup=60s] [cache-dir] [authority-hz=60] [maximum-input-hz=60] [recommended-input-hz=30] [sample-hz=120] [submit-hz=recommended] [input-mode=compliant] [network-service-delay-ms=1] [input-burst=10] [input-burst-window-ms=100]" >&2
+    echo "usage: $0 <quiet|sustained-input|moving|crowd|single-hot|multi-hot|mixed-chaos> <duration> <output-dir> [bots=50] [seed=300301] [warmup=60s] [cache-dir] [authority-hz=60] [maximum-input-hz=60] [recommended-input-hz=30] [sample-hz=120] [submit-hz=recommended] [input-mode=compliant] [network-service-delay-ms=1] [input-burst=10] [input-burst-window-ms=100]" >&2
     exit 2
 fi
 
@@ -26,11 +26,12 @@ checkpoint=${ULTRASIM_BOT_CHECKPOINT:-PF3}
 case "$checkpoint" in
     PF3) summary_schema=5 ;;
     PF4A) summary_schema=6 ;;
+    PF4B) summary_schema=7 ;;
     *) echo "unsupported bot evidence checkpoint: $checkpoint" >&2; exit 2 ;;
 esac
 
 case "$scenario" in
-    quiet|sustained-input|moving|crowd|mixed-chaos) ;;
+    quiet|sustained-input|moving|crowd|single-hot|multi-hot|mixed-chaos) ;;
     *) echo "unsupported PF3 scenario: $scenario" >&2; exit 2 ;;
 esac
 if [[ -e "$output_dir" ]]; then
@@ -137,7 +138,7 @@ server_pid=
 
 jq -e --arg checkpoint "$checkpoint" --argjson schema "$summary_schema" \
     '.passed and .cleanRetirement and .checkpoint == $checkpoint and .schemaVersion == $schema and
-     ($checkpoint != "PF4A" or
+     (($checkpoint != "PF4A" and $checkpoint != "PF4B") or
       ([.actionOutcomes[] | select((.conserved | not) or (.terminal | not))] | length) == 0)' \
     "$bot_summary" >/dev/null
 jq -e '.PhysicalTransportReconciled and .LogicalMessageReconciled and .ParticipantsAtEnd == .ParticipantsAtStart' \

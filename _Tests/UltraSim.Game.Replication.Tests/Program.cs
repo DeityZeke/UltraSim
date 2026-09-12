@@ -144,6 +144,7 @@ var tests = new (string Name, Action Body)[]
     ("N12WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof", N1OfflineDirectChunkTests.WorldStateDeltaAndAbsenceAdvanceOnlyThroughRemoteProof),
     ("N12RemoteRemovalDeltaUsesCanonicalEmptyCurrent", N1OfflineDirectChunkTests.RemoteRemovalDeltaUsesCanonicalEmptyCurrent),
     ("N12CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth", N1OfflineDirectChunkTests.CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth),
+    ("PF4BLaterExactProofAdvancesAndRetiresOnlySubsumedPositiveDebt", N1OfflineDirectChunkTests.LaterExactProofAdvancesAndRetiresOnlySubsumedPositiveDebt),
     ("N12ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge", N1OfflineDirectChunkTests.ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge),
     ("N12OversizeWorldStateDeltaFailsClosedAtDatagramBoundary", N1OfflineDirectChunkTests.OversizeWorldStateDeltaFailsClosedAtDatagramBoundary),
     ("N13SnapshotTransactionAppliesAtomicallyAndRecoversOversize", N1OfflineDirectChunkTests.SnapshotTransactionAppliesAtomicallyAndRecoversOversize),

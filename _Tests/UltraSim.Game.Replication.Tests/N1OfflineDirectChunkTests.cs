@@ -1234,6 +1234,8 @@ internal static class N1OfflineDirectChunkTests
         var client = new RemoteChunkWorldStateClient(
             loopback.Client, cache, 0xD312, maximumDeltaRecords: 8,
             maximumPendingProofs: 16);
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
 
         ulong serverBase = recipient.Subscriptions[occupied].Cursor.Revision.Value;
         fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);
@@ -1256,10 +1258,149 @@ internal static class N1OfflineDirectChunkTests
         True(cache.TryGetResidentHandle(Key(0, 0), out ClientSemanticChunkHandle handle));
         True(cache.TryGetInfo(handle, out ClientSemanticChunkInfo info));
         Equal(latest, info.PublicationCursor.Revision.Value);
+        var clientProof = client.GetTimingSnapshot().ProofCensus;
+        Equal(2UL, clientProof.EntriesGenerated);
+        Equal(0UL, clientProof.EntriesQueued);
+        Equal(2, clientProof.QueueCurrent);
+        Equal(1UL, clientProof.PositiveSubsumptionOpportunities);
+        RemoteChunkDeliveryCensusSnapshot clientDeliveries =
+            client.GetTimingSnapshot().DeliveryCensus;
+        Equal(2UL, clientDeliveries.AppliedDeltas);
+        Equal(0UL, clientDeliveries.DuplicateDeliveries);
+        Equal(0UL, clientDeliveries.SupersededDeliveries);
+        RemoteChunkKnowledgeCensusSnapshot serverKnowledge =
+            server.GetTimingSnapshot().Knowledge;
+        Equal(2UL, serverKnowledge.Delta.Messages);
+        Equal(1UL, serverKnowledge.Delta.OverlappingSameChunkMessages);
+        Equal(2, serverKnowledge.Outstanding.Current);
+        Equal(2, serverKnowledge.Outstanding.CurrentMaximumPerChunk);
 
         Drive(loopback, server, client, () =>
             server.GetSnapshot().OutstandingDeliveries == 0);
         Equal(latest, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+    }
+
+    internal static void LaterExactProofAdvancesAndRetiresOnlySubsumedPositiveDebt()
+    {
+        using var fixture = new Fixture(historyCapacity: 64);
+        fixture.Present(0, Position(0, 0, 2_000, 2_000), GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(default);
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        SpatialChunkKey key = Key(0, 0);
+        int occupied = FindSubscription(recipient, key);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF4B,
+            new RemoteChunkWorldStateTransportLimits(16));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF4B, maximumDeltaRecords: 8,
+            maximumPendingProofs: 16);
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+
+        ulong initial = recipient.Subscriptions[occupied].Cursor.Revision.Value;
+        fixture.Present(0, Position(0, 0, 2_100, 2_000), GameWorldPublicPrefabIds.Character);
+        ulong firstRevision = CurrentRevision(fixture.Store, key);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 1));
+        DeliverToClientWithoutProof(loopback, server, client,
+            () => client.GetSnapshot().AppliedDeltas == 1);
+
+        fixture.Present(0, Position(0, 0, 2_200, 2_000), GameWorldPublicPrefabIds.Character);
+        ulong laterRevision = CurrentRevision(fixture.Store, key);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 2));
+        DeliverToClientWithoutProof(loopback, server, client,
+            () => client.GetSnapshot().AppliedDeltas == 2);
+        Equal(initial, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(2, server.GetSnapshot().OutstandingDeliveries);
+
+        QueueProofEnvelope(loopback, server, new RemoteChunkAppliedMessage
+        {
+            ApplicationSessionEpoch = 0xF4B,
+            PublicationEpoch = fixture.Store.Epoch.Value,
+            DeliveryId = 2,
+            SpatialSpaceId = key.Space.Value,
+            ChunkX = key.Coord.X,
+            ChunkZ = key.Coord.Z,
+            Revision = laterRevision,
+            Kind = RemoteChunkPublicationKind.Delta,
+            Status = RemoteChunkPublicationApplyStatus.Applied,
+        });
+        Equal(laterRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        RemoteChunkKnowledgeCensusSnapshot afterLater = server.GetTimingSnapshot().Knowledge;
+        Equal(1UL, afterLater.Proof.EnvelopesReceived);
+        Equal(1UL, afterLater.Proof.EntriesReceived);
+        Equal(1UL, afterLater.Proof.AppliedEntries);
+        Equal(1UL, afterLater.Proof.KnowledgeAdvancingEntries);
+        Equal(1UL, afterLater.Proof.ExactOutstandingRetired);
+        Equal(1UL, afterLater.Proof.SupersededOutstandingRetired);
+        Equal(1UL, afterLater.Outstanding.InvalidatedByLaterAppliedTruth);
+        Console.WriteLine(
+            $"EVIDENCE PF4B timeline known_before={initial} source_a={firstRevision} " +
+            $"source_b={laterRevision} delivered=1,2 client_applied=1,2 " +
+            $"proofed=2 known_after={recipient.Subscriptions[occupied].Cursor.Revision.Value} " +
+            $"exact_retired={afterLater.Proof.ExactOutstandingRetired} " +
+            $"subsumed_retired={afterLater.Proof.SupersededOutstandingRetired}");
+
+        ulong malformedBefore = server.GetSnapshot().MalformedProofs;
+        QueueProofEnvelope(loopback, server, new RemoteChunkAppliedMessage
+        {
+            ApplicationSessionEpoch = 0xF4B,
+            PublicationEpoch = fixture.Store.Epoch.Value,
+            DeliveryId = 1,
+            SpatialSpaceId = key.Space.Value,
+            ChunkX = key.Coord.X,
+            ChunkZ = key.Coord.Z,
+            Revision = firstRevision,
+            Kind = RemoteChunkPublicationKind.Delta,
+            Status = RemoteChunkPublicationApplyStatus.Applied,
+        });
+        Equal(malformedBefore + 1, server.GetSnapshot().MalformedProofs);
+        Equal(laterRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+
+        fixture.Present(0, Position(0, 0, 2_300, 2_000), GameWorldPublicPrefabIds.Character);
+        ulong thirdRevision = CurrentRevision(fixture.Store, key);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 3));
+        fixture.Present(0, Position(0, 0, 2_400, 2_000), GameWorldPublicPrefabIds.Character);
+        ulong fourthRevision = CurrentRevision(fixture.Store, key);
+        Equal(RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            server.TrySchedule(occupied, 4));
+        Equal(2, server.GetSnapshot().OutstandingDeliveries);
+
+        QueueProofEnvelope(loopback, server, new RemoteChunkAppliedMessage
+        {
+            ApplicationSessionEpoch = 0xF4B,
+            PublicationEpoch = fixture.Store.Epoch.Value,
+            DeliveryId = 4,
+            SpatialSpaceId = key.Space.Value,
+            ChunkX = key.Coord.X,
+            ChunkZ = key.Coord.Z,
+            Revision = fourthRevision,
+            Kind = RemoteChunkPublicationKind.Delta,
+            Status = RemoteChunkPublicationApplyStatus.Rejected,
+        });
+        Equal(1, server.GetSnapshot().OutstandingDeliveries);
+        Equal(laterRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(1UL, server.GetTimingSnapshot().Knowledge.Proof.RejectedEntries);
+
+        QueueProofEnvelope(loopback, server, new RemoteChunkAppliedMessage
+        {
+            ApplicationSessionEpoch = 0xF4B,
+            PublicationEpoch = fixture.Store.Epoch.Value,
+            DeliveryId = 3,
+            SpatialSpaceId = key.Space.Value,
+            ChunkX = key.Coord.X,
+            ChunkZ = key.Coord.Z,
+            Revision = thirdRevision,
+            Kind = RemoteChunkPublicationKind.Delta,
+            Status = RemoteChunkPublicationApplyStatus.Applied,
+        });
+        Equal(thirdRevision, recipient.Subscriptions[occupied].Cursor.Revision.Value);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
     }
 
     internal static void ImpairmentAndSubscriptionReentryFenceDeliveryKnowledge()
@@ -1828,6 +1969,37 @@ internal static class N1OfflineDirectChunkTests
             if (delivered()) return;
         }
         throw new InvalidOperationException("The unproved delta did not reach the client.");
+    }
+
+    private static void QueueProofEnvelope(
+        ProtocolLoopback loopback,
+        RemoteChunkWorldStateServer server,
+        in RemoteChunkAppliedMessage proof)
+    {
+        Span<RemoteChunkAppliedEnvelopeEntry> entries =
+            stackalloc RemoteChunkAppliedEnvelopeEntry[1];
+        entries[0] = RemoteChunkAppliedEnvelopeEntry.FromMessage(in proof);
+        Span<byte> payload = stackalloc byte[128];
+        True(UltraSimGameProtocol.TryWriteChunkAppliedEnvelope(
+            payload, proof.ApplicationSessionEpoch, proof.PublicationEpoch,
+            entries, out int written));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id,
+                payload[..written]));
+        for (int step = 0; step < 32; step++)
+        {
+            loopback.Pump();
+            bool processed = false;
+            while (loopback.Server.TryPeekReceived(
+                       out NetworkDeliveredMessage message, out ReadOnlySpan<byte> delivered))
+            {
+                _ = server.TryProcess(message, delivered);
+                True(loopback.Server.TryConsumeReceived());
+                processed = true;
+            }
+            if (processed) return;
+        }
+        throw new InvalidOperationException("The PF4B proof envelope did not reach the server.");
     }
 
     private static void Drive(

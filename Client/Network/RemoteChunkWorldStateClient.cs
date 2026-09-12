@@ -45,7 +45,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly byte[] _snapshotSegmentScratch;
     private readonly bool[] _snapshotSegments;
     private readonly DeliveryLineage[] _deliveryLineage;
-    private readonly RemoteChunkAppliedMessage[] _proofs;
+    private readonly PendingProof[] _proofs;
     private readonly RemoteChunkAppliedEnvelopeEntry[] _proofEnvelopeEntries;
     private readonly byte[] _proofScratch;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -70,6 +70,25 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private NetworkTelemetryLevel _telemetryLevel;
     private readonly ClientTimingWindow _decodeAndApplyTiming = new();
     private readonly ClientTimingWindow _proofDrainTiming = new();
+    private readonly ClientTimingWindow _proofQueueLatency = new();
+    private readonly ClientValueWindow _proofEnvelopeOccupancy = new();
+    private ulong _timedProofsGenerated;
+    private ulong _timedProofsQueued;
+    private ulong _timedProofEnvelopesQueued;
+    private ulong _timedProofEnvelopeBytes;
+    private ulong _timedProofQueueDeferrals;
+    private ulong _timedProofApplied;
+    private ulong _timedProofRejected;
+    private ulong _timedProofCapacityExceeded;
+    private ulong _timedProofContradictory;
+    private ulong _timedProofDelta;
+    private ulong _timedProofSnapshot;
+    private ulong _timedProofAbsence;
+    private ulong _timedPositiveSubsumptionOpportunities;
+    private ulong _timedFullProofEnvelopes;
+    private ulong _timedSingleProofEnvelopes;
+    private int _timedProofQueueHighWater;
+    private RemoteChunkWorldStateClientSnapshot _timedDeliveryStart;
 
     public RemoteChunkWorldStateClient(
         NetworkProtocolPeer peer,
@@ -108,7 +127,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _snapshotSegmentScratch = new byte[segmentPayload];
         _snapshotSegments = new bool[UltraSimGameProtocol.MaximumChunkSnapshotSegments];
         _deliveryLineage = new DeliveryLineage[cache.Limits.MaximumResidentChunks];
-        _proofs = new RemoteChunkAppliedMessage[maximumPendingProofs];
+        _proofs = new PendingProof[maximumPendingProofs];
         int maximumEnvelopeEntries = UltraSimGameProtocol.
             GetMaximumChunkAppliedEnvelopeEntriesForPayload(peer.MaximumUnfragmentedMessageBytes);
         if (maximumEnvelopeEntries == 0)
@@ -197,12 +216,12 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     {
         while (_proofCount != 0)
         {
-            ref readonly RemoteChunkAppliedMessage first = ref _proofs[_proofHead];
+            RemoteChunkAppliedMessage first = _proofs[_proofHead].Message;
             int count = 0;
             while (count < _proofCount && count < _proofEnvelopeEntries.Length)
             {
-                ref readonly RemoteChunkAppliedMessage proof =
-                    ref _proofs[(_proofHead + count) % _proofs.Length];
+                RemoteChunkAppliedMessage proof =
+                    _proofs[(_proofHead + count) % _proofs.Length].Message;
                 if (proof.ApplicationSessionEpoch != first.ApplicationSessionEpoch ||
                     proof.PublicationEpoch != first.PublicationEpoch)
                     break;
@@ -217,11 +236,17 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             if (_peer.TryQueue(RemoteChunkAppliedEnvelopeHeaderCodec.Descriptor.Id,
                     _proofScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
             {
+                if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                    SaturatingIncrement(ref _timedProofQueueDeferrals);
                 _proofEnvelopeEntries.AsSpan(0, count).Clear();
                 return false;
             }
             for (int index = 0; index < count; index++)
             {
+                PendingProof pending = _proofs[_proofHead];
+                if (_telemetryLevel == NetworkTelemetryLevel.Detailed &&
+                    pending.GeneratedTimestamp != 0)
+                    _proofQueueLatency.RecordElapsed(pending.GeneratedTimestamp);
                 _proofs[_proofHead] = default;
                 _proofHead = (_proofHead + 1) % _proofs.Length;
             }
@@ -229,6 +254,16 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             _proofEnvelopeEntries.AsSpan(0, count).Clear();
             SaturatingAdd(ref _proofsQueued, checked((ulong)count));
             SaturatingIncrement(ref _proofMessagesQueued);
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+            {
+                SaturatingAdd(ref _timedProofsQueued, checked((ulong)count));
+                SaturatingIncrement(ref _timedProofEnvelopesQueued);
+                SaturatingAdd(ref _timedProofEnvelopeBytes, checked((ulong)written));
+                _proofEnvelopeOccupancy.Record(checked((ulong)count));
+                if (count == 1) SaturatingIncrement(ref _timedSingleProofEnvelopes);
+                if (count == _proofEnvelopeEntries.Length)
+                    SaturatingIncrement(ref _timedFullProofEnvelopes);
+            }
         }
         return true;
     }
@@ -261,7 +296,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 _snapshotPayload.Length + _snapshotSegmentScratch.Length +
                 _snapshotSegments.Length +
                 (long)_deliveryLineage.Length * Unsafe.SizeOf<DeliveryLineage>() +
-                (long)_proofs.Length * Unsafe.SizeOf<RemoteChunkAppliedMessage>() +
+                (long)_proofs.Length * Unsafe.SizeOf<PendingProof>() +
                 (long)_proofEnvelopeEntries.Length *
                     Unsafe.SizeOf<RemoteChunkAppliedEnvelopeEntry>() +
                 _proofScratch.Length),
@@ -275,13 +310,85 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _telemetryLevel = level;
         _decodeAndApplyTiming.Clear();
         _proofDrainTiming.Clear();
+        _proofQueueLatency.Clear();
+        _proofEnvelopeOccupancy.Clear();
+        _timedProofsGenerated = _timedProofsQueued = 0;
+        _timedProofEnvelopesQueued = _timedProofEnvelopeBytes = 0;
+        _timedProofQueueDeferrals = 0;
+        _timedProofApplied = _timedProofRejected = 0;
+        _timedProofCapacityExceeded = _timedProofContradictory = 0;
+        _timedProofDelta = _timedProofSnapshot = _timedProofAbsence = 0;
+        _timedPositiveSubsumptionOpportunities = 0;
+        _timedFullProofEnvelopes = _timedSingleProofEnvelopes = 0;
+        _timedProofQueueHighWater = _proofCount;
+        _timedDeliveryStart = GetSnapshotWithoutTiming();
     }
 
     public RemoteChunkWorldStateClientTimingSnapshot GetTimingSnapshot()
     {
         EnsureOwner();
-        return new(_telemetryLevel, _decodeAndApplyTiming.Capture(), _proofDrainTiming.Capture());
+        RemoteChunkWorldStateClientSnapshot current = GetSnapshotWithoutTiming();
+        return new(
+            _telemetryLevel,
+            _decodeAndApplyTiming.Capture(),
+            _proofDrainTiming.Capture(),
+            new RemoteChunkProofCensusSnapshot(
+                _timedProofsGenerated,
+                _timedProofsQueued,
+                _timedProofEnvelopesQueued,
+                _timedProofEnvelopeBytes,
+                _timedProofQueueDeferrals,
+                _timedProofApplied,
+                _timedProofRejected,
+                _timedProofCapacityExceeded,
+                _timedProofContradictory,
+                _timedProofDelta,
+                _timedProofSnapshot,
+                _timedProofAbsence,
+                _timedPositiveSubsumptionOpportunities,
+                _timedFullProofEnvelopes,
+                _timedSingleProofEnvelopes,
+                _proofCount,
+                _timedProofQueueHighWater,
+                _proofs.Length,
+                _proofEnvelopeEntries.Length,
+                _proofEnvelopeOccupancy.Capture(),
+                _proofQueueLatency.Capture()),
+            new RemoteChunkDeliveryCensusSnapshot(
+                Difference(_timedDeliveryStart.AppliedDeltas, current.AppliedDeltas),
+                Difference(_timedDeliveryStart.AppliedSnapshots, current.AppliedSnapshots),
+                Difference(_timedDeliveryStart.AppliedAbsences, current.AppliedAbsences),
+                Difference(_timedDeliveryStart.DuplicateDeliveries, current.DuplicateDeliveries),
+                Difference(_timedDeliveryStart.SupersededDeliveries, current.SupersededDeliveries),
+                Difference(_timedDeliveryStart.RejectedDeliveries, current.RejectedDeliveries),
+                Difference(_timedDeliveryStart.CapacityFailures, current.CapacityFailures),
+                Difference(_timedDeliveryStart.ContradictoryDeliveries,
+                    current.ContradictoryDeliveries),
+                Difference(_timedDeliveryStart.MalformedDeliveries, current.MalformedDeliveries)));
     }
+
+    private RemoteChunkWorldStateClientSnapshot GetSnapshotWithoutTiming() => new(
+        _proofCount,
+        _proofs.Length,
+        _appliedDeltas,
+        _appliedAbsences,
+        _duplicateDeliveries,
+        _rejectedDeliveries,
+        _capacityFailures,
+        _contradictoryDeliveries,
+        _malformedDeliveries,
+        _proofsQueued,
+        _proofMessagesQueued,
+        _snapshotBegin.DeliveryId != 0,
+        _snapshotSegmentsReceived,
+        _appliedSnapshots,
+        _rejectedSnapshots,
+        _supersededDeliveries,
+        0,
+        default);
+
+    private static ulong Difference(ulong before, ulong after) =>
+        after >= before ? after - before : 0;
 
     private void ProcessDirtyChunkBundle(ReadOnlySpan<byte> payload)
     {
@@ -380,7 +487,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 RemoteChunkPublicationKind.Delta, entry.CurrentRevision, entry.ContentHash);
         QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
             entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, entry.CurrentRevision,
-            RemoteChunkPublicationKind.Delta, status);
+            RemoteChunkPublicationKind.Delta, status, handle);
         if (status == RemoteChunkPublicationApplyStatus.Applied)
         {
             if (duplicate) SaturatingIncrement(ref _duplicateDeliveries);
@@ -442,7 +549,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         }
         QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
             entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, entry.CurrentRevision,
-            RemoteChunkPublicationKind.Snapshot, status);
+            RemoteChunkPublicationKind.Snapshot, status, handle);
         _semanticSnapshot.AsSpan(0, records.Length).Clear();
     }
 
@@ -481,7 +588,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 RemoteChunkPublicationKind.Absence, 0, 0);
         QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, entry.DeliveryId,
             entry.SpatialSpaceId, entry.ChunkX, entry.ChunkZ, 0,
-            RemoteChunkPublicationKind.Absence, status);
+            RemoteChunkPublicationKind.Absence, status, handle);
         if (status == RemoteChunkPublicationApplyStatus.Applied)
             SaturatingIncrement(ref _appliedAbsences);
         else RecordFailure(status);
@@ -569,7 +676,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
 
         QueueProof(header.ApplicationSessionEpoch, header.PublicationEpoch, header.DeliveryId,
             header.SpatialSpaceId, header.ChunkX, header.ChunkZ, header.CurrentRevision,
-            RemoteChunkPublicationKind.Delta, status);
+            RemoteChunkPublicationKind.Delta, status, handle);
         if (status == RemoteChunkPublicationApplyStatus.Applied)
         {
             if (duplicate) SaturatingIncrement(ref _duplicateDeliveries);
@@ -627,7 +734,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 RemoteChunkPublicationKind.Absence, 0, 0);
         QueueProof(message.ApplicationSessionEpoch, message.PublicationEpoch, message.DeliveryId,
             message.SpatialSpaceId, message.ChunkX, message.ChunkZ, 0,
-            RemoteChunkPublicationKind.Absence, status);
+            RemoteChunkPublicationKind.Absence, status, handle);
         if (status == RemoteChunkPublicationApplyStatus.Applied)
             SaturatingIncrement(ref _appliedAbsences);
         else
@@ -683,7 +790,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             begin.Revision, begin.ContentHash);
         if (lineage is DeliveryLineageDecision.Superseded or DeliveryLineageDecision.Duplicate)
         {
-            QueueSnapshotProof(in begin, RemoteChunkPublicationApplyStatus.Applied);
+            QueueSnapshotProof(in begin, RemoteChunkPublicationApplyStatus.Applied, handle);
             SaturatingIncrement(ref _supersededDeliveries);
             return;
         }
@@ -856,7 +963,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             SaturatingIncrement(ref _rejectedSnapshots);
             RecordFailure(status);
         }
-        QueueSnapshotProof(in begin, status);
+        QueueSnapshotProof(in begin, status, _snapshotHandle);
         _wireSnapshot.AsSpan(0, count).Clear();
         _semanticSnapshot.AsSpan(0, count).Clear();
         ClearSnapshotCandidate();
@@ -865,7 +972,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private void RejectSnapshotCandidate(RemoteChunkPublicationApplyStatus status)
     {
         if (_snapshotBegin.DeliveryId != 0 && _proofCount < _proofs.Length)
-            QueueSnapshotProof(in _snapshotBegin, status);
+            QueueSnapshotProof(in _snapshotBegin, status, _snapshotHandle);
         SaturatingIncrement(ref _rejectedSnapshots);
         RecordFailure(status);
         ClearSnapshotCandidate();
@@ -873,12 +980,13 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
 
     private void QueueSnapshotProof(
         in RemoteChunkSnapshotBeginMessage begin,
-        RemoteChunkPublicationApplyStatus status)
+        RemoteChunkPublicationApplyStatus status,
+        ClientSemanticChunkHandle handle = default)
     {
         if (_proofCount == _proofs.Length) return;
         QueueProof(begin.ApplicationSessionEpoch, begin.PublicationEpoch, begin.DeliveryId,
             begin.SpatialSpaceId, begin.ChunkX, begin.ChunkZ, begin.Revision,
-            RemoteChunkPublicationKind.Snapshot, status);
+            RemoteChunkPublicationKind.Snapshot, status, handle);
     }
 
     private void ClearSnapshotCandidate()
@@ -913,10 +1021,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         int chunkZ,
         ulong revision,
         RemoteChunkPublicationKind kind,
-        RemoteChunkPublicationApplyStatus status)
+        RemoteChunkPublicationApplyStatus status,
+        ClientSemanticChunkHandle handle)
     {
         int tail = (_proofHead + _proofCount) % _proofs.Length;
-        _proofs[tail] = new RemoteChunkAppliedMessage
+        var message = new RemoteChunkAppliedMessage
         {
             ApplicationSessionEpoch = applicationSessionEpoch,
             PublicationEpoch = publicationEpoch,
@@ -928,7 +1037,71 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             Kind = kind,
             Status = status,
         };
+        if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+        {
+            SaturatingIncrement(ref _timedProofsGenerated);
+            switch (status)
+            {
+                case RemoteChunkPublicationApplyStatus.Applied:
+                    SaturatingIncrement(ref _timedProofApplied);
+                    CountPositiveSubsumptionOpportunities(in message, handle);
+                    break;
+                case RemoteChunkPublicationApplyStatus.Rejected:
+                    SaturatingIncrement(ref _timedProofRejected);
+                    break;
+                case RemoteChunkPublicationApplyStatus.CapacityExceeded:
+                    SaturatingIncrement(ref _timedProofCapacityExceeded);
+                    break;
+                case RemoteChunkPublicationApplyStatus.Contradictory:
+                    SaturatingIncrement(ref _timedProofContradictory);
+                    break;
+            }
+            switch (kind)
+            {
+                case RemoteChunkPublicationKind.Delta:
+                    SaturatingIncrement(ref _timedProofDelta);
+                    break;
+                case RemoteChunkPublicationKind.Snapshot:
+                    SaturatingIncrement(ref _timedProofSnapshot);
+                    break;
+                case RemoteChunkPublicationKind.Absence:
+                    SaturatingIncrement(ref _timedProofAbsence);
+                    break;
+            }
+        }
+        _proofs[tail] = new PendingProof(
+            message,
+            handle,
+            _telemetryLevel == NetworkTelemetryLevel.Detailed
+                ? System.Diagnostics.Stopwatch.GetTimestamp()
+                : 0);
         _proofCount++;
+        if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+            _timedProofQueueHighWater = Math.Max(_timedProofQueueHighWater, _proofCount);
+    }
+
+    private void CountPositiveSubsumptionOpportunities(
+        in RemoteChunkAppliedMessage newer,
+        ClientSemanticChunkHandle handle)
+    {
+        if (handle.Generation == 0) return;
+        for (int offset = 0; offset < _proofCount; offset++)
+        {
+            PendingProof pending = _proofs[(_proofHead + offset) % _proofs.Length];
+            RemoteChunkAppliedMessage older = pending.Message;
+            if (pending.Handle != handle ||
+                older.Status != RemoteChunkPublicationApplyStatus.Applied ||
+                older.ApplicationSessionEpoch != newer.ApplicationSessionEpoch ||
+                older.PublicationEpoch != newer.PublicationEpoch ||
+                older.SpatialSpaceId != newer.SpatialSpaceId ||
+                older.ChunkX != newer.ChunkX || older.ChunkZ != newer.ChunkZ ||
+                older.DeliveryId >= newer.DeliveryId)
+                continue;
+            // Same live semantic-cache handle is the client-side subscription-lifetime fence.
+            // A later exact positive current-truth proof can establish at least the older truth;
+            // negative outcomes intentionally never enter this census.
+            SaturatingIncrement(ref _timedPositiveSubsumptionOpportunities);
+        }
     }
 
     private static WorldPublicDeltaRecord ToSemantic(
@@ -1074,6 +1247,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         Superseded = 3,
         Contradictory = 4,
     }
+
+    private readonly record struct PendingProof(
+        RemoteChunkAppliedMessage Message,
+        ClientSemanticChunkHandle Handle,
+        long GeneratedTimestamp);
 
     private readonly record struct DeliveryLineage(
         SpatialChunkKey Key,

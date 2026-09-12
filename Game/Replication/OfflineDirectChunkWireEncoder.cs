@@ -22,7 +22,13 @@ public readonly record struct OfflineDirectChunkWireEncodeResult(
     OfflineDirectChunkWireEncodeStatus Status,
     RemoteChunkPublicationKind Kind,
     int Written,
-    OfflineDirectChunkDeliveryTicket Ticket);
+    OfflineDirectChunkDeliveryTicket Ticket)
+{
+    public ulong BaseRevision { get; init; }
+    public ulong CurrentRevision { get; init; }
+    public ulong HistoryFloor { get; init; }
+    public int RecordCount { get; init; }
+}
 
 /// <summary>
 /// N1.1 packet-free server-side wire preparation. Encoding releases publication scratch but never
@@ -191,7 +197,12 @@ public sealed class OfflineDirectChunkWireEncoder
             return Cancel(recipient, OfflineDirectChunkWireEncodeStatus.EncodingFailed, out result);
         OfflineDirectChunkDeliveryTicket ticket = recipient.ReleaseReadForRemote(deliveryId);
         result = new(OfflineDirectChunkWireEncodeStatus.Snapshot,
-            RemoteChunkPublicationKind.Snapshot, written, ticket);
+            RemoteChunkPublicationKind.Snapshot, written, ticket)
+        {
+            CurrentRevision = read.Batch.Cursor.Revision.Value,
+            HistoryFloor = read.Batch.HistoryFloor.Value,
+            RecordCount = read.Snapshot.Length,
+        };
         return result.Status;
     }
 
@@ -230,7 +241,13 @@ public sealed class OfflineDirectChunkWireEncoder
             return Cancel(recipient, OfflineDirectChunkWireEncodeStatus.EncodingFailed, out result);
         OfflineDirectChunkDeliveryTicket ticket = recipient.ReleaseReadForRemote(deliveryId);
         result = new(OfflineDirectChunkWireEncodeStatus.Delta,
-            RemoteChunkPublicationKind.Delta, written, ticket);
+            RemoteChunkPublicationKind.Delta, written, ticket)
+        {
+            BaseRevision = baseRevision.Value,
+            CurrentRevision = read.Batch.Cursor.Revision.Value,
+            HistoryFloor = read.Batch.HistoryFloor.Value,
+            RecordCount = read.Deltas.Length,
+        };
         return result.Status;
     }
 

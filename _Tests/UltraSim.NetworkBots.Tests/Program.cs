@@ -25,6 +25,7 @@ var tests = new (string Name, Action Body)[]
     ("SustainedInputOptionsAreExplicitAndBounded", SustainedInputOptionsAreExplicitAndBounded),
     ("PF4AActionStagesRetainNoEdgeAndAuthorityOutcomes", ActionStagesRetainNoEdgeAndAuthorityOutcomes),
     ("PF4ACheckpointSelectsConservationSchema", PF4ACheckpointSelectsConservationSchema),
+    ("PF4BCheckpointAndHotChunkScenariosAreExplicit", PF4BCheckpointAndHotChunkScenariosAreExplicit),
 };
 
 foreach ((string name, Action body) in tests)
@@ -189,6 +190,26 @@ static void PF4ACheckpointSelectsConservationSchema()
         "--checkpoint=PF4A",
     ]);
     Equal("PF4A", options.Checkpoint);
+}
+
+static void PF4BCheckpointAndHotChunkScenariosAreExplicit()
+{
+    foreach (string scenario in new[] { "single-hot", "multi-hot" })
+    {
+        BotOptions options = BotOptions.Parse(
+        [
+            "--endpoint=127.0.0.1:7777",
+            $"--fingerprint={new string('1', 64)}",
+            "--bots=8",
+            "--seed=400504",
+            "--duration=2s",
+            $"--scenario={scenario}",
+            "--cache=/tmp/ultrasim-bot-pf4b-options",
+            "--checkpoint=PF4B",
+        ]);
+        Equal("PF4B", options.Checkpoint);
+        Equal(scenario, options.Scenario);
+    }
 }
 
 static void FinalRetirementCoversEveryLifecycleState()

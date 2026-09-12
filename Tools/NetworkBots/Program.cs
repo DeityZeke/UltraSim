@@ -180,6 +180,19 @@ internal sealed class BotHarness : IDisposable
                 _admissionCompleted = Stopwatch.GetTimestamp();
                 _scenarioStarted = _admissionCompleted;
                 if (_options.IsMixedChaos) SelectSwordContenders();
+                if (_options.Scenario == "single-hot")
+                {
+                    WorldPosition first = _bots[0].CurrentPosition;
+                    int edge = GameWorldSpatialProfile.WorldChunkEdgeUnits;
+                    if (!WorldPosition.TryFromGlobalMillimeters(
+                            checked((long)first.Chunk.X * edge + edge / 2),
+                            first.YMillimeters,
+                            checked((long)first.Chunk.Z * edge + edge / 2),
+                            out WorldPosition target))
+                        throw new InvalidOperationException(
+                            "The single-hot shared chunk center was unrepresentable.");
+                    foreach (BotClient bot in _bots) bot.SetMeasurementTarget(target);
+                }
                 foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
                 Console.WriteLine(
                     $"{_options.Checkpoint} BOT SWARM ACTIVE bots={_bots.Length} generation=" +
@@ -357,7 +370,7 @@ internal sealed class BotHarness : IDisposable
         if (_wireSummary is null || !_wireSummary.PhysicalTransportReconciled ||
             !_wireSummary.LogicalMessageReconciled)
             return "PF2 physical/logical traffic accounting did not reconcile.";
-        if (_options.Checkpoint == "PF4A")
+        if (_options.Checkpoint is "PF4A" or "PF4B")
         {
             BotActionOutcomeReport[] outcomes =
                 BotRunSummary.CreateActionOutcomes(_bots, _clientTelemetry);
@@ -376,9 +389,15 @@ internal sealed class BotHarness : IDisposable
         }
         if (!_options.IsMixedChaos)
         {
-            if (_options.Scenario is "moving" or "crowd" &&
+            if (_options.Scenario is "moving" or "crowd" or "single-hot" or "multi-hot" &&
                 _bots.Sum(static bot => bot.MovementAccepted) == 0)
                 return $"The {_options.Scenario} scenario produced no authoritative movement.";
+            if (_options.Scenario == "single-hot")
+            {
+                SpatialChunkCoord hot = _bots[0].CurrentPosition.Chunk;
+                if (_bots.Any(bot => bot.CurrentPosition.Chunk != hot))
+                    return "The single-hot scenario did not retain every recipient in one chunk.";
+            }
             if (_options.Scenario == "sustained-input")
             {
                 ClientWorldInputScheduleSnapshot[] schedules = _bots
@@ -709,6 +728,9 @@ internal sealed class BotClient : IDisposable
     private long _measurementOriginX;
     private long _measurementOriginZ;
     private long _lastMeasurementJumpSecond = -1;
+    private bool _hasSharedMeasurementTarget;
+    private long _sharedMeasurementTargetX;
+    private long _sharedMeasurementTargetZ;
     private UdpPayloadTrafficSnapshot _retiredUdpTraffic;
     private NetworkTrafficSnapshot? _retiredSecureTraffic;
     private bool _trafficCapturedForCurrentLifetime;
@@ -810,6 +832,15 @@ internal sealed class BotClient : IDisposable
     internal WorldPublicEntityId PriorPublicActor => _priorPublicActor;
     internal WorldPublicEntityId CurrentPublicActor => _currentPublicActor;
     internal string? Fault => _fault;
+    internal WorldPosition CurrentPosition =>
+        _session?.GetSnapshot().Playable.Position ?? default;
+
+    internal void SetMeasurementTarget(in WorldPosition target)
+    {
+        _sharedMeasurementTargetX = target.GlobalXMillimeters;
+        _sharedMeasurementTargetZ = target.GlobalZMillimeters;
+        _hasSharedMeasurementTarget = true;
+    }
 
     internal BotActionAccountingSnapshot GetActionAccounting(BotCommandKind kind) =>
         _actionAccounting.Snapshot(kind);
@@ -1237,6 +1268,12 @@ internal sealed class BotClient : IDisposable
             case "crowd":
                 RunMovingMeasurement(now, snapshot.Playable.Position, crowd: true);
                 return;
+            case "single-hot":
+                RunSingleHotChunkMeasurement(now, snapshot.Playable.Position);
+                return;
+            case "multi-hot":
+                RunMovingMeasurement(now, snapshot.Playable.Position, crowd: false);
+                return;
             case "mixed-chaos":
                 RunMixedChaos(now, snapshot);
                 return;
@@ -1438,6 +1475,31 @@ internal sealed class BotClient : IDisposable
         }
         _ = TryMovement(
             (float)Math.Cos(angle), (float)Math.Sin(angle), position, now);
+    }
+
+    private void RunSingleHotChunkMeasurement(long now, in WorldPosition position)
+    {
+        if (!_hasSharedMeasurementTarget)
+            throw new InvalidOperationException("The single-hot scenario has no shared target.");
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        long second = elapsed / 1_000;
+        if (second != _lastMeasurementJumpSecond && second > 0 &&
+            second % (17 + Id % 3) == 0 && !_pendingCommand.Pending.IsPending)
+        {
+            _lastMeasurementJumpSecond = second;
+            _ = TryPhysicalAction(
+                ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump);
+            return;
+        }
+        if (now < _nextNavigation || _pendingCommand.Pending.IsPending) return;
+        long dx = _sharedMeasurementTargetX - position.GlobalXMillimeters;
+        long dz = _sharedMeasurementTargetZ - position.GlobalZMillimeters;
+        long distanceSquared = checked(dx * dx + dz * dz);
+        double angle = distanceSquared > 1_250L * 1_250L
+            ? Math.Atan2(dz, dx)
+            : ((Id * 41 + second * 61) % 360) * Math.PI / 180d;
+        _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 350);
+        _ = TryMovement((float)Math.Cos(angle), (float)Math.Sin(angle), position, now);
     }
 
     private void RunMixedChaos(long now, in RemotePlayableSessionSnapshot snapshot)
@@ -2473,7 +2535,8 @@ internal sealed record BotRunSummary
             "PF2" => 3,
             "PF2.5" => 4,
             "PF3" => 5,
-            _ => 6,
+            "PF4A" => 6,
+            _ => 7,
         },
         Checkpoint = options.Checkpoint,
         Passed = passed,
@@ -2946,7 +3009,7 @@ internal readonly record struct BotOptions(
                 Enum.TryParse(value!.Replace("-", string.Empty), ignoreCase: true,
                     out BotInputMode parsedInputMode)) inputMode = parsedInputMode;
             else if (TryValue(argument, "--checkpoint=", out value) &&
-                value is "PF2" or "PF2.5" or "PF3" or "PF4A")
+                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B")
                 checkpointOverride = value;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
@@ -2960,9 +3023,10 @@ internal readonly record struct BotOptions(
         if (duration is < 2_000 or > 86_400_000)
             throw new ArgumentException("--duration must be between 2 seconds and 24 hours.");
         if (scenario is not ("mixed-chaos" or "quiet" or "moving" or "crowd" or
-                "sustained-input"))
+                "single-hot" or "multi-hot" or "sustained-input"))
             throw new ArgumentException(
-                "--scenario must be mixed-chaos, quiet, moving, crowd, or sustained-input.");
+                "--scenario must be mixed-chaos, quiet, moving, crowd, single-hot, " +
+                "multi-hot, or sustained-input.");
         if (inputSampleHz is < 0 or > 1_000)
             throw new ArgumentException("--input-sample-hz must be between 1 and 1000 when set.");
         if (inputSubmitHz is < 0 or > 1_000)

@@ -760,6 +760,19 @@ public sealed class SharedPlayableAuthority : IDisposable
             _tickTimings.Capture());
     }
 
+    /// <summary>Captures the one authoritative public-chunk source for cold diagnostics.</summary>
+    public ChunkPublicationStoreSnapshot GetPublicationSnapshot()
+    {
+        EnsureOperational();
+        if (!Runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider,
+                ChunkPublicationStoreSnapshot>(
+                static (world, _, game) => game.WorldState.Publications.GetSnapshot(),
+                out ChunkPublicationStoreSnapshot snapshot))
+            throw new InvalidOperationException(
+                "The active Game generation could not expose its publication source.");
+        return snapshot;
+    }
+
     public void Dispose()
     {
         EnsureOwnerThread();

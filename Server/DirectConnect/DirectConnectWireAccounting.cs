@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
+using UltraSim.Game.World;
 using UltraSim.Network;
 using UltraSim.Server.ConceptDemo;
 using UltraSim.Server.Hosting;
@@ -46,6 +47,14 @@ internal sealed record DirectConnectHttpBodyTrafficReport(
     ulong Rejected,
     long ResponseBodyBytes);
 
+internal sealed record DirectConnectPublicationTrafficReport(
+    ulong CommitCount,
+    ulong PublishedChunkRevisions,
+    ulong HistoryInvalidations,
+    ulong SnapshotReads,
+    ulong DeltaReads,
+    ulong SnapshotFallbacks);
+
 internal sealed record DirectConnectWireAccountingSummary(
     string PhysicalMetric,
     string HttpMetric,
@@ -69,6 +78,7 @@ internal sealed record DirectConnectWireAccountingSummary(
     DirectConnectHttpBodyTrafficReport HttpBody,
     HostedUdpHostTelemetrySnapshot NetworkTiming,
     GameTickTimingSnapshot AuthorityTiming,
+    DirectConnectPublicationTrafficReport AuthoritativePublications,
     RemoteGuestPlayableServerSnapshot[] RemoteApplications,
     double ProcessCpuMilliseconds,
     double CpuSecondsPerWallSecond,
@@ -96,6 +106,7 @@ internal sealed class DirectConnectWireAccounting
     private readonly ulong _tickStart;
     private readonly int _participantsStart;
     private readonly int _connectionsStart;
+    private readonly ChunkPublicationStoreSnapshot _publicationStart;
     private readonly long _started;
     private readonly Process _process;
     private readonly double _cpuStart;
@@ -125,6 +136,7 @@ internal sealed class DirectConnectWireAccounting
         _tickStart = authoritySnapshot.SimulationTick;
         _participantsStart = authoritySnapshot.ParticipantCount;
         _connectionsStart = hostSnapshot.EstablishedSessions;
+        _publicationStart = authority.GetPublicationSnapshot();
         CaptureActive(host, _start);
         for (int ordinal = 0; host.TryGetRetiredTraffic(ordinal, out var retired); ordinal++)
             _retiredBeforeStart.Add(retired.Connection);
@@ -166,6 +178,7 @@ internal sealed class DirectConnectWireAccounting
         double seconds = durationMilliseconds / 1_000d;
         HostedUdpAdmissionSnapshot hostEnd = host.GetSnapshot();
         SharedPlayableAuthoritySnapshot authorityEnd = authority.GetSnapshot();
+        ChunkPublicationStoreSnapshot publicationEnd = authority.GetPublicationSnapshot();
 
         var end = new Dictionary<ConnectionId, HostedUdpServerConnectionTrafficSnapshot>();
         for (int ordinal = 0; host.TryGetRetiredTraffic(ordinal, out var retired); ordinal++)
@@ -301,6 +314,16 @@ internal sealed class DirectConnectWireAccounting
                 Difference(_httpStart.BytesServed, httpEnd.BytesServed)),
             host.GetTelemetrySnapshot(),
             authorityEnd.Timing,
+            new DirectConnectPublicationTrafficReport(
+                Difference(_publicationStart.CommitCount, publicationEnd.CommitCount),
+                Difference(_publicationStart.PublishedChunkRevisions,
+                    publicationEnd.PublishedChunkRevisions),
+                Difference(_publicationStart.HistoryInvalidations,
+                    publicationEnd.HistoryInvalidations),
+                Difference(_publicationStart.SnapshotReads, publicationEnd.SnapshotReads),
+                Difference(_publicationStart.DeltaReads, publicationEnd.DeltaReads),
+                Difference(_publicationStart.SnapshotFallbacks,
+                    publicationEnd.SnapshotFallbacks)),
             applicationSnapshots,
             cpuMilliseconds,
             cpuMilliseconds / durationMilliseconds,
