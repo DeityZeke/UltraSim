@@ -288,7 +288,9 @@ static void VerifyPf4bKnowledgeCensus(string root, string configuration)
         _ = RunCaptured(
             root,
             Path.Combine(root, "Tools", "NetworkBots", "run-pf4b-baseline.sh"),
-            ["single-hot", "15s", output, "8", "400504", "5s", cache],
+            // The focused window must begin after passive spawn/fall recovery has quiesced;
+            // otherwise those legitimate establishment changes contaminate the one-hot census.
+            ["single-hot", "15s", output, "50", "400504", "60s", cache],
             240_000);
         using JsonDocument botDocument = JsonDocument.Parse(
             File.ReadAllText(Path.Combine(output, "bot-summary.json")));
@@ -353,7 +355,7 @@ static void VerifyPf4bKnowledgeCensus(string root, string configuration)
                 .GetProperty("PublishedChunkRevisions").GetUInt64() == 0)
             throw new InvalidOperationException("PF4B server knowledge telemetry was incomplete.");
         Console.WriteLine(
-            $"PASS PF4B_KnowledgeCensus clients=8 generated={generated} " +
+            $"PASS PF4B_KnowledgeCensus clients=50 generated={generated} " +
             $"envelopes={envelopes} advancements={advancements} deltas={deltaMessages}");
     }
     finally
