@@ -1502,22 +1502,30 @@ internal sealed class BotClient : IDisposable
         if (!_isSingleHotMover) return;
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         long second = elapsed / 1_000;
-        if (second != _lastMeasurementJumpSecond && second > 0 &&
-            second % (17 + Id % 3) == 0 && !_pendingCommand.Pending.IsPending)
+        if (now < _nextNavigation || _pendingCommand.Pending.IsPending) return;
+        int waypoint = checked((int)((second / 2) & 3));
+        long targetX = checked(_sharedMeasurementTargetX + waypoint switch
         {
-            _lastMeasurementJumpSecond = second;
-            _ = TryPhysicalAction(
-                ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump);
+            0 => 750L,
+            2 => -750L,
+            _ => 0L,
+        });
+        long targetZ = checked(_sharedMeasurementTargetZ + waypoint switch
+        {
+            1 => 750L,
+            3 => -750L,
+            _ => 0L,
+        });
+        long dx = targetX - position.GlobalXMillimeters;
+        long dz = targetZ - position.GlobalZMillimeters;
+        long distanceSquared = checked(dx * dx + dz * dz);
+        _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 200);
+        if (distanceSquared <= 250L * 250L)
+        {
+            _ = TryMovement(0, 0, position, now);
             return;
         }
-        if (now < _nextNavigation || _pendingCommand.Pending.IsPending) return;
-        long dx = _sharedMeasurementTargetX - position.GlobalXMillimeters;
-        long dz = _sharedMeasurementTargetZ - position.GlobalZMillimeters;
-        long distanceSquared = checked(dx * dx + dz * dz);
-        double angle = distanceSquared > 1_250L * 1_250L
-            ? Math.Atan2(dz, dx)
-            : ((Id * 41 + second * 61) % 360) * Math.PI / 180d;
-        _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 350);
+        double angle = Math.Atan2(dz, dx);
         _ = TryMovement((float)Math.Cos(angle), (float)Math.Sin(angle), position, now);
     }
 

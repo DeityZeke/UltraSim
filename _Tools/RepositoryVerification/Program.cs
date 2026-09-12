@@ -342,6 +342,9 @@ static void VerifyPf4bKnowledgeCensus(string root, string configuration)
             deltaMessages += delta.GetProperty("Messages").GetUInt64();
             if (delta.GetProperty("UniqueChunkCensusOverflowed").GetBoolean())
                 throw new InvalidOperationException("The PF4B unique-chunk census saturated.");
+            if (delta.GetProperty("UniqueChunks").GetUInt64() != 1)
+                throw new InvalidOperationException(
+                    "The PF4B single-hot fixture produced more than one Delta chunk.");
             if (knowledge.GetProperty("Outstanding").GetProperty("HighWater").GetInt32() > 128)
                 throw new InvalidOperationException("The PF4B delivery ledger exceeded its bound.");
         }
