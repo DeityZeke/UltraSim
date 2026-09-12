@@ -5,8 +5,8 @@
   "commits": {
     "exactStartingAndMeasurementBase": "46f26a7f2250f3979ad0da20290f0f3042a0bb04",
     "acceptedPf4aImplementation": "4427d65972345ae68e3af00bb1a734d449207649",
-    "acceptedPf4aClosure": null,
-    "closureIdentityNote": "Populated by the evidence follow-up after the closure commit exists.",
+    "acceptedPf4aClosure": "4aaa797cc3f23b0d9b0f8d2d9ec1f2d4f9ba1d08",
+    "closureIdentityNote": "This artifact's evidence-only follow-up records the exact preceding closure commit without claiming an impossible self-referential Git identity.",
     "repairedFeatureCompleteCandidate": "5eec694692df8f85be2d7db215b2642a9ec9061b",
     "candidateLineageChanged": false,
     "candidateReason": "PF4A found an evidence/reporting defect and accepted a performance optimization, not a product correctness defect. Previous feature checkpoints remain closed."
@@ -301,8 +301,8 @@
     "clientTests": "PASS 30",
     "networkBotTests": "PASS 16",
     "focusedPf4aQuietAndActualExport": "PASS",
-    "canonicalRelease": "PENDING_CLOSURE_COMMIT",
-    "worktreeCleanAfterCommit": "PENDING_CLOSURE_COMMIT",
+    "canonicalRelease": "PASS_AT_EVIDENCE_FOLLOWUP",
+    "worktreeCleanAfterCommit": true,
     "pf4bClosed": false,
     "pf5Closed": false
   }
