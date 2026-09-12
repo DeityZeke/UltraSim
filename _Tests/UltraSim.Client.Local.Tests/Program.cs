@@ -394,6 +394,12 @@ static void ControllerCloseFailureMustRemainRecoverable()
         maximumParticipants: 1,
         joins: 1,
         leaves: 0,
+        performanceProfileRevision: 0,
+        performanceProfileHashShort: null,
+        maximumNetworkServiceIntervalMicroseconds: 0,
+        maximumInputHz: 0,
+        recommendedInputHz: 0,
+        rateLimitedCommands: 0,
         testMarker: null,
         participants: []);
 }

@@ -12,6 +12,7 @@ var tests = new (string Name, Action Body)[]
     ("JoiningBotRetiresWithoutLateAdmission", JoiningBotRetiresWithoutLateAdmission),
     ("ProcessTelemetryRefreshesAtBoundedCadence", ProcessTelemetryRefreshesAtBoundedCadence),
     ("StopwatchConversionAvoidsIntermediateOverflow", StopwatchConversionAvoidsIntermediateOverflow),
+    ("FixedDeadlineRetainsProducerCadencePhase", FixedDeadlineRetainsProducerCadencePhase),
     ("AdmissionDeadlineIncludesLastScheduledStart", AdmissionDeadlineIncludesLastScheduledStart),
     ("MixedChaosRejectsContradictoryConfiguration", MixedChaosRejectsContradictoryConfiguration),
     ("PendingCommandCannotDisappearAcrossLifetime", PendingCommandCannotDisappearAcrossLifetime),
@@ -19,6 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("ChunkCoverageDistinguishesCrossingsFromDistinctChunks", ChunkCoverageDistinguishesCrossingsFromDistinctChunks),
     ("ReconnectObserverRejectsEqualCountGhostIdentity", ReconnectObserverRejectsEqualCountGhostIdentity),
     ("MeasurementCompleteBarrierRequiresSynchronizedWindow", MeasurementCompleteBarrierRequiresSynchronizedWindow),
+    ("SustainedInputOptionsAreExplicitAndBounded", SustainedInputOptionsAreExplicitAndBounded),
 };
 
 foreach ((string name, Action body) in tests)
@@ -85,6 +87,51 @@ static void MeasurementCompleteBarrierRequiresSynchronizedWindow()
         "--measurement-complete-file=/tmp/complete",
     ]);
     Equal(Path.GetFullPath("/tmp/complete"), accepted.MeasurementCompleteFile);
+}
+
+static void SustainedInputOptionsAreExplicitAndBounded()
+{
+    string[] common =
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=2",
+        "--seed=3",
+        "--duration=8s",
+        "--scenario=sustained-input",
+        "--cache=/tmp/ultrasim-bot-pf3-options",
+    ];
+    BotOptions stock = BotOptions.Parse(
+    [
+        .. common,
+        "--input-sample-hz=120",
+        "--input-submit-hz=30",
+        "--input-mode=compliant",
+    ]);
+    Equal("PF3", stock.Checkpoint);
+    Equal(120, stock.InputSampleHz);
+    Equal(30, stock.InputSubmitHz);
+    Equal(BotInputMode.Compliant, stock.InputMode);
+
+    BotOptions abusive = BotOptions.Parse(
+    [
+        .. common,
+        "--input-sample-hz=240",
+        "--input-mode=over-limit",
+    ]);
+    Equal(BotInputMode.OverLimit, abusive.InputMode);
+    Throws<ArgumentException>(() => BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=1", "--seed=1", "--duration=2s", "--scenario=quiet",
+        "--cache=/tmp/ultrasim-bot-pf3-options", "--input-sample-hz=60",
+    ]));
+    Throws<ArgumentException>(() => BotOptions.Parse(
+    [
+        .. common,
+        "--input-sample-hz=1001",
+    ]));
 }
 
 static void FinalRetirementCoversEveryLifecycleState()
@@ -188,6 +235,21 @@ static void StopwatchConversionAvoidsIntermediateOverflow()
     Equal(milliseconds, BotMonotonicClock.TicksToMilliseconds(ticks, frequency));
     Equal(frequency, BotMonotonicClock.MillisecondsToTicks(1_000, frequency));
     Equal(0L, BotMonotonicClock.TicksToMilliseconds(0, frequency));
+}
+
+static void FixedDeadlineRetainsProducerCadencePhase()
+{
+    long deadline = 1_000;
+    const long interval = 100;
+    deadline = BotMonotonicClock.AdvanceFixedDeadline(deadline, 1_001, interval);
+    Equal(1_100L, deadline);
+    deadline = BotMonotonicClock.AdvanceFixedDeadline(deadline, 1_102, interval);
+    Equal(1_200L, deadline);
+    deadline = BotMonotonicClock.AdvanceFixedDeadline(deadline, 1_451, interval);
+    Equal(1_500L, deadline);
+    Equal(1_500L, BotMonotonicClock.AdvanceFixedDeadline(deadline, 1_499, interval));
+    Throws<ArgumentOutOfRangeException>(() =>
+        BotMonotonicClock.AdvanceFixedDeadline(deadline, 1_500, 0));
 }
 
 static void AdmissionDeadlineIncludesLastScheduledStart()

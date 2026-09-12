@@ -33,6 +33,7 @@ public partial class ClientHost
     private bool _remoteSmokeCompletionReadyPublished;
     private bool _remoteProcessObserved;
     private bool _remoteTelemetryWindowStarted;
+    private bool _remoteTelemetryQuiescenceStarted;
     private string _remoteGuestName = string.Empty;
     private GameGuestBody _remoteGuestBody = GameGuestBody.HumanFemale;
     private string? _remoteGuestError;
@@ -134,6 +135,19 @@ public partial class ClientHost
                     else if (playable.Actors.ActiveActors < RemoteSmokeExpectedActors())
                         return;
                     if (!SharedRemoteSmokeCompletionBarrierReleased()) return;
+                    if (string.Equals(
+                            ReadArgument("--telemetry-checkpoint="), "PF3",
+                            StringComparison.Ordinal))
+                    {
+                        if (!_remoteTelemetryQuiescenceStarted)
+                        {
+                            _remotePlayable.BeginTelemetryInputQuiescence();
+                            _remoteTelemetryQuiescenceStarted = true;
+                            return;
+                        }
+                        if (!_remotePlayable.TelemetryInputIsQuiesced()) return;
+                        playable = _remotePlayable.GetSnapshot();
+                    }
                     _remoteSmokeDisconnectStarted = true;
                     WriteRemoteTelemetrySummary(playable);
                     GD.Print(
@@ -613,6 +627,7 @@ public partial class ClientHost
         _directEndpoint = endpoint.Trim();
         _directFingerprint = fingerprint.Trim();
         _remoteTelemetryWindowStarted = false;
+        _remoteTelemetryQuiescenceStarted = false;
         _remoteSession?.Dispose();
         _remoteSession = new ClientDirectConnectSession(_serverTrust!, _serverTrustStore!);
         _remoteSession.ConfigureTelemetry(RemoteTelemetryLevel());
@@ -643,7 +658,9 @@ public partial class ClientHost
             EffectiveSettings,
             _allowInsecurePrivateContent,
             IsAutomatedRemoteSmoke(),
-            RemoteTelemetryLevel());
+            RemoteTelemetryLevel(),
+            OS.GetCmdlineUserArgs().Contains(
+                "--pf3-native-sustained-input", StringComparer.Ordinal));
         WorldRoot.AddChild(playable);
         _remotePlayable = playable;
     }
@@ -820,16 +837,22 @@ public partial class ClientHost
         string? path = ReadArgument("--telemetry-summary=");
         if (path is null) return;
         _remoteSession!.TryGetTelemetrySnapshot(out NetworkServiceTimingSnapshot network);
+        string checkpoint = ReadArgument("--telemetry-checkpoint=") ?? "PF2.5";
+        if (checkpoint is not ("PF2.5" or "PF3"))
+            throw new InvalidOperationException(
+                "--telemetry-checkpoint must be PF2.5 or PF3.");
         var summary = new
         {
-            SchemaVersion = 1,
-            Checkpoint = "PF2.5",
+            SchemaVersion = checkpoint == "PF3" ? 2 : 1,
+            Checkpoint = checkpoint,
             Product = CompiledEdition,
             Guest = playable.Session.Playable.GuestIdentity.DisplayName,
             ApplicationSessionEpoch = playable.Session.Playable.ApplicationSessionEpoch,
             ServerGeneration = playable.Session.Playable.ServerGenerationId,
             Network = network,
             Client = playable.Session.Timing,
+            InputScheduler = playable.InputSchedule,
+            PerformanceProfile = playable.Session.Performance,
             Native = playable.NativeTelemetry,
             Healthy = playable.State == RemoteConceptDemoClientState.Active &&
                 playable.Session.SemanticConsumersActive && playable.RenderedChunks != 0 &&

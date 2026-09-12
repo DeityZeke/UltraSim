@@ -213,6 +213,14 @@ Core emits only the focus-fenced held-to-pressed action edge; Game decides wheth
 actor is grounded and whether the jump is admitted. Vertical velocity, gravity, landing, and fall
 recovery never become client input or presentation authority.
 
+PF3 adds `ClientWorldInputScheduler` between semantic sampling and sequencing. Continuous
+locomotion is latest-wins, while Jump/Interact/Primary, one-shot requests, and held-to-release or
+moving-to-stop transitions enter one bounded ordered obligation ring. The scheduler retains work
+across local transport rejection, fences completion by the resulting command sequence, and applies
+the authenticated remote recommendation/hard limit through a monotonic token bucket plus
+phase-independent rolling burst window. Godot, packet-free Local, and NetworkBots use this same
+engine-neutral mechanism; render or producer sample frequency no longer selects command frequency.
+
 The Direct-era raw-sample overload remains a convenience producer: nonzero axes
 produce complete world-space `Direct`, while zero axes produce explicit `Stop`.
 Control profiles use `ClientWorldCommandIntent` and

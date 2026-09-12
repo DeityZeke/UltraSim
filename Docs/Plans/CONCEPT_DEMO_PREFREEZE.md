@@ -4,7 +4,9 @@
 real headless ClientOnly Network bot plus mixed exported-client correctness gate, and PF2 closes
 first-class wire accounting plus quiet/moving/crowd characterization. PF2.5 now reconciles the
 current product's replication ownership and completes PF3 observability without changing policy;
-PF3 cadence policy follows.
+PF3 now closes render/input/submission/authority/Network clock separation, authenticated bounded
+performance policy, and real authority-side input-rate enforcement. PF4 measured optimization is
+next.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1661,6 +1663,24 @@ Close when:
 
 ## PF3 — cadence/performance policy
 
+**Status: CLOSED.** `ServerPerformanceProfile/v1` is authenticated and applied before content and
+guest admission, then fenced by application epoch plus exact revision/hash. Client Core's bounded
+input scheduler is shared by visible/headless Godot, packet-free Local, and ClientOnly bots. Latest
+continuous state coalesces while action and stop/release obligations remain ordered through local
+queue pressure and semantic completion. The authority independently enforces a monotonic token
+bucket plus phase-independent rolling burst window before Game mutation and returns an explicit
+`RateLimited` completion.
+
+Direct Connect now exposes 20/30/60 Hz authority configurations and its actual bounded maximum
+event-driven Network service interval. Native evidence distinguishes headless main-loop cadence
+from visible X11/VSync presentation and proves render FPS does not select command cadence. Fixed
+whole-window histograms complement the existing rolling Monitor views, and swarm reports identify
+worst-client timing rather than hiding it behind an aggregate median. Permanent measurements are in
+`_Benchmarks/Baselines/concept-demo-pf3-cadence-performance-policy-2026-09-12.json`.
+
+PF3 records but does not optimize quiet replication scheduling or the exact Chunk Delta (120) /
+Chunk Applied Proof (130) costs. `ChunkPublication` remains the sole current dynamic-public owner.
+
 Close when:
 
 - render FPS and input submission cadence are independent;
@@ -1826,10 +1846,10 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 10. Add first-class wire/per-message accounting. **CLOSED — PF2**
 11. Establish high-performance quiet/moving/crowd baselines. **CLOSED — PF2**
 12. Reconcile current-game replication ownership and complete PF3 observability. **CLOSED — PF2.5**
-13. Decouple render FPS from input submission cadence. **NEXT — PF3**
-14. Define/advertise/enforce the bounded Server Performance Profile.
-15. Run mismatched-cadence correctness matrix.
-16. Evaluate input/owner/public cadence reductions.
+13. Decouple render FPS from input submission cadence. **CLOSED — PF3**
+14. Define/advertise/enforce the bounded Server Performance Profile. **CLOSED — PF3**
+15. Run mismatched-cadence correctness matrix. **CLOSED — PF3**
+16. Evaluate input/owner/public cadence reductions. **NEXT — PF4**
 17. Evaluate unreliable frame aggregation.
 18. Measure dense vs distributed AOI/fanout.
 19. Evaluate selective compression only where payload shape justifies it.

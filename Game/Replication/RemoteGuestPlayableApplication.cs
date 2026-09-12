@@ -43,6 +43,14 @@ public readonly record struct RemoteGuestPlayableServerSnapshot(
     ulong DuplicateClientProfileProofs,
     ulong RejectedClientProfileProofs,
     ulong RejectedPreProfileMessages,
+    bool ServerPerformanceProfileRequired,
+    bool ServerPerformanceProfileApplied,
+    ulong ServerPerformanceProfilesQueued,
+    ulong DuplicateServerPerformanceProofs,
+    ulong RejectedServerPerformanceProofs,
+    ulong RejectedPrePerformanceMessages,
+    ulong CommandsConsidered,
+    ulong CommandsRateLimited,
     bool PublicPresentationApplied,
     ulong PublicPresentationDeliveriesQueued,
     ulong DuplicatePublicPresentationProofs,
@@ -84,6 +92,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
+    private readonly RemoteServerPerformanceProfile? _serverPerformanceProfile;
     private long _nextParticipant;
 
     public RemoteGuestPlayableApplicationFactory(
@@ -91,7 +100,8 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         RemoteContentAuthorization? contentAuthorization = null,
         IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
         RemoteClientProfileAdvertisement? clientProfile = null,
-        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null)
+        IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
+        RemoteServerPerformanceProfile? serverPerformanceProfile = null)
     {
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
         if (contentAuthorization is not null &&
@@ -107,6 +117,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         _standardUiDefinitions = CopyUiDefinitions(
             standardUiDefinitions, nameof(standardUiDefinitions));
         _clientProfile = clientProfile;
+        _serverPerformanceProfile = serverPerformanceProfile;
         if (_contentBackedUiDefinitions.Length != 0 && contentAuthorization is null)
             throw new ArgumentException(
                 "Content-backed UI definitions require an exact authenticated content authorization.",
@@ -125,7 +136,7 @@ public sealed class RemoteGuestPlayableApplicationFactory : IHostedUdpSessionApp
         return new RemoteGuestPlayableApplication(
             peer, _realm, new ParticipantId(checked((ulong)value)), CreateEpoch(),
             _contentAuthorization, _contentBackedUiDefinitions, _clientProfile,
-            _standardUiDefinitions);
+            _standardUiDefinitions, serverPerformanceProfile: _serverPerformanceProfile);
     }
 
     private static ulong CreateEpoch()
@@ -189,6 +200,7 @@ public sealed class RemoteGuestPlayableApplication :
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
+    private readonly RemoteServerPerformanceProfile? _serverPerformanceProfile;
     private readonly ParticipantId _participant;
     private readonly ulong _applicationSessionEpoch;
     private readonly SharedPlayableAuthority? _sharedAuthority;
@@ -203,6 +215,12 @@ public sealed class RemoteGuestPlayableApplication :
     private ulong _duplicateClientProfileProofs;
     private ulong _rejectedClientProfileProofs;
     private ulong _rejectedPreProfileMessages;
+    private bool _serverPerformanceProfileApplied;
+    private long _lastServerPerformanceProfileQueue;
+    private ulong _serverPerformanceProfilesQueued;
+    private ulong _duplicateServerPerformanceProofs;
+    private ulong _rejectedServerPerformanceProofs;
+    private ulong _rejectedPrePerformanceMessages;
     private bool _contentApplied;
     private long _lastContentRequirementQueue;
     private ulong _contentRequirementsQueued;
@@ -260,6 +278,8 @@ public sealed class RemoteGuestPlayableApplication :
     private WorldPosition _lastOwnerStatePosition;
     private WorldYaw _lastOwnerStateOrientation;
     private ulong _commandsApplied;
+    private ulong _commandsConsidered;
+    private ulong _commandsRateLimited;
     private ulong _duplicateCommands;
     private ulong _rejectedCommands;
     private ulong _uiBackpressureRejections;
@@ -283,6 +303,8 @@ public sealed class RemoteGuestPlayableApplication :
     private long _tickInterval;
     private bool _disposed;
     private SharedPlayableParticipant _sharedParticipant;
+    private readonly ServerInputRateLimiter? _inputRateLimiter;
+    private bool _lastCommandWasRateLimited;
 
     internal ParticipantId Participant => _participant;
 
@@ -302,7 +324,8 @@ public sealed class RemoteGuestPlayableApplication :
         IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
         RemoteClientProfileAdvertisement? clientProfile = null,
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
-        SharedPlayableAuthority? sharedAuthority = null)
+        SharedPlayableAuthority? sharedAuthority = null,
+        RemoteServerPerformanceProfile? serverPerformanceProfile = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (!realm.IsValid) throw new ArgumentOutOfRangeException(nameof(realm));
@@ -325,6 +348,10 @@ public sealed class RemoteGuestPlayableApplication :
             _sharedParticipantScratch = new GamePublicActorPresentation[participantCapacity];
         }
         _clientProfile = clientProfile;
+        _serverPerformanceProfile = serverPerformanceProfile;
+        _inputRateLimiter = serverPerformanceProfile is null
+            ? null
+            : new ServerInputRateLimiter(serverPerformanceProfile);
         _contentBackedUiDefinitions = (contentBackedUiDefinitions ?? [])
             .Take(257).ToArray();
         _standardUiDefinitions = (standardUiDefinitions ?? [])
@@ -346,6 +373,7 @@ public sealed class RemoteGuestPlayableApplication :
                 nameof(standardUiDefinitions));
         _contentApplied = contentAuthorization is null;
         _clientProfileApplied = clientProfile is null;
+        _serverPerformanceProfileApplied = serverPerformanceProfile is null;
         if (sharedAuthority is not null)
             ConfigureTelemetry(sharedAuthority.TelemetryLevel);
     }
@@ -381,6 +409,16 @@ public sealed class RemoteGuestPlayableApplication :
         if (!_clientProfileApplied)
         {
             SaturatingIncrement(ref _rejectedPreProfileMessages);
+            return false;
+        }
+        if (message.MessageId == RemoteServerPerformanceProfileAppliedMessageCodec.Descriptor.Id)
+        {
+            ProcessServerPerformanceProof(payload);
+            return true;
+        }
+        if (!_serverPerformanceProfileApplied)
+        {
+            SaturatingIncrement(ref _rejectedPrePerformanceMessages);
             return false;
         }
         if (message.MessageId == RemoteContentSetAppliedMessageCodec.Descriptor.Id)
@@ -451,6 +489,11 @@ public sealed class RemoteGuestPlayableApplication :
         if (!_clientProfileApplied)
         {
             complete &= QueueClientProfile(force: false);
+            return complete;
+        }
+        if (!_serverPerformanceProfileApplied)
+        {
+            complete &= QueueServerPerformanceProfile(force: false);
             return complete;
         }
         if (!_contentApplied)
@@ -529,6 +572,10 @@ public sealed class RemoteGuestPlayableApplication :
             _clientProfile is not null, _clientProfileApplied, _clientProfilesQueued,
             _duplicateClientProfileProofs, _rejectedClientProfileProofs,
             _rejectedPreProfileMessages,
+            _serverPerformanceProfile is not null, _serverPerformanceProfileApplied,
+            _serverPerformanceProfilesQueued, _duplicateServerPerformanceProofs,
+            _rejectedServerPerformanceProofs, _rejectedPrePerformanceMessages,
+            _commandsConsidered, _commandsRateLimited,
             _publicPresentationApplied, _publicPresentationDeliveriesQueued,
             _duplicatePublicPresentationProofs, _rejectedPublicPresentationProofs,
             _worldDelivery?.GetSnapshot() ?? default,
@@ -682,6 +729,29 @@ public sealed class RemoteGuestPlayableApplication :
         return true;
     }
 
+    private bool QueueServerPerformanceProfile(bool force)
+    {
+        if (_serverPerformanceProfileApplied || _serverPerformanceProfile is null) return true;
+        long now = Environment.TickCount64;
+        if (!force && _lastServerPerformanceProfileQueue != 0 &&
+            now - _lastServerPerformanceProfileQueue < AdmissionRetryMilliseconds)
+            return true;
+        RemoteServerPerformanceProfileMessage message =
+            UltraSimGameProtocol.CreateServerPerformanceProfile(
+                _applicationSessionEpoch, _serverPerformanceProfile);
+        int bytes = RemoteServerPerformanceProfileMessageCodec.EncodedSize;
+        if (!RemoteServerPerformanceProfileMessageCodec.TryWriteExact(
+                _messageScratch.AsSpan(0, bytes), in message))
+            throw new InvalidOperationException(
+                "The retained server performance profile became invalid.");
+        if (_peer.TryQueue(RemoteServerPerformanceProfileMessageCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
+            return false;
+        _lastServerPerformanceProfileQueue = now;
+        SaturatingIncrement(ref _serverPerformanceProfilesQueued);
+        return true;
+    }
+
     private void ProcessClientProfileProof(ReadOnlySpan<byte> payload)
     {
         if (_clientProfile is null ||
@@ -711,6 +781,37 @@ public sealed class RemoteGuestPlayableApplication :
             return;
         }
         _clientProfileApplied = true;
+    }
+
+    private void ProcessServerPerformanceProof(ReadOnlySpan<byte> payload)
+    {
+        if (_serverPerformanceProfile is null ||
+            !RemoteServerPerformanceProfileAppliedMessageCodec.TryReadExact(
+                payload, out RemoteServerPerformanceProfileAppliedMessage proof) ||
+            !UltraSimGameProtocol.IsValidServerPerformanceProfileApplied(in proof) ||
+            proof.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            proof.ProfileRevision != _serverPerformanceProfile.Revision ||
+            new RemoteServerPerformanceProfileHash(
+                proof.ProfileHash0, proof.ProfileHash1,
+                proof.ProfileHash2, proof.ProfileHash3) != _serverPerformanceProfile.Hash)
+        {
+            SaturatingIncrement(ref _rejectedServerPerformanceProofs);
+            return;
+        }
+        if (proof.Status == RemoteServerPerformanceApplyStatus.Rejected)
+        {
+            if (_serverPerformanceProfileApplied)
+                SaturatingIncrement(ref _rejectedServerPerformanceProofs);
+            else
+                _applicationFaulted = true;
+            return;
+        }
+        if (_serverPerformanceProfileApplied)
+        {
+            SaturatingIncrement(ref _duplicateServerPerformanceProofs);
+            return;
+        }
+        _serverPerformanceProfileApplied = true;
     }
 
     private void ProcessContentProof(ReadOnlySpan<byte> payload)
@@ -1554,6 +1655,15 @@ public sealed class RemoteGuestPlayableApplication :
             SaturatingIncrement(ref _rejectedCommands);
             return;
         }
+        SaturatingIncrement(ref _commandsConsidered);
+        if (_inputRateLimiter is not null && !_inputRateLimiter.TryAdmit())
+        {
+            _lastProcessedCommand = command.Sequence;
+            _lastCommandWasRateLimited = true;
+            SaturatingIncrement(ref _commandsRateLimited);
+            _ = QueueOwnerState();
+            return;
+        }
         long worldActionStarted = _worldActionTiming.StartDetailed();
         bool applied;
         CommandOutcome outcome;
@@ -1570,6 +1680,7 @@ public sealed class RemoteGuestPlayableApplication :
             return;
         }
         _lastProcessedCommand = command.Sequence;
+        _lastCommandWasRateLimited = false;
         long privateStarted = _privateSemanticTiming.StartDetailed();
         try { _lastCommandResult = ApplyPostCommandSemantic(outcome); }
         catch (UiSemanticPublicationException)
@@ -1779,7 +1890,8 @@ public sealed class RemoteGuestPlayableApplication :
     private ServerMonitorSnapshot CaptureServerMonitor()
     {
         if (_sharedAuthority is not null)
-            return _sharedAuthority.CaptureServerMonitor();
+            return _sharedAuthority.CaptureServerMonitor(
+                _serverPerformanceProfile, _commandsRateLimited);
         if (_runtime is null || !_guestIdentity.IsValid || !_playerPublicId.IsValid)
             throw new InvalidOperationException("The remote Server Monitor authority is unavailable.");
         int entityCount = 0;
@@ -1819,6 +1931,14 @@ public sealed class RemoteGuestPlayableApplication :
             1,
             1,
             0,
+            _serverPerformanceProfile?.Revision ?? 0,
+            _serverPerformanceProfile is null
+                ? null
+                : _serverPerformanceProfile.Hash.Part0.ToString("X16")[..12],
+            checked((int)(_serverPerformanceProfile?.MaximumNetworkServiceIntervalMicroseconds ?? 0)),
+            _serverPerformanceProfile?.MaximumInputHz ?? 0,
+            _serverPerformanceProfile?.RecommendedInputHz ?? 0,
+            _commandsRateLimited,
             null,
             participants);
     }
@@ -1930,11 +2050,21 @@ public sealed class RemoteGuestPlayableApplication :
             YMillimeters = capture.Position.YMillimeters,
             GlobalZMillimeters = capture.Position.GlobalZMillimeters,
             OrientationUnits = capture.Descriptor.Orientation.Units,
-            Admission = Map(_lastCommandResult.Admission),
-            Locomotion = Map(_lastCommandResult.Locomotion),
-            Jump = Map(_lastCommandResult.Jump),
-            Primary = Map(_lastCommandResult.Primary),
-            Interaction = Map(_lastCommandResult.Interaction),
+            Admission = _lastCommandWasRateLimited
+                ? RemotePlayableActionStatus.RateLimited
+                : Map(_lastCommandResult.Admission),
+            Locomotion = _lastCommandWasRateLimited
+                ? RemotePlayableActionStatus.RateLimited
+                : Map(_lastCommandResult.Locomotion),
+            Jump = _lastCommandWasRateLimited
+                ? RemotePlayableActionStatus.RateLimited
+                : Map(_lastCommandResult.Jump),
+            Primary = _lastCommandWasRateLimited
+                ? RemotePlayableActionStatus.RateLimited
+                : Map(_lastCommandResult.Primary),
+            Interaction = _lastCommandWasRateLimited
+                ? RemotePlayableActionStatus.RateLimited
+                : Map(_lastCommandResult.Interaction),
             Body = (byte)_guestIdentity.Body,
         };
         int bytes = RemotePlayableOwnerStateMessageCodec.EncodedSize;
@@ -1956,6 +2086,7 @@ public sealed class RemoteGuestPlayableApplication :
 
     private static bool IsApplicationProof(NetworkMessageId messageId) =>
         messageId == RemoteClientProfileAppliedMessageCodec.Descriptor.Id ||
+        messageId == RemoteServerPerformanceProfileAppliedMessageCodec.Descriptor.Id ||
         messageId == RemoteContentSetAppliedMessageCodec.Descriptor.Id ||
         messageId == RemoteGuestAdmissionAppliedMessageCodec.Descriptor.Id ||
         messageId == RemotePublicPresentationAppliedMessageCodec.Descriptor.Id ||

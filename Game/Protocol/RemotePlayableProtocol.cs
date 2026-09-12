@@ -35,6 +35,7 @@ public enum RemotePlayableActionStatus : byte
     Blocked = 11,
     Unsupported = 12,
     NotGrounded = 13,
+    RateLimited = 14,
 }
 
 [Flags]

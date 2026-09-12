@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 
 namespace UltraSim.Game.Replication;
 
@@ -30,7 +31,16 @@ public readonly record struct GameTickTimingSnapshot(
     long LatenessMaximumMicroseconds,
     ulong DeadlineMisses,
     ulong CatchUpTicks,
-    ulong SkippedOpportunities);
+    ulong SkippedOpportunities,
+    long WholeWindowP50Microseconds,
+    long WholeWindowP95Microseconds,
+    long WholeWindowP99Microseconds,
+    long WholeWindowIntervalP50Microseconds,
+    long WholeWindowIntervalP95Microseconds,
+    long WholeWindowIntervalP99Microseconds,
+    long WholeWindowLatenessP50Microseconds,
+    long WholeWindowLatenessP95Microseconds,
+    long WholeWindowLatenessP99Microseconds);
 
 /// <summary>
 /// Owner-thread bounded timing window for authoritative fixed steps. Recording is allocation-free;
@@ -42,6 +52,9 @@ public sealed class GameTickTimingWindow
     private readonly long[] _microseconds = new long[MaximumSamples];
     private readonly long[] _intervalMicroseconds = new long[MaximumSamples];
     private readonly long[] _latenessMicroseconds = new long[MaximumSamples];
+    private readonly ulong[] _durationWholeBuckets = new ulong[64];
+    private readonly ulong[] _intervalWholeBuckets = new ulong[64];
+    private readonly ulong[] _latenessWholeBuckets = new ulong[64];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private GameTelemetryLevel _level = GameTelemetryLevel.Basic;
     private int _next;
@@ -71,6 +84,9 @@ public sealed class GameTickTimingWindow
         Array.Clear(_microseconds);
         Array.Clear(_intervalMicroseconds);
         Array.Clear(_latenessMicroseconds);
+        Array.Clear(_durationWholeBuckets);
+        Array.Clear(_intervalWholeBuckets);
+        Array.Clear(_latenessWholeBuckets);
         _next = _count = _intervalNext = _intervalCount = _latenessNext = _latenessCount = 0;
         _observations = _intervalObservations = _latenessObservations = 0;
         _durationMaximum = _intervalMaximum = _latenessMaximum = 0;
@@ -92,12 +108,13 @@ public sealed class GameTickTimingWindow
         if (_lastTickStarted != 0)
             Record(_intervalMicroseconds, ref _intervalNext, ref _intervalCount,
                 ref _intervalObservations, ref _intervalMaximum,
-                ToMicroseconds(Math.Max(0, actualTimestamp - _lastTickStarted)));
+                ToMicroseconds(Math.Max(0, actualTimestamp - _lastTickStarted)),
+                _intervalWholeBuckets);
         _lastTickStarted = actualTimestamp;
         long lateness = Math.Max(0, actualTimestamp - scheduledTimestamp);
         Record(_latenessMicroseconds, ref _latenessNext, ref _latenessCount,
             ref _latenessObservations, ref _latenessMaximum,
-            ToMicroseconds(lateness));
+            ToMicroseconds(lateness), _latenessWholeBuckets);
         if (lateness >= targetIntervalTicks) SaturatingIncrement(ref _deadlineMisses);
         if (catchUp) SaturatingIncrement(ref _catchUpTicks);
     }
@@ -114,7 +131,7 @@ public sealed class GameTickTimingWindow
         if (_level == GameTelemetryLevel.Off) return;
         long elapsed = Math.Max(0, Stopwatch.GetTimestamp() - startTimestamp);
         Record(_microseconds, ref _next, ref _count, ref _observations, ref _durationMaximum,
-            ToMicroseconds(elapsed));
+            ToMicroseconds(elapsed), _durationWholeBuckets);
     }
 
     public GameTickTimingSnapshot Capture()
@@ -127,7 +144,16 @@ public sealed class GameTickTimingWindow
             _level, _observations, duration.Recent, duration.P50, duration.P95, duration.P99,
             _durationMaximum, _intervalObservations, interval.P50, interval.P95, interval.P99,
             _intervalMaximum, _latenessObservations, lateness.P50, lateness.P95, lateness.P99,
-            _latenessMaximum, _deadlineMisses, _catchUpTicks, _skippedOpportunities);
+            _latenessMaximum, _deadlineMisses, _catchUpTicks, _skippedOpportunities,
+            WholePercentile(_durationWholeBuckets, _observations, _durationMaximum, 50),
+            WholePercentile(_durationWholeBuckets, _observations, _durationMaximum, 95),
+            WholePercentile(_durationWholeBuckets, _observations, _durationMaximum, 99),
+            WholePercentile(_intervalWholeBuckets, _intervalObservations, _intervalMaximum, 50),
+            WholePercentile(_intervalWholeBuckets, _intervalObservations, _intervalMaximum, 95),
+            WholePercentile(_intervalWholeBuckets, _intervalObservations, _intervalMaximum, 99),
+            WholePercentile(_latenessWholeBuckets, _latenessObservations, _latenessMaximum, 50),
+            WholePercentile(_latenessWholeBuckets, _latenessObservations, _latenessMaximum, 95),
+            WholePercentile(_latenessWholeBuckets, _latenessObservations, _latenessMaximum, 99));
     }
 
     private static TimingValues Values(long[] source, int next, int count)
@@ -154,13 +180,39 @@ public sealed class GameTickTimingWindow
         ref int count,
         ref ulong observations,
         ref long maximum,
-        long value)
+        long value,
+        ulong[] wholeBuckets)
     {
         values[next] = value;
         next = (next + 1) % values.Length;
         if (count < values.Length) count++;
         if (observations != ulong.MaxValue) observations++;
         maximum = Math.Max(maximum, value);
+        int bucket = value == 0 ? 0 : Math.Min(63,
+            BitOperations.Log2(checked((ulong)value)) + 1);
+        if (wholeBuckets[bucket] != ulong.MaxValue) wholeBuckets[bucket]++;
+    }
+
+    private static long WholePercentile(
+        ulong[] buckets,
+        ulong observations,
+        long maximum,
+        int percentage)
+    {
+        if (observations == 0) return 0;
+        ulong target = (ulong)(((UInt128)observations * (uint)percentage + 99) / 100);
+        ulong cumulative = 0;
+        for (int index = 0; index < buckets.Length; index++)
+        {
+            cumulative = ulong.MaxValue - cumulative < buckets[index]
+                ? ulong.MaxValue
+                : cumulative + buckets[index];
+            if (cumulative < target) continue;
+            if (index == 0) return 0;
+            ulong upper = index == 63 ? ulong.MaxValue : (1UL << index) - 1;
+            return checked((long)Math.Min(upper, checked((ulong)maximum)));
+        }
+        return maximum;
     }
 
     private static void SaturatingIncrement(ref ulong value)

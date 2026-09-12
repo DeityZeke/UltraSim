@@ -62,7 +62,9 @@ candidate, and PF1 closes one real ClientOnly headless bot process hosting eight
 clients alongside two actual exported Online processes on the same dedicated authority. PF2 now
 closes first-class production UDP accounting and long-window quiet/moving/crowd baselines while
 keeping HTTP content bytes separate. PF2.5 now audits the actual replication owner and adds bounded
-opt-in PF3 observability without changing cadence or AOI. PF3 cadence policy follows; optimization, larger failure
+opt-in PF3 observability without changing cadence or AOI. PF3 now closes authenticated performance
+policy, render/input/submission clock separation, bounded authority enforcement, and mismatched
+cadence proof; PF4 optimization, larger failure
 characterization, and external-human validation remain open. A post-F0.8 defensive UI correction also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
 rejection outside Game callbacks, retries local apply proofs without replaying renderer work,
@@ -1752,7 +1754,8 @@ then close:
     PF0 feature-complete candidate / PF1 real bot + exported swarm      CLOSED
     PF2 first-class wire accounting + explanatory baselines             CLOSED
     PF2.5 replication ownership reconciliation + PF3 observability      CLOSED
-    PF3 cadence/performance policy                                      NEXT
+    PF3 cadence/performance policy                                    CLOSED
+    PF4 measured bandwidth/CPU optimization                             NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

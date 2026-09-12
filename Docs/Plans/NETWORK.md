@@ -651,7 +651,7 @@ fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
 As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 13
-and `UltraSimGameProtocol` constructs manifest version 26. Version 20 added the bounded cold
+and `UltraSimGameProtocol` constructs manifest version 27. Version 20 added the bounded cold
 public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
 adds the authoritative `Primary` result to the playable owner-state schema for I0.12. Version 22
 widens the existing cold presentation occurrence with an independently bounded optional item-detail
@@ -670,7 +670,10 @@ markers reuse the unchanged System occurrence path. No diagnostic payload, endpo
 administrative command enters the Network kernel. Version 26 advances the cold public-presentation
 metadata message to v4 for the bounded public Main Hand prefab, finite Game-owned vertical phase,
 and latest accepted Interact/Primary sequence used by D0.7a actor presentation; hot movement and
-private item rolls remain unchanged. Future schema changes must advance the appropriate generated/
+private item rolls remain unchanged. Version 27 adds the bounded authenticated Server Performance
+Profile advertisement and exact application-session proof used by PF3 before content/application
+progression; it changes policy negotiation and enforcement without changing movement, replication,
+or Network transport cadence. Future schema changes must advance the appropriate generated/
 manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy

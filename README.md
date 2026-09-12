@@ -282,6 +282,7 @@ Start with the [documentation map](Docs/README.md).
 - [Terrain / World T0 accepted plan/status](Docs/Plans/TERRAIN.md)
 - [Network V3 current architecture/status](Docs/Plans/NETWORK.md)
 - [PF2.5 replication ownership and observability](Docs/Plans/PF2_5_REPLICATION_RECONCILIATION.md)
+- [PF3 cadence and performance policy](Docs/Plans/PF3_CADENCE_PERFORMANCE_POLICY.md)
 - [Hosted Network H0 current lifecycle/status](Docs/Plans/HOSTED_NETWORK.md)
 
 Source and tests are executable truth. XML comments define public API semantics.

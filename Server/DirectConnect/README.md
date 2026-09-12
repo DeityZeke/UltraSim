@@ -80,6 +80,14 @@ counters, and process CPU/RSS/heap/GC/thread context. These are owner-local obse
 only at the cold report boundary. They do not change cadence, public-state ownership, AOI,
 packetization, protocol bytes, or authority policy.
 
+PF3 adds `--authority-hz=20|30|60`, `--maximum-input-hz`, `--recommended-input-hz`,
+`--input-burst`, `--input-burst-window-ms`, and `--network-service-delay-ms`. The authority publishes
+those finite semantics as an exact authenticated `ServerPerformanceProfile/v1` and waits for a fresh
+application proof before content/admission. Hosted service remains event-driven with a configured
+maximum polling/service interval; it is not relabeled as a Game tick frequency. Excess ordinary
+commands are stopped before Game mutation by per-application token/rolling-window state and receive
+an explicit `RateLimited` owner completion.
+
 F0.3c publishes one finite stock client profile after authenticated realm identity and gates
 content/admission on its exact application-session proof. Select the development profile with
 `--client-profile=orbit`, `--client-profile=third-person` (the default), or

@@ -112,6 +112,7 @@ internal static class Program
         F03aDirectConnectTests.RunAll();
         F03bRemotePlayableTests.RunAll();
         F03cClientProfileTests.RunAll();
+        Pf3PerformancePolicyTests.RunAll();
         M00SharedAuthorityTests.RunAll();
         Console.WriteLine(
             $"All {tests.Length} Network N0.4 through N0.10 application tests plus " +
@@ -179,7 +180,7 @@ static void GameTrafficClassificationCoversEveryProductionMessage()
     True(seen.All(static value => value));
     False(GameProtocolTrafficClassification.TryClassify(
         new NetworkMessageId(ushort.MaxValue), out _));
-    Equal(46, UltraSimGameProtocol.Manifest.Count);
+    Equal(48, UltraSimGameProtocol.Manifest.Count);
 }
 
 static void RemoteWorkflowMatchesOfflineDirect()

@@ -96,7 +96,9 @@ acceptance narratives remain available through git history.
   bundled X/Y animation canary. D0.7b closes bounded actor-GLB content validation plus real
   server Add/Replace, applied-catalog, lazy native X/Y realization. F0.7/F0.8 are closed, and PF1
   now closes the real headless bot plus two-exported-Online mixed correctness gate; PF2 wire
-  accounting is next.
+  accounting and PF2.5 ownership/observability are closed, and PF3 now closes authenticated
+  performance policy plus independent render/input/submission/authority/Network clocks. PF4
+  measured optimization is next.
 - [Asset streaming/content layering plan](Plans/ASSET_STREAMING.md) — stable logical
   content identity, activation/application proof, deterministic Default/Replace/Add,
   passive-content validation, content-addressed blobs with realm-scoped ownership,
@@ -150,6 +152,9 @@ acceptance narratives remain available through git history.
   exact current-game state routing, P0.4 provenance, alternative-profile readiness,
   fixed-owner versus runtime-transfer requirements, PF3 observability, and the proposed
   `ServerPerformanceProfile/v1` policy boundary.
+- [PF3 cadence and performance policy](Plans/PF3_CADENCE_PERFORMANCE_POLICY.md) — authenticated
+  bounded execution policy, engine-neutral stock input scheduling, authority enforcement,
+  render/input/authority/Network clock separation, and mismatched-cadence evidence.
 - [Hosted Network H0](Plans/HOSTED_NETWORK.md) — accepted H0.0-H0.5 external UDP
   lifecycle: deployment pinning, stateless bounded cookies/rates, authenticated
   promotion, explicit IPv4 path ownership/rebinding, exclusive connection-owner

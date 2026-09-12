@@ -1007,6 +1007,12 @@ public sealed class LocalPlayableSession : IDisposable
             1,
             1,
             0,
+            0,
+            null,
+            0,
+            0,
+            0,
+            0,
             null,
             participants);
     }

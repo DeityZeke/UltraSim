@@ -39,6 +39,7 @@ public readonly record struct RemotePlayableClientSnapshot(
     bool CommandRetainedLocally,
     ulong CommandsRetained,
     ulong CommandsQueued,
+    ulong RateLimitedCommands,
     ulong DuplicateOwnerStates,
     ulong RejectedMessages,
     string? Detail);
@@ -81,6 +82,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
     private RemotePlayableActionStatus _interaction;
     private ulong _commandsRetained;
     private ulong _commandsQueued;
+    private ulong _rateLimitedCommands;
     private ulong _duplicateOwnerStates;
     private ulong _rejectedMessages;
     private string? _detail;
@@ -163,7 +165,20 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
         long faceXMillimeters = 0,
         long faceZMillimeters = 0)
     {
+        return TrySubmitCommand(
+            in intent, target, flags, faceXMillimeters, faceZMillimeters, out _);
+    }
+
+    public bool TrySubmitCommand(
+        in ClientWorldCommandIntent intent,
+        WorldPublicEntityId target,
+        RemotePlayableCommandFlags flags,
+        long faceXMillimeters,
+        long faceZMillimeters,
+        out ulong sequence)
+    {
         EnsureOwner();
+        sequence = 0;
         if (_state != RemotePlayableClientState.Active || _sequencer is null || _hasPendingCommand ||
             !intent.IsValid ||
             (flags & ~(RemotePlayableCommandFlags.FaceRequested |
@@ -190,6 +205,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
             throw new InvalidOperationException(
                 "A prevalidated remote playable command became non-canonical.");
         _lastSubmittedCommand = command.Sequence;
+        sequence = command.Sequence;
         _hasPendingCommand = true;
         SaturatingIncrement(ref _commandsRetained);
         _ = FlushCommand();
@@ -227,7 +243,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
             _controlSession, _publicActor, _serverGenerationId, _stateSequence, _simulationTick,
             _lastProcessedCommand, _position, _orientation, _admission, _locomotion, _jump,
             _primary, _interaction, _hasPendingCommand, _commandsRetained, _commandsQueued,
-            _duplicateOwnerStates, _rejectedMessages, _detail);
+            _rateLimitedCommands, _duplicateOwnerStates, _rejectedMessages, _detail);
     }
 
     private void ProcessAdmissionResult(ReadOnlySpan<byte> payload)
@@ -292,6 +308,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
             ? Stopwatch.GetTimestamp()
             : 0;
         ulong previousTick = _simulationTick;
+        ulong previousCommand = _lastProcessedCommand;
         if (_state != RemotePlayableClientState.Active ||
             !RemotePlayableOwnerStateMessageCodec.TryReadExact(
                 payload, out RemotePlayableOwnerStateMessage state) ||
@@ -329,6 +346,12 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
         _jump = state.Jump;
         _primary = state.Primary;
         _interaction = state.Interaction;
+        if (state.LastProcessedCommandSequence > previousCommand &&
+            (state.Locomotion == RemotePlayableActionStatus.RateLimited ||
+             state.Jump == RemotePlayableActionStatus.RateLimited ||
+             state.Primary == RemotePlayableActionStatus.RateLimited ||
+             state.Interaction == RemotePlayableActionStatus.RateLimited))
+            SaturatingIncrement(ref _rateLimitedCommands);
         if (_telemetryLevel != NetworkTelemetryLevel.Off)
         {
             long now = Stopwatch.GetTimestamp();
@@ -408,7 +431,7 @@ public sealed class RemotePlayableClient : IRemoteGameProtocolHandler, IRemoteGa
     }
 
     private static bool IsActionStatus(RemotePlayableActionStatus status) =>
-        status is >= RemotePlayableActionStatus.NotRequested and <= RemotePlayableActionStatus.NotGrounded;
+        status is >= RemotePlayableActionStatus.NotRequested and <= RemotePlayableActionStatus.RateLimited;
 
     private static void SaturatingIncrement(ref ulong value)
     {

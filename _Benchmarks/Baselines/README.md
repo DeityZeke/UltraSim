@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf3-cadence-performance-policy-2026-09-12.json` — authenticated immutable
+  application-scoped performance policy/proof, shared engine-neutral input scheduling, explicit
+  authority rate enforcement, visible/headless exported render-clock controls, 20/30/60 Hz
+  authority mismatches, whole-window plus worst-client timing, sustained-input/crowd baselines,
+  mixed-chaos mismatch soak, and exact unchanged PF2/PF2.5 wire attribution. It does not close
+  PF4 public/owner cadence, aggregation, compression, AOI, or larger-scale optimization;
 - `concept-demo-pf2-wire-accounting-2026-09-11.json` — first-class production
   per-connection UDP-payload/datagram, secure transport, lane, and exhaustive Game-family
   accounting; separate HTTP body/cache facts; exact-window quiet/moving/crowd baselines; a

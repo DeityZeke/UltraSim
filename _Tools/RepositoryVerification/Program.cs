@@ -132,6 +132,54 @@ if (options.Pf25Only)
     return 0;
 }
 
+if (options.Pf3Only || options.Pf3NativeOnly)
+{
+    if (options.SkipGodot)
+        throw new ArgumentException("PF3 verification requires the actual exported Online product.");
+    if (!options.Pf3NativeOnly)
+    {
+        foreach (string project in new[]
+                 {
+                     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
+                     "_Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj",
+                     "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
+                 })
+        {
+            var command = new List<string>
+            {
+                "run", "--project", project, "-c", options.Configuration,
+            };
+            if (project.Contains("NetworkBots", StringComparison.Ordinal))
+                command.Add("-p:UltraSimNetworkFlavor=ClientOnly");
+            Run(root, "dotnet", command);
+        }
+        VerifyPf3InputCadenceMatrix(root, options.Configuration);
+    }
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        VerifyPf2MixedExportedAccountingSwarm(
+            root, options.Configuration, product.Executable,
+            detailedTelemetry: true,
+            warmupSeconds: options.Pf3NativeWarmupSeconds,
+            measurementSeconds: options.Pf3NativeMeasurementSeconds,
+            evidenceOutputDirectory: options.Pf3NativeEvidenceOutputDirectory,
+            telemetryCheckpoint: "PF3",
+            aliceRenderMode: options.Pf3NativeAliceRenderMode,
+            bobRenderMode: options.Pf3NativeBobRenderMode);
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope))
+            Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine(options.Pf3NativeOnly
+        ? "PASS PF3 native-only verification"
+        : "PASS PF3 focused verification");
+    return 0;
+}
+
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];
 bool contentlessOnlineVerified = false;
 bool finalClientExportsVerified = false;
@@ -1298,7 +1346,10 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     bool detailedTelemetry = false,
     int warmupSeconds = 5,
     int measurementSeconds = 20,
-    string? evidenceOutputDirectory = null)
+    string? evidenceOutputDirectory = null,
+    string telemetryCheckpoint = "PF2.5",
+    string aliceRenderMode = "headless",
+    string bobRenderMode = "headless")
 {
     const int botCount = 8;
     const int nativeClientCount = 2;
@@ -1387,6 +1438,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"--ready-file={botReady}", $"--release-file={botRelease}",
             $"--summary-file={botSummary}", "--admission-stagger-ms=100",
             $"--telemetry={(detailedTelemetry ? "Detailed" : "Off")}",
+            telemetryCheckpoint == "PF3" ? "--checkpoint=PF3" :
+                detailedTelemetry ? "--checkpoint=PF2.5" : "--checkpoint=PF2",
         ], clientTimeoutMilliseconds));
         aliceTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
@@ -1397,7 +1450,9 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                 detailedTelemetry ? "Detailed" : null,
                 detailedTelemetry ? accountingStart : null,
                 detailedTelemetry ? aliceTelemetryReady : null,
-                detailedTelemetry ? aliceTelemetrySummary : null), clientTimeoutMilliseconds));
+                detailedTelemetry ? aliceTelemetrySummary : null,
+                detailedTelemetry ? telemetryCheckpoint : null,
+                aliceRenderMode), clientTimeoutMilliseconds));
         bobTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
             NativeSharedClientArguments(
@@ -1407,7 +1462,9 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                 detailedTelemetry ? "Detailed" : null,
                 detailedTelemetry ? accountingStart : null,
                 detailedTelemetry ? bobTelemetryReady : null,
-                detailedTelemetry ? bobTelemetrySummary : null), clientTimeoutMilliseconds));
+                detailedTelemetry ? bobTelemetrySummary : null,
+                detailedTelemetry ? telemetryCheckpoint : null,
+                bobRenderMode), clientTimeoutMilliseconds));
 
         WaitForPf1Files([botStartReady, aliceReady, bobReady], 120_000, server,
             [botsTask, aliceTask, bobTask], "PF2 clients to complete admission");
@@ -1448,8 +1505,17 @@ static void VerifyPf2MixedExportedAccountingSwarm(
 
         File.WriteAllText(botRelease, "release\n");
         string botOutput = botsTask.GetAwaiter().GetResult();
+        string expectedBotCheckpoint = telemetryCheckpoint == "PF3"
+            ? "PF3"
+            : detailedTelemetry ? "PF2.5" : "PF2";
+        int expectedBotSchema = expectedBotCheckpoint switch
+        {
+            "PF3" => 5,
+            "PF2.5" => 4,
+            _ => 3,
+        };
         if (!botOutput.Contains(
-                detailedTelemetry ? "PF2.5 BOT HARNESS PASS" : "PF2 BOT HARNESS PASS",
+                $"{expectedBotCheckpoint} BOT HARNESS PASS",
                 StringComparison.Ordinal) ||
             !File.Exists(botSummary))
             throw new InvalidOperationException(
@@ -1459,8 +1525,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         JsonElement wire = bot.GetProperty("wire");
         JsonElement measuredPump = bot.GetProperty("measuredPump");
         if (!bot.GetProperty("passed").GetBoolean() ||
-            bot.GetProperty("schemaVersion").GetInt32() != (detailedTelemetry ? 4 : 3) ||
-            bot.GetProperty("checkpoint").GetString() != (detailedTelemetry ? "PF2.5" : "PF2") ||
+            bot.GetProperty("schemaVersion").GetInt32() != expectedBotSchema ||
+            bot.GetProperty("checkpoint").GetString() != expectedBotCheckpoint ||
             bot.GetProperty("successfulReconnects").GetInt32() < 1 ||
             bot.GetProperty("freshProofLifetimes").GetInt32() <= botCount ||
             (detailedTelemetry &&
@@ -1471,7 +1537,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             !wire.GetProperty("physicalTransportReconciled").GetBoolean() ||
             !wire.GetProperty("logicalMessageReconciled").GetBoolean() ||
             wire.GetProperty("lanes").GetArrayLength() != 7 ||
-            wire.GetProperty("families").GetArrayLength() != 11 ||
+            wire.GetProperty("families").GetArrayLength() != 12 ||
             bot.GetProperty("lifetimeHttpBody").GetProperty("archiveBodyBytes").GetInt64() == 0 ||
             measuredPump.GetProperty("samples").GetUInt64() == 0 ||
             bot.GetProperty("faultedBots").GetInt32() != 0 ||
@@ -1490,14 +1556,18 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             accounting.GetProperty("ListenerUdpPayload").GetProperty("PayloadBytesSent").GetUInt64() == 0 ||
             accounting.GetProperty("ListenerUdpPayload").GetProperty("PayloadBytesReceived").GetUInt64() == 0 ||
             accounting.GetProperty("Lanes").GetArrayLength() != 7 ||
-            accounting.GetProperty("Families").GetArrayLength() != 11)
+            accounting.GetProperty("Families").GetArrayLength() != 12)
             throw new InvalidOperationException(
                 "The dedicated authority did not reconcile ordinary bot/native PF2 traffic.");
 
         if (detailedTelemetry)
         {
-            RequireNativeTelemetry(aliceTelemetrySummary);
-            RequireNativeTelemetry(bobTelemetrySummary);
+            RequireNativeTelemetry(
+                aliceTelemetrySummary, telemetryCheckpoint, measurementSeconds,
+                aliceRenderMode);
+            RequireNativeTelemetry(
+                bobTelemetrySummary, telemetryCheckpoint, measurementSeconds,
+                bobRenderMode);
             if (accounting.GetProperty("NetworkTiming").GetProperty("Level").GetByte() != 2 ||
                 accounting.GetProperty("AuthorityTiming").GetProperty("Level").GetByte() != 2 ||
                 accounting.GetProperty("AuthorityTiming").GetProperty("SampleCount").GetUInt64() == 0 ||
@@ -1580,7 +1650,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"udp={wire.GetProperty("clientToServerUdpPayloadBytes").GetUInt64()}/" +
             $"{wire.GetProperty("serverToClientUdpPayloadBytes").GetUInt64()} " +
             $"lifetimes={accounting.GetProperty("ConnectionLifetimes").GetInt32()} " +
-            "reconciled=true retired=true");
+            $"nativeModes={aliceRenderMode}/{bobRenderMode} reconciled=true retired=true");
     }
     finally
     {
@@ -1604,7 +1674,11 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     }
 }
 
-static void RequireNativeTelemetry(string path)
+static void RequireNativeTelemetry(
+    string path,
+    string expectedCheckpoint = "PF2.5",
+    int measurementSeconds = 0,
+    string expectedRenderMode = "headless")
 {
     if (!File.Exists(path))
         throw new InvalidOperationException("An exported Online client omitted its PF2.5 telemetry summary.");
@@ -1626,16 +1700,212 @@ static void RequireNativeTelemetry(string path)
     ulong receivedSamples = client.GetProperty("ProcessReceived").GetProperty("Count").GetUInt64();
     byte networkLevel = network.GetProperty("Level").GetByte();
     ulong pumpSamples = network.GetProperty("PumpDurations").GetProperty("Count").GetUInt64();
-    if (!healthy || checkpoint != "PF2.5" || nativeLevel != 2 || frames == 0 ||
+    bool displayIdentified = !string.IsNullOrWhiteSpace(
+        native.GetProperty("DisplayBackend").GetString()) &&
+        !string.IsNullOrWhiteSpace(native.GetProperty("VSyncMode").GetString()) &&
+        !string.IsNullOrWhiteSpace(native.GetProperty("WindowMode").GetString());
+    ulong wholeFrameSamples = native.GetProperty("FrameDurations")
+        .GetProperty("Samples").GetUInt64();
+    bool pf3 = expectedCheckpoint == "PF3";
+    bool performanceApplied = !pf3 ||
+        root.GetProperty("PerformanceProfile").GetProperty("State").GetByte() == 2;
+    bool schedulerValid = !pf3 ||
+        root.GetProperty("InputScheduler").GetProperty("SamplesObserved").GetUInt64() != 0 &&
+        root.GetProperty("InputScheduler").GetProperty("CommandsSubmitted").GetUInt64() != 0 &&
+        root.GetProperty("InputScheduler").GetProperty("CapacityRejections").GetUInt64() == 0 &&
+        !root.GetProperty("InputScheduler").GetProperty("ContinuousStatePending").GetBoolean() &&
+        root.GetProperty("InputScheduler").GetProperty("PendingObligations").GetInt32() == 0 &&
+        root.GetProperty("InputScheduler").GetProperty("SubmittedCompletionDebt").GetInt32() == 0 &&
+        root.GetProperty("InputScheduler").GetProperty("EdgeObligationsGenerated").GetUInt64() ==
+            root.GetProperty("InputScheduler").GetProperty("EdgeObligationsCompleted").GetUInt64() &&
+        root.GetProperty("InputScheduler").GetProperty("ReleaseOrStopGenerated").GetUInt64() ==
+            root.GetProperty("InputScheduler").GetProperty("ReleaseOrStopCompleted").GetUInt64() &&
+        root.GetProperty("InputScheduler").GetProperty("Policy")
+            .GetProperty("RecommendedInputHz").GetInt32() == 30 &&
+        root.GetProperty("InputScheduler").GetProperty("Policy")
+            .GetProperty("MaximumInputHz").GetInt32() == 60;
+    bool renderModeValid = !pf3 || expectedRenderMode == "headless"
+        ? !pf3 || native.GetProperty("Headless").ValueKind == JsonValueKind.Null ||
+            native.GetProperty("Headless").GetBoolean()
+        : native.GetProperty("Headless").ValueKind == JsonValueKind.False;
+    double measuredSeconds = Math.Max(1, measurementSeconds);
+    double sampleRate = inputSamples / measuredSeconds;
+    double submissionRate = commands / measuredSeconds;
+    bool highProducer = expectedRenderMode is "headless" or
+        "visible-vsync-off-unlimited" or "visible-vsync-off-120" or
+        "visible-vsync-off-240";
+    bool cadenceIndependent = !pf3 ||
+        submissionRate <= 36 && submissionRate >= 15 &&
+        sampleRate + 2 >= submissionRate &&
+        (!highProducer || sampleRate > submissionRate * 1.25);
+    if (!healthy || checkpoint != expectedCheckpoint || nativeLevel != 2 || frames == 0 ||
         commands == 0 || inputSamples == 0 || semanticResolutions == 0 ||
         frameSamples == 0 || presentationSamples == 0 ||
-        clientLevel != 2 || receivedSamples == 0 || networkLevel != 2 || pumpSamples == 0)
+        clientLevel != 2 || receivedSamples == 0 || networkLevel != 2 || pumpSamples == 0 ||
+        !displayIdentified || wholeFrameSamples == 0 || !performanceApplied || !schedulerValid ||
+        !renderModeValid || !cadenceIndependent)
         throw new InvalidOperationException(
             "An exported Online client did not expose the required PF2.5 native/client/Network " +
             $"timing: healthy={healthy} checkpoint={checkpoint} native={nativeLevel} " +
             $"frames={frames}/{frameSamples} input={inputSamples}/{semanticResolutions} " +
             $"commands={commands} presentation={presentationSamples} " +
-            $"client={clientLevel}/{receivedSamples} network={networkLevel}/{pumpSamples}.");
+            $"client={clientLevel}/{receivedSamples} network={networkLevel}/{pumpSamples} " +
+            $"display={displayIdentified}/{renderModeValid} performance={performanceApplied} " +
+            $"scheduler={schedulerValid} cadence={sampleRate:0.###}/{submissionRate:0.###}Hz.");
+}
+
+static void VerifyPf3InputCadenceMatrix(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "build", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ServerOnly",
+    ]);
+    Run(root, "dotnet",
+    [
+        "build", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ClientOnly",
+    ]);
+
+    Pf3Case[] cases =
+    [
+        new("sample120-submit30-authority60", 120, 30, 60, 60, 30, "compliant", false),
+        new("sample240-submit60-max75", 240, 60, 60, 75, 60, "compliant", false, 10),
+        new("sample60-submit20-authority20", 60, 20, 20, 60, 20, "compliant", false),
+        new("hard-limit60-max60", 120, 60, 60, 60, 30, "hard-limit", false, 10),
+        new("burst-within", 120, 0, 60, 60, 30, "burst-within", false),
+        new("burst-over", 120, 0, 60, 60, 30, "burst-over", true),
+        new("noncompliant120-max30", 120, 0, 60, 30, 20, "over-limit", true),
+        new("stale-session-replay", 60, 20, 30, 60, 20, "stale-session", false),
+    ];
+    foreach (Pf3Case item in cases)
+    {
+        string scope = Path.Combine(
+            Path.GetTempPath(), "ultrasim-repository-verification",
+            Environment.ProcessId.ToString(), "pf3-input", item.Name);
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+        Directory.CreateDirectory(scope);
+        string stop = Path.Combine(scope, "server-stop");
+        string serverSummary = Path.Combine(scope, "server-summary.json");
+        string botSummary = Path.Combine(scope, "bot-summary.json");
+        Process? server = null;
+        try
+        {
+            server = StartNativeDeployment(
+                root, configuration, Path.Combine(scope, "deployment"),
+                Path.Combine(scope, "server-ready.json"),
+                ReserveLoopbackPort(SocketType.Dgram, ProtocolType.Udp),
+                ReserveLoopbackPort(SocketType.Stream, ProtocolType.Tcp),
+                out NativeDeploymentReady ready,
+                maximumParticipants: 2,
+                admissionBurstPerAddress: 16,
+                stopFile: stop,
+                summaryFile: serverSummary,
+                telemetryLevel: "Detailed",
+                authorityHz: item.AuthorityHz,
+                maximumInputHz: item.MaximumInputHz,
+                recommendedInputHz: item.RecommendedInputHz,
+                inputBurst: item.InputBurstCapacity,
+                inputBurstWindowMilliseconds: item.InputBurstWindowMilliseconds);
+            if (ready.SimulationFrequencyHz != item.AuthorityHz ||
+                ready.MaximumInputHz != item.MaximumInputHz ||
+                ready.RecommendedInputHz != item.RecommendedInputHz ||
+                ready.ServerPerformanceProfileRevision == 0 ||
+                string.IsNullOrWhiteSpace(ready.ServerPerformanceProfileHash))
+                throw new InvalidOperationException(
+                    $"PF3 deployment '{item.Name}' published the wrong performance profile.");
+
+            var arguments = new List<string>
+            {
+                "run", "--project", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+                "-c", configuration, "-p:UltraSimNetworkFlavor=ClientOnly", "--no-build", "--",
+                $"--endpoint={ready.Endpoint}", $"--fingerprint={ready.Fingerprint}",
+                "--bots=2", "--seed=300301", "--duration=8s", "--warmup=1s",
+                "--scenario=sustained-input", $"--input-sample-hz={item.SampleHz}",
+                $"--input-mode={item.InputMode}",
+                $"--cache={Path.Combine(scope, "cache")}",
+                $"--summary-file={botSummary}", "--admission-stagger-ms=50",
+                "--telemetry=Detailed",
+            };
+            if (item.SubmitHz != 0) arguments.Add($"--input-submit-hz={item.SubmitHz}");
+            string output = RunCaptured(root, "dotnet", arguments, 180_000);
+            if (!output.Contains("PF3 BOT HARNESS PASS", StringComparison.Ordinal) ||
+                !File.Exists(botSummary))
+                throw new InvalidOperationException(
+                    $"PF3 input case '{item.Name}' failed:\n{Tail(output, 8_000)}");
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(botSummary));
+            JsonElement value = document.RootElement;
+            ulong rateLimited = value.GetProperty("serverRateLimitedCommandsObserved").GetUInt64();
+            if (!value.GetProperty("passed").GetBoolean() ||
+                value.GetProperty("schemaVersion").GetInt32() != 5 ||
+                value.GetProperty("checkpoint").GetString() != "PF3" ||
+                value.GetProperty("freshProofLifetimes").GetInt32() !=
+                    (item.InputMode == "stale-session" ? 4 : 2) ||
+                !value.GetProperty("cleanRetirement").GetBoolean())
+                throw new InvalidOperationException(
+                    $"PF3 input case '{item.Name}' did not preserve session/proof retirement.");
+            if (item.ExpectRateLimit)
+            {
+                if (rateLimited == 0)
+                    throw new InvalidOperationException(
+                        $"PF3 input case '{item.Name}' did not observe server rate limiting.");
+            }
+            else if (item.InputMode == "stale-session")
+            {
+                if (value.GetProperty("successfulReconnects").GetInt32() != 2 ||
+                    value.GetProperty("staleSessionReplayAttempts").GetInt32() != 2 ||
+                    value.GetProperty("staleSessionReplaysQueued").GetInt32() != 2 ||
+                    value.GetProperty("staleSessionReplaysFenced").GetInt32() != 2 ||
+                    rateLimited != 0)
+                    throw new InvalidOperationException(
+                        "PF3 stale-session commands were not fenced across fresh application lifetimes.");
+            }
+            else if (item.InputMode is "compliant" or "hard-limit")
+            {
+                ulong samples = value.GetProperty("schedulerSamplesObserved").GetUInt64();
+                ulong submitted = value.GetProperty("schedulerCommandsSubmitted").GetUInt64();
+                double sampleRate = samples / 16d;
+                double submitRate = submitted / 16d;
+                if (sampleRate < item.SampleHz * .65 ||
+                    submitRate < item.SubmitHz * .60 || submitRate > item.SubmitHz * 1.20 ||
+                    rateLimited != 0 ||
+                    value.GetProperty("schedulerContinuousCoalesced").GetUInt64() == 0 ||
+                    value.GetProperty("schedulerActionEdgesGenerated").GetUInt64() !=
+                        value.GetProperty("schedulerActionEdgesCompleted").GetUInt64() ||
+                    value.GetProperty("schedulerReleaseOrStopGenerated").GetUInt64() !=
+                        value.GetProperty("schedulerReleaseOrStopCompleted").GetUInt64())
+                    throw new InvalidOperationException(
+                        $"PF3 input case '{item.Name}' violated sample/submit/edge policy: " +
+                        $"sample={sampleRate:0.###}Hz/client submit={submitRate:0.###}Hz/client " +
+                        $"rateLimited={rateLimited}.");
+            }
+            else if (rateLimited != 0 ||
+                     value.GetProperty("commandsQueued").GetInt32() == 0)
+                throw new InvalidOperationException(
+                    $"PF3 input case '{item.Name}' rejected an admitted bounded burst.");
+
+            File.WriteAllText(stop, "stop\n");
+            if (!server.WaitForExit(30_000) || server.ExitCode != 0 ||
+                !File.Exists(serverSummary))
+                throw new InvalidOperationException(
+                    $"PF3 deployment '{item.Name}' did not retire cleanly.");
+            Console.WriteLine(
+                $"PASS PF3_InputCase name={item.Name} sample={item.SampleHz}Hz/client " +
+                $"submit={item.SubmitHz}Hz/client authority={item.AuthorityHz}Hz " +
+                $"rateLimited={rateLimited}");
+        }
+        finally
+        {
+            Directory.CreateDirectory(scope);
+            if (!File.Exists(stop)) File.WriteAllText(stop, "stop\n");
+            if (server is not null)
+            {
+                StopOwnedProcess(server);
+                server.Dispose();
+            }
+            if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+        }
+    }
 }
 
 static void VerifyPf1MixedExportedSwarm(
@@ -2068,11 +2338,42 @@ static string[] NativeSharedClientArguments(
     string? telemetry = null,
     string? telemetryStart = null,
     string? telemetryReady = null,
-    string? telemetrySummary = null)
+    string? telemetrySummary = null,
+    string? telemetryCheckpoint = null,
+    string renderMode = "headless")
 {
-    var arguments = new List<string>
+    var arguments = new List<string>();
+    switch (renderMode)
     {
-        "--headless", "--", "--a0-8-smoke",
+        case "headless":
+            arguments.Add("--headless");
+            break;
+        case "visible-default":
+            break;
+        case "visible-vsync-off-unlimited":
+            arguments.Add("--disable-vsync");
+            arguments.Add("--max-fps");
+            arguments.Add("0");
+            break;
+        case "visible-vsync-off-30":
+        case "visible-vsync-off-60":
+        case "visible-vsync-off-120":
+        case "visible-vsync-off-240":
+            arguments.Add("--disable-vsync");
+            arguments.Add("--max-fps");
+            arguments.Add(renderMode["visible-vsync-off-".Length..]);
+            break;
+        case "visible-vsync-on-60":
+            arguments.Add("--max-fps");
+            arguments.Add("60");
+            break;
+        default:
+            throw new ArgumentException($"Unknown native render mode '{renderMode}'.");
+    }
+    arguments.Add("--");
+    arguments.AddRange(
+    [
+        "--a0-8-smoke",
         $"--a0-8-endpoint={endpoint}",
         $"--a0-8-fingerprint={fingerprint}",
         $"--a0-8-cache={Path.Combine(scope, name, "content-cache")}",
@@ -2084,7 +2385,7 @@ static string[] NativeSharedClientArguments(
         $"--m0-0-client-ready={ready}",
         $"--m0-0-client-release={release}",
         "--expect-edition=Online",
-    };
+    ]);
     if (guestName is not null) arguments.Add($"--a0-8-guest-name={guestName}");
     if (guestBody is not null) arguments.Add($"--a0-8-guest-body={guestBody}");
     if (completionReady is not null)
@@ -2098,6 +2399,10 @@ static string[] NativeSharedClientArguments(
         arguments.Add($"--telemetry-ready-file={telemetryReady}");
     if (telemetrySummary is not null)
         arguments.Add($"--telemetry-summary={telemetrySummary}");
+    if (telemetryCheckpoint is not null)
+        arguments.Add($"--telemetry-checkpoint={telemetryCheckpoint}");
+    if (telemetryCheckpoint == "PF3")
+        arguments.Add("--pf3-native-sustained-input");
     return arguments.ToArray();
 }
 
@@ -2118,7 +2423,13 @@ static Process StartNativeDeployment(
     string? accountingReadyFile = null,
     string? accountingStopFile = null,
     string? accountingSummaryFile = null,
-    string telemetryLevel = "Off")
+    string telemetryLevel = "Off",
+    int authorityHz = 60,
+    int maximumInputHz = 60,
+    int recommendedInputHz = 30,
+    int inputBurst = 10,
+    int inputBurstWindowMilliseconds = 100,
+    int networkServiceDelayMilliseconds = 1)
 {
     var start = new ProcessStartInfo("dotnet")
     {
@@ -2136,6 +2447,12 @@ static Process StartNativeDeployment(
         $"--client-profile={clientProfile}",
         $"--maximum-participants={maximumParticipants}",
         $"--same-address-admission-burst={admissionBurstPerAddress}",
+        $"--authority-hz={authorityHz}",
+        $"--maximum-input-hz={maximumInputHz}",
+        $"--recommended-input-hz={recommendedInputHz}",
+        $"--input-burst={inputBurst}",
+        $"--input-burst-window-ms={inputBurstWindowMilliseconds}",
+        $"--network-service-delay-ms={networkServiceDelayMilliseconds}",
     }) start.ArgumentList.Add(argument);
     if (stopFile is not null) start.ArgumentList.Add($"--stop-file={stopFile}");
     if (summaryFile is not null) start.ArgumentList.Add($"--summary-file={summaryFile}");
@@ -2177,6 +2494,14 @@ static Process StartNativeDeployment(
             RequiredString(value, "ClientProfile"),
             value.GetProperty("ClientProfileRevision").GetUInt64(),
             RequiredString(value, "ClientProfileHash"),
+            value.GetProperty("ServerPerformanceProfileRevision").GetUInt64(),
+            RequiredString(value, "ServerPerformanceProfileHash"),
+            value.GetProperty("SimulationFrequencyHz").GetInt32(),
+            value.GetProperty("MaximumNetworkServiceIntervalMicroseconds").GetInt32(),
+            value.GetProperty("MaximumInputHz").GetInt32(),
+            value.GetProperty("RecommendedInputHz").GetInt32(),
+            value.GetProperty("InputBurstCapacity").GetInt32(),
+            value.GetProperty("InputBurstWindowMilliseconds").GetInt32(),
             value.GetProperty("MaximumParticipants").GetInt32(),
             value.GetProperty("ServerGeneration").GetUInt64());
         return process;
@@ -2351,7 +2676,8 @@ static void VerifyClientExportComposition(string root)
         (reference.Attribute("Include")?.Value ?? "").Contains("BuiltInTestWorlds", StringComparison.Ordinal) ||
         (reference.Attribute("Include")?.Value ?? "").EndsWith(
             "Local/UltraSim.Client.Local.csproj", StringComparison.Ordinal) ||
-        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Composition", StringComparison.Ordinal)).ToArray();
+        (reference.Attribute("Include")?.Value ?? "").Contains("Game/Composition", StringComparison.Ordinal) ||
+        (reference.Attribute("Include")?.Value ?? "").Contains("Game/UI", StringComparison.Ordinal)).ToArray();
     XElement sharedGameContracts = references.Single(reference =>
         (reference.Attribute("Include")?.Value ?? "").EndsWith(
             "Game/Contracts/UltraSim.Game.Contracts.csproj", StringComparison.Ordinal));
@@ -2364,7 +2690,7 @@ static void VerifyClientExportComposition(string root)
             "ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj",
             StringComparison.Ordinal) == true);
     string localHostCondition = localHost.Attribute("Condition")?.Value ?? "";
-    if (localReferences.Length != 3 || localReferences.Any(reference =>
+    if (localReferences.Length != 4 || localReferences.Any(reference =>
         !(reference.Attribute("Condition")?.Value ?? "").Contains("SinglePlayer", StringComparison.Ordinal) ||
         !(reference.Attribute("Condition")?.Value ?? "").Contains("Complete", StringComparison.Ordinal) ||
         (reference.Attribute("Condition")?.Value ?? "").Contains("Online", StringComparison.Ordinal)))
@@ -2553,6 +2879,7 @@ static void VerifyArchitecture(string root)
             "Client/StandardUi/UltraSim.Client.StandardUi.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/UI/UltraSim.Game.UI.csproj",
             "Game/World/UltraSim.Game.World.csproj",
             "Kernels/Spatial/UltraSim.Spatial.csproj",
             "Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj",
@@ -2975,28 +3302,41 @@ internal sealed record VerificationOptions(
     bool Pf1Only,
     bool Pf2Only,
     bool Pf25Only,
+    bool Pf3Only,
+    bool Pf3NativeOnly,
     bool Pf25LongNative,
     bool AllConfigurations,
     string Configuration,
     bool SkipGodot,
     bool NoRestore,
     string? GodotPath,
-    string? Pf25EvidenceOutputDirectory)
+    string? Pf25EvidenceOutputDirectory,
+    int Pf3NativeWarmupSeconds,
+    int Pf3NativeMeasurementSeconds,
+    string? Pf3NativeEvidenceOutputDirectory,
+    string Pf3NativeAliceRenderMode,
+    string Pf3NativeBobRenderMode)
 {
     internal static VerificationOptions Parse(string[] arguments)
     {
         bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
+            pf3Only = false, pf3NativeOnly = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
         string configuration = "Release";
-        string? godot = null, pf25EvidenceOutputDirectory = null;
+        string? godot = null, pf25EvidenceOutputDirectory = null,
+            pf3NativeEvidenceOutputDirectory = null;
+        int pf3NativeWarmupSeconds = 5, pf3NativeMeasurementSeconds = 20;
+        string pf3NativeAliceRenderMode = "headless", pf3NativeBobRenderMode = "headless";
         foreach (string argument in arguments)
         {
             if (argument == "--architecture-only") architectureOnly = true;
             else if (argument == "--pf1-only") pf1Only = true;
             else if (argument == "--pf2-only") pf2Only = true;
             else if (argument == "--pf2.5-only") pf25Only = true;
+            else if (argument == "--pf3-only") pf3Only = true;
+            else if (argument == "--pf3-native-only") pf3NativeOnly = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -3006,20 +3346,57 @@ internal sealed record VerificationOptions(
             else if (argument.StartsWith("--godot=", StringComparison.Ordinal)) godot = argument["--godot=".Length..];
             else if (argument.StartsWith("--pf2.5-evidence-output=", StringComparison.Ordinal))
                 pf25EvidenceOutputDirectory = argument["--pf2.5-evidence-output=".Length..];
+            else if (argument.StartsWith("--pf3-native-warmup-seconds=", StringComparison.Ordinal))
+                pf3NativeWarmupSeconds = int.Parse(
+                    argument["--pf3-native-warmup-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf3-native-measurement-seconds=", StringComparison.Ordinal))
+                pf3NativeMeasurementSeconds = int.Parse(
+                    argument["--pf3-native-measurement-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf3-native-evidence-output=", StringComparison.Ordinal))
+                pf3NativeEvidenceOutputDirectory =
+                    argument["--pf3-native-evidence-output=".Length..];
+            else if (argument.StartsWith("--pf3-native-a=", StringComparison.Ordinal))
+                pf3NativeAliceRenderMode = argument["--pf3-native-a=".Length..];
+            else if (argument.StartsWith("--pf3-native-b=", StringComparison.Ordinal))
+                pf3NativeBobRenderMode = argument["--pf3-native-b=".Length..];
             else throw new ArgumentException($"Unknown verification option '{argument}'.");
         }
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
-        if ((pf1Only || pf2Only || pf25Only) && architectureOnly)
+        if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
-        if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) > 1)
+        if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
+            (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
                 "PF2.5 long-native/evidence options require --pf2.5-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf25LongNative,
+        if (pf3NativeWarmupSeconds < 0 || pf3NativeWarmupSeconds > 3_600 ||
+            pf3NativeMeasurementSeconds < 1 || pf3NativeMeasurementSeconds > 86_400)
+            throw new ArgumentException(
+                "PF3 native warmup must be 0..3600 seconds and measurement must be 1..86400 seconds.");
+        string[] nativeModes =
+        [
+            "headless", "visible-default", "visible-vsync-off-unlimited",
+            "visible-vsync-off-30", "visible-vsync-off-60", "visible-vsync-off-120",
+            "visible-vsync-off-240", "visible-vsync-on-60",
+        ];
+        if (!nativeModes.Contains(pf3NativeAliceRenderMode, StringComparer.Ordinal) ||
+            !nativeModes.Contains(pf3NativeBobRenderMode, StringComparer.Ordinal))
+            throw new ArgumentException("Unknown PF3 native render mode.");
+        bool hasPf3NativeOption = pf3NativeWarmupSeconds != 5 ||
+            pf3NativeMeasurementSeconds != 20 || pf3NativeEvidenceOutputDirectory is not null ||
+            pf3NativeAliceRenderMode != "headless" || pf3NativeBobRenderMode != "headless";
+        if (hasPf3NativeOption && !pf3Only && !pf3NativeOnly)
+            throw new ArgumentException("PF3 native options require --pf3-only or --pf3-native-only.");
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf3Only, pf3NativeOnly,
+            pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,
-            pf25EvidenceOutputDirectory);
+            pf25EvidenceOutputDirectory, pf3NativeWarmupSeconds,
+            pf3NativeMeasurementSeconds, pf3NativeEvidenceOutputDirectory,
+            pf3NativeAliceRenderMode, pf3NativeBobRenderMode);
     }
 }
 
@@ -3040,6 +3417,14 @@ internal sealed record NativeDeploymentReady(
     string ClientProfile,
     ulong ClientProfileRevision,
     string ClientProfileHash,
+    ulong ServerPerformanceProfileRevision,
+    string ServerPerformanceProfileHash,
+    int SimulationFrequencyHz,
+    int MaximumNetworkServiceIntervalMicroseconds,
+    int MaximumInputHz,
+    int RecommendedInputHz,
+    int InputBurstCapacity,
+    int InputBurstWindowMilliseconds,
     int MaximumParticipants,
     ulong ServerGeneration);
 
@@ -3060,3 +3445,15 @@ internal sealed record NetworkFlavorProbeEvidence(
     string CanonicalPacketHex,
     string[] AllTypes,
     string[] PublicApi);
+
+internal sealed record Pf3Case(
+    string Name,
+    int SampleHz,
+    int SubmitHz,
+    int AuthorityHz,
+    int MaximumInputHz,
+    int RecommendedInputHz,
+    string InputMode,
+    bool ExpectRateLimit,
+    int InputBurstCapacity = 10,
+    int InputBurstWindowMilliseconds = 100);

@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2 load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3 load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -195,3 +195,60 @@ dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerificati
 The evidence output directory must not already exist. Neither long option changes the native
 product, authority, scenario, cadence, or accounting path; it only extends the synchronized window
 and copies the immutable final reports.
+
+## PF3 cadence and performance-policy workloads
+
+PF3 adds `sustained-input`, an explicit per-client high-rate producer which is separate from the
+ordinary sparse `moving` workload. Each bot generates deterministic legal locomotion samples at
+`--input-sample-hz`, while the shared Client Core scheduler emits at `--input-submit-hz` under the
+authenticated server policy. Sample and submission rates are always reported as aggregate swarm,
+per-client average, p50, p95, and maximum values. Schema-v5 reports also include whole-window
+client/Network timing, worst-client IDs, scheduler coalescing, edge/release generation/submission/
+completion, and server-observed rate-limit outcomes.
+
+The accepted deterministic input modes are:
+
+- `compliant` — use the stock bounded scheduler;
+- `hard-limit` — stock scheduling at the advertised maximum;
+- `over-limit` — ordinary Game messages above the maximum, expecting explicit `RateLimited` results;
+- `burst-within` and `burst-over` — exercise the finite burst contract;
+- `stale-session` — reconnect, then send one old application/control-lifetime command through the
+  new ordinary secure transport and require it to remain fenced.
+
+The long-run helper starts a ServerOnly dedicated authority and a ClientOnly bot process, warms and
+synchronizes them, resets only diagnostic windows, then records real UDP/PF2.5 accounting:
+
+```bash
+Tools/NetworkBots/run-pf3-baseline.sh sustained-input 600s \
+  /tmp/ultrasim-pf3-input-30 50 300301 60s \
+  /tmp/ultrasim-pf3-cache 60 60 30 144 30 compliant 1
+```
+
+Its positional policy fields after cache are authority Hz, maximum input Hz, recommended input Hz,
+producer sample Hz, requested submit Hz, input mode, Network service delay milliseconds, burst
+capacity, and burst-window milliseconds. It
+also accepts `quiet`, `moving`, `crowd`, and `mixed-chaos`; sample/submit/mode controls intentionally apply
+only to `sustained-input`.
+
+Run the bounded permanent gate with:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf3-only
+```
+
+For a separately recorded actual exported-client display experiment, use:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf3-native-only \
+  --pf3-native-warmup-seconds=60 \
+  --pf3-native-measurement-seconds=300 \
+  --pf3-native-a=visible-default \
+  --pf3-native-b=visible-vsync-off-60 \
+  --pf3-native-evidence-output=/tmp/ultrasim-pf3-native
+```
+
+Other controlled native modes are `headless`, `visible-vsync-off-unlimited`, explicit off-VSync
+30/60/120/240 caps, and `visible-vsync-on-60`. Native output reports actual runtime display/VSync/
+max-FPS/refresh values. Headless numbers are main-loop cadence, not displayed FPS.

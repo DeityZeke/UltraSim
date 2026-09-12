@@ -87,6 +87,7 @@ public readonly record struct RemotePlayableSessionSnapshot(
     ulong MessagesProcessedBeforeAdmission,
     ulong RejectedPreAdmissionMessages,
     RemoteContentClientSnapshot Content,
+    RemoteServerPerformanceClientSnapshot Performance,
     RemotePlayableClientSnapshot Playable,
     RemoteChunkWorldStateClientSnapshot World,
     RemoteChatClientSnapshot Chat,
@@ -184,6 +185,7 @@ public sealed class RemotePlayableSession : IDisposable
         _applicationSessionEpoch = applicationSessionEpoch;
         _maximumPendingWorldProofs = maximumPendingWorldProofs;
         _requiredWorld = requiredWorld;
+        Performance = new RemoteServerPerformanceClient(peer, applicationSessionEpoch);
         Playable = new RemotePlayableClient(peer, applicationSessionEpoch);
         if (requiredContent is not null)
             _content = new RemoteContentClient(
@@ -203,7 +205,8 @@ public sealed class RemotePlayableSession : IDisposable
         PublicPresentationState = new ClientPublicPresentationMetadataState(256);
         PublicPresentation = new RemotePublicPresentationMetadataClient(
             peer, applicationSessionEpoch, PublicPresentationState);
-        _protocol = new RemoteGameProtocolComposition(6);
+        _protocol = new RemoteGameProtocolComposition(7);
+        _protocol.Add(Performance);
         if (_content is not null) _protocol.Add(_content);
         _protocol.Add(Playable);
         _protocol.Add(PublicPresentation);
@@ -228,6 +231,7 @@ public sealed class RemotePlayableSession : IDisposable
     }
 
     public RemotePlayableClient Playable { get; }
+    public RemoteServerPerformanceClient Performance { get; }
     public RemoteChunkWorldStateClient World
     {
         get
@@ -289,7 +293,8 @@ public sealed class RemotePlayableSession : IDisposable
             bool claimed;
             try
             {
-                claimed = _content?.TryProcess(in message, payload) == true ||
+                claimed = Performance.TryProcess(in message, payload) ||
+                    _content?.TryProcess(in message, payload) == true ||
                     Playable.TryProcess(in message, payload) ||
                     PublicPresentation.TryProcess(in message, payload);
             }
@@ -309,6 +314,7 @@ public sealed class RemotePlayableSession : IDisposable
                 break;
             }
         }
+        _ = Performance.TryProgress();
         _ = _content?.TryProgress();
         _ = TryPublishRequiredWorld();
         _ = Playable.TryProgress();
@@ -325,6 +331,7 @@ public sealed class RemotePlayableSession : IDisposable
             _messagesBeforeAdmission,
             _rejectedBeforeAdmission,
             _content?.GetSnapshot() ?? default,
+            Performance.GetSnapshot(),
             Playable.GetSnapshot(),
             _world?.GetSnapshot() ?? default,
             Chat.GetSnapshot(),

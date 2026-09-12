@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Godot;
 using UltraSim.Client.BuiltInTestWorlds;
 using UltraSim.Client.Content;
@@ -121,6 +122,7 @@ public partial class LocalCabinClient : Node3D
     private GodotWorldRenderer? _renderer;
     private GodotSlidingRenderWindow? _window;
     private ClientWorldInputSequencer? _sequencer;
+    private ClientWorldInputScheduler? _inputScheduler;
     private readonly OrbitCommandProfile _orbit = new();
     private readonly ThirdPersonDirectProfile _thirdPerson = new();
     private readonly IndependentMoveLookProfile _independent = new();
@@ -584,10 +586,15 @@ public partial class LocalCabinClient : Node3D
 
     public override void _PhysicsProcess(double delta)
     {
-        if (!_initialized || _localSession is null || _sequencer is null || _camera is null)
+        if (!_initialized || _localSession is null || _sequencer is null ||
+            _inputScheduler is null || _camera is null)
             return;
         try
         {
+            if (_localSession.TryGetLatestView(out LocalPlayableAuthorityView priorView))
+                _inputScheduler.ObserveCompleted(priorView.LastCommandSequence);
+            _ = _inputScheduler.TryPump(
+                Stopwatch.GetTimestamp(), TrySubmitScheduledLocalCommand);
             UpdatePointerWorldPoint();
             UpdateWorldHover();
             PumpChat();
@@ -600,19 +607,28 @@ public partial class LocalCabinClient : Node3D
             ClientControlProfileDecision decision = EvaluateProfile(physical, basis);
             if (decision.SelectionRequested)
                 Select(decision.SelectionPoint);
-            if (!_sequencer.TryCreateSemanticCommand(decision.Command, out GamePlayerCommand command))
-                throw new InvalidOperationException("The selected control profile produced an invalid command.");
-
             bool faceRequested = TryResolveProfileFacing(
-                command,
+                decision.Command.Locomotion,
                 decision,
                 out ClientControlWorldPoint facingPoint,
                 out bool facingRequiresAcceptedLocomotion);
-            ApplyCommand(
-                command,
-                faceRequested,
-                facingPoint,
-                facingRequiresAcceptedLocomotion);
+            ClientWorldCommandRequestFlags flags = faceRequested
+                ? ClientWorldCommandRequestFlags.FaceRequested |
+                  (facingRequiresAcceptedLocomotion
+                      ? ClientWorldCommandRequestFlags.FacingRequiresAcceptedLocomotion
+                      : ClientWorldCommandRequestFlags.None)
+                : ClientWorldCommandRequestFlags.None;
+            var context = new ClientWorldCommandContext(
+                _selection == SelectionKind.IronSword ? _pointerTarget : default,
+                flags,
+                faceRequested ? facingPoint.XMillimeters : 0,
+                faceRequested ? facingPoint.ZMillimeters : 0,
+                (ulong)ResolveLocalSelection());
+            long now = Stopwatch.GetTimestamp();
+            if (!_inputScheduler.TryObserve(decision.Command, context, now))
+                _lastOutcome = "Local input scheduler busy";
+            else
+                _ = _inputScheduler.TryPump(now, TrySubmitScheduledLocalCommand);
             SynchronizeProjection();
             UpdateChatPresentation();
             UpdateCamera();
@@ -725,6 +741,7 @@ public partial class LocalCabinClient : Node3D
         _residency = null;
         _localSession?.Dispose();
         _localSession = null;
+        _inputScheduler = null;
         ReleaseExternalUi(_ownedHudRoot);
         ReleaseExternalUi(_ownedWorldUiRoot);
         _ownedHudRoot = null;
@@ -744,6 +761,10 @@ public partial class LocalCabinClient : Node3D
         // Command sequencing belongs to the application/control-session lineage. Presentation
         // rebuilds (render-distance changes and Game-generation replacement) must not reset it.
         _sequencer = new ClientWorldInputSequencer(_localSession.ControlSession);
+        // Packet-free Local resolves the same finite stock scheduling meaning directly.
+        // No Network assembly or remote application proof is introduced for this path.
+        _inputScheduler = new ClientWorldInputScheduler(
+            new ClientInputSubmissionPolicy(60, 30, 8, 100));
         _boundWorld = _localSession.BoundWorld;
         _chatState = new ClientChatState(
             _localSession.ApplicationSessionEpoch,
@@ -1628,12 +1649,11 @@ public partial class LocalCabinClient : Node3D
     }
 
     private bool TryResolveProfileFacing(
-        in GamePlayerCommand command,
+        in GameLocomotionUpdate locomotion,
         in ClientControlProfileDecision decision,
         out ClientControlWorldPoint facingPoint,
         out bool requiresAcceptedLocomotion)
     {
-        GameLocomotionUpdate locomotion = command.Locomotion;
         switch (_profile)
         {
             case ControlProfile.OrbitCommand when
@@ -1659,6 +1679,46 @@ public partial class LocalCabinClient : Node3D
                 requiresAcceptedLocomotion = false;
                 return false;
         }
+    }
+
+    private LocalPlayableSelection ResolveLocalSelection() => _selection switch
+    {
+        SelectionKind.None => LocalPlayableSelection.None,
+        SelectionKind.CabinDoor => LocalPlayableSelection.CabinDoor,
+        SelectionKind.CabinChest => LocalPlayableSelection.CabinChest,
+        SelectionKind.SkyTelepad => LocalPlayableSelection.SkyTelepad,
+        SelectionKind.FarGate => LocalPlayableSelection.FarGate,
+        SelectionKind.InformationalSign => LocalPlayableSelection.InformationalSign,
+        SelectionKind.FallbackLabSign => LocalPlayableSelection.FallbackLabSign,
+        SelectionKind.IronSword => LocalPlayableSelection.IronSword,
+        _ => LocalPlayableSelection.Unsupported,
+    };
+
+    private bool TrySubmitScheduledLocalCommand(
+        in ClientWorldScheduledCommand scheduled,
+        out ulong sequence)
+    {
+        sequence = 0;
+        if (_localSession is null || _sequencer is null ||
+            scheduled.Context.DiagnosticTag > (ulong)LocalPlayableSelection.Unsupported ||
+            !_sequencer.TryCreateSemanticCommand(scheduled.Intent, out GamePlayerCommand command))
+            return false;
+        bool faceRequested = (scheduled.Context.Flags &
+            ClientWorldCommandRequestFlags.FaceRequested) != 0;
+        bool requiresAcceptedLocomotion = (scheduled.Context.Flags &
+            ClientWorldCommandRequestFlags.FacingRequiresAcceptedLocomotion) != 0;
+        if (!_localSession.TrySubmit(new LocalPlayableCommand(
+                command,
+                (LocalPlayableSelection)scheduled.Context.DiagnosticTag,
+                faceRequested,
+                new ClientControlWorldPoint(
+                    scheduled.Context.FaceXMillimeters,
+                    scheduled.Context.FaceZMillimeters),
+                requiresAcceptedLocomotion,
+                scheduled.Context.Target)))
+            return false;
+        sequence = command.Sequence;
+        return true;
     }
 
     private void SynchronizeProjection()
@@ -2291,7 +2351,7 @@ public partial class LocalCabinClient : Node3D
                 profile == ControlProfile.OrbitCommand,
                 lookPoint);
             if (!TryResolveProfileFacing(
-                    command,
+                    command.Locomotion,
                     decision,
                     out ClientControlWorldPoint facingPoint,
                     out bool requiresAcceptedLocomotion))

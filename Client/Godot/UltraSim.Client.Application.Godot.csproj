@@ -38,6 +38,8 @@
                       Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj"
                       Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
+    <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj"
+                      Condition="'$(UltraSimEdition)' == 'SinglePlayer' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../Network/UltraSim.Client.Network.csproj"
                       Condition="'$(UltraSimEdition)' == 'Online' Or '$(UltraSimEdition)' == 'Complete'" />
     <ProjectReference Include="../../Server/ConceptDemo.LocalHost/UltraSim.Server.ConceptDemo.LocalHost.csproj"

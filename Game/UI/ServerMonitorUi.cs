@@ -49,6 +49,12 @@ public sealed class ServerMonitorSnapshot
         int maximumParticipants,
         ulong joins,
         ulong leaves,
+        ulong performanceProfileRevision,
+        string? performanceProfileHashShort,
+        int maximumNetworkServiceIntervalMicroseconds,
+        int maximumInputHz,
+        int recommendedInputHz,
+        ulong rateLimitedCommands,
         string? testMarker,
         ReadOnlySpan<ServerMonitorParticipant> participants)
     {
@@ -56,6 +62,11 @@ public sealed class ServerMonitorSnapshot
             generationUptimeSeconds < 0 || recentTickMicroseconds < 0 || p95TickMicroseconds < 0 ||
             entityCount < 0 || maximumParticipants is <= 0 or > MaximumParticipantRows ||
             participants.Length > maximumParticipants || participants.Length > MaximumParticipantRows ||
+            performanceProfileHashShort?.Length > 16 ||
+            maximumNetworkServiceIntervalMicroseconds is < 0 or > 1_000_000 ||
+            maximumInputHz is < 0 or > 240 || recommendedInputHz < 0 ||
+            recommendedInputHz > maximumInputHz ||
+            (performanceProfileRevision == 0) != (performanceProfileHashShort is null) ||
             testMarker?.Length > 96)
             throw new ArgumentOutOfRangeException(nameof(ServerMonitorSnapshot));
         _participants = participants.ToArray();
@@ -82,6 +93,12 @@ public sealed class ServerMonitorSnapshot
         MaximumParticipants = maximumParticipants;
         Joins = joins;
         Leaves = leaves;
+        PerformanceProfileRevision = performanceProfileRevision;
+        PerformanceProfileHashShort = performanceProfileHashShort;
+        MaximumNetworkServiceIntervalMicroseconds = maximumNetworkServiceIntervalMicroseconds;
+        MaximumInputHz = maximumInputHz;
+        RecommendedInputHz = recommendedInputHz;
+        RateLimitedCommands = rateLimitedCommands;
         TestMarker = testMarker;
     }
 
@@ -96,6 +113,12 @@ public sealed class ServerMonitorSnapshot
     public int MaximumParticipants { get; }
     public ulong Joins { get; }
     public ulong Leaves { get; }
+    public ulong PerformanceProfileRevision { get; }
+    public string? PerformanceProfileHashShort { get; }
+    public int MaximumNetworkServiceIntervalMicroseconds { get; }
+    public int MaximumInputHz { get; }
+    public int RecommendedInputHz { get; }
+    public ulong RateLimitedCommands { get; }
     public string? TestMarker { get; }
     public ReadOnlySpan<ServerMonitorParticipant> Participants => _participants;
 }
@@ -321,7 +344,14 @@ public sealed class ServerMonitorUiController : IDisposable
 
     private static string FormatTiming(ServerMonitorSnapshot snapshot) =>
         $"Authoritative tick: {snapshot.RecentTickMicroseconds} µs recent / " +
-        $"{snapshot.P95TickMicroseconds} µs p95";
+        $"{snapshot.P95TickMicroseconds} µs p95" +
+        (snapshot.PerformanceProfileRevision == 0
+            ? "\nPerformance policy: packet-free local"
+            : $"\nPerformance profile v{snapshot.PerformanceProfileRevision} " +
+              $"{snapshot.PerformanceProfileHashShort}: Network service ≤ " +
+              $"{snapshot.MaximumNetworkServiceIntervalMicroseconds} µs • input " +
+              $"{snapshot.RecommendedInputHz}/{snapshot.MaximumInputHz} Hz recommended/max • " +
+              $"rate-limited {snapshot.RateLimitedCommands}");
 
     private static string FormatMarker(ServerMonitorSnapshot snapshot) =>
         string.IsNullOrEmpty(snapshot.TestMarker)

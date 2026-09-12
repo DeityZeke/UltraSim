@@ -35,6 +35,20 @@ internal static class BotMonotonicClock
 
     internal static double TicksToFloatingMilliseconds(long ticks) =>
         ticks * 1_000d / Stopwatch.Frequency;
+
+    /// <summary>
+    /// Advances one fixed-rate deadline without rebasing the cadence phase on a late pump.
+    /// Missed producer opportunities are coalesced rather than synthesized.
+    /// </summary>
+    internal static long AdvanceFixedDeadline(long deadline, long now, long intervalTicks)
+    {
+        if (deadline < 0) throw new ArgumentOutOfRangeException(nameof(deadline));
+        if (now < 0) throw new ArgumentOutOfRangeException(nameof(now));
+        if (intervalTicks <= 0) throw new ArgumentOutOfRangeException(nameof(intervalTicks));
+        if (now < deadline) return deadline;
+        long intervals = checked((now - deadline) / intervalTicks + 1);
+        return checked(deadline + intervals * intervalTicks);
+    }
 }
 
 internal readonly record struct BotCumulativeTrafficSnapshot(

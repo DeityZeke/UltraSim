@@ -19,6 +19,7 @@ public enum GameProtocolTrafficFamily : byte
     ApplicationEvent = 8,
     Chat = 9,
     UserInterfaceAndServerMonitor = 10,
+    ServerPerformanceProfile = 11,
 }
 
 public readonly record struct GameProtocolTrafficFamilySnapshot(
@@ -28,7 +29,7 @@ public readonly record struct GameProtocolTrafficFamilySnapshot(
 /// <summary>Exhaustive allocation-free classification of the current Game manifest.</summary>
 public static class GameProtocolTrafficClassification
 {
-    public const int FamilyCount = 11;
+    public const int FamilyCount = 12;
 
     public static bool TryClassify(
         NetworkMessageId message,
@@ -39,6 +40,7 @@ public static class GameProtocolTrafficClassification
             100 or 101 or 105 or 108 or 134 =>
                 (int)GameProtocolTrafficFamily.AuthenticationAndApplicationSession,
             142 or 143 => (int)GameProtocolTrafficFamily.ClientProfile,
+            146 or 147 => (int)GameProtocolTrafficFamily.ServerPerformanceProfile,
             140 or 141 => (int)GameProtocolTrafficFamily.ContentAuthorizationAndProof,
             135 or 136 or 137 => (int)GameProtocolTrafficFamily.GuestAdmission,
             106 or 138 => (int)GameProtocolTrafficFamily.PlayableInputAndCommands,

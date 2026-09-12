@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UltraSim.Client.Core;
 using UltraSim.Game.Input;
 
@@ -10,6 +11,9 @@ static class ClientWorldInputTests
         OrbitCommandInterpretsMouseGestures();
         ReferenceProfilesKeepMovementAndLookIndependent();
         FocusAndActionEdgesAreCommonClientSemantics();
+        SchedulerDecouplesSamplesAndPreservesEdges();
+        SchedulerRetainsCadencePhaseAcrossSixtyHertzSamples();
+        SchedulerIsBoundedAndLocallyRateLimited();
         InvalidSamplesAndCrossThreadUseFailClosed();
     }
 
@@ -257,5 +261,152 @@ static class ClientWorldInputTests
         thread.Start();
         thread.Join();
         Assert.True(failure is InvalidOperationException);
+    }
+
+    private static void SchedulerDecouplesSamplesAndPreservesEdges()
+    {
+        long start = 10_000;
+        var scheduler = new ClientWorldInputScheduler(
+            new ClientInputSubmissionPolicy(60, 20, 8, 100), start);
+        var sequencer = new ClientWorldInputSequencer();
+        var sent = new List<GamePlayerCommand>();
+        bool accepting = true;
+
+        bool Submit(in ClientWorldScheduledCommand scheduled, out ulong sequence)
+        {
+            sequence = 0;
+            if (!accepting || !sequencer.TryCreateSemanticCommand(scheduled.Intent, out var command))
+                return false;
+            sequence = command.Sequence;
+            sent.Add(command);
+            return true;
+        }
+
+        var move = new ClientWorldCommandIntent(
+            GameLocomotionUpdate.CreateDirect(short.MaxValue, 0),
+            GamePlayerActions.None,
+            true);
+        Assert.True(scheduler.TryObserve(move, default, start));
+        Assert.True(scheduler.TryPump(start, Submit));
+        Assert.Equal(1, sent.Count);
+
+        // Faster samples replace continuous intent without producing one command per sample.
+        for (int index = 1; index <= 12; index++)
+        {
+            var changed = move with
+            {
+                Locomotion = GameLocomotionUpdate.CreateDirect(
+                    checked((short)(short.MaxValue - index)), checked((short)index)),
+            };
+            Assert.True(scheduler.TryObserve(changed, default, start + index));
+            Assert.True(scheduler.TryPump(start + index, Submit));
+        }
+        Assert.Equal(1, sent.Count);
+
+        // A discrete edge is not held behind the recommended continuous cadence.
+        var jump = new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Unchanged, GamePlayerActions.Jump, true);
+        Assert.True(scheduler.TryObserve(jump, default, start + 20));
+        Assert.True(scheduler.TryPump(start + 20, Submit));
+        Assert.Equal(2, sent.Count);
+        Assert.Equal(GamePlayerActions.Jump, sent[1].PressedActions);
+
+        // Stop/release remains retained across ordinary transport pressure.
+        accepting = false;
+        var stop = new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true);
+        Assert.True(scheduler.TryObserve(stop, default, start + 30));
+        Assert.False(scheduler.TryPump(start + 30, Submit));
+        Assert.Equal(2, sent.Count);
+        accepting = true;
+        Assert.True(scheduler.TryPump(start + 31, Submit));
+        Assert.Equal(3, sent.Count);
+        Assert.Equal(GameLocomotionUpdateKind.Stop, sent[2].Locomotion.Kind);
+        Assert.Equal(GamePlayerActions.None, sent[2].HeldActions);
+        scheduler.ObserveCompleted(sent[^1].Sequence);
+
+        ClientWorldInputScheduleSnapshot snapshot = scheduler.GetSnapshot();
+        Assert.True(snapshot.SamplesObserved >= 14);
+        Assert.True(snapshot.ContinuousCommandsCoalesced >= 11);
+        Assert.Equal((ulong)1, snapshot.EdgeObligationsGenerated);
+        Assert.Equal((ulong)1, snapshot.EdgeObligationsSubmitted);
+        Assert.Equal((ulong)1, snapshot.EdgeObligationsCompleted);
+        Assert.Equal((ulong)1, snapshot.ReleaseOrStopGenerated);
+        Assert.Equal((ulong)1, snapshot.ReleaseOrStopSubmitted);
+        Assert.Equal((ulong)1, snapshot.ReleaseOrStopCompleted);
+        Assert.Equal((ulong)1, snapshot.TransportDeferred);
+        Assert.Equal(0, snapshot.PendingObligations);
+        Assert.Equal(0, snapshot.SubmittedCompletionDebt);
+        Assert.False(snapshot.ContinuousStatePending);
+        scheduler.ResetTelemetryWindow();
+        ClientWorldInputScheduleSnapshot reset = scheduler.GetSnapshot();
+        Assert.Equal((ulong)0, reset.SamplesObserved);
+        Assert.Equal((ulong)0, reset.EdgeObligationsGenerated);
+    }
+
+    private static void SchedulerIsBoundedAndLocallyRateLimited()
+    {
+        long start = 20_000;
+        var scheduler = new ClientWorldInputScheduler(
+            new ClientInputSubmissionPolicy(20, 20, 2, 100, 2), start);
+        var sequencer = new ClientWorldInputSequencer();
+
+        bool Submit(in ClientWorldScheduledCommand scheduled, out ulong sequence)
+        {
+            bool accepted = sequencer.TryCreateSemanticCommand(scheduled.Intent, out var command);
+            sequence = accepted ? command.Sequence : 0;
+            return accepted;
+        }
+
+        Assert.True(scheduler.TryObserve(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Unchanged, GamePlayerActions.Jump, true), default, start));
+        Assert.True(scheduler.TryObserve(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Unchanged, GamePlayerActions.None, true), default, start + 1));
+        Assert.False(scheduler.TryObserve(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Unchanged, GamePlayerActions.Interact, true), default, start + 2));
+        Assert.True(scheduler.TryPump(start + 3, Submit));
+        Assert.True(scheduler.TryPump(start + 4, Submit));
+        Assert.True(scheduler.TryObserve(new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Unchanged, GamePlayerActions.Interact, true), default, start + 5));
+        Assert.True(scheduler.TryPump(start + 6, Submit));
+        ClientWorldInputScheduleSnapshot snapshot = scheduler.GetSnapshot();
+        Assert.Equal((ulong)1, snapshot.CapacityRejections);
+        Assert.True(snapshot.LocalHardCapDeferred > 0);
+        Assert.True(snapshot.PendingObligations > 0);
+        Assert.Throws<InvalidOperationException>(scheduler.ResetTelemetryWindow);
+    }
+
+    private static void SchedulerRetainsCadencePhaseAcrossSixtyHertzSamples()
+    {
+        long start = 30_000;
+        long sampleInterval = Stopwatch.Frequency / 60;
+        var scheduler = new ClientWorldInputScheduler(
+            new ClientInputSubmissionPolicy(60, 30, 8, 100), start);
+        var sequencer = new ClientWorldInputSequencer();
+        int submitted = 0;
+
+        bool Submit(in ClientWorldScheduledCommand scheduled, out ulong sequence)
+        {
+            bool accepted = sequencer.TryCreateSemanticCommand(scheduled.Intent, out var command);
+            sequence = accepted ? command.Sequence : 0;
+            if (accepted) submitted++;
+            return accepted;
+        }
+
+        for (int index = 0; index < 120; index++)
+        {
+            long now = checked(start + index * sampleInterval);
+            var intent = new ClientWorldCommandIntent(
+                GameLocomotionUpdate.CreateDirect(
+                    checked((short)(GamePlayerCommand.MaximumAxisMagnitude - index)),
+                    checked((short)index)),
+                GamePlayerActions.None,
+                true);
+            Assert.True(scheduler.TryObserve(in intent, default, now));
+            Assert.True(scheduler.TryPump(now, Submit));
+        }
+
+        Assert.True(submitted is >= 59 and <= 61);
+        Assert.True(scheduler.GetSnapshot().ContinuousCommandsCoalesced >= 59);
     }
 }

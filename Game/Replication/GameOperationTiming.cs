@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics;
 
 namespace UltraSim.Game.Replication;
 
@@ -9,7 +10,11 @@ public readonly record struct GameTimingDistribution(
     long P50Microseconds,
     long P95Microseconds,
     long P99Microseconds,
-    long MaximumMicroseconds);
+    long MaximumMicroseconds,
+    int RollingSamples,
+    long WholeWindowP50Microseconds,
+    long WholeWindowP95Microseconds,
+    long WholeWindowP99Microseconds);
 
 /// <summary>
 /// Owner-thread fixed timing window. Detailed recording is allocation-free; Off
@@ -19,6 +24,7 @@ public sealed class GameOperationTimingWindow
 {
     public const int MaximumSamples = 256;
     private readonly long[] _samples = new long[MaximumSamples];
+    private readonly ulong[] _wholeBuckets = new ulong[64];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private int _next;
     private int _count;
@@ -38,6 +44,7 @@ public sealed class GameOperationTimingWindow
         if (!Enum.IsDefined(level)) throw new ArgumentOutOfRangeException(nameof(level));
         _level = level;
         Array.Clear(_samples);
+        Array.Clear(_wholeBuckets);
         _next = _count = 0;
         _observations = 0;
         _totalTicks = 0;
@@ -60,6 +67,9 @@ public sealed class GameOperationTimingWindow
         ulong ticks = checked((ulong)elapsed);
         _totalTicks = ulong.MaxValue - _totalTicks < ticks ? ulong.MaxValue : _totalTicks + ticks;
         _maximumMicroseconds = Math.Max(_maximumMicroseconds, microseconds);
+        int bucket = microseconds == 0 ? 0 : Math.Min(63,
+            BitOperations.Log2(checked((ulong)microseconds)) + 1);
+        if (_wholeBuckets[bucket] != ulong.MaxValue) _wholeBuckets[bucket]++;
     }
 
     public GameTimingDistribution Capture()
@@ -72,11 +82,30 @@ public sealed class GameOperationTimingWindow
         return new GameTimingDistribution(
             _observations, _totalTicks,
             ordered[Index(0.50)], ordered[Index(0.95)], ordered[Index(0.99)],
-            _maximumMicroseconds);
+            _maximumMicroseconds, _count,
+            WholePercentile(50), WholePercentile(95), WholePercentile(99));
     }
 
     private int Index(double percentile) => Math.Clamp(
         (int)Math.Ceiling(_count * percentile) - 1, 0, _count - 1);
+
+    private long WholePercentile(int percentage)
+    {
+        if (_observations == 0) return 0;
+        ulong target = (ulong)(((UInt128)_observations * (uint)percentage + 99) / 100);
+        ulong cumulative = 0;
+        for (int index = 0; index < _wholeBuckets.Length; index++)
+        {
+            cumulative = ulong.MaxValue - cumulative < _wholeBuckets[index]
+                ? ulong.MaxValue
+                : cumulative + _wholeBuckets[index];
+            if (cumulative < target) continue;
+            if (index == 0) return 0;
+            ulong upper = index == 63 ? ulong.MaxValue : (1UL << index) - 1;
+            return checked((long)Math.Min(upper, checked((ulong)_maximumMicroseconds)));
+        }
+        return _maximumMicroseconds;
+    }
 
     private void EnsureOwner()
     {

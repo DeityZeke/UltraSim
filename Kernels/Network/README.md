@@ -80,6 +80,14 @@ The observation count/total/max cover the complete configured measurement window
 bounded rolling estimates where the owning subsystem uses a fixed recent-sample window. Diagnostic
 snapshots are read-only and do not reset connection counters or create a protocol timestamp.
 
+PF3 does not add a Network transport cadence or change the kernel's wire behavior. The Hosted
+client/server pumps remain event-driven owner-local mechanisms with a measured bounded service
+interval. The authenticated Game application advertises that maximum interval through its finite
+`ServerPerformanceProfile/v1`; it does not relabel the pump as a semantic Hz clock. Authority,
+input submission, rendering, and owner/public delivery therefore remain independently observable.
+The profile announcement/proof are ordinary classified Control messages, and the hard input-rate
+limiter remains Game/application authority state rather than Network policy.
+
 The physical metric is deliberately named **UDP payload bytes**. It is the exact datagram payload
 length successfully handed to, or received from, the UDP socket boundary. It excludes IP, UDP, and
 link-layer headers, and it never includes HTTP content acquisition or CAS/disk traffic. An optional

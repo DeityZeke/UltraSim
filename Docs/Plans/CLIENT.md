@@ -29,7 +29,9 @@ real ClientOnly headless bot harness plus an 8-bot/2-exported-Online shared-auth
 closes first-class production UDP accounting, separate HTTP body accounting, and long-window
 quiet/moving/crowd characterization. PF2.5 now reconciles the selected real-game replication owner
 and completes opt-in PF3 timing/queue/debt observability without changing policy; PF3 cadence and
-performance-profile implementation follows.
+performance-profile implementation now closes authenticated policy/proof, the shared bounded input
+scheduler, authority rate enforcement, visible/headless render-clock truth, and mismatched-cadence
+proof. PF4 measured optimization follows without reopening replication ownership.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2688,7 +2690,7 @@ UI defensive assurance: publication/lifetime/parser/native boundaries      CLOSE
 PF0/PF1 candidate + real headless/mixed exported-client swarm           CLOSED
 PF2 first-class wire accounting + explanatory baselines                 CLOSED
 PF2.5 replication ownership reconciliation + PF3 observability          CLOSED
-PF3 cadence/performance policy                                             NEXT
+PF3 cadence/performance policy                                           CLOSED
 PF4+ tuning/ObjectScript/human testing                                     OPEN
         |
         v

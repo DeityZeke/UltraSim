@@ -28,6 +28,7 @@ catch (Exception exception) when (exception is ArgumentException or FormatExcept
 Console.WriteLine(
     $"{options.Checkpoint} BOT RUN endpoint={options.Endpoint} bots={options.BotCount} seed={options.Seed} " +
     $"warmupMs={options.WarmupMilliseconds} durationMs={options.DurationMilliseconds} scenario={options.Scenario} " +
+    $"inputMode={options.InputMode} sampleHz={options.InputSampleHz} submitHz={options.InputSubmitHz} " +
     $"cache={options.CacheRoot} network=ClientOnly");
 
 Directory.CreateDirectory(options.CacheRoot);
@@ -223,6 +224,21 @@ internal sealed class BotHarness : IDisposable
             foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
         }
 
+        // A measured window owns its generated/submitted/completed input counts. Drain any
+        // command sampled during warmup/positioning before resetting cumulative diagnostics.
+        long inputQuiescenceDeadline = BotMonotonicClock.AddMilliseconds(
+            Stopwatch.GetTimestamp(), 10_000);
+        while (_bots.Any(static bot => bot.HasUnexpectedQueueDebt) &&
+               Stopwatch.GetTimestamp() < inputQuiescenceDeadline)
+        {
+            PumpOnce(allowNewChaos: false);
+            if (_bots.Any(static bot => bot.IsFaulted))
+                return Finish(false, "A bot faulted while quiescing the PF3 input window.");
+            Thread.Sleep(1);
+        }
+        if (_bots.Any(static bot => bot.HasUnexpectedQueueDebt))
+            return Finish(false, "Input/session debt did not quiesce before measurement.");
+
         _measurementStarted = Stopwatch.GetTimestamp();
         foreach (BotClient bot in _bots) bot.ResetTelemetryWindow();
         _wireMeasurement = new BotWireMeasurement(
@@ -250,7 +266,6 @@ internal sealed class BotHarness : IDisposable
         _processMetrics.EndWindow(_scenarioCompleted);
         _wireSummary = _wireMeasurement.Complete(
             _bots, _source, _cache, _scenarioCompleted);
-        _clientTelemetry = _bots.Select(static bot => bot.GetTelemetryReport()).ToArray();
         if (_options.MeasurementCompleteFile is not null)
             BotFiles.WriteAtomic(_options.MeasurementCompleteFile, "complete");
         _quiescenceStarted = _scenarioCompleted;
@@ -265,6 +280,12 @@ internal sealed class BotHarness : IDisposable
             Thread.Sleep(1);
         }
         _quiescenceCompleted = Stopwatch.GetTimestamp();
+        // The measured producer window has closed, but obligations accepted during that window
+        // may complete during the bounded quiescence tail. Capture the client/scheduler view only
+        // after that tail so window-local generated/submitted/completed edge counts cannot report
+        // an impossible partial lifetime. Physical wire accounting remains fenced at the explicit
+        // scenario boundary above.
+        _clientTelemetry = _bots.Select(static bot => bot.GetTelemetryReport()).ToArray();
 
         string? coverageFailure = ValidateCoverage();
         if (coverageFailure is not null)
@@ -341,6 +362,34 @@ internal sealed class BotHarness : IDisposable
             if (_options.Scenario is "moving" or "crowd" &&
                 _bots.Sum(static bot => bot.MovementAccepted) == 0)
                 return $"The {_options.Scenario} scenario produced no authoritative movement.";
+            if (_options.Scenario == "sustained-input")
+            {
+                ClientWorldInputScheduleSnapshot[] schedules = _bots
+                    .Select(static bot => bot.GetTelemetryReport().InputScheduler).ToArray();
+                if (_options.InputMode is BotInputMode.Compliant or BotInputMode.HardLimit)
+                {
+                    if (schedules.Any(static value => value.SamplesObserved == 0 ||
+                            value.CommandsSubmitted == 0))
+                        return "The sustained-input scenario did not exercise every stock scheduler.";
+                    if (schedules.Any(static value => value.CapacityRejections != 0 ||
+                        value.EdgeObligationsGenerated != value.EdgeObligationsSubmitted ||
+                        value.EdgeObligationsGenerated != value.EdgeObligationsCompleted ||
+                        value.ReleaseOrStopGenerated != value.ReleaseOrStopSubmitted ||
+                        value.ReleaseOrStopGenerated != value.ReleaseOrStopCompleted))
+                        return "A bounded stock input scheduler lost or stranded an action/release edge.";
+                    if (_bots.Any(static bot => bot.RateLimitedCommandsObserved != 0))
+                        return "A compliant stock scheduler was rate-limited by the authority.";
+                }
+                if ((_options.InputMode is BotInputMode.OverLimit or BotInputMode.BurstOver) &&
+                    !_bots.Any(static bot => bot.RateLimitedCommandsObserved != 0))
+                    return "The non-compliant input mode did not produce bounded rate-limit outcomes.";
+                if (_options.InputMode == BotInputMode.StaleSession &&
+                    _bots.Any(static bot => bot.SuccessfulReconnects != 1 ||
+                        bot.StaleSessionReplayAttempts != 1 ||
+                        bot.StaleSessionReplaysQueued != 1 ||
+                        bot.StaleSessionReplaysFenced != 1))
+                    return "An old application/control-session command was not explicitly replayed and fenced.";
+            }
             return null;
         }
         if (_bots.Sum(static bot => bot.MovementAccepted) == 0 ||
@@ -563,6 +612,16 @@ internal enum BotCommandKind : byte
     UiOpen,
 }
 
+internal enum BotInputMode : byte
+{
+    Compliant = 1,
+    HardLimit = 2,
+    OverLimit = 3,
+    BurstWithin = 4,
+    BurstOver = 5,
+    StaleSession = 6,
+}
+
 internal enum BotEdgePressureState : byte
 {
     None = 0,
@@ -591,11 +650,13 @@ internal sealed class BotClient : IDisposable
     private RemotePlayableSession? _session;
     private BotUiRenderer? _renderer;
     private ResolvedClientSettings? _settings;
+    private ClientWorldInputScheduler? _inputScheduler;
     private long _startDue;
     private long _scenarioStarted;
     private long _nextChaos;
     private long _nextNavigation;
     private long _nextSwordAttempt;
+    private long _nextInputSample;
     private long _drainDeadline;
     private long _lastPump;
     private long _serviceIntervalHighWaterTicks;
@@ -633,6 +694,15 @@ internal sealed class BotClient : IDisposable
     private UdpPayloadTrafficSnapshot _retiredUdpTraffic;
     private NetworkTrafficSnapshot? _retiredSecureTraffic;
     private bool _trafficCapturedForCurrentLifetime;
+    private ulong _rateLimitedCommandsObserved;
+    private ulong _lastRateLimitedCommands;
+    private GameControlSessionEpoch _priorControlSession;
+    private bool _staleReplayQueued;
+    private bool _staleReplayFenced;
+    private long _staleReplayQueuedAt;
+    private ulong _staleReplayNewLifetimeProcessedSequence;
+    private readonly byte[] _staleReplayScratch =
+        new byte[RemotePlayableCommandMessageCodec.EncodedSize];
 
     internal BotClient(
         BotOptions options,
@@ -668,6 +738,10 @@ internal sealed class BotClient : IDisposable
     internal int InitialConnectRetries { get; private set; }
     internal int SuccessfulReconnects { get; private set; }
     internal int FreshProofLifetimes { get; private set; }
+    internal ulong RateLimitedCommandsObserved => _rateLimitedCommandsObserved;
+    internal int StaleSessionReplayAttempts { get; private set; }
+    internal int StaleSessionReplaysQueued { get; private set; }
+    internal int StaleSessionReplaysFenced => _staleReplayFenced ? 1 : 0;
     internal int MovementAttempts { get; private set; }
     internal int MovementAccepted { get; private set; }
     internal int MovementRejected { get; private set; }
@@ -750,7 +824,8 @@ internal sealed class BotClient : IDisposable
             _connection?.GetSnapshot().Connection ?? default,
             network,
             protocol,
-            _session?.GetTimingSnapshot() ?? default);
+            _session?.GetTimingSnapshot() ?? default,
+            _inputScheduler?.GetSnapshot() ?? default);
     }
 
     internal void ResetTelemetryWindow()
@@ -760,6 +835,7 @@ internal sealed class BotClient : IDisposable
                 "A bot telemetry window requires one active application lifetime.");
         _connection.ConfigureTelemetry(_options.TelemetryLevel);
         _session.ConfigureTelemetry(_options.TelemetryLevel);
+        _inputScheduler?.ResetTelemetryWindow();
         // This counter intentionally describes the synchronized measurement
         // window, not admission or scenario-positioning work. It is distinct
         // from commands submitted because an input sample may be unmapped or
@@ -775,7 +851,11 @@ internal sealed class BotClient : IDisposable
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
             return _pendingCommand.Pending.IsPending ||
                 snapshot.Playable.CommandRetainedLocally ||
-                snapshot.Chat.HasPendingProof || snapshot.Content.ProofRetained;
+                snapshot.Chat.HasPendingProof || snapshot.Content.ProofRetained ||
+                (_inputScheduler is not null &&
+                    (_inputScheduler.GetSnapshot().ContinuousStatePending ||
+                     _inputScheduler.GetSnapshot().PendingObligations != 0 ||
+                     _inputScheduler.GetSnapshot().SubmittedCompletionDebt != 0));
         }
     }
 
@@ -786,6 +866,7 @@ internal sealed class BotClient : IDisposable
             timestamp, 6_000 + _random.NextInt(500));
         _nextNavigation = timestamp;
         _nextSwordAttempt = BotMonotonicClock.AddMilliseconds(timestamp, 100);
+        _nextInputSample = timestamp;
     }
 
     internal void SetSwordContender() => _swordContender = true;
@@ -921,6 +1002,30 @@ internal sealed class BotClient : IDisposable
             }
             if (snapshot.Playable.State != RemotePlayableClientState.Active) return;
 
+            if (_inputScheduler is null)
+            {
+                RemoteServerPerformanceProfile performance = _session.Performance.Profile;
+                int recommended = _options.InputMode == BotInputMode.HardLimit
+                    ? performance.MaximumInputHz
+                    : _options.InputSubmitHz == 0
+                        ? performance.RecommendedInputHz
+                        : _options.InputSubmitHz;
+                if (_options.InputMode == BotInputMode.Compliant &&
+                    recommended > performance.MaximumInputHz)
+                {
+                    Fail($"Requested stock submit rate {recommended}Hz exceeds the authenticated " +
+                        $"server maximum {performance.MaximumInputHz}Hz.");
+                    return;
+                }
+                _inputScheduler = new ClientWorldInputScheduler(new ClientInputSubmissionPolicy(
+                    performance.MaximumInputHz,
+                    Math.Min(recommended, performance.MaximumInputHz),
+                    performance.InputBurstCapacity,
+                    performance.InputBurstWindowMilliseconds));
+            }
+            _inputScheduler.ObserveCompleted(snapshot.Playable.LastProcessedCommandSequence);
+            _ = _inputScheduler.TryPump(now, TrySubmitScheduledCommand);
+
             if (State != BotLifetimeState.Active)
             {
                 State = BotLifetimeState.Active;
@@ -939,12 +1044,22 @@ internal sealed class BotClient : IDisposable
             ServerGenerationId = snapshot.Playable.ServerGenerationId;
             _currentPublicActor = snapshot.Playable.PublicActor;
             Observe(snapshot);
+            if (snapshot.Playable.RateLimitedCommands > _lastRateLimitedCommands)
+            {
+                _rateLimitedCommandsObserved +=
+                    snapshot.Playable.RateLimitedCommands - _lastRateLimitedCommands;
+                _lastRateLimitedCommands = snapshot.Playable.RateLimitedCommands;
+            }
             if (!_proofCounted && snapshot.Content.ProofsQueued > 0 &&
-                _profile.GetSnapshot().ProofsQueued > 0)
+                _profile.GetSnapshot().ProofsQueued > 0 &&
+                snapshot.Performance.ProofsQueued > 0)
             {
                 FreshProofLifetimes++;
                 _proofCounted = true;
             }
+            if (_options.InputMode == BotInputMode.StaleSession &&
+                DriveStaleSessionReplay(now, in snapshot))
+                return;
             if (_scenarioStarted != 0 && allowNewChaos)
                 RunScenario(now, snapshot);
         }
@@ -978,10 +1093,12 @@ internal sealed class BotClient : IDisposable
         _session = null;
         _renderer = null;
         _settings = null;
+        _inputScheduler = null;
         _guestSubmitted = false;
         _proofCounted = false;
         _currentPublicActor = default;
         _lastVertical = ClientPublicActorVerticalPhase.None;
+        _lastRateLimitedCommands = 0;
         _trafficCapturedForCurrentLifetime = false;
         _controls.Reset();
     }
@@ -1097,9 +1214,132 @@ internal sealed class BotClient : IDisposable
             case "mixed-chaos":
                 RunMixedChaos(now, snapshot);
                 return;
+            case "sustained-input":
+                RunSustainedInput(now, snapshot.Playable.Position);
+                return;
             default:
                 throw new InvalidOperationException($"Unknown bot scenario '{_options.Scenario}'.");
         }
+    }
+
+    private void RunSustainedInput(long now, in WorldPosition position)
+    {
+        if (now < _nextInputSample) return;
+        int sampleHz = _options.InputSampleHz == 0 ? 120 : _options.InputSampleHz;
+        long interval = Math.Max(1, Stopwatch.Frequency / sampleHz);
+        _nextInputSample = BotMonotonicClock.AdvanceFixedDeadline(
+            _nextInputSample, now, interval);
+        SyntheticInputSamples++;
+
+        long elapsedMilliseconds = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        long phase = elapsedMilliseconds / 500;
+        bool stop = phase % 8 == 7;
+        float x = stop ? 0 : phase % 4 switch { 0 => 1f, 1 => .7f, 2 => -1f, _ => -.7f };
+        float z = stop ? 0 : phase % 4 switch { 0 => .2f, 1 => 1f, 2 => -.2f, _ => -1f };
+        GameLocomotionUpdate locomotion = stop
+            ? GameLocomotionUpdate.Stop
+            : _controls.EvaluateMovement(
+                _settings!.ControlGrammar, x, z, position, elapsedMilliseconds);
+
+        bool jumpEdge = elapsedMilliseconds > 0 &&
+            elapsedMilliseconds / 2_000 != (elapsedMilliseconds - Math.Max(1,
+                1_000 / sampleHz)) / 2_000;
+        GamePlayerActions actions = jumpEdge ? GamePlayerActions.Jump : GamePlayerActions.None;
+        var intent = new ClientWorldCommandIntent(locomotion, actions, true);
+        MovementAttempts++;
+        if (jumpEdge) JumpAttempts++;
+
+        if (_options.InputMode is BotInputMode.OverLimit or BotInputMode.BurstWithin or
+                BotInputMode.BurstOver)
+        {
+            int withinSecond = checked((int)(elapsedMilliseconds % 1_000));
+            RemoteServerPerformanceProfile performance = _session!.Performance.Profile;
+            bool shouldSubmit = _options.InputMode switch
+            {
+                BotInputMode.BurstWithin => withinSecond <
+                    Math.Max(1, (int)performance.InputBurstCapacity) * 1_000 / sampleHz,
+                BotInputMode.BurstOver => withinSecond <
+                    Math.Min(1_000, (performance.InputBurstCapacity + 3) * 1_000 / sampleHz),
+                _ => true,
+            };
+            if (shouldSubmit) _ = TrySubmitNonCompliant(in intent);
+            return;
+        }
+
+        var context = new ClientWorldCommandContext(
+            default, ClientWorldCommandRequestFlags.None, 0, 0,
+            (ulong)(jumpEdge ? BotCommandKind.Jump : BotCommandKind.None));
+        if (_inputScheduler!.TryObserve(intent, context, now))
+            _ = _inputScheduler.TryPump(now, TrySubmitScheduledCommand);
+    }
+
+    private bool DriveStaleSessionReplay(
+        long now,
+        in RemotePlayableSessionSnapshot snapshot)
+    {
+        long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
+        if (!_reconnectRequested && SuccessfulReconnects == 0 && elapsed >= 2_000)
+        {
+            if (HasUnexpectedQueueDebt) return true;
+            _priorApplicationEpoch = snapshot.Playable.ApplicationSessionEpoch;
+            _priorControlSession = snapshot.Playable.ControlSession;
+            _priorPublicActor = snapshot.Playable.PublicActor;
+            _reconnectRequested = true;
+            BeginRetirement(now, reconnect: true);
+            return true;
+        }
+        if (SuccessfulReconnects == 0) return _reconnectRequested;
+        if (!_staleReplayQueued)
+        {
+            StaleSessionReplayAttempts++;
+            var oldCommand = new GamePlayerCommand(
+                _priorControlSession,
+                1,
+                GameLocomotionUpdate.CreateDirect(
+                    GamePlayerCommand.MaximumAxisMagnitude, 0),
+                GamePlayerActions.None,
+                GamePlayerActions.None);
+            RemotePlayableCommandMessage wire = UltraSimGameProtocol.CreatePlayableCommand(
+                _priorApplicationEpoch,
+                in oldCommand,
+                default,
+                RemotePlayableCommandFlags.None,
+                0,
+                0);
+            if (!RemotePlayableCommandMessageCodec.TryWriteExact(_staleReplayScratch, in wire))
+                throw new InvalidOperationException(
+                    "The stale-session replay command was not canonical.");
+            if (_connection!.Peer!.TryQueue(
+                    RemotePlayableCommandMessageCodec.Descriptor.Id,
+                    _staleReplayScratch) != NetworkQueueStatus.Accepted)
+                return true;
+            StaleSessionReplaysQueued++;
+            _staleReplayQueued = true;
+            _staleReplayQueuedAt = now;
+            _staleReplayNewLifetimeProcessedSequence =
+                snapshot.Playable.LastProcessedCommandSequence;
+            return true;
+        }
+        if (!_staleReplayFenced &&
+            now - _staleReplayQueuedAt >= Stopwatch.Frequency / 2)
+        {
+            if (snapshot.Playable.LastProcessedCommandSequence !=
+                _staleReplayNewLifetimeProcessedSequence)
+                throw new InvalidOperationException(
+                    "An old application/control-session command became valid after reconnect.");
+            _staleReplayFenced = true;
+        }
+        return !_staleReplayFenced;
+    }
+
+    private bool TrySubmitNonCompliant(in ClientWorldCommandIntent intent)
+    {
+        CommandSubmitCalls++;
+        if (_session is null || !_session.Playable.TrySubmitCommand(
+                intent, default, RemotePlayableCommandFlags.None, 0, 0, out _))
+            return false;
+        CommandsQueued++;
+        return true;
     }
 
     private void RunMovingMeasurement(long now, in WorldPosition position, bool crowd)
@@ -1342,10 +1582,30 @@ internal sealed class BotClient : IDisposable
         RemotePlayableCommandFlags flags = RemotePlayableCommandFlags.None)
     {
         CommandSubmitCalls++;
-        if (_pendingCommand.Pending.IsPending || _session is null ||
-            !_session.Playable.TrySubmitCommand(in intent, target, flags))
+        if (_pendingCommand.Pending.IsPending || _session is null || _inputScheduler is null)
             return false;
-        CommandsQueued++;
+        var context = new ClientWorldCommandContext(
+            target,
+            (ClientWorldCommandRequestFlags)(byte)flags,
+            0,
+            0,
+            (ulong)kind);
+        long now = Stopwatch.GetTimestamp();
+        if (!_inputScheduler.TryObserve(intent, context, now)) return false;
+        if ((kind is BotCommandKind.Jump or BotCommandKind.Interaction or
+                BotCommandKind.Primary) &&
+            intent.HeldActions != GamePlayerActions.None)
+        {
+            // These bot operations model a bounded physical press, not a key that remains
+            // held forever. Retain the matching release behind the action edge before
+            // pumping either obligation. Otherwise a later attempt observes no new rising
+            // edge and can be reported as attempted even though no Game command exists.
+            var release = new ClientWorldCommandIntent(
+                GameLocomotionUpdate.Unchanged, GamePlayerActions.None, intent.HasFocus);
+            if (!_inputScheduler.TryObserve(release, default, now))
+                throw new InvalidOperationException(
+                    "The bot input scheduler could not retain a momentary action release.");
+        }
         switch (kind)
         {
             case BotCommandKind.Movement: MovementAttempts++; break;
@@ -1354,9 +1614,29 @@ internal sealed class BotClient : IDisposable
             case BotCommandKind.Primary: PrimaryAttempts++; break;
             case BotCommandKind.UiOpen: UiOpenAttempts++; break;
         }
+        _ = _inputScheduler.TryPump(now, TrySubmitScheduledCommand);
+        return true;
+    }
+
+    private bool TrySubmitScheduledCommand(
+        in ClientWorldScheduledCommand scheduled,
+        out ulong sequence)
+    {
+        sequence = 0;
+        if (_session is null || !_session.Playable.TrySubmitCommand(
+                scheduled.Intent,
+                scheduled.Context.Target,
+                (RemotePlayableCommandFlags)(byte)scheduled.Context.Flags,
+                scheduled.Context.FaceXMillimeters,
+                scheduled.Context.FaceZMillimeters,
+                out sequence))
+            return false;
+        CommandsQueued++;
+        BotCommandKind kind = Enum.IsDefined((BotCommandKind)scheduled.Context.DiagnosticTag)
+            ? (BotCommandKind)scheduled.Context.DiagnosticTag
+            : BotCommandKind.None;
         if (kind != BotCommandKind.None)
         {
-            ulong sequence = _session.Playable.Input.Snapshot().LastSequence;
             ulong epoch = _session.Playable.GetSnapshot().ApplicationSessionEpoch;
             if (!_pendingCommand.TryStart(kind, sequence, epoch))
                 throw new InvalidOperationException(
@@ -1605,6 +1885,7 @@ internal sealed class BotClient : IDisposable
             if (reconnect)
             {
                 _priorApplicationEpoch = snapshot.Playable.ApplicationSessionEpoch;
+                _priorControlSession = snapshot.Playable.ControlSession;
                 _priorPublicActor = snapshot.Playable.PublicActor;
             }
             if (_connection?.GetSnapshot().State == ClientDirectConnectState.Established &&
@@ -1667,6 +1948,7 @@ internal sealed class BotClient : IDisposable
         _profile = null;
         _renderer = null;
         _settings = null;
+        _inputScheduler = null;
         _currentPublicActor = default;
         return failure;
     }
@@ -1893,7 +2175,45 @@ internal sealed record BotClientTelemetryReport(
     ConnectionId Connection,
     NetworkServiceTimingSnapshot Network,
     NetworkProtocolSnapshot Protocol,
-    RemotePlayableSessionTimingSnapshot Client);
+    RemotePlayableSessionTimingSnapshot Client,
+    ClientWorldInputScheduleSnapshot InputScheduler);
+
+internal readonly record struct BotPerClientRateDistribution(
+    double AggregateHz,
+    double AveragePerClientHz,
+    double P50PerClientHz,
+    double P95PerClientHz,
+    double MaximumPerClientHz,
+    int MaximumClientId);
+
+internal readonly record struct BotInputRateReport(
+    double MeasuredSeconds,
+    BotPerClientRateDistribution Samples,
+    BotPerClientRateDistribution SubmissionOpportunities,
+    BotPerClientRateDistribution CommandsSubmitted);
+
+internal readonly record struct BotAcrossClientTimingDistribution(
+    int Clients,
+    double P50OfPerClientP50Microseconds,
+    double P95OfPerClientP50Microseconds,
+    double WorstClientP50Microseconds,
+    int WorstClientP50Id,
+    double P50OfPerClientP95Microseconds,
+    double P95OfPerClientP95Microseconds,
+    double WorstClientP95Microseconds,
+    int WorstClientP95Id,
+    double P50OfPerClientP99Microseconds,
+    double P95OfPerClientP99Microseconds,
+    double WorstClientP99Microseconds,
+    int WorstClientP99Id,
+    double AbsoluteMaximumMicroseconds,
+    int AbsoluteMaximumClientId);
+
+internal readonly record struct BotAcrossClientTimingReport(
+    BotAcrossClientTimingDistribution CommandToOwnerState,
+    BotAcrossClientTimingDistribution OwnerStateFreshness,
+    BotAcrossClientTimingDistribution ActionEdgeSubmissionDelay,
+    BotAcrossClientTimingDistribution NetworkServiceInterval);
 
 internal sealed record BotRunSummary
 {
@@ -1903,6 +2223,9 @@ internal sealed record BotRunSummary
     public required string? Detail { get; init; }
     public required string Endpoint { get; init; }
     public required string Scenario { get; init; }
+    public required string InputMode { get; init; }
+    public required int ConfiguredInputSampleHz { get; init; }
+    public required int ConfiguredInputSubmitHz { get; init; }
     public required ulong Seed { get; init; }
     public required string HarnessBuildModule { get; init; }
     public required string Runtime { get; init; }
@@ -1950,6 +2273,20 @@ internal sealed record BotRunSummary
     public required int InteractionRejected { get; init; }
     public required int CommandSubmitCalls { get; init; }
     public required int CommandsQueued { get; init; }
+    public required ulong ServerRateLimitedCommandsObserved { get; init; }
+    public required int StaleSessionReplayAttempts { get; init; }
+    public required int StaleSessionReplaysQueued { get; init; }
+    public required int StaleSessionReplaysFenced { get; init; }
+    public required ulong SchedulerSamplesObserved { get; init; }
+    public required ulong SchedulerCommandsSubmitted { get; init; }
+    public required ulong SchedulerContinuousCoalesced { get; init; }
+    public required ulong SchedulerActionEdgesGenerated { get; init; }
+    public required ulong SchedulerActionEdgesSubmitted { get; init; }
+    public required ulong SchedulerActionEdgesCompleted { get; init; }
+    public required ulong SchedulerReleaseOrStopGenerated { get; init; }
+    public required ulong SchedulerReleaseOrStopSubmitted { get; init; }
+    public required ulong SchedulerReleaseOrStopCompleted { get; init; }
+    public required ulong SchedulerCapacityRejections { get; init; }
     public required int PrimaryAttempts { get; init; }
     public required int PrimaryAccepted { get; init; }
     public required int PrimaryRejected { get; init; }
@@ -1989,6 +2326,8 @@ internal sealed record BotRunSummary
     public required BotWireMeasurementSummary? Wire { get; init; }
     public required string TelemetryLevel { get; init; }
     public required BotClientTelemetryReport[] ClientTelemetry { get; init; }
+    public required BotInputRateReport InputRates { get; init; }
+    public required BotAcrossClientTimingReport AcrossClientTiming { get; init; }
     public required BotHttpBodyTrafficReport LifetimeHttpBody { get; init; }
     public required BotCacheTrafficReport LifetimeContentCache { get; init; }
     public required BotPumpWindowSummary MeasuredPump { get; init; }
@@ -2021,12 +2360,21 @@ internal sealed record BotRunSummary
     {
         // Preserve the already accepted PF1 evidence schema. PF2 adds the
         // synchronized warmup/measurement window and first-class wire report.
-        SchemaVersion = options.Checkpoint == "PF1" ? 2 : options.Checkpoint == "PF2" ? 3 : 4,
+        SchemaVersion = options.Checkpoint switch
+        {
+            "PF1" => 2,
+            "PF2" => 3,
+            "PF2.5" => 4,
+            _ => 5,
+        },
         Checkpoint = options.Checkpoint,
         Passed = passed,
         Detail = detail,
         Endpoint = options.Endpoint,
         Scenario = options.Scenario,
+        InputMode = options.InputMode.ToString(),
+        ConfiguredInputSampleHz = options.InputSampleHz,
+        ConfiguredInputSubmitHz = options.InputSubmitHz,
         Seed = options.Seed,
         HarnessBuildModule = BotRuntimeIdentity.BuildModule,
         Runtime = BotRuntimeIdentity.Runtime,
@@ -2077,6 +2425,41 @@ internal sealed record BotRunSummary
         InteractionRejected = bots.Sum(static bot => bot.InteractionRejected),
         CommandSubmitCalls = bots.Sum(static bot => bot.CommandSubmitCalls),
         CommandsQueued = bots.Sum(static bot => bot.CommandsQueued),
+        ServerRateLimitedCommandsObserved = bots.Aggregate(
+            0UL, static (total, bot) => SaturatingAdd(total, bot.RateLimitedCommandsObserved)),
+        StaleSessionReplayAttempts = bots.Sum(static bot => bot.StaleSessionReplayAttempts),
+        StaleSessionReplaysQueued = bots.Sum(static bot => bot.StaleSessionReplaysQueued),
+        StaleSessionReplaysFenced = bots.Sum(static bot => bot.StaleSessionReplaysFenced),
+        SchedulerSamplesObserved = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.SamplesObserved)),
+        SchedulerCommandsSubmitted = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.CommandsSubmitted)),
+        SchedulerContinuousCoalesced = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.ContinuousCommandsCoalesced)),
+        SchedulerActionEdgesGenerated = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.EdgeObligationsGenerated)),
+        SchedulerActionEdgesSubmitted = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.EdgeObligationsSubmitted)),
+        SchedulerActionEdgesCompleted = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.EdgeObligationsCompleted)),
+        SchedulerReleaseOrStopGenerated = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.ReleaseOrStopGenerated)),
+        SchedulerReleaseOrStopSubmitted = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.ReleaseOrStopSubmitted)),
+        SchedulerReleaseOrStopCompleted = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.ReleaseOrStopCompleted)),
+        SchedulerCapacityRejections = clientTelemetry.Aggregate(
+            0UL, static (total, client) => SaturatingAdd(
+                total, client.InputScheduler.CapacityRejections)),
         PrimaryAttempts = bots.Sum(static bot => bot.PrimaryAttempts),
         PrimaryAccepted = bots.Sum(static bot => bot.PrimaryAccepted),
         PrimaryRejected = bots.Sum(static bot => bot.PrimaryRejected),
@@ -2121,6 +2504,8 @@ internal sealed record BotRunSummary
         Wire = wire,
         TelemetryLevel = options.TelemetryLevel.ToString(),
         ClientTelemetry = clientTelemetry,
+        InputRates = CreateInputRates(options, clientTelemetry),
+        AcrossClientTiming = CreateAcrossClientTiming(clientTelemetry),
         LifetimeHttpBody = lifetimeHttpBody,
         LifetimeContentCache = lifetimeContentCache,
         MeasuredPump = measuredPump,
@@ -2129,6 +2514,107 @@ internal sealed record BotRunSummary
         Faults = bots.Where(static bot => bot.Fault is not null)
             .Select(bot => $"bot={bot.Id}:{bot.Fault}").ToArray(),
     };
+
+    private static BotInputRateReport CreateInputRates(
+        BotOptions options,
+        BotClientTelemetryReport[] clients)
+    {
+        double seconds = Math.Max(.001, options.DurationMilliseconds / 1_000d);
+        return new BotInputRateReport(
+            seconds,
+            Rates(clients, seconds, static value => value.InputScheduler.SamplesObserved),
+            Rates(clients, seconds,
+                static value => value.InputScheduler.SubmissionOpportunities),
+            Rates(clients, seconds,
+                static value => value.InputScheduler.CommandsSubmitted));
+    }
+
+    private static BotPerClientRateDistribution Rates(
+        BotClientTelemetryReport[] clients,
+        double seconds,
+        Func<BotClientTelemetryReport, ulong> selector)
+    {
+        if (clients.Length == 0) return default;
+        (int Id, double Value)[] values = clients
+            .Select(value => (value.BotId, selector(value) / seconds))
+            .OrderBy(static value => value.Item2)
+            .ToArray();
+        double aggregate = values.Sum(static value => value.Value);
+        return new BotPerClientRateDistribution(
+            aggregate,
+            aggregate / values.Length,
+            Percentile(values, .50),
+            Percentile(values, .95),
+            values[^1].Value,
+            values[^1].Id);
+    }
+
+    private static BotAcrossClientTimingReport CreateAcrossClientTiming(
+        BotClientTelemetryReport[] clients) => new(
+        Across(clients, static value => new TimingTriplet(
+            value.Client.Playable.CommandToOwnerState.WholeWindowP50Microseconds,
+            value.Client.Playable.CommandToOwnerState.WholeWindowP95Microseconds,
+            value.Client.Playable.CommandToOwnerState.WholeWindowP99Microseconds,
+            value.Client.Playable.CommandToOwnerState.MaximumMicroseconds)),
+        Across(clients, static value => new TimingTriplet(
+            value.Client.Playable.OwnerStateApplyIntervals.WholeWindowP50Microseconds,
+            value.Client.Playable.OwnerStateApplyIntervals.WholeWindowP95Microseconds,
+            value.Client.Playable.OwnerStateApplyIntervals.WholeWindowP99Microseconds,
+            value.Client.Playable.OwnerStateApplyIntervals.MaximumMicroseconds)),
+        Across(clients, static value => new TimingTriplet(
+            TicksToMicroseconds(value.InputScheduler.EdgeSubmissionDelay.P50StopwatchTicks),
+            TicksToMicroseconds(value.InputScheduler.EdgeSubmissionDelay.P95StopwatchTicks),
+            TicksToMicroseconds(value.InputScheduler.EdgeSubmissionDelay.P99StopwatchTicks),
+            TicksToMicroseconds(value.InputScheduler.EdgeSubmissionDelay.MaximumStopwatchTicks))),
+        Across(clients, static value => new TimingTriplet(
+            NetworkTimingDistribution.ToMicroseconds(
+                value.Network.PumpIntervals.P50StopwatchTicks),
+            NetworkTimingDistribution.ToMicroseconds(
+                value.Network.PumpIntervals.P95StopwatchTicks),
+            NetworkTimingDistribution.ToMicroseconds(
+                value.Network.PumpIntervals.P99StopwatchTicks),
+            NetworkTimingDistribution.ToMicroseconds(
+                value.Network.PumpIntervals.MaximumStopwatchTicks))));
+
+    private static BotAcrossClientTimingDistribution Across(
+        BotClientTelemetryReport[] clients,
+        Func<BotClientTelemetryReport, TimingTriplet> selector)
+    {
+        if (clients.Length == 0) return default;
+        (int Id, TimingTriplet Timing)[] values = clients
+            .Select(value => (value.BotId, selector(value))).ToArray();
+        (int Id, double Value)[] p50 = values
+            .Select(static value => (value.Id, value.Timing.P50))
+            .OrderBy(static value => value.Item2).ToArray();
+        (int Id, double Value)[] p95 = values
+            .Select(static value => (value.Id, value.Timing.P95))
+            .OrderBy(static value => value.Item2).ToArray();
+        (int Id, double Value)[] p99 = values
+            .Select(static value => (value.Id, value.Timing.P99))
+            .OrderBy(static value => value.Item2).ToArray();
+        (int Id, double Value)[] maxima = values
+            .Select(static value => (value.Id, value.Timing.Maximum))
+            .OrderBy(static value => value.Item2).ToArray();
+        return new BotAcrossClientTimingDistribution(
+            values.Length,
+            Percentile(p50, .50), Percentile(p50, .95), p50[^1].Value, p50[^1].Id,
+            Percentile(p95, .50), Percentile(p95, .95), p95[^1].Value, p95[^1].Id,
+            Percentile(p99, .50), Percentile(p99, .95), p99[^1].Value, p99[^1].Id,
+            maxima[^1].Value, maxima[^1].Id);
+    }
+
+    private static double Percentile((int Id, double Value)[] values, double percentile) =>
+        values[Math.Clamp((int)Math.Ceiling(values.Length * percentile) - 1,
+            0, values.Length - 1)].Value;
+
+    private static double TicksToMicroseconds(ulong ticks) =>
+        ticks * 1_000_000d / Stopwatch.Frequency;
+
+    private readonly record struct TimingTriplet(
+        double P50,
+        double P95,
+        double P99,
+        double Maximum);
 
     internal string ToEvidenceLine() =>
         $"{Checkpoint} BOT HARNESS {(Passed ? "PASS" : "FAIL")} schema={SchemaVersion} " +
@@ -2142,6 +2628,12 @@ internal sealed record BotRunSummary
         $"primary={PrimaryAccepted}/{PrimaryRejected}/{PrimaryAttempts} " +
         $"chat={LocalChatSubmitted}+{GlobalChatSubmitted}/" +
         $"observed={LocalChatObserved}+{GlobalChatObserved} commands={CommandsQueued} " +
+        $"input={InputMode}:{ConfiguredInputSampleHz}/{ConfiguredInputSubmitHz}Hz " +
+        $"scheduler={SchedulerSamplesObserved}/{SchedulerCommandsSubmitted}/" +
+        $"coalesced={SchedulerContinuousCoalesced} edges={SchedulerActionEdgesCompleted}/" +
+        $"{SchedulerActionEdgesGenerated} releases={SchedulerReleaseOrStopCompleted}/" +
+        $"{SchedulerReleaseOrStopGenerated} rateLimited={ServerRateLimitedCommandsObserved} " +
+        $"staleReplay={StaleSessionReplaysFenced}/{StaleSessionReplaysQueued} " +
         $"nonsense={NonsenseInputs}/commands={NonsenseCommandsCreated} sword={SwordPickupObserved}/" +
         $"{SwordEquipObserved}/{SwordDropObserved} interactions={InteractionAccepted}/" +
         $"{InteractionRejected} chunks={DistinctChunksVisited} crossings={ChunkCrossings} " +
@@ -2156,6 +2648,9 @@ internal sealed record BotRunSummary
         $"udp={Wire?.ClientToServerUdpPayloadBytes ?? 0}/" +
         $"{Wire?.ServerToClientUdpPayloadBytes ?? 0} " +
         $"retired={CleanRetirement} detail={Detail ?? "none"}";
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 }
 
 internal readonly record struct BotOptions(
@@ -2177,12 +2672,17 @@ internal readonly record struct BotOptions(
     int AdmissionStaggerMilliseconds,
     bool Verbose,
     int WarmupMilliseconds,
-    NetworkTelemetryLevel TelemetryLevel = NetworkTelemetryLevel.Off)
+    NetworkTelemetryLevel TelemetryLevel = NetworkTelemetryLevel.Off,
+    int InputSampleHz = 0,
+    int InputSubmitHz = 0,
+    BotInputMode InputMode = BotInputMode.Compliant,
+    string? CheckpointOverride = null)
 {
     internal bool IsMixedChaos => string.Equals(Scenario, "mixed-chaos", StringComparison.Ordinal);
-    internal string Checkpoint => TelemetryLevel == NetworkTelemetryLevel.Detailed
+    internal string Checkpoint => CheckpointOverride ?? (Scenario == "sustained-input" ? "PF3" :
+        TelemetryLevel == NetworkTelemetryLevel.Detailed
         ? "PF2.5"
-        : IsMixedChaos && WarmupMilliseconds == 0 ? "PF1" : "PF2";
+        : IsMixedChaos && WarmupMilliseconds == 0 ? "PF1" : "PF2");
 
     internal static BotOptions Parse(string[] arguments)
     {
@@ -2205,6 +2705,10 @@ internal readonly record struct BotOptions(
         bool verbose = false;
         string scenario = "mixed-chaos";
         NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off;
+        int inputSampleHz = 0;
+        int inputSubmitHz = 0;
+        BotInputMode inputMode = BotInputMode.Compliant;
+        string? checkpointOverride = null;
         foreach (string argument in arguments)
         {
             if (argument == "--verbose") { verbose = true; continue; }
@@ -2228,6 +2732,16 @@ internal readonly record struct BotOptions(
             else if (TryValue(argument, "--telemetry=", out value) &&
                 Enum.TryParse(value, ignoreCase: true, out NetworkTelemetryLevel parsedTelemetry))
                 telemetryLevel = parsedTelemetry;
+            else if (TryValue(argument, "--input-sample-hz=", out value) &&
+                int.TryParse(value, out int parsedSampleHz)) inputSampleHz = parsedSampleHz;
+            else if (TryValue(argument, "--input-submit-hz=", out value) &&
+                int.TryParse(value, out int parsedSubmitHz)) inputSubmitHz = parsedSubmitHz;
+            else if (TryValue(argument, "--input-mode=", out value) &&
+                Enum.TryParse(value!.Replace("-", string.Empty), ignoreCase: true,
+                    out BotInputMode parsedInputMode)) inputMode = parsedInputMode;
+            else if (TryValue(argument, "--checkpoint=", out value) &&
+                value is "PF2" or "PF2.5" or "PF3")
+                checkpointOverride = value;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
         if (!ClientDirectConnectEndpoint.TryParse(endpoint, out _))
@@ -2239,8 +2753,19 @@ internal readonly record struct BotOptions(
         if (seed == 0) throw new ArgumentException("--seed must be a nonzero UInt64.");
         if (duration is < 2_000 or > 86_400_000)
             throw new ArgumentException("--duration must be between 2 seconds and 24 hours.");
-        if (scenario is not ("mixed-chaos" or "quiet" or "moving" or "crowd"))
-            throw new ArgumentException("--scenario must be mixed-chaos, quiet, moving, or crowd.");
+        if (scenario is not ("mixed-chaos" or "quiet" or "moving" or "crowd" or
+                "sustained-input"))
+            throw new ArgumentException(
+                "--scenario must be mixed-chaos, quiet, moving, crowd, or sustained-input.");
+        if (inputSampleHz is < 0 or > 1_000)
+            throw new ArgumentException("--input-sample-hz must be between 1 and 1000 when set.");
+        if (inputSubmitHz is < 0 or > 1_000)
+            throw new ArgumentException("--input-submit-hz must be between 1 and 1000 when set.");
+        if (scenario == "sustained-input" && inputSampleHz == 0) inputSampleHz = 120;
+        if (scenario != "sustained-input" &&
+            (inputSampleHz != 0 || inputSubmitHz != 0 || inputMode != BotInputMode.Compliant))
+            throw new ArgumentException(
+                "input sample/submit/mode options require --scenario=sustained-input.");
         if (cache is null) throw new ArgumentException("--cache is required.");
         if ((startReady is null) != (startRelease is null))
             throw new ArgumentException(
@@ -2262,7 +2787,8 @@ internal readonly record struct BotOptions(
         return new BotOptions(endpoint!, fingerprint!, bots, seed, duration, scenario,
             cache, startReady, startRelease, ready, release, summary,
             measurementReady, measurementRelease, measurementComplete,
-            stagger, verbose, warmup, telemetryLevel);
+            stagger, verbose, warmup, telemetryLevel,
+            inputSampleHz, inputSubmitHz, inputMode, checkpointOverride);
     }
 
     private static bool TryValue(string argument, string prefix, out string? value)

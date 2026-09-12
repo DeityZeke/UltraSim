@@ -1,4 +1,5 @@
 #if ULTRASIM_ONLINE || ULTRASIM_COMPLETE
+using System.Diagnostics;
 using Godot;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
@@ -34,6 +35,7 @@ public readonly record struct RemoteConceptDemoClientSnapshot(
     bool UsedPrimitiveSubstrate,
     bool SmokeComplete,
     string? Fault,
+    ClientWorldInputScheduleSnapshot InputSchedule,
     GodotNativeTelemetrySnapshot NativeTelemetry);
 
 public readonly record struct RemoteConceptDemoLifecycleResidueSnapshot(
@@ -78,6 +80,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private GodotActorPresenter? _actorPresenter;
     private GodotContentActorVisualResolver? _actorVisuals;
     private ResolvedClientSettings? _settings;
+    private ClientWorldInputScheduler? _inputScheduler;
     private Camera3D? _camera;
     private Control? _ownedHud;
     private Control? _uiHost;
@@ -114,6 +117,9 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     private int _terrainTriangles;
     private bool _configured;
     private bool _disposed;
+    private bool _pf3SustainedInput;
+    private bool _telemetryWindowActive;
+    private long _pf3SustainedInputStarted;
     private RemoteConceptDemoClientState _state = RemoteConceptDemoClientState.AwaitingContent;
     private NetworkTelemetryLevel _telemetryLevel;
     private string? _fault;
@@ -127,7 +133,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         ResolvedClientSettings settings,
         bool allowInsecurePrivateContent,
         bool smoke,
-        NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off)
+        NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off,
+        bool pf3SustainedInput = false)
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentOutOfRangeException.ThrowIfZero(applicationSessionEpoch);
@@ -167,6 +174,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             _networkPeer = peer;
             _settings = settings;
             _smoke = smoke;
+            _pf3SustainedInput = pf3SustainedInput;
             BuildBootstrapHud();
             _configured = true;
         }
@@ -250,6 +258,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 UpdateHud("Remote Concept Demo active");
             }
             if (_state != RemoteConceptDemoClientState.Active) return;
+            _inputScheduler!.ObserveCompleted(snapshot.Playable.LastProcessedCommandSequence);
+            _ = _inputScheduler.TryPump(Stopwatch.GetTimestamp(), TrySubmitScheduledCommand);
 
             // The headless exported-product gate has no physical device events while held at
             // its synchronization barrier. Drive one ordinary bounded movement/stop pair after
@@ -268,6 +278,8 @@ public sealed partial class RemoteConceptDemoClient : Node3D
                 if (TrySubmitObservedCommand(in probe))
                     _telemetryProbePhase = _telemetryProbePhase == 1 ? 2 : 0;
             }
+            if (_pf3SustainedInput && _telemetryWindowActive)
+                SubmitPf3SustainedInput();
 
             if (!gameplayInputAllowed) _actorPresenter?.SetRevealHeld(false);
 
@@ -302,6 +314,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             true,
             _smokePhase == 8,
             _fault,
+            _inputScheduler?.GetSnapshot() ?? default,
             _nativeTelemetry.Capture(in actors, in renderer));
     }
 
@@ -310,8 +323,40 @@ public sealed partial class RemoteConceptDemoClient : Node3D
     {
         EnsureOperational();
         _session!.ConfigureTelemetry(_telemetryLevel);
+        _inputScheduler?.ResetTelemetryWindow();
         _nativeTelemetry.Configure(_telemetryLevel);
         _telemetryProbePhase = _telemetryLevel == NetworkTelemetryLevel.Off ? 0 : 1;
+        _telemetryWindowActive = _telemetryLevel != NetworkTelemetryLevel.Off;
+        _pf3SustainedInputStarted = Stopwatch.GetTimestamp();
+    }
+
+    /// <summary>
+    /// Stops the PF3 synthetic producer and publishes one ordinary semantic stop/release sample.
+    /// The caller must continue pumping until <see cref="TelemetryInputIsQuiesced"/> becomes true
+    /// before taking closure evidence.
+    /// </summary>
+    public void BeginTelemetryInputQuiescence()
+    {
+        EnsureOperational();
+        if (!_telemetryWindowActive) return;
+        _telemetryWindowActive = false;
+        if (!_pf3SustainedInput || _inputScheduler is null) return;
+        var stop = new ClientWorldCommandIntent(
+            GameLocomotionUpdate.Stop, GamePlayerActions.None, true);
+        if (!TrySubmitObservedCommand(in stop))
+            throw new InvalidOperationException(
+                "The native PF3 input scheduler could not retain its terminal stop/release.");
+    }
+
+    public bool TelemetryInputIsQuiesced()
+    {
+        EnsureOperational();
+        if (_inputScheduler is null) return true;
+        ClientWorldInputScheduleSnapshot snapshot = _inputScheduler.GetSnapshot();
+        return !snapshot.ContinuousStatePending && snapshot.PendingObligations == 0 &&
+            snapshot.SubmittedCompletionDebt == 0 &&
+            snapshot.EdgeObligationsGenerated == snapshot.EdgeObligationsCompleted &&
+            snapshot.ReleaseOrStopGenerated == snapshot.ReleaseOrStopCompleted;
     }
 
     /// <summary>
@@ -446,6 +491,7 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         _systemChatBanner = null;
         _actorState = null;
         _session = null;
+        _inputScheduler = null;
         _networkPeer = null;
         _source = null;
         _cache = null;
@@ -460,6 +506,12 @@ public sealed partial class RemoteConceptDemoClient : Node3D
 
     private void BuildWorldPresentation(in RemotePlayableClientSnapshot playable)
     {
+        RemoteServerPerformanceProfile performance = _session!.Performance.Profile;
+        _inputScheduler = new ClientWorldInputScheduler(new ClientInputSubmissionPolicy(
+            performance.MaximumInputHz,
+            performance.RecommendedInputHz,
+            performance.InputBurstCapacity,
+            performance.InputBurstWindowMilliseconds));
         _player = playable.Position;
         ClientPublicPresentationMetadataSnapshot metadata =
             _session!.PublicPresentationState.GetSnapshot();
@@ -575,12 +627,15 @@ public sealed partial class RemoteConceptDemoClient : Node3D
             faceX = facing.XMillimeters;
             faceZ = facing.ZMillimeters;
         }
-        bool submitted = TrySubmitObservedCommand(
+        bool retained = TrySubmitObservedCommand(
             decision.Command, _selectedTarget, flags, faceX, faceZ);
-        _oneShotRequests.ObserveSubmission(submitted);
-        _primaryPressed = false;
-        _primaryReleased = false;
-        _secondaryPressed = false;
+        _oneShotRequests.ObserveSubmission(retained);
+        if (retained)
+        {
+            _primaryPressed = false;
+            _primaryReleased = false;
+            _secondaryPressed = false;
+        }
     }
 
     private bool TrySubmitObservedCommand(
@@ -590,14 +645,64 @@ public sealed partial class RemoteConceptDemoClient : Node3D
         long faceXMillimeters = 0,
         long faceZMillimeters = 0)
     {
-        bool submitted = _session!.Playable.TrySubmitCommand(
-            command, target, flags, faceXMillimeters, faceZMillimeters);
+        if (_inputScheduler is null) return false;
+        var context = new ClientWorldCommandContext(
+            target,
+            (ClientWorldCommandRequestFlags)(byte)flags,
+            faceXMillimeters,
+            faceZMillimeters);
+        long now = Stopwatch.GetTimestamp();
+        bool retained = _inputScheduler.TryObserve(command, context, now);
+        if (retained) _ = _inputScheduler.TryPump(now, TrySubmitScheduledCommand);
         _nativeTelemetry.RecordCommandSample(
             command.Locomotion.Kind != GameLocomotionUpdateKind.Unchanged,
             command.HeldActions != GamePlayerActions.None ||
-                flags != RemotePlayableCommandFlags.None,
-            submitted);
+                flags != RemotePlayableCommandFlags.None);
+        return retained;
+    }
+
+    private bool TrySubmitScheduledCommand(
+        in ClientWorldScheduledCommand scheduled,
+        out ulong sequence)
+    {
+        bool submitted = _session!.Playable.TrySubmitCommand(
+            scheduled.Intent,
+            scheduled.Context.Target,
+            (RemotePlayableCommandFlags)(byte)scheduled.Context.Flags,
+            scheduled.Context.FaceXMillimeters,
+            scheduled.Context.FaceZMillimeters,
+            out sequence);
+        if (submitted) _nativeTelemetry.RecordCommandSubmission();
         return submitted;
+    }
+
+    private void SubmitPf3SustainedInput()
+    {
+        long now = Stopwatch.GetTimestamp();
+        long elapsedMilliseconds = checked((long)((Int128)Math.Max(
+            0, now - _pf3SustainedInputStarted) * 1_000 / Stopwatch.Frequency));
+        long phase = elapsedMilliseconds / 500;
+        bool stop = phase % 8 == 7;
+        bool jump = elapsedMilliseconds != 0 && elapsedMilliseconds % 2_000 < 100;
+        short x = checked((short)(phase % 4 switch
+        {
+            0 => GamePlayerCommand.MaximumAxisMagnitude,
+            1 => GamePlayerCommand.MaximumAxisMagnitude / 2,
+            2 => -GamePlayerCommand.MaximumAxisMagnitude,
+            _ => -GamePlayerCommand.MaximumAxisMagnitude / 2,
+        }));
+        short z = checked((short)(phase % 4 switch
+        {
+            0 => GamePlayerCommand.MaximumAxisMagnitude / 4,
+            1 => GamePlayerCommand.MaximumAxisMagnitude,
+            2 => -GamePlayerCommand.MaximumAxisMagnitude / 4,
+            _ => -GamePlayerCommand.MaximumAxisMagnitude,
+        }));
+        var intent = new ClientWorldCommandIntent(
+            stop ? GameLocomotionUpdate.Stop : GameLocomotionUpdate.CreateDirect(x, z),
+            jump ? GamePlayerActions.Jump : GamePlayerActions.None,
+            true);
+        _ = TrySubmitObservedCommand(in intent);
     }
 
     private ClientControlProfileDecision EvaluateProfile(

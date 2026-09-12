@@ -193,7 +193,8 @@ public sealed class SharedPlayableAuthority : IDisposable
 
     /// <summary>Creates and owns a fresh shared Concept Demo server on the calling thread.</summary>
     public static SharedPlayableAuthority CreateConceptDemo(
-        SharedPlayableAuthorityLimits limits = default)
+        SharedPlayableAuthorityLimits limits = default,
+        int simulationFrequencyHz = WorldClockOptions.DefaultSimulationFrequencyHz)
     {
         if (limits == default) limits = SharedPlayableAuthorityLimits.Default;
         limits.Validate();
@@ -210,7 +211,7 @@ public sealed class SharedPlayableAuthority : IDisposable
                     limits.RequiredEntityCapacity,
                     new PersistenceIdentityOptions(new PersistentWorldId(0x4D_0000UL)),
                     GameRuntimeProfile.Networked),
-                WorldClockOptions.Default));
+                new WorldClockOptions(simulationFrequencyHz)));
         AdmissionService? admission = null;
         GameChatService? chat = null;
         RemoteChatDeliveryService? delivery = null;
@@ -391,7 +392,9 @@ public sealed class SharedPlayableAuthority : IDisposable
     }
 
     /// <summary>Captures one bounded sanitized monitor view of this authority.</summary>
-    public ServerMonitorSnapshot CaptureServerMonitor()
+    public ServerMonitorSnapshot CaptureServerMonitor(
+        RemoteServerPerformanceProfile? performanceProfile = null,
+        ulong rateLimitedCommands = 0)
     {
         EnsureOperational();
         var rows = new ServerMonitorParticipant[_participantCount];
@@ -441,9 +444,18 @@ public sealed class SharedPlayableAuthority : IDisposable
             _limits.MaximumParticipants,
             _joins,
             _leaves,
+            performanceProfile?.Revision ?? 0,
+            ShortPerformanceHash(performanceProfile),
+            checked((int)(performanceProfile?.MaximumNetworkServiceIntervalMicroseconds ?? 0)),
+            performanceProfile?.MaximumInputHz ?? 0,
+            performanceProfile?.RecommendedInputHz ?? 0,
+            rateLimitedCommands,
             _lastTestMarker,
             rows);
     }
+
+    private static string? ShortPerformanceHash(RemoteServerPerformanceProfile? profile) =>
+        profile is null ? null : profile.Hash.Part0.ToString("X16")[..12];
 
     private static long ElapsedSeconds(long startedTimestamp)
     {
@@ -847,6 +859,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
     private readonly UiDefinitionIdentity[] _contentBackedUiDefinitions;
     private readonly UiDefinitionIdentity[] _standardUiDefinitions;
     private readonly RemoteClientProfileAdvertisement? _clientProfile;
+    private readonly RemoteServerPerformanceProfile? _serverPerformanceProfile;
     private long _nextParticipant;
 
     public SharedRemoteGuestPlayableApplicationFactory(
@@ -856,6 +869,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
         IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
         RemoteClientProfileAdvertisement? clientProfile = null,
         IEnumerable<UiDefinitionIdentity>? standardUiDefinitions = null,
+        RemoteServerPerformanceProfile? serverPerformanceProfile = null,
         ulong firstParticipantId = 1)
     {
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
@@ -886,6 +900,7 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
                 "The shared hot-open definition sets exceed capacity or overlap.",
                 nameof(standardUiDefinitions));
         _clientProfile = clientProfile;
+        _serverPerformanceProfile = serverPerformanceProfile;
         _nextParticipant = checked((long)firstParticipantId - 1);
     }
 
@@ -904,7 +919,8 @@ public sealed class SharedRemoteGuestPlayableApplicationFactory : IHostedUdpSess
             _contentBackedUiDefinitions,
             _clientProfile,
             _standardUiDefinitions,
-            _authority);
+            _authority,
+            _serverPerformanceProfile);
         try
         {
             _authority.RegisterRemoteApplication(application);

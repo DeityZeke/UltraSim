@@ -42,17 +42,27 @@ Directory.CreateDirectory(options.IdentityDirectory);
 using NetworkServerIdentity identity = LoadOrCreateIdentity(options.IdentityDirectory);
 ApplicationRealmId realm = LoadOrCreateRealm(options.IdentityDirectory);
 using SharedPlayableAuthority authority = SharedPlayableAuthority.CreateConceptDemo(
-    new SharedPlayableAuthorityLimits(options.MaximumParticipants));
+    new SharedPlayableAuthorityLimits(options.MaximumParticipants),
+    options.SimulationFrequencyHz);
 using ConceptDemoContentDeployment content = ConceptDemoContentDeployment.Create(
     realm, options.ContentEndPoint);
 RemoteClientProfileAdvertisement clientProfile =
     ConceptDemoClientProfiles.Create(options.ClientProfile);
+RemoteServerPerformanceProfile performanceProfile =
+    ConceptDemoServerPerformanceProfiles.Create(
+        options.SimulationFrequencyHz,
+        options.MaximumInputHz,
+    options.RecommendedInputHz,
+    options.InputBurstCapacity,
+    options.InputBurstWindowMilliseconds,
+    checked((options.NetworkServiceDelayMilliseconds + 1) * 1_000));
 using HostedUdpAdmissionHost host = CreateHost(
     options.BindEndPoint, identity, realm, authority, content.Authorization,
     [
         UiDefinitionIdentity.From(InventoryUi.Definition),
         UiDefinitionIdentity.From(ServerMonitorUi.Definition),
-    ], clientProfile, options.MaximumParticipants, options.AdmissionBurstPerAddress);
+    ], clientProfile, performanceProfile,
+    options.MaximumParticipants, options.AdmissionBurstPerAddress);
 host.ConfigureTelemetry(options.TelemetryLevel);
 authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     ? GameTelemetryLevel.Off
@@ -75,6 +85,14 @@ Console.WriteLine(
     $"Client profile: {options.ClientProfile} revision={clientProfile.Revision} " +
     $"hash={ProfileHash(clientProfile.Hash)}");
 Console.WriteLine(
+    $"Server performance: authority={performanceProfile.SimulationFrequencyHz}Hz " +
+    $"network-max-service={performanceProfile.MaximumNetworkServiceIntervalMicroseconds}us " +
+    $"input-max={performanceProfile.MaximumInputHz}Hz " +
+    $"input-recommended={performanceProfile.RecommendedInputHz}Hz " +
+    $"burst={performanceProfile.InputBurstCapacity}/" +
+    $"{performanceProfile.InputBurstWindowMilliseconds}ms " +
+    $"revision={performanceProfile.Revision} hash={PerformanceHash(performanceProfile.Hash)}");
+Console.WriteLine(
     $"This shared endpoint admits up to {options.MaximumParticipants} independent guests " +
     "into one Concept Demo authority.");
 Console.WriteLine("Press Ctrl+C to stop.");
@@ -87,6 +105,12 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     content.Snapshot.CatalogFingerprint.ToString(),
     content.Snapshot.WorldPackFingerprint.ToString(), content.Snapshot.WorldChunks,
     options.ClientProfile, clientProfile.Revision, ProfileHash(clientProfile.Hash),
+    performanceProfile.Revision, PerformanceHash(performanceProfile.Hash),
+    performanceProfile.SimulationFrequencyHz,
+    performanceProfile.MaximumNetworkServiceIntervalMicroseconds,
+    performanceProfile.MaximumInputHz, performanceProfile.RecommendedInputHz,
+    performanceProfile.InputBurstCapacity,
+    performanceProfile.InputBurstWindowMilliseconds,
     options.MaximumParticipants, authority.GetSnapshot().GenerationId));
 
 using var stopping = new CancellationTokenSource();
@@ -119,7 +143,10 @@ while (!stopping.IsCancellationRequested)
         wireAccountingWritten = true;
         Console.WriteLine("PF2 Direct Connect wire-accounting window completed.");
     }
-    Thread.Sleep(1);
+    if (options.NetworkServiceDelayMilliseconds != 0)
+        Thread.Sleep(options.NetworkServiceDelayMilliseconds);
+    else
+        Thread.Yield();
 }
 long retirementDeadline = Environment.TickCount64 + 10_000;
 while ((authority.GetSnapshot().ParticipantCount != 0 ||
@@ -163,6 +190,7 @@ static HostedUdpAdmissionHost CreateHost(
     RemoteContentAuthorization? contentAuthorization = null,
     IEnumerable<UiDefinitionIdentity>? contentBackedUiDefinitions = null,
     RemoteClientProfileAdvertisement? clientProfile = null,
+    RemoteServerPerformanceProfile? serverPerformanceProfile = null,
     int maximumParticipants = 8,
     int admissionBurstPerAddress = 4)
 {
@@ -172,7 +200,8 @@ static HostedUdpAdmissionHost CreateHost(
         MaximumSessions = maximumParticipants,
     };
     var applications = new SharedRemoteGuestPlayableApplicationFactory(
-        authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile);
+        authority, realm, contentAuthorization, contentBackedUiDefinitions, clientProfile,
+        serverPerformanceProfile: serverPerformanceProfile);
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,
@@ -321,6 +350,16 @@ static string ProfileHash(RemoteClientProfileHash hash)
     return Convert.ToHexString(bytes).ToLowerInvariant();
 }
 
+static string PerformanceHash(RemoteServerPerformanceProfileHash hash)
+{
+    Span<byte> bytes = stackalloc byte[32];
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes, hash.Part0);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], hash.Part1);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes[16..], hash.Part2);
+    System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(bytes[24..], hash.Part3);
+    return Convert.ToHexString(bytes).ToLowerInvariant();
+}
+
 internal readonly record struct DirectConnectOptions(
     IPEndPoint BindEndPoint,
     IPEndPoint ContentEndPoint,
@@ -333,6 +372,12 @@ internal readonly record struct DirectConnectOptions(
     string? AccountingStopFile,
     string? AccountingSummaryFile,
     string ClientProfile,
+    int SimulationFrequencyHz,
+    int MaximumInputHz,
+    int RecommendedInputHz,
+    int InputBurstCapacity,
+    int InputBurstWindowMilliseconds,
+    int NetworkServiceDelayMilliseconds,
     bool EphemeralSmoke,
     int MaximumParticipants,
     int AdmissionBurstPerAddress,
@@ -354,6 +399,12 @@ internal readonly record struct DirectConnectOptions(
         string? accountingStopFile = null;
         string? accountingSummaryFile = null;
         string clientProfile = "third-person";
+        int simulationFrequencyHz = 60;
+        int maximumInputHz = 60;
+        int recommendedInputHz = 30;
+        int inputBurstCapacity = 10;
+        int inputBurstWindowMilliseconds = 100;
+        int networkServiceDelayMilliseconds = 1;
         int maximumParticipants = 8;
         int admissionBurstPerAddress =
             HostedUdpAdmissionLimits.Default.MaximumValidationsPerAddressPerBucket;
@@ -453,6 +504,56 @@ internal readonly record struct DirectConnectOptions(
                         "--maximum-participants must be between 1 and 64.");
                 continue;
             }
+            if (argument.StartsWith("--authority-hz=", StringComparison.Ordinal))
+            {
+                string value = argument["--authority-hz=".Length..];
+                if (!int.TryParse(value, out simulationFrequencyHz) ||
+                    simulationFrequencyHz is not (20 or 30 or 60))
+                    throw new ArgumentException("--authority-hz must be 20, 30, or 60.");
+                continue;
+            }
+            if (argument.StartsWith("--maximum-input-hz=", StringComparison.Ordinal))
+            {
+                string value = argument["--maximum-input-hz=".Length..];
+                if (!int.TryParse(value, out maximumInputHz) || maximumInputHz is <= 0 or > 240)
+                    throw new ArgumentException("--maximum-input-hz must be between 1 and 240.");
+                continue;
+            }
+            if (argument.StartsWith("--recommended-input-hz=", StringComparison.Ordinal))
+            {
+                string value = argument["--recommended-input-hz=".Length..];
+                if (!int.TryParse(value, out recommendedInputHz) ||
+                    recommendedInputHz is <= 0 or > 240)
+                    throw new ArgumentException(
+                        "--recommended-input-hz must be between 1 and 240.");
+                continue;
+            }
+            if (argument.StartsWith("--input-burst=", StringComparison.Ordinal))
+            {
+                string value = argument["--input-burst=".Length..];
+                if (!int.TryParse(value, out inputBurstCapacity) ||
+                    inputBurstCapacity is <= 0 or > 32)
+                    throw new ArgumentException("--input-burst must be between 1 and 32.");
+                continue;
+            }
+            if (argument.StartsWith("--input-burst-window-ms=", StringComparison.Ordinal))
+            {
+                string value = argument["--input-burst-window-ms=".Length..];
+                if (!int.TryParse(value, out inputBurstWindowMilliseconds) ||
+                    inputBurstWindowMilliseconds is < 10 or > 5_000)
+                    throw new ArgumentException(
+                        "--input-burst-window-ms must be between 10 and 5000.");
+                continue;
+            }
+            if (argument.StartsWith("--network-service-delay-ms=", StringComparison.Ordinal))
+            {
+                string value = argument["--network-service-delay-ms=".Length..];
+                if (!int.TryParse(value, out networkServiceDelayMilliseconds) ||
+                    networkServiceDelayMilliseconds is < 0 or > 19)
+                    throw new ArgumentException(
+                        "--network-service-delay-ms must be between 0 and 19.");
+                continue;
+            }
             if (argument.StartsWith("--same-address-admission-burst=", StringComparison.Ordinal))
             {
                 string value = argument["--same-address-admission-burst=".Length..];
@@ -477,10 +578,21 @@ internal readonly record struct DirectConnectOptions(
             accountingStopFile is null || accountingSummaryFile is null))
             throw new ArgumentException(
                 "PF2 accounting start, stop, and summary files must be supplied together.");
+        if (recommendedInputHz > maximumInputHz)
+            throw new ArgumentException(
+                "--recommended-input-hz cannot exceed --maximum-input-hz.");
+        long maximumPerBurstWindow =
+            ((long)maximumInputHz * inputBurstWindowMilliseconds + 999) / 1_000;
+        if (inputBurstCapacity < Math.Max(1, maximumPerBurstWindow))
+            throw new ArgumentException(
+                "--input-burst is too small for the hard rate and burst window.");
         return new DirectConnectOptions(
             endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,
             accountingStartFile, accountingReadyFile, accountingStopFile,
-            accountingSummaryFile, clientProfile, smoke,
+            accountingSummaryFile, clientProfile,
+            simulationFrequencyHz, maximumInputHz, recommendedInputHz,
+            inputBurstCapacity, inputBurstWindowMilliseconds,
+            networkServiceDelayMilliseconds, smoke,
             maximumParticipants, admissionBurstPerAddress, telemetryLevel);
 
         static string RequiredPath(string argument, string prefix)
@@ -522,6 +634,14 @@ internal readonly record struct DirectConnectReady(
     string ClientProfile,
     ulong ClientProfileRevision,
     string ClientProfileHash,
+    ulong ServerPerformanceProfileRevision,
+    string ServerPerformanceProfileHash,
+    ushort SimulationFrequencyHz,
+    uint MaximumNetworkServiceIntervalMicroseconds,
+    ushort MaximumInputHz,
+    ushort RecommendedInputHz,
+    ushort InputBurstCapacity,
+    ushort InputBurstWindowMilliseconds,
     int MaximumParticipants,
     ulong ServerGeneration);
 

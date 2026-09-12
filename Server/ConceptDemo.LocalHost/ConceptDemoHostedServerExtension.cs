@@ -163,6 +163,9 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
             content = ConceptDemoContentDeployment.Create(realm, _options.ContentEndPoint);
             RemoteClientProfileAdvertisement profile =
                 ConceptDemoClientProfiles.Create(_options.ClientProfile);
+            RemoteServerPerformanceProfile performance =
+                ConceptDemoServerPerformanceProfiles.Create(
+                    _context.Runtime.SimulationFrequencyHz);
             var applications = new SharedRemoteGuestPlayableApplicationFactory(
                 _authority,
                 realm,
@@ -172,6 +175,7 @@ public sealed class ConceptDemoHostedServerExtension : ILocalPlayableServerExten
                     UiDefinitionIdentity.From(ServerMonitorUi.Definition),
                 ],
                 profile,
+                serverPerformanceProfile: performance,
                 firstParticipantId: 1);
             var shared = SharedUdpProtocolLimits.Default with
             {
