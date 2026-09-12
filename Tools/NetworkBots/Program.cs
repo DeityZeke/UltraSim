@@ -123,6 +123,8 @@ internal sealed class BotHarness : IDisposable
     private BotWireMeasurement? _wireMeasurement;
     private BotWireMeasurementSummary? _wireSummary;
     private BotClientTelemetryReport[] _clientTelemetry = [];
+    private WorldPublicEntityId _singleHotActor;
+    private SpatialChunkCoord _singleHotChunk;
     private bool _measurementActive;
     private int _activeHighWater;
     private int _admittingHighWater;
@@ -182,7 +184,15 @@ internal sealed class BotHarness : IDisposable
                 if (_options.IsMixedChaos) SelectSwordContenders();
                 if (_options.Scenario == "single-hot")
                 {
-                    WorldPosition first = _bots[0].CurrentPosition;
+                    // Hold most recipient anchors still and make one ordinary actor the sole hot
+                    // source. The middle spawn lies in the central shared-interest region, so
+                    // this measures temporal churn on one chunk instead of navigation convergence.
+                    // Shared spawns alternate X columns. The adjacent even slot is in the
+                    // authored flat test chunk (0,1), avoiding fall/recovery churn while every
+                    // other bounded spawn remains interested in that central chunk.
+                    int moverIndex = (_bots.Length / 2) & ~1;
+                    BotClient mover = _bots[moverIndex];
+                    WorldPosition first = mover.CurrentPosition;
                     int edge = GameWorldSpatialProfile.WorldChunkEdgeUnits;
                     if (!WorldPosition.TryFromGlobalMillimeters(
                             checked((long)first.Chunk.X * edge + edge / 2),
@@ -191,7 +201,10 @@ internal sealed class BotHarness : IDisposable
                             out WorldPosition target))
                         throw new InvalidOperationException(
                             "The single-hot shared chunk center was unrepresentable.");
-                    foreach (BotClient bot in _bots) bot.SetMeasurementTarget(target);
+                    _singleHotActor = mover.CurrentPublicActor;
+                    _singleHotChunk = first.Chunk;
+                    foreach (BotClient bot in _bots)
+                        bot.SetMeasurementTarget(target, bot.Id == moverIndex);
                 }
                 foreach (BotClient bot in _bots) bot.StartScenario(_scenarioStarted);
                 Console.WriteLine(
@@ -394,9 +407,12 @@ internal sealed class BotHarness : IDisposable
                 return $"The {_options.Scenario} scenario produced no authoritative movement.";
             if (_options.Scenario == "single-hot")
             {
-                SpatialChunkCoord hot = _bots[0].CurrentPosition.Chunk;
-                if (_bots.Any(bot => bot.CurrentPosition.Chunk != hot))
-                    return "The single-hot scenario did not retain every recipient in one chunk.";
+                BotClient mover = _bots[(_bots.Length / 2) & ~1];
+                if (!_singleHotActor.IsValid || mover.CurrentPublicActor != _singleHotActor ||
+                    mover.CurrentPosition.Chunk != _singleHotChunk)
+                    return "The single-hot source actor did not retain its chunk/lifetime.";
+                if (_bots.Any(bot => !bot.ContainsPublic(_singleHotActor)))
+                    return "A single-hot recipient did not retain the shared hot actor.";
             }
             if (_options.Scenario == "sustained-input")
             {
@@ -729,6 +745,7 @@ internal sealed class BotClient : IDisposable
     private long _measurementOriginZ;
     private long _lastMeasurementJumpSecond = -1;
     private bool _hasSharedMeasurementTarget;
+    private bool _isSingleHotMover;
     private long _sharedMeasurementTargetX;
     private long _sharedMeasurementTargetZ;
     private UdpPayloadTrafficSnapshot _retiredUdpTraffic;
@@ -835,11 +852,12 @@ internal sealed class BotClient : IDisposable
     internal WorldPosition CurrentPosition =>
         _session?.GetSnapshot().Playable.Position ?? default;
 
-    internal void SetMeasurementTarget(in WorldPosition target)
+    internal void SetMeasurementTarget(in WorldPosition target, bool isSingleHotMover)
     {
         _sharedMeasurementTargetX = target.GlobalXMillimeters;
         _sharedMeasurementTargetZ = target.GlobalZMillimeters;
         _hasSharedMeasurementTarget = true;
+        _isSingleHotMover = isSingleHotMover;
     }
 
     internal BotActionAccountingSnapshot GetActionAccounting(BotCommandKind kind) =>
@@ -1481,6 +1499,7 @@ internal sealed class BotClient : IDisposable
     {
         if (!_hasSharedMeasurementTarget)
             throw new InvalidOperationException("The single-hot scenario has no shared target.");
+        if (!_isSingleHotMover) return;
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         long second = elapsed / 1_000;
         if (second != _lastMeasurementJumpSecond && second > 0 &&
