@@ -1560,8 +1560,13 @@ was `fdb468698d07ccafa17e1dcc51fc1546b26c9fee`: independently valid vertical mot
 outside/blocked horizontal component, and unrepresentable vertical integration takes bounded Game
 recovery rather than escaping as an authority fault. PF2.5 then found that a locally rejected
 Server Monitor request was cleared rather than retained for retry. The repaired current candidate
-is `5863c22cf92112281dfd4395b1fea7d8f1143b2e`; one-shot Inventory/Monitor requests now survive
-client queue pressure and the monitor case has a permanent regression.
+was `5863c22cf92112281dfd4395b1fea7d8f1143b2e`; one-shot Inventory/Monitor requests now survive
+client queue pressure and the monitor case has a permanent regression. PF3 then exposed one
+clean-build product-graph defect: Single Player and Complete compiled the informational-sign
+consumer from `Game.UI` without declaring their edition-fenced direct project dependency. The
+repaired current candidate is `5eec694692df8f85be2d7db215b2642a9ec9061b`; the physical export
+gate now verifies that dependency explicitly. This advances the candidate lineage without
+reopening any prior feature checkpoint.
 
 Entry:
 
@@ -1663,7 +1668,8 @@ Close when:
 
 ## PF3 — cadence/performance policy
 
-**Status: CLOSED.** `ServerPerformanceProfile/v1` is authenticated and applied before content and
+**Status: CLOSED** at `5eec694692df8f85be2d7db215b2642a9ec9061b`.
+`ServerPerformanceProfile/v1` is authenticated and applied before content and
 guest admission, then fenced by application epoch plus exact revision/hash. Client Core's bounded
 input scheduler is shared by visible/headless Godot, packet-free Local, and ClientOnly bots. Latest
 continuous state coalesces while action and stop/release obligations remain ordered through local
@@ -1680,6 +1686,11 @@ worst-client timing rather than hiding it behind an aggregate median. Permanent 
 
 PF3 records but does not optimize quiet replication scheduling or the exact Chunk Delta (120) /
 Chunk Applied Proof (130) costs. `ChunkPublication` remains the sole current dynamic-public owner.
+The permanent baseline records 50-client 10-minute sustained/moving/crowd/quiet cases, a
+30-minute mismatched-cadence mixed-chaos soak, and the five-minute two-visible-export plus eight-bot
+canary. The default remains 60 Hz authority, a 60 Hz hard input ceiling, and a 30 Hz stock
+recommendation; the lower 20 Hz and experimental high-input profiles are characterization points,
+not silent default changes.
 
 Close when:
 

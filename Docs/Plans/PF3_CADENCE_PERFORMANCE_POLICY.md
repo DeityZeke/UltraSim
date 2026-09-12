@@ -1,6 +1,6 @@
 # PF3 — Cadence and authenticated server performance policy
 
-**Status:** implemented; permanent long-window evidence is recorded in
+**Status:** CLOSED at `5eec694692df8f85be2d7db215b2642a9ec9061b`; permanent long-window evidence is recorded in
 `_Benchmarks/Baselines/concept-demo-pf3-cadence-performance-policy-2026-09-12.json`.
 
 PF3 separates six clocks which were previously easy to mistake for one another:
