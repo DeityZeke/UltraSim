@@ -10,8 +10,8 @@
       "cb3df7701aeba4408f54369f42bbe4c9dcc32a6c",
       "0b8218d10f309b3102672158668bb65943ddab83"
     ],
-    "acceptedPf4bClosure": null,
-    "closureIdentityNote": "The evidence-only follow-up will record the exact preceding closure commit without claiming an impossible self-referential Git identity.",
+    "acceptedPf4bClosure": "6167989c03b43b312c8d3dd4c3dcca6efed67035",
+    "closureIdentityNote": "This evidence-only follow-up records the exact preceding PF4B closure commit without claiming an impossible self-referential Git identity.",
     "repairedFeatureCompleteCandidate": "5eec694692df8f85be2d7db215b2642a9ec9061b",
     "candidateLineageChanged": false,
     "candidateReason": "PF4B found measurement-harness defects and characterized an optimization tradeoff; it found no product correctness defect and changed no product replication policy. Earlier feature checkpoints remain closed."
@@ -247,8 +247,8 @@
   },
   "verification": {
     "pf4bFocused": "PASS: 50-client real-UDP single-hot census plus 8 bots + 2 actual exported Online headless main loops for 60 s warmup and 300 s measurement",
-    "canonicalRelease": "PENDING",
-    "worktree": "PENDING final evidence commit"
+    "canonicalRelease": "PASS at acceptedPf4bClosure via ./verify.sh (Release, actual exports included)",
+    "worktree": "clean after evidence-only identity commit"
   },
   "closure": {
     "outcome":"C — no safe local knowledge optimization was worth its complexity",
