@@ -48,6 +48,8 @@ public readonly record struct ChunkPublicationWorkSchedulerSnapshot(
     int PendingWorkCount,
     int CurrentCleanMembershipCount,
     ulong IncomingQueued,
+    ulong CommitsObserved,
+    ulong EmptyCommitsObserved,
     ulong DirtyCommitsObserved,
     ulong DirtyChunksObserved,
     ulong DirtyChunksWithoutSubscribers,
@@ -121,6 +123,8 @@ public sealed class ChunkPublicationWorkScheduler
     private bool _pendingPassExhausted;
     private ulong _observedCommitSequence;
     private ulong _incomingQueued;
+    private ulong _commitsObserved;
+    private ulong _emptyCommitsObserved;
     private ulong _dirtyCommitsObserved;
     private ulong _dirtyChunksObserved;
     private ulong _dirtyChunksWithoutSubscribers;
@@ -169,6 +173,16 @@ public sealed class ChunkPublicationWorkScheduler
     }
 
     public ChunkPublicationWorkSchedulerLimits Limits => _limits;
+
+    /// <summary>Owner-local O(1) readiness signal; reading it does not inspect memberships.</summary>
+    public int PendingWorkCount
+    {
+        get
+        {
+            EnsureOwner();
+            return _pendingCount;
+        }
+    }
 
     public bool TryRegister(
         OfflineDirectChunkRecipient recipient,
@@ -317,7 +331,11 @@ public sealed class ChunkPublicationWorkScheduler
         ReadOnlySpan<SpatialChunkKey> dirty = source.LastCommittedDirtyChunks;
         for (int index = 0; index < dirty.Length; index++) MarkDirty(dirty[index]);
         _observedCommitSequence = current;
-        SaturatingIncrement(ref _dirtyCommitsObserved);
+        SaturatingIncrement(ref _commitsObserved);
+        if (dirty.Length == 0)
+            SaturatingIncrement(ref _emptyCommitsObserved);
+        else
+            SaturatingIncrement(ref _dirtyCommitsObserved);
         SaturatingAdd(ref _dirtyChunksObserved, checked((ulong)dirty.Length));
         return ChunkPublicationCommitObservationStatus.Observed;
     }
@@ -404,7 +422,28 @@ public sealed class ChunkPublicationWorkScheduler
             !TryFindMembership(new RecipientChunkKey(work.Recipient, work.Key), out int membership))
             return false;
         Queue(membership, work.Kind);
+        // A retry depends on a later cadence step, transport/proof progress, or source change.
+        // Do not let a just-requeued membership circulate again in the current bounded pass.
+        _memberships[membership].LastExaminedPendingPass = _pendingPassId;
         return true;
+    }
+
+    /// <summary>Clears cold observation counters without changing source, topology, or debt.</summary>
+    public void ResetTelemetryWindow()
+    {
+        EnsureOwner();
+        _incomingQueued = 0;
+        _commitsObserved = 0;
+        _emptyCommitsObserved = 0;
+        _dirtyCommitsObserved = 0;
+        _dirtyChunksObserved = 0;
+        _dirtyChunksWithoutSubscribers = 0;
+        _dirtyRecipientFanout = 0;
+        _dirtyWorkCoalesces = 0;
+        _pendingMembershipsExamined = 0;
+        _dueWorkDequeued = 0;
+        _cadenceDeferrals = 0;
+        _sourceRefreshes = 0;
     }
 
     public ChunkPublicationWorkSchedulerSnapshot GetSnapshot()
@@ -419,6 +458,8 @@ public sealed class ChunkPublicationWorkScheduler
             _pendingCount,
             _membershipCount - _pendingCount,
             _incomingQueued,
+            _commitsObserved,
+            _emptyCommitsObserved,
             _dirtyCommitsObserved,
             _dirtyChunksObserved,
             _dirtyChunksWithoutSubscribers,

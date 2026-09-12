@@ -357,6 +357,23 @@ internal sealed class BotHarness : IDisposable
         if (_wireSummary is null || !_wireSummary.PhysicalTransportReconciled ||
             !_wireSummary.LogicalMessageReconciled)
             return "PF2 physical/logical traffic accounting did not reconcile.";
+        if (_options.Checkpoint == "PF4A")
+        {
+            BotActionOutcomeReport[] outcomes =
+                BotRunSummary.CreateActionOutcomes(_bots, _clientTelemetry);
+            BotActionOutcomeReport? invalid = null;
+            foreach (BotActionOutcomeReport outcome in outcomes)
+                if (!outcome.Conserved || !outcome.Terminal)
+                {
+                    invalid = outcome;
+                    break;
+                }
+            if (invalid is not null)
+                return $"PF4A action conservation failed for {invalid.Value.Action}: " +
+                    $"unexplained={invalid.Value.Unexplained}, " +
+                    $"pendingUnsent={invalid.Value.PendingUnsent}, " +
+                    $"pendingCompletion={invalid.Value.PendingCompletion}.";
+        }
         if (!_options.IsMixedChaos)
         {
             if (_options.Scenario is "moving" or "crowd" &&
@@ -642,6 +659,7 @@ internal sealed class BotClient : IDisposable
     private readonly ClientChatOccurrence[] _chatScratch = new ClientChatOccurrence[256];
     private readonly BotChunkObservation _chunkObservation = new(MaximumResidentChunks);
     private readonly BotPendingCommandTracker _pendingCommand = new();
+    private readonly BotActionAccounting _actionAccounting = new();
     private readonly BotControlDriver _controls = new();
     private DeterministicRandom _random;
     private BotChatObservationCursor _chatObservation;
@@ -793,6 +811,12 @@ internal sealed class BotClient : IDisposable
     internal WorldPublicEntityId CurrentPublicActor => _currentPublicActor;
     internal string? Fault => _fault;
 
+    internal BotActionAccountingSnapshot GetActionAccounting(BotCommandKind kind) =>
+        _actionAccounting.Snapshot(kind);
+
+    internal int GetPendingActionCompletion(BotCommandKind kind) =>
+        _pendingCommand.Pending.Kind == kind ? 1 : 0;
+
     internal BotCumulativeTrafficSnapshot GetCumulativeTrafficSnapshot()
     {
         UdpPayloadTrafficSnapshot physical = _retiredUdpTraffic;
@@ -836,6 +860,7 @@ internal sealed class BotClient : IDisposable
         _connection.ConfigureTelemetry(_options.TelemetryLevel);
         _session.ConfigureTelemetry(_options.TelemetryLevel);
         _inputScheduler?.ResetTelemetryWindow();
+        _actionAccounting.Reset();
         // This counter intentionally describes the synchronized measurement
         // window, not admission or scenario-positioning work. It is distinct
         // from commands submitted because an input sample may be unmapped or
@@ -1139,6 +1164,7 @@ internal sealed class BotClient : IDisposable
                 _ => RemotePlayableActionStatus.Accepted,
             };
             bool accepted = result == RemotePlayableActionStatus.Accepted;
+            _actionAccounting.Completed(completed.Kind, result);
             switch (completed.Kind)
             {
                 case BotCommandKind.Movement when accepted:
@@ -1248,6 +1274,8 @@ internal sealed class BotClient : IDisposable
         var intent = new ClientWorldCommandIntent(locomotion, actions, true);
         MovementAttempts++;
         if (jumpEdge) JumpAttempts++;
+        _actionAccounting.Generated(BotCommandKind.Movement);
+        if (jumpEdge) _actionAccounting.Generated(BotCommandKind.Jump);
 
         if (_options.InputMode is BotInputMode.OverLimit or BotInputMode.BurstWithin or
                 BotInputMode.BurstOver)
@@ -1269,8 +1297,34 @@ internal sealed class BotClient : IDisposable
         var context = new ClientWorldCommandContext(
             default, ClientWorldCommandRequestFlags.None, 0, 0,
             (ulong)(jumpEdge ? BotCommandKind.Jump : BotCommandKind.None));
-        if (_inputScheduler!.TryObserve(intent, context, now))
+        ClientWorldInputScheduleSnapshot before = _inputScheduler!.GetSnapshot();
+        if (_inputScheduler.TryObserve(intent, context, now))
+        {
+            _actionAccounting.Admitted(BotCommandKind.Movement);
+            if (jumpEdge)
+            {
+                ClientWorldInputScheduleSnapshot observed = _inputScheduler.GetSnapshot();
+                if (observed.EdgeObligationsGenerated > before.EdgeObligationsGenerated)
+                    _actionAccounting.Admitted(BotCommandKind.Jump);
+                else
+                    _actionAccounting.NoNewEdge(BotCommandKind.Jump);
+            }
             _ = _inputScheduler.TryPump(now, TrySubmitScheduledCommand);
+        }
+        else
+        {
+            ClientWorldInputScheduleSnapshot rejected = _inputScheduler.GetSnapshot();
+            if (rejected.CapacityRejections > before.CapacityRejections)
+            {
+                _actionAccounting.CapacityRejected(BotCommandKind.Movement);
+                if (jumpEdge) _actionAccounting.CapacityRejected(BotCommandKind.Jump);
+            }
+            else
+            {
+                _actionAccounting.UnavailableOrInvalid(BotCommandKind.Movement);
+                if (jumpEdge) _actionAccounting.UnavailableOrInvalid(BotCommandKind.Jump);
+            }
+        }
     }
 
     private bool DriveStaleSessionReplay(
@@ -1582,8 +1636,12 @@ internal sealed class BotClient : IDisposable
         RemotePlayableCommandFlags flags = RemotePlayableCommandFlags.None)
     {
         CommandSubmitCalls++;
+        _actionAccounting.Generated(kind);
         if (_pendingCommand.Pending.IsPending || _session is null || _inputScheduler is null)
+        {
+            _actionAccounting.UnavailableOrInvalid(kind);
             return false;
+        }
         var context = new ClientWorldCommandContext(
             target,
             (ClientWorldCommandRequestFlags)(byte)flags,
@@ -1591,7 +1649,34 @@ internal sealed class BotClient : IDisposable
             0,
             (ulong)kind);
         long now = Stopwatch.GetTimestamp();
-        if (!_inputScheduler.TryObserve(intent, context, now)) return false;
+        ClientWorldInputScheduleSnapshot before = _inputScheduler.GetSnapshot();
+        if (!_inputScheduler.TryObserve(intent, context, now))
+        {
+            ClientWorldInputScheduleSnapshot rejected = _inputScheduler.GetSnapshot();
+            if (rejected.CapacityRejections > before.CapacityRejections)
+                _actionAccounting.CapacityRejected(kind);
+            else
+                _actionAccounting.UnavailableOrInvalid(kind);
+            return false;
+        }
+        ClientWorldInputScheduleSnapshot observed = _inputScheduler.GetSnapshot();
+        // Retain the historical PF1-PF3 counter meaning: a valid source sample was observed,
+        // even when a held action produced no new rising edge. PF4A's ActionOutcomes is the
+        // authoritative stage-conserving schema.
+        switch (kind)
+        {
+            case BotCommandKind.Movement: MovementAttempts++; break;
+            case BotCommandKind.Jump: JumpAttempts++; break;
+            case BotCommandKind.Interaction: InteractionAttempts++; break;
+            case BotCommandKind.Primary: PrimaryAttempts++; break;
+            case BotCommandKind.UiOpen: UiOpenAttempts++; break;
+        }
+        bool admitted = kind == BotCommandKind.Movement
+            ? intent.Locomotion.Kind != GameLocomotionUpdateKind.Unchanged
+            : kind != BotCommandKind.None &&
+                observed.EdgeObligationsGenerated > before.EdgeObligationsGenerated;
+        if (admitted) _actionAccounting.Admitted(kind);
+        else _actionAccounting.NoNewEdge(kind);
         if ((kind is BotCommandKind.Jump or BotCommandKind.Interaction or
                 BotCommandKind.Primary) &&
             intent.HeldActions != GamePlayerActions.None)
@@ -1606,16 +1691,8 @@ internal sealed class BotClient : IDisposable
                 throw new InvalidOperationException(
                     "The bot input scheduler could not retain a momentary action release.");
         }
-        switch (kind)
-        {
-            case BotCommandKind.Movement: MovementAttempts++; break;
-            case BotCommandKind.Jump: JumpAttempts++; break;
-            case BotCommandKind.Interaction: InteractionAttempts++; break;
-            case BotCommandKind.Primary: PrimaryAttempts++; break;
-            case BotCommandKind.UiOpen: UiOpenAttempts++; break;
-        }
         _ = _inputScheduler.TryPump(now, TrySubmitScheduledCommand);
-        return true;
+        return kind == BotCommandKind.None || admitted;
     }
 
     private bool TrySubmitScheduledCommand(
@@ -1635,6 +1712,12 @@ internal sealed class BotClient : IDisposable
         BotCommandKind kind = Enum.IsDefined((BotCommandKind)scheduled.Context.DiagnosticTag)
             ? (BotCommandKind)scheduled.Context.DiagnosticTag
             : BotCommandKind.None;
+        if (scheduled.Intent.Locomotion.Kind != GameLocomotionUpdateKind.Unchanged)
+            _actionAccounting.Submitted(
+                BotCommandKind.Movement,
+                completionTracked: kind == BotCommandKind.Movement);
+        if (kind is not (BotCommandKind.None or BotCommandKind.Movement))
+            _actionAccounting.Submitted(kind, completionTracked: true);
         if (kind != BotCommandKind.None)
         {
             ulong epoch = _session.Playable.GetSnapshot().ApplicationSessionEpoch;
@@ -1970,6 +2053,7 @@ internal sealed class BotClient : IDisposable
     private void CancelPendingCommand()
     {
         if (!_pendingCommand.TryCancel(out BotPendingCommand cancelled)) return;
+        _actionAccounting.RetiredCompletionDebt(cancelled.Kind);
         switch (cancelled.Kind)
         {
             case BotCommandKind.Movement: MovementCancelled++; break;
@@ -2215,6 +2299,28 @@ internal readonly record struct BotAcrossClientTimingReport(
     BotAcrossClientTimingDistribution ActionEdgeSubmissionDelay,
     BotAcrossClientTimingDistribution NetworkServiceInterval);
 
+internal readonly record struct BotActionOutcomeReport(
+    string Action,
+    string Model,
+    ulong Generated,
+    ulong SchedulerAdmitted,
+    ulong SchedulerCapacityRejected,
+    ulong NotAdmittedNoNewEdge,
+    ulong NotAdmittedUnavailableOrInvalid,
+    ulong CoalescedBeforeSubmit,
+    ulong Submitted,
+    ulong SemanticallyCompleted,
+    ulong Accepted,
+    ulong Rejected,
+    ulong RateLimited,
+    ulong CompletionNotTrackedLatestState,
+    ulong CancelledOrRetiredCompletionDebt,
+    ulong PendingUnsent,
+    ulong PendingCompletion,
+    ulong Unexplained,
+    bool Conserved,
+    bool Terminal);
+
 internal sealed record BotRunSummary
 {
     public required int SchemaVersion { get; init; }
@@ -2328,6 +2434,7 @@ internal sealed record BotRunSummary
     public required BotClientTelemetryReport[] ClientTelemetry { get; init; }
     public required BotInputRateReport InputRates { get; init; }
     public required BotAcrossClientTimingReport AcrossClientTiming { get; init; }
+    public required BotActionOutcomeReport[] ActionOutcomes { get; init; }
     public required BotHttpBodyTrafficReport LifetimeHttpBody { get; init; }
     public required BotCacheTrafficReport LifetimeContentCache { get; init; }
     public required BotPumpWindowSummary MeasuredPump { get; init; }
@@ -2365,7 +2472,8 @@ internal sealed record BotRunSummary
             "PF1" => 2,
             "PF2" => 3,
             "PF2.5" => 4,
-            _ => 5,
+            "PF3" => 5,
+            _ => 6,
         },
         Checkpoint = options.Checkpoint,
         Passed = passed,
@@ -2506,6 +2614,7 @@ internal sealed record BotRunSummary
         ClientTelemetry = clientTelemetry,
         InputRates = CreateInputRates(options, clientTelemetry),
         AcrossClientTiming = CreateAcrossClientTiming(clientTelemetry),
+        ActionOutcomes = CreateActionOutcomes(bots, clientTelemetry),
         LifetimeHttpBody = lifetimeHttpBody,
         LifetimeContentCache = lifetimeContentCache,
         MeasuredPump = measuredPump,
@@ -2514,6 +2623,101 @@ internal sealed record BotRunSummary
         Faults = bots.Where(static bot => bot.Fault is not null)
             .Select(bot => $"bot={bot.Id}:{bot.Fault}").ToArray(),
     };
+
+    internal static BotActionOutcomeReport[] CreateActionOutcomes(
+        BotClient[] bots,
+        BotClientTelemetryReport[] clientTelemetry)
+    {
+        BotActionOutcomeReport[] reports =
+        [
+            Action(BotCommandKind.Movement, bots, clientTelemetry),
+            Action(BotCommandKind.Jump, bots, clientTelemetry),
+            Action(BotCommandKind.Interaction, bots, clientTelemetry),
+            Action(BotCommandKind.Primary, bots, clientTelemetry),
+            Action(BotCommandKind.UiOpen, bots, clientTelemetry),
+            Release(clientTelemetry),
+        ];
+        return reports;
+    }
+
+    private static BotActionOutcomeReport Action(
+        BotCommandKind kind,
+        BotClient[] bots,
+        BotClientTelemetryReport[] clientTelemetry)
+    {
+        BotActionAccountingSnapshot[] values = bots
+            .Select(bot => bot.GetActionAccounting(kind)).ToArray();
+        ulong generated = Sum(values, static value => value.Generated);
+        ulong admitted = Sum(values, static value => value.SchedulerAdmitted);
+        ulong capacity = Sum(values, static value => value.SchedulerCapacityRejected);
+        ulong noEdge = Sum(values, static value => value.NotAdmittedNoNewEdge);
+        ulong unavailable = Sum(values, static value => value.NotAdmittedUnavailableOrInvalid);
+        ulong submitted = Sum(values, static value => value.Submitted);
+        ulong completed = Sum(values, static value => value.SemanticallyCompleted);
+        ulong accepted = Sum(values, static value => value.Accepted);
+        ulong rejected = Sum(values, static value => value.Rejected);
+        ulong rateLimited = Sum(values, static value => value.RateLimited);
+        ulong untracked = Sum(values, static value => value.CompletionNotTrackedLatestState);
+        ulong retired = Sum(values, static value => value.RetiredCompletionDebt);
+        ulong pendingCompletion = checked((ulong)bots.Sum(bot => bot.GetPendingActionCompletion(kind)));
+        ulong pendingUnsent = kind == BotCommandKind.Movement
+            ? checked((ulong)clientTelemetry.Count(static value =>
+                value.InputScheduler.ContinuousStatePending))
+            : 0;
+        ulong coalesced = kind == BotCommandKind.Movement &&
+            admitted >= submitted + pendingUnsent
+                ? admitted - submitted - pendingUnsent
+                : 0;
+        ulong generatedRight = SaturatingAdd(
+            SaturatingAdd(admitted, capacity), SaturatingAdd(noEdge, unavailable));
+        ulong admittedRight = SaturatingAdd(
+            SaturatingAdd(submitted, coalesced), pendingUnsent);
+        ulong submittedRight = SaturatingAdd(
+            SaturatingAdd(completed, untracked), SaturatingAdd(retired, pendingCompletion));
+        ulong completedRight = SaturatingAdd(accepted, SaturatingAdd(rejected, rateLimited));
+        ulong unexplained = Distance(generated, generatedRight);
+        unexplained = SaturatingAdd(unexplained, Distance(admitted, admittedRight));
+        unexplained = SaturatingAdd(unexplained, Distance(submitted, submittedRight));
+        unexplained = SaturatingAdd(unexplained, Distance(completed, completedRight));
+        bool terminal = pendingUnsent == 0 && pendingCompletion == 0;
+        return new BotActionOutcomeReport(
+            kind.ToString(),
+            kind == BotCommandKind.Movement
+                ? nameof(BotActionAccountingModel.LatestStateToSubmission)
+                : nameof(BotActionAccountingModel.EdgeToAuthorityCompletion),
+            generated, admitted, capacity, noEdge, unavailable, coalesced,
+            submitted, completed, accepted, rejected, rateLimited, untracked, retired,
+            pendingUnsent, pendingCompletion, unexplained, unexplained == 0, terminal);
+    }
+
+    private static BotActionOutcomeReport Release(
+        BotClientTelemetryReport[] clients)
+    {
+        ulong generated = clients.Aggregate(0UL, static (total, client) =>
+            SaturatingAdd(total, client.InputScheduler.ReleaseOrStopGenerated));
+        ulong submitted = clients.Aggregate(0UL, static (total, client) =>
+            SaturatingAdd(total, client.InputScheduler.ReleaseOrStopSubmitted));
+        ulong completed = clients.Aggregate(0UL, static (total, client) =>
+            SaturatingAdd(total, client.InputScheduler.ReleaseOrStopCompleted));
+        ulong pendingUnsent = generated >= submitted ? generated - submitted : 0;
+        ulong pendingCompletion = submitted >= completed ? submitted - completed : 0;
+        ulong unexplained = Distance(generated, SaturatingAdd(submitted, pendingUnsent));
+        unexplained = SaturatingAdd(
+            unexplained, Distance(submitted, SaturatingAdd(completed, pendingCompletion)));
+        bool terminal = pendingUnsent == 0 && pendingCompletion == 0;
+        return new BotActionOutcomeReport(
+            "ReleaseOrStop", "SchedulerCompletion", generated, generated, 0, 0, 0, 0,
+            submitted, completed, completed, 0, 0, 0, 0,
+            pendingUnsent, pendingCompletion, unexplained, unexplained == 0, terminal);
+    }
+
+    private static ulong Sum(
+        BotActionAccountingSnapshot[] values,
+        Func<BotActionAccountingSnapshot, ulong> selector) =>
+        values.Aggregate(0UL, (total, value) => SaturatingAdd(total, selector(value)));
+
+    private static ulong Distance(ulong left, ulong right) =>
+        left >= right ? left - right : right - left;
 
     private static BotInputRateReport CreateInputRates(
         BotOptions options,
@@ -2633,6 +2837,8 @@ internal sealed record BotRunSummary
         $"coalesced={SchedulerContinuousCoalesced} edges={SchedulerActionEdgesCompleted}/" +
         $"{SchedulerActionEdgesGenerated} releases={SchedulerReleaseOrStopCompleted}/" +
         $"{SchedulerReleaseOrStopGenerated} rateLimited={ServerRateLimitedCommandsObserved} " +
+        $"actionConservation={ActionOutcomes.Count(static value => value.Conserved && value.Terminal)}/" +
+        $"{ActionOutcomes.Length} unexplained={ActionOutcomes.Aggregate(0UL, static (total, value) => SaturatingAdd(total, value.Unexplained))} " +
         $"staleReplay={StaleSessionReplaysFenced}/{StaleSessionReplaysQueued} " +
         $"nonsense={NonsenseInputs}/commands={NonsenseCommandsCreated} sword={SwordPickupObserved}/" +
         $"{SwordEquipObserved}/{SwordDropObserved} interactions={InteractionAccepted}/" +
@@ -2740,7 +2946,7 @@ internal readonly record struct BotOptions(
                 Enum.TryParse(value!.Replace("-", string.Empty), ignoreCase: true,
                     out BotInputMode parsedInputMode)) inputMode = parsedInputMode;
             else if (TryValue(argument, "--checkpoint=", out value) &&
-                value is "PF2" or "PF2.5" or "PF3")
+                value is "PF2" or "PF2.5" or "PF3" or "PF4A")
                 checkpointOverride = value;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }

@@ -22,6 +22,12 @@ input_mode=${13:-compliant}
 network_service_delay_ms=${14:-1}
 input_burst=${15:-10}
 input_burst_window_ms=${16:-100}
+checkpoint=${ULTRASIM_BOT_CHECKPOINT:-PF3}
+case "$checkpoint" in
+    PF3) summary_schema=5 ;;
+    PF4A) summary_schema=6 ;;
+    *) echo "unsupported bot evidence checkpoint: $checkpoint" >&2; exit 2 ;;
+esac
 
 case "$scenario" in
     quiet|sustained-input|moving|crowd|mixed-chaos) ;;
@@ -103,7 +109,7 @@ bot_arguments=(
     --measurement-complete-file="$measurement_complete"
     --ready-file="$bot_ready" --release-file="$bot_release"
     --summary-file="$bot_summary" --telemetry=Detailed
-    --checkpoint=PF3
+    --checkpoint="$checkpoint"
 )
 if [[ "$scenario" == "sustained-input" ]]; then
     bot_arguments+=(--input-sample-hz="$sample_hz" --input-submit-hz="$submit_hz" --input-mode="$input_mode")
@@ -129,7 +135,10 @@ touch "$server_stop"
 wait "$server_pid"
 server_pid=
 
-jq -e '.passed and .cleanRetirement and .checkpoint == "PF3" and .schemaVersion == 5' \
+jq -e --arg checkpoint "$checkpoint" --argjson schema "$summary_schema" \
+    '.passed and .cleanRetirement and .checkpoint == $checkpoint and .schemaVersion == $schema and
+     ($checkpoint != "PF4A" or
+      ([.actionOutcomes[] | select((.conserved | not) or (.terminal | not))] | length) == 0)' \
     "$bot_summary" >/dev/null
 jq -e '.PhysicalTransportReconciled and .LogicalMessageReconciled and .ParticipantsAtEnd == .ParticipantsAtStart' \
     "$accounting_summary" >/dev/null
@@ -137,4 +146,4 @@ jq -e '.CleanRetirement and .Participants == 0 and .EstablishedSessions == 0' \
     "$server_summary" >/dev/null
 
 trap - EXIT INT TERM
-echo "PF3 baseline complete: $output_dir"
+echo "$checkpoint baseline complete: $output_dir"

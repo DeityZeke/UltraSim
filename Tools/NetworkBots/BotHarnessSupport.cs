@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using UltraSim.Client.Core;
 using UltraSim.Client.Network;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 using UltraSim.Network;
@@ -141,6 +142,118 @@ internal readonly record struct BotPendingCommand(
     ulong ApplicationSessionEpoch)
 {
     internal bool IsPending => Kind != BotCommandKind.None;
+}
+
+internal enum BotActionAccountingModel : byte
+{
+    LatestStateToSubmission = 1,
+    EdgeToAuthorityCompletion = 2,
+}
+
+internal readonly record struct BotActionAccountingSnapshot(
+    BotCommandKind Kind,
+    BotActionAccountingModel Model,
+    ulong Generated,
+    ulong SchedulerAdmitted,
+    ulong SchedulerCapacityRejected,
+    ulong NotAdmittedNoNewEdge,
+    ulong NotAdmittedUnavailableOrInvalid,
+    ulong Submitted,
+    ulong SemanticallyCompleted,
+    ulong Accepted,
+    ulong Rejected,
+    ulong RateLimited,
+    ulong CompletionNotTrackedLatestState,
+    ulong RetiredCompletionDebt);
+
+/// <summary>
+/// Measurement-window source-to-terminal accounting. Movement is latest-state and conserves at
+/// scheduler submission; one-shot actions conserve through the authoritative processed sequence.
+/// </summary>
+internal sealed class BotActionAccounting
+{
+    private readonly Counter[] _counters = new Counter[6];
+
+    internal void Reset() => Array.Clear(_counters);
+
+    internal void Generated(BotCommandKind kind) => Increment(kind, static (ref Counter c) => c.Generated++);
+    internal void Admitted(BotCommandKind kind) => Increment(kind, static (ref Counter c) => c.SchedulerAdmitted++);
+    internal void CapacityRejected(BotCommandKind kind) => Increment(kind, static (ref Counter c) => c.SchedulerCapacityRejected++);
+    internal void NoNewEdge(BotCommandKind kind) => Increment(kind, static (ref Counter c) => c.NotAdmittedNoNewEdge++);
+    internal void UnavailableOrInvalid(BotCommandKind kind) => Increment(kind, static (ref Counter c) => c.NotAdmittedUnavailableOrInvalid++);
+    internal void Submitted(BotCommandKind kind, bool completionTracked)
+    {
+        if (kind == BotCommandKind.None) return;
+        ref Counter counter = ref Resolve(kind);
+        counter.Submitted++;
+        if (!completionTracked) counter.CompletionNotTrackedLatestState++;
+    }
+
+    internal void Completed(BotCommandKind kind, RemotePlayableActionStatus result)
+    {
+        ref Counter counter = ref Resolve(kind);
+        counter.SemanticallyCompleted++;
+        if (result == RemotePlayableActionStatus.Accepted) counter.Accepted++;
+        else if (result == RemotePlayableActionStatus.RateLimited) counter.RateLimited++;
+        else counter.Rejected++;
+    }
+
+    internal void RetiredCompletionDebt(BotCommandKind kind) =>
+        Increment(kind, static (ref Counter c) => c.RetiredCompletionDebt++);
+
+    internal BotActionAccountingSnapshot Snapshot(BotCommandKind kind)
+    {
+        ref Counter counter = ref Resolve(kind);
+        return new BotActionAccountingSnapshot(
+            kind,
+            kind == BotCommandKind.Movement
+                ? BotActionAccountingModel.LatestStateToSubmission
+                : BotActionAccountingModel.EdgeToAuthorityCompletion,
+            counter.Generated,
+            counter.SchedulerAdmitted,
+            counter.SchedulerCapacityRejected,
+            counter.NotAdmittedNoNewEdge,
+            counter.NotAdmittedUnavailableOrInvalid,
+            counter.Submitted,
+            counter.SemanticallyCompleted,
+            counter.Accepted,
+            counter.Rejected,
+            counter.RateLimited,
+            counter.CompletionNotTrackedLatestState,
+            counter.RetiredCompletionDebt);
+    }
+
+    private delegate void CounterMutation(ref Counter counter);
+
+    private void Increment(BotCommandKind kind, CounterMutation mutation)
+    {
+        if (kind == BotCommandKind.None) return;
+        mutation(ref Resolve(kind));
+    }
+
+    private ref Counter Resolve(BotCommandKind kind)
+    {
+        int index = (int)kind;
+        if ((uint)index >= (uint)_counters.Length || kind == BotCommandKind.None)
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        return ref _counters[index];
+    }
+
+    private struct Counter
+    {
+        internal ulong Generated;
+        internal ulong SchedulerAdmitted;
+        internal ulong SchedulerCapacityRejected;
+        internal ulong NotAdmittedNoNewEdge;
+        internal ulong NotAdmittedUnavailableOrInvalid;
+        internal ulong Submitted;
+        internal ulong SemanticallyCompleted;
+        internal ulong Accepted;
+        internal ulong Rejected;
+        internal ulong RateLimited;
+        internal ulong CompletionNotTrackedLatestState;
+        internal ulong RetiredCompletionDebt;
+    }
 }
 
 internal sealed class BotPendingCommandTracker

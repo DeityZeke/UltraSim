@@ -2,6 +2,8 @@ using System.Diagnostics;
 using UltraSim.Client.Content;
 using UltraSim.Client.Core;
 using UltraSim.Client.Network;
+using UltraSim.Game.Input;
+using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
 using UltraSim.Spatial;
 
@@ -21,6 +23,8 @@ var tests = new (string Name, Action Body)[]
     ("ReconnectObserverRejectsEqualCountGhostIdentity", ReconnectObserverRejectsEqualCountGhostIdentity),
     ("MeasurementCompleteBarrierRequiresSynchronizedWindow", MeasurementCompleteBarrierRequiresSynchronizedWindow),
     ("SustainedInputOptionsAreExplicitAndBounded", SustainedInputOptionsAreExplicitAndBounded),
+    ("PF4AActionStagesRetainNoEdgeAndAuthorityOutcomes", ActionStagesRetainNoEdgeAndAuthorityOutcomes),
+    ("PF4ACheckpointSelectsConservationSchema", PF4ACheckpointSelectsConservationSchema),
 };
 
 foreach ((string name, Action body) in tests)
@@ -132,6 +136,59 @@ static void SustainedInputOptionsAreExplicitAndBounded()
         .. common,
         "--input-sample-hz=1001",
     ]));
+}
+
+static void ActionStagesRetainNoEdgeAndAuthorityOutcomes()
+{
+    var scheduler = new ClientWorldInputScheduler(
+        new ClientInputSubmissionPolicy(60, 30, 10, 100), initialTimestamp: 1);
+    var heldJump = new ClientWorldCommandIntent(
+        GameLocomotionUpdate.Unchanged, GamePlayerActions.Jump, true);
+    True(scheduler.TryObserve(heldJump, default, 1));
+    Equal((ulong)1, scheduler.GetSnapshot().EdgeObligationsGenerated);
+    True(scheduler.TryObserve(heldJump, default, 2));
+    Equal((ulong)1, scheduler.GetSnapshot().EdgeObligationsGenerated);
+
+    var accounting = new BotActionAccounting();
+    accounting.Generated(BotCommandKind.Jump);
+    accounting.NoNewEdge(BotCommandKind.Jump);
+    accounting.Generated(BotCommandKind.Jump);
+    accounting.Admitted(BotCommandKind.Jump);
+    accounting.Submitted(BotCommandKind.Jump, completionTracked: true);
+    accounting.Completed(BotCommandKind.Jump, RemotePlayableActionStatus.NotGrounded);
+    BotActionAccountingSnapshot jump = accounting.Snapshot(BotCommandKind.Jump);
+    Equal((ulong)2, jump.Generated);
+    Equal((ulong)1, jump.NotAdmittedNoNewEdge);
+    Equal((ulong)1, jump.SchedulerAdmitted);
+    Equal((ulong)1, jump.Submitted);
+    Equal((ulong)1, jump.SemanticallyCompleted);
+    Equal((ulong)1, jump.Rejected);
+
+    accounting.Generated(BotCommandKind.Movement);
+    accounting.Admitted(BotCommandKind.Movement);
+    accounting.Submitted(BotCommandKind.Movement, completionTracked: false);
+    BotActionAccountingSnapshot movement = accounting.Snapshot(BotCommandKind.Movement);
+    Equal(BotActionAccountingModel.LatestStateToSubmission, movement.Model);
+    Equal((ulong)1, movement.CompletionNotTrackedLatestState);
+
+    accounting.Reset();
+    Equal((ulong)0, accounting.Snapshot(BotCommandKind.Jump).Generated);
+}
+
+static void PF4ACheckpointSelectsConservationSchema()
+{
+    BotOptions options = BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=1",
+        "--seed=4",
+        "--duration=2s",
+        "--scenario=quiet",
+        "--cache=/tmp/ultrasim-bot-pf4a-options",
+        "--checkpoint=PF4A",
+    ]);
+    Equal("PF4A", options.Checkpoint);
 }
 
 static void FinalRetirementCoversEveryLifecycleState()

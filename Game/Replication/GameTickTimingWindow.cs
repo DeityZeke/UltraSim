@@ -10,7 +10,11 @@ public enum GameTelemetryLevel : byte
     Detailed = 2,
 }
 
-/// <summary>Cold snapshot of one bounded authoritative fixed-step timing window.</summary>
+/// <summary>
+/// Cold snapshot of one bounded authoritative fixed-step timing window. Unprefixed percentiles
+/// are exact rolling observations from the most recent bounded sample set. WholeWindow fields are
+/// conservative power-of-two histogram bucket upper bounds, while each Maximum field is exact.
+/// </summary>
 public readonly record struct GameTickTimingSnapshot(
     GameTelemetryLevel Level,
     ulong SampleCount,

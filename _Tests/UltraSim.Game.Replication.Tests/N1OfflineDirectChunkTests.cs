@@ -286,6 +286,44 @@ internal static class N1OfflineDirectChunkTests
         Equal(ChunkPublicationCommitObservationStatus.Observed,
             scheduler.ObserveCommit(fixture.Store));
         Equal(0, scheduler.GetSnapshot().PendingWorkCount);
+        ChunkPublicationWorkSchedulerSnapshot observed = scheduler.GetSnapshot();
+        Equal((ulong)2, observed.CommitsObserved);
+        Equal((ulong)1, observed.EmptyCommitsObserved);
+        Equal((ulong)1, observed.DirtyCommitsObserved);
+    }
+
+    internal static void DirtySchedulerRetryWaitsAndTelemetryResetPreservesDebt()
+    {
+        using var fixture = new Fixture(historyCapacity: 16);
+        var recipient = NewScheduledRecipient();
+        var scheduler = new ChunkPublicationWorkScheduler(
+            fixture.Store, new ChunkPublicationWorkSchedulerLimits(1, 64));
+        True(scheduler.TryRegister(recipient, out ChunkReplicationRecipientId id));
+        Span<OfflineDirectChunkSubscriptionChange> changes =
+            stackalloc OfflineDirectChunkSubscriptionChange[64];
+        ApplyScheduledReconcile(scheduler, id, recipient, fixture.Store,
+            Position(0, 0, 8_000, 8_000), changes);
+
+        True(scheduler.TryDequeueDue(10, out ChunkPublicationWork work));
+        True(scheduler.Requeue(in work));
+        while (scheduler.TryDequeueDue(10, out ChunkPublicationWork sibling))
+        {
+            False(sibling.Recipient == work.Recipient && sibling.Key == work.Key);
+        }
+        Equal(1, scheduler.PendingWorkCount);
+
+        scheduler.ResetTelemetryWindow();
+        ChunkPublicationWorkSchedulerSnapshot reset = scheduler.GetSnapshot();
+        Equal(1, reset.PendingWorkCount);
+        Equal(recipient.Subscriptions.Length, reset.MembershipCount);
+        Equal((ulong)0, reset.IncomingQueued);
+        Equal((ulong)0, reset.PendingMembershipsExamined);
+        Equal((ulong)0, reset.DueWorkDequeued);
+
+        True(scheduler.TryDequeueDue(11, out ChunkPublicationWork retried));
+        Equal(work.Recipient, retried.Recipient);
+        Equal(work.Key, retried.Key);
+        Equal(work.Kind, retried.Kind);
     }
 
     internal static void StableInterestBudgetSkipsOnlyProvablyUnchangedTopology()

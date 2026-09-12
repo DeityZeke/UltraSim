@@ -3,7 +3,12 @@ using System.Numerics;
 
 namespace UltraSim.Game.Replication;
 
-/// <summary>Cold bounded duration distribution owned by a Game operation.</summary>
+/// <summary>
+/// Cold bounded duration distribution owned by a Game operation. P50/P95/P99 are exact values
+/// from the most recent bounded 256 observations. WholeWindowP50/P95/P99 are conservative
+/// power-of-two histogram bucket upper bounds across the complete configured window; only
+/// MaximumMicroseconds is the exact whole-window maximum.
+/// </summary>
 public readonly record struct GameTimingDistribution(
     ulong Count,
     ulong TotalStopwatchTicks,

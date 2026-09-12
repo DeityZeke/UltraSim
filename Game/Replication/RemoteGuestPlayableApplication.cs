@@ -76,7 +76,19 @@ public readonly record struct RemoteGuestApplicationTimingSnapshot(
     GameTimingDistribution ProofProcessing,
     GameTimingDistribution PublicWorld,
     GameTimingDistribution OwnerState,
-    RemoteChunkReplicationTimingSnapshot Replication);
+    RemoteChunkReplicationTimingSnapshot Replication,
+    RemoteChunkReplicationReadinessSnapshot ReplicationReadiness);
+
+/// <summary>Owner-local PF4A wake/debt attribution for one remote application window.</summary>
+public readonly record struct RemoteChunkReplicationReadinessSnapshot(
+    ulong DrivePasses,
+    ulong CleanPasses,
+    ulong DeliveryDebtRequeues,
+    ulong TransientDeferralRequeues,
+    ulong SourceGapRefreshes,
+    ulong SourceReplacements,
+    int PendingHighWater,
+    ChunkPublicationWorkSchedulerSnapshot Scheduler);
 
 /// <summary>
 /// F0.3b external guest/application factory. Each admitted transport owns one authoritative
@@ -266,7 +278,16 @@ public sealed class RemoteGuestPlayableApplication :
     private RemoteChatServerSession? _chatSession;
     private OfflineDirectChunkRecipient? _recipient;
     private RemoteChunkWorldStateServer? _worldDelivery;
-    private int _worldScheduleCursor;
+    private ChunkPublicationStore? _publicationSource;
+    private ChunkPublicationWorkScheduler? _publicationWork;
+    private ChunkReplicationRecipientId _publicationRecipient;
+    private ulong _publicationDrivePasses;
+    private ulong _publicationCleanPasses;
+    private ulong _publicationDeliveryDebtRequeues;
+    private ulong _publicationTransientDeferralRequeues;
+    private ulong _publicationSourceGapRefreshes;
+    private ulong _publicationSourceReplacements;
+    private int _publicationPendingHighWater;
     private GamePlayableWorldEntities _entities;
     private GamePlayerCommandResult _lastCommandResult;
     private ulong _lastProcessedCommand;
@@ -601,6 +622,14 @@ public sealed class RemoteGuestPlayableApplication :
         _publicWorldTiming.Configure(level);
         _ownerStateTiming.Configure(level);
         _worldDelivery?.ConfigureTelemetry(level);
+        _publicationWork?.ResetTelemetryWindow();
+        _publicationDrivePasses = 0;
+        _publicationCleanPasses = 0;
+        _publicationDeliveryDebtRequeues = 0;
+        _publicationTransientDeferralRequeues = 0;
+        _publicationSourceGapRefreshes = 0;
+        _publicationSourceReplacements = 0;
+        _publicationPendingHighWater = _publicationWork?.PendingWorkCount ?? 0;
     }
 
     public RemoteGuestApplicationTimingSnapshot GetTimingSnapshot()
@@ -618,7 +647,16 @@ public sealed class RemoteGuestPlayableApplication :
             _proofTiming.Capture(),
             _publicWorldTiming.Capture(),
             _ownerStateTiming.Capture(),
-            _worldDelivery?.GetTimingSnapshot() ?? default);
+            _worldDelivery?.GetTimingSnapshot() ?? default,
+            new RemoteChunkReplicationReadinessSnapshot(
+                _publicationDrivePasses,
+                _publicationCleanPasses,
+                _publicationDeliveryDebtRequeues,
+                _publicationTransientDeferralRequeues,
+                _publicationSourceGapRefreshes,
+                _publicationSourceReplacements,
+                _publicationPendingHighWater,
+                _publicationWork?.GetSnapshot() ?? default));
     }
 
     internal void ResetTelemetryWindow() => ConfigureTelemetry(_telemetryLevel);
@@ -996,6 +1034,7 @@ public sealed class RemoteGuestPlayableApplication :
             _peer, _recipient, publications, _applicationSessionEpoch,
             new RemoteChunkWorldStateTransportLimits(128, 64));
         _worldDelivery.ConfigureTelemetry(_telemetryLevel);
+        InitializePublicationWork(publications);
         if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPublicEntityId>(
                 (world, _, game) =>
                 {
@@ -1072,6 +1111,7 @@ public sealed class RemoteGuestPlayableApplication :
             _peer, _recipient, publications, _applicationSessionEpoch,
             new RemoteChunkWorldStateTransportLimits(128, 64));
         _worldDelivery.ConfigureTelemetry(_telemetryLevel);
+        InitializePublicationWork(publications);
         _authorityTicks = _runtime.SimulationTick;
         return entered;
     }
@@ -1958,50 +1998,129 @@ public sealed class RemoteGuestPlayableApplication :
 
     private void DrivePublicWorldCore()
     {
-        if (!_runtime!.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPosition>(
+        SaturatingIncrement(ref _publicationDrivePasses);
+        if (!_runtime!.Game.TryUseActiveGeneration<IGameGenerationStateProvider, PublicWorldDriveCapture>(
                 (world, _, game) =>
                 {
                     Entity player = Resolve(world, _entities.PlayerId);
                     if (!game.WorldState.TryReadPosition(world, player, out WorldPosition position))
                         throw new InvalidOperationException("The remote public anchor was unavailable.");
-                    return position;
-                }, out WorldPosition anchor))
+                    return new PublicWorldDriveCapture(position, game.WorldState.Publications);
+                }, out PublicWorldDriveCapture capture))
             throw new InvalidOperationException("The remote public authority was unavailable.");
+
+        if (!ReferenceEquals(capture.Publications, _publicationSource))
+        {
+            _worldDelivery!.ReplaceSource(capture.Publications);
+            _publicationWork!.ReplaceSource(capture.Publications);
+            _publicationSource = capture.Publications;
+            SaturatingIncrement(ref _publicationSourceReplacements);
+        }
+        ChunkPublicationCommitObservationStatus observation =
+            _publicationWork!.ObserveCommit(capture.Publications);
+        if (observation == ChunkPublicationCommitObservationStatus.CommitGapRequiresRefresh)
+        {
+            _publicationWork.RefreshAllFromCurrentSource();
+            SaturatingIncrement(ref _publicationSourceGapRefreshes);
+        }
+        else if (observation == ChunkPublicationCommitObservationStatus.SourceRequiresReplacement)
+        {
+            throw new InvalidOperationException(
+                "The publication work scheduler did not accept the current source lineage.");
+        }
+
         OfflineDirectChunkReconcileStatus reconcile = _worldDelivery!.Reconcile(
-            GameWorldState.DefaultSpace, anchor, _subscriptionChanges, out _);
+            GameWorldState.DefaultSpace, capture.Anchor, _subscriptionChanges,
+            out OfflineDirectChunkReconcileResult reconcileResult);
         if (reconcile != OfflineDirectChunkReconcileStatus.Reconciled)
             throw new InvalidOperationException($"Remote public interest failed: {reconcile}.");
-        OfflineDirectChunkSubscriptionView subscriptions = _recipient!.Subscriptions;
+        if (!_publicationWork.TryApplyReconciliation(
+                _publicationRecipient,
+                _subscriptionChanges.AsSpan(0, reconcileResult.ChangeCount),
+                in reconcileResult))
+            throw new InvalidOperationException(
+                "Remote public interest and publication work topology diverged.");
+
+        int pending = _publicationWork.PendingWorkCount;
+        if (pending > _publicationPendingHighWater) _publicationPendingHighWater = pending;
+        if (pending == 0)
+        {
+            SaturatingIncrement(ref _publicationCleanPasses);
+            return;
+        }
+
         int scheduled = 0;
-        int examined = 0;
-        if (_worldScheduleCursor >= subscriptions.Length) _worldScheduleCursor = 0;
-        while (examined < subscriptions.Length && scheduled < 16)
+        while (scheduled < 16 &&
+               _publicationWork.TryDequeueDue(_authorityTicks, out ChunkPublicationWork work))
         {
             // Bulk public-state snapshots must leave bounded reliable headroom for owner state,
             // UI, Chat and other control-plane semantics on this same application session.
             if (_peer.ReliableQueued >=
                 Math.Max(1, _peer.MaximumReliableMessages - ReservedReliableControlMessages))
+            {
+                RequirePublicationRequeue(in work);
+                SaturatingIncrement(ref _publicationTransientDeferralRequeues);
                 break;
-            int index = _worldScheduleCursor;
-            _worldScheduleCursor = (_worldScheduleCursor + 1) % subscriptions.Length;
-            examined++;
+            }
             // Public disclosure does not manufacture structural residency. F0.3b's preinstalled
             // Concept Demo consumer stages the canonical authored WorldPack; unauthored spatial
             // keys have neither structural pages nor a client semantic destination. Later remote
             // structural acquisition will explicitly coordinate the same authored-key boundary.
-            if (!_worldPack!.TryGetBaseTerrain(subscriptions[index].Interest.Key, out _))
+            if (!_worldPack!.TryGetBaseTerrain(work.Key, out _))
                 continue;
             RemoteChunkWorldStateScheduleStatus status =
-                _worldDelivery.TrySchedule(index, _authorityTicks);
+                _worldDelivery.TrySchedule(work.Key, _authorityTicks);
             if (status is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
                 RemoteChunkWorldStateScheduleStatus.QueuedAbsence or
                 RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted)
+            {
                 scheduled++;
-            else if (status is RemoteChunkWorldStateScheduleStatus.TransportNotAccepting or
-                     RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
-                     RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy)
+                RequirePublicationRequeue(in work);
+                SaturatingIncrement(ref _publicationDeliveryDebtRequeues);
+            }
+            else if (status == RemoteChunkWorldStateScheduleStatus.NoPayload)
+            {
+                // Current truth is already known. Consuming this work is the quiet transition.
+            }
+            else if (status == RemoteChunkWorldStateScheduleStatus.InvalidSubscription)
+            {
+                throw new InvalidOperationException(
+                    "Accepted publication work addressed an invalid subscription.");
+            }
+            else
+            {
+                RequirePublicationRequeue(in work);
+                SaturatingIncrement(ref _publicationTransientDeferralRequeues);
+            }
+            if (status is RemoteChunkWorldStateScheduleStatus.TransportNotAccepting or
+                RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
+                RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy or
+                RemoteChunkWorldStateScheduleStatus.ReadPending or
+                RemoteChunkWorldStateScheduleStatus.SourceRequiresReconcile)
                 break;
         }
+        pending = _publicationWork.PendingWorkCount;
+        if (pending > _publicationPendingHighWater) _publicationPendingHighWater = pending;
+    }
+
+    private void InitializePublicationWork(ChunkPublicationStore publications)
+    {
+        _publicationSource = publications;
+        _publicationWork = new ChunkPublicationWorkScheduler(
+            publications,
+            new ChunkPublicationWorkSchedulerLimits(1, MaximumSubscriptions));
+        if (!_publicationWork.TryRegister(_recipient!, out _publicationRecipient))
+            throw new InvalidOperationException(
+                "The remote publication work recipient could not be registered.");
+        _publicationWork.ResetTelemetryWindow();
+        _publicationPendingHighWater = 0;
+    }
+
+    private void RequirePublicationRequeue(in ChunkPublicationWork work)
+    {
+        if (!_publicationWork!.Requeue(in work))
+            throw new InvalidOperationException(
+                "Accepted publication work could not retain its retry debt.");
     }
 
     private bool QueueOwnerState()
@@ -2110,6 +2229,10 @@ public sealed class RemoteGuestPlayableApplication :
             throw new InvalidOperationException("The remote publication source was unavailable.");
         return publications;
     }
+
+    private readonly record struct PublicWorldDriveCapture(
+        WorldPosition Anchor,
+        ChunkPublicationStore Publications);
 
     private static RemotePlayableActionStatus Map(GameWorldActionStatus status) => status switch
     {

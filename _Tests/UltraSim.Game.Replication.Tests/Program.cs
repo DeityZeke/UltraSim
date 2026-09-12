@@ -129,6 +129,7 @@ var tests = new (string Name, Action Body)[]
     ("N1OfflineDirectCapacityAndReadCommitAreTransactional", N1OfflineDirectChunkTests.CapacityAndReadCommitAreTransactional),
     ("N1OfflineDirectWarmedStableRecipientAllocatesZero", N1OfflineDirectChunkTests.WarmedStableRecipientAllocatesZero),
     ("N14DirtySchedulerSkipsCleanScopesAndFansOutOnce", N1OfflineDirectChunkTests.DirtySchedulerSkipsCleanScopesAndFansOutOnce),
+    ("PF4ADirtySchedulerRetryWaitsAndTelemetryResetPreservesDebt", N1OfflineDirectChunkTests.DirtySchedulerRetryWaitsAndTelemetryResetPreservesDebt),
     ("N14StableInterestBudgetSkipsOnlyProvablyUnchangedTopology", N1OfflineDirectChunkTests.StableInterestBudgetSkipsOnlyProvablyUnchangedTopology),
     ("N14StableInterestBudgetMatchesRandomizedExactOracle", N1OfflineDirectChunkTests.StableInterestBudgetMatchesRandomizedExactOracle),
     ("N14ReconcileAttributionIsExplicitAndDormantByDefault", N1OfflineDirectChunkTests.ReconcileAttributionIsExplicitAndDormantByDefault),
