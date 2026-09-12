@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3 load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -252,3 +252,42 @@ dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerificati
 Other controlled native modes are `headless`, `visible-vsync-off-unlimited`, explicit off-VSync
 30/60/120/240 caps, and `visible-vsync-on-60`. Native output reports actual runtime display/VSync/
 max-FPS/refresh values. Headless numbers are main-loop cadence, not displayed FPS.
+
+## PF4A action conservation and quiet-readiness measurements
+
+Schema v6 (`--checkpoint=PF4A`) replaces ambiguous performance-evidence remainders with a finite
+per-action stage ledger. For Movement, latest state conserves through scheduler admission,
+coalescing, and submission. Jump, Interaction, Primary, and UI Open conserve through source
+generation, admission/non-admission, submission, and authoritative Accepted/Rejected/RateLimited
+completion. Release/Stop conserves through scheduler completion. Final evidence fails unless every
+row is conserved, has zero unexplained work, and has zero pending unsent/completion debt.
+
+Legacy `*Attempts` remain available with their historical meaning: a valid input observation was
+accepted even if a held button produced no new rising edge. `actionOutcomes` is the authoritative
+PF4A evidence surface and reports that case explicitly as `notAdmittedNoNewEdge`.
+
+Run a matched PF4A capture with the normal PF3 profile and schema-v6 gate:
+
+```bash
+Tools/NetworkBots/run-pf4a-baseline.sh quiet 600s \
+  /tmp/ultrasim-pf4a-quiet-50 50 400401 60s \
+  /tmp/ultrasim-pf4a-shared-cache
+```
+
+The wrapper accepts the same positional policy fields as `run-pf3-baseline.sh`, selects PF4A
+accounting, preserves raw bot/server/accounting summaries, and rejects non-conserved action rows.
+For quiet runs, `RemoteApplications[].Timing.ReplicationReadiness` distinguishes O(1) clean commit
+observations from dirty commits, membership examination, due work, debt/retry, gap refresh, and
+source replacement. These counters are Game replication work, not Network wire messages.
+
+The routine focused gate adds an 8-client real-UDP quiet canary requiring zero memberships examined,
+zero schedule attempts, and zero deliveries, followed by the existing 8-bot + 2-actual-exported-
+Online active canary:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4a-only
+```
+
+The long matched runs and 30-minute soak are permanent evidence and intentionally are not repeated
+by every repository verification.

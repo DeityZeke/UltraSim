@@ -1,0 +1,104 @@
+{
+  "checkpoint": "PF3 evidence correction / PF4A action-accounting reconciliation",
+  "capturedUtc": "2026-09-12",
+  "status": "ACCEPTED_CORRECTION",
+  "immutableOriginal": {
+    "artifact": "concept-demo-pf3-cadence-performance-policy-2026-09-12.json",
+    "measurementBase": "96df915aef4c02254fbcb7c3da4caad86245aca8",
+    "acceptedPf3Implementation": "5eec694692df8f85be2d7db215b2642a9ec9061b",
+    "policy": "The original accepted artifact and its recorded measurements are not rewritten. This amendment corrects only the interpretation and future evidence schema."
+  },
+  "retainedMismatchSoak": {
+    "checkpoint": "PF3",
+    "schemaVersion": 5,
+    "scenario": "mixed-chaos",
+    "seed": 300306,
+    "measuredMilliseconds": 1800000,
+    "jump": {
+      "legacyObservedAttempts": 17973,
+      "accepted": 13973,
+      "rejected": 1401,
+      "cancelled": 0,
+      "rateLimited": 0,
+      "previouslyUnclassified": 2599,
+      "correctedCategory": "NotAdmittedNoNewEdge",
+      "productCommandsLost": 0
+    },
+    "otherLegacyRemaindersDisclosed": {
+      "interaction": {
+        "legacyObservedAttempts": 35800,
+        "accepted": 195,
+        "rejected": 24634,
+        "cancelled": 0,
+        "remainder": 10971
+      },
+      "primary": {
+        "legacyObservedAttempts": 17600,
+        "accepted": 1,
+        "rejected": 15097,
+        "cancelled": 0,
+        "remainder": 2502
+      },
+      "uiOpen": {
+        "legacyObservedAttempts": 2,
+        "accepted": 2,
+        "cancelled": 0,
+        "remainder": 0
+      }
+    },
+    "scheduler": {
+      "actionEdgesGenerated": 55302,
+      "actionEdgesSubmitted": 55302,
+      "actionEdgesCompleted": 55302,
+      "releaseOrStopGenerated": 60454,
+      "releaseOrStopSubmitted": 60454,
+      "releaseOrStopCompleted": 60454,
+      "capacityRejections": 0,
+      "serverRateLimited": 0,
+      "commandsQueued": 109471,
+      "commandSubmitCalls": 125607
+    },
+    "legacyCrossCounterCaveat": "Legacy per-action attempts were recorded after TryObserve accepted an input sample, including a held button which generated no new rising edge. Scheduler edge totals count rising-edge obligations across action kinds. Their observation boundaries differ; summing legacy terminal outcomes produces 55,303 while the scheduler reports 55,302 edges and is not a valid conservation equality."
+  },
+  "disposition": {
+    "classification": "harness evidence/reporting defect",
+    "explanation": "TryObserve can validly accept a repeated held input while generating no new action edge. The old attempt counters incremented at that earlier observation boundary, whereas Accepted/Rejected existed only for an actual submitted Game command. The 2,599 Jump remainder therefore represents no-new-edge observations, not vanished transport or authority work.",
+    "gameplayCorrectnessRepair": false,
+    "candidateLineageAdvanced": false,
+    "momentaryInputCorrection": "PF3 development also retained one matching Release obligation behind each bot Jump/Interaction/Primary press. PF4A preserves that behavior and makes any remaining held/no-edge observation explicit rather than silently subtracting it."
+  },
+  "pf4aSchemaVersion6": {
+    "authoritativeSurface": "actionOutcomes",
+    "actions": [
+      "Movement",
+      "Jump",
+      "Interaction",
+      "Primary",
+      "UiOpen",
+      "ReleaseOrStop"
+    ],
+    "models": {
+      "LatestStateToSubmission": "Movement may be coalesced before submission and does not require an individual authority completion for every source value.",
+      "EdgeToAuthorityCompletion": "Jump, Interaction, Primary and UiOpen retain one finite rising-edge obligation through the authoritative processed-sequence result.",
+      "SchedulerCompletion": "ReleaseOrStop is conserved through scheduler completion rather than a separate Game action result."
+    },
+    "equalities": [
+      "generated = schedulerAdmitted + schedulerCapacityRejected + notAdmittedNoNewEdge + notAdmittedUnavailableOrInvalid",
+      "schedulerAdmitted = submitted + coalescedBeforeSubmit + pendingUnsent",
+      "submitted = semanticallyCompleted + completionNotTrackedLatestState + cancelledOrRetiredCompletionDebt + pendingCompletion",
+      "semanticallyCompleted = accepted + rejected + rateLimited"
+    ],
+    "finalBoundary": "pendingUnsent = 0; pendingCompletion = 0; unexplained = 0; conserved = true; terminal = true",
+    "acceptanceBehavior": "The PF4A summary writer, long-run shell gate, focused repository verifier, and permanent bot tests reject any unexplained or terminal-debt row."
+  },
+  "histogramTerminology": {
+    "rolling": "Unprefixed P50/P95/P99 values are exact percentiles over the most recent bounded 256 observations; Maximum is the exact whole-window maximum.",
+    "wholeWindow": "WholeWindow P50/P95/P99 values are conservative power-of-two histogram bucket upper bounds, not exact observations.",
+    "evidenceRule": "Permanent prose and new artifacts identify whole-window values as BucketUpperBoundMicroseconds and do not describe 8,191/16,383/32,767 microseconds as exact medians or tails."
+  },
+  "regression": {
+    "heldJump": "A repeated held Jump can be observed successfully while creating no new edge and is counted as NotAdmittedNoNewEdge.",
+    "allActions": "Each action model has focused source-to-terminal conservation coverage.",
+    "cleanRetirement": "PF4A real-client summaries require zero pending and zero unexplained work after quiescence and retirement."
+  }
+}

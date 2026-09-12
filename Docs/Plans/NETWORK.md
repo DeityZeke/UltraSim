@@ -1,7 +1,8 @@
 # Network V3: current architecture and accepted replication policy
 
-Status: **accepted / consumption-ready**, including physical Network capability packaging and the
-PF2.5 replication-ownership/observability reconciliation, as of 2026-09-11.
+Status: **accepted / consumption-ready**, including physical Network capability packaging,
+PF2.5 replication-ownership/observability reconciliation, PF3 authenticated performance policy,
+and PF4A quiet publication-work suppression, as of 2026-09-12.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -17,6 +18,13 @@ continues through the one composed `ChunkPublication` owner. This is not a claim
 fastest mechanism for every future semantic class. The exact routing, identities, alternative
 readiness, and future fixed-owner/transfer requirements are recorded in
 [PF2.5 replication reconciliation](PF2_5_REPLICATION_RECONCILIATION.md).
+
+PF4A does not revise that ownership decision. It adds one bounded readiness scheduler to each
+remote Game application so a clean recipient observes an empty authoritative publication commit
+in O(1) and skips per-chunk scheduling. Dirty source commits, recipient-interest changes, retained
+delivery/proof debt, transport/capacity deferral, cadence deadlines, history gaps, recovery, and
+source/epoch replacement remain explicit wake conditions. This is Game replication scheduling;
+the Network kernel and wire protocol are unchanged.
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.
@@ -449,6 +457,13 @@ A recipient maintains bounded chunk subscriptions, cadence tier/phase, an applie
 cursor per key, and bounded in-flight proof/recovery lineage. Current+clean scopes
 create zero replication work. Dirty work is discovered through the shared
 `ChunkPublicationWorkScheduler` reverse subscriber index.
+
+The production remote application owns one single-recipient scheduler and observes the source's
+committed affected-key set once per authority progression. `PendingWorkCount == 0` is an O(1)
+clean gate: no subscription scan, encode attempt, or cadence-deferral traversal occurs. A dirty
+commit fans only to current subscribers; an interest change enqueues only the affected membership;
+retained delivery debt is requeued until proof/application converges. Commit gaps and source
+replacement conservatively refresh current truth rather than sleeping uncertain state.
 
 First interest, invalid knowledge, and history-floor loss recover complete current
 truth. Leaving retires scope membership and invalidates outstanding lineage.

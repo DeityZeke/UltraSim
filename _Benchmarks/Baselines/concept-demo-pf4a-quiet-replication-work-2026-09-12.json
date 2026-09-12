@@ -1,0 +1,309 @@
+{
+  "checkpoint": "PF4A",
+  "capturedUtc": "2026-09-12",
+  "status": "CLOSED",
+  "commits": {
+    "exactStartingAndMeasurementBase": "46f26a7f2250f3979ad0da20290f0f3042a0bb04",
+    "acceptedPf4aImplementation": "4427d65972345ae68e3af00bb1a734d449207649",
+    "acceptedPf4aClosure": null,
+    "closureIdentityNote": "Populated by the evidence follow-up after the closure commit exists.",
+    "repairedFeatureCompleteCandidate": "5eec694692df8f85be2d7db215b2642a9ec9061b",
+    "candidateLineageChanged": false,
+    "candidateReason": "PF4A found an evidence/reporting defect and accepted a performance optimization, not a product correctness defect. Previous feature checkpoints remain closed."
+  },
+  "machine": {
+    "operatingSystem": "Linux 7.1.5-1-cachyos x86_64",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "dotnetSdk": "8.0.129",
+    "dotnetRuntime": "8.0.29",
+    "godot": "4.7.1.stable.mono",
+    "configuration": "Release",
+    "networkFlavor": "ClientOnly bots/Online; ServerOnly dedicated authority",
+    "stopwatchFrequency": 1000000000
+  },
+  "frozenPolicy": {
+    "dynamicPublicOwner": "ChunkPublication only",
+    "authorityHz": 60,
+    "maximumNetworkServiceIntervalMicroseconds": 2000,
+    "maximumInputHz": 60,
+    "recommendedInputHz": 30,
+    "inputBurstCapacity": 10,
+    "inputBurstWindowMilliseconds": 100,
+    "aoi": "GameChunkInterestProfile.Default",
+    "publicCadence": "OfflineDirectChunkCadence.EvidenceProfile",
+    "content": "same shared warm valid CAS",
+    "unchanged": [
+      "AOI semantics",
+      "Immediate/Near/Far delivery policy",
+      "OwnerState cadence",
+      "authority and Network defaults",
+      "input profile",
+      "message formats and IDs",
+      "application proof and recovery meaning",
+      "packet aggregation and compression",
+      "64-participant bound"
+    ]
+  },
+  "pf3EvidenceReconciliation": {
+    "correctionArtifact": "concept-demo-pf3-action-accounting-correction-2026-09-12.json",
+    "jumpLegacyObservedAttempts": 17973,
+    "jumpAccepted": 13973,
+    "jumpRejected": 1401,
+    "jumpUnclassifiedInOriginal": 2599,
+    "exactDisposition": "NotAdmittedNoNewEdge: repeated held-input observations accepted by TryObserve but producing no rising-edge obligation or Game command.",
+    "realCommandLossFound": false,
+    "productCandidateAdvanced": false,
+    "newBotSchemaVersion": 6,
+    "evidenceFailsOnUnexplainedOutcome": true
+  },
+  "actionConservation": {
+    "models": [
+      "Movement: LatestStateToSubmission",
+      "Jump/Interaction/Primary/UiOpen: EdgeToAuthorityCompletion",
+      "ReleaseOrStop: SchedulerCompletion"
+    ],
+    "equalities": [
+      "generated = schedulerAdmitted + schedulerCapacityRejected + notAdmittedNoNewEdge + notAdmittedUnavailableOrInvalid",
+      "schedulerAdmitted = submitted + coalescedBeforeSubmit + pendingUnsent",
+      "submitted = semanticallyCompleted + completionNotTrackedLatestState + cancelledOrRetiredCompletionDebt + pendingCompletion",
+      "semanticallyCompleted = accepted + rejected + rateLimited"
+    ],
+    "cleanFinalBoundary": "pendingUnsent=0, pendingCompletion=0, unexplained=0, conserved=true, terminal=true"
+  },
+  "timingSemantics": {
+    "rolling": "Unprefixed timing percentiles are exact values over the most recent bounded 256 observations.",
+    "wholeWindow": "WholeWindow percentiles are conservative fixed power-of-two bucket upper bounds and are reported as BucketUpperBoundMicroseconds.",
+    "maximum": "MaximumMicroseconds is the exact whole-window maximum.",
+    "scope": "Application timings are summed across 50 remote application lifetimes. CPUSecondsPerWallSecond is complete server-process CPU divided by synchronized wall duration."
+  },
+  "schedulingCallChain": {
+    "outer": "Hosted connection-owner service invokes RemoteGuestPlayableApplication.TryProgress; each new shared authority SimulationTick calls DrivePublicWorld once per admitted remote application.",
+    "capture": "One active-generation callback atomically captures controlled-player WorldPosition and the authoritative ChunkPublicationStore reference.",
+    "source": "Replace source on reference change; observe its monotonic commit; a missed commit refreshes all current memberships.",
+    "interest": "Run the existing stable-budget recipient Reconcile and apply its exact Incoming/Current/Leaving changes to the bounded scheduler.",
+    "readiness": "PendingWorkCount is owner-local O(1). Zero returns immediately; nonzero dequeues only ready SpatialChunkKeys.",
+    "delivery": "The existing WorldPack authored-key guard and RemoteChunkWorldStateServer.TrySchedule perform unchanged encode/delivery/proof work, capped at 16 successful deliveries per drive.",
+    "retry": "Delivery debt and transient transport/capacity/snapshot/source deferrals are requeued; requeue cannot circulate again in the same cadence pass."
+  },
+  "wakeSources": [
+    "authoritative dirty affected-key commit including create/update/removal",
+    "recipient anchor/interest Incoming/Current/Leaving change",
+    "new participant initial interest",
+    "recipient re-entry or reconnect under a fresh application lifetime",
+    "queued delivery/application-proof debt",
+    "transport reliable-headroom or queue deferral",
+    "capacity or snapshot-transfer deferral",
+    "cadence becoming due for retained dirty work",
+    "missed source commit/history gap requiring current-truth refresh",
+    "publication source, epoch, or server generation replacement",
+    "snapshot/recovery work retained by RemoteChunkWorldStateServer"
+  ],
+  "beforeQuietRepeatedFiveMinute": {
+    "seed": 400401,
+    "bots": 50,
+    "warmupSeconds": 60,
+    "measuredSecondsNominal": 300,
+    "runs": [
+      {"durationMilliseconds":300256,"authorityTicks":18016,"processCpuMilliseconds":103900,"cpuSecondsPerWallSecond":0.3460380475,"processWorkingSetHighWaterBytes":237707264,"publicWorldStopwatchTicks":24926086733,"scheduleAttempts":72964800,"noPayload":37518320,"cadenceDeferrals":35446480,"deliveries":0,"udpPayloadBytesSent":132132,"udpPayloadBytesReceived":132132},
+      {"durationMilliseconds":300283,"authorityTicks":18017,"processCpuMilliseconds":103170,"cpuSecondsPerWallSecond":0.3435758931,"processWorkingSetHighWaterBytes":233725952,"publicWorldStopwatchTicks":24862513340,"scheduleAttempts":72968850,"noPayload":37610465,"cadenceDeferrals":35358385,"deliveries":0,"udpPayloadBytesSent":132000,"udpPayloadBytesReceived":132000},
+      {"durationMilliseconds":300257,"authorityTicks":18016,"processCpuMilliseconds":105840,"cpuSecondsPerWallSecond":0.3524980267,"processWorkingSetHighWaterBytes":231624704,"publicWorldStopwatchTicks":25743766311,"scheduleAttempts":72960750,"noPayload":37606297,"cadenceDeferrals":35354453,"deliveries":0,"udpPayloadBytesSent":132000,"udpPayloadBytesReceived":132000}
+    ],
+    "cpuSecondsPerWallSecondMeanMedianRange": [0.3473706558,0.3460380475,0.0089221336],
+    "publicWorldStopwatchTicksMeanMedianRange": [25177455461.33,24926086733,881252971]
+  },
+  "afterQuietRepeatedFiveMinute": {
+    "seed": 400401,
+    "bots": 50,
+    "warmupSeconds": 60,
+    "measuredSecondsNominal": 300,
+    "runs": [
+      {"durationMilliseconds":300265,"authorityTicks":18016,"processCpuMilliseconds":86940,"cpuSecondsPerWallSecond":0.2895442359,"processWorkingSetHighWaterBytes":246620160,"publicWorldStopwatchTicks":1679831531,"drivePasses":900800,"cleanPasses":900800,"emptyCommits":900800,"dirtyCommits":0,"membershipsExamined":0,"dueWorkDequeued":0,"scheduleAttempts":0,"deliveries":0,"udpPayloadBytesSent":132000,"udpPayloadBytesReceived":132000},
+      {"durationMilliseconds":300274,"authorityTicks":18017,"processCpuMilliseconds":87360,"cpuSecondsPerWallSecond":0.2909342800,"processWorkingSetHighWaterBytes":238800896,"publicWorldStopwatchTicks":1684146926,"drivePasses":900850,"cleanPasses":900850,"emptyCommits":900850,"dirtyCommits":0,"membershipsExamined":0,"dueWorkDequeued":0,"scheduleAttempts":0,"deliveries":0,"udpPayloadBytesSent":132000,"udpPayloadBytesReceived":132000},
+      {"durationMilliseconds":300283,"authorityTicks":18018,"processCpuMilliseconds":86930,"cpuSecondsPerWallSecond":0.2894935777,"processWorkingSetHighWaterBytes":238182400,"publicWorldStopwatchTicks":1686487135,"drivePasses":900900,"cleanPasses":900900,"emptyCommits":900900,"dirtyCommits":0,"membershipsExamined":0,"dueWorkDequeued":0,"scheduleAttempts":0,"deliveries":0,"udpPayloadBytesSent":132000,"udpPayloadBytesReceived":132000}
+    ],
+    "cpuSecondsPerWallSecondMeanMedianRange": [0.2899906979,0.2895442359,0.0014407023],
+    "publicWorldStopwatchTicksMeanMedianRange": [1683488530.67,1684146926,6655604],
+    "meanCpuReductionPercent": 16.5184,
+    "meanPublicWorldWorkReductionPercent": 93.3135
+  },
+  "quietTenMinuteMatched": {
+    "seed": 400401,
+    "bots": 50,
+    "warmupSeconds": 60,
+    "before": {
+      "durationMilliseconds": 600340,
+      "authorityTicks": 36021,
+      "processCpuMilliseconds": 207850,
+      "cpuSecondsPerWallSecond": 0.3462204751,
+      "processWorkingSetHighWaterBytes": 231587840,
+      "managedHeapHighWaterBytes": 102703480,
+      "gcGen0Gen1Gen2": [54,4,1],
+      "publicWorldStopwatchTicks": 49417625949,
+      "interestStopwatchTicks": 62379436,
+      "encodingAndSchedulingStopwatchTicks": 13734152367,
+      "queueDrainStopwatchTicks": 669222547,
+      "scheduleAttempts": 145885050,
+      "scheduleAttemptsPerSecond": 243004,
+      "scheduleAttemptsPerClientAuthorityTick": 81,
+      "noPayload": 75193853,
+      "cadenceDeferrals": 70691197,
+      "deliveries": 0,
+      "udpPayloadBytesSentReceived": [264000,264000],
+      "udpDatagramsSentReceived": [6000,6000]
+    },
+    "after": {
+      "durationMilliseconds": 600355,
+      "authorityTicks": 36022,
+      "processCpuMilliseconds": 173840,
+      "cpuSecondsPerWallSecond": 0.2895620091,
+      "processWorkingSetHighWaterBytes": 238112768,
+      "managedHeapHighWaterBytes": 107422864,
+      "gcGen0Gen1Gen2": [58,5,0],
+      "publicWorldStopwatchTicks": 3381035297,
+      "interestStopwatchTicks": 64228674,
+      "encodingAndSchedulingStopwatchTicks": 0,
+      "queueDrainStopwatchTicks": 557605836,
+      "drivePasses": 1801100,
+      "cleanPasses": 1801100,
+      "emptyCommits": 1801100,
+      "dirtyCommits": 0,
+      "membershipsExamined": 0,
+      "dueWorkDequeued": 0,
+      "scheduleAttempts": 0,
+      "noPayload": 0,
+      "cadenceDeferrals": 0,
+      "deliveries": 0,
+      "pendingWorkAtEnd": 0,
+      "udpPayloadBytesSentReceived": [264044,264044],
+      "udpDatagramsSentReceived": [6001,6001]
+    },
+    "delta": {
+      "serverCpuPercent": -16.3649,
+      "publicWorldStopwatchTicksPercent": -93.1582,
+      "scheduleAttemptsPercent": -100.0,
+      "noPayloadAndCadenceTraversalPercent": -100.0,
+      "udpPayloadPercent": 0.0167,
+      "wireExplanation": "One additional symmetric 44-byte keepalive datagram crossed the wall-clock boundary; gameplay/public deliveries remained zero."
+    }
+  },
+  "movingTenMinuteMatched": {
+    "seed": 400401,
+    "bots": 50,
+    "before": {"durationMilliseconds":600361,"authorityTicks":36022,"cpuSecondsPerWallSecond":0.4668524438,"processCpuMilliseconds":280280,"publicWorldStopwatchTicks":77188418468,"scheduleAttempts":145888887,"deliveries":10203666,"movementAccepted":16500,"chunkCrossings":4240,"summedDistinctChunks":1597,"udpPayloadBytesSent":2336993837,"udpPayloadBytesReceived":565765165,"udpDatagramsSent":11546730,"udpDatagramsReceived":2644811},
+    "after": {"durationMilliseconds":600360,"authorityTicks":36022,"cpuSecondsPerWallSecond":0.4139349723,"processCpuMilliseconds":248510,"publicWorldStopwatchTicks":27533034961,"scheduleAttempts":10242685,"deliveries":10068100,"movementAccepted":16500,"chunkCrossings":4204,"summedDistinctChunks":1600,"dirtyCommits":1801100,"membershipsExamined":78335885,"dueWorkDequeued":10338950,"deliveryDebtRequeues":10068100,"pendingWorkAtMeasurementEnd":550,"udpPayloadBytesSent":2313289742,"udpPayloadBytesReceived":558227140,"udpDatagramsSent":11420878,"udpDatagramsReceived":2615709},
+    "deltaPercent": {"serverCpu":-11.3349,"publicWorldStopwatchTicks":-64.3301,"scheduleAttempts":-92.9791,"udpPayloadSent":-1.0143,"udpPayloadReceived":-1.3324},
+    "interpretation": "Source behavior and coverage remain comparable; minor real-wall-clock movement/fanout variation explains non-identical wire totals. PF4A did not change cadence or message policy."
+  },
+  "crowdTenMinuteMatched": {
+    "seed": 400401,
+    "bots": 50,
+    "before": {"durationMilliseconds":600360,"authorityTicks":36022,"cpuSecondsPerWallSecond":0.4455493371,"processCpuMilliseconds":267490,"publicWorldStopwatchTicks":70095156902,"scheduleAttempts":145889100,"deliveries":6462113,"movementAccepted":65900,"chunkCrossings":4734,"summedDistinctChunks":238,"udpPayloadBytesSent":1803528710,"udpPayloadBytesReceived":435978326,"udpDatagramsSent":7743683,"udpDatagramsReceived":2583212},
+    "after": {"durationMilliseconds":600361,"authorityTicks":36022,"cpuSecondsPerWallSecond":0.3911313360,"processCpuMilliseconds":234820,"publicWorldStopwatchTicks":25287125560,"scheduleAttempts":6493530,"deliveries":6430336,"movementAccepted":65900,"chunkCrossings":4547,"summedDistinctChunks":241,"dirtyCommits":1799350,"emptyCommits":1750,"membershipsExamined":29977418,"dueWorkDequeued":6541961,"deliveryDebtRequeues":6430336,"pendingWorkAtMeasurementEnd":100,"udpPayloadBytesSent":1811006888,"udpPayloadBytesReceived":434251107,"udpDatagramsSent":7747582,"udpDatagramsReceived":2582359},
+    "deltaPercent": {"serverCpu":-12.2137,"publicWorldStopwatchTicks":-63.9246,"scheduleAttempts":-95.5490,"udpPayloadSent":0.4146,"udpPayloadReceived":-0.3962},
+    "interpretation": "The readiness bookkeeping did not impose an active-work regression; dense semantic output remained comparable while CPU and scheduling traversal fell."
+  },
+  "mixedChaosThirtyMinuteSoak": {
+    "seed": 400402,
+    "bots": 50,
+    "warmupSeconds": 60,
+    "measuredMilliseconds": 1800231,
+    "authorityTicks": 108016,
+    "server": {"processCpuMilliseconds":834470,"cpuSecondsPerWallSecond":0.4635349575,"processWorkingSetHighWaterBytes":248799232,"managedHeapHighWaterBytes":93435520,"threadHighWater":12,"udpPayloadBytesSent":11838196452,"udpPayloadBytesReceived":2559962063,"udpDatagramsSent":55656653,"udpDatagramsReceived":12296007},
+    "replicationReadiness": {"drivePasses":5400449,"cleanPasses":637,"dirtyCommits":5399762,"emptyCommits":637,"membershipsExamined":448412301,"dueWorkDequeued":46342919,"deliveryDebtRequeues":45445281,"transientDeferralRequeues":24569,"sourceGapRefreshes":49,"pendingWorkAtMeasurementEnd":850,"deliveries":45445281},
+    "sessions": {"applicationLifetimes":51,"successfulReconnects":1,"freshApplicationContentProofLifetimes":51,"cleanRetirement":true,"serverParticipantsAfterShutdown":0,"serverSessionsAfterShutdown":0},
+    "actions": [
+      {"action":"Movement","generated":53761,"admitted":53761,"submitted":53761,"completed":53761,"accepted":53761,"rejected":0,"unavailable":0},
+      {"action":"Jump","generated":17995,"admitted":17995,"submitted":17995,"completed":17995,"accepted":14252,"rejected":3743,"unavailable":0},
+      {"action":"Interaction","generated":37673,"admitted":37654,"submitted":37654,"completed":37654,"accepted":221,"rejected":37433,"unavailable":19},
+      {"action":"Primary","generated":18140,"admitted":18140,"submitted":18140,"completed":18140,"accepted":1,"rejected":18139,"unavailable":0},
+      {"action":"UiOpen","generated":2,"admitted":2,"submitted":2,"completed":2,"accepted":2,"rejected":0,"unavailable":0},
+      {"action":"ReleaseOrStop","generated":78937,"admitted":78937,"submitted":78937,"completed":78937,"accepted":78937,"rejected":0,"unavailable":0}
+    ],
+    "allActions": {"capacityRejected":0,"rateLimited":0,"pendingUnsent":0,"pendingCompletion":0,"unexplained":0,"conserved":true,"terminal":true},
+    "otherCoverage": {"localChatSubmitted":1,"globalChatSubmitted":17683,"swordPickup":true,"swordEquip":true,"swordDrop":true},
+    "botMeasuredWindow": {"pumpSamples":618732,"pumpIntervalP50P95P99MaxMilliseconds":[2.3,6.35,7.1,16.681116],"pumpDurationP50P95P99MaxMilliseconds":[1.25,5.3,6.05,15.636747],"processCpuMilliseconds":1134850,"workingSetHighWaterBytes":995020800,"managedHeapHighWaterBytes":940700344,"allocatedBytes":4414749352,"gcGen0Gen1Gen2":[87,27,0],"threadHighWater":13},
+    "result": "PASS: no unexplained action, wake loss, stale proof resurrection, capacity failure, unexpected rate limit, terminal debt, or retirement leak. Source-gap refreshes recovered conservatively under churn."
+  },
+  "fiveMinuteExportedMixedCanary": {
+    "command": "dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj -c Release -- --pf4a-only --pf4a-native-warmup-seconds=60 --pf4a-native-measurement-seconds=300 --pf4a-native-evidence-output=/tmp/ultrasim-pf4a-native-5m",
+    "seed": 130363,
+    "bots": 8,
+    "actualExportedOnlineClients": 2,
+    "warmupSeconds": 60,
+    "measuredMilliseconds": 300024,
+    "server": {"authorityTicks":18004,"cpuSecondsPerWallSecond":0.0714942805,"processCpuMilliseconds":21450,"workingSetHighWaterBytes":218984448,"connectionsStartEnd":[10,10],"connectionLifetimes":11,"udpPayloadBytesSent":103221451,"udpPayloadBytesReceived":32968393,"cleanRetirement":true},
+    "bots": {"applicationLifetimes":9,"successfulReconnects":1,"freshProofLifetimes":9,"movementAccepted":1535,"jumpAcceptedRejected":[377,101],"allActionsConserved":true,"unexplained":0,"pumpIntervalP50P95P99MaxMilliseconds":[1.2,1.4,1.5,15.611873],"processCpuMilliseconds":40100,"workingSetHighWaterBytes":283897856,"cleanRetirement":true},
+    "alice": {"body":"X","headlessExport":true,"frames":43505,"frameP95Microseconds":2271,"worldApplies":42607,"actorRootsHighWater":11,"renderedChunksHighWater":9,"processCpuMilliseconds":86870,"workingSetHighWaterBytes":335929344,"healthy":true},
+    "bob": {"body":"Y","headlessExport":true,"frames":43505,"frameP95Microseconds":2344,"worldApplies":42612,"actorRootsHighWater":11,"renderedChunksHighWater":9,"processCpuMilliseconds":89460,"workingSetHighWaterBytes":336596992,"healthy":true},
+    "result": "PASS: both actual exported Online products retained actors, nameplates, overhead Chat, UI, chunks, content-backed visuals, and clean retirement beside active bots."
+  },
+  "benchmarkControls": {
+    "networkSecureProtocol": {
+      "workload": "network-n0.3-secure-reliable-protocol-v1",
+      "warmups": 4,
+      "iterations": 25,
+      "operationsPerIteration": 10000,
+      "beforeMeanNanoseconds": {"unreliable32":1997.924148,"reliableControl32":3633.415964,"reliableBulk4096":9105.399520},
+      "afterMeanNanoseconds": {"unreliable32":2012.716384,"reliableControl32":3709.378660,"reliableBulk4096":9397.693600},
+      "meanDeltaPercent": {"unreliable32":0.7404,"reliableControl32":2.0907,"reliableBulk4096":3.2101},
+      "warmedManagedAllocationBytes": 0,
+      "interpretation": "PF4A does not touch the secure packet path; one 25-iteration pair does not distinguish these small deltas from host noise. All scenarios retain the same fingerprint/checksum and zero allocation."
+    },
+    "gameChunkPublicationMicro": {
+      "stableWorldBeforeAfterP95Microseconds": [0.09,0.09],
+      "stableWorldBeforeAfterP99Microseconds": [0.14,0.09],
+      "activeTownBeforeAfterP95Microseconds": [414.856,412.326],
+      "activeTownBeforeAfterP99Microseconds": [428.866,422.355],
+      "recordsMaterializedBeforeAfter": [14934,14934],
+      "encodedPayloadBytesBeforeAfter": [4350088,4350088],
+      "warmedManagedAllocationBytes": 0,
+      "semanticDigestsUnchanged": true
+    },
+    "n1WholeFlow": {
+      "status": "PREEXISTING_BENCHMARK_DEBT",
+      "finding": "The maintained N1 benchmark project does not compile at the accepted PF4A base because it still references ProtocolLoopback and SharedUdpProtocolHost/Session types removed during the earlier Network packaging split.",
+      "pf4aDisposition": "Not repaired or used as evidence because this debt predates PF4A and the production/focused test paths are accepted."
+    }
+  },
+  "matchedDeltaProofTraffic": {
+    "moving": {
+      "before": {"delta120Messages":10202716,"delta120ApplicationBytes":1493117257,"delta120FrameBytes":1727779725,"proof130Messages":1804143,"proof130ApplicationBytes":377595075,"proof130FrameBytes":419090364},
+      "after": {"delta120Messages":10067050,"delta120ApplicationBytes":1476375254,"delta120FrameBytes":1707917404,"proof130Messages":1792918,"proof130ApplicationBytes":372795006,"proof130FrameBytes":414032120}
+    },
+    "crowd": {
+      "before": {"delta120Messages":6462013,"delta120ApplicationBytes":1218807158,"delta120FrameBytes":1367433457,"proof130Messages":1799825,"proof130ApplicationBytes":250308867,"proof130FrameBytes":291704842},
+      "after": {"delta120Messages":6430236,"delta120ApplicationBytes":1222915335,"delta120FrameBytes":1370810763,"proof130Messages":1793681,"proof130ApplicationBytes":249124001,"proof130FrameBytes":290378664}
+    },
+    "thirtyMinuteSoak": {"delta120Messages":45443103,"delta120ApplicationBytes":7579068484,"delta120FrameBytes":8624259853,"proof130Messages":5447979,"proof130ApplicationBytes":1637779269,"proof130FrameBytes":1763082786},
+    "interpretation": "PF4A preserves message 120 production and message 130 application-proof policy. Small matched active-run differences follow real wall-clock movement/fanout traces, not an intentional wire optimization."
+  },
+  "optimizationDecision": {
+    "decision": "ACCEPTED",
+    "reason": "The clean path eliminates all 145.9M ten-minute no-op schedule attempts, removes 13.7B encoding/scheduling stopwatch ticks, reduces complete quiet server CPU by about 16.4-16.5%, preserves keepalive-only wire and all semantic wake/recovery gates, and improves rather than regresses the measured Moving/Crowd active controls.",
+    "scope": "Avoid provably unnecessary per-recipient ChunkPublication traversal only."
+  },
+  "pf4bRecommendation": {
+    "status": "NEXT_NOT_IMPLEMENTED",
+    "task": "Jointly analyze Chunk Delta 120 production/delivery and Chunk Applied Proof 130 acknowledgement policy.",
+    "questions": [
+      "Which delta messages carry new semantic truth versus redundant resend?",
+      "How many per-recipient revisions are produced, applied, and proved?",
+      "Can latest-state changes coalesce before semantic publication without delaying required current truth?",
+      "Can multiple independently meaningful applied cursors be acknowledged compactly without weakening SENT != KNOWN?",
+      "How do Immediate/Near/Far cadence policies affect both directions?",
+      "Do proposed changes retain exact loss, reordering, reconnect, history-gap and recovery behavior?"
+    ]
+  },
+  "verification": {
+    "gameReplicationTests": "PASS 140",
+    "networkApplicationTests": "PASS",
+    "clientTests": "PASS 30",
+    "networkBotTests": "PASS 16",
+    "focusedPf4aQuietAndActualExport": "PASS",
+    "canonicalRelease": "PENDING_CLOSURE_COMMIT",
+    "worktreeCleanAfterCommit": "PENDING_CLOSURE_COMMIT",
+    "pf4bClosed": false,
+    "pf5Closed": false
+  }
+}

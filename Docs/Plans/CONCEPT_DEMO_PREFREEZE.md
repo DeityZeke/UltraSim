@@ -6,7 +6,8 @@ first-class wire accounting plus quiet/moving/crowd characterization. PF2.5 now 
 current product's replication ownership and completes PF3 observability without changing policy;
 PF3 now closes render/input/submission/authority/Network clock separation, authenticated bounded
 performance policy, and real authority-side input-rate enforcement. PF4 measured optimization is
-next.
+now active: PF4A closes evidence-conserving bot action outcomes and quiet
+`ChunkPublication` work suppression; PF4B Delta/Applied-Proof analysis is next.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1699,7 +1700,38 @@ Close when:
 - server enforces maximum input rate;
 - mismatched authority/Network/input/render rates pass semantic correctness.
 
-## PF4 — measured bandwidth/CPU optimization
+## PF4A — evidence integrity and quiet replication work
+
+**Status: CLOSED** at `4427d65972345ae68e3af00bb1a734d449207649` for the product
+implementation. PF4A preserves `ChunkPublication` as the sole current-game dynamic-public owner,
+but each remote application now maintains one bounded recipient readiness scheduler. An authority
+commit, recipient-interest change, retained delivery debt, transport/capacity deferral, history
+gap, source replacement, or cadence-due item can make work ready. When none does, the per-tick path
+is an owner-local O(1) check and does not traverse every subscribed chunk.
+
+The matched 50-client quiet result reduced `ChunkPublication` schedule attempts from roughly
+243,000/s to zero, kept wire traffic at the keepalive floor, reduced measured PublicWorld stage
+ticks by 93.2%, and reduced server CPU/core by 16.5% across three five-minute pairs. Ten-minute
+Moving and Crowd controls also improved server CPU while retaining comparable semantic delivery
+and message 120/130 traffic. The 30-minute mixed-chaos and five-minute 8-bot + 2-exported-Online
+canaries retained exact wake/recovery, fresh-session, presentation, and clean-retirement behavior.
+
+PF4A also adds schema-v6 action accounting to `Tools/NetworkBots`. Generated work now conserves
+through scheduler admission/non-admission, submission/coalescing, semantic completion, and final
+accepted/rejected/rate-limited/retired/pending outcomes. The PF3 mismatch soak's 2,599 unclassified
+Jump observations were repeated held-input observations which produced no new scheduler edge, not
+lost Game commands. The immutable PF3 artifact remains unchanged; its explicit correction and
+PF4A measurements are recorded separately under `_Benchmarks/Baselines`.
+
+## PF4B — Delta 120 / Applied Proof 130 optimization
+
+**Status: NEXT.** Jointly measure new truth versus redundant resend, latest-state coalescing, and
+compact proof acknowledgement without weakening `SENT != KNOWN`. Loss, reordering, reconnect,
+history recovery, and Immediate/Near/Far cadence behavior are mandatory controls. Do not infer
+permission to change AOI, ownership, public cadence, aggregation, compression, or wire identity
+from PF4A.
+
+## PF4 — measured bandwidth/CPU optimization campaign
 
 Evaluate and accept only evidence-backed changes such as:
 
@@ -1860,19 +1892,21 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 13. Decouple render FPS from input submission cadence. **CLOSED — PF3**
 14. Define/advertise/enforce the bounded Server Performance Profile. **CLOSED — PF3**
 15. Run mismatched-cadence correctness matrix. **CLOSED — PF3**
-16. Evaluate input/owner/public cadence reductions. **NEXT — PF4**
-17. Evaluate unreliable frame aggregation.
-18. Measure dense vs distributed AOI/fanout.
-19. Evaluate selective compression only where payload shape justifies it.
-20. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-21. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-22. Run mixed headless + exported Godot clients.
-23. Run external human Concept Demo validation.
-24. Choose/document the default deployment-performance policy.
-25. Record decisive performance/bandwidth/failure evidence.
-26. Full exact-tree verifier and export closure.
-27. Freeze/tag the Concept Demo baseline.
-28. Begin the separate extraction/genericization/ecosystem roadmap.
+16. Reconcile PF3 action accounting and suppress provably quiet publication work. **CLOSED — PF4A**
+17. Jointly evaluate Chunk Delta 120 and Chunk Applied Proof 130. **NEXT — PF4B**
+18. Evaluate input/owner/public cadence reductions only from matched evidence.
+19. Evaluate unreliable frame aggregation.
+20. Measure dense vs distributed AOI/fanout.
+21. Evaluate selective compression only where payload shape justifies it.
+22. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+23. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+24. Run mixed headless + exported Godot clients.
+25. Run external human Concept Demo validation.
+26. Choose/document the default deployment-performance policy.
+27. Record decisive performance/bandwidth/failure evidence.
+28. Full exact-tree verifier and export closure.
+29. Freeze/tag the Concept Demo baseline.
+30. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

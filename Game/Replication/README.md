@@ -32,6 +32,13 @@ PF2.5 later audits that decision against every real current-game consumer and re
 single `ChunkPublication` owner through Concept Demo freeze. The complete current routing and the
 separate requirements for fixed multi-owner composition versus runtime transfer live in
 [`PF2_5_REPLICATION_RECONCILIATION.md`](../../Docs/Plans/PF2_5_REPLICATION_RECONCILIATION.md).
+PF4A retains that owner and every accepted cadence/AOI/proof contract while replacing the
+production remote application's unconditional per-chunk polling with one bounded recipient
+readiness scheduler. Empty source commits take an O(1) clean path; dirty source keys,
+recipient-interest changes, retained delivery/proof debt, transport/capacity deferral,
+cadence-due work, history gaps, recovery, and source replacement wake the existing exact delivery
+machinery. Permanent matched measurements and wake/conservation evidence are recorded in the
+PF4A baseline under `_Benchmarks/Baselines`.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -442,6 +449,14 @@ set. Exceeding the budget executes the unchanged exact query.
 Remote delivery accepts scheduler work by `SpatialChunkKey`; sorted recipient
 array positions remain private ephemeral storage. The work then uses the accepted
 N1.1-N1.3 codec, lane, delivery-ticket, snapshot, and proof machinery unchanged.
+
+PF4A composes this scheduler in every real remote playable application. Each application has one
+recipient and at most `MaximumSubscriptions` retained memberships. It atomically observes the
+authoritative source commit and controlled-player anchor, applies exact interest changes, and then
+exits immediately when `PendingWorkCount` is zero. Ready keys alone enter the existing
+`TrySchedule` path. A requeued delivery is marked examined for the current cadence pass so it
+cannot circulate repeatedly in one authority tick. Diagnostic-window reset clears counters only;
+it never clears source lineage, membership, or pending semantic debt.
 
 This is an implementation checkpoint, not N0 replacement. The first 256-recipient
 semantic census makes shared clean/dirty scheduling cheap, but the broad recipient

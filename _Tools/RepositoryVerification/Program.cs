@@ -200,6 +200,7 @@ if (options.Pf4aOnly)
             command.Add("-p:UltraSimNetworkFlavor=ClientOnly");
         Run(root, "dotnet", command);
     }
+    VerifyPf4aQuietReadiness(root, options.Configuration);
     string godot = ResolveGodot(options.GodotPath);
     ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
     try
@@ -219,6 +220,95 @@ if (options.Pf4aOnly)
     }
     Console.WriteLine("PASS PF4A focused verification");
     return 0;
+}
+
+static void VerifyPf4aQuietReadiness(string root, string configuration)
+{
+    Run(root, "dotnet",
+    [
+        "build", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ServerOnly",
+    ]);
+    Run(root, "dotnet",
+    [
+        "build", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ClientOnly",
+    ]);
+
+    string parent = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf4a-quiet-readiness");
+    if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+    Directory.CreateDirectory(parent);
+    string output = Path.Combine(parent, "run");
+    string cache = Path.Combine(parent, "cache");
+    try
+    {
+        _ = RunCaptured(
+            root,
+            Path.Combine(root, "Tools", "NetworkBots", "run-pf4a-baseline.sh"),
+            ["quiet", "10s", output, "8", "400401", "5s", cache],
+            180_000);
+
+        using JsonDocument botDocument = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(output, "bot-summary.json")));
+        JsonElement bot = botDocument.RootElement;
+        if (!bot.GetProperty("passed").GetBoolean() ||
+            bot.GetProperty("checkpoint").GetString() != "PF4A" ||
+            bot.GetProperty("schemaVersion").GetInt32() != 6 ||
+            !bot.GetProperty("cleanRetirement").GetBoolean() ||
+            bot.GetProperty("actionOutcomes").EnumerateArray().Any(static outcome =>
+                !outcome.GetProperty("conserved").GetBoolean() ||
+                !outcome.GetProperty("terminal").GetBoolean() ||
+                outcome.GetProperty("unexplained").GetUInt64() != 0))
+            throw new InvalidOperationException(
+                "The PF4A quiet bot lifetime did not conserve and retire cleanly.");
+
+        using JsonDocument accountingDocument = JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(output, "accounting-summary.json")));
+        JsonElement accounting = accountingDocument.RootElement;
+        if (accounting.GetProperty("ParticipantsAtStart").GetInt32() != 8 ||
+            accounting.GetProperty("ParticipantsAtEnd").GetInt32() != 8 ||
+            accounting.GetProperty("RemoteApplications").GetArrayLength() != 8)
+            throw new InvalidOperationException(
+                "The PF4A quiet accounting window did not retain all eight participants.");
+
+        ulong drivePasses = 0;
+        ulong emptyCommits = 0;
+        foreach (JsonElement application in
+                 accounting.GetProperty("RemoteApplications").EnumerateArray())
+        {
+            JsonElement timing = application.GetProperty("Timing");
+            JsonElement readiness = timing.GetProperty("ReplicationReadiness");
+            JsonElement scheduler = readiness.GetProperty("Scheduler");
+            JsonElement work = timing.GetProperty("Replication").GetProperty("Work");
+            ulong applicationDrivePasses = readiness.GetProperty("DrivePasses").GetUInt64();
+            ulong applicationEmptyCommits = scheduler.GetProperty("EmptyCommitsObserved").GetUInt64();
+            if (applicationDrivePasses == 0 ||
+                readiness.GetProperty("CleanPasses").GetUInt64() != applicationDrivePasses ||
+                scheduler.GetProperty("CommitsObserved").GetUInt64() != applicationEmptyCommits ||
+                scheduler.GetProperty("DirtyCommitsObserved").GetUInt64() != 0 ||
+                scheduler.GetProperty("PendingMembershipsExamined").GetUInt64() != 0 ||
+                scheduler.GetProperty("DueWorkDequeued").GetUInt64() != 0 ||
+                scheduler.GetProperty("PendingWorkCount").GetInt32() != 0 ||
+                work.GetProperty("ScheduleAttempts").GetUInt64() != 0 ||
+                work.GetProperty("DeliveriesQueued").GetUInt64() != 0)
+                throw new InvalidOperationException(
+                    "A PF4A quiet recipient entered ChunkPublication scheduling work.");
+            drivePasses = checked(drivePasses + applicationDrivePasses);
+            emptyCommits = checked(emptyCommits + applicationEmptyCommits);
+        }
+        if (drivePasses == 0 || emptyCommits != drivePasses)
+            throw new InvalidOperationException(
+                "PF4A quiet readiness did not observe one empty source commit per drive pass.");
+        Console.WriteLine(
+            $"PASS PF4A_QuietReadiness recipients=8 passes={drivePasses} " +
+            "examined=0 dequeued=0 deliveries=0");
+    }
+    finally
+    {
+        if (Directory.Exists(parent)) Directory.Delete(parent, recursive: true);
+    }
 }
 
 string[] configurations = options.AllConfigurations ? ["Debug", "Release"] : [options.Configuration];

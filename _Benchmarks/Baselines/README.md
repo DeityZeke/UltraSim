@@ -26,6 +26,16 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4a-quiet-replication-work-2026-09-12.json` — matched repeated and
+  ten-minute Quiet-50 before/after evidence for the bounded per-recipient readiness gate,
+  Moving/Crowd active controls, a 30-minute mixed-chaos soak, an actual 8-bot + 2-exported-Online
+  five-minute canary, action-outcome conservation, unchanged wire/cadence/AOI ownership, and the
+  measured Delta-120/Applied-Proof-130 input to PF4B;
+- `concept-demo-pf3-action-accounting-correction-2026-09-12.json` — immutable amendment to
+  PF3's mismatch-soak interpretation. It retains the original counters, accounts for the 2,599
+  Jump remainder as held observations that generated no new scheduler edge, records the analogous
+  legacy Interaction/Primary gaps, and points to schema-v6 mechanical conservation. It does not
+  rewrite the accepted PF3 artifact or claim product command loss;
 - `concept-demo-pf3-cadence-performance-policy-2026-09-12.json` — authenticated immutable
   application-scoped performance policy/proof, shared engine-neutral input scheduling, explicit
   authority rate enforcement, visible/headless exported render-clock controls, 20/30/60 Hz
