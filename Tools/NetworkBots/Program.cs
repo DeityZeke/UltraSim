@@ -180,8 +180,10 @@ internal sealed class BotHarness : IDisposable
                     }
                 }
                 _admissionCompleted = Stopwatch.GetTimestamp();
-                _scenarioStarted = _admissionCompleted;
-                if (_options.IsMixedChaos) SelectSwordContenders();
+                if (_options.IsMixedChaos && !WaitForSwordContenders())
+                    return Finish(false,
+                        "No bot could locate the sword through its ordinary public world state.");
+                _scenarioStarted = Stopwatch.GetTimestamp();
                 if (_options.Scenario == "single-hot")
                 {
                     // Hold most recipient anchors still and make one ordinary actor the sole hot
@@ -526,7 +528,21 @@ internal sealed class BotHarness : IDisposable
         }
     }
 
-    private void SelectSwordContenders()
+    private bool WaitForSwordContenders()
+    {
+        long deadline = BotMonotonicClock.AddMilliseconds(Stopwatch.GetTimestamp(), 10_000);
+        do
+        {
+            if (TrySelectSwordContenders()) return true;
+            PumpOnce(allowNewChaos: false);
+            if (_bots.Any(static bot => bot.IsFaulted)) return false;
+            Thread.Sleep(1);
+        }
+        while (Stopwatch.GetTimestamp() < deadline);
+        return TrySelectSwordContenders();
+    }
+
+    private bool TrySelectSwordContenders()
     {
         (BotClient Bot, double DistanceSquared)[] candidates = _bots
             .Select(static bot => bot.TryMeasurePublicDistanceSquared(
@@ -537,11 +553,10 @@ internal sealed class BotHarness : IDisposable
             .OrderBy(static candidate => candidate.distanceSquared)
             .ThenBy(static candidate => candidate.bot.Id)
             .ToArray();
-        if (candidates.Length == 0)
-            throw new InvalidOperationException(
-                "No bot could locate the sword through its ordinary public world state.");
+        if (candidates.Length == 0) return false;
         for (int index = 0; index < Math.Min(2, candidates.Length); index++)
             candidates[index].Bot.SetSwordContender();
+        return true;
     }
 
     private BotRunSummary Finish(bool requestedPass, string? detail)
