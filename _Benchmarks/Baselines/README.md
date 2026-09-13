@@ -26,6 +26,10 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4c-r1-singleton-mtu-repair-2026-09-13.json` — exact generated
+  1,371/1,372/1,373/1,374/1,405-byte singleton boundary, transactional first-admission refusal,
+  successful retry/proof/cursor convergence, supported Absence-121 boundary audit, repaired
+  candidate lineage, focused export/UDP evidence, and full Release verification before PF4D;
 - `concept-demo-pf4c-selected-chunk-bundling-cadence-2026-09-13.json` — exact-base and
   implementation A/B/C/D Moving/Crowd matrix for standalone/message-129 and 1/2/4 versus 1/3/6,
   single-hot/multi-hot/mixed-chaos controls, a 30-minute soak, actual 8-bot + 2-exported-Online

@@ -69,7 +69,8 @@ optimization: exact bot action-outcome conservation plus an O(1) clean-recipient
 which eliminates quiet `ChunkPublication` traversal without changing ownership, cadence, AOI, or
 wire semantics. PF4B closes the exact Delta-120/Applied-Proof-130 knowledge census without a
 speculative proof delay, and PF4C closes beneficial selected-profile message-129 bundling while
-retaining the production 1/2/4 Immediate/Near/Far cadence. Later optimization, larger failure
+retaining the production 1/2/4 Immediate/Near/Far cadence. PF4C-R1 closes the exact singleton MTU
+boundary so optional bundling can never reject a fitting canonical 120/121 message. Later optimization, larger failure
 characterization, and external-human validation remain open. A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1764,6 +1765,7 @@ then close:
     PF4A PF3 evidence integrity + quiet publication-work suppression   CLOSED
     PF4B Delta 120 / Applied Proof 130 analysis                         CLOSED (outcome C)
     PF4C selected Game bundling / public-tier cadence                   CLOSED (bundling; cadence retained)
+    PF4C-R1 singleton MTU boundary repair                               CLOSED
     PF4D unreliable frame aggregation                                  NEXT
 ```
 

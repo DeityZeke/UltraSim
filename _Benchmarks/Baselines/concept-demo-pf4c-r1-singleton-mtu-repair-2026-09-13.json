@@ -1,0 +1,59 @@
+{
+  "checkpoint": "PF4C-R1",
+  "capturedUtc": "2026-09-13",
+  "status": "CLOSED — singleton MTU admission repaired before PF4D",
+  "commits": {
+    "reportedStartingHead": "7b134b8ae759dfef0bcd9f4a6fa96259b373c7a0",
+    "acceptedPf4cClosure": "a31f09da093993cf302ef1ecceb9e4d85e7cd4ab",
+    "minimalProductionRepair": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+    "pf1GateConvergenceHardening": "b0efa1c6fdae513dd51105e6fd78661e6fe17e6e",
+    "previousFeatureCompleteCandidate": "5eec694692df8f85be2d7db215b2642a9ec9061b",
+    "repairedFeatureCompleteCandidate": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+    "candidateLineageChanged": true,
+    "candidateReason": "PF4C-R1 independently reproduced and repaired a product correctness defect in optional message-129 representation admission. The later PF1 harness convergence wait changes only deterministic acceptance timing and does not advance the product candidate."
+  },
+  "reproduction": {
+    "generatedDelta120Bytes": 1372,
+    "hypotheticalSingleEntryMessage129Bytes": 1374,
+    "defect": "A peer limit which admitted the canonical standalone Delta 120 could reject it solely because the optional one-entry message-129 representation was two bytes larger.",
+    "independentlyReproducedBeforeRepair": true
+  },
+  "boundaryMatrix": [
+    {"maximumApplicationBytes":1371,"status":"PayloadTooLarge","messageId":0,"knownRevisionBefore":1,"knownRevisionAfter":1,"nextDeliveryBefore":1,"nextDeliveryAfter":1,"outstandingAfter":0,"proofs":0},
+    {"maximumApplicationBytes":1372,"status":"QueuedDelta","messageId":120,"encodedBytes":1372,"knownRevisionBefore":1,"knownRevisionAfter":2,"nextDeliveryBefore":1,"nextDeliveryAfter":2,"outstandingAfterProof":0,"proofs":1},
+    {"maximumApplicationBytes":1373,"status":"QueuedDelta","messageId":120,"encodedBytes":1372,"knownRevisionBefore":1,"knownRevisionAfter":2,"nextDeliveryBefore":1,"nextDeliveryAfter":2,"outstandingAfterProof":0,"proofs":1},
+    {"maximumApplicationBytes":1374,"status":"QueuedDelta","messageId":120,"encodedBytes":1372,"knownRevisionBefore":1,"knownRevisionAfter":2,"nextDeliveryBefore":1,"nextDeliveryAfter":2,"outstandingAfterProof":0,"proofs":1},
+    {"maximumApplicationBytes":1405,"status":"QueuedDelta","messageId":120,"encodedBytes":1372,"knownRevisionBefore":1,"knownRevisionAfter":2,"nextDeliveryBefore":1,"nextDeliveryAfter":2,"outstandingAfterProof":0,"proofs":1}
+  ],
+  "transactionalAdmission": {
+    "case": "1372-byte limit with one independent Network queue slot deliberately occupied",
+    "firstAttempt": "TransportNotAccepting",
+    "firstAttemptMessages": 0,
+    "firstAttemptOutstanding": 0,
+    "firstAttemptNextDelivery": 1,
+    "firstAttemptKnownRevision": 1,
+    "retryAfterCapacityRelease": "canonical standalone message 120 delivered and positively proved",
+    "retryOutstandingAfterProof": 0,
+    "retryKnownRevision": 2
+  },
+  "absenceAudit": {
+    "standalone121Bytes": 48,
+    "hypotheticalSingleEntry129Bytes": 50,
+    "minimumSupportedApplicationBytes": 189,
+    "equivalentSupportedBoundaryPossible": false,
+    "reason": "Every connection capable of completing the current handshake admits both representations; no artificial below-handshake peer was added."
+  },
+  "repairContract": {
+    "rule": "Message 129 is an optional representation candidate, never an admission prerequisite for a canonical standalone message.",
+    "singleton": "A fitting first entry is retained and emitted through the existing canonical standalone 120/121 path.",
+    "multiEntry": "Once an earlier entry exists, an entry which would exceed the bundle limit remains pending for the next service pass.",
+    "unchanged": ["message 129 codec", "message 120/121 codecs", "protocol identity", "wire framing", "AOI", "cadence 1/2/4", "participant bound"]
+  },
+  "verification": {
+    "gameReplicationTests": "PASS — 147 checks including exact 1371/1372/1373/1374/1405 matrix",
+    "pf4cFocused": "PASS — actual Online export, default-1405 50-client selected-profile UDP run, and 8-bot + 2-exported-Online canary",
+    "pf4cFocusedDefault1405": {"bundles":48887,"bundleEntries":280810,"gameMessagesSaved":231923,"knowledgeAdvancements":282375,"contradictions":0},
+    "pf1FocusedAfterGateHardening": "PASS — 8 bots + 2 actual exported Online clients; sword pickup/equip/drop 1/1/1; joins/leaves 11/11; clean retirement",
+    "fullCanonicalRelease": "PASS after deterministic PF1 public-sword convergence hardening"
+  }
+}
