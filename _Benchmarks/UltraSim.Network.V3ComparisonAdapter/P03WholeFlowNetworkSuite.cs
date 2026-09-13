@@ -193,6 +193,16 @@ internal static class P03WholeFlowNetworkSuite
 
         var rows = new List<P03WholeFlowRow>();
         int executionOrder = 0;
+        int primePopulation = Math.Min(populations[0], 32);
+        foreach ((string curveId, P03NetworkProfile profile,
+                     Func<int, P03NetworkWorkload> createWorkload) in curves)
+        {
+            if (selectedCurves is not null && !selectedCurves.Contains(curveId)) continue;
+            Console.WriteLine($"RECONCILE {curveId}: process-level tiering prime...");
+            using var prime = new P03WholeFlowHarness(
+                createWorkload(primePopulation), profile, frameCap, stageTimingEnabled);
+            _ = prime.Run(Math.Max(30, warmup), 10);
+        }
         foreach ((string curveId, P03NetworkProfile profile,
                      Func<int, P03NetworkWorkload> createWorkload) in curves)
         {
@@ -244,7 +254,9 @@ internal static class P03WholeFlowNetworkSuite
                 $"All current rows use cap {frameCap}, selected 1/2/4 cadence, {warmup} warmup " +
                 $"and {ticks} measured ticks. Legacy ServerRole matches P0.3J when probes are " +
                 "off; the inclusive Network+replication clock is retained separately. " +
-                $"Stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}.") ,
+                $"Stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. Each " +
+                $"curve was process-tiering primed at {primePopulation} recipients outside all " +
+                "retained rows.") ,
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
         File.WriteAllText(output, JsonSerializer.Serialize(report,
