@@ -25,6 +25,11 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--pf4e-r1-rated-reconciliation", StringComparer.Ordinal))
+        {
+            RunRatedReconciliation(args);
+            return;
+        }
         if (args.Contains("--p03h-rated-server-role-sweep", StringComparer.Ordinal))
         {
             RunRatedServerRoleSweep(args);
@@ -133,6 +138,118 @@ internal static class P03WholeFlowNetworkSuite
             : overrideTickCadence
                 ? workload.WithTickDuration(tickMilliseconds)
                 : workload;
+    }
+
+    private static void RunRatedReconciliation(string[] args)
+    {
+        int warmup = ReadInt(args, "--warmup", 30);
+        int ticks = ReadInt(args, "--ticks", 270);
+        int tickMilliseconds = ReadInt(args, "--server-tick-milliseconds", 16);
+        int frameCap = ReadInt(args, "--rated-frame-cap", 2);
+        double stopMilliseconds = ReadDouble(args, "--server-role-stop-p95", 4d);
+        int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
+            [64, 96, 128, 192, 256, 384, 448, 512, 576, 640, 704, 768];
+        bool stopAfterFailure = !args.Contains("--retain-full-ladder", StringComparer.Ordinal);
+        bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/Baselines/network-pf4e-r1-rated-reconciliation-raw.json";
+        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
+            frameCap is not (1 or 2 or 4 or 8) || stopMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        var curves = new (string Id, P03NetworkProfile Profile,
+            Func<int, P03NetworkWorkload> Workload)[]
+        {
+            ("current-dirty-entity-dense", P03NetworkProfile.DirtyEntitySpatialFanout,
+                population => P03NetworkWorkload.Dense(population, 1_000)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("current-maintained-entity-sparse", P03NetworkProfile.MaintainedEntityRelation,
+                population => P03NetworkWorkload.Sparse(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("pf4e-existing-chunk-dense", P03NetworkProfile.ChunkPublication,
+                population => P03NetworkWorkload.ChunkExistingDense(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("chunk-unbatchable-single-dirty-chunk", P03NetworkProfile.ChunkPublication,
+                population => P03NetworkWorkload.ChunkUnbatchableDense(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("chunk-production-localized-multichunk", P03NetworkProfile.ChunkPublication,
+                population => P03NetworkWorkload.ChunkProductionDense(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+        };
+        string? requestedCurves = ReadText(args, "--curves");
+        HashSet<string>? selectedCurves = string.IsNullOrWhiteSpace(requestedCurves)
+            ? null
+            : requestedCurves.Split(',', StringSplitOptions.RemoveEmptyEntries |
+                    StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (selectedCurves is not null && selectedCurves.Any(id =>
+                !curves.Any(curve => curve.Id.Equals(id, StringComparison.OrdinalIgnoreCase))))
+            throw new ArgumentException("The reconciliation curve selection contains an unknown id.");
+
+        var rows = new List<P03WholeFlowRow>();
+        int executionOrder = 0;
+        foreach ((string curveId, P03NetworkProfile profile,
+                     Func<int, P03NetworkWorkload> createWorkload) in curves)
+        {
+            if (selectedCurves is not null && !selectedCurves.Contains(curveId)) continue;
+            bool retainedPass = false;
+            foreach (int population in populations)
+            {
+                P03NetworkWorkload workload = createWorkload(population);
+                Console.WriteLine($"RECONCILE {curveId}/{workload.Id} {profile} " +
+                    $"frames={frameCap}: constructing...");
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                using var harness = new P03WholeFlowHarness(
+                    workload, profile, frameCap, stageTimingEnabled);
+                P03WholeFlowRow row = harness.Run(warmup, ticks) with
+                {
+                    ExecutionOrder = executionOrder++,
+                    Curve = curveId,
+                };
+                rows.Add(row);
+                double legacy = row.Timing.ServerRole.P95;
+                Console.WriteLine($"RECONCILE {curveId}/{workload.Id}: legacy p95 " +
+                    $"{legacy:F3} ms, inclusive p95 " +
+                    $"{row.Timing.NetworkAndRemoteReplication.P95:F3} ms, publications " +
+                    $"{row.ProfileCounters.SuccessfulSemanticPublications:N0}, bundles " +
+                    $"{row.ProfileCounters.ChunkBundleMessages:N0}");
+                if (legacy <= stopMilliseconds) retainedPass = true;
+                else if (stopAfterFailure && retainedPass) break;
+            }
+        }
+
+        var report = new P03WholeFlowReport(
+            "ultrasim-network-pf4e-r1-rated-replication-scaling-reconciliation-v1",
+            DateTimeOffset.UtcNow,
+            ReadGitSha(),
+            Environment.Version.ToString(),
+            Environment.OSVersion.VersionString,
+            Environment.ProcessorCount,
+            Stopwatch.Frequency,
+            new P03WholeFlowScope(
+                "Current-code, real-loopback-UDP comparison of the historical DirtyEntity dense " +
+                "and MaintainedEntity sparse controls with three explicitly shaped selected " +
+                "ChunkPublication workloads. Every row includes authority mutation, Game " +
+                "schedule/codec/queue, client semantic apply, application proof, and convergence.",
+                "Cold construction, handshake, bootstrap, warmup, final convergence drain, and " +
+                "semantic validation are outside timed ticks. Production policy, participant " +
+                "limits, payload formats, cadence, AOI, proof, and reliability are unchanged.",
+                $"All current rows use cap {frameCap}, selected 1/2/4 cadence, {warmup} warmup " +
+                $"and {ticks} measured ticks. Legacy ServerRole matches P0.3J when probes are " +
+                "off; the inclusive Network+replication clock is retained separately. " +
+                $"Stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}.") ,
+            ExecutionSeed, warmup, ticks, rows.ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
     }
 
     private static void RunRatedServerRoleSweep(string[] args)
@@ -365,6 +482,19 @@ internal enum P03AoICadencePolicy : byte
     Selected124 = 3,
 }
 
+internal enum P03EntityLayout : byte
+{
+    GridFourMeters = 1,
+    TwentyEntitiesPerChunk = 2,
+}
+
+internal enum P03MutationPattern : byte
+{
+    Sequential = 1,
+    OneChunkGroup = 2,
+    EightChunkStripe = 3,
+}
+
 internal readonly record struct P03NetworkWorkload(
     string Id,
     int Recipients,
@@ -374,7 +504,9 @@ internal readonly record struct P03NetworkWorkload(
     GameInterestProfile EntityInterest,
     ChunkInterestProfile ChunkInterest,
     OfflineDirectChunkCadence ChunkCadence,
-    int TickDurationMilliseconds)
+    int TickDurationMilliseconds,
+    P03EntityLayout EntityLayout = P03EntityLayout.GridFourMeters,
+    P03MutationPattern MutationPattern = P03MutationPattern.Sequential)
 {
     internal static P03NetworkWorkload Dense(int recipients, int entities) => new(
         $"dense-{recipients}", recipients, entities, Math.Max(1, entities * 2 / 100), false,
@@ -388,6 +520,79 @@ internal readonly record struct P03NetworkWorkload(
             32, 48, 100, 2_000),
         new ChunkInterestProfile(7_500, 7_500, 23_500, 23_500, 39_500, 39_500),
         new OfflineDirectChunkCadence(1, 2, 3), 16);
+
+    internal static P03NetworkWorkload ChunkExistingDense(int recipients) =>
+        Dense(recipients, 1_000) with { Id = $"chunk-existing-dense-{recipients}" };
+
+    internal static P03NetworkWorkload ChunkUnbatchableDense(int recipients) =>
+        Dense(recipients, 1_000) with
+        {
+            Id = $"chunk-unbatchable-dense-{recipients}",
+            EntityLayout = P03EntityLayout.TwentyEntitiesPerChunk,
+            MutationPattern = P03MutationPattern.OneChunkGroup,
+        };
+
+    internal static P03NetworkWorkload ChunkProductionDense(int recipients) =>
+        Dense(recipients, 1_000) with
+        {
+            Id = $"chunk-production-dense-{recipients}",
+            EntityLayout = P03EntityLayout.TwentyEntitiesPerChunk,
+            MutationPattern = P03MutationPattern.EightChunkStripe,
+        };
+
+    internal void CopyDirtyEntityIndices(int tick, Span<int> destination)
+    {
+        if (destination.Length < DirtyEntitiesPerTick)
+            throw new ArgumentException("The dirty-entity destination is too small.",
+                nameof(destination));
+        Span<int> selected = destination[..DirtyEntitiesPerTick];
+        switch (MutationPattern)
+        {
+            case P03MutationPattern.Sequential:
+            {
+                int start = checked((tick - 1) * DirtyEntitiesPerTick % Entities);
+                for (int offset = 0; offset < selected.Length; offset++)
+                    selected[offset] = (start + offset) % Entities;
+                break;
+            }
+            case P03MutationPattern.OneChunkGroup:
+            {
+                int groupCount = Entities / DirtyEntitiesPerTick;
+                if (Entities % DirtyEntitiesPerTick != 0)
+                    throw new InvalidOperationException(
+                        "The one-chunk workload requires complete fixed-size groups.");
+                int start = ((tick - 1) % groupCount) * DirtyEntitiesPerTick;
+                for (int offset = 0; offset < selected.Length; offset++)
+                    selected[offset] = start + offset;
+                break;
+            }
+            case P03MutationPattern.EightChunkStripe:
+            {
+                const int chunksPerStripe = 8;
+                const int entitiesPerChunk = 20;
+                int chunkCount = Entities / entitiesPerChunk;
+                if (Entities % entitiesPerChunk != 0 || DirtyEntitiesPerTick != 20)
+                    throw new InvalidOperationException(
+                        "The production chunk workload requires 20 changes over complete 20-row chunks.");
+                int startChunk = checked((tick - 1) * chunksPerStripe % chunkCount);
+                for (int offset = 0; offset < selected.Length; offset++)
+                {
+                    int stripeChunk = offset % chunksPerStripe;
+                    int round = offset / chunksPerStripe;
+                    int chunk = (startChunk + stripeChunk) % chunkCount;
+                    int row = (tick + stripeChunk + round * chunksPerStripe) % entitiesPerChunk;
+                    selected[offset] = chunk * entitiesPerChunk + row;
+                }
+                break;
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(MutationPattern));
+        }
+        selected.Sort();
+        for (int index = 1; index < selected.Length; index++)
+            if (selected[index] == selected[index - 1])
+                throw new InvalidOperationException("The workload selected one entity twice.");
+    }
 
     internal P03NetworkWorkload WithTickDuration(int tickMilliseconds)
     {
@@ -551,6 +756,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
         long profileClientReserved = _adapter.GetClientReservedBytes();
         P03TransportSummary transport = P03TransportSummary.Delta(
             after, before, listenerAfter, listenerBefore, _frameCap);
+        P03NormalizedCost normalized = P03NormalizedCost.Calculate(
+            _workload.Recipients, ticks, _networkAndRemoteReplication, _serverRole,
+            transport, profile);
         return new P03WholeFlowRow(
             0, _workload.Id, _profile.ToString(), _frameCap,
             _workload.Recipients, _workload.Entities, _workload.DirtyEntitiesPerTick,
@@ -576,7 +784,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             profileServerReserved, profileClientReserved,
             hostSnapshot.KnownReservedBytes, hostSnapshot.KnownServerReservedBytes,
             hostSnapshot.KnownClientReservedBytes,
-            _adapter.IsConverged);
+            _adapter.IsConverged, "", normalized);
     }
 
     private void RunTick(int tick, bool measure)
@@ -622,10 +830,11 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private void Mutate(int tick)
     {
-        int start = checked((tick - 1) * _workload.DirtyEntitiesPerTick % _workload.Entities);
-        for (int offset = 0; offset < _workload.DirtyEntitiesPerTick; offset++)
+        Span<int> dirty = stackalloc int[_workload.DirtyEntitiesPerTick];
+        _workload.CopyDirtyEntityIndices(tick, dirty);
+        for (int offset = 0; offset < dirty.Length; offset++)
         {
-            int entity = (start + offset) % _workload.Entities;
+            int entity = dirty[offset];
             long dx = _workload.Id.StartsWith("sparse", StringComparison.Ordinal)
                 ? 10 + entity % 3
                 : ((tick + entity) & 1) == 0 ? 1 : -1;
@@ -745,7 +954,22 @@ internal sealed class P03WholeFlowHarness : IDisposable
 
     private void InitializePositions()
     {
-        if (_workload.Id.StartsWith("dense", StringComparison.Ordinal))
+        if (_workload.EntityLayout == P03EntityLayout.TwentyEntitiesPerChunk)
+        {
+            const int entitiesPerChunk = 20;
+            const int chunkWidth = 10;
+            for (int index = 0; index < _workload.Entities; index++)
+            {
+                int chunk = index / entitiesPerChunk;
+                int row = index % entitiesPerChunk;
+                _x[index] = checked((long)(chunk % chunkWidth) *
+                    GameWorldSpatialProfile.WorldChunkEdgeUnits + 1_000L + row % 5 * 2_500L);
+                _z[index] = checked((long)(chunk / chunkWidth) *
+                    GameWorldSpatialProfile.WorldChunkEdgeUnits + 1_000L + row / 5 * 2_500L);
+                _versions[index] = 1;
+            }
+        }
+        else if (!_workload.Id.StartsWith("sparse", StringComparison.Ordinal))
         {
             int width = checked((int)Math.Ceiling(Math.Sqrt(_workload.Entities)));
             for (int index = 0; index < _workload.Entities; index++)
@@ -776,6 +1000,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
     }
 
     internal static ParticipantId Participant(int index) => new(checked((ulong)index + 1));
+    internal static int MaximumPlaintextDatagramBytes =>
+        NetworkSecureDatagramFraming.MaximumPlaintextBytes(s_udp.MaximumDatagramBytes);
     internal static ReplicationEntityId ReplicationId(int index) => new(checked((uint)index), 1);
     internal static ReplicationSpatialPoint Point(long x, long z) =>
         new(checked((int)x), checked((int)z));
@@ -1043,6 +1269,16 @@ internal sealed class P03MaintainedRemoteAdapter : P03RemoteProfileAdapter
             value = checked(value + _clients[index].GetSnapshot().ReservedBytes);
         return value;
     }
+    internal override P03ProfileCounters GetCounters()
+    {
+        GameInterestSnapshot snapshot = _service.GetSnapshot();
+        return base.GetCounters() with
+        {
+            SuccessfulSemanticPublications = ScheduleSuccesses,
+            GameMessagesQueued = ScheduleSuccesses,
+            SemanticKnowledgeRows = checked((ulong)snapshot.RelationCount),
+        };
+    }
 
     internal override string DescribeState() => _service.GetSnapshot().ToString();
 
@@ -1250,6 +1486,16 @@ internal sealed class P03DirtyEntityRemoteAdapter : P03RemoteProfileAdapter
             value = checked(value + _clients[index].GetSnapshot().ReservedBytes);
         return value;
     }
+    internal override P03ProfileCounters GetCounters()
+    {
+        DirtyEntitySpatialFanoutSnapshot snapshot = _service.GetSnapshot();
+        return base.GetCounters() with
+        {
+            SuccessfulSemanticPublications = ScheduleSuccesses,
+            GameMessagesQueued = ScheduleSuccesses,
+            SemanticKnowledgeRows = checked((ulong)snapshot.SemanticKnowledgeRowCount),
+        };
+    }
     internal override string DescribeState() => _service.GetSnapshot().ToString();
     public override void Dispose() { }
 
@@ -1317,17 +1563,10 @@ internal abstract class P03ChunkRemoteAdapterBase : P03RemoteProfileAdapter
 
     protected void CommitMutation(int tick)
     {
-        int start = checked((tick - 1) * Workload.DirtyEntitiesPerTick % Workload.Entities);
-        int end = checked(start + Workload.DirtyEntitiesPerTick);
-        int wrapped = Math.Max(0, end - Workload.Entities);
-        int written = 0;
-        // ChunkPublicationStore deliberately requires entity-index canonical ordering. A rotating
-        // trace that wraps the entity array therefore emits the low interval before the high one.
-        for (int entity = 0; entity < wrapped; entity++) Changes[written++] = Present(entity);
-        for (int entity = start; entity < Math.Min(end, Workload.Entities); entity++)
-            Changes[written++] = Present(entity);
-        P03WholeFlowHarness.Require(written == Workload.DirtyEntitiesPerTick,
-            "Chunk publication trace did not form the requested canonical change set.");
+        Span<int> dirty = stackalloc int[Workload.DirtyEntitiesPerTick];
+        Workload.CopyDirtyEntityIndices(tick, dirty);
+        for (int index = 0; index < dirty.Length; index++)
+            Changes[index] = Present(dirty[index]);
         P03WholeFlowHarness.Require(Source.TryCommit(
             Changes.AsSpan(0, Workload.DirtyEntitiesPerTick), out _),
             "Chunk publication mutation failed.");
@@ -1570,6 +1809,17 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private readonly ChunkPublicationWork[] _dueWorks;
     private readonly RemoteChunkWorldStateScheduleStatus[] _dueStatuses;
     private readonly int[] _dueCounts;
+    private ulong _dueCandidates;
+    private ulong _simultaneouslyDueCandidates;
+    private ulong _multiDueRecipientPasses;
+    private ulong _bundleMessages;
+    private ulong _bundleEntries;
+    private ulong _gameMessagesQueued;
+    private ulong _applicationBytesQueued;
+    private ulong _capTwoPairOpportunities;
+    private ulong _snapshotOrRecoveryDeliveries;
+    private int _maximumDuePerRecipientPass;
+    private ChunkPublicationStoreSnapshot _sourceBaseline;
     private const int MaximumDuePerRecipient = 64;
 
     internal P03ChunkPublicationRemoteAdapter(P03NetworkWorkload workload,
@@ -1678,17 +1928,47 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         for (int recipient = 0; recipient < _servers.Length; recipient++)
         {
             int count = _dueCounts[recipient];
+            _dueCandidates += checked((ulong)count);
+            _maximumDuePerRecipientPass = Math.Max(_maximumDuePerRecipientPass, count);
+            if (count >= 2)
+            {
+                _multiDueRecipientPasses++;
+                _simultaneouslyDueCandidates += checked((ulong)count);
+            }
             int baseIndex = recipient * MaximumDuePerRecipient;
             int offset = 0;
             bool blocked = false;
+            int pendingFrameBytes = 0;
             while (offset < count && !blocked)
             {
                 int consumed = _servers[recipient].TryScheduleDueBundle(
                     _dueWorks.AsSpan(baseIndex + offset, count - offset), step,
-                    _dueStatuses.AsSpan(baseIndex + offset, count - offset), out _);
+                    _dueStatuses.AsSpan(baseIndex + offset, count - offset),
+                    out int messagesQueued, out int applicationBytesQueued,
+                    out int bundlesQueued);
                 P03WholeFlowHarness.Require(consumed > 0,
                     "Chunk selected-profile bundle pass made no progress.");
+                _gameMessagesQueued += checked((ulong)messagesQueued);
+                _applicationBytesQueued += checked((ulong)applicationBytesQueued);
+                _bundleMessages += checked((ulong)bundlesQueued);
+                if (messagesQueued != 0)
+                {
+                    int frameBytes = checked(applicationBytesQueued +
+                        NetworkProtocolDataHeader.EncodedBytes);
+                    if (pendingFrameBytes != 0 &&
+                        pendingFrameBytes + frameBytes <=
+                            P03WholeFlowHarness.MaximumPlaintextDatagramBytes)
+                    {
+                        _capTwoPairOpportunities++;
+                        pendingFrameBytes = 0;
+                    }
+                    else
+                    {
+                        pendingFrameBytes = frameBytes;
+                    }
+                }
                 ScheduleCalls += checked((ulong)consumed);
+                int successful = 0;
                 for (int index = 0; index < consumed; index++)
                 {
                     int position = baseIndex + offset + index;
@@ -1696,7 +1976,12 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                     if (status is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
                         RemoteChunkWorldStateScheduleStatus.QueuedAbsence or
                         RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted)
+                    {
                         ScheduleSuccesses++;
+                        successful++;
+                        if (status == RemoteChunkWorldStateScheduleStatus.SnapshotTransferStarted)
+                            _snapshotOrRecoveryDeliveries++;
+                    }
                     else if (status is RemoteChunkWorldStateScheduleStatus.TransportNotAccepting or
                              RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
                              RemoteChunkWorldStateScheduleStatus.SnapshotTransferBusy)
@@ -1710,6 +1995,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                         throw new InvalidOperationException(
                             $"Chunk remote schedule returned {status}.");
                 }
+                if (bundlesQueued != 0)
+                    _bundleEntries += checked((ulong)successful);
                 offset += consumed;
             }
             for (int index = offset; index < count; index++)
@@ -1780,6 +2067,47 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 $"server={server} client={client}.");
         }
     }
+    internal override P03ProfileCounters GetCounters()
+    {
+        ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
+        ChunkPublicationStoreSnapshot source = Source.GetSnapshot();
+        return base.GetCounters() with
+        {
+            SuccessfulSemanticPublications = ScheduleSuccesses,
+            GameMessagesQueued = _gameMessagesQueued,
+            ApplicationBytesQueued = _applicationBytesQueued,
+            InterestSubscriptions = checked((ulong)scheduler.MembershipCount),
+            DueCandidatePublications = _dueCandidates,
+            SimultaneouslyDuePublications = _simultaneouslyDueCandidates,
+            MultiDueRecipientPasses = _multiDueRecipientPasses,
+            ChunkBundleMessages = _bundleMessages,
+            ChunkBundleEntries = _bundleEntries,
+            CapTwoPairOpportunities = _capTwoPairOpportunities,
+            MaximumDuePerRecipientPass = _maximumDuePerRecipientPass,
+            SnapshotOrRecoveryDeliveries = _snapshotOrRecoveryDeliveries,
+            ProofEntries = ScheduleSuccesses,
+            DirtyChunksObserved = scheduler.DirtyChunksObserved,
+            DirtyRecipientFanout = scheduler.DirtyRecipientFanout,
+            PendingMembershipsExamined = scheduler.PendingMembershipsExamined,
+            SchedulerCadenceDeferrals = scheduler.CadenceDeferrals,
+            SourceDeltaReads = Difference(source.DeltaReads, _sourceBaseline.DeltaReads),
+            SourceSnapshotReads = Difference(source.SnapshotReads, _sourceBaseline.SnapshotReads),
+            SourceSnapshotFallbacks = Difference(
+                source.SnapshotFallbacks, _sourceBaseline.SnapshotFallbacks),
+        };
+    }
+    internal override void ResetCounters()
+    {
+        base.ResetCounters();
+        _dueCandidates = _simultaneouslyDueCandidates = _multiDueRecipientPasses = 0;
+        _bundleMessages = _bundleEntries = _gameMessagesQueued = _applicationBytesQueued = 0;
+        _capTwoPairOpportunities = _snapshotOrRecoveryDeliveries = 0;
+        _maximumDuePerRecipientPass = 0;
+        _scheduler.ResetTelemetryWindow();
+        _sourceBaseline = Source.GetSnapshot();
+    }
+    private static ulong Difference(ulong value, ulong baseline) =>
+        value >= baseline ? value - baseline : 0;
     internal override long GetServerReservedBytes()
     {
         long value = checked(Source.GetSnapshot().ReservedBytes + _scheduler.GetSnapshot().ReservedBytes);
@@ -2106,7 +2434,55 @@ internal readonly record struct P03WholeFlowRow(
     long NetworkReservedBytes,
     long NetworkServerReservedBytes,
     long NetworkClientReservedBytes,
-    bool Converged);
+    bool Converged,
+    string Curve,
+    P03NormalizedCost Normalized);
+
+internal readonly record struct P03NormalizedCost(
+    double LegacyServerRoleP95MicrosecondsPerRecipientTick,
+    double InclusiveNetworkReplicationP95MicrosecondsPerRecipientTick,
+    double MeanLegacyServerRoleMicrosecondsPerSuccessfulPublication,
+    double MeanInclusiveNetworkReplicationMicrosecondsPerSuccessfulPublication,
+    double ApplicationBytesPerRecipientTick,
+    double WireBytesPerRecipientTick,
+    double DatagramsPerRecipientTick,
+    double SemanticPublicationsPerRecipientTick,
+    double GameMessagesPerRecipientTick,
+    double ProofEnvelopesPerPublication,
+    double ScheduleAttemptsPerSuccessfulPublication)
+{
+    internal static P03NormalizedCost Calculate(
+        int recipients,
+        int ticks,
+        IReadOnlyList<double> inclusive,
+        IReadOnlyList<double> legacy,
+        in P03TransportSummary transport,
+        in P03ProfileCounters profile)
+    {
+        double recipientTicks = checked((double)recipients * ticks);
+        ulong publications = profile.SuccessfulSemanticPublications != 0
+            ? profile.SuccessfulSemanticPublications
+            : profile.SuccessfulGameMessages;
+        double publicationDivisor = publications == 0 ? 1 : publications;
+        double legacyMean = legacy.Count == 0 ? 0 : legacy.Average();
+        double inclusiveMean = inclusive.Count == 0 ? 0 : inclusive.Average();
+        ulong gameMessages = profile.GameMessagesQueued != 0
+            ? profile.GameMessagesQueued
+            : profile.ClientGameMessages;
+        return new(
+            P03Metric.From(legacy).P95 * 1_000d / recipients,
+            P03Metric.From(inclusive).P95 * 1_000d / recipients,
+            legacyMean * 1_000d * ticks / publicationDivisor,
+            inclusiveMean * 1_000d * ticks / publicationDivisor,
+            transport.GamePayloadBytes / recipientTicks,
+            transport.WireBytes / recipientTicks,
+            transport.WireDatagrams / recipientTicks,
+            publications / recipientTicks,
+            gameMessages / recipientTicks,
+            profile.ServerApplicationProofMessages / publicationDivisor,
+            profile.ScheduleCalls / publicationDivisor);
+    }
+}
 
 internal readonly record struct P03CadenceSummary(
     string AoiCadenceSkippedTicks,
@@ -2285,7 +2661,28 @@ internal readonly record struct P03ProfileCounters(
     ulong DirtyChunkBundles,
     ulong DirtyChunkBundleEntries,
     ulong DirtyChunkSharedPageMaterializations,
-    ulong DirtyChunkSharedPageHits);
+    ulong DirtyChunkSharedPageHits,
+    ulong SuccessfulSemanticPublications = 0,
+    ulong GameMessagesQueued = 0,
+    ulong ApplicationBytesQueued = 0,
+    ulong InterestSubscriptions = 0,
+    ulong SemanticKnowledgeRows = 0,
+    ulong DueCandidatePublications = 0,
+    ulong SimultaneouslyDuePublications = 0,
+    ulong MultiDueRecipientPasses = 0,
+    ulong ChunkBundleMessages = 0,
+    ulong ChunkBundleEntries = 0,
+    ulong CapTwoPairOpportunities = 0,
+    int MaximumDuePerRecipientPass = 0,
+    ulong SnapshotOrRecoveryDeliveries = 0,
+    ulong ProofEntries = 0,
+    ulong DirtyChunksObserved = 0,
+    ulong DirtyRecipientFanout = 0,
+    ulong PendingMembershipsExamined = 0,
+    ulong SchedulerCadenceDeferrals = 0,
+    ulong SourceDeltaReads = 0,
+    ulong SourceSnapshotReads = 0,
+    ulong SourceSnapshotFallbacks = 0);
 
 internal readonly record struct P03Metric(
     int Samples,

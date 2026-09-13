@@ -25,6 +25,13 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf4eR1Only)
+{
+    VerifyPf4eR1Reconciliation(root, options.Configuration);
+    Console.WriteLine("PASS PF4E-R1 focused verification");
+    return 0;
+}
+
 if (options.Pf1Only)
 {
     if (options.SkipGodot)
@@ -49,6 +56,79 @@ if (options.Pf1Only)
     }
     Console.WriteLine("PASS PF1 focused verification");
     return 0;
+}
+
+static void VerifyPf4eR1Reconciliation(string root, string configuration)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf4e-r1");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string output = Path.Combine(scope, "reconciliation.json");
+    try
+    {
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf4e-r1-rated-reconciliation", "--warmup=3", "--ticks=20",
+            "--populations=8,16", "--retain-full-ladder", "--probes-off",
+            $"--output={output}",
+        ]);
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(output));
+        JsonElement rootElement = document.RootElement;
+        if (rootElement.GetProperty("Schema").GetString() !=
+            "ultrasim-network-pf4e-r1-rated-replication-scaling-reconciliation-v1")
+            throw new InvalidOperationException("PF4E-R1 emitted an unexpected report schema.");
+        JsonElement rows = rootElement.GetProperty("Rows");
+        if (rows.GetArrayLength() != 10)
+            throw new InvalidOperationException("PF4E-R1 did not emit two rows for all five curves.");
+        var byCurve = new Dictionary<string, List<JsonElement>>(StringComparer.Ordinal);
+        foreach (JsonElement row in rows.EnumerateArray())
+        {
+            if (!row.GetProperty("Converged").GetBoolean() ||
+                row.GetProperty("Transport").GetProperty("CapacityDrops").GetUInt64() != 0 ||
+                row.GetProperty("Transport").GetProperty("Retransmissions").GetUInt64() != 0)
+                throw new InvalidOperationException(
+                    "PF4E-R1 smoke row failed convergence/drop/retransmission gates.");
+            string curve = row.GetProperty("Curve").GetString() ?? "";
+            if (!byCurve.TryGetValue(curve, out List<JsonElement>? curveRows))
+                byCurve.Add(curve, curveRows = []);
+            curveRows.Add(row.Clone());
+            JsonElement normalized = row.GetProperty("Normalized");
+            if (normalized.GetProperty("SemanticPublicationsPerRecipientTick").GetDouble() <= 0 ||
+                normalized.GetProperty("WireBytesPerRecipientTick").GetDouble() <= 0)
+                throw new InvalidOperationException("PF4E-R1 omitted normalized useful work.");
+        }
+        string[] expected =
+        [
+            "current-dirty-entity-dense",
+            "current-maintained-entity-sparse",
+            "pf4e-existing-chunk-dense",
+            "chunk-unbatchable-single-dirty-chunk",
+            "chunk-production-localized-multichunk",
+        ];
+        if (expected.Any(curve => !byCurve.TryGetValue(curve, out List<JsonElement>? values) ||
+                values.Count != 2))
+            throw new InvalidOperationException("PF4E-R1 curve coverage is incomplete.");
+        ulong Sum(string curve, string counter) => checked(byCurve[curve].Aggregate(
+            0UL, (sum, row) => sum + row.GetProperty("ProfileCounters")
+                .GetProperty(counter).GetUInt64()));
+        if (Sum("pf4e-existing-chunk-dense", "ChunkBundleMessages") == 0 ||
+            Sum("chunk-production-localized-multichunk", "ChunkBundleMessages") == 0 ||
+            Sum("chunk-production-localized-multichunk", "SimultaneouslyDuePublications") == 0)
+            throw new InvalidOperationException(
+                "PF4E-R1 failed to engage natural selected-profile multi-chunk bundling.");
+        if (Sum("chunk-unbatchable-single-dirty-chunk", "ChunkBundleMessages") != 0)
+            throw new InvalidOperationException(
+                "PF4E-R1 unbatchable control unexpectedly emitted a message-129 bundle.");
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
 }
 
 if (options.Pf2Only)
@@ -3984,6 +4064,7 @@ internal sealed record VerificationOptions(
     bool Pf4cOnly,
     bool Pf4dOnly,
     bool Pf4eOnly,
+    bool Pf4eR1Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -4003,7 +4084,7 @@ internal sealed record VerificationOptions(
     {
         bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
-            pf4cOnly = false, pf4dOnly = false, pf4eOnly = false,
+            pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -4025,6 +4106,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf4c-only") pf4cOnly = true;
             else if (argument == "--pf4d-only") pf4dOnly = true;
             else if (argument == "--pf4e-only") pf4eOnly = true;
+            else if (argument == "--pf4e-r1-only") pf4eR1Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -4109,12 +4191,12 @@ internal sealed record VerificationOptions(
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
-             pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly) && architectureOnly)
+             pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
-            (pf4eOnly ? 1 : 0) > 1)
+            (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -4139,7 +4221,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, or --pf4e-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,
