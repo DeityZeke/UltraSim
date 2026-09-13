@@ -314,6 +314,34 @@ public static partial class UltraSimGameProtocol
             RemoteChunkDeltaRecord.EncodedSize);
     }
 
+    /// <summary>
+    /// Validates one trusted in-process delta materialization and computes the same content hash
+    /// used by the standalone and bundled wire encoders. This is not a decoder shortcut:
+    /// untrusted bytes still pass through the complete canonical readers below.
+    /// </summary>
+    internal static bool TryGetChunkDeltaContentHash(
+        ulong publicationEpoch,
+        ulong spatialSpaceId,
+        int chunkX,
+        int chunkZ,
+        ulong baseRevision,
+        ulong currentRevision,
+        ulong historyFloor,
+        ReadOnlySpan<RemoteChunkDeltaRecord> records,
+        out ulong contentHash)
+    {
+        contentHash = 0;
+        if (publicationEpoch == 0 || spatialSpaceId == 0 || baseRevision == 0 ||
+            currentRevision <= baseRevision || historyFloor == 0 ||
+            historyFloor > baseRevision || records.IsEmpty ||
+            records.Length > MaximumChunkPublicationRecords ||
+            !ValidateDeltaRecords(records, baseRevision, currentRevision))
+            return false;
+        contentHash = ComputeDeltaHash(publicationEpoch, spatialSpaceId, chunkX, chunkZ,
+            baseRevision, currentRevision, historyFloor, records);
+        return true;
+    }
+
     public static int GetChunkSnapshotSegmentEncodedBytes(int payloadBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(payloadBytes);
@@ -723,6 +751,39 @@ public static partial class UltraSimGameProtocol
         ReadOnlySpan<RemoteChunkPublicRecord> snapshotRecords,
         ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords,
         out int written)
+        => TryWriteDirtyChunkBundleCore(
+            destination, applicationSessionEpoch, publicationEpoch, bundleId,
+            entries, snapshotRecords, deltaRecords, trustedPreparedDeltaEntries: false,
+            out written);
+
+    /// <summary>
+    /// Encodes Game-owned Delta/Absence entries already validated and content-hashed by
+    /// <see cref="TryGetChunkDeltaContentHash"/>. This internal friend seam avoids revalidating
+    /// the same immutable records merely to cross the Protocol/remote-composition assembly seam.
+    /// It is intentionally unavailable to clients and never accepts decoded network input.
+    /// </summary>
+    internal static bool TryWritePreparedDirtyChunkBundle(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong bundleId,
+        ReadOnlySpan<RemoteDirtyChunkBundleEntry> entries,
+        ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords,
+        out int written)
+        => TryWriteDirtyChunkBundleCore(
+            destination, applicationSessionEpoch, publicationEpoch, bundleId,
+            entries, [], deltaRecords, trustedPreparedDeltaEntries: true, out written);
+
+    private static bool TryWriteDirtyChunkBundleCore(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong publicationEpoch,
+        ulong bundleId,
+        ReadOnlySpan<RemoteDirtyChunkBundleEntry> entries,
+        ReadOnlySpan<RemoteChunkPublicRecord> snapshotRecords,
+        ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords,
+        bool trustedPreparedDeltaEntries,
+        out int written)
     {
         written = 0;
         if (applicationSessionEpoch == 0 || publicationEpoch == 0 || bundleId == 0 ||
@@ -741,9 +802,13 @@ public static partial class UltraSimGameProtocol
         for (int index = 0; index < entries.Length; index++)
         {
             ref readonly RemoteDirtyChunkBundleEntry entry = ref entries[index];
-            if (!ValidDirtyChunkBundleEntry(
+            bool valid = trustedPreparedDeltaEntries
+                ? ValidPreparedDirtyChunkBundleEntry(
+                    in entry, deltaRecords, expectedDeltas, out ulong hash)
+                : ValidDirtyChunkBundleEntry(
                     publicationEpoch, in entry, snapshotRecords, deltaRecords,
-                    expectedSnapshots, expectedDeltas, out ulong hash))
+                    expectedSnapshots, expectedDeltas, out hash);
+            if (!valid)
                 return false;
             for (int prior = 0; prior < index; prior++)
                 if (entries[prior].DeliveryId == entry.DeliveryId ||
@@ -771,8 +836,10 @@ public static partial class UltraSimGameProtocol
         for (int index = 0; index < entries.Length; index++)
         {
             ref readonly RemoteDirtyChunkBundleEntry entry = ref entries[index];
-            ulong hash = DirtyChunkBundleEntryHash(
-                publicationEpoch, in entry, snapshotRecords, deltaRecords);
+            ulong hash = trustedPreparedDeltaEntries
+                ? entry.ContentHash
+                : DirtyChunkBundleEntryHash(
+                    publicationEpoch, in entry, snapshotRecords, deltaRecords);
             if (!writer.TryWriteByte((byte)entry.Kind) ||
                 !writer.TryWriteUInt64(entry.DeliveryId) ||
                 !writer.TryWriteUInt64(entry.SpatialSpaceId) ||
@@ -806,6 +873,26 @@ public static partial class UltraSimGameProtocol
             throw new InvalidOperationException("Dirty-chunk bundle size accounting diverged.");
         written = required;
         return true;
+    }
+
+    private static bool ValidPreparedDirtyChunkBundleEntry(
+        in RemoteDirtyChunkBundleEntry entry,
+        ReadOnlySpan<RemoteChunkDeltaRecord> deltaRecords,
+        int expectedDeltaOffset,
+        out ulong hash)
+    {
+        hash = entry.ContentHash;
+        if (entry.DeliveryId == 0 || entry.SpatialSpaceId == 0 ||
+            entry.RecordCount > MaximumChunkPublicationRecords)
+            return false;
+        if (entry.Kind == RemoteChunkPublicationKind.Delta)
+            return entry.RecordOffset == expectedDeltaOffset && entry.BaseRevision != 0 &&
+                entry.CurrentRevision > entry.BaseRevision && entry.HistoryFloor != 0 &&
+                entry.HistoryFloor <= entry.BaseRevision && entry.RecordCount != 0 && hash != 0 &&
+                entry.RecordOffset + entry.RecordCount <= deltaRecords.Length;
+        return entry.Kind == RemoteChunkPublicationKind.Absence && entry.RecordOffset == 0 &&
+            entry.RecordCount == 0 && entry.BaseRevision == 0 && entry.CurrentRevision == 0 &&
+            entry.HistoryFloor == 0 && hash == 0;
     }
 
     public static bool TryReadDirtyChunkBundle(

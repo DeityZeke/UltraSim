@@ -63,7 +63,16 @@ public readonly record struct ChunkPublicationWorkSchedulerSnapshot(
     ulong SourceRefreshes,
     long ReservedBytes,
     ChunkPublicationFanoutCensusSnapshot Fanout,
-    ChunkPublicationTopologyCensusSnapshot Topology);
+    ChunkPublicationTopologyCensusSnapshot Topology,
+    ChunkPublicationWorkSchedulerCpuAttribution Cpu);
+
+/// <summary>PF4E-R2 detailed-only readiness/cadence timing in raw Stopwatch ticks.</summary>
+public readonly record struct ChunkPublicationWorkSchedulerCpuAttribution(
+    bool Enabled,
+    ulong SelectionCalls,
+    ulong SelectionTicks,
+    ulong CadenceCheckCalls,
+    ulong CadenceCheckTicks);
 
 /// <summary>Detailed-only bounded distribution of actual subscribers reached per dirty key.</summary>
 public readonly record struct ChunkPublicationFanoutCensusSnapshot(
@@ -163,6 +172,10 @@ public sealed class ChunkPublicationWorkScheduler
     private GameTelemetryLevel _telemetryLevel;
     private GameValueDistributionWindow? _fanoutDistribution;
     private readonly ulong[] _fanoutBuckets = new ulong[8];
+    private ulong _attributionSelectionCalls;
+    private ulong _attributionSelectionTicks;
+    private ulong _attributionCadenceCheckCalls;
+    private ulong _attributionCadenceCheckTicks;
 
     public ChunkPublicationWorkScheduler(
         ChunkPublicationStore source,
@@ -414,6 +427,11 @@ public sealed class ChunkPublicationWorkScheduler
     public bool TryDequeueDue(ulong cadenceStep, out ChunkPublicationWork work)
     {
         EnsureOwner();
+        long selectionStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionSelectionCalls);
+        try
+        {
         if (_pendingCount == 0)
         {
             work = default;
@@ -438,8 +456,15 @@ public sealed class ChunkPublicationWorkScheduler
             ref MembershipState membership = ref _memberships[membershipIndex];
             if (membership.LastExaminedPendingPass == _pendingPassId) continue;
             membership.LastExaminedPendingPass = _pendingPassId;
-            if (membership.PendingKind == ChunkPublicationWorkKind.Dirty &&
-                !IsCadenceDue(membership, cadenceStep))
+            long cadenceStarted = CpuTimestamp();
+            bool cadenceDue = membership.PendingKind != ChunkPublicationWorkKind.Dirty ||
+                IsCadenceDue(membership, cadenceStep);
+            if (CpuAttributionEnabled)
+            {
+                SaturatingIncrement(ref _attributionCadenceCheckCalls);
+                CpuElapsed(ref _attributionCadenceCheckTicks, cadenceStarted);
+            }
+            if (!cadenceDue)
             {
                 SaturatingIncrement(ref _cadenceDeferrals);
                 continue;
@@ -459,6 +484,11 @@ public sealed class ChunkPublicationWorkScheduler
         _pendingPassExhausted = true;
         work = default;
         return false;
+        }
+        finally
+        {
+            CpuElapsed(ref _attributionSelectionTicks, selectionStarted);
+        }
     }
 
     /// <summary>Returns transiently blocked work to the bounded coalescing set.</summary>
@@ -491,6 +521,8 @@ public sealed class ChunkPublicationWorkScheduler
         _dueWorkDequeued = 0;
         _cadenceDeferrals = 0;
         _sourceRefreshes = 0;
+        _attributionSelectionCalls = _attributionSelectionTicks = 0;
+        _attributionCadenceCheckCalls = _attributionCadenceCheckTicks = 0;
         _fanoutDistribution?.Clear();
         Array.Clear(_fanoutBuckets);
     }
@@ -531,7 +563,13 @@ public sealed class ChunkPublicationWorkScheduler
             _sourceRefreshes,
             CalculateReservedBytes(),
             CaptureFanout(),
-            CaptureTopology());
+            CaptureTopology(),
+            new ChunkPublicationWorkSchedulerCpuAttribution(
+                CpuAttributionEnabled,
+                _attributionSelectionCalls,
+                _attributionSelectionTicks,
+                _attributionCadenceCheckCalls,
+                _attributionCadenceCheckTicks));
     }
 
     public ChunkPublicationWorkSchedulerStorageSnapshot GetStorageSnapshot()
@@ -1065,6 +1103,20 @@ public sealed class ChunkPublicationWorkScheduler
 
     private static void SaturatingAdd(ref ulong value, ulong amount) =>
         value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
+
+    private bool CpuAttributionEnabled => _telemetryLevel == GameTelemetryLevel.Detailed;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long CpuTimestamp() =>
+        CpuAttributionEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void CpuElapsed(ref ulong destination, long started)
+    {
+        if (!CpuAttributionEnabled) return;
+        long elapsed = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+        if (elapsed > 0) SaturatingAdd(ref destination, checked((ulong)elapsed));
+    }
 
     private ChunkReplicationRecipientId RecipientId(int recipientIndex) =>
         new(recipientIndex, _recipientGenerations[recipientIndex]);

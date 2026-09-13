@@ -73,7 +73,44 @@ public readonly record struct RemoteChunkReplicationTimingSnapshot(
     GameTimingDistribution ApplicationProof,
     OfflineDirectChunkReconcileAttribution ReconcileAttribution,
     RemoteChunkReplicationWorkSnapshot Work,
-    RemoteChunkKnowledgeCensusSnapshot Knowledge);
+    RemoteChunkKnowledgeCensusSnapshot Knowledge,
+    RemoteChunkCpuAttributionSnapshot Cpu);
+
+/// <summary>
+/// PF4E-R2 detailed-only attribution. Timings are cumulative raw Stopwatch ticks and deliberately
+/// remain separate from probes-off rated measurements.
+/// </summary>
+public readonly record struct RemoteChunkCpuAttributionSnapshot(
+    bool Enabled,
+    ulong SubscriptionLookupCalls,
+    ulong SubscriptionLookupComparisons,
+    ulong SubscriptionLookupTicks,
+    OfflineDirectChunkReadAttribution RecipientRead,
+    OfflineDirectChunkWireEncoderAttribution Encoder,
+    ulong CanonicalReparseCalls,
+    ulong CanonicalReparseRecords,
+    ulong CanonicalReparseTicks,
+    ulong BundlePreflightCalls,
+    ulong BundlePreflightTicks,
+    ulong BundleStagingCalls,
+    ulong BundleStagingRecords,
+    ulong BundleStagingTicks,
+    ulong BundleEncodeCalls,
+    ulong BundleEncodeEntries,
+    ulong BundleEncodeRecords,
+    ulong BundleEncodeTicks,
+    ulong NetworkQueueCalls,
+    ulong NetworkQueueTicks,
+    ulong OutstandingBookkeepingCalls,
+    ulong OutstandingBookkeepingTicks,
+    ulong DetailedCensusTicks,
+    ulong ProofLookupCalls,
+    ulong ProofLookupComparisons,
+    ulong ProofLookupTicks,
+    ulong ProofTicketValidationCalls,
+    ulong ProofTicketValidationTicks,
+    ulong ProofRetirementCalls,
+    ulong ProofRetirementTicks);
 
 /// <summary>PF4B bounded census of Delta-120 production for one recipient lifetime/window.</summary>
 public readonly record struct RemoteChunkDeltaCensusSnapshot(
@@ -358,6 +395,33 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
     private TierFreshnessWindow? _immediateFreshness;
     private TierFreshnessWindow? _nearFreshness;
     private TierFreshnessWindow? _farFreshness;
+    private ulong _attributionSubscriptionLookupCalls;
+    private ulong _attributionSubscriptionLookupComparisons;
+    private ulong _attributionSubscriptionLookupTicks;
+    private ulong _attributionCanonicalReparseCalls;
+    private ulong _attributionCanonicalReparseRecords;
+    private ulong _attributionCanonicalReparseTicks;
+    private ulong _attributionBundlePreflightCalls;
+    private ulong _attributionBundlePreflightTicks;
+    private ulong _attributionBundleStagingCalls;
+    private ulong _attributionBundleStagingRecords;
+    private ulong _attributionBundleStagingTicks;
+    private ulong _attributionBundleEncodeCalls;
+    private ulong _attributionBundleEncodeEntries;
+    private ulong _attributionBundleEncodeRecords;
+    private ulong _attributionBundleEncodeTicks;
+    private ulong _attributionNetworkQueueCalls;
+    private ulong _attributionNetworkQueueTicks;
+    private ulong _attributionOutstandingBookkeepingCalls;
+    private ulong _attributionOutstandingBookkeepingTicks;
+    private ulong _attributionDetailedCensusTicks;
+    private ulong _attributionProofLookupCalls;
+    private ulong _attributionProofLookupComparisons;
+    private ulong _attributionProofLookupTicks;
+    private ulong _attributionProofTicketValidationCalls;
+    private ulong _attributionProofTicketValidationTicks;
+    private ulong _attributionProofRetirementCalls;
+    private ulong _attributionProofRetirementTicks;
 
     public RemoteChunkWorldStateServer(
         NetworkProtocolPeer peer,
@@ -447,6 +511,8 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _proofEnvelopeOccupancy.Clear();
         _deliveryAgeSteps.Clear();
         _recipient.ResetTelemetryWindow(level == GameTelemetryLevel.Detailed);
+        _encoder.ResetAttribution(level == GameTelemetryLevel.Detailed);
+        ResetCpuAttribution();
         _timedScheduleAttempts = _timedDeliveriesQueued = 0;
         _timedImmediateQueued = _timedNearQueued = _timedFarQueued = 0;
         _timedNoPayload = _timedCadenceDeferrals = 0;
@@ -534,8 +600,67 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 _timedImmediateQueued, _timedNearQueued, _timedFarQueued,
                 _timedNoPayload, _timedCadenceDeferrals, _timedTransportDeferrals,
                 _timedCapacityDeferrals, _timedOutstandingHighWater),
-            CaptureKnowledgeCensus());
+            CaptureKnowledgeCensus(),
+            CaptureCpuAttribution());
     }
+
+    private void ResetCpuAttribution()
+    {
+        _attributionSubscriptionLookupCalls = 0;
+        _attributionSubscriptionLookupComparisons = 0;
+        _attributionSubscriptionLookupTicks = 0;
+        _attributionCanonicalReparseCalls = 0;
+        _attributionCanonicalReparseRecords = 0;
+        _attributionCanonicalReparseTicks = 0;
+        _attributionBundlePreflightCalls = _attributionBundlePreflightTicks = 0;
+        _attributionBundleStagingCalls = 0;
+        _attributionBundleStagingRecords = 0;
+        _attributionBundleStagingTicks = 0;
+        _attributionBundleEncodeCalls = 0;
+        _attributionBundleEncodeEntries = 0;
+        _attributionBundleEncodeRecords = 0;
+        _attributionBundleEncodeTicks = 0;
+        _attributionNetworkQueueCalls = _attributionNetworkQueueTicks = 0;
+        _attributionOutstandingBookkeepingCalls = _attributionOutstandingBookkeepingTicks = 0;
+        _attributionDetailedCensusTicks = 0;
+        _attributionProofLookupCalls = 0;
+        _attributionProofLookupComparisons = 0;
+        _attributionProofLookupTicks = 0;
+        _attributionProofTicketValidationCalls = _attributionProofTicketValidationTicks = 0;
+        _attributionProofRetirementCalls = _attributionProofRetirementTicks = 0;
+    }
+
+    private RemoteChunkCpuAttributionSnapshot CaptureCpuAttribution() => new(
+        CpuAttributionEnabled,
+        _attributionSubscriptionLookupCalls,
+        _attributionSubscriptionLookupComparisons,
+        _attributionSubscriptionLookupTicks,
+        _recipient.GetReadAttribution(),
+        _encoder.GetAttribution(),
+        _attributionCanonicalReparseCalls,
+        _attributionCanonicalReparseRecords,
+        _attributionCanonicalReparseTicks,
+        _attributionBundlePreflightCalls,
+        _attributionBundlePreflightTicks,
+        _attributionBundleStagingCalls,
+        _attributionBundleStagingRecords,
+        _attributionBundleStagingTicks,
+        _attributionBundleEncodeCalls,
+        _attributionBundleEncodeEntries,
+        _attributionBundleEncodeRecords,
+        _attributionBundleEncodeTicks,
+        _attributionNetworkQueueCalls,
+        _attributionNetworkQueueTicks,
+        _attributionOutstandingBookkeepingCalls,
+        _attributionOutstandingBookkeepingTicks,
+        _attributionDetailedCensusTicks,
+        _attributionProofLookupCalls,
+        _attributionProofLookupComparisons,
+        _attributionProofLookupTicks,
+        _attributionProofTicketValidationCalls,
+        _attributionProofTicketValidationTicks,
+        _attributionProofRetirementCalls,
+        _attributionProofRetirementTicks);
 
     /// <summary>
     /// Rebinds a surviving connection adapter to a replacement generation's publication source.
@@ -686,11 +811,20 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             RemoteChunkPublicationKind.Absence => RemoteChunkAbsenceMessageCodec.Descriptor.Id,
             _ => throw new InvalidOperationException("N1.2 only transports deltas and absences."),
         };
-        if (_peer.TryQueue(messageId, _messageScratch.AsSpan(0, result.Written)) !=
+        long queueStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionNetworkQueueCalls);
+        NetworkQueueStatus queueStatus =
+            _peer.TryQueue(messageId, _messageScratch.AsSpan(0, result.Written));
+        CpuElapsed(ref _attributionNetworkQueueTicks, queueStarted);
+        if (queueStatus !=
             NetworkQueueStatus.Accepted)
             return RemoteChunkWorldStateScheduleStatus.TransportNotAccepting;
         applicationBytesQueued = result.Written;
 
+        long bookkeepingStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionOutstandingBookkeepingCalls);
         int retainedIndex = _outstandingCount;
         _outstanding[retainedIndex] = new OutstandingDelivery(
             result.Ticket,
@@ -703,8 +837,10 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 : 0);
         if (result.Kind == RemoteChunkPublicationKind.Delta)
         {
+            long censusStarted = CpuTimestamp();
             RecordQueuedDelta(in result, subscriptionIndex, cadenceStep, retainedIndex);
             RecordRepresentation(tier, bundled: false);
+            CpuElapsed(ref _attributionDetailedCensusTicks, censusStarted);
         }
         else
         {
@@ -714,6 +850,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         _outstandingCount++;
         _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         _nextDeliveryId = _nextDeliveryId == ulong.MaxValue ? 0 : _nextDeliveryId + 1;
+        CpuElapsed(ref _attributionOutstandingBookkeepingTicks, bookkeepingStarted);
         if (result.Kind == RemoteChunkPublicationKind.Delta)
         {
             SaturatingIncrement(ref _deltasQueued);
@@ -845,7 +982,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             }
 
             ulong deliveryId = _nextDeliveryId + (ulong)staged;
-            OfflineDirectChunkWireEncodeStatus encoded = _encoder.TryEncode(
+            OfflineDirectChunkWireEncodeStatus encoded = _encoder.TryPrepareForRepresentation(
                 _recipient, _source, subscriptionIndex, cadenceStep, deliveryId,
                 _messageScratch, out OfflineDirectChunkWireEncodeResult result);
             RemoteChunkWorldStateScheduleStatus mapped = Map(encoded);
@@ -885,8 +1022,12 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 continue;
             }
 
+            long preflightStarted = CpuTimestamp();
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionBundlePreflightCalls);
             int entryBytes = UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
                 result.Kind, result.RecordCount);
+            CpuElapsed(ref _attributionBundlePreflightTicks, preflightStarted);
             if (bundleBytes + entryBytes > _peer.MaximumUnfragmentedMessageBytes)
             {
                 // The bundle envelope is only a representation candidate. Its larger header may
@@ -902,34 +1043,19 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             }
 
             int recordOffset = deltaRecords;
-            ulong contentHash = 0;
             if (result.Kind == RemoteChunkPublicationKind.Delta)
             {
-                if (!UltraSimGameProtocol.TryReadChunkDelta(
-                        _messageScratch.AsSpan(0, result.Written),
-                        out RemoteChunkDeltaHeader header,
-                        _bundleDeltaRecords.AsSpan(deltaRecords), out int decoded) ||
-                    decoded != result.RecordCount ||
-                    header.DeliveryId != result.Ticket.DeliveryId ||
-                    header.BaseRevision != result.BaseRevision ||
-                    header.CurrentRevision != result.CurrentRevision ||
-                    deltaRecords + decoded > _bundleDeltaRecords.Length)
+                if (deltaRecords + result.RecordCount > _bundleDeltaRecords.Length)
                     throw new InvalidOperationException(
-                        "A canonical selected-profile delta could not enter bundle staging.");
-                deltaRecords += decoded;
-                contentHash = header.ContentHash;
-            }
-            else if (!UltraSimGameProtocol.TryReadChunkAbsence(
-                         _messageScratch.AsSpan(0, result.Written),
-                         out RemoteChunkAbsenceMessage absence) ||
-                     absence.DeliveryId != result.Ticket.DeliveryId)
-            {
-                throw new InvalidOperationException(
-                    "A canonical selected-profile absence could not enter bundle staging.");
+                        "A validated selected-profile delta exceeded bundle staging.");
+                _encoder.PreparedDeltaRecords(result.RecordCount).CopyTo(
+                    _bundleDeltaRecords.AsSpan(deltaRecords));
+                deltaRecords += result.RecordCount;
             }
 
-            if (staged == 0)
-                _messageScratch.AsSpan(0, result.Written).CopyTo(_bundleScratch);
+            long stagingStarted = CpuTimestamp();
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionBundleStagingCalls);
             _bundleEntries[staged] = new RemoteDirtyChunkBundleEntry(
                 result.Kind,
                 result.Ticket.DeliveryId,
@@ -939,7 +1065,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 result.BaseRevision,
                 result.CurrentRevision,
                 result.HistoryFloor,
-                contentHash,
+                result.ContentHash,
                 checked((ushort)result.RecordCount),
                 result.Kind == RemoteChunkPublicationKind.Delta ? recordOffset : 0);
             _bundleResults[staged] = result;
@@ -949,6 +1075,10 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             _bundleStandaloneBytes[staged] = result.Written;
             _bundleWorkPositions[staged] = processed;
             _bundleSubscriptionIndices[staged] = subscriptionIndex;
+            if (CpuAttributionEnabled)
+                SaturatingAdd(ref _attributionBundleStagingRecords,
+                    checked((ulong)result.RecordCount));
+            CpuElapsed(ref _attributionBundleStagingTicks, stagingStarted);
             bundleBytes += entryBytes;
             standaloneBytes = checked(standaloneBytes + result.Written);
             staged++;
@@ -962,27 +1092,49 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         int materializedEntries = staged;
         if (bundled)
         {
-            if (!UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+            long encodeStarted = CpuTimestamp();
+            if (CpuAttributionEnabled)
+            {
+                SaturatingIncrement(ref _attributionBundleEncodeCalls);
+                SaturatingAdd(ref _attributionBundleEncodeEntries, checked((ulong)staged));
+                SaturatingAdd(ref _attributionBundleEncodeRecords, checked((ulong)deltaRecords));
+            }
+            if (!UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
                     _bundleScratch, _applicationSessionEpoch, _source.Epoch.Value,
                     _bundleResults[0].Ticket.DeliveryId,
-                    _bundleEntries.AsSpan(0, staged), [],
+                    _bundleEntries.AsSpan(0, staged),
                     _bundleDeltaRecords.AsSpan(0, deltaRecords), out written) ||
                 written != bundleBytes)
                 throw new InvalidOperationException(
                     "Preflighted selected-profile bundle materialization diverged.");
+            CpuElapsed(ref _attributionBundleEncodeTicks, encodeStarted);
             messageId = RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id;
         }
         else
         {
             staged = 1;
             processed = Math.Min(processed, _bundleWorkPositions[0] + 1);
-            written = _bundleStandaloneBytes[0];
+            ReadOnlySpan<RemoteChunkDeltaRecord> records =
+                _bundleResults[0].Kind == RemoteChunkPublicationKind.Delta
+                    ? _bundleDeltaRecords.AsSpan(
+                        _bundleEntries[0].RecordOffset, _bundleEntries[0].RecordCount)
+                    : [];
+            if (!_encoder.TryEncodePreparedStandalone(
+                    in _bundleResults[0], records, _bundleScratch, out written))
+                throw new InvalidOperationException(
+                    "A validated selected-profile publication failed canonical standalone encoding.");
             messageId = _bundleResults[0].Kind == RemoteChunkPublicationKind.Delta
                 ? RemoteChunkDeltaHeaderCodec.Descriptor.Id
                 : RemoteChunkAbsenceMessageCodec.Descriptor.Id;
         }
 
-        if (_peer.TryQueue(messageId, _bundleScratch.AsSpan(0, written)) !=
+        long queueStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionNetworkQueueCalls);
+        NetworkQueueStatus queueStatus =
+            _peer.TryQueue(messageId, _bundleScratch.AsSpan(0, written));
+        CpuElapsed(ref _attributionNetworkQueueTicks, queueStarted);
+        if (queueStatus !=
             NetworkQueueStatus.Accepted)
         {
             for (int index = 0; index < staged; index++)
@@ -995,6 +1147,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             return processed;
         }
 
+        long bookkeepingStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionOutstandingBookkeepingCalls);
         long queuedTimestamp = _telemetryLevel == GameTelemetryLevel.Detailed
             ? System.Diagnostics.Stopwatch.GetTimestamp()
             : 0;
@@ -1010,9 +1165,11 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 ReadOnlySpan<RemoteChunkDeltaRecord> records =
                     _bundleDeltaRecords.AsSpan(_bundleEntries[index].RecordOffset,
                         _bundleEntries[index].RecordCount);
+                long censusStarted = CpuTimestamp();
                 RecordQueuedDelta(in result, _bundleSubscriptionIndices[index], cadenceStep,
                     retainedIndex, records);
                 RecordRepresentation(_bundleTiers[index], bundled);
+                CpuElapsed(ref _attributionDetailedCensusTicks, censusStarted);
                 SaturatingIncrement(ref _deltasQueued);
                 statuses[_bundleWorkPositions[index]] =
                     RemoteChunkWorldStateScheduleStatus.QueuedDelta;
@@ -1032,6 +1189,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         }
         _timedOutstandingHighWater = Math.Max(_timedOutstandingHighWater, _outstandingCount);
         AdvanceDeliveryIds(staged);
+        CpuElapsed(ref _attributionOutstandingBookkeepingTicks, bookkeepingStarted);
         gameMessagesQueued = 1;
         applicationBytesQueued = written;
         bundlesQueued = bundled ? 1 : 0;
@@ -1284,8 +1442,15 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private void ProcessProof(in RemoteChunkAppliedMessage proof)
     {
+        long lookupStarted = CpuTimestamp();
         int index = FindDelivery(proof.DeliveryId);
-        if (index < 0 || !Matches(_outstanding[index].Ticket, proof))
+        CpuElapsed(ref _attributionProofLookupTicks, lookupStarted);
+        long validationStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionProofTicketValidationCalls);
+        bool matches = index >= 0 && Matches(_outstanding[index].Ticket, proof);
+        CpuElapsed(ref _attributionProofTicketValidationTicks, validationStarted);
+        if (!matches)
         {
             SaturatingIncrement(ref _malformedProofs);
             RecordMalformedProof();
@@ -1300,7 +1465,11 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         RecordDeliveryLatency(in retained);
         if (proof.Status != RemoteChunkPublicationApplyStatus.Applied)
         {
+            long retirementStarted = CpuTimestamp();
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionProofRetirementCalls);
             RemoveAt(index);
+            CpuElapsed(ref _attributionProofRetirementTicks, retirementStarted);
             if (_telemetryLevel == GameTelemetryLevel.Detailed)
                 SaturatingIncrement(ref _timedExactDebtRetired);
             SaturatingIncrement(ref _rejectedProofs);
@@ -1309,7 +1478,11 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
         if (!_encoder.TryCommitAppliedProof(
                 _recipient, ticket, proof, out OfflineDirectChunkAppliedProofStatus status))
         {
+            long retirementStarted = CpuTimestamp();
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionProofRetirementCalls);
             RemoveAt(index);
+            CpuElapsed(ref _attributionProofRetirementTicks, retirementStarted);
             if (_telemetryLevel == GameTelemetryLevel.Detailed)
             {
                 SaturatingIncrement(ref _timedExactDebtRetired);
@@ -1318,6 +1491,9 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             SaturatingIncrement(ref _malformedProofs);
             return;
         }
+        long acceptedRetirementStarted = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionProofRetirementCalls);
         RemoveAt(index);
         if (_telemetryLevel == GameTelemetryLevel.Detailed)
             SaturatingIncrement(ref _timedExactDebtRetired);
@@ -1335,6 +1511,7 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
             InvalidateObsolete(in ticket);
             SaturatingIncrement(ref _appliedProofs);
         }
+        CpuElapsed(ref _attributionProofRetirementTicks, acceptedRetirementStarted);
     }
 
     public RemoteChunkWorldStateServerSnapshot GetSnapshot()
@@ -1669,24 +1846,40 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private int FindSubscription(SpatialChunkKey key)
     {
+        long started = CpuTimestamp();
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionSubscriptionLookupCalls);
         OfflineDirectChunkSubscriptionView subscriptions = _recipient.Subscriptions;
         int low = 0;
         int high = subscriptions.Length - 1;
         while (low <= high)
         {
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionSubscriptionLookupComparisons);
             int middle = low + ((high - low) >> 1);
             int comparison = subscriptions[middle].Interest.Key.CompareTo(key);
-            if (comparison == 0) return middle;
+            if (comparison == 0)
+            {
+                CpuElapsed(ref _attributionSubscriptionLookupTicks, started);
+                return middle;
+            }
             if (comparison < 0) low = middle + 1;
             else high = middle - 1;
         }
+        CpuElapsed(ref _attributionSubscriptionLookupTicks, started);
         return -1;
     }
 
     private int FindDelivery(ulong deliveryId)
     {
+        if (CpuAttributionEnabled)
+            SaturatingIncrement(ref _attributionProofLookupCalls);
         for (int index = 0; index < _outstandingCount; index++)
+        {
+            if (CpuAttributionEnabled)
+                SaturatingIncrement(ref _attributionProofLookupComparisons);
             if (_outstanding[index].Ticket.DeliveryId == deliveryId) return index;
+        }
         return -1;
     }
 
@@ -2274,6 +2467,20 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
 
     private static void SaturatingAdd(ref ulong value, ulong amount) =>
         value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
+
+    private bool CpuAttributionEnabled => _telemetryLevel == GameTelemetryLevel.Detailed;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long CpuTimestamp() =>
+        CpuAttributionEnabled ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void CpuElapsed(ref ulong destination, long started)
+    {
+        if (!CpuAttributionEnabled) return;
+        long elapsed = System.Diagnostics.Stopwatch.GetTimestamp() - started;
+        if (elapsed > 0) SaturatingAdd(ref destination, checked((ulong)elapsed));
+    }
 
     private void EnsureOwner()
     {

@@ -152,6 +152,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4CSelectedProfileBundleEntriesApplyAndProveIndependently", N1OfflineDirectChunkTests.SelectedProfileBundleEntriesApplyAndProveIndependently),
     ("PF4CCandidateCadenceTracksLatestCoalescedTruth", N1OfflineDirectChunkTests.CandidateCadenceTracksLatestCoalescedTruth),
     ("PF4CSelectedProfileBundleWarmedPathAllocatesZero", N1OfflineDirectChunkTests.SelectedProfileBundleWarmedPathAllocatesZero),
+    ("PF4ER2PreparedBundleEncodingIsCanonicalAndBounded", N1OfflineDirectChunkTests.PreparedBundleEncodingIsCanonicalAndBounded),
     ("PF4CR1SingletonMtuBoundaryRetainsCanonicalStandalone", N1OfflineDirectChunkTests.SingletonMtuBoundaryRetainsCanonicalStandalone),
     ("N12RemoteRemovalDeltaUsesCanonicalEmptyCurrent", N1OfflineDirectChunkTests.RemoteRemovalDeltaUsesCanonicalEmptyCurrent),
     ("N12CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth", N1OfflineDirectChunkTests.CoalescedDeltaOverlapsLocallyAppliedUnprovedTruth),

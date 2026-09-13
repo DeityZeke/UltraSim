@@ -1690,6 +1690,58 @@ internal static class N1OfflineDirectChunkTests
         AssertAbsenceSingletonMtuBoundary();
     }
 
+    internal static void PreparedBundleEncodingIsCanonicalAndBounded()
+    {
+        const ulong applicationEpoch = 0xF4E201;
+        const ulong publicationEpoch = 0xF4E202;
+        const ulong space = 1;
+        RemoteChunkDeltaRecord[] records =
+        [
+            new(RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Complete,
+                1, 1, 1, GameWorldPublicPrefabIds.Character, 10, 20, 30, 40,
+                (ushort)WorldPublicStateFlags.Visible, 2),
+            new(RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Complete,
+                2, 1, 1, GameWorldPublicPrefabIds.Character, 11, 21, 31, 41,
+                (ushort)WorldPublicStateFlags.Visible, 3),
+        ];
+        var entries = new RemoteDirtyChunkBundleEntry[2];
+        for (int index = 0; index < entries.Length; index++)
+        {
+            ReadOnlySpan<RemoteChunkDeltaRecord> record = records.AsSpan(index, 1);
+            True(UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+                publicationEpoch, space, index, 0, 1, checked((ulong)index + 2), 1,
+                record, out ulong hash));
+            entries[index] = new RemoteDirtyChunkBundleEntry(
+                RemoteChunkPublicationKind.Delta, checked((ulong)index + 1), space,
+                index, 0, 1, checked((ulong)index + 2), 1, hash, 1, index);
+        }
+        byte[] canonical = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        byte[] prepared = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+            canonical, applicationEpoch, publicationEpoch, 1, entries, [], records,
+            out int canonicalWritten));
+        True(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+            prepared, applicationEpoch, publicationEpoch, 1, entries, records,
+            out int preparedWritten));
+        Equal(canonicalWritten, preparedWritten);
+        True(canonical.AsSpan(0, canonicalWritten).SequenceEqual(
+            prepared.AsSpan(0, preparedWritten)));
+
+        RemoteDirtyChunkBundleEntry original = entries[1];
+        entries[1] = original with { ContentHash = 0 };
+        False(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+            prepared, applicationEpoch, publicationEpoch, 1, entries, records, out _));
+        entries[1] = original with { RecordOffset = 0 };
+        False(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+            prepared, applicationEpoch, publicationEpoch, 1, entries, records, out _));
+        entries[1] = original with { DeliveryId = entries[0].DeliveryId };
+        False(UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+            prepared, applicationEpoch, publicationEpoch, 1, entries, records, out _));
+
+        Console.WriteLine($"EVIDENCE PF4E-R2 prepared_bundle_bytes={preparedWritten} " +
+            "canonical_equal=true invalid_hash_offset_delivery=rejected");
+    }
+
     private static void AssertSingletonMtuBoundary(
         int maximumApplicationBytes,
         RemoteChunkWorldStateScheduleStatus expected,

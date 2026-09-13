@@ -25,11 +25,109 @@ Console.WriteLine("PASS documentation architecture and links");
 if (options.ArchitectureOnly)
     return 0;
 
+if (options.Pf4eR2Only)
+{
+    VerifyPf4eR2ChunkCpuEfficiency(root, options.Configuration);
+    Console.WriteLine("PASS PF4E-R2 focused verification");
+    return 0;
+}
+
 if (options.Pf4eR1Only)
 {
     VerifyPf4eR1Reconciliation(root, options.Configuration);
     Console.WriteLine("PASS PF4E-R1 focused verification");
     return 0;
+}
+
+static void VerifyPf4eR2ChunkCpuEfficiency(string root, string configuration)
+{
+    string scope = Path.Combine(
+        Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf4e-r2");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string micro = Path.Combine(scope, "staging-micro.json");
+    string attribution = Path.Combine(scope, "attribution.json");
+    try
+    {
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+            "-c", configuration,
+        ]);
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf4e-r2-staging-microbench", "--micro-warmup=1000",
+            "--micro-iterations=5000", "--micro-samples=7", $"--output={micro}",
+        ]);
+        using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(micro)))
+        {
+            JsonElement report = document.RootElement;
+            if (report.GetProperty("Schema").GetString() !=
+                "ultrasim-network-pf4e-r2-staging-microbench-v1" ||
+                report.GetProperty("Rows").GetArrayLength() != 6)
+                throw new InvalidOperationException("PF4E-R2 staging microbench coverage is incomplete.");
+            foreach (JsonElement row in report.GetProperty("Rows").EnumerateArray())
+                if (row.GetProperty("OldAllocatedBytes").GetInt64() != 0 ||
+                    row.GetProperty("DirectAllocatedBytes").GetInt64() != 0 ||
+                    row.GetProperty("EncodedBytes").GetInt32() <= 0)
+                    throw new InvalidOperationException(
+                        "PF4E-R2 staging microbench lost canonical/zero-allocation behavior.");
+        }
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow", "--pf4e-r2-chunk-cpu",
+            "--implementation-label=verification", "--warmup=3", "--ticks=20",
+            "--populations=8,16", $"--output={attribution}",
+        ]);
+        using JsonDocument attributionDocument = JsonDocument.Parse(File.ReadAllText(attribution));
+        JsonElement rootElement = attributionDocument.RootElement;
+        if (rootElement.GetProperty("Schema").GetString() !=
+            "ultrasim-network-pf4e-r2-chunk-cpu-attribution-v1" ||
+            rootElement.GetProperty("Rows").GetArrayLength() != 8)
+            throw new InvalidOperationException("PF4E-R2 attribution coverage is incomplete.");
+        int chunkRows = 0;
+        bool bundled = false;
+        bool reuse = false;
+        foreach (JsonElement row in rootElement.GetProperty("Rows").EnumerateArray())
+        {
+            if (!row.GetProperty("Converged").GetBoolean() ||
+                row.GetProperty("Transport").GetProperty("CapacityDrops").GetUInt64() != 0 ||
+                row.GetProperty("Transport").GetProperty("Retransmissions").GetUInt64() != 0)
+                throw new InvalidOperationException(
+                    "PF4E-R2 attribution row failed convergence/drop/retransmission gates.");
+            if (row.GetProperty("Profile").GetString() != "ChunkPublication") continue;
+            chunkRows++;
+            JsonElement counters = row.GetProperty("ProfileCounters");
+            JsonElement cpu = counters.GetProperty("ChunkCpu");
+            if (!cpu.GetProperty("Enabled").GetBoolean() ||
+                cpu.GetProperty("CanonicalReparseCalls").GetUInt64() != 0 ||
+                cpu.GetProperty("CanonicalReparseTicks").GetUInt64() != 0 ||
+                cpu.GetProperty("SourceReadCalls").GetUInt64() == 0 ||
+                cpu.GetProperty("NetworkQueueCalls").GetUInt64() == 0 ||
+                cpu.GetProperty("ProofRetirementCalls").GetUInt64() == 0)
+                throw new InvalidOperationException(
+                    "PF4E-R2 direct staging or attribution invariants failed.");
+            JsonElement ranges = counters.GetProperty("DeltaRangeReuse");
+            reuse |= ranges.GetProperty("ReusableRequests").GetUInt64() != 0 &&
+                ranges.GetProperty("ReusableRecords").GetUInt64() != 0;
+            bundled |= counters.GetProperty("ChunkBundleMessages").GetUInt64() != 0 &&
+                cpu.GetProperty("BundleEncodeCalls").GetUInt64() != 0;
+        }
+        if (chunkRows != 6 || !bundled || !reuse)
+            throw new InvalidOperationException(
+                "PF4E-R2 did not exercise all Chunk rows, bundling, and range reuse.");
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
 }
 
 if (options.Pf1Only)
@@ -4065,6 +4163,7 @@ internal sealed record VerificationOptions(
     bool Pf4dOnly,
     bool Pf4eOnly,
     bool Pf4eR1Only,
+    bool Pf4eR2Only,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -4085,6 +4184,7 @@ internal sealed record VerificationOptions(
         bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
+            pf4eR2Only = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -4107,6 +4207,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf4d-only") pf4dOnly = true;
             else if (argument == "--pf4e-only") pf4eOnly = true;
             else if (argument == "--pf4e-r1-only") pf4eR1Only = true;
+            else if (argument == "--pf4e-r2-only") pf4eR2Only = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -4191,12 +4292,12 @@ internal sealed record VerificationOptions(
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
-             pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only) && architectureOnly)
+             pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
-            (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) > 1)
+            (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -4221,7 +4322,7 @@ internal sealed record VerificationOptions(
             !pf4cOnly && !pf4dOnly && !pf4eOnly)
             throw new ArgumentException(
                 "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, or --pf4e-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only,
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

@@ -230,6 +230,25 @@ public readonly record struct OfflineDirectChunkReconcileAttribution(
     ulong PublicationTicks);
 
 /// <summary>
+/// Detailed-only PF4E-R2 attribution for recipient-owned publication reads. Timings are raw
+/// <see cref="Stopwatch"/> ticks. The counters remain dormant outside an explicitly enabled
+/// diagnostic window and do not alter cadence, source, cursor, or proof semantics.
+/// </summary>
+public readonly record struct OfflineDirectChunkReadAttribution(
+    bool Enabled,
+    ulong BeginReadCalls,
+    ulong CadenceChecks,
+    ulong CadenceCheckTicks,
+    ulong DeltaCopyCalls,
+    ulong DeltaCopyTicks,
+    ulong DeltaRecordsCopied,
+    ulong SnapshotCopyCalls,
+    ulong SnapshotCopyTicks,
+    ulong SnapshotRecordsCopied,
+    ulong AppliedProofCommitCalls,
+    ulong AppliedProofCommitTicks);
+
+/// <summary>
 /// N1.0 packet-free recipient subscription/cursor layer. Game interest and applied publication
 /// cursors live here; authoritative history remains in <see cref="ChunkPublicationStore"/>, and
 /// client semantic/cache identity remains outside this server/game-owned object.
@@ -284,6 +303,18 @@ public sealed class OfflineDirectChunkRecipient
     private ulong _nextBankBuildTicks;
     private ulong _changeEmissionTicks;
     private ulong _reconcilePublicationTicks;
+    private bool _readAttributionEnabled;
+    private ulong _attributedBeginReadCalls;
+    private ulong _attributedCadenceChecks;
+    private ulong _attributedCadenceCheckTicks;
+    private ulong _attributedDeltaCopyCalls;
+    private ulong _attributedDeltaCopyTicks;
+    private ulong _attributedDeltaRecordsCopied;
+    private ulong _attributedSnapshotCopyCalls;
+    private ulong _attributedSnapshotCopyTicks;
+    private ulong _attributedSnapshotRecordsCopied;
+    private ulong _attributedAppliedProofCommitCalls;
+    private ulong _attributedAppliedProofCommitTicks;
 
     public OfflineDirectChunkRecipient(
         OfflineDirectChunkRecipientLimits limits,
@@ -509,9 +540,15 @@ public sealed class OfflineDirectChunkRecipient
             return read.Status;
         }
 
+        if (_readAttributionEnabled) SaturatingIncrement(ref _attributedBeginReadCalls);
         OfflineDirectChunkSubscriptionState subscription = _subscriptions[subscriptionIndex];
+        long cadenceStarted = ReadAttributionTimestamp();
         uint period = _cadence.Period(subscription.Tier);
-        if (subscription.HasKnowledge && cadenceStep % period != subscription.CadencePhase)
+        bool cadenceDue = !subscription.HasKnowledge ||
+            cadenceStep % period == subscription.CadencePhase;
+        if (_readAttributionEnabled) SaturatingIncrement(ref _attributedCadenceChecks);
+        AttributeReadElapsed(ref _attributedCadenceCheckTicks, cadenceStarted);
+        if (!cadenceDue)
         {
             _cadenceDeferrals++;
             read = EmptyRead(OfflineDirectChunkReadStatus.NotDue, source.Epoch);
@@ -523,8 +560,16 @@ public sealed class OfflineDirectChunkRecipient
         ChunkPublicationCursor cursor = CursorFor(subscription);
         if (cursor.IsValid)
         {
+            long deltaCopyStarted = ReadAttributionTimestamp();
             publicationStatus = source.TryCopyDelta(
                 subscription.Key, cursor, _deltaScratch, out batch);
+            if (_readAttributionEnabled)
+            {
+                SaturatingIncrement(ref _attributedDeltaCopyCalls);
+                AttributeReadElapsed(ref _attributedDeltaCopyTicks, deltaCopyStarted);
+                if (publicationStatus == ChunkPublicationReadStatus.Delta)
+                    SaturatingAdd(ref _attributedDeltaRecordsCopied, checked((ulong)batch.Count));
+            }
             switch (publicationStatus)
             {
                 case ChunkPublicationReadStatus.Delta:
@@ -547,8 +592,16 @@ public sealed class OfflineDirectChunkRecipient
             }
         }
 
+        long snapshotCopyStarted = ReadAttributionTimestamp();
         publicationStatus = source.TryCopySnapshot(
             subscription.Key, _snapshotScratch, out batch);
+        if (_readAttributionEnabled)
+        {
+            SaturatingIncrement(ref _attributedSnapshotCopyCalls);
+            AttributeReadElapsed(ref _attributedSnapshotCopyTicks, snapshotCopyStarted);
+            if (publicationStatus == ChunkPublicationReadStatus.Snapshot)
+                SaturatingAdd(ref _attributedSnapshotRecordsCopied, checked((ulong)batch.Count));
+        }
         if (publicationStatus == ChunkPublicationReadStatus.Snapshot)
             return PublishPending(subscriptionIndex, OfflineDirectChunkReadStatus.Snapshot,
                 source.Epoch, batch, _snapshotScratch.AsSpan(0, batch.Count), default, out read);
@@ -682,6 +735,11 @@ public sealed class OfflineDirectChunkRecipient
         in OfflineDirectChunkDeliveryTicket ticket)
     {
         EnsureOwner();
+        long attributionStarted = ReadAttributionTimestamp();
+        if (_readAttributionEnabled)
+            SaturatingIncrement(ref _attributedAppliedProofCommitCalls);
+        try
+        {
         if (_pendingIndex >= 0 || !ticket.IsValid || ticket.SourceEpoch != _sourceEpoch)
             return OfflineDirectChunkAppliedProofStatus.Invalid;
         int subscriptionIndex = FindSubscription(ticket.Key);
@@ -711,6 +769,11 @@ public sealed class OfflineDirectChunkRecipient
         if (ticket.Status == OfflineDirectChunkReadStatus.Snapshot) _snapshotReads++;
         else _deltaReads++;
         return OfflineDirectChunkAppliedProofStatus.Applied;
+        }
+        finally
+        {
+            AttributeReadElapsed(ref _attributedAppliedProofCommitTicks, attributionStarted);
+        }
     }
 
     public OfflineDirectChunkRecipientSnapshot GetSnapshot()
@@ -800,6 +863,7 @@ public sealed class OfflineDirectChunkRecipient
         _fullInterestQueries = 0;
         _stableInterestFastPaths = 0;
         ResetReconcileAttribution(enabled: false);
+        ResetReadAttribution(enabled: false);
     }
 
     private void CountTierTransition(ChunkInterestTier previous, ChunkInterestTier current)
@@ -860,6 +924,7 @@ public sealed class OfflineDirectChunkRecipient
         _fullInterestQueries = 0;
         _stableInterestFastPaths = 0;
         ResetReconcileAttribution(enableReconcileAttribution);
+        ResetReadAttribution(enableReconcileAttribution);
     }
 
     public OfflineDirectChunkReconcileAttribution GetReconcileAttribution()
@@ -875,6 +940,40 @@ public sealed class OfflineDirectChunkRecipient
             _nextBankBuildTicks,
             _changeEmissionTicks,
             _reconcilePublicationTicks);
+    }
+
+    public OfflineDirectChunkReadAttribution GetReadAttribution()
+    {
+        EnsureOwner();
+        return new OfflineDirectChunkReadAttribution(
+            _readAttributionEnabled,
+            _attributedBeginReadCalls,
+            _attributedCadenceChecks,
+            _attributedCadenceCheckTicks,
+            _attributedDeltaCopyCalls,
+            _attributedDeltaCopyTicks,
+            _attributedDeltaRecordsCopied,
+            _attributedSnapshotCopyCalls,
+            _attributedSnapshotCopyTicks,
+            _attributedSnapshotRecordsCopied,
+            _attributedAppliedProofCommitCalls,
+            _attributedAppliedProofCommitTicks);
+    }
+
+    private void ResetReadAttribution(bool enabled)
+    {
+        _readAttributionEnabled = enabled;
+        _attributedBeginReadCalls = 0;
+        _attributedCadenceChecks = 0;
+        _attributedCadenceCheckTicks = 0;
+        _attributedDeltaCopyCalls = 0;
+        _attributedDeltaCopyTicks = 0;
+        _attributedDeltaRecordsCopied = 0;
+        _attributedSnapshotCopyCalls = 0;
+        _attributedSnapshotCopyTicks = 0;
+        _attributedSnapshotRecordsCopied = 0;
+        _attributedAppliedProofCommitCalls = 0;
+        _attributedAppliedProofCommitTicks = 0;
     }
 
     private OfflineDirectChunkReadStatus PublishPending(
@@ -921,10 +1020,27 @@ public sealed class OfflineDirectChunkRecipient
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long ReadAttributionTimestamp() =>
+        _readAttributionEnabled ? Stopwatch.GetTimestamp() : 0;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AttributeReadElapsed(ref ulong destination, long started)
+    {
+        if (!_readAttributionEnabled) return;
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        if (elapsed <= 0) return;
+        SaturatingAdd(ref destination, checked((ulong)elapsed));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void SaturatingIncrement(ref ulong value)
     {
         if (value != ulong.MaxValue) value++;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void SaturatingAdd(ref ulong destination, ulong value) =>
+        destination = ulong.MaxValue - destination < value ? ulong.MaxValue : destination + value;
 
     private int CountChanges(int desiredCount)
     {

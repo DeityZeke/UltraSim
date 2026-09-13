@@ -25,6 +25,16 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--pf4e-r2-staging-microbench", StringComparer.Ordinal))
+        {
+            RunChunkStagingMicrobenchmark(args);
+            return;
+        }
+        if (args.Contains("--pf4e-r2-chunk-cpu", StringComparer.Ordinal))
+        {
+            RunChunkCpuEfficiency(args);
+            return;
+        }
         if (args.Contains("--pf4e-r1-rated-reconciliation", StringComparer.Ordinal))
         {
             RunRatedReconciliation(args);
@@ -138,6 +148,195 @@ internal static class P03WholeFlowNetworkSuite
             : overrideTickCadence
                 ? workload.WithTickDuration(tickMilliseconds)
                 : workload;
+    }
+
+    private static void RunChunkStagingMicrobenchmark(string[] args)
+    {
+        int warmup = ReadInt(args, "--micro-warmup", 2_000);
+        int iterations = ReadInt(args, "--micro-iterations", 10_000);
+        int samples = ReadInt(args, "--micro-samples", 31);
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/results/network-pf4e-r2-staging-microbench.json";
+        if (warmup < 1 || iterations < 100 || samples < 5)
+            throw new ArgumentOutOfRangeException(nameof(args));
+        var rows = new List<Pf4eR2StagingMicroRow>();
+        foreach ((string name, int entries, int recordsPerEntry, bool absence) in
+                 new (string, int, int, bool)[]
+                 {
+                     ("standalone-delta", 1, 8, false),
+                     ("bundle-2", 2, 2, false),
+                     ("bundle-4", 4, 2, false),
+                     ("bundle-8", 8, 2, false),
+                     ("near-mtu-bundle", 13, 1, false),
+                     ("absence", 1, 0, true),
+                 })
+        {
+            var fixture = new Pf4eR2StagingFixture(entries, recordsPerEntry, absence);
+            P03Metric oldMetric = Measure(fixture.OldCycle);
+            P03Metric directMetric = Measure(fixture.DirectCycle);
+            // Prime the allocation observer/JIT call shape itself outside the retained values.
+            _ = MeasureAllocation(fixture.OldCycle);
+            _ = MeasureAllocation(fixture.DirectCycle);
+            long oldAllocation = MeasureAllocation(fixture.OldCycle);
+            long directAllocation = MeasureAllocation(fixture.DirectCycle);
+            if (oldAllocation != 0 || directAllocation != 0)
+                throw new InvalidOperationException(
+                    $"PF4E-R2 staging microbench allocated for {name}: " +
+                    $"old={oldAllocation}, direct={directAllocation}.");
+            if (!fixture.CanonicalEquivalent)
+                throw new InvalidOperationException(
+                    $"PF4E-R2 staging representations diverged for {name}.");
+            rows.Add(new(name, entries, recordsPerEntry, fixture.EncodedBytes,
+                oldMetric, directMetric, oldAllocation, directAllocation,
+                oldMetric.Mean == 0 ? 0 :
+                    (oldMetric.Mean - directMetric.Mean) / oldMetric.Mean * 100d));
+            Console.WriteLine($"PF4E-R2 MICRO {name}: old p95={oldMetric.P95:F1} ns, " +
+                $"direct p95={directMetric.P95:F1} ns, " +
+                $"mean reduction={rows[^1].MeanReductionPercent:F1}% bytes={fixture.EncodedBytes}");
+        }
+        var report = new Pf4eR2StagingMicroReport(
+            "ultrasim-network-pf4e-r2-staging-microbench-v1",
+            DateTimeOffset.UtcNow, ReadGitSha(), Environment.Version.ToString(),
+            Environment.OSVersion.VersionString, Stopwatch.Frequency,
+            warmup, iterations, samples, rows.ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
+        return;
+
+        P03Metric Measure(Func<ulong> body)
+        {
+            ulong checksum = 0;
+            for (int index = 0; index < warmup; index++) checksum ^= body();
+            var values = new double[samples];
+            for (int sample = 0; sample < samples; sample++)
+            {
+                long started = Stopwatch.GetTimestamp();
+                for (int index = 0; index < iterations; index++) checksum ^= body();
+                long elapsed = Stopwatch.GetTimestamp() - started;
+                values[sample] = elapsed * 1_000_000_000d /
+                    Stopwatch.Frequency / iterations;
+            }
+            GC.KeepAlive(checksum);
+            return P03Metric.From(values);
+        }
+
+        long MeasureAllocation(Func<ulong> body)
+        {
+            for (int index = 0; index < warmup; index++) _ = body();
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            ulong checksum = 0;
+            for (int index = 0; index < iterations; index++) checksum ^= body();
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+            GC.KeepAlive(checksum);
+            return allocated;
+        }
+    }
+
+    private static void RunChunkCpuEfficiency(string[] args)
+    {
+        int warmup = ReadInt(args, "--warmup", 30);
+        int ticks = ReadInt(args, "--ticks", 270);
+        int tickMilliseconds = ReadInt(args, "--server-tick-milliseconds", 16);
+        int frameCap = ReadInt(args, "--rated-frame-cap", 2);
+        int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
+            [64, 96, 128];
+        string label = ReadText(args, "--implementation-label") ?? "current";
+        string output = ReadText(args, "--output") ??
+            "_Benchmarks/results/network-pf4e-r2-chunk-cpu-attribution.json";
+        if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
+            frameCap is not (1 or 2 or 4 or 8))
+            throw new ArgumentOutOfRangeException(nameof(args));
+
+        var curves = new (string Id, P03NetworkProfile Profile,
+            Func<int, P03NetworkWorkload> Workload)[]
+        {
+            ("dirty-entity-dense-control", P03NetworkProfile.DirtyEntitySpatialFanout,
+                population => P03NetworkWorkload.Dense(population, 1_000)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("chunk-unbatchable-single-dirty-chunk", P03NetworkProfile.ChunkPublication,
+                population => P03NetworkWorkload.ChunkUnbatchableDense(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("pf4e-existing-chunk-dense", P03NetworkProfile.ChunkPublication,
+                population => P03NetworkWorkload.ChunkExistingDense(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+            ("chunk-production-localized-multichunk", P03NetworkProfile.ChunkPublication,
+                population => P03NetworkWorkload.ChunkProductionDense(population)
+                    .WithServerTickAndAoICadence(tickMilliseconds,
+                        P03AoICadencePolicy.Selected124)),
+        };
+        string? requestedCurves = ReadText(args, "--curves");
+        HashSet<string>? selectedCurves = string.IsNullOrWhiteSpace(requestedCurves)
+            ? null
+            : requestedCurves.Split(',', StringSplitOptions.RemoveEmptyEntries |
+                    StringSplitOptions.TrimEntries)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (selectedCurves is not null && selectedCurves.Any(id =>
+                !curves.Any(curve => curve.Id.Equals(id, StringComparison.OrdinalIgnoreCase))))
+            throw new ArgumentException("The PF4E-R2 curve selection contains an unknown id.");
+
+        var rows = new List<P03WholeFlowRow>();
+        int executionOrder = 0;
+        foreach ((string curveId, P03NetworkProfile profile,
+                     Func<int, P03NetworkWorkload> createWorkload) in curves)
+        {
+            if (selectedCurves is not null && !selectedCurves.Contains(curveId)) continue;
+            using var prime = new P03WholeFlowHarness(
+                createWorkload(Math.Min(populations[0], 32)), profile, frameCap,
+                stageTimingEnabled: false, gameDetailedAttribution: true);
+            _ = prime.Run(Math.Max(30, warmup), 10);
+        }
+        foreach ((string curveId, P03NetworkProfile profile,
+                     Func<int, P03NetworkWorkload> createWorkload) in curves)
+        foreach (int population in populations)
+        {
+            if (selectedCurves is not null && !selectedCurves.Contains(curveId)) continue;
+            P03NetworkWorkload workload = createWorkload(population);
+            Console.WriteLine($"PF4E-R2 {label}/{curveId}/{population}: constructing...");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            using var harness = new P03WholeFlowHarness(
+                workload, profile, frameCap,
+                stageTimingEnabled: false, gameDetailedAttribution: true);
+            P03WholeFlowRow row = harness.Run(warmup, ticks) with
+            {
+                ExecutionOrder = executionOrder++,
+                Curve = $"{label}/{curveId}",
+            };
+            rows.Add(row);
+            Console.WriteLine($"PF4E-R2 {label}/{curveId}/{population}: schedule p95 " +
+                $"{row.Timing.GameScheduleAndCodecQueue.P95:F3} ms; publications " +
+                $"{row.ProfileCounters.SuccessfulSemanticPublications:N0}; detailed=" +
+                $"{row.ProfileCounters.ChunkCpu.Enabled}");
+        }
+
+        var report = new P03WholeFlowReport(
+            "ultrasim-network-pf4e-r2-chunk-cpu-attribution-v1",
+            DateTimeOffset.UtcNow,
+            ReadGitSha(),
+            Environment.Version.ToString(),
+            Environment.OSVersion.VersionString,
+            Environment.ProcessorCount,
+            Stopwatch.Frequency,
+            new P03WholeFlowScope(
+                "Real-loopback-UDP whole flow plus opt-in detailed ChunkPublication CPU " +
+                "attribution for readiness, source reads, materialization, canonical encoding, " +
+                "bundle staging/encoding, queue admission, retained debt, and proof retirement.",
+                "Cold construction, handshake, bootstrap, warmup, final convergence drain, and " +
+                "validation are excluded. Detailed timing overhead makes these attribution rows " +
+                "unsuitable as rated p95 evidence; probes-off R1/R2 rows remain authoritative.",
+                $"Implementation label {label}; cap {frameCap}; selected 1/2/4 cadence; " +
+                $"{warmup} warmup and {ticks} measured ticks; seed {ExecutionSeed}."),
+            ExecutionSeed, warmup, ticks, rows.ToArray());
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
+        File.WriteAllText(output, JsonSerializer.Serialize(report,
+            new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+        Console.WriteLine(Path.GetFullPath(output));
     }
 
     private static void RunRatedReconciliation(string[] args)
@@ -664,6 +863,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
     private readonly P03NetworkProfile _profile;
     private readonly int _frameCap;
     private readonly bool _stageTimingEnabled;
+    private readonly bool _gameDetailedAttribution;
     private readonly NetworkProtocolLimits _protocolLimits;
     private readonly SharedUdpProtocolHost _host;
     private readonly SharedUdpProtocolSession[] _sessions;
@@ -689,12 +889,14 @@ internal sealed class P03WholeFlowHarness : IDisposable
         P03NetworkWorkload workload,
         P03NetworkProfile profile,
         int frameCap,
-        bool stageTimingEnabled = true)
+        bool stageTimingEnabled = true,
+        bool gameDetailedAttribution = false)
     {
         _workload = workload;
         _profile = profile;
         _frameCap = frameCap;
         _stageTimingEnabled = stageTimingEnabled;
+        _gameDetailedAttribution = gameDetailedAttribution;
         _x = new long[workload.Entities];
         _z = new long[workload.Entities];
         _versions = new ulong[workload.Entities];
@@ -744,6 +946,9 @@ internal sealed class P03WholeFlowHarness : IDisposable
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
         };
+        _adapter.ConfigureTelemetry(gameDetailedAttribution
+            ? GameTelemetryLevel.Detailed
+            : GameTelemetryLevel.Off);
     }
 
     internal P03WholeFlowRow Run(int warmup, int ticks)
@@ -1092,6 +1297,7 @@ internal abstract class P03RemoteProfileAdapter : IDisposable
     internal abstract bool ProcessClient(int recipient, in NetworkDeliveredMessage message,
         ReadOnlySpan<byte> payload);
     internal virtual void ProgressServers() { }
+    internal virtual void ConfigureTelemetry(GameTelemetryLevel level) { }
     internal abstract void ProgressClient(int recipient);
     internal abstract bool IsConverged { get; }
     internal abstract void Validate();
@@ -1821,6 +2027,10 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private readonly ChunkPublicationWork[] _dueWorks;
     private readonly RemoteChunkWorldStateScheduleStatus[] _dueStatuses;
     private readonly int[] _dueCounts;
+    private readonly P03DeltaRangeSignature[] _rangeSignatures;
+    private readonly int[] _rangeRecordCounts;
+    private readonly WorldPublicDeltaRecord[] _rangeCensusScratch =
+        new WorldPublicDeltaRecord[UltraSimGameProtocol.MaximumChunkPublicationRecords];
     private ulong _dueCandidates;
     private ulong _simultaneouslyDueCandidates;
     private ulong _multiDueRecipientPasses;
@@ -1832,6 +2042,14 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     private ulong _snapshotOrRecoveryDeliveries;
     private int _maximumDuePerRecipientPass;
     private ChunkPublicationStoreSnapshot _sourceBaseline;
+    private GameTelemetryLevel _telemetryLevel;
+    private ulong _deltaRangeRequests;
+    private ulong _uniqueDeltaRanges;
+    private ulong _reusableDeltaRangeRequests;
+    private ulong _deltaRangeRecordInstances;
+    private ulong _uniqueDeltaRangeRecords;
+    private ulong _reusableDeltaRangeRecords;
+    private ulong _censusSourceDeltaReads;
     private const int MaximumDuePerRecipient = 64;
 
     internal P03ChunkPublicationRemoteAdapter(P03NetworkWorkload workload,
@@ -1851,6 +2069,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         _dueWorks = new ChunkPublicationWork[checked(workload.Recipients * MaximumDuePerRecipient)];
         _dueStatuses = new RemoteChunkWorldStateScheduleStatus[_dueWorks.Length];
         _dueCounts = new int[workload.Recipients];
+        _rangeSignatures = new P03DeltaRangeSignature[_dueWorks.Length];
+        _rangeRecordCounts = new int[_dueWorks.Length];
         for (int index = 0; index < workload.Recipients; index++)
         {
             var recipient = new OfflineDirectChunkRecipient(
@@ -1882,6 +2102,14 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 sessions[index].Client, Caches[index], ApplicationEpoch, 64, 256);
         }
         while (_scheduler.TryDequeueDue(0, out _)) { }
+    }
+
+    internal override void ConfigureTelemetry(GameTelemetryLevel level)
+    {
+        _telemetryLevel = level;
+        _scheduler.ConfigureTelemetry(level);
+        for (int index = 0; index < _servers.Length; index++)
+            _servers[index].ConfigureTelemetry(level);
     }
 
     private void Bootstrap(int recipientIndex)
@@ -1937,6 +2165,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             _dueWorks[recipient * MaximumDuePerRecipient + count] = work;
             _dueCounts[recipient] = count + 1;
         }
+        if (_telemetryLevel == GameTelemetryLevel.Detailed)
+            CaptureDeltaRangeReuseCensus();
         for (int recipient = 0; recipient < _servers.Length; recipient++)
         {
             int count = _dueCounts[recipient];
@@ -2102,10 +2332,17 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             DirtyRecipientFanout = scheduler.DirtyRecipientFanout,
             PendingMembershipsExamined = scheduler.PendingMembershipsExamined,
             SchedulerCadenceDeferrals = scheduler.CadenceDeferrals,
-            SourceDeltaReads = Difference(source.DeltaReads, _sourceBaseline.DeltaReads),
+            SourceDeltaReads = Difference(
+                Difference(source.DeltaReads, _sourceBaseline.DeltaReads),
+                _censusSourceDeltaReads),
             SourceSnapshotReads = Difference(source.SnapshotReads, _sourceBaseline.SnapshotReads),
             SourceSnapshotFallbacks = Difference(
                 source.SnapshotFallbacks, _sourceBaseline.SnapshotFallbacks),
+            ChunkCpu = CaptureCpuAttribution(scheduler.Cpu),
+            DeltaRangeReuse = new P03DeltaRangeReuseCensus(
+                _deltaRangeRequests, _uniqueDeltaRanges, _reusableDeltaRangeRequests,
+                _deltaRangeRecordInstances, _uniqueDeltaRangeRecords,
+                _reusableDeltaRangeRecords, _censusSourceDeltaReads),
         };
     }
     internal override void ResetCounters()
@@ -2115,11 +2352,95 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
         _bundleMessages = _bundleEntries = _gameMessagesQueued = _applicationBytesQueued = 0;
         _capTwoPairOpportunities = _snapshotOrRecoveryDeliveries = 0;
         _maximumDuePerRecipientPass = 0;
-        _scheduler.ResetTelemetryWindow();
+        _deltaRangeRequests = _uniqueDeltaRanges = _reusableDeltaRangeRequests = 0;
+        _deltaRangeRecordInstances = _uniqueDeltaRangeRecords =
+            _reusableDeltaRangeRecords = _censusSourceDeltaReads = 0;
+        _scheduler.ConfigureTelemetry(_telemetryLevel);
+        for (int index = 0; index < _servers.Length; index++)
+            _servers[index].ConfigureTelemetry(_telemetryLevel);
         _sourceBaseline = Source.GetSnapshot();
+    }
+
+    private void CaptureDeltaRangeReuseCensus()
+    {
+        int unique = 0;
+        for (int recipient = 0; recipient < _recipients.Length; recipient++)
+        {
+            int baseIndex = recipient * MaximumDuePerRecipient;
+            for (int workIndex = 0; workIndex < _dueCounts[recipient]; workIndex++)
+            {
+                ref readonly ChunkPublicationWork work = ref _dueWorks[baseIndex + workIndex];
+                OfflineDirectChunkSubscriptionView subscriptions =
+                    _recipients[recipient].Subscriptions;
+                ChunkPublicationCursor cursor = default;
+                for (int subscription = 0; subscription < subscriptions.Length; subscription++)
+                    if (subscriptions[subscription].Interest.Key == work.Key)
+                    {
+                        cursor = subscriptions[subscription].Cursor;
+                        break;
+                    }
+                if (!cursor.IsValid || !Source.TryGetCommittedView(
+                        work.Key, out ChunkPublicationView view) ||
+                    view.Revision.Value <= cursor.Revision.Value)
+                    continue;
+                var signature = new P03DeltaRangeSignature(
+                    work.Key, cursor.Revision.Value, view.Revision.Value);
+                _deltaRangeRequests++;
+                int match = -1;
+                for (int index = 0; index < unique; index++)
+                    if (_rangeSignatures[index] == signature)
+                    {
+                        match = index;
+                        break;
+                    }
+                if (match >= 0)
+                {
+                    _reusableDeltaRangeRequests++;
+                    _deltaRangeRecordInstances = checked(_deltaRangeRecordInstances +
+                        (ulong)_rangeRecordCounts[match]);
+                    _reusableDeltaRangeRecords = checked(_reusableDeltaRangeRecords +
+                        (ulong)_rangeRecordCounts[match]);
+                    continue;
+                }
+                ChunkPublicationReadStatus status = Source.TryCopyDelta(
+                    work.Key, cursor, _rangeCensusScratch, out ChunkPublicationBatch batch);
+                _censusSourceDeltaReads++;
+                P03WholeFlowHarness.Require(status == ChunkPublicationReadStatus.Delta,
+                    "PF4E-R2 detailed range census diverged from due Delta work.");
+                _rangeSignatures[unique] = signature;
+                _rangeRecordCounts[unique] = batch.Count;
+                unique++;
+                _uniqueDeltaRanges++;
+                _uniqueDeltaRangeRecords = checked(_uniqueDeltaRangeRecords +
+                    (ulong)batch.Count);
+                _deltaRangeRecordInstances = checked(_deltaRangeRecordInstances +
+                    (ulong)batch.Count);
+            }
+        }
     }
     private static ulong Difference(ulong value, ulong baseline) =>
         value >= baseline ? value - baseline : 0;
+    private P03ChunkCpuAttribution CaptureCpuAttribution(
+        ChunkPublicationWorkSchedulerCpuAttribution scheduler)
+    {
+        var value = new P03ChunkCpuAttributionAccumulator
+        {
+            Enabled = scheduler.Enabled,
+            ReadinessSelectionCalls = scheduler.SelectionCalls,
+            ReadinessSelectionTicks = scheduler.SelectionTicks,
+            SchedulerCadenceCheckCalls = scheduler.CadenceCheckCalls,
+            SchedulerCadenceCheckTicks = scheduler.CadenceCheckTicks,
+        };
+        for (int index = 0; index < _servers.Length; index++)
+        {
+            RemoteChunkReplicationTimingSnapshot timing = _servers[index].GetTimingSnapshot();
+            RemoteChunkCpuAttributionSnapshot cpu = timing.Cpu;
+            value.ScheduleTotalTicks += timing.EncodingAndScheduling.TotalStopwatchTicks;
+            value.ProofTotalTicks += timing.ApplicationProof.TotalStopwatchTicks;
+            value.Add(in cpu);
+        }
+        return value.Capture();
+    }
     internal override long GetServerReservedBytes()
     {
         long value = checked(Source.GetSnapshot().ReservedBytes + _scheduler.GetSnapshot().ReservedBytes);
@@ -2694,7 +3015,211 @@ internal readonly record struct P03ProfileCounters(
     ulong SchedulerCadenceDeferrals = 0,
     ulong SourceDeltaReads = 0,
     ulong SourceSnapshotReads = 0,
-    ulong SourceSnapshotFallbacks = 0);
+    ulong SourceSnapshotFallbacks = 0,
+    P03ChunkCpuAttribution ChunkCpu = default,
+    P03DeltaRangeReuseCensus DeltaRangeReuse = default);
+
+internal readonly record struct P03DeltaRangeReuseCensus(
+    ulong Requests,
+    ulong UniqueRanges,
+    ulong ReusableRequests,
+    ulong RecordInstances,
+    ulong UniqueRecords,
+    ulong ReusableRecords,
+    ulong CensusSourceReads);
+
+internal readonly record struct P03DeltaRangeSignature(
+    SpatialChunkKey Key,
+    ulong BaseRevision,
+    ulong CurrentRevision);
+
+internal readonly record struct P03ChunkCpuAttribution(
+    bool Enabled,
+    ulong ScheduleTotalTicks,
+    ulong ProofTotalTicks,
+    ulong ReadinessSelectionCalls,
+    ulong ReadinessSelectionTicks,
+    ulong SchedulerCadenceCheckCalls,
+    ulong SchedulerCadenceCheckTicks,
+    ulong SubscriptionLookupCalls,
+    ulong SubscriptionLookupComparisons,
+    ulong SubscriptionLookupTicks,
+    ulong SourceReadCalls,
+    ulong SourceReadTicks,
+    ulong RecipientCadenceCheckCalls,
+    ulong RecipientCadenceCheckTicks,
+    ulong DeltaCopyCalls,
+    ulong DeltaCopyTicks,
+    ulong DeltaRecordsCopied,
+    ulong DeltaMaterializationCalls,
+    ulong DeltaMaterializationTicks,
+    ulong DeltaRecordsMaterialized,
+    ulong CanonicalStandaloneEncodeCalls,
+    ulong CanonicalStandaloneEncodeTicks,
+    ulong CanonicalStandaloneBytes,
+    ulong CanonicalReparseCalls,
+    ulong CanonicalReparseRecords,
+    ulong CanonicalReparseTicks,
+    ulong BundlePreflightCalls,
+    ulong BundlePreflightTicks,
+    ulong BundleStagingCalls,
+    ulong BundleStagingRecords,
+    ulong BundleStagingTicks,
+    ulong BundleEncodeCalls,
+    ulong BundleEncodeEntries,
+    ulong BundleEncodeRecords,
+    ulong BundleEncodeTicks,
+    ulong NetworkQueueCalls,
+    ulong NetworkQueueTicks,
+    ulong OutstandingBookkeepingCalls,
+    ulong OutstandingBookkeepingTicks,
+    ulong DetailedCensusTicks,
+    ulong ProofLookupCalls,
+    ulong ProofLookupComparisons,
+    ulong ProofLookupTicks,
+    ulong ProofTicketValidationCalls,
+    ulong ProofTicketValidationTicks,
+    ulong ProofValidationCalls,
+    ulong ProofValidationTicks,
+    ulong CursorAdvancementCalls,
+    ulong CursorAdvancementTicks,
+    ulong RecipientProofCommitCalls,
+    ulong RecipientProofCommitTicks,
+    ulong ProofRetirementCalls,
+    ulong ProofRetirementTicks);
+
+internal sealed class P03ChunkCpuAttributionAccumulator
+{
+    internal bool Enabled;
+    internal ulong ScheduleTotalTicks;
+    internal ulong ProofTotalTicks;
+    internal ulong ReadinessSelectionCalls;
+    internal ulong ReadinessSelectionTicks;
+    internal ulong SchedulerCadenceCheckCalls;
+    internal ulong SchedulerCadenceCheckTicks;
+    internal ulong SubscriptionLookupCalls;
+    internal ulong SubscriptionLookupComparisons;
+    internal ulong SubscriptionLookupTicks;
+    internal ulong SourceReadCalls;
+    internal ulong SourceReadTicks;
+    internal ulong RecipientCadenceCheckCalls;
+    internal ulong RecipientCadenceCheckTicks;
+    internal ulong DeltaCopyCalls;
+    internal ulong DeltaCopyTicks;
+    internal ulong DeltaRecordsCopied;
+    internal ulong DeltaMaterializationCalls;
+    internal ulong DeltaMaterializationTicks;
+    internal ulong DeltaRecordsMaterialized;
+    internal ulong CanonicalStandaloneEncodeCalls;
+    internal ulong CanonicalStandaloneEncodeTicks;
+    internal ulong CanonicalStandaloneBytes;
+    internal ulong CanonicalReparseCalls;
+    internal ulong CanonicalReparseRecords;
+    internal ulong CanonicalReparseTicks;
+    internal ulong BundlePreflightCalls;
+    internal ulong BundlePreflightTicks;
+    internal ulong BundleStagingCalls;
+    internal ulong BundleStagingRecords;
+    internal ulong BundleStagingTicks;
+    internal ulong BundleEncodeCalls;
+    internal ulong BundleEncodeEntries;
+    internal ulong BundleEncodeRecords;
+    internal ulong BundleEncodeTicks;
+    internal ulong NetworkQueueCalls;
+    internal ulong NetworkQueueTicks;
+    internal ulong OutstandingBookkeepingCalls;
+    internal ulong OutstandingBookkeepingTicks;
+    internal ulong DetailedCensusTicks;
+    internal ulong ProofLookupCalls;
+    internal ulong ProofLookupComparisons;
+    internal ulong ProofLookupTicks;
+    internal ulong ProofTicketValidationCalls;
+    internal ulong ProofTicketValidationTicks;
+    internal ulong ProofValidationCalls;
+    internal ulong ProofValidationTicks;
+    internal ulong CursorAdvancementCalls;
+    internal ulong CursorAdvancementTicks;
+    internal ulong RecipientProofCommitCalls;
+    internal ulong RecipientProofCommitTicks;
+    internal ulong ProofRetirementCalls;
+    internal ulong ProofRetirementTicks;
+
+    internal void Add(in RemoteChunkCpuAttributionSnapshot value)
+    {
+        Enabled |= value.Enabled;
+        SubscriptionLookupCalls += value.SubscriptionLookupCalls;
+        SubscriptionLookupComparisons += value.SubscriptionLookupComparisons;
+        SubscriptionLookupTicks += value.SubscriptionLookupTicks;
+        SourceReadCalls += value.Encoder.SourceReadCalls;
+        SourceReadTicks += value.Encoder.SourceReadTicks;
+        RecipientCadenceCheckCalls += value.RecipientRead.CadenceChecks;
+        RecipientCadenceCheckTicks += value.RecipientRead.CadenceCheckTicks;
+        DeltaCopyCalls += value.RecipientRead.DeltaCopyCalls;
+        DeltaCopyTicks += value.RecipientRead.DeltaCopyTicks;
+        DeltaRecordsCopied += value.RecipientRead.DeltaRecordsCopied;
+        DeltaMaterializationCalls += value.Encoder.DeltaMaterializationCalls;
+        DeltaMaterializationTicks += value.Encoder.DeltaMaterializationTicks;
+        DeltaRecordsMaterialized += value.Encoder.DeltaRecordsMaterialized;
+        CanonicalStandaloneEncodeCalls += value.Encoder.CanonicalStandaloneEncodeCalls;
+        CanonicalStandaloneEncodeTicks += value.Encoder.CanonicalStandaloneEncodeTicks;
+        CanonicalStandaloneBytes += value.Encoder.CanonicalStandaloneBytes;
+        CanonicalReparseCalls += value.CanonicalReparseCalls;
+        CanonicalReparseRecords += value.CanonicalReparseRecords;
+        CanonicalReparseTicks += value.CanonicalReparseTicks;
+        BundlePreflightCalls += value.BundlePreflightCalls;
+        BundlePreflightTicks += value.BundlePreflightTicks;
+        BundleStagingCalls += value.BundleStagingCalls;
+        BundleStagingRecords += value.BundleStagingRecords;
+        BundleStagingTicks += value.BundleStagingTicks;
+        BundleEncodeCalls += value.BundleEncodeCalls;
+        BundleEncodeEntries += value.BundleEncodeEntries;
+        BundleEncodeRecords += value.BundleEncodeRecords;
+        BundleEncodeTicks += value.BundleEncodeTicks;
+        NetworkQueueCalls += value.NetworkQueueCalls;
+        NetworkQueueTicks += value.NetworkQueueTicks;
+        OutstandingBookkeepingCalls += value.OutstandingBookkeepingCalls;
+        OutstandingBookkeepingTicks += value.OutstandingBookkeepingTicks;
+        DetailedCensusTicks += value.DetailedCensusTicks;
+        ProofLookupCalls += value.ProofLookupCalls;
+        ProofLookupComparisons += value.ProofLookupComparisons;
+        ProofLookupTicks += value.ProofLookupTicks;
+        ProofTicketValidationCalls += value.ProofTicketValidationCalls;
+        ProofTicketValidationTicks += value.ProofTicketValidationTicks;
+        ProofValidationCalls += value.Encoder.ProofValidationCalls;
+        ProofValidationTicks += value.Encoder.ProofValidationTicks;
+        CursorAdvancementCalls += value.Encoder.CursorAdvancementCalls;
+        CursorAdvancementTicks += value.Encoder.CursorAdvancementTicks;
+        RecipientProofCommitCalls += value.RecipientRead.AppliedProofCommitCalls;
+        RecipientProofCommitTicks += value.RecipientRead.AppliedProofCommitTicks;
+        ProofRetirementCalls += value.ProofRetirementCalls;
+        ProofRetirementTicks += value.ProofRetirementTicks;
+    }
+
+    internal P03ChunkCpuAttribution Capture() => new(
+        Enabled, ScheduleTotalTicks, ProofTotalTicks,
+        ReadinessSelectionCalls, ReadinessSelectionTicks,
+        SchedulerCadenceCheckCalls, SchedulerCadenceCheckTicks,
+        SubscriptionLookupCalls, SubscriptionLookupComparisons, SubscriptionLookupTicks,
+        SourceReadCalls, SourceReadTicks,
+        RecipientCadenceCheckCalls, RecipientCadenceCheckTicks,
+        DeltaCopyCalls, DeltaCopyTicks, DeltaRecordsCopied,
+        DeltaMaterializationCalls, DeltaMaterializationTicks, DeltaRecordsMaterialized,
+        CanonicalStandaloneEncodeCalls, CanonicalStandaloneEncodeTicks,
+        CanonicalStandaloneBytes,
+        CanonicalReparseCalls, CanonicalReparseRecords, CanonicalReparseTicks,
+        BundlePreflightCalls, BundlePreflightTicks,
+        BundleStagingCalls, BundleStagingRecords, BundleStagingTicks,
+        BundleEncodeCalls, BundleEncodeEntries, BundleEncodeRecords, BundleEncodeTicks,
+        NetworkQueueCalls, NetworkQueueTicks,
+        OutstandingBookkeepingCalls, OutstandingBookkeepingTicks,
+        DetailedCensusTicks,
+        ProofLookupCalls, ProofLookupComparisons, ProofLookupTicks,
+        ProofTicketValidationCalls, ProofTicketValidationTicks,
+        ProofValidationCalls, ProofValidationTicks,
+        CursorAdvancementCalls, CursorAdvancementTicks,
+        RecipientProofCommitCalls, RecipientProofCommitTicks,
+        ProofRetirementCalls, ProofRetirementTicks);
+}
 
 internal readonly record struct P03Metric(
     int Samples,
@@ -2717,5 +3242,161 @@ internal readonly record struct P03Metric(
         int index = Math.Clamp((int)Math.Ceiling(percentile * sorted.Length) - 1,
             0, sorted.Length - 1);
         return sorted[index];
+    }
+}
+
+internal sealed record Pf4eR2StagingMicroReport(
+    string Schema,
+    DateTimeOffset CapturedAtUtc,
+    string GitSha,
+    string Runtime,
+    string OperatingSystem,
+    long StopwatchFrequency,
+    int Warmup,
+    int IterationsPerSample,
+    int Samples,
+    Pf4eR2StagingMicroRow[] Rows);
+
+internal sealed record Pf4eR2StagingMicroRow(
+    string Shape,
+    int Entries,
+    int RecordsPerEntry,
+    int EncodedBytes,
+    P03Metric OldEncodeParseEncodeNanoseconds,
+    P03Metric DirectStagingNanoseconds,
+    long OldAllocatedBytes,
+    long DirectAllocatedBytes,
+    double MeanReductionPercent);
+
+internal sealed class Pf4eR2StagingFixture
+{
+    private const ulong ApplicationEpoch = 0xF4E201;
+    private const ulong PublicationEpoch = 0xF4E202;
+    private const ulong Space = 1;
+    private readonly int _entryCount;
+    private readonly int _recordsPerEntry;
+    private readonly bool _absence;
+    private readonly byte[] _standalone = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+    private readonly byte[] _oldBytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+    private readonly byte[] _directBytes = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+    private readonly RemoteChunkDeltaRecord[] _source;
+    private readonly RemoteChunkDeltaRecord[] _oldStaging;
+    private readonly RemoteChunkDeltaRecord[] _directStaging;
+    private readonly RemoteDirtyChunkBundleEntry[] _oldEntries;
+    private readonly RemoteDirtyChunkBundleEntry[] _directEntries;
+    private int _oldWritten;
+    private int _directWritten;
+
+    internal Pf4eR2StagingFixture(int entryCount, int recordsPerEntry, bool absence)
+    {
+        _entryCount = entryCount;
+        _recordsPerEntry = recordsPerEntry;
+        _absence = absence;
+        int records = checked(entryCount * recordsPerEntry);
+        _source = new RemoteChunkDeltaRecord[records];
+        _oldStaging = new RemoteChunkDeltaRecord[records];
+        _directStaging = new RemoteChunkDeltaRecord[records];
+        _oldEntries = new RemoteDirtyChunkBundleEntry[entryCount];
+        _directEntries = new RemoteDirtyChunkBundleEntry[entryCount];
+        for (int entry = 0; entry < entryCount; entry++)
+        for (int record = 0; record < recordsPerEntry; record++)
+        {
+            int offset = checked(entry * recordsPerEntry + record);
+            _source[offset] = new RemoteChunkDeltaRecord(
+                RemoteChunkPublicOperation.Present, RemoteChunkPublicFieldMask.Complete,
+                checked((uint)(record + 1)), 1, checked((ulong)offset + 1), 1,
+                checked((ushort)(100 + record)), checked((ushort)(200 + record)), 0, 0,
+                1, 2);
+        }
+        _ = OldCycle();
+        _ = DirectCycle();
+        CanonicalEquivalent = _oldWritten == _directWritten &&
+            _oldBytes.AsSpan(0, _oldWritten).SequenceEqual(
+                _directBytes.AsSpan(0, _directWritten));
+        EncodedBytes = _directWritten;
+        if (!_absence && entryCount > 1 && EncodedBytes > 1_405)
+            throw new InvalidOperationException("PF4E-R2 near-MTU fixture exceeds 1,405 bytes.");
+    }
+
+    internal int EncodedBytes { get; }
+    internal bool CanonicalEquivalent { get; }
+
+    internal ulong OldCycle()
+    {
+        if (_absence)
+        {
+            if (!UltraSimGameProtocol.TryWriteChunkAbsence(
+                    _oldBytes, ApplicationEpoch, PublicationEpoch, 1, Space, 0, 0,
+                    out _oldWritten) ||
+                !UltraSimGameProtocol.TryReadChunkAbsence(
+                    _oldBytes.AsSpan(0, _oldWritten), out RemoteChunkAbsenceMessage decoded))
+                throw new InvalidOperationException("PF4E-R2 old absence cycle failed.");
+            return decoded.DeliveryId ^ checked((ulong)_oldWritten);
+        }
+        for (int entry = 0; entry < _entryCount; entry++)
+        {
+            ReadOnlySpan<RemoteChunkDeltaRecord> source =
+                _source.AsSpan(entry * _recordsPerEntry, _recordsPerEntry);
+            if (!UltraSimGameProtocol.TryWriteChunkDelta(
+                    _standalone, ApplicationEpoch, PublicationEpoch,
+                    checked((ulong)entry + 1), Space, entry, 0, 1, 2, 1, source,
+                    out int standaloneWritten) ||
+                !UltraSimGameProtocol.TryReadChunkDelta(
+                    _standalone.AsSpan(0, standaloneWritten), out RemoteChunkDeltaHeader header,
+                    _oldStaging.AsSpan(entry * _recordsPerEntry, _recordsPerEntry),
+                    out int decoded) || decoded != _recordsPerEntry)
+                throw new InvalidOperationException("PF4E-R2 old delta cycle failed.");
+            _oldEntries[entry] = new RemoteDirtyChunkBundleEntry(
+                RemoteChunkPublicationKind.Delta, header.DeliveryId, Space, entry, 0,
+                1, 2, 1, header.ContentHash, checked((ushort)decoded),
+                entry * _recordsPerEntry);
+            if (_entryCount == 1)
+            {
+                _standalone.AsSpan(0, standaloneWritten).CopyTo(_oldBytes);
+                _oldWritten = standaloneWritten;
+            }
+        }
+        if (_entryCount > 1 && !UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+                _oldBytes, ApplicationEpoch, PublicationEpoch, 1, _oldEntries,
+                [], _oldStaging, out _oldWritten))
+            throw new InvalidOperationException("PF4E-R2 old bundle cycle failed.");
+        return checked((ulong)_oldWritten) ^ _oldEntries[0].ContentHash;
+    }
+
+    internal ulong DirectCycle()
+    {
+        if (_absence)
+        {
+            if (!UltraSimGameProtocol.TryWriteChunkAbsence(
+                    _directBytes, ApplicationEpoch, PublicationEpoch, 1, Space, 0, 0,
+                    out _directWritten))
+                throw new InvalidOperationException("PF4E-R2 direct absence cycle failed.");
+            return checked((ulong)_directWritten) ^ 1UL;
+        }
+        for (int entry = 0; entry < _entryCount; entry++)
+        {
+            ReadOnlySpan<RemoteChunkDeltaRecord> source =
+                _source.AsSpan(entry * _recordsPerEntry, _recordsPerEntry);
+            if (!UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+                    PublicationEpoch, Space, entry, 0, 1, 2, 1, source, out ulong hash))
+                throw new InvalidOperationException("PF4E-R2 direct validation failed.");
+            source.CopyTo(_directStaging.AsSpan(entry * _recordsPerEntry));
+            _directEntries[entry] = new RemoteDirtyChunkBundleEntry(
+                RemoteChunkPublicationKind.Delta, checked((ulong)entry + 1), Space,
+                entry, 0, 1, 2, 1, hash, checked((ushort)_recordsPerEntry),
+                entry * _recordsPerEntry);
+        }
+        if (_entryCount == 1)
+        {
+            if (!UltraSimGameProtocol.TryWriteChunkDelta(
+                    _directBytes, ApplicationEpoch, PublicationEpoch, 1, Space, 0, 0,
+                    1, 2, 1, _directStaging, out _directWritten))
+                throw new InvalidOperationException("PF4E-R2 direct standalone failed.");
+        }
+        else if (!UltraSimGameProtocol.TryWritePreparedDirtyChunkBundle(
+                     _directBytes, ApplicationEpoch, PublicationEpoch, 1,
+                     _directEntries, _directStaging, out _directWritten))
+            throw new InvalidOperationException("PF4E-R2 direct bundle cycle failed.");
+        return checked((ulong)_directWritten) ^ _directEntries[0].ContentHash;
     }
 }
