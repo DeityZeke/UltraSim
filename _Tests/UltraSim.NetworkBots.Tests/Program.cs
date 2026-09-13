@@ -31,6 +31,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4CCheckpointRetainsMeasurementScenarios", PF4CCheckpointRetainsMeasurementScenarios),
     ("PF4DCheckpointSelectsExplicitAggregationPolicy", PF4DCheckpointSelectsExplicitAggregationPolicy),
     ("PF4ECheckpointRetainsSelectedProductionPolicy", PF4ECheckpointRetainsSelectedProductionPolicy),
+    ("PF4FCheckpointRetainsSelectedCompressionPolicy", PF4FCheckpointRetainsSelectedCompressionPolicy),
 };
 
 foreach ((string name, Action body) in tests)
@@ -285,6 +286,27 @@ static void PF4ECheckpointRetainsSelectedProductionPolicy()
         "--unreliable-aggregation-scope=cross-lane",
     ]);
     Equal("PF4E", options.Checkpoint);
+    Equal(2, options.UnreliableFrameCap);
+    Equal(NetworkUnreliableAggregationScope.CrossLane,
+        options.UnreliableAggregationScope);
+}
+
+static void PF4FCheckpointRetainsSelectedCompressionPolicy()
+{
+    BotOptions options = BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=50",
+        "--seed=400614",
+        "--duration=600s",
+        "--scenario=crowd",
+        "--cache=/tmp/ultrasim-bot-pf4f-options",
+        "--checkpoint=PF4F",
+        "--unreliable-frame-cap=2",
+        "--unreliable-aggregation-scope=cross-lane",
+    ]);
+    Equal("PF4F", options.Checkpoint);
     Equal(2, options.UnreliableFrameCap);
     Equal(NetworkUnreliableAggregationScope.CrossLane,
         options.UnreliableAggregationScope);

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using UltraSim.Network;
 
@@ -16,6 +17,12 @@ public enum RemoteChunkPublicationApplyStatus : byte
     Rejected = 2,
     CapacityExceeded = 3,
     Contradictory = 4,
+}
+
+/// <summary>Finite independently-decodable representation for one canonical message-129 body.</summary>
+public enum RemoteChunkBundleCompressionFormat : byte
+{
+    Lz4BlockV1 = 1,
 }
 
 public enum RemoteChunkPublicOperation : byte
@@ -217,6 +224,18 @@ public partial struct RemoteDirtyChunkBundleHeader
     public byte EntryCount;
 }
 
+/// <summary>
+/// Optional representation wrapper around one already-selected canonical message-129 payload.
+/// Compression never changes the canonical bundle's entry membership or semantic loss domain.
+/// </summary>
+[NetworkMessage(148, "ultrasim.game.compressed-dirty-chunk-bundle", 1, NetworkLane.WorldState)]
+public partial struct RemoteCompressedDirtyChunkBundleHeader
+{
+    public RemoteChunkBundleCompressionFormat Format;
+    public ushort DecodedBytes;
+    public ushort CompressedBytes;
+}
+
 /// <summary>Decoded metadata for one entry in a dirty-chunk recipient envelope.</summary>
 public readonly record struct RemoteDirtyChunkBundleEntry(
     RemoteChunkPublicationKind Kind,
@@ -283,6 +302,13 @@ public static partial class UltraSimGameProtocol
     public const int MaximumChunkPublicationRecords = 64;
     public const int MaximumChunkSnapshotSegments = 64;
     public const int MaximumDirtyChunkBundleEntries = 32;
+    // PF4F deliberately retains the current nonfragmenting Game-message boundary. Compression
+    // cannot admit a canonical message-129 body which the current bundler could not emit.
+    public const int MaximumCompressedDirtyChunkBundleDecodedBytes = 1_405;
+    public const int MaximumCompressedDirtyChunkBundleInputBytes =
+        MaximumCompressedDirtyChunkBundleDecodedBytes -
+        RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize;
+    public const int DirtyChunkBundleCompressionHashEntries = 4_096;
     // 17-byte header + 40 * 34-byte entries = 1,377 bytes, below the default secure
     // nonfragmenting application-message limit of 1,405 bytes. Smaller peer limits clamp at use.
     public const int MaximumChunkAppliedEnvelopeEntries = 40;
@@ -381,6 +407,229 @@ public static partial class UltraSimGameProtocol
             bytes = checked(bytes + GetDirtyChunkBundleEntryEncodedBytes(
                 entries[index].Kind, entries[index].RecordCount));
         return bytes;
+    }
+
+    /// <summary>
+    /// Attempts the bounded PF4F representation of one complete canonical message-129 payload.
+    /// The caller still owns profitability policy and canonical fallback.
+    /// </summary>
+    public static bool TryWriteCompressedDirtyChunkBundle(
+        Span<byte> destination,
+        ReadOnlySpan<byte> canonicalBundle,
+        Span<ushort> hashScratch,
+        out int written)
+    {
+        written = 0;
+        if (canonicalBundle.Length < RemoteDirtyChunkBundleHeaderCodec.EncodedSize ||
+            canonicalBundle.Length > MaximumCompressedDirtyChunkBundleDecodedBytes ||
+            destination.Length < RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize + 1 ||
+            hashScratch.Length < DirtyChunkBundleCompressionHashEntries ||
+            canonicalBundle.Overlaps(destination))
+            return false;
+        Span<byte> compressed = destination[
+            RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize..];
+        if (!TryCompressDirtyChunkBundleLz4(
+                canonicalBundle, compressed, hashScratch, out int compressedBytes) ||
+            compressedBytes <= 0 || compressedBytes > ushort.MaxValue)
+            return false;
+        int total = checked(RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize + compressedBytes);
+        if (total > MaximumCompressedDirtyChunkBundleDecodedBytes || total > destination.Length)
+            return false;
+        var header = new RemoteCompressedDirtyChunkBundleHeader
+        {
+            Format = RemoteChunkBundleCompressionFormat.Lz4BlockV1,
+            DecodedBytes = checked((ushort)canonicalBundle.Length),
+            CompressedBytes = checked((ushort)compressedBytes),
+        };
+        var writer = new NetworkPacketWriter(
+            destination[..RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize]);
+        if (!RemoteCompressedDirtyChunkBundleHeaderCodec.TryWrite(ref writer, in header) ||
+            writer.WrittenCount != RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize)
+            return false;
+        written = total;
+        return true;
+    }
+
+    /// <summary>
+    /// Recovers one independently encoded canonical message-129 body into caller-owned bounded
+    /// scratch. Semantic validation remains the responsibility of the existing canonical reader.
+    /// </summary>
+    public static bool TryReadCompressedDirtyChunkBundle(
+        ReadOnlySpan<byte> source,
+        Span<byte> canonicalDestination,
+        out int written)
+    {
+        written = 0;
+        if (source.Length <= RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize ||
+            source.Length > MaximumCompressedDirtyChunkBundleDecodedBytes)
+            return false;
+        var reader = new NetworkPacketReader(
+            source[..RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize]);
+        if (!RemoteCompressedDirtyChunkBundleHeaderCodec.TryRead(
+                ref reader, out RemoteCompressedDirtyChunkBundleHeader header) ||
+            !reader.IsComplete ||
+            header.Format != RemoteChunkBundleCompressionFormat.Lz4BlockV1 ||
+            header.DecodedBytes < RemoteDirtyChunkBundleHeaderCodec.EncodedSize ||
+            header.DecodedBytes > MaximumCompressedDirtyChunkBundleDecodedBytes ||
+            header.DecodedBytes > canonicalDestination.Length ||
+            header.CompressedBytes == 0 ||
+            header.CompressedBytes > MaximumCompressedDirtyChunkBundleInputBytes ||
+            source.Length != RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize +
+                header.CompressedBytes ||
+            source.Overlaps(canonicalDestination))
+            return false;
+        ReadOnlySpan<byte> compressed =
+            source[RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize..];
+        if (!TryDecompressDirtyChunkBundleLz4(
+                compressed, canonicalDestination[..header.DecodedBytes], out int decodedBytes) ||
+            decodedBytes != header.DecodedBytes)
+        {
+            canonicalDestination[..Math.Clamp(
+                decodedBytes, 0, canonicalDestination.Length)].Clear();
+            return false;
+        }
+        written = decodedBytes;
+        return true;
+    }
+
+    private static bool TryCompressDirtyChunkBundleLz4(
+        ReadOnlySpan<byte> source,
+        Span<byte> destination,
+        Span<ushort> hashScratch,
+        out int written)
+    {
+        written = 0;
+        Span<ushort> hashes = hashScratch[..DirtyChunkBundleCompressionHashEntries];
+        hashes.Clear();
+        int anchor = 0;
+        int position = 0;
+        while (position + sizeof(uint) <= source.Length)
+        {
+            uint sequence = BinaryPrimitives.ReadUInt32LittleEndian(source[position..]);
+            int hash = (int)(unchecked(sequence * 2_654_435_761u) >> 20);
+            int prior = hashes[hash] - 1;
+            hashes[hash] = checked((ushort)(position + 1));
+            if (prior < 0 || position - prior > ushort.MaxValue ||
+                !source.Slice(prior, sizeof(uint)).SequenceEqual(
+                    source.Slice(position, sizeof(uint))))
+            {
+                position++;
+                continue;
+            }
+
+            int matchLength = sizeof(uint);
+            while (position + matchLength < source.Length &&
+                   source[prior + matchLength] == source[position + matchLength])
+                matchLength++;
+            int literalLength = position - anchor;
+            int tokenPosition = written++;
+            if (tokenPosition >= destination.Length ||
+                !TryWriteLz4Length(destination, ref written, literalLength, 15) ||
+                written + literalLength + sizeof(ushort) > destination.Length)
+            {
+                written = 0;
+                return false;
+            }
+            source.Slice(anchor, literalLength).CopyTo(destination[written..]);
+            written += literalLength;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                destination[written..], checked((ushort)(position - prior)));
+            written += sizeof(ushort);
+            int encodedMatchLength = matchLength - sizeof(uint);
+            if (!TryWriteLz4Length(destination, ref written, encodedMatchLength, 15))
+            {
+                written = 0;
+                return false;
+            }
+            destination[tokenPosition] = checked((byte)(
+                Math.Min(literalLength, 15) << 4 | Math.Min(encodedMatchLength, 15)));
+            position += matchLength;
+            anchor = position;
+        }
+
+        int trailingLength = source.Length - anchor;
+        int trailingToken = written++;
+        if (trailingToken >= destination.Length ||
+            !TryWriteLz4Length(destination, ref written, trailingLength, 15) ||
+            written + trailingLength > destination.Length)
+        {
+            written = 0;
+            return false;
+        }
+        destination[trailingToken] = checked((byte)(Math.Min(trailingLength, 15) << 4));
+        source[anchor..].CopyTo(destination[written..]);
+        written += trailingLength;
+        return true;
+    }
+
+    private static bool TryWriteLz4Length(
+        Span<byte> destination,
+        ref int written,
+        int length,
+        int inlineMaximum)
+    {
+        if (length < inlineMaximum) return true;
+        int remaining = length - inlineMaximum;
+        while (remaining >= byte.MaxValue)
+        {
+            if (written >= destination.Length) return false;
+            destination[written++] = byte.MaxValue;
+            remaining -= byte.MaxValue;
+        }
+        if (written >= destination.Length) return false;
+        destination[written++] = checked((byte)remaining);
+        return true;
+    }
+
+    private static bool TryDecompressDirtyChunkBundleLz4(
+        ReadOnlySpan<byte> source,
+        Span<byte> destination,
+        out int written)
+    {
+        written = 0;
+        int read = 0;
+        while (read < source.Length)
+        {
+            byte token = source[read++];
+            if (!TryReadLz4Length(source, ref read, token >> 4, out int literalLength) ||
+                literalLength > source.Length - read || literalLength > destination.Length - written)
+                return false;
+            source.Slice(read, literalLength).CopyTo(destination[written..]);
+            read += literalLength;
+            written += literalLength;
+            if (read == source.Length) return written == destination.Length;
+            if (source.Length - read < sizeof(ushort)) return false;
+            int offset = BinaryPrimitives.ReadUInt16LittleEndian(source[read..]);
+            read += sizeof(ushort);
+            if (offset == 0 || offset > written ||
+                !TryReadLz4Length(source, ref read, token & 0x0f, out int matchExtra))
+                return false;
+            int matchLength = checked(matchExtra + sizeof(uint));
+            if (matchLength > destination.Length - written) return false;
+            int match = written - offset;
+            for (int index = 0; index < matchLength; index++)
+                destination[written++] = destination[match + index];
+        }
+        return written == destination.Length;
+    }
+
+    private static bool TryReadLz4Length(
+        ReadOnlySpan<byte> source,
+        ref int read,
+        int inlineLength,
+        out int length)
+    {
+        length = inlineLength;
+        if (inlineLength != 15) return true;
+        byte extension;
+        do
+        {
+            if (read >= source.Length) return false;
+            extension = source[read++];
+            if (length > int.MaxValue - extension) return false;
+            length += extension;
+        } while (extension == byte.MaxValue);
+        return true;
     }
 
     public static bool TryWriteChunkSnapshotBegin(

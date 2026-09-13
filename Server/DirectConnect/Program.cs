@@ -98,7 +98,12 @@ Console.WriteLine(
     $"Public ChunkPublication: representation={options.PublicationPolicy.Representation} " +
     $"cadence={options.PublicationPolicy.Cadence.ImmediateSteps}/" +
     $"{options.PublicationPolicy.Cadence.NearSteps}/" +
-    $"{options.PublicationPolicy.Cadence.FarSteps}");
+    $"{options.PublicationPolicy.Cadence.FarSteps} " +
+    $"compression={(options.PublicationPolicy.Compression.Enabled ? "Lz4BlockV1" : "Off")}" +
+    (options.PublicationPolicy.Compression.Enabled
+        ? $" threshold={options.PublicationPolicy.Compression.MinimumCanonicalBytes}" +
+          $" save={options.PublicationPolicy.Compression.MinimumNetSavingsBytes}"
+        : string.Empty));
 Console.WriteLine(
     $"Unreliable Network frames: cap={options.UnreliableFrameCap} " +
     $"scope={options.UnreliableAggregationScope}");
@@ -446,6 +451,8 @@ internal readonly record struct DirectConnectOptions(
         RemoteChunkPublicationRepresentation publicationRepresentation =
             RemoteChunkPublicationRepresentation.Message129WhenBeneficial;
         OfflineDirectChunkCadence publicationCadence = OfflineDirectChunkCadence.EvidenceProfile;
+        RemoteChunkBundleCompressionPolicy compressionPolicy =
+            RemoteChunkBundleCompressionPolicy.Selected;
         foreach (string argument in arguments)
         {
             if (argument == "--ephemeral-smoke")
@@ -658,6 +665,19 @@ internal readonly record struct DirectConnectOptions(
                         "--public-cadence must be positive and ordered Immediate <= Near <= Far.");
                 continue;
             }
+            if (argument.StartsWith("--public-compression=", StringComparison.Ordinal))
+            {
+                string value = argument["--public-compression=".Length..]
+                    .Trim().ToLowerInvariant();
+                compressionPolicy = value switch
+                {
+                    "off" or "canonical" => RemoteChunkBundleCompressionPolicy.Disabled,
+                    "lz4" or "selected" => RemoteChunkBundleCompressionPolicy.Selected,
+                    _ => throw new ArgumentException(
+                        "--public-compression must be off or lz4."),
+                };
+                continue;
+            }
             throw new ArgumentException($"Unknown option '{argument}'.");
         }
         bool anyAccounting = accountingStartFile is not null || accountingReadyFile is not null ||
@@ -675,7 +695,7 @@ internal readonly record struct DirectConnectOptions(
             throw new ArgumentException(
                 "--input-burst is too small for the hard rate and burst window.");
         var publicationPolicy = new RemoteChunkPublicationPolicy(
-            publicationCadence, publicationRepresentation);
+            publicationCadence, publicationRepresentation, compressionPolicy);
         publicationPolicy.Validate();
         return new DirectConnectOptions(
             endpoint, contentEndpoint, identity, readyFile, stopFile, summaryFile,

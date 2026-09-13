@@ -180,7 +180,7 @@ static void GameTrafficClassificationCoversEveryProductionMessage()
     True(seen.All(static value => value));
     False(GameProtocolTrafficClassification.TryClassify(
         new NetworkMessageId(ushort.MaxValue), out _));
-    Equal(48, UltraSimGameProtocol.Manifest.Count);
+    Equal(49, UltraSimGameProtocol.Manifest.Count);
 }
 
 static void RemoteWorkflowMatchesOfflineDirect()

@@ -1219,8 +1219,8 @@ internal static class N1OfflineDirectChunkTests
         }
         Equal(0L, GC.GetAllocatedBytesForCurrentThread() - proofEnvelopeAllocations);
 
-        Equal((ushort)28, UltraSimGameProtocol.Manifest.Version);
-        Equal(8_944_792_020_096_633_706UL, UltraSimGameProtocol.Manifest.Fingerprint);
+        Equal((ushort)29, UltraSimGameProtocol.Manifest.Version);
+        Equal(13_618_865_889_094_008_680UL, UltraSimGameProtocol.Manifest.Fingerprint);
         Equal(6_148_331_928_277_823_537UL,
             UltraSimGameProtocol.ChunkPublicationSchemaFingerprint);
         True(UltraSimGameProtocol.Manifest.TryGet(
@@ -1243,6 +1243,8 @@ internal static class N1OfflineDirectChunkTests
             RemoteChunkSnapshotCancelMessageCodec.Descriptor.Id, out _));
         True(UltraSimGameProtocol.Manifest.TryGet(
             RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id, out _));
+        True(UltraSimGameProtocol.Manifest.TryGet(
+            RemoteCompressedDirtyChunkBundleHeaderCodec.Descriptor.Id, out _));
     }
 
     internal static void RemoteEncodingRequiresAppliedProofAndSuppressesKnownAbsence()
@@ -1740,6 +1742,340 @@ internal static class N1OfflineDirectChunkTests
 
         Console.WriteLine($"EVIDENCE PF4E-R2 prepared_bundle_bytes={preparedWritten} " +
             "canonical_equal=true invalid_hash_offset_delivery=rejected");
+    }
+
+    internal static void CompressedBundleCodecIsExactBoundedHostileSafeAndAllocationFree()
+    {
+        CreatePf4fCanonicalBundle(out byte[] canonical, out int canonicalBytes);
+        byte[] compressed = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        byte[] decoded = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        ushort[] hashes = new ushort[
+            UltraSimGameProtocol.DirtyChunkBundleCompressionHashEntries];
+        True(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+            compressed, canonical.AsSpan(0, canonicalBytes), hashes, out int compressedBytes));
+        True(compressedBytes < canonicalBytes);
+        Equal(RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize, 5);
+        True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            compressed.AsSpan(0, compressedBytes), decoded, out int decodedBytes));
+        Equal(canonicalBytes, decodedBytes);
+        True(canonical.AsSpan(0, canonicalBytes).SequenceEqual(decoded.AsSpan(0, decodedBytes)));
+
+        byte[] malformed = compressed.AsSpan(0, compressedBytes + 1).ToArray();
+        malformed[compressedBytes] = 0x7f;
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            malformed, decoded, out _));
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            compressed.AsSpan(0, compressedBytes - 1), decoded, out _));
+        malformed.AsSpan().Clear();
+        malformed[0] = (byte)RemoteChunkBundleCompressionFormat.Lz4BlockV1;
+        BinaryPrimitives.WriteUInt16BigEndian(malformed.AsSpan(1),
+            checked((ushort)canonicalBytes));
+        BinaryPrimitives.WriteUInt16BigEndian(malformed.AsSpan(3),
+            checked((ushort)(malformed.Length - 5)));
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            malformed, decoded, out _));
+
+        byte[] headerMutation = compressed.AsSpan(0, compressedBytes).ToArray();
+        BinaryPrimitives.WriteUInt16BigEndian(headerMutation.AsSpan(1), 0);
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            headerMutation, decoded, out _));
+        headerMutation = compressed.AsSpan(0, compressedBytes).ToArray();
+        BinaryPrimitives.WriteUInt16BigEndian(headerMutation.AsSpan(1),
+            checked((ushort)(UltraSimGameProtocol.
+                MaximumCompressedDirtyChunkBundleDecodedBytes + 1)));
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            headerMutation, decoded, out _));
+        headerMutation = compressed.AsSpan(0, compressedBytes).ToArray();
+        BinaryPrimitives.WriteUInt16BigEndian(headerMutation.AsSpan(1),
+            checked((ushort)(canonicalBytes - 1)));
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            headerMutation, decoded, out _));
+        headerMutation = compressed.AsSpan(0, compressedBytes).ToArray();
+        BinaryPrimitives.WriteUInt16BigEndian(headerMutation.AsSpan(1),
+            checked((ushort)(canonicalBytes + 1)));
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            headerMutation, decoded, out _));
+        headerMutation = compressed.AsSpan(0, compressedBytes).ToArray();
+        headerMutation[0] = byte.MaxValue;
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            headerMutation, decoded, out _));
+
+        // A successful decompression never bypasses the canonical message-129 validator.
+        byte[] badCanonical = canonical.AsSpan(0, canonicalBytes).ToArray();
+        badCanonical[RemoteDirtyChunkBundleHeaderCodec.EncodedSize] = byte.MaxValue;
+        True(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+            compressed, badCanonical, hashes, out int badCompressedBytes));
+        True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            compressed.AsSpan(0, badCompressedBytes), decoded, out int badDecodedBytes));
+        var entries = new RemoteDirtyChunkBundleEntry[
+            UltraSimGameProtocol.MaximumDirtyChunkBundleEntries];
+        var snapshots = new RemoteChunkPublicRecord[
+            UltraSimGameProtocol.MaximumChunkPublicationRecords];
+        var deltas = new RemoteChunkDeltaRecord[
+            UltraSimGameProtocol.MaximumChunkPublicationRecords];
+        False(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+            decoded.AsSpan(0, badDecodedBytes), out _, entries, snapshots, deltas,
+            out _, out _, out _));
+
+        int firstEntry = RemoteDirtyChunkBundleHeaderCodec.EncodedSize;
+        int entryBytes = UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
+            RemoteChunkPublicationKind.Delta, 2);
+        byte[] invalidCanonical = canonical.AsSpan(0, canonicalBytes).ToArray();
+        invalidCanonical.AsSpan(0, sizeof(ulong)).Clear();
+        RejectCanonical(invalidCanonical);
+        invalidCanonical = canonical.AsSpan(0, canonicalBytes).ToArray();
+        invalidCanonical.AsSpan(firstEntry + sizeof(byte), sizeof(ulong)).Clear();
+        RejectCanonical(invalidCanonical);
+        invalidCanonical = canonical.AsSpan(0, canonicalBytes).ToArray();
+        BinaryPrimitives.WriteUInt64BigEndian(
+            invalidCanonical.AsSpan(firstEntry + entryBytes + sizeof(byte)), 1);
+        RejectCanonical(invalidCanonical);
+        invalidCanonical = canonical.AsSpan(0, canonicalBytes).ToArray();
+        const int deltaRecordCountOffset = sizeof(byte) + sizeof(ulong) * 2 +
+            sizeof(int) * 2 + sizeof(ulong) * 4;
+        BinaryPrimitives.WriteUInt16BigEndian(
+            invalidCanonical.AsSpan(firstEntry + deltaRecordCountOffset),
+            UltraSimGameProtocol.MaximumChunkPublicationRecords);
+        RejectCanonical(invalidCanonical);
+
+        var fuzz = new Random(0xF4F);
+        byte[] fuzzed = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        for (int iteration = 1; iteration <= 256; iteration++)
+        {
+            int length = 1 + iteration * (fuzzed.Length - 1) / 256;
+            fuzz.NextBytes(fuzzed.AsSpan(0, length));
+            if (UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+                    fuzzed.AsSpan(0, length), decoded, out int fuzzDecoded))
+                False(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+                    decoded.AsSpan(0, fuzzDecoded), out _, entries, snapshots, deltas,
+                    out _, out _, out _));
+        }
+
+        byte[] oversizedInput = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes + 1];
+        oversizedInput[0] = (byte)RemoteChunkBundleCompressionFormat.Lz4BlockV1;
+        BinaryPrimitives.WriteUInt16BigEndian(oversizedInput.AsSpan(1),
+            checked((ushort)canonicalBytes));
+        BinaryPrimitives.WriteUInt16BigEndian(oversizedInput.AsSpan(3),
+            checked((ushort)(oversizedInput.Length - 5)));
+        False(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            oversizedInput, decoded, out _));
+
+        True(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+            compressed, canonical.AsSpan(0, canonicalBytes), hashes, out compressedBytes));
+        True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            compressed.AsSpan(0, compressedBytes), decoded, out _));
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 1_024; iteration++)
+        {
+            True(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+                compressed, canonical.AsSpan(0, canonicalBytes), hashes, out compressedBytes));
+            True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+                compressed.AsSpan(0, compressedBytes), decoded, out decodedBytes));
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Equal(0L, allocated);
+        Console.WriteLine($"EVIDENCE PF4F codec canonical={canonicalBytes} " +
+            $"compressed={compressedBytes} saved={canonicalBytes - compressedBytes} " +
+            $"wrapper={RemoteCompressedDirtyChunkBundleHeaderCodec.EncodedSize} " +
+            $"alloc={allocated} hostile=bounded canonical_equal=true");
+
+        void RejectCanonical(byte[] bytes)
+        {
+            True(UltraSimGameProtocol.TryWriteCompressedDirtyChunkBundle(
+                compressed, bytes, hashes, out int encodedBytes));
+            True(UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+                compressed.AsSpan(0, encodedBytes), decoded, out int recoveredBytes));
+            Equal(bytes.Length, recoveredBytes);
+            True(bytes.AsSpan().SequenceEqual(decoded.AsSpan(0, recoveredBytes)));
+            False(UltraSimGameProtocol.TryReadDirtyChunkBundle(
+                decoded.AsSpan(0, recoveredBytes), out _, entries, snapshots, deltas,
+                out _, out _, out _));
+        }
+    }
+
+    internal static void SelectedCompressionPreservesQueueTransactionAndProofs()
+    {
+        using var fixture = new Fixture(historyCapacity: 128, entityCount: 8);
+        int[] chunkX = [-1, 0, 1, -1, 0, 1, -1, 0];
+        int[] chunkZ = [-1, -1, -1, 0, 0, 0, 1, 1];
+        for (int index = 0; index < 8; index++)
+            fixture.Present(index, Position(chunkX[index], chunkZ[index], 2_000, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        NetworkProtocolLimits constrained = NetworkProtocolLimits.Default with
+        {
+            MaximumIndependentUnreliableMessages = 1,
+        };
+        using ProtocolLoopback loopback = CreateLoopback(default, constrained);
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        for (int index = 0; index < 8; index++)
+            fixture.Present(index, Position(chunkX[index], chunkZ[index], 2_100, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF4F01,
+            new RemoteChunkWorldStateTransportLimits(
+                32, 64, RemoteChunkBundleCompressionPolicy.Selected));
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF4F01, maximumDeltaRecords: 8,
+            maximumPendingProofs: 32);
+        client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+        var works = new ChunkPublicationWork[8];
+        var statuses = new RemoteChunkWorldStateScheduleStatus[8];
+        for (int index = 0; index < works.Length; index++)
+            works[index] = new(default, Key(chunkX[index], chunkZ[index]),
+                ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1);
+
+        Equal(NetworkQueueStatus.Accepted, loopback.Server.TryQueue(
+            RemoteChunkDeltaHeaderCodec.Descriptor.Id, new byte[] { 1 }));
+        Equal(8, server.TryScheduleDueBundle(works, 1, statuses, out int refusedMessages));
+        Equal(0, refusedMessages);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        Equal(1UL, server.GetSnapshot().NextDeliveryId);
+        for (int index = 0; index < statuses.Length; index++)
+            Equal(RemoteChunkWorldStateScheduleStatus.TransportNotAccepting, statuses[index]);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryConsumeReceived());
+
+        Equal(8, server.TryScheduleDueBundle(works, 2, statuses, out int acceptedMessages));
+        Equal(1, acceptedMessages);
+        Equal(8, server.GetSnapshot().OutstandingDeliveries);
+        Equal(9UL, server.GetSnapshot().NextDeliveryId);
+        for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+            loopback.Pump();
+        True(loopback.Client.TryPeekReceived(
+            out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload));
+        Equal(RemoteCompressedDirtyChunkBundleHeaderCodec.Descriptor.Id, delivered.MessageId);
+        True(client.TryProcess(delivered, payload));
+        True(loopback.Client.TryConsumeReceived());
+        Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 8);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        RemoteChunkCompressionCensusSnapshot sent =
+            server.GetTimingSnapshot().Knowledge.Compression;
+        RemoteChunkCompressionReceiveCensusSnapshot received =
+            client.GetTimingSnapshot().CompressionCensus;
+        Equal(2UL, sent.Attempts);
+        Equal(1UL, sent.Selected);
+        Equal(1UL, received.Messages);
+        Equal(sent.CompressedRepresentationBytes, received.CompressedRepresentationBytes);
+        Equal(sent.CanonicalBytesSelected, received.CanonicalDecodedBytes);
+        True(sent.DirectBytesSaved >= 32);
+        Console.WriteLine($"EVIDENCE PF4F transaction refused_attempts=1 " +
+            $"selected={sent.Selected} canonical={sent.CanonicalBytesSelected} " +
+            $"compressed={sent.CompressedRepresentationBytes} proofs=8 debt=0");
+    }
+
+    internal static void IndependentCompressedMessagesConvergeThroughImpairment()
+    {
+        using var fixture = new Fixture(historyCapacity: 128, entityCount: 8);
+        int[] chunkX = [-1, 0, 1, -1, 0, 1, -1, 0];
+        int[] chunkZ = [-1, -1, -1, 0, 0, 0, 1, 1];
+        for (int index = 0; index < 8; index++)
+            fixture.Present(index, Position(chunkX[index], chunkZ[index], 2_000, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopback(
+            new NetworkImpairmentOptions(0xF4F0_1290, 220, 180, 40, 5));
+        var recipient = Recipient(maximumRecords: 8);
+        var cache = Cache(fixture, maximumPublicRecords: 8);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        for (int index = 0; index < 8; index++)
+            fixture.Present(index, Position(chunkX[index], chunkZ[index], 2_200, 2_000),
+                GameWorldPublicPrefabIds.Character);
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF4F03,
+            new RemoteChunkWorldStateTransportLimits(
+                64, 64, RemoteChunkBundleCompressionPolicy.Selected));
+        server.ConfigureTelemetry(GameTelemetryLevel.Detailed);
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF4F03, maximumDeltaRecords: 8,
+            maximumPendingProofs: 64);
+        client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
+        var works = new ChunkPublicationWork[8];
+        var statuses = new RemoteChunkWorldStateScheduleStatus[8];
+        for (int index = 0; index < works.Length; index++)
+            works[index] = new(default, Key(chunkX[index], chunkZ[index]),
+                ChunkInterestTier.Immediate, ChunkPublicationWorkKind.Dirty, 1, 1);
+
+        for (int step = 1; step <= 8_192; step++)
+        {
+            bool converged = true;
+            for (int index = 0; index < works.Length; index++)
+                converged &= recipient.Subscriptions[
+                    FindSubscription(recipient, works[index].Key)].Cursor.Revision.Value ==
+                    CurrentRevision(fixture.Store, works[index].Key);
+            if (converged && server.GetSnapshot().OutstandingDeliveries == 0) break;
+            if ((step & 3) == 1)
+            {
+                int processed = server.TryScheduleDueBundle(
+                    works, checked((ulong)step), statuses, out _);
+                True(processed is >= 1 and <= 8);
+                for (int index = 0; index < processed; index++)
+                    True(statuses[index] is RemoteChunkWorldStateScheduleStatus.QueuedDelta or
+                        RemoteChunkWorldStateScheduleStatus.NoPayload or
+                        RemoteChunkWorldStateScheduleStatus.CapacityExceeded or
+                        RemoteChunkWorldStateScheduleStatus.TransportNotAccepting);
+            }
+            Pump(loopback, server, client);
+        }
+
+        for (int index = 0; index < works.Length; index++)
+            Equal(CurrentRevision(fixture.Store, works[index].Key),
+                recipient.Subscriptions[FindSubscription(recipient, works[index].Key)]
+                    .Cursor.Revision.Value);
+        Equal(0, server.GetSnapshot().OutstandingDeliveries);
+        RemoteChunkCompressionCensusSnapshot sent =
+            server.GetTimingSnapshot().Knowledge.Compression;
+        RemoteChunkCompressionReceiveCensusSnapshot received =
+            client.GetTimingSnapshot().CompressionCensus;
+        True(sent.Selected > 1);
+        True(received.Messages > 0);
+        Equal(0UL, received.Malformed);
+        Equal(8UL, client.GetSnapshot().AppliedDeltas);
+        True(client.GetSnapshot().DuplicateDeliveries > 0 || sent.Selected > received.Messages);
+        Console.WriteLine($"EVIDENCE PF4F impairment sent={sent.Selected} " +
+            $"received={received.Messages} duplicate={client.GetSnapshot().DuplicateDeliveries} " +
+            "loss_reorder_delay_corruption=converged proofs=8 debt=0");
+    }
+
+    private static void CreatePf4fCanonicalBundle(out byte[] canonical, out int written)
+    {
+        const int entryCount = 8;
+        const int recordsPerEntry = 2;
+        const ulong publicationEpoch = 0xF4F02;
+        var entries = new RemoteDirtyChunkBundleEntry[entryCount];
+        var records = new RemoteChunkDeltaRecord[entryCount * recordsPerEntry];
+        for (int entry = 0; entry < entryCount; entry++)
+        {
+            int offset = entry * recordsPerEntry;
+            for (int record = 0; record < recordsPerEntry; record++)
+                records[offset + record] = new RemoteChunkDeltaRecord(
+                    RemoteChunkPublicOperation.Present,
+                    record == 0 ? RemoteChunkPublicFieldMask.Complete :
+                        RemoteChunkPublicFieldMask.Transform,
+                    checked((uint)(offset + record + 1)), 1,
+                    checked((ulong)(offset + record + 1)),
+                    GameWorldPublicPrefabIds.Character,
+                    checked((ushort)(2_000 + entry)), 2_000, 0,
+                    checked((ushort)entry), (ushort)WorldPublicStateFlags.Visible, 2);
+            True(UltraSimGameProtocol.TryGetChunkDeltaContentHash(
+                publicationEpoch, 1, entry, 0, 1, 2, 1,
+                records.AsSpan(offset, recordsPerEntry), out ulong hash));
+            entries[entry] = new RemoteDirtyChunkBundleEntry(
+                RemoteChunkPublicationKind.Delta, checked((ulong)entry + 1), 1,
+                entry, 0, 1, 2, 1, hash, recordsPerEntry, offset);
+        }
+        canonical = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
+        True(UltraSimGameProtocol.TryWriteDirtyChunkBundle(
+            canonical, 0xF4F01, publicationEpoch, 1, entries, [], records, out written));
+        True(written >= RemoteChunkBundleCompressionPolicy.Selected.MinimumCanonicalBytes);
     }
 
     private static void AssertSingletonMtuBoundary(

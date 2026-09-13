@@ -1121,7 +1121,7 @@ public sealed class RemoteGuestPlayableApplication :
             _publicationPolicy.Cadence);
         _worldDelivery = new RemoteChunkWorldStateServer(
             _peer, _recipient, publications, _applicationSessionEpoch,
-            new RemoteChunkWorldStateTransportLimits(128, 64));
+            new RemoteChunkWorldStateTransportLimits(128, 64, _publicationPolicy.Compression));
         _worldDelivery.ConfigureTelemetry(_telemetryLevel);
         InitializePublicationWork(publications);
         if (!_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, WorldPublicEntityId>(
@@ -1198,7 +1198,7 @@ public sealed class RemoteGuestPlayableApplication :
             _publicationPolicy.Cadence);
         _worldDelivery = new RemoteChunkWorldStateServer(
             _peer, _recipient, publications, _applicationSessionEpoch,
-            new RemoteChunkWorldStateTransportLimits(128, 64));
+            new RemoteChunkWorldStateTransportLimits(128, 64, _publicationPolicy.Compression));
         _worldDelivery.ConfigureTelemetry(_telemetryLevel);
         InitializePublicationWork(publications);
         _authorityTicks = _runtime.SimulationTick;

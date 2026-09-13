@@ -25,6 +25,11 @@ internal static class P03WholeFlowNetworkSuite
 
     internal static void Run(string[] args)
     {
+        if (args.Contains("--pf4f-compression-oracle", StringComparer.Ordinal))
+        {
+            Pf4fCompressionOracle.Run(args);
+            return;
+        }
         if (args.Contains("--pf4e-r2-staging-microbench", StringComparer.Ordinal))
         {
             RunChunkStagingMicrobenchmark(args);
@@ -243,6 +248,8 @@ internal static class P03WholeFlowNetworkSuite
         int[] populations = ParseOptionalPositiveIntegers(ReadText(args, "--populations")) ??
             [64, 96, 128];
         string label = ReadText(args, "--implementation-label") ?? "current";
+        RemoteChunkBundleCompressionPolicy compression =
+            ParseCompression(ReadText(args, "--compression"));
         string output = ReadText(args, "--output") ??
             "_Benchmarks/results/network-pf4e-r2-chunk-cpu-attribution.json";
         if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
@@ -287,7 +294,8 @@ internal static class P03WholeFlowNetworkSuite
             if (selectedCurves is not null && !selectedCurves.Contains(curveId)) continue;
             using var prime = new P03WholeFlowHarness(
                 createWorkload(Math.Min(populations[0], 32)), profile, frameCap,
-                stageTimingEnabled: false, gameDetailedAttribution: true);
+                stageTimingEnabled: false, gameDetailedAttribution: true,
+                compression: compression);
             _ = prime.Run(Math.Max(30, warmup), 10);
         }
         foreach ((string curveId, P03NetworkProfile profile,
@@ -302,7 +310,8 @@ internal static class P03WholeFlowNetworkSuite
             GC.Collect();
             using var harness = new P03WholeFlowHarness(
                 workload, profile, frameCap,
-                stageTimingEnabled: false, gameDetailedAttribution: true);
+                stageTimingEnabled: false, gameDetailedAttribution: true,
+                compression: compression);
             P03WholeFlowRow row = harness.Run(warmup, ticks) with
             {
                 ExecutionOrder = executionOrder++,
@@ -331,6 +340,7 @@ internal static class P03WholeFlowNetworkSuite
                 "validation are excluded. Detailed timing overhead makes these attribution rows " +
                 "unsuitable as rated p95 evidence; probes-off R1/R2 rows remain authoritative.",
                 $"Implementation label {label}; cap {frameCap}; selected 1/2/4 cadence; " +
+                $"compression {(compression.Enabled ? "Lz4BlockV1" : "off")}; " +
                 $"{warmup} warmup and {ticks} measured ticks; seed {ExecutionSeed}."),
             ExecutionSeed, warmup, ticks, rows.ToArray());
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
@@ -350,6 +360,8 @@ internal static class P03WholeFlowNetworkSuite
             [64, 96, 128, 192, 256, 384, 448, 512, 576, 640, 704, 768];
         bool stopAfterFailure = !args.Contains("--retain-full-ladder", StringComparer.Ordinal);
         bool stageTimingEnabled = !args.Contains("--probes-off", StringComparer.Ordinal);
+        RemoteChunkBundleCompressionPolicy compression =
+            ParseCompression(ReadText(args, "--compression"));
         string output = ReadText(args, "--output") ??
             "_Benchmarks/Baselines/network-pf4e-r1-rated-reconciliation-raw.json";
         if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
@@ -399,7 +411,8 @@ internal static class P03WholeFlowNetworkSuite
             if (selectedCurves is not null && !selectedCurves.Contains(curveId)) continue;
             Console.WriteLine($"RECONCILE {curveId}: process-level tiering prime...");
             using var prime = new P03WholeFlowHarness(
-                createWorkload(primePopulation), profile, frameCap, stageTimingEnabled);
+                createWorkload(primePopulation), profile, frameCap, stageTimingEnabled,
+                compression: compression);
             _ = prime.Run(Math.Max(30, warmup), 10);
         }
         foreach ((string curveId, P03NetworkProfile profile,
@@ -416,7 +429,8 @@ internal static class P03WholeFlowNetworkSuite
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
                 using var harness = new P03WholeFlowHarness(
-                    workload, profile, frameCap, stageTimingEnabled);
+                    workload, profile, frameCap, stageTimingEnabled,
+                    compression: compression);
                 P03WholeFlowRow row = harness.Run(warmup, ticks) with
                 {
                     ExecutionOrder = executionOrder++,
@@ -602,6 +616,15 @@ internal static class P03WholeFlowNetworkSuite
             "1/1/2" or "112" or "slower" => P03AoICadencePolicy.Slower112,
             "1/2/4" or "124" or "selected" => P03AoICadencePolicy.Selected124,
             _ => throw new ArgumentException($"Unknown AOI cadence '{text}'."),
+        };
+
+    private static RemoteChunkBundleCompressionPolicy ParseCompression(string? text) =>
+        text?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "off" or "canonical" =>
+                RemoteChunkBundleCompressionPolicy.Disabled,
+            "lz4" or "selected" => RemoteChunkBundleCompressionPolicy.Selected,
+            _ => throw new ArgumentException($"Unknown chunk-bundle compression '{text}'."),
         };
 
     private static P03NetworkProfile[] ParseProfiles(string? text)
@@ -890,7 +913,8 @@ internal sealed class P03WholeFlowHarness : IDisposable
         P03NetworkProfile profile,
         int frameCap,
         bool stageTimingEnabled = true,
-        bool gameDetailedAttribution = false)
+        bool gameDetailedAttribution = false,
+        RemoteChunkBundleCompressionPolicy compression = default)
     {
         _workload = workload;
         _profile = profile;
@@ -941,7 +965,7 @@ internal sealed class P03WholeFlowHarness : IDisposable
             P03NetworkProfile.DirtyEntityChunkBatchFanout => new P03DirtyEntityRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, chunkBatch: true),
             P03NetworkProfile.ChunkPublication => new P03ChunkPublicationRemoteAdapter(
-                workload, _sessions, _x, _z, _versions, s_content),
+                workload, _sessions, _x, _z, _versions, s_content, compression),
             P03NetworkProfile.DirtyChunkSpatialFanout => new P03DirtyChunkRemoteAdapter(
                 workload, _sessions, _x, _z, _versions, s_content),
             _ => throw new ArgumentOutOfRangeException(nameof(profile)),
@@ -2054,7 +2078,8 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
 
     internal P03ChunkPublicationRemoteAdapter(P03NetworkWorkload workload,
         SharedUdpProtocolSession[] sessions, long[] x, long[] z, ulong[] versions,
-        WorldContentFingerprint content)
+        WorldContentFingerprint content,
+        RemoteChunkBundleCompressionPolicy compression = default)
         : base(workload, sessions, x, z, versions, content)
     {
         int subscriptions = workload.Id.StartsWith("sparse", StringComparison.Ordinal) ? 128 : 1_024;
@@ -2097,7 +2122,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
             ExpectedCounts[index] = Caches[index].GetSnapshot().KnownPublicIdentities;
             _servers[index] = new RemoteChunkWorldStateServer(
                 sessions[index].Server, recipient, Source, ApplicationEpoch,
-                new RemoteChunkWorldStateTransportLimits(128));
+                new RemoteChunkWorldStateTransportLimits(128, 1_024, compression));
             _clients[index] = new RemoteChunkWorldStateClient(
                 sessions[index].Client, Caches[index], ApplicationEpoch, 64, 256);
         }
@@ -2313,6 +2338,13 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
     {
         ChunkPublicationWorkSchedulerSnapshot scheduler = _scheduler.GetSnapshot();
         ChunkPublicationStoreSnapshot source = Source.GetSnapshot();
+        P03CompressionCounters compression = default;
+        for (int index = 0; index < _servers.Length; index++)
+        {
+            RemoteChunkCompressionCensusSnapshot value =
+                _servers[index].GetTimingSnapshot().Knowledge.Compression;
+            compression = compression.Add(value);
+        }
         return base.GetCounters() with
         {
             SuccessfulSemanticPublications = ScheduleSuccesses,
@@ -2343,6 +2375,7 @@ internal sealed class P03ChunkPublicationRemoteAdapter : P03ChunkRemoteAdapterBa
                 _deltaRangeRequests, _uniqueDeltaRanges, _reusableDeltaRangeRequests,
                 _deltaRangeRecordInstances, _uniqueDeltaRangeRecords,
                 _reusableDeltaRangeRecords, _censusSourceDeltaReads),
+            Compression = compression,
         };
     }
     internal override void ResetCounters()
@@ -3017,7 +3050,38 @@ internal readonly record struct P03ProfileCounters(
     ulong SourceSnapshotReads = 0,
     ulong SourceSnapshotFallbacks = 0,
     P03ChunkCpuAttribution ChunkCpu = default,
-    P03DeltaRangeReuseCensus DeltaRangeReuse = default);
+    P03DeltaRangeReuseCensus DeltaRangeReuse = default,
+    P03CompressionCounters Compression = default);
+
+internal readonly record struct P03CompressionCounters(
+    ulong Attempts,
+    ulong Selected,
+    ulong SkippedBySize,
+    ulong RejectedAsUnprofitable,
+    ulong CodecFailures,
+    ulong CanonicalBytesAttempted,
+    ulong CanonicalBytesSelected,
+    ulong CompressedRepresentationBytes,
+    ulong DirectBytesSaved,
+    ulong CompressionStopwatchTicks,
+    long MaximumCompressionMicroseconds)
+{
+    internal P03CompressionCounters Add(in RemoteChunkCompressionCensusSnapshot value) => new(
+        Add(Attempts, value.Attempts),
+        Add(Selected, value.Selected),
+        Add(SkippedBySize, value.SkippedBySize),
+        Add(RejectedAsUnprofitable, value.RejectedAsUnprofitable),
+        Add(CodecFailures, value.CodecFailures),
+        Add(CanonicalBytesAttempted, value.CanonicalBytesAttempted),
+        Add(CanonicalBytesSelected, value.CanonicalBytesSelected),
+        Add(CompressedRepresentationBytes, value.CompressedRepresentationBytes),
+        Add(DirectBytesSaved, value.DirectBytesSaved),
+        Add(CompressionStopwatchTicks, value.Compression.TotalStopwatchTicks),
+        Math.Max(MaximumCompressionMicroseconds, value.Compression.MaximumMicroseconds));
+
+    private static ulong Add(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+}
 
 internal readonly record struct P03DeltaRangeReuseCensus(
     ulong Requests,

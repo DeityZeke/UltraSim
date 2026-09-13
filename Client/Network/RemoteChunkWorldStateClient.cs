@@ -41,6 +41,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly RemoteChunkPublicRecord[] _wireSnapshot;
     private readonly WorldPublicRecord[] _semanticSnapshot;
     private readonly RemoteDirtyChunkBundleEntry[] _bundleEntries;
+    private readonly byte[] _compressedBundleScratch;
     private readonly byte[] _snapshotPayload;
     private readonly byte[] _snapshotSegmentScratch;
     private readonly bool[] _snapshotSegments;
@@ -74,10 +75,15 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
     private readonly ClientValueWindow _proofEnvelopeOccupancy = new();
     private readonly ClientValueWindow _bundleEnvelopeOccupancy = new();
     private readonly ClientTimingWindow _semanticApplyIntervals = new();
+    private readonly ClientTimingWindow _decompressionTiming = new();
     private long _lastSemanticApplyTimestamp;
     private ulong _timedBundleEnvelopes;
     private ulong _timedBundleEntries;
     private ulong _timedBundleBytes;
+    private ulong _timedCompressedMessages;
+    private ulong _timedCompressedBytes;
+    private ulong _timedCompressedDecodedBytes;
+    private ulong _timedCompressedMalformed;
     private ulong _timedProofsGenerated;
     private ulong _timedProofsQueued;
     private ulong _timedProofEnvelopesQueued;
@@ -122,6 +128,8 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _semanticSnapshot = new WorldPublicRecord[cache.Limits.MaximumPublicRecordsPerChunk];
         _bundleEntries = new RemoteDirtyChunkBundleEntry[
             UltraSimGameProtocol.MaximumDirtyChunkBundleEntries];
+        _compressedBundleScratch = new byte[
+            UltraSimGameProtocol.MaximumCompressedDirtyChunkBundleDecodedBytes];
         _snapshotPayload = new byte[UltraSimGameProtocol.GetChunkSnapshotEncodedBytes(
             cache.Limits.MaximumPublicRecordsPerChunk)];
         int segmentPayload = peer.MaximumUnfragmentedMessageBytes -
@@ -172,6 +180,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         if (message.MessageId == RemoteDirtyChunkBundleHeaderCodec.Descriptor.Id)
         {
             ProcessDirtyChunkBundle(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteCompressedDirtyChunkBundleHeaderCodec.Descriptor.Id)
+        {
+            ProcessCompressedDirtyChunkBundle(payload);
             return true;
         }
         if (message.MessageId == RemoteChunkSnapshotBeginMessageCodec.Descriptor.Id)
@@ -299,6 +312,7 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 (long)_wireSnapshot.Length * Unsafe.SizeOf<RemoteChunkPublicRecord>() +
                 (long)_semanticSnapshot.Length * Unsafe.SizeOf<WorldPublicRecord>() +
                 (long)_bundleEntries.Length * Unsafe.SizeOf<RemoteDirtyChunkBundleEntry>() +
+                _compressedBundleScratch.Length +
                 _snapshotPayload.Length + _snapshotSegmentScratch.Length +
                 _snapshotSegments.Length +
                 (long)_deliveryLineage.Length * Unsafe.SizeOf<DeliveryLineage>() +
@@ -320,8 +334,11 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
         _proofEnvelopeOccupancy.Clear();
         _bundleEnvelopeOccupancy.Clear();
         _semanticApplyIntervals.Clear();
+        _decompressionTiming.Clear();
         _lastSemanticApplyTimestamp = 0;
         _timedBundleEnvelopes = _timedBundleEntries = _timedBundleBytes = 0;
+        _timedCompressedMessages = _timedCompressedBytes = 0;
+        _timedCompressedDecodedBytes = _timedCompressedMalformed = 0;
         _timedProofsGenerated = _timedProofsQueued = 0;
         _timedProofEnvelopesQueued = _timedProofEnvelopeBytes = 0;
         _timedProofQueueDeferrals = 0;
@@ -380,6 +397,12 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
                 _timedBundleEntries,
                 _timedBundleBytes,
                 _bundleEnvelopeOccupancy.Capture()),
+            new RemoteChunkCompressionReceiveCensusSnapshot(
+                _timedCompressedMessages,
+                _timedCompressedBytes,
+                _timedCompressedDecodedBytes,
+                _timedCompressedMalformed,
+                _decompressionTiming.Capture()),
             _semanticApplyIntervals.Capture());
     }
 
@@ -451,6 +474,32 @@ public sealed class RemoteChunkWorldStateClient : IRemoteGameProtocolHandler, IR
             }
         }
         ClearBundleScratch(entryCount, snapshotCount, deltaCount);
+    }
+
+    private void ProcessCompressedDirtyChunkBundle(ReadOnlySpan<byte> payload)
+    {
+        long started = _telemetryLevel == NetworkTelemetryLevel.Detailed
+            ? System.Diagnostics.Stopwatch.GetTimestamp()
+            : 0;
+        bool decoded = UltraSimGameProtocol.TryReadCompressedDirtyChunkBundle(
+            payload, _compressedBundleScratch, out int decodedBytes);
+        if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+            _decompressionTiming.RecordElapsed(started);
+        if (!decoded)
+        {
+            SaturatingIncrement(ref _malformedDeliveries);
+            if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+                SaturatingIncrement(ref _timedCompressedMalformed);
+            return;
+        }
+        if (_telemetryLevel == NetworkTelemetryLevel.Detailed)
+        {
+            SaturatingIncrement(ref _timedCompressedMessages);
+            SaturatingAdd(ref _timedCompressedBytes, checked((ulong)payload.Length));
+            SaturatingAdd(ref _timedCompressedDecodedBytes, checked((ulong)decodedBytes));
+        }
+        ProcessDirtyChunkBundle(_compressedBundleScratch.AsSpan(0, decodedBytes));
+        _compressedBundleScratch.AsSpan(0, decodedBytes).Clear();
     }
 
     private void ApplyBundledDelta(

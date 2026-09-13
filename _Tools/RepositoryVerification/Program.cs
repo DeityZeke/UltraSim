@@ -39,6 +39,135 @@ if (options.Pf4eR1Only)
     return 0;
 }
 
+if (options.Pf4fOnly)
+{
+    if (options.SkipGodot)
+        throw new ArgumentException("--pf4f-only requires the actual exported Online product.");
+    foreach (string project in new[]
+             {
+                 "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
+                 "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
+                 "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+                 "_Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj",
+                 "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
+             })
+    {
+        var command = new List<string> { "run", "--project", project, "-c", options.Configuration };
+        if (project.Contains("NetworkBots", StringComparison.Ordinal))
+            command.Add("-p:UltraSimNetworkFlavor=ClientOnly");
+        Run(root, "dotnet", command);
+    }
+    VerifyPf4fSelectiveCompression(root, options.Configuration);
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        VerifyPf2MixedExportedAccountingSwarm(
+            root, options.Configuration, product.Executable,
+            detailedTelemetry: true,
+            warmupSeconds: options.Pf3NativeWarmupSeconds,
+            measurementSeconds: options.Pf3NativeMeasurementSeconds,
+            evidenceOutputDirectory: options.Pf3NativeEvidenceOutputDirectory,
+            telemetryCheckpoint: "PF4F",
+            externalImpairment: true);
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope)) Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine("PASS PF4F focused verification");
+    return 0;
+}
+
+static void VerifyPf4fSelectiveCompression(string root, string configuration)
+{
+    string scope = Path.Combine(Path.GetTempPath(), "ultrasim-repository-verification",
+        Environment.ProcessId.ToString(), "pf4f");
+    if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    Directory.CreateDirectory(scope);
+    string oracle = Path.Combine(scope, "oracle.json");
+    string canonical = Path.Combine(scope, "canonical.json");
+    string compressed = Path.Combine(scope, "compressed.json");
+    try
+    {
+        Run(root, "dotnet",
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow", "--pf4f-compression-oracle",
+            "--iterations=2", $"--output={oracle}",
+        ]);
+        using (JsonDocument oracleDocument = JsonDocument.Parse(File.ReadAllText(oracle)))
+        {
+            JsonElement report = oracleDocument.RootElement;
+            if (report.GetProperty("Schema").GetString() !=
+                    "ultrasim-network-pf4f-compression-oracle-v1" ||
+                report.GetProperty("WrapperBytes").GetInt32() != 5 ||
+                report.GetProperty("Payloads").GetInt32() != 1_024 ||
+                report.GetProperty("Workloads").GetArrayLength() != 4)
+                throw new InvalidOperationException("PF4F oracle corpus/schema is incomplete.");
+            JsonElement lz4 = report.GetProperty("Candidates").EnumerateArray().Single(
+                static item => item.GetProperty("Codec").GetString() == "ultrasim-lz4-block-v1");
+            if (lz4.GetProperty("CompleteRatio").GetDouble() >= 0.8 ||
+                lz4.GetProperty("EncodeAllocatedBytes").GetInt64() != 0 ||
+                lz4.GetProperty("DecodeAllocatedBytes").GetInt64() != 0 ||
+                lz4.GetProperty("ProfitableMessages").GetInt32() == 0)
+                throw new InvalidOperationException("PF4F bounded codec lost its oracle contract.");
+            bool selectedCurve = report.GetProperty("Thresholds").EnumerateArray().Any(
+                static item => item.GetProperty("MinimumCanonicalBytes").GetInt32() == 384 &&
+                    item.GetProperty("MinimumNetSavingsBytes").GetInt32() == 32 &&
+                    item.GetProperty("SelectedMessages").GetInt32() != 0);
+            if (!selectedCurve)
+                throw new InvalidOperationException("PF4F omitted its selected threshold curve.");
+        }
+
+        string[] common =
+        [
+            "run", "--project",
+            "_Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj",
+            "-c", configuration, "--", "--p03-whole-flow",
+            "--pf4e-r1-rated-reconciliation",
+            "--curves=chunk-production-localized-multichunk", "--populations=8,16",
+            "--warmup=3", "--ticks=20", "--retain-full-ladder", "--probes-off",
+        ];
+        Run(root, "dotnet", [.. common, "--compression=off", $"--output={canonical}"]);
+        Run(root, "dotnet", [.. common, "--compression=selected", $"--output={compressed}"]);
+        using JsonDocument canonicalDocument = JsonDocument.Parse(File.ReadAllText(canonical));
+        using JsonDocument compressedDocument = JsonDocument.Parse(File.ReadAllText(compressed));
+        JsonElement[] before = canonicalDocument.RootElement.GetProperty("Rows")
+            .EnumerateArray().Select(static row => row.Clone()).ToArray();
+        JsonElement[] after = compressedDocument.RootElement.GetProperty("Rows")
+            .EnumerateArray().Select(static row => row.Clone()).ToArray();
+        if (before.Length != 2 || after.Length != 2)
+            throw new InvalidOperationException("PF4F rated smoke omitted a population.");
+        foreach (JsonElement compressedRow in after)
+        {
+            int recipients = compressedRow.GetProperty("Recipients").GetInt32();
+            JsonElement canonicalRow = before.Single(
+                row => row.GetProperty("Recipients").GetInt32() == recipients);
+            JsonElement census = compressedRow.GetProperty("ProfileCounters").GetProperty("Compression");
+            if (!canonicalRow.GetProperty("Converged").GetBoolean() ||
+                !compressedRow.GetProperty("Converged").GetBoolean() ||
+                canonicalRow.GetProperty("SemanticDigest").GetString() !=
+                    compressedRow.GetProperty("SemanticDigest").GetString() ||
+                census.GetProperty("Selected").GetUInt64() == 0 ||
+                census.GetProperty("CodecFailures").GetUInt64() != 0 ||
+                census.GetProperty("CanonicalBytesSelected").GetUInt64() -
+                    census.GetProperty("CompressedRepresentationBytes").GetUInt64() !=
+                    census.GetProperty("DirectBytesSaved").GetUInt64() ||
+                compressedRow.GetProperty("Transport").GetProperty("WireBytes").GetUInt64() >=
+                    canonicalRow.GetProperty("Transport").GetProperty("WireBytes").GetUInt64() ||
+                compressedRow.GetProperty("Transport").GetProperty("CapacityDrops").GetUInt64() != 0)
+                throw new InvalidOperationException(
+                    $"PF4F semantic/transactional rated smoke failed at {recipients} recipients.");
+        }
+    }
+    finally
+    {
+        if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
+    }
+}
+
 static void VerifyPf4eR2ChunkCpuEfficiency(string root, string configuration)
 {
     string scope = Path.Combine(
@@ -2163,7 +2292,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"--ready-file={botReady}", $"--release-file={botRelease}",
             $"--summary-file={botSummary}", "--admission-stagger-ms=100",
             $"--telemetry={(detailedTelemetry ? "Detailed" : "Off")}",
-            telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E"
+            telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F"
                 ? $"--checkpoint={telemetryCheckpoint}" :
                 detailedTelemetry ? "--checkpoint=PF2.5" : "--checkpoint=PF2",
         ], clientTimeoutMilliseconds));
@@ -2233,7 +2362,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
 
         File.WriteAllText(botRelease, "release\n");
         string botOutput = botsTask.GetAwaiter().GetResult();
-        string expectedBotCheckpoint = telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E"
+        string expectedBotCheckpoint = telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F"
             ? telemetryCheckpoint
             : detailedTelemetry ? "PF2.5" : "PF2";
         int expectedBotSchema = expectedBotCheckpoint switch
@@ -2244,6 +2373,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             "PF4C" => 8,
             "PF4D" => 9,
             "PF4E" => 10,
+            "PF4F" => 11,
             "PF2.5" => 4,
             _ => 3,
         };
@@ -2277,7 +2407,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             !bot.GetProperty("cleanRetirement").GetBoolean())
             throw new InvalidOperationException(
                 "The PF2 client accounting/reconnect/retirement contract did not hold.");
-        if (expectedBotCheckpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" &&
+        if (expectedBotCheckpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D" or "PF4E" or "PF4F" &&
             bot.GetProperty("actionOutcomes").EnumerateArray().Any(static outcome =>
                 !outcome.GetProperty("conserved").GetBoolean() ||
                 !outcome.GetProperty("terminal").GetBoolean() ||
@@ -2285,7 +2415,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             throw new InvalidOperationException(
                 "The PF4A bot action lifecycle contained unexplained or terminal debt.");
 
-        if (expectedBotCheckpoint is "PF4D" or "PF4E")
+        if (expectedBotCheckpoint is "PF4D" or "PF4E" or "PF4F")
         {
             JsonElement aggregation = wire.GetProperty("unreliableAggregation");
             if (bot.GetProperty("unreliableFrameCap").GetInt32() <= 1 ||
@@ -2308,7 +2438,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             accounting.GetProperty("Families").GetArrayLength() != 12)
             throw new InvalidOperationException(
                 "The dedicated authority did not reconcile ordinary bot/native PF2 traffic.");
-        if (expectedBotCheckpoint is "PF4D" or "PF4E" &&
+        if (expectedBotCheckpoint is "PF4D" or "PF4E" or "PF4F" &&
             accounting.GetProperty("UnreliableAggregation")
                 .GetProperty("SentDatagramsWithTwoOrMoreFrames").GetUInt64() == 0)
             throw new InvalidOperationException(
@@ -2322,9 +2452,12 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         if (externalImpairment)
             File.WriteAllText(impairmentSummary, JsonSerializer.Serialize(new
             {
-                Schema = expectedBotCheckpoint == "PF4E"
-                    ? "ultrasim-pf4e-external-udp-impairment-v1"
-                    : "ultrasim-pf4d-external-udp-impairment-v1",
+                Schema = expectedBotCheckpoint switch
+                {
+                    "PF4F" => "ultrasim-pf4f-external-udp-impairment-v1",
+                    "PF4E" => "ultrasim-pf4e-external-udp-impairment-v1",
+                    _ => "ultrasim-pf4d-external-udp-impairment-v1",
+                },
                 DropPeriod = ExternalUdpImpairmentProxy.DropPeriod,
                 ReorderPeriod = ExternalUdpImpairmentProxy.ReorderPeriod,
                 AliceDropped = aliceProxy!.DroppedDatagrams,
@@ -2348,7 +2481,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                 throw new InvalidOperationException(
                     "The PF2.5 authority timing projection was absent or incomplete.");
 
-            if (telemetryCheckpoint == "PF4E")
+            if (telemetryCheckpoint is "PF4E" or "PF4F")
             {
                 JsonElement remote = accounting.GetProperty("RemoteReplication");
                 JsonElement publication = accounting.GetProperty("AuthoritativePublications");
@@ -2390,7 +2523,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                         throw new InvalidOperationException(
                             "A PF4A application omitted bounded replication wake attribution.");
                 }
-                if (telemetryCheckpoint == "PF4E")
+                if (telemetryCheckpoint is "PF4E" or "PF4F")
                 {
                     JsonElement publication = application.GetProperty("World")
                         .GetProperty("Timing").GetProperty("Knowledge")
@@ -2401,6 +2534,22 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                             .GetProperty("Count").GetUInt64() == 0)
                         throw new InvalidOperationException(
                             "A PF4E application omitted record/payload/self-public attribution.");
+                }
+                if (telemetryCheckpoint == "PF4F")
+                {
+                    JsonElement compression = application.GetProperty("World")
+                        .GetProperty("Timing").GetProperty("Knowledge")
+                        .GetProperty("Compression");
+                    ulong canonicalBytes = compression.GetProperty("CanonicalBytesSelected").GetUInt64();
+                    ulong compressedBytes = compression.GetProperty("CompressedRepresentationBytes").GetUInt64();
+                    if (!compression.GetProperty("Enabled").GetBoolean() ||
+                        compression.GetProperty("Selected").GetUInt64() == 0 ||
+                        compression.GetProperty("CodecFailures").GetUInt64() != 0 ||
+                        canonicalBytes <= compressedBytes ||
+                        canonicalBytes - compressedBytes !=
+                            compression.GetProperty("DirectBytesSaved").GetUInt64())
+                        throw new InvalidOperationException(
+                            "A PF4F application omitted coherent selected compression accounting.");
                 }
             }
             if (serverWorldActions == 0 || serverScheduleAttempts == 0 || serverDeliveries == 0)
@@ -2427,6 +2576,17 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                     .GetProperty("ownerStatesApplied").GetUInt64();
                 worldApplies += client.GetProperty("world")
                     .GetProperty("decodeAndApply").GetProperty("count").GetUInt64();
+                if (telemetryCheckpoint == "PF4F")
+                {
+                    JsonElement compression = client.GetProperty("world")
+                        .GetProperty("compressionCensus");
+                    if (compression.GetProperty("messages").GetUInt64() == 0 ||
+                        compression.GetProperty("malformed").GetUInt64() != 0 ||
+                        compression.GetProperty("canonicalDecodedBytes").GetUInt64() <=
+                            compression.GetProperty("compressedRepresentationBytes").GetUInt64())
+                        throw new InvalidOperationException(
+                            "A PF4F ClientOnly bot omitted coherent decompression accounting.");
+                }
             }
             if (clientProcesses == 0 || ownerStates == 0 || worldApplies == 0)
                 throw new InvalidOperationException(
@@ -2526,6 +2686,7 @@ static void RequireNativeTelemetry(
         "PF4C" => 5,
         "PF4D" => 6,
         "PF4E" => 7,
+        "PF4F" => 8,
         _ => 1,
     };
     byte nativeLevel = native.GetProperty("Level").GetByte();
@@ -2545,7 +2706,7 @@ static void RequireNativeTelemetry(
         !string.IsNullOrWhiteSpace(native.GetProperty("WindowMode").GetString());
     ulong wholeFrameSamples = native.GetProperty("FrameDurations")
         .GetProperty("Samples").GetUInt64();
-    bool sustainedInput = expectedCheckpoint is "PF3" or "PF4E";
+    bool sustainedInput = expectedCheckpoint is "PF3" or "PF4E" or "PF4F";
     bool performanceApplied = !sustainedInput ||
         root.GetProperty("PerformanceProfile").GetProperty("State").GetByte() == 2;
     bool schedulerValid = !sustainedInput ||
@@ -2581,11 +2742,20 @@ static void RequireNativeTelemetry(
         submissionRate <= 36 && submissionRate >= 15 &&
         sampleRate + 2 >= submissionRate &&
         (!highProducer || sampleRate > submissionRate * 1.25);
-    bool aggregationValid = expectedCheckpoint is not ("PF4D" or "PF4E") ||
+    bool aggregationValid = expectedCheckpoint is not ("PF4D" or "PF4E" or "PF4F") ||
         root.GetProperty("Protocol").GetProperty("UnreliableAggregation")
             .GetProperty("ConfiguredMaximumFramesPerDatagram").GetInt32() > 1 &&
         root.GetProperty("Protocol").GetProperty("UnreliableAggregation")
             .GetProperty("ReceivedDatagramsWithTwoOrMoreFrames").GetUInt64() > 0;
+    bool compressionValid = expectedCheckpoint != "PF4F" ||
+        client.GetProperty("World").GetProperty("CompressionCensus")
+            .GetProperty("Messages").GetUInt64() != 0 &&
+        client.GetProperty("World").GetProperty("CompressionCensus")
+            .GetProperty("Malformed").GetUInt64() == 0 &&
+        client.GetProperty("World").GetProperty("CompressionCensus")
+            .GetProperty("CanonicalDecodedBytes").GetUInt64() >
+        client.GetProperty("World").GetProperty("CompressionCensus")
+            .GetProperty("CompressedRepresentationBytes").GetUInt64();
     if (!healthy || checkpoint != expectedCheckpoint ||
         root.GetProperty("SchemaVersion").GetInt32() != expectedSchema ||
         nativeLevel != 2 || frames == 0 ||
@@ -2593,7 +2763,7 @@ static void RequireNativeTelemetry(
         frameSamples == 0 || presentationSamples == 0 ||
         clientLevel != 2 || receivedSamples == 0 || networkLevel != 2 || pumpSamples == 0 ||
         !displayIdentified || wholeFrameSamples == 0 || !performanceApplied || !schedulerValid ||
-        !renderModeValid || !cadenceIndependent || !aggregationValid)
+        !renderModeValid || !cadenceIndependent || !aggregationValid || !compressionValid)
         throw new InvalidOperationException(
             "An exported Online client did not expose the required PF2.5 native/client/Network " +
             $"timing: healthy={healthy} checkpoint={checkpoint} native={nativeLevel} " +
@@ -2602,7 +2772,7 @@ static void RequireNativeTelemetry(
             $"client={clientLevel}/{receivedSamples} network={networkLevel}/{pumpSamples} " +
             $"display={displayIdentified}/{renderModeValid} performance={performanceApplied} " +
             $"scheduler={schedulerValid} cadence={sampleRate:0.###}/{submissionRate:0.###}Hz " +
-            $"aggregation={aggregationValid}.");
+            $"aggregation={aggregationValid} compression={compressionValid}.");
 }
 
 static void VerifyPf3InputCadenceMatrix(string root, string configuration)
@@ -3256,7 +3426,7 @@ static string[] NativeSharedClientArguments(
         arguments.Add($"--telemetry-summary={telemetrySummary}");
     if (telemetryCheckpoint is not null)
         arguments.Add($"--telemetry-checkpoint={telemetryCheckpoint}");
-    if (telemetryCheckpoint is "PF3" or "PF4E")
+    if (telemetryCheckpoint is "PF3" or "PF4E" or "PF4F")
         arguments.Add("--pf3-native-sustained-input");
     return arguments.ToArray();
 }
@@ -4164,6 +4334,7 @@ internal sealed record VerificationOptions(
     bool Pf4eOnly,
     bool Pf4eR1Only,
     bool Pf4eR2Only,
+    bool Pf4fOnly,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -4184,7 +4355,7 @@ internal sealed record VerificationOptions(
         bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
             pf4cOnly = false, pf4dOnly = false, pf4eOnly = false, pf4eR1Only = false,
-            pf4eR2Only = false,
+            pf4eR2Only = false, pf4fOnly = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -4208,6 +4379,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf4e-only") pf4eOnly = true;
             else if (argument == "--pf4e-r1-only") pf4eR1Only = true;
             else if (argument == "--pf4e-r2-only") pf4eR2Only = true;
+            else if (argument == "--pf4f-only") pf4fOnly = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -4241,6 +4413,10 @@ internal sealed record VerificationOptions(
                 pf3NativeWarmupSeconds = int.Parse(
                     argument["--pf4e-native-warmup-seconds=".Length..],
                     System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf4f-native-warmup-seconds=", StringComparison.Ordinal))
+                pf3NativeWarmupSeconds = int.Parse(
+                    argument["--pf4f-native-warmup-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
             else if (argument.StartsWith("--pf3-native-measurement-seconds=", StringComparison.Ordinal))
                 pf3NativeMeasurementSeconds = int.Parse(
                     argument["--pf3-native-measurement-seconds=".Length..],
@@ -4265,6 +4441,10 @@ internal sealed record VerificationOptions(
                 pf3NativeMeasurementSeconds = int.Parse(
                     argument["--pf4e-native-measurement-seconds=".Length..],
                     System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf4f-native-measurement-seconds=", StringComparison.Ordinal))
+                pf3NativeMeasurementSeconds = int.Parse(
+                    argument["--pf4f-native-measurement-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
             else if (argument.StartsWith("--pf3-native-evidence-output=", StringComparison.Ordinal))
                 pf3NativeEvidenceOutputDirectory =
                     argument["--pf3-native-evidence-output=".Length..];
@@ -4283,6 +4463,9 @@ internal sealed record VerificationOptions(
             else if (argument.StartsWith("--pf4e-native-evidence-output=", StringComparison.Ordinal))
                 pf3NativeEvidenceOutputDirectory =
                     argument["--pf4e-native-evidence-output=".Length..];
+            else if (argument.StartsWith("--pf4f-native-evidence-output=", StringComparison.Ordinal))
+                pf3NativeEvidenceOutputDirectory =
+                    argument["--pf4f-native-evidence-output=".Length..];
             else if (argument.StartsWith("--pf3-native-a=", StringComparison.Ordinal))
                 pf3NativeAliceRenderMode = argument["--pf3-native-a=".Length..];
             else if (argument.StartsWith("--pf3-native-b=", StringComparison.Ordinal))
@@ -4292,12 +4475,14 @@ internal sealed record VerificationOptions(
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
-             pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only) && architectureOnly)
+             pf4bOnly || pf4cOnly || pf4dOnly || pf4eOnly || pf4eR1Only || pf4eR2Only ||
+             pf4fOnly) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
             (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) +
-            (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) > 1)
+            (pf4eOnly ? 1 : 0) + (pf4eR1Only ? 1 : 0) + (pf4eR2Only ? 1 : 0) +
+            (pf4fOnly ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -4319,10 +4504,10 @@ internal sealed record VerificationOptions(
             pf3NativeMeasurementSeconds != 20 || pf3NativeEvidenceOutputDirectory is not null ||
             pf3NativeAliceRenderMode != "headless" || pf3NativeBobRenderMode != "headless";
         if (hasPf3NativeOption && !pf3Only && !pf3NativeOnly && !pf4aOnly && !pf4bOnly &&
-            !pf4cOnly && !pf4dOnly && !pf4eOnly)
+            !pf4cOnly && !pf4dOnly && !pf4eOnly && !pf4fOnly)
             throw new ArgumentException(
-                "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, or --pf4e-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only,
+                "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, --pf4d-only, --pf4e-only, or --pf4f-only.");
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly, pf4eOnly, pf4eR1Only, pf4eR2Only, pf4fOnly,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,

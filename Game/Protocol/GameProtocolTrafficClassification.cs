@@ -45,7 +45,7 @@ public static class GameProtocolTrafficClassification
             135 or 136 or 137 => (int)GameProtocolTrafficFamily.GuestAdmission,
             106 or 138 => (int)GameProtocolTrafficFamily.PlayableInputAndCommands,
             107 or 139 => (int)GameProtocolTrafficFamily.OwnerPrivateState,
-            >= 109 and <= 114 or >= 117 and <= 130 =>
+            >= 109 and <= 114 or >= 117 and <= 130 or 148 =>
                 (int)GameProtocolTrafficFamily.StructuralAndPublicWorld,
             144 or 145 => (int)GameProtocolTrafficFamily.PublicPresentation,
             115 or 116 => (int)GameProtocolTrafficFamily.ApplicationEvent,
