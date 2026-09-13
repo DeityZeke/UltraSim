@@ -1,0 +1,296 @@
+{
+  "checkpoint": "PF4D",
+  "capturedUtc": "2026-09-13",
+  "status": "CLOSED — cross-lane cap-two unreliable Network-frame aggregation accepted",
+  "commits": {
+    "pf4cR1CleanMeasurementBase": "3f8490cec60953f14ea44bb624c1859ab85b4726",
+    "pf4cR1ProductRepair": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+    "acceptedPf4dImplementation": "b4ce125b2bec9f63d265963872c8baaf58ce9fb2",
+    "featureCompleteCorrectnessCandidate": "af9fcb740c02eb08efa8d4985d929b50b135504e",
+    "candidateLineageChangedByPf4d": false,
+    "candidateReason": "PF4D changes an accepted physical Network representation and negotiated receive capability, not Game truth. PF4C-R1 remains the latest product-correctness repair candidate."
+  },
+  "environment": {
+    "configuration": "Release",
+    "runtime": ".NET 8.0.29",
+    "operatingSystem": "CachyOS / Linux 7.1.5-1-cachyos",
+    "processor": "AMD Ryzen 7 7800X3D 8-Core Processor",
+    "logicalProcessors": 16,
+    "architecture": "x64",
+    "networkFlavors": ["ClientOnly", "ServerOnly"]
+  },
+  "audit": {
+    "existingTransportWireRevision": 2,
+    "prePf4dGameManifestVersion": 27,
+    "prePf4dGameManifestFingerprint": 12297143954470782176,
+    "prePf4dMaximumUnreliableReceiveFrames": 1,
+    "pf4dGameManifestVersion": 28,
+    "pf4dGameManifestFingerprint": 8944792020096633706,
+    "pf4dMaximumUnreliableReceiveFrames": 8,
+    "transportWireRevisionChanged": false,
+    "reason": "Transport revision 2 already carried and atomically validated multiple Data frames. PF4D changes the Game manifest's negotiated receive capability and therefore its fingerprint, but adds no new outer framing.",
+    "productionGamePolicyUnchanged": {
+      "owner": "ChunkPublication",
+      "representation": "Message129WhenBeneficial",
+      "immediateNearFarCadence": [1, 2, 4]
+    }
+  },
+  "selectedPolicy": {
+    "maximumUnreliableFramesPerDatagram": 2,
+    "scope": "CrossLane",
+    "departureDeadline": "the current Emit/service opportunity; no aggregation wait or timer",
+    "reliableRule": "Control/Event/Bulk remain singleton and never share a Data datagram with unreliable frames",
+    "physicalOnly": "Every aggregated frame retains its lane, message identity/version, lane sequence, length, payload, and independent receive result.",
+    "bounds": "Frame count is capped by the local send policy, the manifest receive capability, and the exact secure-datagram plaintext/MTU limit."
+  },
+  "scalarOpportunityCensus": {
+    "telemetry": "Detailed-only, owner-local, non-mutating immediate-ready scan",
+    "serverToClientMoving50": {
+      "seed": 500501,
+      "warmupSeconds": 60,
+      "measuredSeconds": 60.215,
+      "inspections": 1677059,
+      "readyFrames": 251259,
+      "readyFrameBytes": 159988698,
+      "opportunities": {"zero":1493990,"one":120879,"two":56201,"three":5978,"four":11,"fiveToEight":0,"ninePlus":0},
+      "readyByLane": {"Input":0,"OwnerState":60446,"WorldState":190813,"Disposable":0,"Other":0},
+      "scalarDatagrams": 251259,
+      "crossLaneDatagrams": {"cap2":197685,"cap4":197529,"cap8":197529,"unlimited":197529},
+      "sameLaneDatagrams": {"cap2":250834,"cap4":250834,"cap8":250834,"unlimited":250834},
+      "cap2PotentialDatagramsSaved": 53574,
+      "cap2PotentialOuterSecureBytesSaved": 2357256
+    },
+    "serverToClientCrowd50": {
+      "seed": 500502,
+      "warmupSeconds": 60,
+      "measuredSeconds": 60.413,
+      "inspections": 1639404,
+      "readyFrames": 275378,
+      "readyFrameBytes": 196460108,
+      "opportunities": {"zero":1452195,"one":103072,"two":80105,"three":4032,"four":0,"fiveToEight":0,"ninePlus":0},
+      "readyByLane": {"Input":0,"OwnerState":87125,"WorldState":188253,"Disposable":0,"Other":0},
+      "scalarDatagrams": 275378,
+      "crossLaneDatagrams": {"cap2":200851,"cap4":200851,"cap8":200851,"unlimited":200851},
+      "sameLaneDatagrams": {"cap2":275378,"cap4":275378,"cap8":275378,"unlimited":275378},
+      "cap2PotentialDatagramsSaved": 74527,
+      "cap2PotentialOuterSecureBytesSaved": 3279188
+    },
+    "clientToServer": {
+      "moving50ReadyFrames": 180855,
+      "crowd50ReadyFrames": 180325,
+      "multiReadyOpportunities": 0,
+      "potentialDatagramsSaved": 0,
+      "explanation": "The current product clients offered only one ready WorldState proof frame at each sampled emit opportunity. PF4D's measured opportunity and selected benefit are therefore server-to-client."
+    },
+    "decision": "Same-lane aggregation captured under 0.2% of Moving opportunity and none in Crowd. Cross-lane OwnerState+WorldState cap two captured the material remaining opportunity. Cap four/eight added at most 156 predicted Moving datagram savings and zero Crowd savings over cap two."
+  },
+  "matchedTenMinuteBaselines": {
+    "moving50": {
+      "seed": 604001,
+      "warmupSeconds": 60,
+      "scalar": {
+        "measuredMilliseconds": 600372,
+        "serverUdpDatagramsSent": 3218727,
+        "serverUdpPayloadBytesSent": 1619649785,
+        "unreliableFramesSent": 2377078,
+        "unreliableDatagramsSent": 2377078,
+        "authorityP95Microseconds": 871,
+        "authorityDeadlineMisses": 0,
+        "serverCpuSecondsPerWallSecond": 0.407564,
+        "serverWorkingSetHighWaterBytes": 257290240,
+        "botPumpIntervalMilliseconds": {"p50":3.0,"p95":5.75,"p99":6.7,"max":9.819844},
+        "botMeasuredCpuMilliseconds": 409840,
+        "botMeasuredWorkingSetHighWaterBytes": 814370816
+      },
+      "crossLaneCap2": {
+        "measuredMilliseconds": 600378,
+        "serverUdpDatagramsSent": 2732336,
+        "serverUdpPayloadBytesSent": 1584646872,
+        "unreliableFramesSent": 2377524,
+        "unreliableDatagramsSent": 1893339,
+        "twoFrameDatagramsSent": 484185,
+        "ownerStateWorldStateDatagrams": 483764,
+        "authorityP95Microseconds": 853,
+        "authorityDeadlineMisses": 0,
+        "serverCpuSecondsPerWallSecond": 0.405228,
+        "serverWorkingSetHighWaterBytes": 258818048,
+        "botPumpIntervalMilliseconds": {"p50":3.05,"p95":5.6,"p99":6.65,"max":10.528297},
+        "botMeasuredCpuMilliseconds": 409980,
+        "botMeasuredWorkingSetHighWaterBytes": 777564160
+      },
+      "observedDeltaPercent": {
+        "serverUdpDatagramsSent": -15.1113,
+        "serverUdpPayloadBytesSent": -2.16114,
+        "unreliableFramesSent": 0.018763
+      },
+      "interpretation": "The nearly identical semantic-frame volume makes Moving the strongest matched causal comparison. Cap two removes one 44-byte secure envelope/socket datagram whenever an OwnerState and WorldState frame fit together."
+    },
+    "crowd50": {
+      "seed": 604002,
+      "warmupSeconds": 60,
+      "scalar": {
+        "measuredMilliseconds": 600377,
+        "serverUdpDatagramsSent": 3231409,
+        "serverUdpPayloadBytesSent": 1613004090,
+        "unreliableFramesSent": 2406484,
+        "unreliableDatagramsSent": 2406484,
+        "authorityP95Microseconds": 980,
+        "authorityDeadlineMisses": 0,
+        "serverCpuSecondsPerWallSecond": 0.39865,
+        "serverWorkingSetHighWaterBytes": 267010048
+      },
+      "crossLaneCap2": {
+        "measuredMilliseconds": 600362,
+        "serverUdpDatagramsSent": 2677482,
+        "serverUdpPayloadBytesSent": 1362433547,
+        "unreliableFramesSent": 2278354,
+        "unreliableDatagramsSent": 1856213,
+        "twoFrameDatagramsSent": 422141,
+        "ownerStateWorldStateDatagrams": 422111,
+        "authorityP95Microseconds": 950,
+        "authorityDeadlineMisses": 0,
+        "serverCpuSecondsPerWallSecond": 0.39746,
+        "serverWorkingSetHighWaterBytes": 262557696
+      },
+      "observedDeltaPercent": {
+        "serverUdpDatagramsSent": -17.142,
+        "serverUdpPayloadBytesSent": -15.5344,
+        "unreliableFramesSent": -5.32437
+      },
+      "interpretation": "The Crowd executions had different realized movement/chunk histories despite the same deterministic behavior seed, so the large payload reduction is not attributed wholly to aggregation. The scalar opportunity census and exact 422,141 paired envelopes are the causal representation evidence."
+    }
+  },
+  "policyControls": {
+    "capLadder": {
+      "movingMaximumObservedFrames": {"cap1":1,"cap2":2,"cap4":3,"cap8":6},
+      "crowdMaximumObservedFrames": {"cap1":1,"cap2":2,"cap4":4,"cap8":7},
+      "result": "All cap 1/2/4/8 real-UDP runs reconciled and retired cleanly. Cap 4/8 provided negligible additional census savings and were not selected."
+    },
+    "sameLaneCap2": {
+      "movingMeasuredMilliseconds": 30305,
+      "sentFrames": 125792,
+      "sentDatagrams": 125485,
+      "multiFrameDatagrams": 307,
+      "result": "Confirmed that same-lane packing leaves almost all current OwnerState+WorldState opportunity unused."
+    },
+    "singleHot": {"seed":604003,"measuredMilliseconds":40340,"aggregateDatagrams":444,"clean":true},
+    "multiHot": {"seed":604004,"measuredMilliseconds":30303,"aggregateDatagrams":27378,"clean":true},
+    "allActionOutcomesConserved": true,
+    "allPhysicalAndLogicalAccountingReconciled": true
+  },
+  "kernelEvidence": {
+    "dense50WholeFlowTicks": 180,
+    "scalar": {"tickMeanMilliseconds":2.99544,"tickP95Milliseconds":3.8663,"serverRoleP95Milliseconds":0.539229,"datagrams":44097,"udpPayloadBytes":14913009},
+    "cap2": {"tickMeanMilliseconds":2.65491,"tickP95Milliseconds":3.3688,"serverRoleP95Milliseconds":0.55356,"datagrams":28398,"udpPayloadBytes":14222253},
+    "cap4AndCap8": "Measured as controls; timing order was noisy while physical datagram reduction flattened after cap two.",
+    "warmedManagedAllocation": "0 bytes for repeated Detailed cap-eight aggregate emit/admit/consume after warmup",
+    "hotPath": "Fixed owner-local primitive counters; no global lock, reflection, dictionary, string formatting, or per-packet allocation. Opportunity scans run only with Detailed telemetry."
+  },
+  "mixedChaosSoak": {
+    "seed": 604005,
+    "bots": 50,
+    "warmupSeconds": 60,
+    "measuredMilliseconds": 1800286,
+    "applicationSessions": 51,
+    "successfulReconnects": 1,
+    "freshProofLifetimes": 51,
+    "movement": {"attempted":53826,"accepted":53826},
+    "jump": {"attempted":17945,"accepted":13771},
+    "chat": {"localSubmitted":1,"localObserved":33,"globalSubmitted":17950,"globalObserved":897500},
+    "sword": {"attempts":19610,"pickup":1,"equip":1,"drop":1},
+    "nonsense": {"inputs":50,"commandsCreated":0},
+    "chunkCrossings": 15928,
+    "verticalTransitions": 43972,
+    "landingRecoveries": 14929,
+    "serverUnreliableFrames": 9731992,
+    "serverUnreliableDatagrams": 7366758,
+    "serverTwoFrameDatagrams": 2365234,
+    "serverUdpPayloadBytesSent": 8262659215,
+    "authorityP95Microseconds": 1096,
+    "authorityDeadlineMisses": 0,
+    "botPumpIntervalMilliseconds": {"p50":3.45,"p95":6.85,"p99":7.5,"max":17.777434},
+    "botMeasuredCpuMilliseconds": 1323890,
+    "botMeasuredWorkingSetHighWaterBytes": 945946624,
+    "serverCpuMilliseconds": 832610,
+    "serverWorkingSetHighWaterBytes": 273018880,
+    "faults": 0,
+    "cleanRetirement": true,
+    "accountingMonotonicAndReconciled": true
+  },
+  "exportedOnlineCanary": {
+    "composition": "8 real ClientOnly headless bots + 2 separately running actual exported Online clients + one ServerOnly dedicated authority",
+    "seed": 130363,
+    "warmupSeconds": 60,
+    "measuredMilliseconds": 300027,
+    "participants": 10,
+    "connectionLifetimes": 11,
+    "freshBotProofLifetimes": 9,
+    "botReconnects": 1,
+    "serverUnreliableFrames": 259986,
+    "serverUnreliableDatagrams": 182397,
+    "serverTwoFrameDatagrams": 77589,
+    "botReceivedAggregateDatagrams": 77551,
+    "nativeAliceReceivedAggregateDatagrams": 21,
+    "nativeBobReceivedAggregateDatagrams": 24,
+    "bothNativeClientsHealthy": true,
+    "physicalAndLogicalAccountingReconciled": true,
+    "cleanRetirement": true
+  },
+  "externalExportedImpairment": {
+    "path": "Two independent userspace UDP proxies outside the exported product and production Network assembly; transparent through admission, then deterministic bidirectional loss every 53rd datagram and reorder every 37th datagram with at most 20 ms hold.",
+    "bots": 8,
+    "exportedOnlineClients": 2,
+    "measuredMilliseconds": 30034,
+    "aliceDropped": 85,
+    "aliceReordered": 110,
+    "bobDropped": 86,
+    "bobReordered": 110,
+    "bothNativeClientsHealthy": true,
+    "receivedAggregates": true,
+    "freshReconnectProof": true,
+    "physicalAndLogicalAccountingReconciled": true,
+    "cleanRetirement": true
+  },
+  "correctness": {
+    "coverage": [
+      "cap 1/2/4/8 exact grouping",
+      "same-lane and cross-lane no-wait departure",
+      "reliable singleton priority",
+      "multiple WorldState frames and MTU closure",
+      "transactional endpoint refusal",
+      "atomic structural receive validation",
+      "independent per-frame sequencing and capacity results",
+      "asymmetric receive capability",
+      "loss/duplication/corruption/reorder correlated aggregate fate",
+      "security-epoch rotation",
+      "scalar/sharded real UDP product paths",
+      "zero warmed managed allocation"
+    ],
+    "newCorrectnessDefect": "The verifier's external UDP proxy initially treated Linux socket-close Interrupted as an unhandled failure after all product assertions passed. Disposal now admits only the expected disposed Interrupted/OperationAborted result, and the complete clean+impaired focused gate exits zero. This is verifier teardown, not production behavior.",
+    "gameSemanticsChanged": false,
+    "aoiChanged": false,
+    "cadenceChanged": false,
+    "participantBoundChanged": false,
+    "compressionChanged": false
+  },
+  "verification": {
+    "networkTests": "PASS",
+    "clientTests": "PASS",
+    "gameReplicationTests": "PASS — 147",
+    "networkApplicationTests": "PASS — 71",
+    "networkBotTests": "PASS — 19",
+    "pf4dFocused": "PASS — actual ClientOnly Online export, clean real-UDP mixed swarm, and external loss/reorder mixed swarm",
+    "fullCanonicalRelease": "PASS — canonical ./verify.sh Release after documentation/evidence integration"
+  },
+  "disposition": {
+    "accepted": "CrossLane cap 2",
+    "retainedControls": ["scalar cap 1", "SameLane cap 2", "CrossLane cap 4", "CrossLane cap 8"],
+    "notStarted": ["AOI changes", "cadence changes", "compression", "wire compaction", "participant-limit changes", "PF5 failure/scale claims"],
+    "nextEvidenceQuestions": [
+      "Whether remaining large WorldState payloads justify selective compression",
+      "Whether public self-echo is semantically redundant for the controlled recipient",
+      "Whether any further wire compaction is worth its complexity after message-129 and cap-two aggregation",
+      "Dense versus distributed AOI/fanout and later PF5 failure-cliff characterization"
+    ]
+  }
+}

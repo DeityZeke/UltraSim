@@ -88,6 +88,26 @@ input submission, rendering, and owner/public delivery therefore remain independ
 The profile announcement/proof are ordinary classified Control messages, and the hard input-rate
 limiter remains Game/application authority state rather than Network policy.
 
+PF4D selects bounded unreliable frame aggregation. `NetworkProtocolLimits.Default` sends at most
+two already-ready unreliable frames per secure Data datagram with `CrossLane` scope; scalar cap one,
+`SameLane`, and cross-lane caps four/eight remain explicit controls. The manifest independently
+states the maximum receive capability, so a sender always uses the smaller of its local send cap
+and the negotiated manifest bound.
+
+Aggregation never waits for future work. It starts with the ordinary next scheduler selection,
+appends only work already ready in that `Emit`, stops if a reliable frame becomes next or the exact
+secure plaintext/MTU bound would be exceeded, and consumes no selected message until the endpoint
+accepts the complete datagram. Reliable Control/Event/Bulk frames remain singleton. Receive first
+validates every frame's structure and negotiated count before publishing any frame, then applies
+each unreliable lane's normal sequencing/capacity semantics independently. Correlated loss is a
+deliberate physical consequence of sharing one datagram; it creates no retransmission for
+unreliable state and changes no application-proof meaning.
+
+Fixed aggregation histograms, lane masks, MTU-fill buckets, and maxima are exposed in the cold
+protocol/traffic snapshot. The more expensive immediate-ready cap/scope opportunity census runs
+only with `Detailed` telemetry. Both paths use owner-local fixed primitive storage and add no
+per-packet managed allocation.
+
 The physical metric is deliberately named **UDP payload bytes**. It is the exact datagram payload
 length successfully handed to, or received from, the UDP socket boundary. It excludes IP, UDP, and
 link-layer headers, and it never includes HTTP content acquisition or CAS/disk traffic. An optional

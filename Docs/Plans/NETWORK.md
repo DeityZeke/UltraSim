@@ -2,7 +2,9 @@
 
 Status: **accepted / consumption-ready**, including physical Network capability packaging,
 PF2.5 replication-ownership/observability reconciliation, PF3 authenticated performance policy,
-PF4A quiet publication-work suppression, and PF4B chunk-knowledge census, as of 2026-09-12.
+PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selected Game-message
+bundling, the PF4C-R1 singleton MTU repair, and PF4D unreliable Network-frame aggregation, as of
+2026-09-13.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
 comparison program through P0.4, and the first real remote public-actor consumer
@@ -34,6 +36,20 @@ These counters are bounded diagnostics, not another knowledge source: only an ex
 Applied proof may advance the recipient cursor. The ordinary production path still flushes proofs
 at the next client progress opportunity and bases independently repairable deltas on proven applied
 knowledge.
+
+PF4C retains the selected owner and 1/2/4 cadence while using the existing message-129 Game
+envelope for two or more physically beneficial, already-due per-recipient Delta-120/Absence-121
+publications. PF4C-R1 additionally guarantees that considering that optional envelope cannot reject
+a canonical standalone 120/121 message which fits the peer's actual application-message limit.
+
+PF4D changes only the later Network representation. Reliable frames remain singleton. Up to two
+already-ready unreliable frames for one secure peer may share one authenticated Data datagram,
+including the measured OwnerState + WorldState case. There is no aggregation timer or added wait:
+the first frame is the normal scheduler choice, following frames use the same bounded selection,
+packing stops at a higher-priority reliable frame or the exact MTU, and endpoint refusal consumes
+nothing. The Game manifest advances to version 28 and admits at most eight received unreliable
+frames so cap 1/2/4/8 remain interoperable test policies; the selected production send policy is
+cross-lane cap two. Transport wire revision 2 and all Game/AOI/cadence semantics remain unchanged.
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.
@@ -560,6 +576,15 @@ processes entries independently.
 These are Network mechanism improvements and are retained regardless of which Game
 public profile is selected.
 
+PF4D activates the existing multi-frame Data path for already-ready unreliable work only. The
+default is `MaximumUnreliableFramesPerDatagram=2` with `CrossLane` scope. `SameLane`, scalar cap one,
+and cross-lane caps four/eight remain explicit measurement controls. Every inner frame retains its
+own lane/message/version/sequence/length/payload and independently applies normal unreliable receive
+semantics after the entire datagram structure has validated. Corruption or invalid framing rejects
+the whole datagram before any inner delivery; ordinary unreliable loss deliberately couples only
+the physical fate of frames which shared that datagram. Detailed telemetry supplies the bounded
+cap/scope opportunity census; ordinary aggregation counters remain owner-local primitive values.
+
 ## Performance evidence: what may and may not be claimed
 
 Three different envelopes must not be conflated.
@@ -675,7 +700,7 @@ fingerprint used at that checkpoint. Those historical values are **not current
 configuration constants** and should not be copied forward into architecture prose.
 
 As of this document refresh, `GeneratedUltraSimGameProtocol` is protocol version 13
-and `UltraSimGameProtocol` constructs manifest version 27. Version 20 added the bounded cold
+and `UltraSimGameProtocol` constructs manifest version 28. Version 20 added the bounded cold
 public-presentation metadata/application-proof pair above existing hot chunk state. Version 21
 adds the authoritative `Primary` result to the playable owner-state schema for I0.12. Version 22
 widens the existing cold presentation occurrence with an independently bounded optional item-detail
@@ -697,7 +722,10 @@ and latest accepted Interact/Primary sequence used by D0.7a actor presentation; 
 private item rolls remain unchanged. Version 27 adds the bounded authenticated Server Performance
 Profile advertisement and exact application-session proof used by PF3 before content/application
 progression; it changes policy negotiation and enforcement without changing movement, replication,
-or Network transport cadence. Future schema changes must advance the appropriate generated/
+or Network transport cadence. Version 28 raises the manifest's finite unreliable-Data receive
+capability from one to eight for PF4D. It changes the manifest fingerprint but not outer transport
+revision 2; the selected sender policy is independently bounded to cross-lane cap two. Future schema
+changes must advance the appropriate generated/
 manifest identity and remain bounded/hostile-input transactional.
 
 ## Evidence policy

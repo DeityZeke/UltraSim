@@ -96,6 +96,14 @@ bundled entries retain individual proof and recovery identity. Per-application D
 include bundle packing, byte-limit closure, per-tier source-to-due/queue/proof freshness, and
 per-recipient authority-step publication/message/bundle/application-byte distributions.
 
+PF4D selects Network-layer aggregation independently of that Game representation. The production
+defaults are `--unreliable-frame-cap=2` and `--unreliable-aggregation-scope=cross-lane`. Supported
+frame-cap controls are `1`, `2`, `4`, and `8`; scope is `same-lane` or `cross-lane`. These options
+change only how already-ready unreliable Network frames share secure UDP Data datagrams. They add
+no wait, never combine reliable frames, and do not alter `ChunkPublication`, message 129, the 1/2/4
+public cadence, AOI, participant capacity, or authority frequency. The readiness record and console
+startup summary print the effective cap/scope so a baseline cannot silently use another policy.
+
 PF3 adds `--authority-hz=20|30|60`, `--maximum-input-hz`, `--recommended-input-hz`,
 `--input-burst`, `--input-burst-window-ms`, and `--network-service-delay-ms`. The authority publishes
 those finite semantics as an exact authenticated `ServerPerformanceProfile/v1` and waits for a fresh

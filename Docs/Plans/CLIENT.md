@@ -37,9 +37,13 @@ entering chunk scheduling; all dirty, interest, debt, retry, recovery, cadence, 
 wake conditions remain explicit. PF4B closes its bounded Delta 120 / Applied Proof 130 knowledge
 census as outcome C: no client-local proof/delta optimization was worth weakening immediate exact
 knowledge. PF4C now closes selected-profile message-129 bundling with exact per-entry proof and
-recovery while retaining the production 1/2/4 public-tier cadence; 1/3/6 remains an impairment-
-PF4C-R1 additionally closes the exact optional-bundle singleton MTU boundary: if canonical
-standalone 120/121 bytes fit, considering the larger message-129 envelope cannot reject them.
+recovery while retaining the production 1/2/4 public-tier cadence; 1/3/6 remains an
+impairment-backed future candidate. PF4C-R1 additionally closes the exact optional-bundle singleton
+MTU boundary: if canonical standalone 120/121 bytes fit, considering the larger message-129
+envelope cannot reject them.
+PF4D now closes the later physical representation: the same exported Online ClientOnly path receives
+bounded cross-lane cap-two unreliable aggregates with no added wait, while reliable traffic,
+per-frame semantics, Game replication ownership, AOI, and the accepted 1/2/4 cadence remain intact.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2703,7 +2707,8 @@ PF4A action evidence + quiet publication work suppression                CLOSED
 PF4B Delta/proof knowledge census                                           CLOSED (outcome C)
 PF4C selected Game bundling / public-tier cadence                           CLOSED (bundling; cadence retained)
 PF4C-R1 singleton MTU boundary repair                                        CLOSED
-PF4D+ frame aggregation, tuning, ObjectScript, human testing                OPEN
+PF4D unreliable Network-frame aggregation                                   CLOSED (cross-lane cap two)
+PF4E+ remaining measured optimization, ObjectScript, human testing          OPEN
         |
         v
 repository generalization / extraction readiness

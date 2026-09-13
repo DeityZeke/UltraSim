@@ -10,7 +10,8 @@ now active: PF4A closes evidence-conserving bot action outcomes and quiet
 `ChunkPublication` work suppression; PF4B closes the bounded Delta/Applied-Proof knowledge census
 without accepting a speculative local knowledge optimization; PF4C closes selected-profile
 message-129 bundling while retaining the proven 1/2/4 Immediate/Near/Far cadence. PF4C-R1 then
-repairs the exact singleton MTU boundary before unreliable Network-frame aggregation begins.
+repairs the exact singleton MTU boundary, and PF4D closes cross-lane cap-two unreliable
+Network-frame aggregation without changing Game ownership, AOI, or cadence.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1143,7 +1144,8 @@ Do not reduce cadence merely to improve a benchmark if the resulting presentatio
 
 The Network kernel already has machinery for multiple unreliable frames per datagram, while conservative defaults may currently leave substantial framing overhead.
 
-Measure enabling bounded aggregation.
+PF4D measured and accepted bounded cross-lane cap-two aggregation. Cap one, same-lane cap two, and
+cross-lane caps four/eight remain maintained controls.
 
 This can amortize:
 
@@ -1794,6 +1796,39 @@ Absence 121 is 48 bytes versus 50 bytes enveloped, but the minimum supported con
 application bytes, so no equivalent supported boundary exists. PF4C-R1 changes no codec, protocol
 identity, AOI, cadence, participant bound, or aggregation policy.
 
+## PF4D — unreliable Network-frame aggregation
+
+**Status: CLOSED — cross-lane cap two accepted.** PF4D started from the clean PF4C-R1 HEAD
+`3f8490cec60953f14ea44bb624c1859ab85b4726`. The existing transport-revision-2 multi-frame
+machinery now packs at most two already-ready unreliable frames for one peer into one secure Data
+datagram. Reliable Control/Event/Bulk remains singleton; no timer, later service opportunity, or
+future work is awaited. Selection priority, per-frame lane/message/version/sequence identity,
+independent unreliable receive semantics, exact MTU admission, authenticated atomic structural
+validation, and transactional endpoint refusal remain intact.
+
+The scalar Detailed census found no current client-to-server opportunity and material
+server-to-client opportunity almost entirely in cross-lane OwnerState + WorldState pairs.
+Same-lane cap two saved under 0.2% of Moving census datagrams and none in Crowd. Cross-lane cap two
+predicted 21.3% fewer Moving and 27.1% fewer Crowd unreliable datagrams; cap four/eight added only
+156 predicted Moving savings and zero Crowd savings. The selected policy is therefore cross-lane
+cap two. The Game manifest advances from v27/cap-one to v28/receive-cap-eight so maintained cap
+1/2/4/8 controls share one exact negotiated capability; outer transport revision 2 is unchanged.
+
+Matched ten-minute Moving-50 runs retained essentially equal semantic frame volume and measured
+15.11% fewer server UDP datagrams plus 2.16% fewer server UDP payload bytes. Crowd-50 observed
+17.14% fewer datagrams, but its 15.53% payload reduction also included a 5.32% different realized
+semantic-frame workload and is not attributed wholly to aggregation. Cap-two CPU, authority timing,
+and bot pump distributions remained comparable with no authority deadline misses. A 30-minute
+50-client mixed-chaos soak, single/multi-hot controls, cap 1/2/4/8 real-UDP runs, a five-minute
+8-bot + 2-actual-exported-Online canary, and a separate external real-UDP loss/reorder exported
+canary all reconciled and retired cleanly. The warmed Detailed kernel path allocates zero managed
+bytes. Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf4d-unreliable-frame-aggregation-2026-09-13.json`.
+
+PF4D changes no `ChunkPublication + Message129WhenBeneficial + 1/2/4` Game policy, AOI, participant
+bound, compression, authority/input rate, or application payload schema. Cap four/eight and
+same-lane remain measurement controls, not additional production modes.
+
 ## PF4 — measured bandwidth/CPU optimization campaign
 
 Evaluate and accept only evidence-backed changes such as:
@@ -1958,8 +1993,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 16. Reconcile PF3 action accounting and suppress provably quiet publication work. **CLOSED — PF4A**
 17. Jointly evaluate Chunk Delta 120 and Chunk Applied Proof 130. **CLOSED — PF4B outcome C**
 18. Evaluate selected-profile Game bundling and public-tier cadence only from matched evidence. **CLOSED — PF4C; bundling accepted, cadence retained**
-19. Evaluate unreliable frame aggregation. **NEXT**
-20. Measure dense vs distributed AOI/fanout.
+19. Evaluate unreliable frame aggregation. **CLOSED — PF4D; cross-lane cap two accepted**
+20. Measure dense vs distributed AOI/fanout. **NEXT**
 21. Evaluate selective compression only where payload shape justifies it.
 22. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
 23. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.

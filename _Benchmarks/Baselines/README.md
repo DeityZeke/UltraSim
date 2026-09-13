@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4d-unreliable-frame-aggregation-2026-09-13.json` — clean PF4C-R1
+  measurement base, scalar same/cross-lane cap census, cap 1/2/4/8 controls, selected cross-lane
+  cap-two policy, matched ten-minute Moving/Crowd runs, single/multi-hot controls, zero-allocation
+  kernel evidence, a 30-minute mixed-chaos soak, actual 8-bot + 2-exported-Online five-minute
+  canary, external real-UDP loss/reorder canary, unchanged Game/AOI/cadence policy, and protocol
+  manifest/capability disposition;
 - `concept-demo-pf4c-r1-singleton-mtu-repair-2026-09-13.json` — exact generated
   1,371/1,372/1,373/1,374/1,405-byte singleton boundary, transactional first-admission refusal,
   successful retry/proof/cursor convergence, supported Absence-121 boundary audit, repaired

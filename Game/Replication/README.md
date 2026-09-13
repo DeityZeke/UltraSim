@@ -77,6 +77,12 @@ recovery under loss/reordering. This is Game message composition above Network; 
 Network frame aggregation, the Game protocol manifest, AOI, public ownership, or server-known-
 applied truth.
 
+PF4D separately composes already-ready unreliable Network frames below this layer. The selected
+cross-lane cap-two policy can place an OwnerState frame and a WorldState frame in one authenticated
+UDP Data datagram, but it neither combines their Game meanings nor changes this scheduler's
+message-129, 1/2/4 cadence, delivery-ledger, or applied-proof decisions. Each frame remains an
+independent lane/message/version/sequence lifetime on receive.
+
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
 replication identity, and invalidates old generation-local application facts.

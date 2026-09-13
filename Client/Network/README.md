@@ -57,6 +57,12 @@ scheduler, which coalesces continuous locomotion, retains bounded action/stop ob
 submits under the authenticated recommendation/hard ceiling. The server still enforces the ceiling;
 a client proof is never authority to bypass it.
 
+PF4D changes only physical packing beneath this layer. The negotiated manifest advertises a
+maximum receive capability of eight unreliable frames, while the selected production sender packs
+at most two already-ready cross-lane frames without waiting. `Client/Network` still receives and
+applies each authenticated Game message independently through its owning semantic adapter; a shared
+datagram never becomes a shared application transaction or proof.
+
 ## Permanent boundary
 
 ```text
@@ -114,7 +120,7 @@ contracts.
 
 F0.3c inserts `RemoteClientProfileClient` after authenticated realm identity and before content or
 guest admission. It hostile-validates the finite profile vocabulary introduced in manifest v19,
-retained unchanged through the current manifest v27, and maps it into
+retained unchanged through the current manifest v28, and maps it into
 Client Core's stock recommendation, and either applies an exact remembered realm/revision/hash
 decision or waits for explicit local consent. Only after durable decision persistence does it emit
 the exact application-session/profile proof that lets the server continue. Cached decisions do not

@@ -1,6 +1,6 @@
 # UltraSim headless Network bots
 
-`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B/PF4C load-generation and measurement client. One CLR process owns many
+`UltraSim.NetworkBots` is the maintained PF1/PF2/PF3/PF4A/PF4B/PF4C/PF4D load-generation and measurement client. One CLR process owns many
 independent ordinary remote client lifetimes and advances them from one bounded central pump. Each
 bot has its own UDP transport, authenticated session, application epoch, profile/content proof,
 guest/control identity, Client Core state, command sequence, reconnect lifetime, and deterministic
@@ -351,4 +351,38 @@ The focused real-UDP plus exported-product gate is:
 ```bash
 dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
   -c Release -- --pf4c-only
+```
+
+## PF4D unreliable Network-frame aggregation
+
+Schema v9 (`--checkpoint=PF4D`) retains the earlier action, knowledge, and Game-bundle evidence and
+adds the explicit Network send policy plus per-peer aggregate histograms, MTU-fill buckets, lane
+masks, and the Detailed immediate-ready opportunity census. The selected production policy is
+cross-lane cap two. Cap one, four, eight, and same-lane cap two remain maintained measurement
+controls; none changes the Game `ChunkPublication + Message129WhenBeneficial + 1/2/4` policy.
+
+Use the PF4D wrapper with an explicit policy when capturing evidence:
+
+```bash
+ULTRASIM_UNRELIABLE_FRAME_CAP=1 \
+ULTRASIM_UNRELIABLE_AGGREGATION_SCOPE=cross-lane \
+Tools/NetworkBots/run-pf4d-baseline.sh moving 600s \
+  /tmp/ultrasim-pf4d-moving50-scalar 50 604001 60s /tmp/ultrasim-pf4d-cache
+
+ULTRASIM_UNRELIABLE_FRAME_CAP=2 \
+ULTRASIM_UNRELIABLE_AGGREGATION_SCOPE=cross-lane \
+Tools/NetworkBots/run-pf4d-baseline.sh moving 600s \
+  /tmp/ultrasim-pf4d-moving50-cap2 50 604001 60s /tmp/ultrasim-pf4d-cache
+```
+
+Valid caps are `1`, `2`, `4`, and `8`; valid scopes are `same-lane` and `cross-lane`. Detailed
+telemetry performs the non-mutating opportunity scan. Actual aggregation itself never waits for a
+sibling and remains active with ordinary lower telemetry.
+
+The focused gate exports the actual Online product and runs both a clean 8-bot + 2-native swarm and
+an externally impaired real-UDP swarm:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4d-only
 ```
