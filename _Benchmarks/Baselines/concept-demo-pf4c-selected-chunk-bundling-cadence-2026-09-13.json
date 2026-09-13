@@ -5,6 +5,7 @@
   "commits": {
     "exactStartingAndMeasurementBase": "16ee984577c816e813742ee7e8c03d7f0288bcca",
     "acceptedBundlingImplementation": "dd01f54a74af69d2d200686d4d423904954cac51",
+    "acceptedPf4cClosure": "a31f09da093993cf302ef1ecceb9e4d85e7cd4ab",
     "repairedFeatureCompleteCandidate": "5eec694692df8f85be2d7db215b2642a9ec9061b",
     "candidateLineageChanged": false,
     "candidateReason": "PF4C introduced an evidence-backed representation optimization and diagnostic/harness hardening. It found no product correctness defect and did not reopen prior feature checkpoints."
@@ -243,7 +244,7 @@
     "focusedGameReplicationTests": "146/146 passed",
     "focusedPf4cRealUdp": "passed",
     "longExportedOnlineGate": "passed with actual Godot 4.7.1 Mono export",
-    "completeCanonicalReleaseVerification": "pending closure commit",
+    "completeCanonicalReleaseVerification": "passed at a31f09da093993cf302ef1ecceb9e4d85e7cd4ab",
     "focusedGateCorrection": "The first closure rerun correctly produced independently Contradictory entries and later unknown proofs for debt already retired by newer exact truth. The verifier had incorrectly required every negative-result counter to be zero. It now requires exact proof-category reconciliation, zero rejected/capacity/non-advancing results, and bounds unknown-after-supersession by the matching superseded-retirement count. Production behavior was unchanged.",
     "regressions": [
       "message-129 encode/decode and hostile bounds",
