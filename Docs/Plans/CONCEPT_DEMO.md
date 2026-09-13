@@ -73,7 +73,10 @@ retaining the production 1/2/4 Immediate/Near/Far cadence. PF4C-R1 closes the ex
 boundary so optional bundling can never reject a fitting canonical 120/121 message. PF4D then
 closes cross-lane cap-two unreliable Network-frame aggregation over already-ready work, including
 the actual exported Online product under external UDP loss/reorder, without changing Game
-ownership, AOI, or cadence. Later optimization, larger failure
+ownership, AOI, or cadence. PF4E now closes dense/distributed fanout and complete remaining-cost
+attribution without changing production policy. Its outcome B ranks a bounded selective-compression
+experiment next because message 129 is about 94.1% of active Game application egress; self-public
+suppression and deeper header compaction are not selected. Later optimization, larger failure
 characterization, and external-human validation remain open. A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1770,7 +1773,8 @@ then close:
     PF4C selected Game bundling / public-tier cadence                   CLOSED (bundling; cadence retained)
     PF4C-R1 singleton MTU boundary repair                               CLOSED
     PF4D unreliable frame aggregation                                  CLOSED (cross-lane cap two)
-    PF4E remaining measured optimization                               NEXT
+    PF4E dense/distributed fanout + remaining-cost attribution          CLOSED (outcome B)
+    selective compression experiment                                   NEXT
 ```
 
 Exact subsystem checkpoint labels should be chosen in the owning plan when the consumer reaches that

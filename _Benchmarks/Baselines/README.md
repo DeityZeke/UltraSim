@@ -26,6 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
+- `concept-demo-pf4e-dense-distributed-fanout-attribution-2026-09-13.json` —
+  corrected-window Quiet/Moving/Crowd product attribution, exact source-record-to-UDP cost funnels,
+  fanout/topology/churn controls, per-client fairness/freshness/debt, self-public consumer audit,
+  selected-profile inclusive Network-plus-remote-replication rated boundaries, 64-client control,
+  long mixed-chaos soak, exported-client external impairment, diagnostic cost, and the outcome-B
+  recommendation to evaluate bounded selective compression without pre-accepting it;
 - `concept-demo-pf4d-unreliable-frame-aggregation-2026-09-13.json` — clean PF4C-R1
   measurement base, scalar same/cross-lane cap census, cap 1/2/4/8 controls, selected cross-lane
   cap-two policy, matched ten-minute Moving/Crowd runs, single/multi-hot controls, zero-allocation

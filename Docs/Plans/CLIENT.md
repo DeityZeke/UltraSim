@@ -44,6 +44,9 @@ envelope cannot reject them.
 PF4D now closes the later physical representation: the same exported Online ClientOnly path receives
 bounded cross-lane cap-two unreliable aggregates with no added wait, while reliable traffic,
 per-frame semantics, Game replication ownership, AOI, and the accepted 1/2/4 cadence remain intact.
+PF4E now closes dense/distributed fanout, per-recipient fairness, exact self-public, payload-shape,
+and end-to-end cost attribution on that unchanged client path. The resulting next candidate is a
+bounded selective-compression experiment; no client codec or policy change has yet been accepted.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2708,7 +2711,8 @@ PF4B Delta/proof knowledge census                                           CLOS
 PF4C selected Game bundling / public-tier cadence                           CLOSED (bundling; cadence retained)
 PF4C-R1 singleton MTU boundary repair                                        CLOSED
 PF4D unreliable Network-frame aggregation                                   CLOSED (cross-lane cap two)
-PF4E+ remaining measured optimization, ObjectScript, human testing          OPEN
+PF4E dense/distributed fanout + remaining-cost attribution                  CLOSED (outcome B)
+selective compression experiment, then remaining pre-freeze work            NEXT
         |
         v
 repository generalization / extraction readiness

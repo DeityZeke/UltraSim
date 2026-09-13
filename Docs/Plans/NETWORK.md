@@ -3,7 +3,8 @@
 Status: **accepted / consumption-ready**, including physical Network capability packaging,
 PF2.5 replication-ownership/observability reconciliation, PF3 authenticated performance policy,
 PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selected Game-message
-bundling, the PF4C-R1 singleton MTU repair, and PF4D unreliable Network-frame aggregation, as of
+bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, and PF4E
+dense/distributed fanout plus remaining-cost attribution, as of
 2026-09-13.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
@@ -50,6 +51,14 @@ packing stops at a higher-priority reliable frame or the exact MTU, and endpoint
 nothing. The Game manifest advances to version 28 and admits at most eight received unreliable
 frames so cap 1/2/4/8 remain interoperable test policies; the selected production send policy is
 cross-lane cap two. Transport wire revision 2 and all Game/AOI/cadence semantics remain unchanged.
+
+PF4E adds bounded owner-local physical payload histograms and an exact inclusive
+Network-plus-remote-replication rating clock; neither changes packet selection or protocol state.
+The selected-profile sweep first exceeded the 4.000 ms subsystem p95 gate at dense 128 (the first
+dense point tested) and distributed 256, with distributed 128 passing. These are rated replication
+recipients, not CCU. Product Moving/Crowd attribution identifies message 129 as roughly 94.1% of
+Game application egress, so a selective-compression experiment ranks above self-public suppression
+or deeper header compaction. No compression is implemented or accepted by PF4E.
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.

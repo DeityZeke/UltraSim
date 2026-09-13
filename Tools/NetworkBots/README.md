@@ -386,3 +386,42 @@ an externally impaired real-UDP swarm:
 dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
   -c Release -- --pf4d-only
 ```
+
+## PF4E dense/distributed attribution
+
+Schema v10 (`--checkpoint=PF4E`) keeps every earlier action/knowledge/transport conservation gate
+and adds the per-client semantic/freshness data needed to compare density without treating total
+population as fanout. The wrapper fixes the accepted production policy and enables Detailed
+telemetry:
+
+```bash
+Tools/NetworkBots/run-pf4e-baseline.sh moving 600s \
+  /tmp/ultrasim-pf4e-moving50 50 400502 60s /tmp/ultrasim-pf4e-cache
+
+Tools/NetworkBots/run-pf4e-baseline.sh crowd 600s \
+  /tmp/ultrasim-pf4e-crowd50 50 400503 60s /tmp/ultrasim-pf4e-cache
+
+# Existing product-cap control (characterization, not a CCU rating)
+Tools/NetworkBots/run-pf4e-baseline.sh moving 120s \
+  /tmp/ultrasim-pf4e-moving64 64 400505 60s /tmp/ultrasim-pf4e-cache
+
+# Long selected-policy stability/control run
+Tools/NetworkBots/run-pf4e-baseline.sh mixed-chaos 1800s \
+  /tmp/ultrasim-pf4e-chaos50 50 400504 60s /tmp/ultrasim-pf4e-cache
+```
+
+The start marker resets diagnostic windows only after admission, scenario positioning, and warmup.
+Live interest membership and applied knowledge remain intact. `quiet`, `moving`, `crowd`, and
+`mixed-chaos` therefore produce comparable explicit-window evidence; they are not assumed to have
+equal semantic source work. Run the bounded permanent export/impairment gate with:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4e-only
+```
+
+For the accepted longer native export/impairment run, add
+`--pf4e-native-warmup-seconds=60 --pf4e-native-measurement-seconds=300`. The verifier exports one
+actual Online artifact, starts two instances behind independent deterministic UDP proxies, and
+keeps eight ordinary headless clients on the same dedicated authority. Output may be retained with
+`--pf4e-native-evidence-output=/tmp/ultrasim-pf4e-native`.

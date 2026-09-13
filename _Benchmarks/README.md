@@ -347,6 +347,33 @@ The alternating adoption and separately isolated capacity evidence is
 with its readable
 [`report`](Baselines/network-v3-sparse-10m-confirmation-capacity-2026-08-17.md).
 
+## PF4E selected-profile rating and attribution
+
+PF4E's selected-profile recipient sweep uses the exact inclusive
+`NetworkAndRemoteReplication` p95—not the broader `ServerRole` p95—as its 4.000 ms subsystem stop
+metric. It retains both timings plus complete tick context. The dense and sparse rows intentionally
+have different semantic workloads and are reported as separate scaling shapes, not a causal A/B or
+CCU claim.
+
+```bash
+dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+  --p03-whole-flow --p03h-rated-server-role-sweep \
+  --rated-profile=ChunkPublication --rated-frame-cap=2 \
+  --aoi-cadence=1/2/4 --probes-off \
+  --stop-metric=network-replication --server-role-stop-p95=4 \
+  --warmup=30 --ticks=270 --maximum-population=768 \
+  --dense-populations=128,256,384,448,512,576,640,704,768 \
+  --sparse-populations=128,256,384,448,512,576,640,704,768 \
+  --output=_Benchmarks/results/network-pf4e-selected-profile-rated-local.json
+```
+
+The first completed row above the metric stops only that workload series. A first tested failure
+does not establish the preceding population as a pass. Message-129 and Network aggregation counts
+may remain zero in this synthetic sweep when only one chunk publication/frame is ready for a
+recipient per opportunity; that is workload evidence, not proof that the selected policies were
+disabled. Real-UDP Quiet/Moving/Crowd, native impairment, and soak evidence use
+`Tools/NetworkBots/run-pf4e-baseline.sh` and remain outside routine benchmark execution.
+
 ## Comparability
 
 Every cross-generation row is classified:

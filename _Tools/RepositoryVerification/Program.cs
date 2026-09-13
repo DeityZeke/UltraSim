@@ -2747,10 +2747,14 @@ static void VerifyPf1MixedExportedSwarm(
             bots.GetProperty("freshProofLifetimes").GetInt32() < botCount + 1 ||
             bots.GetProperty("schemaVersion").GetInt32() != 2 ||
             bots.GetProperty("commandsQueued").GetInt32() == 0 ||
-            bots.GetProperty("movementAttempts").GetInt32() !=
-                bots.GetProperty("movementAccepted").GetInt32() +
-                bots.GetProperty("movementRejected").GetInt32() +
-                bots.GetProperty("movementCancelled").GetInt32() ||
+            // Movement is latest-state unreliable input and becomes terminal at scheduler
+            // submission.  The legacy authoritative-outcome counters may therefore omit the
+            // final submitted sample when the acceptance window retires; PF4A's stage-conserving
+            // action outcome is the exact contract for that source model.
+            bots.GetProperty("actionOutcomes").EnumerateArray().Any(static outcome =>
+                !outcome.GetProperty("conserved").GetBoolean() ||
+                !outcome.GetProperty("terminal").GetBoolean() ||
+                outcome.GetProperty("unexplained").GetUInt64() != 0) ||
             bots.GetProperty("jumpAttempts").GetInt32() !=
                 bots.GetProperty("jumpsAccepted").GetInt32() +
                 bots.GetProperty("jumpsRejected").GetInt32() +

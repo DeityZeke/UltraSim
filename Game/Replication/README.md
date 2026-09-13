@@ -911,3 +911,29 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release -- \
     --benchmark-n08 --output _Benchmarks/results/network-n0.8-local-run.json
 ```
+
+## PF4E dense/distributed and remaining-cost attribution
+
+Detailed telemetry can now trace the selected `ChunkPublication` path without becoming another
+semantic source. `SharedPlayableAuthority` counts committed dirty chunks and their exact current
+subscriber fanout; each remote application separately reports current subscription topology,
+measured-window AOI enters/leaves/retiering, scheduling by tier, publication/proof/debt, exact source
+and delivered record counts, self versus other records, and message-129 payload distributions.
+Resetting a measurement window clears only these cold observations. It does not rebuild interest,
+drop an applied cursor, or publish work.
+
+Controlled tests vary actual subscriber fanout from 1 through 768, keep 512 source records and
+memberships constant across 1x512, 8x64, 64x8, and 512x1 topology shapes, and compare stable
+position with explicit boundary churn. Fanout work is proportional to actual subscribers and the
+fixed-work topology shapes remain comparable; churn is materially more expensive than the stable
+fast path. The current 50-client product measurements nevertheless show that public payload
+encoding/delivery, not AOI reconciliation alone, is the larger active cost.
+
+The current client requires its own public row for actor creation/lifetime, prefab/body selection,
+nameplate eligibility, public equipment/action, overhead anchoring, and public picking. Owner state
+only overlays the controlled pose on an already-present public actor. PF4E therefore records a
+self-public upper bound but deliberately implements no suppression.
+
+See the PF4E baseline for the exact corrected ten-minute Quiet/Moving/Crowd windows, rated
+Network-plus-remote-replication boundary, per-tier freshness/fairness, cost funnel, and the outcome-B
+selective-compression recommendation.

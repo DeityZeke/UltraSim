@@ -11,7 +11,11 @@ now active: PF4A closes evidence-conserving bot action outcomes and quiet
 without accepting a speculative local knowledge optimization; PF4C closes selected-profile
 message-129 bundling while retaining the proven 1/2/4 Immediate/Near/Far cadence. PF4C-R1 then
 repairs the exact singleton MTU boundary, and PF4D closes cross-lane cap-two unreliable
-Network-frame aggregation without changing Game ownership, AOI, or cadence.
+Network-frame aggregation without changing Game ownership, AOI, or cadence. PF4E now closes the
+dense/distributed fanout and remaining-cost attribution pass. Its measured outcome is B: current
+50-client active cost is payload-dominated, so a bounded selective-compression experiment is the
+next optimization candidate; no compression, self-public suppression, AOI, cadence, schema, or
+participant-limit change is part of PF4E.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1829,6 +1833,54 @@ PF4D changes no `ChunkPublication + Message129WhenBeneficial + 1/2/4` Game polic
 bound, compression, authority/input rate, or application payload schema. Cap four/eight and
 same-lane remain measurement controls, not additional production modes.
 
+## PF4E — dense/distributed fanout and remaining-cost attribution
+
+**Status: CLOSED — outcome B; selective compression is the ranked next experiment.** PF4E keeps
+the exact selected `ChunkPublication + Message129WhenBeneficial + 1/2/4` Game policy and the
+cross-lane cap-two Network policy. Detailed-only, bounded telemetry now follows one dirty source
+commit through authoritative changed records, dirty chunks, actual subscriber fanout, per-recipient
+AOI reconciliation, scheduling/tier/debt, Delta records, message-129 representation, Proof entries,
+Game application bytes, Network frame bytes, secure outer overhead, retransmission, ACK/KeepAlive,
+and final UDP payload. Window reset clears only observations; it preserves live subscriptions and
+application knowledge.
+
+The corrected ten-minute product controls show that topology and semantic work are independent.
+Moving-50 visited 1,665 distinct chunks and performed 100,666 measured-window enters, while
+Crowd-50 visited 259 and performed 65,860. Crowd nevertheless delivered 20.20 million public
+records versus Moving's 15.64 million because dense mutual relevance changes the record fanout
+shape. Both runs had exactly 50 subscribers for each dirty publication chunk in this small demo
+world, zero capacity deferrals, bounded proof debt, and zero authority deadline misses. Quiet-50
+had no dirty chunks or measured-window AOI changes and emitted only keepalives.
+
+Controlled fixtures independently vary subscriber fanout, topology shape at fixed source work,
+and AOI churn. The dirty scheduler scales with actual subscribers; changing how the same 512
+memberships are distributed among hot chunks adds no material shape amplification. Churn is much
+more expensive than the stable-position fast path, but product AOI reconciliation is not the
+dominant 50-client cost. In both active product runs message 129 accounts for about 94.1% of Game
+application egress. Self-public rows are only 3.30% of Moving and 2.72% of Crowd delivered records,
+and the current client still requires them for actor lifetime/prefab/nameplate/equipment/action and
+public picking semantics. They are therefore neither a material nor safe suppression target.
+
+The selected-profile rated sweep uses an exact inclusive **Network + remote-replication** wall-time
+bucket for the 4.000 ms subsystem gate. Dense first exceeds that gate at the first tested point,
+128 rated replication recipients (4.777 ms p95), so no lower passing dense boundary is claimed.
+Distributed passes at 128 (2.159 ms) and first exceeds at 256 (7.167 ms). These are synthetic rated
+replication-recipient observations, not CCU or maximum-player claims. Historical P0.3J
+`server-role` figures remain broader category-B context and are not relabeled as Network-only.
+
+The real-product controls also retain their narrower claim boundaries. A 120-second Moving run at
+the existing 64-participant product cap admitted and retired all 64 ClientOnly sessions with zero
+capacity deferrals, deadline misses, or catch-up ticks; it does not raise the cap or establish a CCU
+rating. A separate 30-minute, 50-client mixed-chaos soak completed with zero faults, one clean
+reconnect/fresh proof lifetime, action conservation, bounded debt, and clean retirement after 8.32
+GB of server UDP-payload egress. These runs characterize and validate the selected policy; they do
+not tune it.
+
+Permanent evidence is in
+`_Benchmarks/Baselines/concept-demo-pf4e-dense-distributed-fanout-attribution-2026-09-13.json`.
+PF4E recommends a bounded compression oracle/experiment for the large message-129 payload surface;
+it does not pre-accept a codec or begin PF5.
+
 ## PF4 — measured bandwidth/CPU optimization campaign
 
 Evaluate and accept only evidence-backed changes such as:
@@ -1994,8 +2046,8 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 17. Jointly evaluate Chunk Delta 120 and Chunk Applied Proof 130. **CLOSED — PF4B outcome C**
 18. Evaluate selected-profile Game bundling and public-tier cadence only from matched evidence. **CLOSED — PF4C; bundling accepted, cadence retained**
 19. Evaluate unreliable frame aggregation. **CLOSED — PF4D; cross-lane cap two accepted**
-20. Measure dense vs distributed AOI/fanout. **NEXT**
-21. Evaluate selective compression only where payload shape justifies it.
+20. Measure dense vs distributed AOI/fanout. **CLOSED — PF4E; outcome B**
+21. Evaluate selective compression only where payload shape justifies it. **NEXT — bounded experiment, not pre-accepted**
 22. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
 23. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
 24. Run mixed headless + exported Godot clients.

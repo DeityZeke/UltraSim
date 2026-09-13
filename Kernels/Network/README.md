@@ -455,3 +455,18 @@ without a concrete consumer proving the need.
 New Network-kernel work should be driven by a demonstrated correctness, security,
 capacity, freshness, deployment, or measured hot-path problem in a real Game/client
 vertical.
+
+## PF4E payload accounting boundary
+
+PF4E extends `Detailed` accounting with fixed finite per-message payload-size histograms. Updates
+remain peer-owner-local primitive increments: no reflection, strings, dictionaries, global locks,
+or managed allocation enter the packet hot path. `Off` does not allocate histogram storage; cold
+snapshots may aggregate it. Game owns source records, fanout, AOI, tier, and proof meaning. Network
+owns logical frame bytes, secure Data/ACK/KeepAlive/retransmission, and exact UDP payload totals.
+
+The PF4D matched Moving result is now attributed conservatively. Exactly 484,185 paired datagrams
+removed one 44-byte secure envelope each, for 21,304,140 direct bytes saved. The remaining
+13,698,773-byte observed difference is retained as a matched-run residual because realized semantic
+and timing work was not identical; it is not credited to aggregation. PF4E's active product funnel
+keeps Game payload, frame metadata, first-send secure outer bytes, retransmission, ACK, KeepAlive,
+and final UDP payload separately reconcilable.
