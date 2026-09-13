@@ -885,7 +885,7 @@ internal sealed class BotClient : IDisposable
         _actionAccounting.Snapshot(kind);
 
     internal int GetPendingActionCompletion(BotCommandKind kind) =>
-        _pendingCommand.Pending.Kind == kind ? 1 : 0;
+        kind != BotCommandKind.Movement && _pendingCommand.Pending.Kind == kind ? 1 : 0;
 
     internal BotCumulativeTrafficSnapshot GetCumulativeTrafficSnapshot()
     {
@@ -929,6 +929,10 @@ internal sealed class BotClient : IDisposable
                 "A bot telemetry window requires one active application lifetime.");
         _connection.ConfigureTelemetry(_options.TelemetryLevel);
         _session.ConfigureTelemetry(_options.TelemetryLevel);
+        // Movement is latest-state input on an unreliable lane. Its accounting terminates at
+        // scheduler submission, so a lost final warmup sample is neither delivery debt nor a
+        // reason to poison the synchronized measurement window.
+        _pendingCommand.TryRetireLatestMovement(out _);
         _inputScheduler?.ResetTelemetryWindow();
         _actionAccounting.Reset();
         // This counter intentionally describes the synchronized measurement
@@ -944,7 +948,7 @@ internal sealed class BotClient : IDisposable
         {
             if (_session is null || State != BotLifetimeState.Active) return false;
             RemotePlayableSessionSnapshot snapshot = _session.GetSnapshot();
-            return _pendingCommand.Pending.IsPending ||
+            return _pendingCommand.HasPendingExactCompletion ||
                 snapshot.Playable.CommandRetainedLocally ||
                 snapshot.Chat.HasPendingProof || snapshot.Content.ProofRetained ||
                 (_inputScheduler is not null &&
@@ -1187,6 +1191,7 @@ internal sealed class BotClient : IDisposable
             RetireWithoutConnection();
             return;
         }
+        _pendingCommand.TryRetireLatestMovement(out _);
         _pendingCommand.RequireClearForNewLifetime();
         Directory.CreateDirectory(_stateRoot);
         ClientServerTrustFileStore store = TrustStore();
@@ -1257,7 +1262,8 @@ internal sealed class BotClient : IDisposable
                 _ => RemotePlayableActionStatus.Accepted,
             };
             bool accepted = result == RemotePlayableActionStatus.Accepted;
-            _actionAccounting.Completed(completed.Kind, result);
+            if (completed.Kind != BotCommandKind.Movement)
+                _actionAccounting.Completed(completed.Kind, result);
             switch (completed.Kind)
             {
                 case BotCommandKind.Movement when accepted:
@@ -1507,14 +1513,14 @@ internal sealed class BotClient : IDisposable
         long second = elapsed / 1_000;
         if (second != _lastMeasurementJumpSecond &&
             second > 0 && second % (11 + Id % 5) == 0 &&
-            !_pendingCommand.Pending.IsPending)
+            !_pendingCommand.HasPendingExactCompletion)
         {
             _lastMeasurementJumpSecond = second;
             _ = TryPhysicalAction(
                 ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump);
             return;
         }
-        if (now < _nextNavigation || _pendingCommand.Pending.IsPending) return;
+        if (now < _nextNavigation || _pendingCommand.HasPendingExactCompletion) return;
 
         double angle;
         if (crowd)
@@ -1546,7 +1552,7 @@ internal sealed class BotClient : IDisposable
         if (!_isSingleHotMover) return;
         long elapsed = BotMonotonicClock.TicksToMilliseconds(now - _scenarioStarted);
         long second = elapsed / 1_000;
-        if (now < _nextNavigation || _pendingCommand.Pending.IsPending) return;
+        if (now < _nextNavigation || _pendingCommand.HasPendingExactCompletion) return;
         int waypoint = checked((int)((second / 2) & 3));
         long targetX = checked(_sharedMeasurementTargetX + waypoint switch
         {
@@ -1657,7 +1663,7 @@ internal sealed class BotClient : IDisposable
                 DriveTowardInteractable(
                     GameWorldPublicPrefabIds.FarGate, now, snapshot.Playable.Position);
             else if (Id == 6 && elapsed is >= 1_500 and < 6_000 &&
-                !_pendingCommand.Pending.IsPending)
+                !_pendingCommand.HasPendingExactCompletion)
                 _ = TryMovement(1f, 0.2f, snapshot.Playable.Position, now);
             _nextNavigation = BotMonotonicClock.AddMilliseconds(now, 250);
         }
@@ -1671,7 +1677,7 @@ internal sealed class BotClient : IDisposable
             }
         }
         else if (_edgePressure == BotEdgePressureState.MovementQueued &&
-            !_pendingCommand.Pending.IsPending &&
+            !_pendingCommand.HasPendingExactCompletion &&
             TryPhysicalAction(
                 ClientSemanticAction.Jump, GamePlayerActions.Jump, BotCommandKind.Jump))
         {
@@ -1679,7 +1685,8 @@ internal sealed class BotClient : IDisposable
             _edgePressure = BotEdgePressureState.Complete;
         }
 
-        if (elapsed >= 6_000 && now >= _nextChaos && !_pendingCommand.Pending.IsPending)
+        if (elapsed >= 6_000 && now >= _nextChaos &&
+            !_pendingCommand.HasPendingExactCompletion)
         {
             RunRandomChaos(now, snapshot.Playable.Position);
             _nextChaos = BotMonotonicClock.AddMilliseconds(
@@ -1730,7 +1737,7 @@ internal sealed class BotClient : IDisposable
 
     private bool TryMovement(float x, float z, in WorldPosition position, long now)
     {
-        if (_pendingCommand.Pending.IsPending) return false;
+        if (_pendingCommand.HasPendingExactCompletion) return false;
         SyntheticInputSamples++;
         long relativeTimestamp = _scenarioStarted == 0
             ? 0
@@ -1746,7 +1753,7 @@ internal sealed class BotClient : IDisposable
         GamePlayerActions gameAction,
         BotCommandKind kind)
     {
-        if (_pendingCommand.Pending.IsPending ||
+        if (_pendingCommand.HasPendingExactCompletion ||
             !_settings!.TryGetBinding(expected, out ClientPhysicalInput physical))
             return false;
         SyntheticInputSamples++;
@@ -1770,11 +1777,14 @@ internal sealed class BotClient : IDisposable
     {
         CommandSubmitCalls++;
         _actionAccounting.Generated(kind);
-        if (_pendingCommand.Pending.IsPending || _session is null || _inputScheduler is null)
+        if (_pendingCommand.HasPendingExactCompletion ||
+            _session is null || _inputScheduler is null)
         {
             _actionAccounting.UnavailableOrInvalid(kind);
             return false;
         }
+        if (kind != BotCommandKind.Movement)
+            _pendingCommand.TryRetireLatestMovement(out _);
         var context = new ClientWorldCommandContext(
             target,
             (ClientWorldCommandRequestFlags)(byte)flags,
@@ -1848,13 +1858,16 @@ internal sealed class BotClient : IDisposable
         if (scheduled.Intent.Locomotion.Kind != GameLocomotionUpdateKind.Unchanged)
             _actionAccounting.Submitted(
                 BotCommandKind.Movement,
-                completionTracked: kind == BotCommandKind.Movement);
+                completionTracked: false);
         if (kind is not (BotCommandKind.None or BotCommandKind.Movement))
             _actionAccounting.Submitted(kind, completionTracked: true);
         if (kind != BotCommandKind.None)
         {
             ulong epoch = _session.Playable.GetSnapshot().ApplicationSessionEpoch;
-            if (!_pendingCommand.TryStart(kind, sequence, epoch))
+            bool retained = kind == BotCommandKind.Movement
+                ? _pendingCommand.TryStartOrSupersedeLatestMovement(sequence, epoch)
+                : _pendingCommand.TryStart(kind, sequence, epoch);
+            if (!retained)
                 throw new InvalidOperationException(
                     "The queued bot command could not enter outcome accounting.");
         }
@@ -1869,7 +1882,7 @@ internal sealed class BotClient : IDisposable
         long distanceSquared = checked(dx * dx + dz * dz);
         if (distanceSquared <= 1_200L * 1_200L)
         {
-            if (!_pendingCommand.Pending.IsPending)
+            if (!_pendingCommand.HasPendingExactCompletion)
                 _ = TryInteraction(target.Id);
             return;
         }
@@ -2185,6 +2198,7 @@ internal sealed class BotClient : IDisposable
 
     private void CancelPendingCommand()
     {
+        if (_pendingCommand.TryRetireLatestMovement(out _)) return;
         if (!_pendingCommand.TryCancel(out BotPendingCommand cancelled)) return;
         _actionAccounting.RetiredCompletionDebt(cancelled.Kind);
         switch (cancelled.Kind)

@@ -259,13 +259,39 @@ internal sealed class BotActionAccounting
 internal sealed class BotPendingCommandTracker
 {
     internal BotPendingCommand Pending { get; private set; }
+    internal bool HasPendingExactCompletion =>
+        Pending.Kind is not (BotCommandKind.None or BotCommandKind.Movement);
 
     internal bool TryStart(BotCommandKind kind, ulong sequence, ulong applicationSessionEpoch)
     {
-        if (kind == BotCommandKind.None || sequence == 0 || applicationSessionEpoch == 0 ||
+        if (kind is BotCommandKind.None or BotCommandKind.Movement ||
+            sequence == 0 || applicationSessionEpoch == 0 ||
             Pending.IsPending)
             return false;
         Pending = new BotPendingCommand(kind, sequence, applicationSessionEpoch);
+        return true;
+    }
+
+    internal bool TryStartOrSupersedeLatestMovement(
+        ulong sequence,
+        ulong applicationSessionEpoch)
+    {
+        if (sequence == 0 || applicationSessionEpoch == 0 ||
+            (Pending.IsPending && Pending.Kind != BotCommandKind.Movement) ||
+            (Pending.Kind == BotCommandKind.Movement &&
+                (Pending.ApplicationSessionEpoch != applicationSessionEpoch ||
+                 sequence <= Pending.Sequence)))
+            return false;
+        Pending = new BotPendingCommand(
+            BotCommandKind.Movement, sequence, applicationSessionEpoch);
+        return true;
+    }
+
+    internal bool TryRetireLatestMovement(out BotPendingCommand retired)
+    {
+        retired = Pending;
+        if (Pending.Kind != BotCommandKind.Movement) return false;
+        Pending = default;
         return true;
     }
 

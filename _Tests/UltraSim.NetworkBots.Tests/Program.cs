@@ -19,6 +19,7 @@ var tests = new (string Name, Action Body)[]
     ("AdmissionDeadlineIncludesLastScheduledStart", AdmissionDeadlineIncludesLastScheduledStart),
     ("MixedChaosRejectsContradictoryConfiguration", MixedChaosRejectsContradictoryConfiguration),
     ("PendingCommandCannotDisappearAcrossLifetime", PendingCommandCannotDisappearAcrossLifetime),
+    ("LatestStateMovementCanSupersedeLossWithoutDebt", LatestStateMovementCanSupersedeLossWithoutDebt),
     ("ChatObserverUsesOneBoundedSequenceCursor", ChatObserverUsesOneBoundedSequenceCursor),
     ("ChunkCoverageDistinguishesCrossingsFromDistinctChunks", ChunkCoverageDistinguishesCrossingsFromDistinctChunks),
     ("ReconnectObserverRejectsEqualCountGhostIdentity", ReconnectObserverRejectsEqualCountGhostIdentity),
@@ -427,18 +428,37 @@ static void MixedChaosRejectsContradictoryConfiguration()
 static void PendingCommandCannotDisappearAcrossLifetime()
 {
     var tracker = new BotPendingCommandTracker();
-    True(tracker.TryStart(BotCommandKind.Movement, 7, 100));
+    True(tracker.TryStart(BotCommandKind.Jump, 7, 100));
+    True(tracker.HasPendingExactCompletion);
     False(tracker.TryComplete(100, 6, out _));
     Throws<InvalidOperationException>(tracker.RequireClearForNewLifetime);
     True(tracker.TryComplete(100, 7, out BotPendingCommand completed));
-    Equal(BotCommandKind.Movement, completed.Kind);
+    Equal(BotCommandKind.Jump, completed.Kind);
     tracker.RequireClearForNewLifetime();
 
-    True(tracker.TryStart(BotCommandKind.Jump, 8, 100));
+    True(tracker.TryStart(BotCommandKind.Primary, 8, 100));
     True(tracker.TryCancel(out BotPendingCommand cancelled));
     Equal((ulong)100, cancelled.ApplicationSessionEpoch);
     tracker.RequireClearForNewLifetime();
     False(tracker.TryComplete(101, 8, out _));
+}
+
+static void LatestStateMovementCanSupersedeLossWithoutDebt()
+{
+    var tracker = new BotPendingCommandTracker();
+    True(tracker.TryStartOrSupersedeLatestMovement(7, 100));
+    False(tracker.HasPendingExactCompletion);
+    False(tracker.TryStart(BotCommandKind.Jump, 8, 100));
+
+    // An unobserved unreliable sample must not strand the bot. A newer movement sample replaces
+    // it, while stale/equal and cross-lifetime replacements remain invalid.
+    True(tracker.TryStartOrSupersedeLatestMovement(8, 100));
+    Equal((ulong)8, tracker.Pending.Sequence);
+    False(tracker.TryStartOrSupersedeLatestMovement(8, 100));
+    False(tracker.TryStartOrSupersedeLatestMovement(9, 101));
+    True(tracker.TryRetireLatestMovement(out BotPendingCommand retired));
+    Equal((ulong)8, retired.Sequence);
+    tracker.RequireClearForNewLifetime();
 }
 
 static void ChatObserverUsesOneBoundedSequenceCursor()
