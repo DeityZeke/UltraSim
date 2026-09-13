@@ -1385,6 +1385,152 @@ internal static class N1OfflineDirectChunkTests
         Equal(1UL, server.GetTimingSnapshot().Knowledge.Bundle.SingleCandidatesEmittedStandalone);
     }
 
+    internal static void SingletonMtuBoundaryRetainsCanonicalStandalone()
+    {
+        const int recordCount = 30;
+        int standaloneBytes = UltraSimGameProtocol.GetChunkDeltaEncodedBytes(recordCount);
+        int hypotheticalBundleBytes = checked(
+            RemoteDirtyChunkBundleHeaderCodec.EncodedSize +
+            UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
+                RemoteChunkPublicationKind.Delta, recordCount));
+        Equal(1_372, standaloneBytes);
+        Equal(1_374, hypotheticalBundleBytes);
+
+        int[] limits =
+        [
+            standaloneBytes - 1,
+            standaloneBytes,
+            standaloneBytes + 1,
+            standaloneBytes + 2,
+            1_405,
+        ];
+        RemoteChunkWorldStateScheduleStatus[] expected =
+        [
+            RemoteChunkWorldStateScheduleStatus.PayloadTooLarge,
+            RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+            RemoteChunkWorldStateScheduleStatus.QueuedDelta,
+        ];
+
+        for (int index = 0; index < limits.Length; index++)
+            AssertSingletonMtuBoundary(limits[index], expected[index], recordCount,
+                standaloneBytes, hypotheticalBundleBytes,
+                refuseFirstAdmission: limits[index] == standaloneBytes);
+
+        AssertAbsenceSingletonMtuBoundary();
+    }
+
+    private static void AssertSingletonMtuBoundary(
+        int maximumApplicationBytes,
+        RemoteChunkWorldStateScheduleStatus expected,
+        int recordCount,
+        int standaloneBytes,
+        int hypotheticalBundleBytes,
+        bool refuseFirstAdmission)
+    {
+        using var fixture = new Fixture(historyCapacity: 128, entityCount: recordCount);
+        fixture.PresentAll(2_000, GameWorldPublicPrefabIds.Character);
+        using ProtocolLoopback loopback = CreateLoopbackWithMaximumApplicationBytes(
+            maximumApplicationBytes, refuseFirstAdmission ? 1 : null);
+        Equal(maximumApplicationBytes, loopback.Server.MaximumUnfragmentedMessageBytes);
+        var recipient = Recipient(maximumRecords: 32);
+        var cache = Cache(fixture, maximumPublicRecords: 32);
+        SpatialChunkKey key = Key(0, 0);
+        ReconcileAndStageInitial(fixture, recipient, cache, Position(0, 0, 8_000, 8_000));
+        int subscription = FindSubscription(recipient, key);
+        True(subscription >= 0);
+        ChunkPublicationCursor initialCursor = recipient.Subscriptions[subscription].Cursor;
+        fixture.PresentAll(2_100, GameWorldPublicPrefabIds.Character);
+
+        var server = new RemoteChunkWorldStateServer(
+            loopback.Server, recipient, fixture.Store, 0xF4C01,
+            new RemoteChunkWorldStateTransportLimits(32));
+        var client = new RemoteChunkWorldStateClient(
+            loopback.Client, cache, 0xF4C01, maximumDeltaRecords: 32,
+            maximumPendingProofs: 8);
+        ChunkPublicationWork[] work =
+        [
+            new(default, key, ChunkInterestTier.Immediate,
+                ChunkPublicationWorkKind.Dirty, 1, 1),
+        ];
+        Span<RemoteChunkWorldStateScheduleStatus> statuses = stackalloc RemoteChunkWorldStateScheduleStatus[1];
+        if (refuseFirstAdmission)
+        {
+            Equal(NetworkQueueStatus.Accepted, loopback.Server.TryQueue(
+                RemoteChunkDeltaHeaderCodec.Descriptor.Id, new byte[] { 1 }));
+            Equal(1, server.TryScheduleDueBundle(work, 1, statuses, out int refusedMessages));
+            Equal(0, refusedMessages);
+            Equal(RemoteChunkWorldStateScheduleStatus.TransportNotAccepting, statuses[0]);
+            Equal(0, server.GetSnapshot().OutstandingDeliveries);
+            Equal(1UL, server.GetSnapshot().NextDeliveryId);
+            Equal(initialCursor, recipient.Subscriptions[subscription].Cursor);
+            for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+                loopback.Pump();
+            True(loopback.Client.TryConsumeReceived());
+        }
+        Equal(1, server.TryScheduleDueBundle(work, 1, statuses, out int messages));
+        Equal(expected, statuses[0]);
+
+        if (expected == RemoteChunkWorldStateScheduleStatus.PayloadTooLarge)
+        {
+            Equal(0, messages);
+            Equal(0, server.GetSnapshot().OutstandingDeliveries);
+            Equal(1UL, server.GetSnapshot().NextDeliveryId);
+        }
+        else
+        {
+            Equal(1, messages);
+            Equal(1, server.GetSnapshot().OutstandingDeliveries);
+            Equal(2UL, server.GetSnapshot().NextDeliveryId);
+            for (int pump = 0; pump < 8 && loopback.Client.ReceivedQueued == 0; pump++)
+                loopback.Pump();
+            True(loopback.Client.TryPeekReceived(out NetworkDeliveredMessage delivered,
+                out ReadOnlySpan<byte> payload));
+            Equal(RemoteChunkDeltaHeaderCodec.Descriptor.Id, delivered.MessageId);
+            Equal(standaloneBytes, payload.Length);
+            _ = client.TryProcess(delivered, payload);
+            True(loopback.Client.TryConsumeReceived());
+            Drive(loopback, server, client, () => server.GetSnapshot().AppliedProofs == 1);
+            Equal(0, server.GetSnapshot().OutstandingDeliveries);
+            Equal(CurrentRevision(fixture.Store, key),
+                recipient.Subscriptions[subscription].Cursor.Revision.Value);
+        }
+
+        Console.WriteLine(
+            $"EVIDENCE PF4C-R1 mtu={maximumApplicationBytes} standalone={standaloneBytes} " +
+            $"hypothetical_bundle={hypotheticalBundleBytes} status={statuses[0]} " +
+            $"message={(messages == 0 ? 0 : RemoteChunkDeltaHeaderCodec.Descriptor.Id.Value)} " +
+            $"next_delivery={server.GetSnapshot().NextDeliveryId} " +
+            $"outstanding={server.GetSnapshot().OutstandingDeliveries} " +
+            $"proofs={server.GetSnapshot().AppliedProofs} " +
+            $"known_revision={recipient.Subscriptions[subscription].Cursor.Revision.Value}");
+    }
+
+    private static void AssertAbsenceSingletonMtuBoundary()
+    {
+        int standaloneBytes = RemoteChunkAbsenceMessageCodec.EncodedSize;
+        int hypotheticalBundleBytes = checked(
+            RemoteDirtyChunkBundleHeaderCodec.EncodedSize +
+            UltraSimGameProtocol.GetDirtyChunkBundleEntryEncodedBytes(
+                RemoteChunkPublicationKind.Absence, 0));
+        True(hypotheticalBundleBytes > standaloneBytes);
+        // UdpProtocolLimits admits no production datagram smaller than 256 bytes. After the
+        // secure (44-byte) and Data-frame (23-byte) headers, even that floor has 189 application
+        // bytes, so both absence representations fit and this boundary cannot occur for 121.
+        const int minimumSupportedUdpDatagramBytes = 256;
+        const int dataFrameHeaderBytes = 23;
+        int minimumSupportedApplicationBytes = checked(
+            minimumSupportedUdpDatagramBytes - NetworkSecureDatagramFraming.HeaderBytes -
+            NetworkSecureDatagramFraming.TagBytes - dataFrameHeaderBytes);
+        True(hypotheticalBundleBytes <= minimumSupportedApplicationBytes);
+        Console.WriteLine(
+            $"EVIDENCE PF4C-R1 absence_standalone={standaloneBytes} " +
+            $"absence_hypothetical_bundle={hypotheticalBundleBytes} " +
+            $"minimum_supported_application={minimumSupportedApplicationBytes} " +
+            "boundary_possible=false");
+    }
+
     internal static void SelectedProfileBundleEntriesApplyAndProveIndependently()
     {
         using var fixture = new Fixture(historyCapacity: 64, entityCount: 3);
@@ -2125,6 +2271,32 @@ internal static class N1OfflineDirectChunkTests
         return loopback!;
     }
 
+    private static ProtocolLoopback CreateLoopbackWithMaximumApplicationBytes(
+        int maximumApplicationBytes,
+        int? maximumIndependentUnreliableMessages = null)
+    {
+        // Secure header + tag + canonical Data-frame header. The resulting public peer value is
+        // asserted by every caller so this test cannot silently drift from Network framing.
+        const int dataFrameHeaderBytes = 23;
+        int maximumDatagramBytes = checked(
+            maximumApplicationBytes + NetworkSecureDatagramFraming.HeaderBytes +
+            NetworkSecureDatagramFraming.TagBytes + dataFrameHeaderBytes);
+        True(ProtocolLoopback.TryCreate(
+            maximumIndependentUnreliableMessages.HasValue
+                ? NetworkProtocolLimits.Default with
+                {
+                    MaximumIndependentUnreliableMessages =
+                        maximumIndependentUnreliableMessages.Value,
+                }
+                : NetworkProtocolLimits.Default,
+            new DeterministicDatagramLimits(2_048, maximumDatagramBytes),
+            default,
+            out ProtocolLoopback? loopback,
+            out _,
+            UltraSimGameProtocol.Manifest));
+        return loopback!;
+    }
+
     private static void ReconcileAndStageInitial(
         Fixture fixture,
         OfflineDirectChunkRecipient recipient,
@@ -2812,6 +2984,17 @@ internal static class N1OfflineDirectChunkTests
                 _entities[0], Position(0, 0, localX, 2_000), descriptor);
             changes[1] = WorldPublicChange.Present(
                 _entities[1], Position(1, 0, localX, 2_000), descriptor);
+            True(Store.TryCommit(changes, out _));
+        }
+
+        internal void PresentAll(int localX, uint prefab)
+        {
+            var descriptor = new WorldPublicDescriptor(
+                prefab, WorldYaw.Zero, WorldPublicStateFlags.Visible);
+            var changes = new WorldPublicChange[_entities.Length];
+            for (int index = 0; index < changes.Length; index++)
+                changes[index] = WorldPublicChange.Present(
+                    _entities[index], Position(0, 0, localX + index, 2_000), descriptor);
             True(Store.TryCommit(changes, out _));
         }
 

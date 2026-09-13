@@ -815,15 +815,16 @@ public sealed class RemoteChunkWorldStateServer : IRemoteGameProtocolHandler, IR
                 result.Kind, result.RecordCount);
             if (bundleBytes + entryBytes > _peer.MaximumUnfragmentedMessageBytes)
             {
-                if (staged == 0)
+                // The bundle envelope is only a representation candidate. Its larger header may
+                // exceed a custom peer limit even though this first canonical 120/121 message
+                // fits. Retain that first entry so the singleton path below queues the canonical
+                // standalone bytes. Once a prior entry exists, the bundle really is full and the
+                // next independently valid publication remains pending for the next service pass.
+                if (staged != 0)
                 {
-                    statuses[processed] = RemoteChunkWorldStateScheduleStatus.PayloadTooLarge;
-                    RecordScheduleResult(subscriptionIndex, statuses[processed]);
-                    processed++;
-                    continue;
+                    fullByByteLimit = true;
+                    break;
                 }
-                fullByByteLimit = true;
-                break;
             }
 
             int recordOffset = deltaRecords;
