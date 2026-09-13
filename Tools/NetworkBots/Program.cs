@@ -29,6 +29,7 @@ Console.WriteLine(
     $"{options.Checkpoint} BOT RUN endpoint={options.Endpoint} bots={options.BotCount} seed={options.Seed} " +
     $"warmupMs={options.WarmupMilliseconds} durationMs={options.DurationMilliseconds} scenario={options.Scenario} " +
     $"inputMode={options.InputMode} sampleHz={options.InputSampleHz} submitHz={options.InputSubmitHz} " +
+    $"frames={options.UnreliableFrameCap}/{options.UnreliableAggregationScope} " +
     $"cache={options.CacheRoot} network=ClientOnly");
 
 Directory.CreateDirectory(options.CacheRoot);
@@ -388,7 +389,7 @@ internal sealed class BotHarness : IDisposable
         if (_wireSummary is null || !_wireSummary.PhysicalTransportReconciled ||
             !_wireSummary.LogicalMessageReconciled)
             return "PF2 physical/logical traffic accounting did not reconcile.";
-        if (_options.Checkpoint is "PF4A" or "PF4B" or "PF4C")
+        if (_options.Checkpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D")
         {
             BotActionOutcomeReport[] outcomes =
                 BotRunSummary.CreateActionOutcomes(_bots, _clientTelemetry);
@@ -415,7 +416,9 @@ internal sealed class BotHarness : IDisposable
                 BotClient mover = _bots[(_bots.Length / 2) & ~1];
                 if (!_singleHotActor.IsValid || mover.CurrentPublicActor != _singleHotActor ||
                     mover.CurrentPosition.Chunk != _singleHotChunk)
-                    return "The single-hot source actor did not retain its chunk/lifetime.";
+                    return "The single-hot source actor did not retain its chunk/lifetime: " +
+                        $"expectedActor={_singleHotActor} actualActor={mover.CurrentPublicActor} " +
+                        $"expectedChunk={_singleHotChunk} actualPosition={mover.CurrentPosition}.";
                 if (_bots.Any(bot => !bot.ContainsPublic(_singleHotActor)))
                     return "A single-hot recipient did not retain the shared hot actor.";
             }
@@ -1188,7 +1191,14 @@ internal sealed class BotClient : IDisposable
         Directory.CreateDirectory(_stateRoot);
         ClientServerTrustFileStore store = TrustStore();
         ClientServerTrustLoadResult loaded = store.Load();
-        _connection = new ClientDirectConnectSession(loaded.Registry, store);
+        _connection = new ClientDirectConnectSession(
+            loaded.Registry,
+            store,
+            NetworkProtocolLimits.Default with
+            {
+                MaximumUnreliableFramesPerDatagram = _options.UnreliableFrameCap,
+                UnreliableAggregationScope = _options.UnreliableAggregationScope,
+            });
         _connection.ConfigureTelemetry(_options.TelemetryLevel);
         if (!_connection.TryStart(_options.Endpoint, _options.Fingerprint))
         {
@@ -2455,6 +2465,8 @@ internal sealed record BotRunSummary
     public required string InputMode { get; init; }
     public required int ConfiguredInputSampleHz { get; init; }
     public required int ConfiguredInputSubmitHz { get; init; }
+    public required int UnreliableFrameCap { get; init; }
+    public required string UnreliableAggregationScope { get; init; }
     public required ulong Seed { get; init; }
     public required string HarnessBuildModule { get; init; }
     public required string Runtime { get; init; }
@@ -2598,7 +2610,8 @@ internal sealed record BotRunSummary
             "PF3" => 5,
             "PF4A" => 6,
             "PF4B" => 7,
-            _ => 8,
+            "PF4C" => 8,
+            _ => 9,
         },
         Checkpoint = options.Checkpoint,
         Passed = passed,
@@ -2608,6 +2621,8 @@ internal sealed record BotRunSummary
         InputMode = options.InputMode.ToString(),
         ConfiguredInputSampleHz = options.InputSampleHz,
         ConfiguredInputSubmitHz = options.InputSubmitHz,
+        UnreliableFrameCap = options.UnreliableFrameCap,
+        UnreliableAggregationScope = options.UnreliableAggregationScope.ToString(),
         Seed = options.Seed,
         HarnessBuildModule = BotRuntimeIdentity.BuildModule,
         Runtime = BotRuntimeIdentity.Runtime,
@@ -2958,6 +2973,7 @@ internal sealed record BotRunSummary
         $"chat={LocalChatSubmitted}+{GlobalChatSubmitted}/" +
         $"observed={LocalChatObserved}+{GlobalChatObserved} commands={CommandsQueued} " +
         $"input={InputMode}:{ConfiguredInputSampleHz}/{ConfiguredInputSubmitHz}Hz " +
+        $"frames={UnreliableFrameCap}/{UnreliableAggregationScope} " +
         $"scheduler={SchedulerSamplesObserved}/{SchedulerCommandsSubmitted}/" +
         $"coalesced={SchedulerContinuousCoalesced} edges={SchedulerActionEdgesCompleted}/" +
         $"{SchedulerActionEdgesGenerated} releases={SchedulerReleaseOrStopCompleted}/" +
@@ -3007,6 +3023,9 @@ internal readonly record struct BotOptions(
     int InputSampleHz = 0,
     int InputSubmitHz = 0,
     BotInputMode InputMode = BotInputMode.Compliant,
+    int UnreliableFrameCap = 2,
+    NetworkUnreliableAggregationScope UnreliableAggregationScope =
+        NetworkUnreliableAggregationScope.CrossLane,
     string? CheckpointOverride = null)
 {
     internal bool IsMixedChaos => string.Equals(Scenario, "mixed-chaos", StringComparison.Ordinal);
@@ -3039,6 +3058,9 @@ internal readonly record struct BotOptions(
         int inputSampleHz = 0;
         int inputSubmitHz = 0;
         BotInputMode inputMode = BotInputMode.Compliant;
+        int unreliableFrameCap = NetworkProtocolLimits.Default.MaximumUnreliableFramesPerDatagram;
+        NetworkUnreliableAggregationScope unreliableAggregationScope =
+            NetworkUnreliableAggregationScope.CrossLane;
         string? checkpointOverride = null;
         foreach (string argument in arguments)
         {
@@ -3070,8 +3092,20 @@ internal readonly record struct BotOptions(
             else if (TryValue(argument, "--input-mode=", out value) &&
                 Enum.TryParse(value!.Replace("-", string.Empty), ignoreCase: true,
                     out BotInputMode parsedInputMode)) inputMode = parsedInputMode;
+            else if (TryValue(argument, "--unreliable-frame-cap=", out value) &&
+                int.TryParse(value, out int parsedFrameCap) &&
+                parsedFrameCap is 1 or 2 or 4 or 8)
+                unreliableFrameCap = parsedFrameCap;
+            else if (TryValue(argument, "--unreliable-aggregation-scope=", out value))
+                unreliableAggregationScope = value switch
+                {
+                    "same-lane" => NetworkUnreliableAggregationScope.SameLane,
+                    "cross-lane" => NetworkUnreliableAggregationScope.CrossLane,
+                    _ => throw new ArgumentException(
+                        "--unreliable-aggregation-scope must be same-lane or cross-lane."),
+                };
             else if (TryValue(argument, "--checkpoint=", out value) &&
-                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C")
+                value is "PF2" or "PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D")
                 checkpointOverride = value;
             else throw new ArgumentException($"Unknown or malformed option '{argument}'.");
         }
@@ -3120,7 +3154,8 @@ internal readonly record struct BotOptions(
             cache, startReady, startRelease, ready, release, summary,
             measurementReady, measurementRelease, measurementComplete,
             stagger, verbose, warmup, telemetryLevel,
-            inputSampleHz, inputSubmitHz, inputMode, checkpointOverride);
+            inputSampleHz, inputSubmitHz, inputMode,
+            unreliableFrameCap, unreliableAggregationScope, checkpointOverride);
     }
 
     private static bool TryValue(string argument, string prefix, out string? value)

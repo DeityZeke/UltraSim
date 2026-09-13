@@ -5,6 +5,7 @@ using UltraSim.Client.Network;
 using UltraSim.Game.Input;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.World;
+using UltraSim.Network;
 using UltraSim.Spatial;
 
 var tests = new (string Name, Action Body)[]
@@ -27,6 +28,7 @@ var tests = new (string Name, Action Body)[]
     ("PF4ACheckpointSelectsConservationSchema", PF4ACheckpointSelectsConservationSchema),
     ("PF4BCheckpointAndHotChunkScenariosAreExplicit", PF4BCheckpointAndHotChunkScenariosAreExplicit),
     ("PF4CCheckpointRetainsMeasurementScenarios", PF4CCheckpointRetainsMeasurementScenarios),
+    ("PF4DCheckpointSelectsExplicitAggregationPolicy", PF4DCheckpointSelectsExplicitAggregationPolicy),
 };
 
 foreach ((string name, Action body) in tests)
@@ -234,6 +236,35 @@ static void PF4CCheckpointRetainsMeasurementScenarios()
         Equal("PF4C", options.Checkpoint);
         Equal(scenario, options.Scenario);
     }
+}
+
+static void PF4DCheckpointSelectsExplicitAggregationPolicy()
+{
+    BotOptions options = BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=50",
+        "--seed=500501",
+        "--duration=600s",
+        "--scenario=crowd",
+        "--cache=/tmp/ultrasim-bot-pf4d-options",
+        "--checkpoint=PF4D",
+        "--unreliable-frame-cap=4",
+        "--unreliable-aggregation-scope=same-lane",
+    ]);
+    Equal("PF4D", options.Checkpoint);
+    Equal(4, options.UnreliableFrameCap);
+    Equal(NetworkUnreliableAggregationScope.SameLane,
+        options.UnreliableAggregationScope);
+    Throws<ArgumentException>(() => BotOptions.Parse(
+    [
+        "--endpoint=127.0.0.1:7777",
+        $"--fingerprint={new string('1', 64)}",
+        "--bots=1", "--seed=1", "--duration=2s", "--scenario=quiet",
+        "--cache=/tmp/ultrasim-bot-pf4d-options",
+        "--unreliable-frame-cap=3",
+    ]));
 }
 
 static void FinalRetirementCoversEveryLifecycleState()

@@ -59,7 +59,7 @@ internal static class P03WholeFlowNetworkSuite
         };
         if (warmup < 1 || ticks < 10 || tickMilliseconds <= 0 ||
             denseRecipients <= 0 || denseEntities <= 0 ||
-            sparsePopulation <= 0 || caps.Any(value => value is not (1 or 4 or 8)))
+            sparsePopulation <= 0 || caps.Any(value => value is not (1 or 2 or 4 or 8)))
             throw new ArgumentOutOfRangeException(nameof(args));
 
         var cases = new List<P03WholeFlowCase>(workloads.Length * profiles.Length * caps.Length);
@@ -116,7 +116,8 @@ internal static class P03WholeFlowNetworkSuite
                 "outside timed ticks. H0.4 connection-owner handoff, external admission, public WAN, " +
                 "loss, and slow-client behavior are excluded and remain separate evidence gates.",
                 "A comparison-only manifest negotiates up to eight unreliable frames. Local send " +
-                "caps 1/4/8 are the only A/B policy change; the production manifest remains cap one. " +
+                "caps 1/2/4/8 are the only A/B policy change; the production selected policy is " +
+                "cross-lane cap two. " +
                 $"Protocol/listener stage probes were {(stageTimingEnabled ? "enabled" : "disabled")}. " +
                 $"The server semantic tick duration was {tickMilliseconds} ms. " +
                 $"AOI cadence was {(aoiCadence?.ToString() ?? "the workload default")}."),
@@ -263,7 +264,7 @@ internal static class P03WholeFlowNetworkSuite
     }
 
     private static int[] ParseCaps(string? text) => string.IsNullOrWhiteSpace(text)
-        ? [1, 4, 8]
+        ? [1, 2, 4, 8]
         : text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(value => int.Parse(value, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
 

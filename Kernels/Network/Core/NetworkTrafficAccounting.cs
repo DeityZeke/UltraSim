@@ -141,7 +141,9 @@ public sealed class NetworkTrafficSnapshot
         NetworkTransportTrafficSnapshot transport,
         NetworkLogicalTrafficSnapshot[] lanes,
         NetworkMessageTrafficSnapshot[] messages,
-        NetworkProtocolStageTiming protocolTiming = default)
+        NetworkProtocolStageTiming protocolTiming = default,
+        NetworkUnreliableAggregationSnapshot unreliableAggregation = default,
+        NetworkUnreliableOpportunitySnapshot unreliableOpportunity = default)
     {
         ProtocolVersion = protocolVersion;
         ProtocolFingerprint = protocolFingerprint;
@@ -149,12 +151,16 @@ public sealed class NetworkTrafficSnapshot
         _lanes = lanes;
         _messages = messages;
         ProtocolTiming = protocolTiming;
+        UnreliableAggregation = unreliableAggregation;
+        UnreliableOpportunity = unreliableOpportunity;
     }
 
     public ushort ProtocolVersion { get; }
     public ulong ProtocolFingerprint { get; }
     public NetworkTransportTrafficSnapshot Transport { get; }
     public NetworkProtocolStageTiming ProtocolTiming { get; }
+    public NetworkUnreliableAggregationSnapshot UnreliableAggregation { get; }
+    public NetworkUnreliableOpportunitySnapshot UnreliableOpportunity { get; }
     public int LaneCount => _lanes.Length;
     public int MessageCount => _messages.Length;
 
@@ -227,7 +233,11 @@ public sealed class NetworkTrafficSnapshot
         return new(end.ProtocolVersion, end.ProtocolFingerprint,
             NetworkTransportTrafficSnapshot.Delta(start.Transport, end.Transport),
             lanes, messages,
-            NetworkProtocolStageTiming.Delta(start.ProtocolTiming, end.ProtocolTiming));
+            NetworkProtocolStageTiming.Delta(start.ProtocolTiming, end.ProtocolTiming),
+            NetworkUnreliableAggregationSnapshot.Delta(
+                start.UnreliableAggregation, end.UnreliableAggregation),
+            NetworkUnreliableOpportunitySnapshot.Delta(
+                start.UnreliableOpportunity, end.UnreliableOpportunity));
     }
 
     public static NetworkTrafficSnapshot Add(
@@ -255,7 +265,9 @@ public sealed class NetworkTrafficSnapshot
         }
         return new(left.ProtocolVersion, left.ProtocolFingerprint,
             left.Transport.Add(right.Transport), lanes, messages,
-            left.ProtocolTiming.Add(right.ProtocolTiming));
+            left.ProtocolTiming.Add(right.ProtocolTiming),
+            left.UnreliableAggregation.Add(right.UnreliableAggregation),
+            left.UnreliableOpportunity.Add(right.UnreliableOpportunity));
     }
 }
 

@@ -29,6 +29,7 @@ case "$checkpoint" in
     PF4A) summary_schema=6 ;;
     PF4B) summary_schema=7 ;;
     PF4C) summary_schema=8 ;;
+    PF4D) summary_schema=9 ;;
     *) echo "unsupported bot evidence checkpoint: $checkpoint" >&2; exit 2 ;;
 esac
 
@@ -99,6 +100,8 @@ dotnet run --project Server/DirectConnect/UltraSim.Server.DirectConnect.csproj \
     --network-service-delay-ms="$network_service_delay_ms" \
     --public-representation="${ULTRASIM_PUBLIC_REPRESENTATION:-message129}" \
     --public-cadence="${ULTRASIM_PUBLIC_CADENCE:-1/2/4}" \
+    --unreliable-frame-cap="${ULTRASIM_UNRELIABLE_FRAME_CAP:-2}" \
+    --unreliable-aggregation-scope="${ULTRASIM_UNRELIABLE_AGGREGATION_SCOPE:-cross-lane}" \
     --telemetry="$telemetry" >"$output_dir/server.log" 2>&1 &
 server_pid=$!
 wait_file "$server_ready" 60
@@ -114,6 +117,8 @@ bot_arguments=(
     --measurement-complete-file="$measurement_complete"
     --ready-file="$bot_ready" --release-file="$bot_release"
     --summary-file="$bot_summary" --telemetry="$telemetry"
+    --unreliable-frame-cap="${ULTRASIM_UNRELIABLE_FRAME_CAP:-2}"
+    --unreliable-aggregation-scope="${ULTRASIM_UNRELIABLE_AGGREGATION_SCOPE:-cross-lane}"
     --checkpoint="$checkpoint"
 )
 if [[ "$scenario" == "sustained-input" ]]; then
@@ -142,7 +147,7 @@ server_pid=
 
 jq -e --arg checkpoint "$checkpoint" --argjson schema "$summary_schema" \
     '.passed and .cleanRetirement and .checkpoint == $checkpoint and .schemaVersion == $schema and
-     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C") or
+     (($checkpoint != "PF4A" and $checkpoint != "PF4B" and $checkpoint != "PF4C" and $checkpoint != "PF4D") or
       ([.actionOutcomes[] | select((.conserved | not) or (.terminal | not))] | length) == 0)' \
     "$bot_summary" >/dev/null
 jq -e '.PhysicalTransportReconciled and .LogicalMessageReconciled and .ParticipantsAtEnd == .ParticipantsAtStart' \

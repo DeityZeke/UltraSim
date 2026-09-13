@@ -33,6 +33,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly NetworkProtocolLimits _limits;
     private readonly int _maximumUnreliableSendFramesPerDatagram;
     private readonly int _maximumUnreliableReceiveFramesPerDatagram;
+    private readonly NetworkUnreliableAggregationScope _unreliableAggregationScope;
     private readonly DeterministicDatagramLimits _datagramLimits;
     private readonly ConnectionId _connection;
     private readonly NetworkDirectionalCryptography _sendCryptography;
@@ -142,6 +143,18 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _unreliableReceivedHistogramEightOrMore;
     private ulong _unreliableSentPlaintextBytes;
     private ulong _unreliableReceivedPlaintextBytes;
+    private ulong _unreliableSentPlaintextAtMostQuarterMtu;
+    private ulong _unreliableSentPlaintextAtMostHalfMtu;
+    private ulong _unreliableSentPlaintextAtMostThreeQuarterMtu;
+    private ulong _unreliableSentPlaintextAtMostNineTenthsMtu;
+    private ulong _unreliableSentPlaintextAboveNineTenthsMtu;
+    private ulong _unreliableSentSameLaneDatagrams;
+    private ulong _unreliableSentCrossLaneDatagrams;
+    private ulong _unreliableSentInputOwnerStateDatagrams;
+    private ulong _unreliableSentOwnerWorldStateDatagrams;
+    private ulong _unreliableSentInputWorldStateDatagrams;
+    private ulong _unreliableSentInputOwnerWorldStateDatagrams;
+    private ulong _unreliableSentOtherMultiLaneDatagrams;
     private int _maximumUnreliableSentFramesPerDatagram;
     private int _maximumUnreliableReceivedFramesPerDatagram;
     private int _maximumUnreliableSentPlaintextBytes;
@@ -204,6 +217,33 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _stageExcludedSelectionProbes;
     private ulong _stageEmptySelectionAttempts;
     private ulong _stageReadySelections;
+    private ulong _opportunityInspections;
+    private ulong _opportunityEmpty;
+    private ulong _opportunityOne;
+    private ulong _opportunityTwo;
+    private ulong _opportunityThree;
+    private ulong _opportunityFour;
+    private ulong _opportunityFiveToEight;
+    private ulong _opportunityNineOrMore;
+    private ulong _opportunityReadyFrames;
+    private ulong _opportunityPlaintextBytes;
+    private ulong _opportunityScalarDatagrams;
+    private ulong _opportunityCrossLaneCapTwoDatagrams;
+    private ulong _opportunityCrossLaneCapFourDatagrams;
+    private ulong _opportunityCrossLaneCapEightDatagrams;
+    private ulong _opportunityCrossLaneUnlimitedDatagrams;
+    private ulong _opportunitySameLaneCapTwoDatagrams;
+    private ulong _opportunitySameLaneCapFourDatagrams;
+    private ulong _opportunitySameLaneCapEightDatagrams;
+    private ulong _opportunitySameLaneUnlimitedDatagrams;
+    private ulong _opportunitySingleLaneInspections;
+    private ulong _opportunityMultiLaneInspections;
+    private ulong _opportunityReadyInputFrames;
+    private ulong _opportunityReadyOwnerStateFrames;
+    private ulong _opportunityReadyWorldStateFrames;
+    private ulong _opportunityReadyDisposableFrames;
+    private ulong _opportunityReadyOtherFrames;
+    private int _opportunityMaximumReadyFrames;
     private bool _acceptsNewSends = true;
     private bool _disposed;
     private NetworkTelemetryLevel _telemetryLevel;
@@ -229,6 +269,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             manifest.MaximumUnreliableDataFramesPerDatagram);
         _maximumUnreliableReceiveFramesPerDatagram =
             manifest.MaximumUnreliableDataFramesPerDatagram;
+        _unreliableAggregationScope = limits.UnreliableAggregationScope;
         if ((long)limits.MaximumInboundPacketsPerPump *
                 _maximumUnreliableReceiveFramesPerDatagram >
             NetworkProtocolLimits.MaximumUnreliableFramesPerPumpBound)
@@ -492,24 +533,68 @@ public sealed class NetworkProtocolPeer : IDisposable
         int bytes = 0;
         int greedyDatagrams = 0;
         int currentDatagramBytes = 0;
+        int capTwoDatagrams = 0, capTwoBytes = 0, capTwoFrames = 0;
+        int capFourDatagrams = 0, capFourBytes = 0, capFourFrames = 0;
+        int capEightDatagrams = 0, capEightBytes = 0, capEightFrames = 0;
         Span<int> sameLaneDatagramBytes = stackalloc int[NetworkLaneContracts.Count];
+        Span<int> sameLaneCapTwoBytes = stackalloc int[NetworkLaneContracts.Count];
+        Span<int> sameLaneCapTwoFrames = stackalloc int[NetworkLaneContracts.Count];
+        Span<int> sameLaneCapFourBytes = stackalloc int[NetworkLaneContracts.Count];
+        Span<int> sameLaneCapFourFrames = stackalloc int[NetworkLaneContracts.Count];
+        Span<int> sameLaneCapEightBytes = stackalloc int[NetworkLaneContracts.Count];
+        Span<int> sameLaneCapEightFrames = stackalloc int[NetworkLaneContracts.Count];
         int sameLaneGreedyDatagrams = 0;
+        int sameLaneCapTwoDatagrams = 0;
+        int sameLaneCapFourDatagrams = 0;
+        int sameLaneCapEightDatagrams = 0;
+        uint laneMask = 0;
+        int inputFrames = 0, ownerStateFrames = 0, worldStateFrames = 0;
+        int disposableFrames = 0, otherFrames = 0;
 
         for (int index = 0; index < _independent.Length; index++)
-            if (_independent[index].Active) Add(_independent[index], sameLaneDatagramBytes);
+            if (_independent[index].Active) Add(
+                _independent[index], sameLaneDatagramBytes,
+                sameLaneCapTwoBytes, sameLaneCapTwoFrames,
+                sameLaneCapFourBytes, sameLaneCapFourFrames,
+                sameLaneCapEightBytes, sameLaneCapEightFrames);
         for (int index = 0; index < _unreliableStreams.Length; index++)
             if (_unreliableStreams[index].Pending)
-                Add(_unreliableStreams[index].Message, sameLaneDatagramBytes);
+                Add(_unreliableStreams[index].Message, sameLaneDatagramBytes,
+                    sameLaneCapTwoBytes, sameLaneCapTwoFrames,
+                    sameLaneCapFourBytes, sameLaneCapFourFrames,
+                    sameLaneCapEightBytes, sameLaneCapEightFrames);
 
-        return new(ready, bytes, greedyDatagrams, sameLaneGreedyDatagrams);
+        return new(ready, bytes, greedyDatagrams, sameLaneGreedyDatagrams,
+            capTwoDatagrams, capFourDatagrams, capEightDatagrams,
+            sameLaneCapTwoDatagrams, sameLaneCapFourDatagrams,
+            sameLaneCapEightDatagrams, laneMask,
+            inputFrames, ownerStateFrames, worldStateFrames,
+            disposableFrames, otherFrames);
 
-        void Add(in OutgoingMessage message, Span<int> sameLaneBytes)
+        void Add(
+            in OutgoingMessage message,
+            Span<int> sameLaneBytes,
+            Span<int> laneCapTwoBytes,
+            Span<int> laneCapTwoFrames,
+            Span<int> laneCapFourBytes,
+            Span<int> laneCapFourFrames,
+            Span<int> laneCapEightBytes,
+            Span<int> laneCapEightFrames)
         {
             int frameBytes = checked(NetworkProtocolDataHeader.EncodedBytes + message.Length);
             if (frameBytes > maximumPlaintext)
                 throw new InvalidOperationException("An admitted unreliable frame exceeds one secure datagram.");
             ready++;
             bytes = checked(bytes + frameBytes);
+            laneMask |= 1U << (int)message.Lane;
+            switch (message.Lane)
+            {
+                case NetworkLane.Input: inputFrames++; break;
+                case NetworkLane.OwnerState: ownerStateFrames++; break;
+                case NetworkLane.WorldState: worldStateFrames++; break;
+                case NetworkLane.Disposable: disposableFrames++; break;
+                default: otherFrames++; break;
+            }
             if (currentDatagramBytes == 0 ||
                 checked(currentDatagramBytes + frameBytes) > maximumPlaintext)
             {
@@ -520,6 +605,10 @@ public sealed class NetworkProtocolPeer : IDisposable
             {
                 currentDatagramBytes += frameBytes;
             }
+
+            AddCapped(frameBytes, 2, ref capTwoBytes, ref capTwoFrames, ref capTwoDatagrams);
+            AddCapped(frameBytes, 4, ref capFourBytes, ref capFourFrames, ref capFourDatagrams);
+            AddCapped(frameBytes, 8, ref capEightBytes, ref capEightFrames, ref capEightDatagrams);
 
             int laneIndex = (int)message.Lane;
             if (sameLaneBytes[laneIndex] == 0 ||
@@ -532,6 +621,51 @@ public sealed class NetworkProtocolPeer : IDisposable
             {
                 sameLaneBytes[laneIndex] += frameBytes;
             }
+            AddSameLaneCapped(frameBytes, laneIndex, 2,
+                laneCapTwoBytes, laneCapTwoFrames, ref sameLaneCapTwoDatagrams);
+            AddSameLaneCapped(frameBytes, laneIndex, 4,
+                laneCapFourBytes, laneCapFourFrames, ref sameLaneCapFourDatagrams);
+            AddSameLaneCapped(frameBytes, laneIndex, 8,
+                laneCapEightBytes, laneCapEightFrames, ref sameLaneCapEightDatagrams);
+        }
+
+        void AddCapped(
+            int frameBytes,
+            int cap,
+            ref int datagramBytes,
+            ref int datagramFrames,
+            ref int datagrams)
+        {
+            if (datagramFrames == 0 || datagramFrames == cap ||
+                checked(datagramBytes + frameBytes) > maximumPlaintext)
+            {
+                datagrams++;
+                datagramBytes = frameBytes;
+                datagramFrames = 1;
+                return;
+            }
+            datagramBytes += frameBytes;
+            datagramFrames++;
+        }
+
+        void AddSameLaneCapped(
+            int frameBytes,
+            int lane,
+            int cap,
+            Span<int> datagramBytes,
+            Span<int> datagramFrames,
+            ref int datagrams)
+        {
+            if (datagramFrames[lane] == 0 || datagramFrames[lane] == cap ||
+                checked(datagramBytes[lane] + frameBytes) > maximumPlaintext)
+            {
+                datagrams++;
+                datagramBytes[lane] = frameBytes;
+                datagramFrames[lane] = 1;
+                return;
+            }
+            datagramBytes[lane] += frameBytes;
+            datagramFrames[lane]++;
         }
     }
 
@@ -568,6 +702,33 @@ public sealed class NetworkProtocolPeer : IDisposable
         _stageExcludedSelectionProbes = 0;
         _stageEmptySelectionAttempts = 0;
         _stageReadySelections = 0;
+        _opportunityInspections = 0;
+        _opportunityEmpty = 0;
+        _opportunityOne = 0;
+        _opportunityTwo = 0;
+        _opportunityThree = 0;
+        _opportunityFour = 0;
+        _opportunityFiveToEight = 0;
+        _opportunityNineOrMore = 0;
+        _opportunityReadyFrames = 0;
+        _opportunityPlaintextBytes = 0;
+        _opportunityScalarDatagrams = 0;
+        _opportunityCrossLaneCapTwoDatagrams = 0;
+        _opportunityCrossLaneCapFourDatagrams = 0;
+        _opportunityCrossLaneCapEightDatagrams = 0;
+        _opportunityCrossLaneUnlimitedDatagrams = 0;
+        _opportunitySameLaneCapTwoDatagrams = 0;
+        _opportunitySameLaneCapFourDatagrams = 0;
+        _opportunitySameLaneCapEightDatagrams = 0;
+        _opportunitySameLaneUnlimitedDatagrams = 0;
+        _opportunitySingleLaneInspections = 0;
+        _opportunityMultiLaneInspections = 0;
+        _opportunityReadyInputFrames = 0;
+        _opportunityReadyOwnerStateFrames = 0;
+        _opportunityReadyWorldStateFrames = 0;
+        _opportunityReadyDisposableFrames = 0;
+        _opportunityReadyOtherFrames = 0;
+        _opportunityMaximumReadyFrames = 0;
         _reliableQueuedHighWater = _reliableCount;
         _independentQueuedHighWater = _independentCount;
         _receivedQueuedHighWater = _receivedCount;
@@ -670,6 +831,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             return;
         }
 
+        if (_stageTimingEnabled && budget > 0 && _inFlight < _congestionWindow)
+            RecordUnreliableOpportunity();
+
         if (_maximumUnreliableSendFramesPerDatagram == 1)
             EmitScalarData(step, ref budget);
         else
@@ -716,6 +880,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             {
                 int aggregateCount = 1;
                 aggregate[0] = new(independentSlot, unreliableSlot);
+                NetworkLane aggregateLane = GetUnreliableSelectionMessage(aggregate[0]).Lane;
                 int aggregatePlaintextBytes = GetUnreliableFrameBytes(independentSlot, unreliableSlot);
                 int maximumPlaintextBytes = NetworkSecureDatagramFraming.MaximumPlaintextBytes(
                     _datagramLimits.MaximumDatagramBytes);
@@ -727,11 +892,16 @@ public sealed class NetworkProtocolPeer : IDisposable
                         out int nextIndependentSlot, out int nextUnreliableSlot);
                     RecordStageTiming(ref _selectionTicks, nextSelectionStarted);
                     if (!nextSelected || nextReliableSlot >= 0) break;
+                    var nextSelection = new UnreliableSelection(
+                        nextIndependentSlot, nextUnreliableSlot);
+                    if (_unreliableAggregationScope == NetworkUnreliableAggregationScope.SameLane &&
+                        GetUnreliableSelectionMessage(nextSelection).Lane != aggregateLane)
+                        break;
                     int nextFrameBytes = GetUnreliableFrameBytes(
                         nextIndependentSlot, nextUnreliableSlot);
                     if (checked(aggregatePlaintextBytes + nextFrameBytes) > maximumPlaintextBytes)
                         break;
-                    aggregate[aggregateCount++] = new(nextIndependentSlot, nextUnreliableSlot);
+                    aggregate[aggregateCount++] = nextSelection;
                     aggregatePlaintextBytes += nextFrameBytes;
                 }
                 if (!TryEmitUnreliableFrames(aggregate[..aggregateCount])) break;
@@ -739,6 +909,67 @@ public sealed class NetworkProtocolPeer : IDisposable
             budget--;
             if (ShouldStopAfterData(step)) break;
         }
+    }
+
+    private void RecordUnreliableOpportunity()
+    {
+        NetworkUnreliableBatchOpportunity value = InspectUnreliableBatchOpportunity();
+        _opportunityInspections = SaturatingIncrement(_opportunityInspections);
+        switch (value.ReadyFrames)
+        {
+            case 0: _opportunityEmpty = SaturatingIncrement(_opportunityEmpty); break;
+            case 1: _opportunityOne = SaturatingIncrement(_opportunityOne); break;
+            case 2: _opportunityTwo = SaturatingIncrement(_opportunityTwo); break;
+            case 3: _opportunityThree = SaturatingIncrement(_opportunityThree); break;
+            case 4: _opportunityFour = SaturatingIncrement(_opportunityFour); break;
+            case <= 8: _opportunityFiveToEight = SaturatingIncrement(_opportunityFiveToEight); break;
+            default: _opportunityNineOrMore = SaturatingIncrement(_opportunityNineOrMore); break;
+        }
+        if (value.ReadyFrames == 0) return;
+        _opportunityReadyFrames = SaturatingAdd(
+            _opportunityReadyFrames, checked((ulong)value.ReadyFrames));
+        _opportunityPlaintextBytes = SaturatingAdd(
+            _opportunityPlaintextBytes, checked((ulong)value.PlaintextBytes));
+        _opportunityScalarDatagrams = SaturatingAdd(
+            _opportunityScalarDatagrams, checked((ulong)value.ReadyFrames));
+        _opportunityCrossLaneCapTwoDatagrams = SaturatingAdd(
+            _opportunityCrossLaneCapTwoDatagrams, checked((ulong)value.CapTwoGreedyDatagrams));
+        _opportunityCrossLaneCapFourDatagrams = SaturatingAdd(
+            _opportunityCrossLaneCapFourDatagrams, checked((ulong)value.CapFourGreedyDatagrams));
+        _opportunityCrossLaneCapEightDatagrams = SaturatingAdd(
+            _opportunityCrossLaneCapEightDatagrams, checked((ulong)value.CapEightGreedyDatagrams));
+        _opportunityCrossLaneUnlimitedDatagrams = SaturatingAdd(
+            _opportunityCrossLaneUnlimitedDatagrams, checked((ulong)value.GreedyDatagrams));
+        _opportunitySameLaneCapTwoDatagrams = SaturatingAdd(
+            _opportunitySameLaneCapTwoDatagrams,
+            checked((ulong)value.SameLaneCapTwoGreedyDatagrams));
+        _opportunitySameLaneCapFourDatagrams = SaturatingAdd(
+            _opportunitySameLaneCapFourDatagrams,
+            checked((ulong)value.SameLaneCapFourGreedyDatagrams));
+        _opportunitySameLaneCapEightDatagrams = SaturatingAdd(
+            _opportunitySameLaneCapEightDatagrams,
+            checked((ulong)value.SameLaneCapEightGreedyDatagrams));
+        _opportunitySameLaneUnlimitedDatagrams = SaturatingAdd(
+            _opportunitySameLaneUnlimitedDatagrams,
+            checked((ulong)value.SameLaneGreedyDatagrams));
+        if (BitOperations.PopCount(value.LaneMask) <= 1)
+            _opportunitySingleLaneInspections =
+                SaturatingIncrement(_opportunitySingleLaneInspections);
+        else
+            _opportunityMultiLaneInspections =
+                SaturatingIncrement(_opportunityMultiLaneInspections);
+        _opportunityReadyInputFrames = SaturatingAdd(
+            _opportunityReadyInputFrames, checked((ulong)value.InputFrames));
+        _opportunityReadyOwnerStateFrames = SaturatingAdd(
+            _opportunityReadyOwnerStateFrames, checked((ulong)value.OwnerStateFrames));
+        _opportunityReadyWorldStateFrames = SaturatingAdd(
+            _opportunityReadyWorldStateFrames, checked((ulong)value.WorldStateFrames));
+        _opportunityReadyDisposableFrames = SaturatingAdd(
+            _opportunityReadyDisposableFrames, checked((ulong)value.DisposableFrames));
+        _opportunityReadyOtherFrames = SaturatingAdd(
+            _opportunityReadyOtherFrames, checked((ulong)value.OtherFrames));
+        _opportunityMaximumReadyFrames = Math.Max(
+            _opportunityMaximumReadyFrames, value.ReadyFrames);
     }
 
     private bool ShouldStopAfterData(ulong step)
@@ -784,25 +1015,8 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _reliablePayloadMaximumBytesMovedPerCompaction,
                 _receivedPayloadCompactions, _receivedPayloadCompactionBytesMoved,
                 _receivedPayloadMaximumBytesMovedPerCompaction),
-            new NetworkUnreliableAggregationSnapshot(
-                _maximumUnreliableSendFramesPerDatagram,
-                _unreliableFramesSent, _unreliableDatagramsSent,
-                _unreliableFramesReceived, _unreliableDatagramsReceived,
-                _unreliableSentDatagramsWithTwoOrMoreFrames,
-                _unreliableReceivedDatagramsWithTwoOrMoreFrames,
-                _unreliableSentHistogramOne, _unreliableSentHistogramTwo,
-                _unreliableSentHistogramThree, _unreliableSentHistogramFour,
-                _unreliableSentHistogramFive, _unreliableSentHistogramSix,
-                _unreliableSentHistogramSeven, _unreliableSentHistogramEightOrMore,
-                _unreliableReceivedHistogramOne, _unreliableReceivedHistogramTwo,
-                _unreliableReceivedHistogramThree, _unreliableReceivedHistogramFour,
-                _unreliableReceivedHistogramFive, _unreliableReceivedHistogramSix,
-                _unreliableReceivedHistogramSeven, _unreliableReceivedHistogramEightOrMore,
-                _unreliableSentPlaintextBytes, _unreliableReceivedPlaintextBytes,
-                _maximumUnreliableSentFramesPerDatagram,
-                _maximumUnreliableReceivedFramesPerDatagram,
-                _maximumUnreliableSentPlaintextBytes,
-                _maximumUnreliableReceivedPlaintextBytes));
+            CreateUnreliableAggregationSnapshot(),
+            CreateUnreliableOpportunitySnapshot());
     }
 
     /// <summary>
@@ -834,8 +1048,56 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _retransmittedDataDatagrams, _reliableRetransmittedWireBytes),
             lanes,
             messages,
-            GetStageTiming());
+            GetStageTiming(),
+            CreateUnreliableAggregationSnapshot(),
+            CreateUnreliableOpportunitySnapshot());
     }
+
+    private NetworkUnreliableAggregationSnapshot CreateUnreliableAggregationSnapshot() => new(
+        _maximumUnreliableSendFramesPerDatagram,
+        _unreliableAggregationScope,
+        _unreliableFramesSent, _unreliableDatagramsSent,
+        _unreliableFramesReceived, _unreliableDatagramsReceived,
+        _unreliableSentDatagramsWithTwoOrMoreFrames,
+        _unreliableReceivedDatagramsWithTwoOrMoreFrames,
+        _unreliableSentHistogramOne, _unreliableSentHistogramTwo,
+        _unreliableSentHistogramThree, _unreliableSentHistogramFour,
+        _unreliableSentHistogramFive, _unreliableSentHistogramSix,
+        _unreliableSentHistogramSeven, _unreliableSentHistogramEightOrMore,
+        _unreliableReceivedHistogramOne, _unreliableReceivedHistogramTwo,
+        _unreliableReceivedHistogramThree, _unreliableReceivedHistogramFour,
+        _unreliableReceivedHistogramFive, _unreliableReceivedHistogramSix,
+        _unreliableReceivedHistogramSeven, _unreliableReceivedHistogramEightOrMore,
+        _unreliableSentPlaintextBytes, _unreliableReceivedPlaintextBytes,
+        _unreliableSentPlaintextAtMostQuarterMtu,
+        _unreliableSentPlaintextAtMostHalfMtu,
+        _unreliableSentPlaintextAtMostThreeQuarterMtu,
+        _unreliableSentPlaintextAtMostNineTenthsMtu,
+        _unreliableSentPlaintextAboveNineTenthsMtu,
+        _unreliableSentSameLaneDatagrams, _unreliableSentCrossLaneDatagrams,
+        _unreliableSentInputOwnerStateDatagrams,
+        _unreliableSentOwnerWorldStateDatagrams,
+        _unreliableSentInputWorldStateDatagrams,
+        _unreliableSentInputOwnerWorldStateDatagrams,
+        _unreliableSentOtherMultiLaneDatagrams,
+        _maximumUnreliableSentFramesPerDatagram,
+        _maximumUnreliableReceivedFramesPerDatagram,
+        _maximumUnreliableSentPlaintextBytes,
+        _maximumUnreliableReceivedPlaintextBytes);
+
+    private NetworkUnreliableOpportunitySnapshot CreateUnreliableOpportunitySnapshot() => new(
+        _opportunityInspections, _opportunityEmpty, _opportunityOne, _opportunityTwo,
+        _opportunityThree, _opportunityFour, _opportunityFiveToEight,
+        _opportunityNineOrMore, _opportunityReadyFrames, _opportunityPlaintextBytes,
+        _opportunityScalarDatagrams, _opportunityCrossLaneCapTwoDatagrams,
+        _opportunityCrossLaneCapFourDatagrams, _opportunityCrossLaneCapEightDatagrams,
+        _opportunityCrossLaneUnlimitedDatagrams, _opportunitySameLaneCapTwoDatagrams,
+        _opportunitySameLaneCapFourDatagrams, _opportunitySameLaneCapEightDatagrams,
+        _opportunitySameLaneUnlimitedDatagrams, _opportunitySingleLaneInspections,
+        _opportunityMultiLaneInspections,
+        _opportunityReadyInputFrames, _opportunityReadyOwnerStateFrames,
+        _opportunityReadyWorldStateFrames, _opportunityReadyDisposableFrames,
+        _opportunityReadyOtherFrames, _opportunityMaximumReadyFrames);
 
     public void Dispose()
     {
@@ -1106,12 +1368,18 @@ public sealed class NetworkProtocolPeer : IDisposable
         return checked(NetworkProtocolDataHeader.EncodedBytes + message.Length);
     }
 
+    private OutgoingMessage GetUnreliableSelectionMessage(UnreliableSelection selection) =>
+        selection.IndependentSlot >= 0
+            ? _independent[selection.IndependentSlot]
+            : _unreliableStreams[selection.UnreliableSlot].Message;
+
     private bool TryEmitUnreliableFrames(
         ReadOnlySpan<UnreliableSelection> selections)
     {
         if (selections.IsEmpty) return false;
         long frameStarted = StartStageTiming();
         var writer = new NetworkPacketWriter(_plaintextScratch);
+        uint laneMask = 0;
         for (int index = 0; index < selections.Length; index++)
         {
             UnreliableSelection selection = selections[index];
@@ -1119,6 +1387,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             OutgoingMessage message = independent
                 ? _independent[selection.IndependentSlot]
                 : _unreliableStreams[selection.UnreliableSlot].Message;
+            laneMask |= 1U << (int)message.Lane;
             ReadOnlySpan<byte> payload = independent
                 ? IndependentPayload(selection.IndependentSlot)[..message.Length]
                 : UnreliablePayload(selection.UnreliableSlot)[..message.Length];
@@ -1148,20 +1417,74 @@ public sealed class NetworkProtocolPeer : IDisposable
                 firstMessageFrame: true);
             ConsumeUnreliableSelection(selection);
         }
-        _unreliableFramesSent = SaturatingAdd(
-            _unreliableFramesSent, checked((ulong)selections.Length));
-        _unreliableDatagramsSent = SaturatingIncrement(_unreliableDatagramsSent);
-        _unreliableSentPlaintextBytes = SaturatingAdd(
-            _unreliableSentPlaintextBytes, checked((ulong)writer.WrittenCount));
-        _maximumUnreliableSentFramesPerDatagram = Math.Max(
-            _maximumUnreliableSentFramesPerDatagram, selections.Length);
-        _maximumUnreliableSentPlaintextBytes = Math.Max(
-            _maximumUnreliableSentPlaintextBytes, writer.WrittenCount);
-        RecordUnreliableHistogram(sent: true, selections.Length);
+        RecordUnreliableSentDatagram(selections.Length, writer.WrittenCount, laneMask);
         if (_stageTimingEnabled)
             _stageOutboundUnreliableFrames = SaturatingAdd(
                 _stageOutboundUnreliableFrames, checked((ulong)selections.Length));
         return true;
+    }
+
+    private void RecordUnreliableSentDatagram(
+        int frameCount,
+        int plaintextBytes,
+        uint laneMask)
+    {
+        _unreliableFramesSent = SaturatingAdd(
+            _unreliableFramesSent, checked((ulong)frameCount));
+        _unreliableDatagramsSent = SaturatingIncrement(_unreliableDatagramsSent);
+        _unreliableSentPlaintextBytes = SaturatingAdd(
+            _unreliableSentPlaintextBytes, checked((ulong)plaintextBytes));
+        _maximumUnreliableSentFramesPerDatagram = Math.Max(
+            _maximumUnreliableSentFramesPerDatagram, frameCount);
+        _maximumUnreliableSentPlaintextBytes = Math.Max(
+            _maximumUnreliableSentPlaintextBytes, plaintextBytes);
+        RecordUnreliableHistogram(sent: true, frameCount);
+        int maximumPlaintext = NetworkSecureDatagramFraming.MaximumPlaintextBytes(
+            _datagramLimits.MaximumDatagramBytes);
+        if ((long)plaintextBytes * 4 <= maximumPlaintext)
+            _unreliableSentPlaintextAtMostQuarterMtu =
+                SaturatingIncrement(_unreliableSentPlaintextAtMostQuarterMtu);
+        else if ((long)plaintextBytes * 2 <= maximumPlaintext)
+            _unreliableSentPlaintextAtMostHalfMtu =
+                SaturatingIncrement(_unreliableSentPlaintextAtMostHalfMtu);
+        else if ((long)plaintextBytes * 4 <= (long)maximumPlaintext * 3)
+            _unreliableSentPlaintextAtMostThreeQuarterMtu =
+                SaturatingIncrement(_unreliableSentPlaintextAtMostThreeQuarterMtu);
+        else if ((long)plaintextBytes * 10 <= (long)maximumPlaintext * 9)
+            _unreliableSentPlaintextAtMostNineTenthsMtu =
+                SaturatingIncrement(_unreliableSentPlaintextAtMostNineTenthsMtu);
+        else
+            _unreliableSentPlaintextAboveNineTenthsMtu =
+                SaturatingIncrement(_unreliableSentPlaintextAboveNineTenthsMtu);
+
+        int laneCount = BitOperations.PopCount(laneMask);
+        if (laneCount <= 1)
+        {
+            _unreliableSentSameLaneDatagrams =
+                SaturatingIncrement(_unreliableSentSameLaneDatagrams);
+            return;
+        }
+
+        _unreliableSentCrossLaneDatagrams =
+            SaturatingIncrement(_unreliableSentCrossLaneDatagrams);
+        uint input = 1U << (int)NetworkLane.Input;
+        uint owner = 1U << (int)NetworkLane.OwnerState;
+        uint world = 1U << (int)NetworkLane.WorldState;
+        if (laneMask == (input | owner))
+            _unreliableSentInputOwnerStateDatagrams =
+                SaturatingIncrement(_unreliableSentInputOwnerStateDatagrams);
+        else if (laneMask == (owner | world))
+            _unreliableSentOwnerWorldStateDatagrams =
+                SaturatingIncrement(_unreliableSentOwnerWorldStateDatagrams);
+        else if (laneMask == (input | world))
+            _unreliableSentInputWorldStateDatagrams =
+                SaturatingIncrement(_unreliableSentInputWorldStateDatagrams);
+        else if (laneMask == (input | owner | world))
+            _unreliableSentInputOwnerWorldStateDatagrams =
+                SaturatingIncrement(_unreliableSentInputOwnerWorldStateDatagrams);
+        else
+            _unreliableSentOtherMultiLaneDatagrams =
+                SaturatingIncrement(_unreliableSentOtherMultiLaneDatagrams);
     }
 
     private void ConsumeUnreliableSelection(UnreliableSelection selection)
@@ -1318,6 +1641,8 @@ public sealed class NetworkProtocolPeer : IDisposable
                 RecordLogicalSent(in message, writer.WrittenCount,
                     firstMessageFrame: true);
                 ConsumeUnreliableSelection(new(independentSlot, unreliableSlot));
+                RecordUnreliableSentDatagram(
+                    1, writer.WrittenCount, 1U << (int)message.Lane);
                 if (_stageTimingEnabled)
                     _stageOutboundUnreliableFrames = SaturatingIncrement(
                         _stageOutboundUnreliableFrames);
@@ -1594,6 +1919,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             return reliable;
         }
 
+        RecordReceivedUnreliableDatagram(1, plaintext.Length);
         return ProcessUnreliableFrame(header, messageSlot, fragment);
     }
 

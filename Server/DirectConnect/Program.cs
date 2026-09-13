@@ -63,7 +63,8 @@ using HostedUdpAdmissionHost host = CreateHost(
         UiDefinitionIdentity.From(ServerMonitorUi.Definition),
     ], clientProfile, performanceProfile,
     options.MaximumParticipants, options.AdmissionBurstPerAddress,
-    options.PublicationPolicy);
+    options.PublicationPolicy, options.UnreliableFrameCap,
+    options.UnreliableAggregationScope);
 host.ConfigureTelemetry(options.TelemetryLevel);
 authority.ConfigureTelemetry(options.TelemetryLevel == NetworkTelemetryLevel.Off
     ? GameTelemetryLevel.Off
@@ -99,6 +100,9 @@ Console.WriteLine(
     $"{options.PublicationPolicy.Cadence.NearSteps}/" +
     $"{options.PublicationPolicy.Cadence.FarSteps}");
 Console.WriteLine(
+    $"Unreliable Network frames: cap={options.UnreliableFrameCap} " +
+    $"scope={options.UnreliableAggregationScope}");
+Console.WriteLine(
     $"This shared endpoint admits up to {options.MaximumParticipants} independent guests " +
     "into one Concept Demo authority.");
 Console.WriteLine("Press Ctrl+C to stop.");
@@ -121,7 +125,9 @@ WriteReady(options.ReadyFile, new DirectConnectReady(
     options.PublicationPolicy.Representation.ToString(),
     options.PublicationPolicy.Cadence.ImmediateSteps,
     options.PublicationPolicy.Cadence.NearSteps,
-    options.PublicationPolicy.Cadence.FarSteps));
+    options.PublicationPolicy.Cadence.FarSteps,
+    options.UnreliableFrameCap,
+    options.UnreliableAggregationScope.ToString()));
 
 using var stopping = new CancellationTokenSource();
 DirectConnectWireAccounting? wireAccounting = null;
@@ -203,7 +209,10 @@ static HostedUdpAdmissionHost CreateHost(
     RemoteServerPerformanceProfile? serverPerformanceProfile = null,
     int maximumParticipants = 8,
     int admissionBurstPerAddress = 4,
-    RemoteChunkPublicationPolicy publicationPolicy = default)
+    RemoteChunkPublicationPolicy publicationPolicy = default,
+    int unreliableFrameCap = 1,
+    NetworkUnreliableAggregationScope unreliableAggregationScope =
+        NetworkUnreliableAggregationScope.CrossLane)
 {
     if (publicationPolicy == default)
         publicationPolicy = RemoteChunkPublicationPolicy.CurrentBundled;
@@ -220,7 +229,11 @@ static HostedUdpAdmissionHost CreateHost(
     return new HostedUdpAdmissionHost(
         endpoint,
         identity,
-        NetworkProtocolLimits.Default,
+        NetworkProtocolLimits.Default with
+        {
+            MaximumUnreliableFramesPerDatagram = unreliableFrameCap,
+            UnreliableAggregationScope = unreliableAggregationScope,
+        },
         udp,
         shared,
         HostedUdpAdmissionLimits.Default with
@@ -396,6 +409,8 @@ internal readonly record struct DirectConnectOptions(
     bool EphemeralSmoke,
     int MaximumParticipants,
     int AdmissionBurstPerAddress,
+    int UnreliableFrameCap,
+    NetworkUnreliableAggregationScope UnreliableAggregationScope,
     NetworkTelemetryLevel TelemetryLevel,
     RemoteChunkPublicationPolicy PublicationPolicy)
 {
@@ -424,6 +439,9 @@ internal readonly record struct DirectConnectOptions(
         int maximumParticipants = 8;
         int admissionBurstPerAddress =
             HostedUdpAdmissionLimits.Default.MaximumValidationsPerAddressPerBucket;
+        int unreliableFrameCap = NetworkProtocolLimits.Default.MaximumUnreliableFramesPerDatagram;
+        NetworkUnreliableAggregationScope unreliableAggregationScope =
+            NetworkUnreliableAggregationScope.CrossLane;
         NetworkTelemetryLevel telemetryLevel = NetworkTelemetryLevel.Off;
         RemoteChunkPublicationRepresentation publicationRepresentation =
             RemoteChunkPublicationRepresentation.Message129WhenBeneficial;
@@ -589,6 +607,28 @@ internal readonly record struct DirectConnectOptions(
                     throw new ArgumentException("--telemetry must be Off, Basic, or Detailed.");
                 continue;
             }
+            if (argument.StartsWith("--unreliable-frame-cap=", StringComparison.Ordinal))
+            {
+                string value = argument["--unreliable-frame-cap=".Length..];
+                if (!int.TryParse(value, out unreliableFrameCap) ||
+                    unreliableFrameCap is not (1 or 2 or 4 or 8))
+                    throw new ArgumentException(
+                        "--unreliable-frame-cap must be 1, 2, 4, or 8.");
+                continue;
+            }
+            if (argument.StartsWith("--unreliable-aggregation-scope=", StringComparison.Ordinal))
+            {
+                string value = argument["--unreliable-aggregation-scope=".Length..]
+                    .Trim().ToLowerInvariant();
+                unreliableAggregationScope = value switch
+                {
+                    "same-lane" => NetworkUnreliableAggregationScope.SameLane,
+                    "cross-lane" => NetworkUnreliableAggregationScope.CrossLane,
+                    _ => throw new ArgumentException(
+                        "--unreliable-aggregation-scope must be same-lane or cross-lane."),
+                };
+                continue;
+            }
             if (argument.StartsWith("--public-representation=", StringComparison.Ordinal))
             {
                 string value = argument["--public-representation=".Length..]
@@ -644,7 +684,8 @@ internal readonly record struct DirectConnectOptions(
             simulationFrequencyHz, maximumInputHz, recommendedInputHz,
             inputBurstCapacity, inputBurstWindowMilliseconds,
             networkServiceDelayMilliseconds, smoke,
-            maximumParticipants, admissionBurstPerAddress, telemetryLevel,
+            maximumParticipants, admissionBurstPerAddress,
+            unreliableFrameCap, unreliableAggregationScope, telemetryLevel,
             publicationPolicy);
 
         static string RequiredPath(string argument, string prefix)
@@ -699,7 +740,9 @@ internal readonly record struct DirectConnectReady(
     string PublicRepresentation,
     uint PublicImmediateSteps,
     uint PublicNearSteps,
-    uint PublicFarSteps);
+    uint PublicFarSteps,
+    int UnreliableFrameCap,
+    string UnreliableAggregationScope);
 
 internal readonly record struct DirectConnectSummary(
     ulong ServerGeneration,

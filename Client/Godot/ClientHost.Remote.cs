@@ -837,10 +837,13 @@ public partial class ClientHost
         string? path = ReadArgument("--telemetry-summary=");
         if (path is null) return;
         _remoteSession!.TryGetTelemetrySnapshot(out NetworkServiceTimingSnapshot network);
-        string checkpoint = ReadArgument("--telemetry-checkpoint=") ?? "PF2.5";
-        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C"))
+        if (!_remoteSession.TryGetProtocolSnapshot(out NetworkProtocolSnapshot protocol))
             throw new InvalidOperationException(
-                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, PF4B, or PF4C.");
+                "The active remote session omitted its Network protocol snapshot.");
+        string checkpoint = ReadArgument("--telemetry-checkpoint=") ?? "PF2.5";
+        if (checkpoint is not ("PF2.5" or "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D"))
+            throw new InvalidOperationException(
+                "--telemetry-checkpoint must be PF2.5, PF3, PF4A, PF4B, PF4C, or PF4D.");
         var summary = new
         {
             SchemaVersion = checkpoint switch
@@ -849,6 +852,7 @@ public partial class ClientHost
                 "PF4A" => 3,
                 "PF4B" => 4,
                 "PF4C" => 5,
+                "PF4D" => 6,
                 _ => 1,
             },
             Checkpoint = checkpoint,
@@ -857,6 +861,7 @@ public partial class ClientHost
             ApplicationSessionEpoch = playable.Session.Playable.ApplicationSessionEpoch,
             ServerGeneration = playable.Session.Playable.ServerGenerationId,
             Network = network,
+            Protocol = protocol,
             Client = playable.Session.Timing,
             InputScheduler = playable.InputSchedule,
             PerformanceProfile = playable.Session.Performance,

@@ -97,6 +97,8 @@ internal sealed record BotWireMeasurementSummary
     public required bool OneSecondSamplesSaturated { get; init; }
     public required ulong EstimatedIpv4UdpHeaderBytes { get; init; }
     public required NetworkTransportTrafficSnapshot SecureProtocol { get; init; }
+    public required NetworkUnreliableAggregationSnapshot UnreliableAggregation { get; init; }
+    public required NetworkUnreliableOpportunitySnapshot UnreliableOpportunity { get; init; }
     public required ulong NonSecureOrUnattributedUdpPayloadBytesSent { get; init; }
     public required ulong NonSecureOrUnattributedUdpPayloadBytesReceived { get; init; }
     public required BotLaneTrafficReport[] Lanes { get; init; }
@@ -300,6 +302,8 @@ internal sealed class BotWireMeasurement
             EstimatedIpv4UdpHeaderBytes = checked(
                 Add(totalSentDatagrams, totalReceivedDatagrams) * 28UL),
             SecureProtocol = transport,
+            UnreliableAggregation = aggregate.UnreliableAggregation,
+            UnreliableOpportunity = aggregate.UnreliableOpportunity,
             NonSecureOrUnattributedUdpPayloadBytesSent =
                 totalSentBytes - transport.SecureUdpPayloadBytesSent,
             NonSecureOrUnattributedUdpPayloadBytesReceived =

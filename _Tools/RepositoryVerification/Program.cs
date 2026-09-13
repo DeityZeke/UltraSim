@@ -306,6 +306,58 @@ if (options.Pf4cOnly)
     return 0;
 }
 
+if (options.Pf4dOnly)
+{
+    if (options.SkipGodot)
+        throw new ArgumentException("--pf4d-only requires the actual exported Online product.");
+    foreach (string project in new[]
+             {
+                 "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
+                 "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
+                 "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
+                 "_Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj",
+                 "_Tests/UltraSim.NetworkBots.Tests/UltraSim.NetworkBots.Tests.csproj",
+             })
+    {
+        var command = new List<string>
+        {
+            "run", "--project", project, "-c", options.Configuration,
+        };
+        if (project.Contains("NetworkBots", StringComparison.Ordinal))
+            command.Add("-p:UltraSimNetworkFlavor=ClientOnly");
+        Run(root, "dotnet", command);
+    }
+    string godot = ResolveGodot(options.GodotPath);
+    ContentlessOnlineExport product = VerifyContentlessOnlineExport(root, godot);
+    try
+    {
+        VerifyPf2MixedExportedAccountingSwarm(
+            root, options.Configuration, product.Executable,
+            detailedTelemetry: true,
+            warmupSeconds: options.Pf3NativeWarmupSeconds,
+            measurementSeconds: options.Pf3NativeMeasurementSeconds,
+            evidenceOutputDirectory: options.Pf3NativeEvidenceOutputDirectory,
+            telemetryCheckpoint: "PF4D");
+        VerifyPf2MixedExportedAccountingSwarm(
+            root, options.Configuration, product.Executable,
+            detailedTelemetry: true,
+            warmupSeconds: 5,
+            measurementSeconds: 30,
+            evidenceOutputDirectory: options.Pf3NativeEvidenceOutputDirectory is null
+                ? null
+                : options.Pf3NativeEvidenceOutputDirectory + "-impaired",
+            telemetryCheckpoint: "PF4D",
+            externalImpairment: true);
+    }
+    finally
+    {
+        if (Directory.Exists(product.Scope))
+            Directory.Delete(product.Scope, recursive: true);
+    }
+    Console.WriteLine("PASS PF4D focused verification");
+    return 0;
+}
+
 static void VerifyPf4cSelectedBundling(string root, string configuration)
 {
     Run(root, "dotnet",
@@ -1786,7 +1838,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     string? evidenceOutputDirectory = null,
     string telemetryCheckpoint = "PF2.5",
     string aliceRenderMode = "headless",
-    string bobRenderMode = "headless")
+    string bobRenderMode = "headless",
+    bool externalImpairment = false)
 {
     const int botCount = 8;
     const int nativeClientCount = 2;
@@ -1822,6 +1875,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     string bobTelemetryReady = Path.Combine(scope, "bob", "telemetry-ready");
     string aliceTelemetrySummary = Path.Combine(scope, "alice", "telemetry-summary.json");
     string bobTelemetrySummary = Path.Combine(scope, "bob", "telemetry-summary.json");
+    string impairmentSummary = Path.Combine(scope, "external-udp-impairment.json");
     string botStartReady = Path.Combine(scope, "bots-start-ready");
     string botStartRelease = Path.Combine(scope, "bots-start-release");
     string measurementReady = Path.Combine(scope, "measurement-ready");
@@ -1838,6 +1892,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
     string bobComplete = Path.Combine(scope, "bob", "complete");
 
     Process? server = null;
+    ExternalUdpImpairmentProxy? aliceProxy = null;
+    ExternalUdpImpairmentProxy? bobProxy = null;
     Task<string>? botsTask = null;
     Task<string>? aliceTask = null;
     Task<string>? bobTask = null;
@@ -1859,6 +1915,17 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             accountingSummaryFile: accountingSummary,
             telemetryLevel: detailedTelemetry ? "Detailed" : "Off");
 
+        string aliceEndpoint = ready.Endpoint;
+        string bobEndpoint = ready.Endpoint;
+        if (externalImpairment)
+        {
+            IPEndPoint serverEndpoint = ParseUdpEndpoint(ready.Endpoint);
+            aliceProxy = new ExternalUdpImpairmentProxy(serverEndpoint);
+            bobProxy = new ExternalUdpImpairmentProxy(serverEndpoint);
+            aliceEndpoint = aliceProxy.Endpoint;
+            bobEndpoint = bobProxy.Endpoint;
+        }
+
         botsTask = Task.Run(() => RunCaptured(root, "dotnet",
         [
             "run", "--project", "Tools/NetworkBots/UltraSim.NetworkBots.csproj",
@@ -1875,14 +1942,14 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"--ready-file={botReady}", $"--release-file={botRelease}",
             $"--summary-file={botSummary}", "--admission-stagger-ms=100",
             $"--telemetry={(detailedTelemetry ? "Detailed" : "Off")}",
-            telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C"
+            telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D"
                 ? $"--checkpoint={telemetryCheckpoint}" :
                 detailedTelemetry ? "--checkpoint=PF2.5" : "--checkpoint=PF2",
         ], clientTimeoutMilliseconds));
         aliceTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
             NativeSharedClientArguments(
-                scope, "alice", ready.Endpoint, ready.Fingerprint,
+                scope, "alice", aliceEndpoint, ready.Fingerprint,
                 aliceReady, nativeRelease, expectedPresentedActors,
                 "PF2 Native Alice", "x", aliceComplete, nativeRetireRelease,
                 detailedTelemetry ? "Detailed" : null,
@@ -1894,7 +1961,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
         bobTask = Task.Run(() => RunCaptured(
             root, onlineExecutable,
             NativeSharedClientArguments(
-                scope, "bob", ready.Endpoint, ready.Fingerprint,
+                scope, "bob", bobEndpoint, ready.Fingerprint,
                 bobReady, nativeRelease, expectedPresentedActors,
                 "PF2 Native Bob", "y", bobComplete, nativeRetireRelease,
                 detailedTelemetry ? "Detailed" : null,
@@ -1906,6 +1973,8 @@ static void VerifyPf2MixedExportedAccountingSwarm(
 
         WaitForPf1Files([botStartReady, aliceReady, bobReady], 120_000, server,
             [botsTask, aliceTask, bobTask], "PF2 clients to complete admission");
+        aliceProxy?.EnableImpairment();
+        bobProxy?.EnableImpairment();
         File.WriteAllText(botStartRelease, "start\n");
         WaitForPf1Files([measurementReady], checked((warmupSeconds + 60) * 1_000), server,
             [botsTask, aliceTask, bobTask], "PF2 bot warmup to complete");
@@ -1943,7 +2012,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
 
         File.WriteAllText(botRelease, "release\n");
         string botOutput = botsTask.GetAwaiter().GetResult();
-        string expectedBotCheckpoint = telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C"
+        string expectedBotCheckpoint = telemetryCheckpoint is "PF3" or "PF4A" or "PF4B" or "PF4C" or "PF4D"
             ? telemetryCheckpoint
             : detailedTelemetry ? "PF2.5" : "PF2";
         int expectedBotSchema = expectedBotCheckpoint switch
@@ -1952,6 +2021,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             "PF4A" => 6,
             "PF4B" => 7,
             "PF4C" => 8,
+            "PF4D" => 9,
             "PF2.5" => 4,
             _ => 3,
         };
@@ -1985,13 +2055,22 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             !bot.GetProperty("cleanRetirement").GetBoolean())
             throw new InvalidOperationException(
                 "The PF2 client accounting/reconnect/retirement contract did not hold.");
-        if (expectedBotCheckpoint is "PF4A" or "PF4B" or "PF4C" &&
+        if (expectedBotCheckpoint is "PF4A" or "PF4B" or "PF4C" or "PF4D" &&
             bot.GetProperty("actionOutcomes").EnumerateArray().Any(static outcome =>
                 !outcome.GetProperty("conserved").GetBoolean() ||
                 !outcome.GetProperty("terminal").GetBoolean() ||
                 outcome.GetProperty("unexplained").GetUInt64() != 0))
             throw new InvalidOperationException(
                 "The PF4A bot action lifecycle contained unexplained or terminal debt.");
+
+        if (expectedBotCheckpoint == "PF4D")
+        {
+            JsonElement aggregation = wire.GetProperty("unreliableAggregation");
+            if (bot.GetProperty("unreliableFrameCap").GetInt32() <= 1 ||
+                aggregation.GetProperty("receivedDatagramsWithTwoOrMoreFrames").GetUInt64() == 0)
+                throw new InvalidOperationException(
+                    "The PF4D ClientOnly product did not receive an ordinary aggregate datagram.");
+        }
 
         using JsonDocument accountingDocument = JsonDocument.Parse(
             File.ReadAllText(accountingSummary));
@@ -2007,6 +2086,28 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             accounting.GetProperty("Families").GetArrayLength() != 12)
             throw new InvalidOperationException(
                 "The dedicated authority did not reconcile ordinary bot/native PF2 traffic.");
+        if (expectedBotCheckpoint == "PF4D" &&
+            accounting.GetProperty("UnreliableAggregation")
+                .GetProperty("SentDatagramsWithTwoOrMoreFrames").GetUInt64() == 0)
+            throw new InvalidOperationException(
+                "The PF4D ServerOnly product did not send an ordinary aggregate datagram.");
+        if (externalImpairment &&
+            (aliceProxy is null || bobProxy is null ||
+             aliceProxy.DroppedDatagrams == 0 || bobProxy.DroppedDatagrams == 0 ||
+             aliceProxy.ReorderedDatagrams == 0 || bobProxy.ReorderedDatagrams == 0))
+            throw new InvalidOperationException(
+                "The PF4D exported clients did not remain active through external UDP loss and reorder.");
+        if (externalImpairment)
+            File.WriteAllText(impairmentSummary, JsonSerializer.Serialize(new
+            {
+                Schema = "ultrasim-pf4d-external-udp-impairment-v1",
+                DropPeriod = ExternalUdpImpairmentProxy.DropPeriod,
+                ReorderPeriod = ExternalUdpImpairmentProxy.ReorderPeriod,
+                AliceDropped = aliceProxy!.DroppedDatagrams,
+                AliceReordered = aliceProxy.ReorderedDatagrams,
+                BobDropped = bobProxy!.DroppedDatagrams,
+                BobReordered = bobProxy.ReorderedDatagrams,
+            }, new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
 
         if (detailedTelemetry)
         {
@@ -2099,6 +2200,7 @@ static void VerifyPf2MixedExportedAccountingSwarm(
                          (botSummary, "bot-summary.json"),
                          (aliceTelemetrySummary, "native-alice-telemetry.json"),
                          (bobTelemetrySummary, "native-bob-telemetry.json"),
+                         (impairmentSummary, "external-udp-impairment.json"),
                      })
                 if (File.Exists(file.Source)) File.Copy(file.Source, Path.Combine(output, file.Name));
         }
@@ -2110,6 +2212,11 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             $"{wire.GetProperty("serverToClientUdpPayloadBytes").GetUInt64()} " +
             $"lifetimes={accounting.GetProperty("ConnectionLifetimes").GetInt32()} " +
             $"nativeModes={aliceRenderMode}/{bobRenderMode} reconciled=true retired=true");
+        if (externalImpairment)
+            Console.WriteLine(
+                $"PASS PF4D_ExternalNativeImpairment " +
+                $"aliceDrop/Reorder={aliceProxy!.DroppedDatagrams}/{aliceProxy.ReorderedDatagrams} " +
+                $"bobDrop/Reorder={bobProxy!.DroppedDatagrams}/{bobProxy.ReorderedDatagrams}");
     }
     finally
     {
@@ -2129,8 +2236,21 @@ static void VerifyPf2MixedExportedAccountingSwarm(
             StopOwnedProcess(server);
             server.Dispose();
         }
+        aliceProxy?.Dispose();
+        bobProxy?.Dispose();
         if (Directory.Exists(scope)) Directory.Delete(scope, recursive: true);
     }
+}
+
+static IPEndPoint ParseUdpEndpoint(string text)
+{
+    int separator = text.LastIndexOf(':');
+    if (separator <= 0 ||
+        !IPAddress.TryParse(text.AsSpan(0, separator), out IPAddress? address) ||
+        !int.TryParse(text.AsSpan(separator + 1), out int port) ||
+        port is <= IPEndPoint.MinPort or > IPEndPoint.MaxPort)
+        throw new InvalidOperationException($"Could not parse UDP endpoint '{text}'.");
+    return new IPEndPoint(address, port);
 }
 
 static void RequireNativeTelemetry(
@@ -2148,6 +2268,15 @@ static void RequireNativeTelemetry(
     JsonElement network = root.GetProperty("Network");
     bool healthy = root.GetProperty("Healthy").GetBoolean();
     string? checkpoint = root.GetProperty("Checkpoint").GetString();
+    int expectedSchema = expectedCheckpoint switch
+    {
+        "PF3" => 2,
+        "PF4A" => 3,
+        "PF4B" => 4,
+        "PF4C" => 5,
+        "PF4D" => 6,
+        _ => 1,
+    };
     byte nativeLevel = native.GetProperty("Level").GetByte();
     ulong frames = native.GetProperty("RenderFrames").GetUInt64();
     ulong commands = native.GetProperty("CommandsSubmitted").GetUInt64();
@@ -2197,12 +2326,19 @@ static void RequireNativeTelemetry(
         submissionRate <= 36 && submissionRate >= 15 &&
         sampleRate + 2 >= submissionRate &&
         (!highProducer || sampleRate > submissionRate * 1.25);
-    if (!healthy || checkpoint != expectedCheckpoint || nativeLevel != 2 || frames == 0 ||
+    bool aggregationValid = expectedCheckpoint != "PF4D" ||
+        root.GetProperty("Protocol").GetProperty("UnreliableAggregation")
+            .GetProperty("ConfiguredMaximumFramesPerDatagram").GetInt32() > 1 &&
+        root.GetProperty("Protocol").GetProperty("UnreliableAggregation")
+            .GetProperty("ReceivedDatagramsWithTwoOrMoreFrames").GetUInt64() > 0;
+    if (!healthy || checkpoint != expectedCheckpoint ||
+        root.GetProperty("SchemaVersion").GetInt32() != expectedSchema ||
+        nativeLevel != 2 || frames == 0 ||
         commands == 0 || inputSamples == 0 || semanticResolutions == 0 ||
         frameSamples == 0 || presentationSamples == 0 ||
         clientLevel != 2 || receivedSamples == 0 || networkLevel != 2 || pumpSamples == 0 ||
         !displayIdentified || wholeFrameSamples == 0 || !performanceApplied || !schedulerValid ||
-        !renderModeValid || !cadenceIndependent)
+        !renderModeValid || !cadenceIndependent || !aggregationValid)
         throw new InvalidOperationException(
             "An exported Online client did not expose the required PF2.5 native/client/Network " +
             $"timing: healthy={healthy} checkpoint={checkpoint} native={nativeLevel} " +
@@ -2210,7 +2346,8 @@ static void RequireNativeTelemetry(
             $"commands={commands} presentation={presentationSamples} " +
             $"client={clientLevel}/{receivedSamples} network={networkLevel}/{pumpSamples} " +
             $"display={displayIdentified}/{renderModeValid} performance={performanceApplied} " +
-            $"scheduler={schedulerValid} cadence={sampleRate:0.###}/{submissionRate:0.###}Hz.");
+            $"scheduler={schedulerValid} cadence={sampleRate:0.###}/{submissionRate:0.###}Hz " +
+            $"aggregation={aggregationValid}.");
 }
 
 static void VerifyPf3InputCadenceMatrix(string root, string configuration)
@@ -2898,7 +3035,7 @@ static Process StartNativeDeployment(
     foreach (string argument in new[]
     {
         "run", "--project", "Server/DirectConnect/UltraSim.Server.DirectConnect.csproj",
-        "-c", configuration, "--no-build", "--",
+        "-c", configuration, "-p:UltraSimNetworkFlavor=ServerOnly", "--no-build", "--",
         $"--bind=127.0.0.1:{applicationPort}",
         $"--content-bind=127.0.0.1:{contentPort}",
         $"--identity-dir={identityDirectory}",
@@ -3764,6 +3901,7 @@ internal sealed record VerificationOptions(
     bool Pf4aOnly,
     bool Pf4bOnly,
     bool Pf4cOnly,
+    bool Pf4dOnly,
     bool Pf3Only,
     bool Pf3NativeOnly,
     bool Pf25LongNative,
@@ -3783,7 +3921,7 @@ internal sealed record VerificationOptions(
     {
         bool architectureOnly = false, pf1Only = false, pf2Only = false, pf25Only = false,
             pf3Only = false, pf3NativeOnly = false, pf4aOnly = false, pf4bOnly = false,
-            pf4cOnly = false,
+            pf4cOnly = false, pf4dOnly = false,
             pf25LongNative = false,
             allConfigurations = false;
         bool skipGodot = false, noRestore = false;
@@ -3803,6 +3941,7 @@ internal sealed record VerificationOptions(
             else if (argument == "--pf4a-only") pf4aOnly = true;
             else if (argument == "--pf4b-only") pf4bOnly = true;
             else if (argument == "--pf4c-only") pf4cOnly = true;
+            else if (argument == "--pf4d-only") pf4dOnly = true;
             else if (argument == "--pf2.5-long-native") pf25LongNative = true;
             else if (argument == "--all-configurations") allConfigurations = true;
             else if (argument == "--skip-godot") skipGodot = true;
@@ -3828,6 +3967,10 @@ internal sealed record VerificationOptions(
                 pf3NativeWarmupSeconds = int.Parse(
                     argument["--pf4c-native-warmup-seconds=".Length..],
                     System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf4d-native-warmup-seconds=", StringComparison.Ordinal))
+                pf3NativeWarmupSeconds = int.Parse(
+                    argument["--pf4d-native-warmup-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
             else if (argument.StartsWith("--pf3-native-measurement-seconds=", StringComparison.Ordinal))
                 pf3NativeMeasurementSeconds = int.Parse(
                     argument["--pf3-native-measurement-seconds=".Length..],
@@ -3844,6 +3987,10 @@ internal sealed record VerificationOptions(
                 pf3NativeMeasurementSeconds = int.Parse(
                     argument["--pf4c-native-measurement-seconds=".Length..],
                     System.Globalization.CultureInfo.InvariantCulture);
+            else if (argument.StartsWith("--pf4d-native-measurement-seconds=", StringComparison.Ordinal))
+                pf3NativeMeasurementSeconds = int.Parse(
+                    argument["--pf4d-native-measurement-seconds=".Length..],
+                    System.Globalization.CultureInfo.InvariantCulture);
             else if (argument.StartsWith("--pf3-native-evidence-output=", StringComparison.Ordinal))
                 pf3NativeEvidenceOutputDirectory =
                     argument["--pf3-native-evidence-output=".Length..];
@@ -3856,6 +4003,9 @@ internal sealed record VerificationOptions(
             else if (argument.StartsWith("--pf4c-native-evidence-output=", StringComparison.Ordinal))
                 pf3NativeEvidenceOutputDirectory =
                     argument["--pf4c-native-evidence-output=".Length..];
+            else if (argument.StartsWith("--pf4d-native-evidence-output=", StringComparison.Ordinal))
+                pf3NativeEvidenceOutputDirectory =
+                    argument["--pf4d-native-evidence-output=".Length..];
             else if (argument.StartsWith("--pf3-native-a=", StringComparison.Ordinal))
                 pf3NativeAliceRenderMode = argument["--pf3-native-a=".Length..];
             else if (argument.StartsWith("--pf3-native-b=", StringComparison.Ordinal))
@@ -3865,11 +4015,11 @@ internal sealed record VerificationOptions(
         if (configuration is not ("Debug" or "Release"))
             throw new ArgumentException("Verification configuration must be Debug or Release.");
         if ((pf1Only || pf2Only || pf25Only || pf3Only || pf3NativeOnly || pf4aOnly ||
-             pf4bOnly || pf4cOnly) && architectureOnly)
+             pf4bOnly || pf4cOnly || pf4dOnly) && architectureOnly)
             throw new ArgumentException("Focused PF verification cannot be architecture-only.");
         if ((pf1Only ? 1 : 0) + (pf2Only ? 1 : 0) + (pf25Only ? 1 : 0) +
             (pf3Only ? 1 : 0) + (pf3NativeOnly ? 1 : 0) + (pf4aOnly ? 1 : 0) +
-            (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) > 1)
+            (pf4bOnly ? 1 : 0) + (pf4cOnly ? 1 : 0) + (pf4dOnly ? 1 : 0) > 1)
             throw new ArgumentException("Choose one focused PF verification mode.");
         if ((pf25LongNative || pf25EvidenceOutputDirectory is not null) && !pf25Only)
             throw new ArgumentException(
@@ -3891,10 +4041,10 @@ internal sealed record VerificationOptions(
             pf3NativeMeasurementSeconds != 20 || pf3NativeEvidenceOutputDirectory is not null ||
             pf3NativeAliceRenderMode != "headless" || pf3NativeBobRenderMode != "headless";
         if (hasPf3NativeOption && !pf3Only && !pf3NativeOnly && !pf4aOnly && !pf4bOnly &&
-            !pf4cOnly)
+            !pf4cOnly && !pf4dOnly)
             throw new ArgumentException(
-                "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, or --pf4c-only.");
-        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly,
+                "Native PF options require --pf3-only, --pf3-native-only, --pf4a-only, --pf4b-only, --pf4c-only, or --pf4d-only.");
+        return new(architectureOnly, pf1Only, pf2Only, pf25Only, pf4aOnly, pf4bOnly, pf4cOnly, pf4dOnly,
             pf3Only, pf3NativeOnly,
             pf25LongNative,
             allConfigurations, configuration, skipGodot, noRestore, godot,
@@ -3961,3 +4111,168 @@ internal sealed record Pf3Case(
     bool ExpectRateLimit,
     int InputBurstCapacity = 10,
     int InputBurstWindowMilliseconds = 100);
+
+/// <summary>
+/// External userspace UDP path used only by repository verification. It remains transparent
+/// through admission, then applies bounded deterministic loss and reorder to the actual exported
+/// client without linking production code to Network.Testing.
+/// </summary>
+internal sealed class ExternalUdpImpairmentProxy : IDisposable
+{
+    internal const int DropPeriod = 53;
+    internal const int ReorderPeriod = 37;
+    private const int MaximumHoldMilliseconds = 20;
+
+    private readonly Socket _socket;
+    private readonly IPEndPoint _server;
+    private readonly Thread _thread;
+    private readonly byte[] _receive = new byte[65_535];
+    private IPEndPoint? _client;
+    private HeldDatagram? _clientToServerHeld;
+    private HeldDatagram? _serverToClientHeld;
+    private long _clientToServerSequence;
+    private long _serverToClientSequence;
+    private long _droppedDatagrams;
+    private long _reorderedDatagrams;
+    private volatile bool _enabled;
+    private volatile bool _disposed;
+
+    internal ExternalUdpImpairmentProxy(IPEndPoint server)
+    {
+        _server = server;
+        _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+        {
+            ReceiveTimeout = 10,
+        };
+        _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        Endpoint = ((IPEndPoint)_socket.LocalEndPoint!).ToString();
+        _thread = new Thread(Run)
+        {
+            IsBackground = true,
+            Name = "UltraSim PF4D external UDP impairment",
+        };
+        _thread.Start();
+    }
+
+    internal string Endpoint { get; }
+    internal long DroppedDatagrams => Interlocked.Read(ref _droppedDatagrams);
+    internal long ReorderedDatagrams => Interlocked.Read(ref _reorderedDatagrams);
+    internal void EnableImpairment() => _enabled = true;
+
+    private void Run()
+    {
+        while (!_disposed)
+        {
+            FlushExpired();
+            EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+            try
+            {
+                int length = _socket.ReceiveFrom(
+                    _receive, 0, _receive.Length, SocketFlags.None, ref remote);
+                if (length <= 0 || remote is not IPEndPoint source) continue;
+                bool fromServer = source.Address.Equals(_server.Address) &&
+                    source.Port == _server.Port;
+                IPEndPoint? target;
+                if (fromServer)
+                {
+                    target = _client;
+                }
+                else
+                {
+                    _client = new IPEndPoint(source.Address, source.Port);
+                    target = _server;
+                }
+                if (target is null) continue;
+                if (!_enabled)
+                {
+                    Send(_receive.AsSpan(0, length), target);
+                    continue;
+                }
+                Process(_receive.AsSpan(0, length), target, fromServer);
+            }
+            catch (SocketException exception) when (
+                exception.SocketErrorCode is SocketError.TimedOut or SocketError.WouldBlock)
+            {
+            }
+            catch (SocketException exception) when (
+                _disposed && exception.SocketErrorCode is
+                    SocketError.Interrupted or SocketError.OperationAborted)
+            {
+                return;
+            }
+            catch (ObjectDisposedException) when (_disposed)
+            {
+                return;
+            }
+        }
+    }
+
+    private void Process(ReadOnlySpan<byte> payload, IPEndPoint target, bool fromServer)
+    {
+        long sequence = fromServer
+            ? ++_serverToClientSequence
+            : ++_clientToServerSequence;
+        if (sequence % DropPeriod == 0)
+        {
+            Interlocked.Increment(ref _droppedDatagrams);
+            return;
+        }
+
+        ref HeldDatagram? held = ref (fromServer
+            ? ref _serverToClientHeld
+            : ref _clientToServerHeld);
+        if (held is not null)
+        {
+            Send(payload, target);
+            Send(held.Payload, held.Target);
+            held = null;
+            Interlocked.Increment(ref _reorderedDatagrams);
+            return;
+        }
+        if (sequence % ReorderPeriod == 0)
+        {
+            held = new HeldDatagram(
+                payload.ToArray(), new IPEndPoint(target.Address, target.Port),
+                Environment.TickCount64);
+            return;
+        }
+        Send(payload, target);
+    }
+
+    private void FlushExpired()
+    {
+        long now = Environment.TickCount64;
+        Flush(ref _clientToServerHeld, now);
+        Flush(ref _serverToClientHeld, now);
+    }
+
+    private void Flush(ref HeldDatagram? held, long now)
+    {
+        if (held is null || now - held.StartedMilliseconds < MaximumHoldMilliseconds) return;
+        Send(held.Payload, held.Target);
+        held = null;
+    }
+
+    private void Send(ReadOnlySpan<byte> payload, IPEndPoint target)
+    {
+        try { _socket.SendTo(payload, SocketFlags.None, target); }
+        catch (SocketException exception) when (
+            _disposed && exception.SocketErrorCode is
+                SocketError.Interrupted or SocketError.OperationAborted) { }
+        catch (ObjectDisposedException) when (_disposed) { }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _socket.Dispose();
+        if (!_thread.Join(2_000))
+            throw new InvalidOperationException("PF4D UDP impairment proxy did not retire.");
+    }
+
+    private sealed record HeldDatagram(
+        byte[] Payload,
+        IPEndPoint Target,
+        long StartedMilliseconds);
+}

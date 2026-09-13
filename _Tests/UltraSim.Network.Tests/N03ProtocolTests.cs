@@ -7,7 +7,7 @@ internal static class N03ProtocolTests
         16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32, 16);
     private static readonly DeterministicDatagramLimits s_datagrams = new(256, 512);
     private static readonly NetworkProtocolManifest s_manifest = CreateManifest();
-    private static readonly NetworkProtocolManifest s_aggregatedManifest = CreateManifest(7);
+    private static readonly NetworkProtocolManifest s_aggregatedManifest = CreateManifest(8);
 
     internal static void RunAll()
     {
@@ -24,6 +24,10 @@ internal static class N03ProtocolTests
         Run("UnreliableDataDoesNotElicitTransportAcknowledgements", UnreliableDataDoesNotElicitTransportAcknowledgements);
         Run("MixedTrafficAcknowledgesReliableDataOnly", MixedTrafficAcknowledgesReliableDataOnly);
         Run("UnreliableBatchCensusIsExactAndNonMutating", UnreliableBatchCensusIsExactAndNonMutating);
+        Run("UnreliableAggregationCapLadderIsExact", UnreliableAggregationCapLadderIsExact);
+        Run("UnreliableSameLaneScopeNeverDelaysReadyFrames", UnreliableSameLaneScopeNeverDelaysReadyFrames);
+        Run("ReliableFramesRemainSingletonWithUnreliableAggregation", ReliableFramesRemainSingletonWithUnreliableAggregation);
+        Run("UnreliableAggregationRespectsMtuWithMultipleWorldFrames", UnreliableAggregationRespectsMtuWithMultipleWorldFrames);
         Run("UnreliableMultiframeAggregationPreservesOrderAndCounters", UnreliableMultiframeAggregationPreservesOrderAndCounters);
         Run("UnreliableMultiframeSendBackpressureIsTransactional", UnreliableMultiframeSendBackpressureIsTransactional);
         Run("UnreliableMultiframeReceiveValidationIsTransactional", UnreliableMultiframeReceiveValidationIsTransactional);
@@ -326,6 +330,14 @@ internal static class N03ProtocolTests
         Equal(0UL, sender.ReliableAcknowledgements);
         Equal(0UL, sender.SmoothedRoundTripSteps);
         Equal(2UL, receiver.ReceivedPackets);
+        Equal(2UL, sender.UnreliableAggregation.SentFrames);
+        Equal(2UL, sender.UnreliableAggregation.SentDatagrams);
+        Equal(2UL, sender.UnreliableAggregation.SentHistogramOne);
+        Equal(2UL, sender.UnreliableAggregation.SentSameLaneDatagrams);
+        Equal(0UL, sender.UnreliableAggregation.SentCrossLaneDatagrams);
+        Equal(2UL, receiver.UnreliableAggregation.ReceivedFrames);
+        Equal(2UL, receiver.UnreliableAggregation.ReceivedDatagrams);
+        Equal(2UL, receiver.UnreliableAggregation.ReceivedHistogramOne);
     }
 
     private static void MixedTrafficAcknowledgesReliableDataOnly()
@@ -365,10 +377,142 @@ internal static class N03ProtocolTests
             opportunity.PlaintextBytes);
         Equal(2, opportunity.GreedyDatagrams);
         Equal(3, opportunity.SameLaneGreedyDatagrams);
+        Equal(2, opportunity.CapTwoGreedyDatagrams);
+        Equal(2, opportunity.CapFourGreedyDatagrams);
+        Equal(2, opportunity.CapEightGreedyDatagrams);
+        Equal(3, opportunity.SameLaneCapTwoGreedyDatagrams);
+        Equal(3, opportunity.SameLaneCapFourGreedyDatagrams);
+        Equal(3, opportunity.SameLaneCapEightGreedyDatagrams);
+        Equal((1U << (int)NetworkLane.Input) |
+            (1U << (int)NetworkLane.OwnerState) |
+            (1U << (int)NetworkLane.WorldState), opportunity.LaneMask);
         Equal(1, loopback.Client.IndependentUnreliableQueued);
 
         Drive(loopback, () => loopback.Server.ReceivedQueued == 3, 100);
         Equal(0, loopback.Client.InspectUnreliableBatchOpportunity().ReadyFrames);
+    }
+
+    private static void UnreliableAggregationCapLadderIsExact()
+    {
+        int[] caps = [1, 2, 4, 8];
+        ulong[] expectedDatagrams = [4, 2, 1, 1];
+        byte[] input = [1];
+        byte[] owner = [2];
+        byte[] world = [3];
+        byte[] disposable = [4];
+        for (int index = 0; index < caps.Length; index++)
+        {
+            NetworkProtocolLimits limits = s_limits with
+                { MaximumUnreliableFramesPerDatagram = caps[index] };
+            using ProtocolLoopback loopback = Create(
+                default, s_datagrams, limits, s_aggregatedManifest);
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Input), input));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.OwnerState), owner));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.WorldState), world));
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.Disposable), disposable));
+
+            loopback.Client.Emit(0);
+            loopback.Server.ProcessInbound(0);
+            NetworkUnreliableAggregationSnapshot sent =
+                loopback.Client.GetSnapshot().UnreliableAggregation;
+            Equal(4UL, sent.SentFrames);
+            Equal(expectedDatagrams[index], sent.SentDatagrams);
+            Equal(4, loopback.Server.ReceivedQueued);
+        }
+    }
+
+    private static void UnreliableSameLaneScopeNeverDelaysReadyFrames()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            MaximumUnreliableFramesPerDatagram = 8,
+            UnreliableAggregationScope = NetworkUnreliableAggregationScope.SameLane,
+        };
+        using ProtocolLoopback loopback = Create(
+            default, s_datagrams, limits, s_aggregatedManifest);
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 3 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Disposable), stackalloc byte[] { 4 }));
+
+        // One ordinary emit call must drain every ready frame. Scope may alter only
+        // physical grouping; it may not create an aggregation wait state.
+        loopback.Client.Emit(0);
+        loopback.Server.ProcessInbound(0);
+        NetworkUnreliableAggregationSnapshot sent =
+            loopback.Client.GetSnapshot().UnreliableAggregation;
+        Equal(4UL, sent.SentFrames);
+        Equal(4UL, sent.SentDatagrams);
+        Equal(4UL, sent.SentSameLaneDatagrams);
+        Equal(0UL, sent.SentCrossLaneDatagrams);
+        Equal(4, loopback.Server.ReceivedQueued);
+    }
+
+    private static void ReliableFramesRemainSingletonWithUnreliableAggregation()
+    {
+        NetworkProtocolLimits limits = s_limits with
+            { MaximumUnreliableFramesPerDatagram = 8 };
+        using ProtocolLoopback loopback = Create(
+            default, s_datagrams, limits, s_aggregatedManifest);
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 9 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+
+        loopback.Client.Emit(0);
+        loopback.Server.ProcessInbound(0);
+        NetworkProtocolSnapshot sent = loopback.Client.GetSnapshot();
+        Equal(2UL, sent.DataPacketsSent);
+        Equal(2UL, sent.UnreliableAggregation.SentFrames);
+        Equal(1UL, sent.UnreliableAggregation.SentDatagrams);
+        Equal(1UL, sent.UnreliableAggregation.SentHistogramTwo);
+        Equal(3, loopback.Server.ReceivedQueued);
+        AssertReceive(loopback.Server, NetworkLane.Control, stackalloc byte[] { 9 });
+        AssertReceive(loopback.Server, NetworkLane.Input, stackalloc byte[] { 1 });
+        AssertReceive(loopback.Server, NetworkLane.OwnerState, stackalloc byte[] { 2 });
+    }
+
+    private static void UnreliableAggregationRespectsMtuWithMultipleWorldFrames()
+    {
+        NetworkProtocolLimits limits = s_limits with
+            { MaximumUnreliableFramesPerDatagram = 8 };
+        using ProtocolLoopback loopback = Create(
+            default, s_datagrams, limits, s_aggregatedManifest);
+        byte[] largeA = Enumerable.Repeat((byte)0xA1, 200).ToArray();
+        byte[] largeB = Enumerable.Repeat((byte)0xB2, 200).ToArray();
+        byte[] tail = [0xC3];
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), largeA));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), largeB));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), tail));
+
+        loopback.Client.Emit(0);
+        loopback.Server.ProcessInbound(0);
+        NetworkUnreliableAggregationSnapshot sent =
+            loopback.Client.GetSnapshot().UnreliableAggregation;
+        Equal(3UL, sent.SentFrames);
+        Equal(2UL, sent.SentDatagrams);
+        Equal(1UL, sent.SentHistogramTwo);
+        Equal(1UL, sent.SentHistogramOne);
+        True(sent.MaximumSentPlaintextBytes <=
+            NetworkSecureDatagramFraming.MaximumPlaintextBytes(
+                s_datagrams.MaximumDatagramBytes));
+        Equal(3, loopback.Server.ReceivedQueued);
+        AssertReceive(loopback.Server, NetworkLane.WorldState, largeA);
+        AssertReceive(loopback.Server, NetworkLane.WorldState, largeB);
+        AssertReceive(loopback.Server, NetworkLane.WorldState, tail);
     }
 
     private static void UnreliableMultiframeAggregationPreservesOrderAndCounters()
@@ -517,17 +661,24 @@ internal static class N03ProtocolTests
             impairment: new NetworkImpairmentOptions(0xA661, 180, 220, 260, 7));
         byte[] payload = { 0x5A };
         int delivered = 0;
+        Span<bool> input = stackalloc bool[256];
+        Span<bool> owner = stackalloc bool[256];
         for (ulong step = 0; step < 256; step++)
         {
+            payload[0] = checked((byte)step);
             Equal(NetworkQueueStatus.Accepted,
                 pair.Sender.TryQueue(Id(NetworkLane.Input), payload));
             Equal(NetworkQueueStatus.Accepted,
                 pair.Sender.TryQueue(Id(NetworkLane.OwnerState), payload));
             pair.Sender.Emit(step);
             pair.Receiver.ProcessInbound(step);
-            while (pair.Receiver.TryPeekReceived(out _, out ReadOnlySpan<byte> received))
+            while (pair.Receiver.TryPeekReceived(
+                out NetworkDeliveredMessage message, out ReadOnlySpan<byte> received))
             {
-                True(payload.AsSpan().SequenceEqual(received));
+                Equal(1, received.Length);
+                if (message.Lane == NetworkLane.Input) input[received[0]] = true;
+                else if (message.Lane == NetworkLane.OwnerState) owner[received[0]] = true;
+                else throw new InvalidOperationException("Unexpected impaired aggregate lane.");
                 True(pair.Receiver.TryConsumeReceived());
                 delivered++;
             }
@@ -537,9 +688,13 @@ internal static class N03ProtocolTests
         for (ulong step = 256; step < 320; step++)
         {
             pair.Receiver.ProcessInbound(step);
-            while (pair.Receiver.TryPeekReceived(out _, out ReadOnlySpan<byte> received))
+            while (pair.Receiver.TryPeekReceived(
+                out NetworkDeliveredMessage message, out ReadOnlySpan<byte> received))
             {
-                True(payload.AsSpan().SequenceEqual(received));
+                Equal(1, received.Length);
+                if (message.Lane == NetworkLane.Input) input[received[0]] = true;
+                else if (message.Lane == NetworkLane.OwnerState) owner[received[0]] = true;
+                else throw new InvalidOperationException("Unexpected impaired aggregate lane.");
                 True(pair.Receiver.TryConsumeReceived());
                 delivered++;
             }
@@ -552,12 +707,18 @@ internal static class N03ProtocolTests
         True(pair.Link.GetSnapshot().Duplicated > 0);
         True(pair.Link.GetSnapshot().Corrupted > 0);
         True(pair.Receiver.GetSnapshot().AuthenticationFailures > 0);
+        Equal(0UL, pair.Sender.GetSnapshot().ReliableRetransmissions);
+        Equal(0, pair.Sender.GetSnapshot().InFlightPackets);
+        // Correlated physical loss/corruption is explicit: both semantic frames in
+        // each emitted aggregate survive or disappear together.
+        for (int value = 0; value < input.Length; value++) Equal(input[value], owner[value]);
     }
 
     private static void WarmedUnreliableMultiframeAggregationAllocatesZero()
     {
         NetworkProtocolLimits limits = s_limits with { MaximumUnreliableFramesPerDatagram = 7 };
         using ProtocolLoopback loopback = Create(default, s_datagrams, limits, s_aggregatedManifest);
+        loopback.Client.ConfigureTelemetry(NetworkTelemetryLevel.Detailed);
         byte[] payload = new byte[1];
         for (int iteration = 0; iteration < 32; iteration++)
         {
