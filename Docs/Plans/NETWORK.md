@@ -3,8 +3,9 @@
 Status: **accepted / consumption-ready**, including physical Network capability packaging,
 PF2.5 replication-ownership/observability reconciliation, PF3 authenticated performance policy,
 PF4A quiet publication-work suppression, PF4B chunk-knowledge census, PF4C selected Game-message
-bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, and PF4E
-dense/distributed fanout plus remaining-cost attribution, as of
+bundling, the PF4C-R1 singleton MTU repair, PF4D unreliable Network-frame aggregation, PF4E
+dense/distributed fanout plus remaining-cost attribution, and PF4E-R1 rated scaling reconciliation,
+as of
 2026-09-13.
 
 Network N0, Terrain/World T0, N1.0-N1.4, Hosted H0.0-H0.5, the five-profile
@@ -59,6 +60,23 @@ dense point tested) and distributed 256, with distributed 128 passing. These are
 recipients, not CCU. Product Moving/Crowd attribution identifies message 129 as roughly 94.1% of
 Game application egress, so a selective-compression experiment ranks above self-public suppression
 or deeper header compaction. No compression is implemented or accepted by PF4E.
+
+PF4E-R1 preserves that product policy and compares five current real-loopback-UDP curves on one
+measurement basis. Current cap-one Dirty/Maintained controls reproduce the historical P0.3J class,
+so the selected-profile gap is not general harness or clock drift. The prior PF4E Chunk dense
+fixture passes the comparable legacy 4 ms gate at 128 and first fails at 192; an explicit
+one-dirty-chunk/unbatchable shape passes 192 and fails 256; a production-shaped localized
+eight-chunk shape passes 96 and narrowly fails 128. Recipient count alone is not a capacity claim.
+
+The earlier inference that the PF4E fixture did not engage message 129 is superseded: at 128 it
+bundles 98.20% of semantic publications. The production-shaped fixture bundles 97.47%. Neither
+shape has an MTU-compatible PF4D cross-lane pair, so cap-two aggregation remains proven by PF4D's
+own product workload rather than these chunk-only controls. At 128 the prior fixture's 4.85x Dirty
+legacy p95 consists chiefly of 3.76x more useful publications plus a 1.17x mean cost/publication;
+operation-count decomposition assigns about 81.2% of the mean gap to publication count and 18.8%
+to the unit premium. This confirms a real selected-profile CPU cost without indicating a product
+regression. See
+[`concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md`](../../_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md).
 
 This document is the current Network/replication architecture contract. Historical
 checkpoint detail remains in git and immutable `_Benchmarks/Baselines` artifacts.

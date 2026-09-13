@@ -47,6 +47,11 @@ per-frame semantics, Game replication ownership, AOI, and the accepted 1/2/4 cad
 PF4E now closes dense/distributed fanout, per-recipient fairness, exact self-public, payload-shape,
 and end-to-end cost attribution on that unchanged client path. The resulting next candidate is a
 bounded selective-compression experiment; no client codec or policy change has yet been accepted.
+PF4E-R1 additionally reconciles the selected-profile rating against current and historical
+Dirty/Maintained controls. It confirms outcome B while correcting the earlier fixture explanation:
+the prior PF4E dense fixture already used message-129 bundling, and its cost follows
+ChunkPublication's semantic unit cost multiplied by useful chunk-publication count. The three
+Chunk workloads prove there is no context-free `<128` profile boundary.
 
 **Purpose:** replace the acceptance-oriented Godot playable harness with a real persistent client shell while preserving UltraSim ownership boundaries and proving that local play, remote play, bundled content, streamed content, server-composed UI, presentation, and optional client capabilities can be composed independently.
 
@@ -2712,6 +2717,7 @@ PF4C selected Game bundling / public-tier cadence                           CLOS
 PF4C-R1 singleton MTU boundary repair                                        CLOSED
 PF4D unreliable Network-frame aggregation                                   CLOSED (cross-lane cap two)
 PF4E dense/distributed fanout + remaining-cost attribution                  CLOSED (outcome B)
+PF4E-R1 rated replication scaling reconciliation                            CLOSED (outcome B)
 selective compression experiment, then remaining pre-freeze work            NEXT
         |
         v

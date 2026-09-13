@@ -12,10 +12,14 @@ without accepting a speculative local knowledge optimization; PF4C closes select
 message-129 bundling while retaining the proven 1/2/4 Immediate/Near/Far cadence. PF4C-R1 then
 repairs the exact singleton MTU boundary, and PF4D closes cross-lane cap-two unreliable
 Network-frame aggregation without changing Game ownership, AOI, or cadence. PF4E now closes the
-dense/distributed fanout and remaining-cost attribution pass. Its measured outcome is B: current
-50-client active cost is payload-dominated, so a bounded selective-compression experiment is the
-next optimization candidate; no compression, self-public suppression, AOI, cadence, schema, or
-participant-limit change is part of PF4E.
+dense/distributed fanout and remaining-cost attribution pass. PF4E-R1 then reconciles its selected
+profile rating against current and historical Dirty/Maintained controls. Outcome B is retained, but
+the former “unbatchable PF4E fixture” explanation is corrected: that fixture already used
+message-129 bundling, while ChunkPublication's per-publication semantics and the number of useful
+chunk publications drive its CPU curve. Current 50-client active wire cost remains
+payload-dominated, so a bounded selective-compression experiment is the next bandwidth candidate;
+no compression, self-public suppression, AOI, cadence, schema, or participant-limit change is part
+of PF4E or PF4E-R1.
 Complete this campaign before declaring the Concept Demo frozen and before
 beginning the broader post-demo extraction/genericization ecosystem roadmap.
 
@@ -1881,6 +1885,38 @@ Permanent evidence is in
 PF4E recommends a bounded compression oracle/experiment for the large message-129 payload surface;
 it does not pre-accept a codec or begin PF5.
 
+## PF4E-R1 — rated replication scaling reconciliation
+
+**Status: CLOSED — outcome B, selected-profile cost difference confirmed.** PF4E-R1 adds no
+product behavior. It runs current Dirty Entity, Maintained Entity, the prior PF4E Chunk fixture, an
+explicit one-dirty-chunk unbatchable control, and a localized eight-dirty-chunk production-shaped
+control through one real-loopback-UDP harness and the same legacy `ServerRole` clock.
+
+The current cap-one controls reproduce P0.3J's historical scaling class: Dirty 640 is 3.602 ms p95
+and first exceeds at 704 (4.062 ms), while Maintained 512 is 2.983 ms and 640 is 4.077 ms. The
+historical values were 3.969/4.900 ms and 3.032/4.081 ms respectively. The clock definitions are
+equivalent with stage probes disabled, so the selected-profile difference is not broad benchmark
+or timing drift.
+
+Under the current cap-two policy, the prior PF4E Chunk fixture passes legacy `ServerRole` at 128
+(3.539 ms) and first exceeds at 192 (5.237 ms). The explicit unbatchable fixture passes 192 and
+fails 256. The production-shaped eight-chunk fixture passes 96 and narrowly fails 128 (4.126 ms).
+At 128, the prior fixture costs 4.85x Dirty p95: 3.76x as many semantic publications per
+recipient/tick plus a 1.17x mean per-publication premium explain the difference. About 81.2% of the
+mean gap is publication count and 18.8% is the per-publication premium.
+
+The old PF4E “no message-129 opportunity” inference is superseded. At 128 the prior fixture bundles
+98.20% of 135,530 publications, and the production-shaped fixture bundles 97.47% of 276,480.
+PF4D cap-two aggregation has zero compatible opportunities in these chunk-only shapes; it remains
+accepted from its cross-lane product proof. Thus `<128` is not a universal ChunkPublication
+property: useful-work shape must accompany every recipient-scale claim.
+
+Permanent raw evidence and the clock/work decomposition are in
+`_Benchmarks/Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.*`;
+the exact cap-one historical-policy controls are retained separately alongside it. Selective
+compression remains the next bandwidth experiment, not a proposed fix for ChunkPublication CPU
+scaling.
+
 ## PF4 — measured bandwidth/CPU optimization campaign
 
 Evaluate and accept only evidence-backed changes such as:
@@ -2047,16 +2083,17 @@ NOT MERELY AFTER THE LAST FEATURE COMPILES.
 18. Evaluate selected-profile Game bundling and public-tier cadence only from matched evidence. **CLOSED — PF4C; bundling accepted, cadence retained**
 19. Evaluate unreliable frame aggregation. **CLOSED — PF4D; cross-lane cap two accepted**
 20. Measure dense vs distributed AOI/fanout. **CLOSED — PF4E; outcome B**
-21. Evaluate selective compression only where payload shape justifies it. **NEXT — bounded experiment, not pre-accepted**
-22. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
-23. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
-24. Run mixed headless + exported Godot clients.
-25. Run external human Concept Demo validation.
-26. Choose/document the default deployment-performance policy.
-27. Record decisive performance/bandwidth/failure evidence.
-28. Full exact-tree verifier and export closure.
-29. Freeze/tag the Concept Demo baseline.
-30. Begin the separate extraction/genericization/ecosystem roadmap.
+21. Reconcile selected-profile rated scaling against current/historical controls. **CLOSED — PF4E-R1; outcome B**
+22. Evaluate selective compression only where payload shape justifies it. **NEXT — bounded experiment, not pre-accepted**
+23. Evaluate deeper wire compaction only if remaining measurements justify the complexity.
+24. Run correctness, soak, stress, migration, Chat, UI, fall, reconnect, and impairment swarms.
+25. Run mixed headless + exported Godot clients.
+26. Run external human Concept Demo validation.
+27. Choose/document the default deployment-performance policy.
+28. Record decisive performance/bandwidth/failure evidence.
+29. Full exact-tree verifier and export closure.
+30. Freeze/tag the Concept Demo baseline.
+31. Begin the separate extraction/genericization/ecosystem roadmap.
 ```
 
 The intended outcome is not merely a demo that works.

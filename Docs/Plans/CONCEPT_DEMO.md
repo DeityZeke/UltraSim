@@ -76,7 +76,12 @@ the actual exported Online product under external UDP loss/reorder, without chan
 ownership, AOI, or cadence. PF4E now closes dense/distributed fanout and complete remaining-cost
 attribution without changing production policy. Its outcome B ranks a bounded selective-compression
 experiment next because message 129 is about 94.1% of active Game application egress; self-public
-suppression and deeper header compaction are not selected. Later optimization, larger failure
+suppression and deeper header compaction are not selected. PF4E-R1 then reproduces the historical
+Dirty/Maintained scaling class and confirms outcome B for the selected profile while correcting one
+PF4E inference: the existing dense fixture was already message-129 bundled. Chunk semantic cost and
+the number of useful chunk publications, not a lack of Game bundling, explain its curve. `<128` is
+not a universal ChunkPublication boundary; the existing, explicitly unbatchable, and
+production-shaped fixtures have distinct boundaries. Later optimization, larger failure
 characterization, and external-human validation remain open. A post-F0.8 defensive UI correction
 also makes
 local shutdown independent from a saturated presentation queue, contains expected view-capacity
@@ -1774,6 +1779,7 @@ then close:
     PF4C-R1 singleton MTU boundary repair                               CLOSED
     PF4D unreliable frame aggregation                                  CLOSED (cross-lane cap two)
     PF4E dense/distributed fanout + remaining-cost attribution          CLOSED (outcome B)
+    PF4E-R1 rated replication scaling reconciliation                    CLOSED (outcome B)
     selective compression experiment                                   NEXT
 ```
 

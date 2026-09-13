@@ -368,11 +368,39 @@ dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release
 ```
 
 The first completed row above the metric stops only that workload series. A first tested failure
-does not establish the preceding population as a pass. Message-129 and Network aggregation counts
-may remain zero in this synthetic sweep when only one chunk publication/frame is ready for a
-recipient per opportunity; that is workload evidence, not proof that the selected policies were
+does not establish the preceding population as a pass. The original PF4E profile counters were not
+sufficient to infer message-129 opportunity: PF4E-R1 later proved this exact dense fixture was
+already heavily bundled. Network cap-two aggregation can still remain zero when no exact
+MTU-compatible second frame is available; that is workload evidence, not proof that the policy was
 disabled. Real-UDP Quiet/Moving/Crowd, native impairment, and soak evidence use
 `Tools/NetworkBots/run-pf4e-baseline.sh` and remain outside routine benchmark execution.
+
+## PF4E-R1 rated reconciliation
+
+PF4E-R1 runs historical-profile controls and three explicitly shaped ChunkPublication workloads in
+the same real-loopback-UDP process. The default primary run uses current cap two and selected 1/2/4
+cadence; `--rated-frame-cap=1` reproduces P0.3J's physical policy for exact control comparison.
+Every curve is tiering-primed outside retained rows, keeps 30/270 warmup/measurement ticks by
+default, and stops only after a completed legacy `ServerRole p95 > 4.000 ms` row follows a pass.
+
+```bash
+dotnet run --project _Benchmarks/UltraSim.Network.V3ComparisonAdapter -c Release -- \
+  --p03-whole-flow --pf4e-r1-rated-reconciliation --probes-off \
+  --warmup=30 --ticks=270 \
+  --populations=64,96,128,192,256,384,448,512,576,640,704,768 \
+  --output=_Benchmarks/results/network-pf4e-r1-rated-reconciliation-local.json
+```
+
+Use `--curves=` with comma-separated curve IDs or `--retain-full-ladder` for focused extensions.
+The maintained repository gate is:
+
+```bash
+dotnet run --project _Tools/RepositoryVerification/UltraSim.RepositoryVerification.csproj \
+  -c Release -- --pf4e-r1-only
+```
+
+Accepted evidence is in
+[`concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md`](Baselines/concept-demo-pf4e-r1-rated-replication-scaling-reconciliation-2026-09-13.md).
 
 ## Comparability
 

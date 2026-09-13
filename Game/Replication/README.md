@@ -937,3 +937,12 @@ self-public upper bound but deliberately implements no suppression.
 See the PF4E baseline for the exact corrected ten-minute Quiet/Moving/Crowd windows, rated
 Network-plus-remote-replication boundary, per-tier freshness/fairness, cost funnel, and the outcome-B
 selective-compression recommendation.
+
+PF4E-R1 separately reconciles that selected-profile rating with historical/current Dirty Entity
+and Maintained Entity controls on the same legacy `ServerRole` clock. Those controls retain the
+P0.3J scaling class, confirming a real selected-profile cost rather than general harness drift. It
+also corrects the prior fixture interpretation: the existing PF4E dense workload already bundles
+98.20% of its semantic publications at 128 recipients. Its 4.85x Dirty p95 is predominantly 3.76x
+more useful chunk publications, plus a 1.17x mean per-publication premium. Explicit unbatchable and
+localized multichunk controls prove recipient count alone is not a ChunkPublication capacity
+statement. No replication policy changes in PF4E-R1.
